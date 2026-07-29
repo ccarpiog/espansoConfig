@@ -993,7 +993,7 @@ fn every_block_scalar_in_the_corpus_reconstructs_from_span_indent_and_header() {
     // the headline "scalars checked" figure without asserting anything.
     let mut checked = 0usize;
     let mut overshooting = 0usize;
-    let mut folded_skipped = 0usize;
+    let mut not_decodable = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
     println!("\n--- block scalars reconstructed across the valid corpus ---");
@@ -1024,7 +1024,7 @@ fn every_block_scalar_in_the_corpus_reconstructs_from_span_indent_and_header() {
                     "{}: header {:?} reconstructed {reconstructed:?} but parser said {:?}",
                     file.name, block.header.text, block.value
                 )),
-                None => folded_skipped += 1,
+                None => not_decodable += 1,
             }
         }
         println!("{:<40} {} block scalars", file.name, blocks.len());
@@ -1032,15 +1032,19 @@ fn every_block_scalar_in_the_corpus_reconstructs_from_span_indent_and_header() {
 
     println!("block scalars reconstructed byte-exactly: {checked}");
     println!("of those, spans that overshoot:           {overshooting}");
-    println!("folded scalars with more-indented lines:  {folded_skipped}");
+    println!("blocks not indented as the span records:  {not_decodable}");
     for failure in failures.iter().take(10) {
         println!("  {failure}");
     }
 
     assert!(checked >= 30, "the corpus must exercise many block scalars");
+    // The de-indentation is strict, so `None` no longer means "a folded shape
+    // this probe declines to handle" — folded scalars with more-indented lines
+    // are decoded properly now. It means the content region is not indented the
+    // way the recorded indentation says, which is a real boundary error.
     assert_eq!(
-        folded_skipped, 0,
-        "no corpus folded scalar needs the escape hatch"
+        not_decodable, 0,
+        "every block's content region must carry the indentation it records"
     );
     assert!(
         failures.is_empty(),
@@ -2041,6 +2045,13 @@ fn parse_block_header(text: &str) -> BlockHeader {
 struct BlockScalar {
     /// Byte offset of the first character of the first content line.
     span_start: usize,
+    /// Byte offset just past the line break that terminates the header line.
+    ///
+    /// This is where the content genuinely starts. The parser's own start is
+    /// the first *non-empty* content character, which is one line's
+    /// indentation — and, for a block that opens with empty lines, several
+    /// whole lines — too late.
+    content_start: usize,
     /// Byte offset the parser reported as the end. It **overshoots**.
     span_end: usize,
     /// Byte offset where the scalar's content genuinely stops, derived from the
@@ -2059,12 +2070,23 @@ struct BlockScalar {
 /// Length, in bytes, of the genuine content prefix of a block scalar's span.
 ///
 /// The reported span runs on past the content: first over every trailing blank
-/// line, then over the indentation of whatever comes next. Trimming the
-/// horizontal whitespace removes the second part unconditionally; how many of
-/// the trailing line breaks survive is decided by the chomping indicator, which
+/// line, then over the indentation of whatever comes next. How many of the
+/// trailing line breaks survive is decided by the chomping indicator, which
 /// only the header knows.
-fn block_content_len(span_text: &str, chomping: Chomping) -> usize {
-    let without_spaces = span_text.trim_end_matches([' ', '\t']);
+///
+/// `at_end_of_source` distinguishes the two readings of a trailing run of
+/// spaces or tabs. Mid-document it is the next token's indentation; at EOF
+/// there is no next token, so a run that sits on a content line is scalar data
+/// and discarding it would silently shorten the value.
+fn block_content_len(span_text: &str, chomping: Chomping, at_end_of_source: bool) -> usize {
+    let trimmed = span_text.trim_end_matches([' ', '\t']);
+    let keeps_terminal_whitespace =
+        at_end_of_source && !trimmed.is_empty() && !trimmed.ends_with(['\n', '\r']);
+    let without_spaces = if keeps_terminal_whitespace {
+        span_text
+    } else {
+        trimmed
+    };
     let without_breaks = without_spaces.trim_end_matches(['\n', '\r']);
     match chomping {
         Chomping::Keep => without_spaces.len(),
@@ -2096,10 +2118,16 @@ fn block_scalars(source: &str) -> Vec<BlockScalar> {
         let header = parse_block_header(&header_before(source, &scalar));
         let span_start = table.byte(scalar.span.start);
         let span_end = table.byte(scalar.span.end);
-        let content_end =
-            span_start + block_content_len(&source[span_start..span_end], header.chomping);
+        let content_start = block_content_start(source, span_start);
+        let content_end = content_start
+            + block_content_len(
+                &source[content_start..span_end],
+                header.chomping,
+                span_end == source.len(),
+            );
         out.push(BlockScalar {
             span_start,
+            content_start,
             span_end,
             content_end,
             indent: scalar.start_col,
@@ -2111,49 +2139,79 @@ fn block_scalars(source: &str) -> Vec<BlockScalar> {
     out
 } // End of function block_scalars()
 
+/// Byte offset just past the line break that terminates a block scalar's
+/// header line.
+///
+/// The parser's reported start is the first non-empty content character, so it
+/// sits after that line's indentation, and after any empty lines the block
+/// opened with. The content genuinely begins one line earlier: right after the
+/// header line's break, with all three break spellings — `\r\n`, `\n` and a
+/// bare `\r` — counting as one.
+fn block_content_start(source: &str, span_start: usize) -> usize {
+    let before = &source[..span_start];
+    // Whatever remains after trimming separation backwards is the last
+    // non-separation character of the header line, comment included.
+    let header_line = before.trim_end_matches([' ', '\t', '\n', '\r']);
+    let separation = &before[header_line.len()..];
+    match separation.find(['\n', '\r']) {
+        Some(offset) if separation[offset..].starts_with("\r\n") => header_line.len() + offset + 2,
+        Some(offset) => header_line.len() + offset + 1,
+        None => span_start,
+    }
+} // End of function block_content_start()
+
 /// Re-derives a block scalar's value from the source region alone.
 ///
 /// This is the proof that the reconstructed content region is the *right*
 /// region: if `(span, col, header)` really pins the scalar, then decoding that
-/// region by hand must reproduce the parser's own value byte for byte. Returns
-/// `None` for a folded scalar containing more-indented lines, which YAML leaves
-/// unfolded and which the corpus does not exercise.
+/// region by hand must reproduce the parser's own value byte for byte.
+///
+/// The de-indentation is strict — every line, the first included, must carry
+/// the recorded indentation, the sole exception being a blank line shorter than
+/// it — and the folding handles more-indented lines, which YAML leaves
+/// unfolded along with the breaks on either side of them.
 fn reconstruct_block_value(source: &str, block: &BlockScalar) -> Option<String> {
-    let content = &source[block.span_start..block.content_end];
+    let content = &source[block.content_start..block.content_end];
     let indent = " ".repeat(block.indent);
     let mut lines: Vec<String> = Vec::new();
-    for (index, raw) in content.split('\n').enumerate() {
+    for raw in content.split('\n') {
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
-        if index == 0 {
-            // The span already begins at the content indentation column, so the
-            // first line carries no indent to remove.
-            lines.push(raw.to_owned());
-        } else {
-            let stripped = raw
-                .strip_prefix(indent.as_str())
-                .unwrap_or_else(|| raw.trim_start_matches(' '));
-            lines.push(stripped.to_owned());
+        match raw.strip_prefix(indent.as_str()) {
+            Some(stripped) => lines.push(stripped.to_owned()),
+            None if raw.chars().all(|character| character == ' ') => lines.push(String::new()),
+            None => return None,
         }
-    }
-    match block.style {
-        ScalarStyle::Literal => Some(lines.join("\n")),
+    } // End of the loop over the content's physical lines
+
+    let mut value = match block.style {
+        ScalarStyle::Literal => lines.join("\n"),
         ScalarStyle::Folded => fold_lines(&lines),
-        _ => None,
+        _ => return None,
+    };
+    // YAML treats the end of input as a line break, so a block whose content
+    // stops without one still gets it — unless chomping strips it away.
+    if !content.ends_with(['\n', '\r'])
+        && block.header.chomping != Chomping::Strip
+        && !value.ends_with('\n')
+        && source[..block.content_start].ends_with(['\n', '\r'])
+    {
+        value.push('\n');
     }
+    Some(value)
 } // End of function reconstruct_block_value()
 
 /// Applies YAML block folding to already de-indented content lines.
 ///
-/// A single line break between two content lines folds to one space; a run of
-/// `n` breaks yields `n - 1` line breaks. Trailing breaks are whatever chomping
-/// already selected and survive verbatim.
-fn fold_lines(lines: &[String]) -> Option<String> {
-    if lines.iter().any(|line| line.starts_with([' ', '\t'])) {
-        return None;
-    }
+/// A single line break between two ordinary content lines folds to one space;
+/// a run of `n` breaks yields `n - 1` line breaks. A **more-indented** line —
+/// one that still starts with a space or a tab after de-indentation — is never
+/// folded, and neither are the breaks on either side of it, so a run of `n`
+/// breaks next to one yields `n` breaks. Breaks before the first content line
+/// are leading breaks and survive in full.
+fn fold_lines(lines: &[String]) -> String {
     let mut out = String::new();
     let mut pending = 0usize;
-    let mut started = false;
+    let mut previous: Option<&str> = None;
     for (index, line) in lines.iter().enumerate() {
         if index > 0 {
             pending += 1;
@@ -2161,23 +2219,25 @@ fn fold_lines(lines: &[String]) -> Option<String> {
         if line.is_empty() {
             continue;
         }
-        if started {
-            if pending == 1 {
-                out.push(' ');
-            } else {
-                for _ in 0..pending - 1 {
-                    out.push('\n');
+        match previous {
+            None => out.push_str(&"\n".repeat(pending)),
+            Some(before) => {
+                let unfolded = before.starts_with([' ', '\t']) || line.starts_with([' ', '\t']);
+                if unfolded {
+                    out.push_str(&"\n".repeat(pending));
+                } else if pending == 1 {
+                    out.push(' ');
+                } else {
+                    out.push_str(&"\n".repeat(pending - 1));
                 }
             }
         }
         out.push_str(line);
-        started = true;
+        previous = Some(line);
         pending = 0;
-    }
-    for _ in 0..pending {
-        out.push('\n');
-    }
-    Some(out)
+    } // End of the loop over the de-indented content lines
+    out.push_str(&"\n".repeat(pending));
+    out
 } // End of function fold_lines()
 
 /// Recovers a block scalar's header text by scanning backwards from the span.

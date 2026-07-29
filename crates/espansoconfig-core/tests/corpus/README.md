@@ -16,6 +16,9 @@ the files CI runs against and the files a fresh clone gets.
 |---|---|
 | `scalar-styles.yml` | plain, `'single'`, `"double"`, `\|`, `\|-`, `\|+`, `\|2`, `>`, `>-`, plus multi-line quoted scalars whose value contains a blank line |
 | `block-scalars.yml` | the full header matrix: `\|`/`>` × clip/strip/keep × explicit indent (`\|2-`, `\|2+`), a blank line that is scalar content, a `#` that is shell text, a comment directly after a block |
+| `block-scalar-leading-blank-lines.yml` | blocks that **open** with one or more empty lines, in all three chomping modes plus folded, and one block that is nothing but empty lines |
+| `block-scalar-terminal-spaces.yml` | a block whose last line ends in genuine trailing spaces at end-of-source, with no final newline: there is no next token, so the spaces are content |
+| `folded-more-indented.yml` | folded blocks with **more-indented** lines, which YAML never folds — including a run between blank lines and an explicit `>2` indicator |
 | `unicode-offsets.yml` | precomposed `é`, **decomposed** `é`, astral `😀`, `tail` — the fixture that pins the offset-counting scheme |
 | `comments-everywhere.yml` | file header, leading, trailing, inline, between sequence entries |
 | `blank-lines.yml` | runs of 2+ blank lines, blank lines inside a mapping and inside a block scalar |
@@ -35,14 +38,17 @@ the files CI runs against and the files a fresh clone gets.
 | `no-trailing-newline.yml` | final byte is not a newline |
 | `invalid/*.yml` | deliberately broken YAML, in its own directory so valid-file tests can glob cleanly |
 
-### ⚠️ Five files must never be "fixed"
+### ⚠️ Eight files must never be "fixed"
 
 `crlf-line-endings.yml`, `bom-utf8.yml`, `no-trailing-newline.yml`,
-`unicode-offsets.yml` and `block-scalars.yml` exist precisely because they
-violate what an editor considers tidy. Editors and formatters will offer to
-normalise the line endings, strip the byte-order mark, add the missing final
-newline, normalise the decomposed `é` to NFC, and collapse the deliberate blank
-runs after the block scalars. **Every one of those "fixes" silently deletes the
+`unicode-offsets.yml`, `block-scalars.yml`,
+`block-scalar-leading-blank-lines.yml`, `block-scalar-terminal-spaces.yml` and
+`folded-more-indented.yml` exist precisely because they violate what an editor
+considers tidy. Editors and formatters will offer to normalise the line endings,
+strip the byte-order mark, add the missing final newline, normalise the
+decomposed `é` to NFC, collapse the deliberate blank runs after and under the
+block scalars, trim the two terminal spaces at end-of-source, and re-indent the
+more-indented folded lines. **Every one of those "fixes" silently deletes the
 test.**
 
 Guards in place:
@@ -51,7 +57,7 @@ Guards in place:
   on checkout or commit.
 - `scripts/build-byte-exact-fixtures.sh` regenerates the four `printf`-authored
   ones from explicit escapes and asserts the bytes afterwards.
-- `tests/corpus_integrity.rs` fails the build if any of the five loses its
+- `tests/corpus_integrity.rs` fails the build if any of the eight loses its
   distinguishing bytes.
 
 Verify by hand at any time:
@@ -61,6 +67,7 @@ xxd crates/espansoconfig-core/tests/corpus/synthetic/crlf-line-endings.yml | gre
 xxd -l 3 crates/espansoconfig-core/tests/corpus/synthetic/bom-utf8.yml     # efbb bf
 tail -c 1 crates/espansoconfig-core/tests/corpus/synthetic/no-trailing-newline.yml | xxd  # 27, not 0a
 xxd crates/espansoconfig-core/tests/corpus/synthetic/unicode-offsets.yml | grep -m1 65cc  # 65 cc 81
+tail -c 3 crates/espansoconfig-core/tests/corpus/synthetic/block-scalar-terminal-spaces.yml | xxd  # ends 20 20
 ```
 
 ### A note on `duplicate-keys.yml`

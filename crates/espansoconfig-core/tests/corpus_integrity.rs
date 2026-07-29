@@ -143,6 +143,74 @@ fn block_scalars_fixture_keeps_its_deliberate_blank_runs() {
 }
 
 #[test]
+fn the_terminal_spaces_fixture_still_ends_in_two_spaces_with_no_final_newline() {
+    // The whole point of this fixture is its last two bytes. There is no next
+    // token after the block scalar, so those spaces are scalar CONTENT; an
+    // editor that trims trailing whitespace, or adds a final newline, deletes
+    // the test without leaving a trace.
+    let bytes = fixture_bytes("block-scalar-terminal-spaces.yml");
+    let tail: Vec<u8> = bytes.iter().rev().take(3).rev().copied().collect();
+    println!("block-scalar-terminal-spaces.yml last three bytes: {tail:02x?}");
+    assert_eq!(
+        &tail[1..],
+        b"  ",
+        "the two terminal spaces must still be there"
+    );
+    assert_ne!(
+        *bytes.last().expect("non-empty file"),
+        b'\n',
+        "an editor added a final newline"
+    );
+    assert_ne!(tail[0], b' ', "there must be content before the spaces");
+} // End of function the_terminal_spaces_fixture_still_ends_in_two_spaces_with_no_final_newline()
+
+#[test]
+fn the_leading_blank_line_fixture_keeps_its_empty_lines_directly_under_the_headers() {
+    // Every blank line under a `|` or `>` header here is scalar content, and
+    // every one of them must stay COMPLETELY empty: a blank line indented past
+    // the block's own indentation is a parse error, not a formatting detail.
+    let bytes = fixture_bytes("block-scalar-leading-blank-lines.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    let openings = text.matches(": |\n\n").count()
+        + text.matches(": |-\n\n").count()
+        + text.matches(": |+\n\n").count()
+        + text.matches(": >\n\n").count();
+    println!("block-scalar-leading-blank-lines.yml: {openings} headers followed by a blank line");
+    assert_eq!(
+        openings, 5,
+        "every block in the fixture must still open with an empty line"
+    );
+    assert!(
+        !text.contains("\n \n") && !text.contains("\n\t\n"),
+        "the blank lines must stay completely empty"
+    );
+} // End of function the_leading_blank_line_fixture_keeps_its_empty_lines_directly_under_the_headers()
+
+#[test]
+fn the_folded_fixture_keeps_its_more_indented_lines() {
+    // The extra indentation is what stops YAML folding those lines. An editor
+    // that re-indents them turns four distinct folding cases into one trivial
+    // one.
+    let bytes = fixture_bytes("folded-more-indented.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    let deeper = text
+        .lines()
+        .filter(|line| line.starts_with("        ") && !line.trim_start().starts_with('#'))
+        .count();
+    println!("folded-more-indented.yml: {deeper} lines indented past the block indent");
+    assert_eq!(
+        deeper, 5,
+        "the more-indented lines must survive, one per folding case"
+    );
+    assert!(
+        text.contains("replace: >2\n"),
+        "the explicit indentation indicator in front of a deeper line must survive"
+    );
+} // End of function the_folded_fixture_keeps_its_more_indented_lines()
+
+#[test]
 fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
     // Cheap insurance against a fixture being deleted or renamed without the
     // matching test being updated. The categories come from plan section 11.
@@ -171,6 +239,11 @@ fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
         "html-and-markdown.yml",
         "imports-and-global-vars.yml",
         "config-profile.yml",
+        // Added when the Phase 0b-1 review was closed out: three block-scalar
+        // shapes neither corpus contained.
+        "block-scalar-leading-blank-lines.yml",
+        "block-scalar-terminal-spaces.yml",
+        "folded-more-indented.yml",
     ];
     for fixture in required {
         assert!(

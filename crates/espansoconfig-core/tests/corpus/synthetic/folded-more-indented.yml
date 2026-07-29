@@ -1,0 +1,45 @@
+# Folded (`>`) block scalars containing MORE-INDENTED lines.
+#
+# YAML never folds a line indented past the block's own indentation, and it does
+# not fold the line breaks on either side of one either. A folder that joins
+# every single break with a space therefore corrupts all three blocks below,
+# which is exactly why they are here: the corpus had no folded scalar with a
+# more-indented line at all until this file was added.
+#
+# Do NOT let an editor re-indent the deeper lines: their extra indentation is
+# scalar CONTENT and decides where the folding stops.
+matches:
+  # A more-indented line between two ordinary folded lines.
+  - trigger: :folded-more-indented
+    replace: >
+      a folded paragraph that keeps going
+        an indented line that is never folded
+      back at the base indentation
+    label: after-folded-more-indented
+
+  # A run of more-indented lines with blank lines around it, and strip chomping.
+  - trigger: :folded-more-indented-run
+    replace: >-
+      first paragraph
+
+        indented line one
+        indented line two
+
+      last paragraph
+    label: after-folded-more-indented-run
+
+  # A more-indented tail, with keep chomping and a trailing blank line.
+  - trigger: :folded-more-indented-keep
+    replace: >+
+      lead in
+        indented tail
+
+    label: after-folded-more-indented-keep
+
+  # An explicit indentation indicator in front of a more-indented line, so the
+  # block indent cannot be inferred from the first line.
+  - trigger: :folded-more-indented-explicit
+    replace: >2
+        deeper than the block indent
+      at the block indent
+    label: after-folded-more-indented-explicit

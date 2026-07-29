@@ -43,7 +43,10 @@ pub mod watch;
 
 use std::path::PathBuf;
 
-pub use syntax::{ByteSpan, Chomping, ScalarPresentation, ScalarStyle, SyntaxIndex};
+pub use syntax::{
+    ByteSpan, Chomping, Node, NodeId, NodeKind, ScalarPresentation, ScalarStyle, SyntaxError,
+    SyntaxIndex,
+};
 pub use watch::ContentRevision;
 
 /// Session-local identity of a loaded document.
@@ -125,7 +128,12 @@ pub struct SourceDocument {
     pub id: DocumentId,
     /// Absolute path this snapshot was read from.
     pub path: PathBuf,
-    /// Exact bytes read from disk, BOM excluded (see [`SourceDocument::bom`]).
+    /// Exact bytes read from disk, **BOM included**.
+    ///
+    /// Every span in [`SourceDocument::syntax`] indexes into this string, so a
+    /// document that starts with a BOM has its first node span starting at
+    /// byte 3 or later. Keeping the BOM here is what lets the whole file be
+    /// rebuilt from spans and gaps without a special case.
     pub source: String,
     /// Hash of the disk contents this snapshot is based on.
     pub revision: ContentRevision,

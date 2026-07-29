@@ -61,17 +61,31 @@ cargo fmt --check
 # The Phase 0 parser evaluation, with its evidence printed
 cargo test -p espansoconfig-core --test parser_evaluation -- --nocapture --test-threads=1
 
-# Regenerate the three byte-exact corpus fixtures (CRLF, BOM, no final newline)
+# Regenerate the five script-built byte-exact corpus fixtures
+# (CRLF, BOM, no final newline, Unicode offsets, block-scalar terminal spaces)
 ./scripts/build-byte-exact-fixtures.sh
 
 # Copy the live espanso config into the gitignored real corpus
 ./scripts/sync-real-corpus.sh
 ```
 
-Three corpus fixtures must never be "fixed" by an editor or a formatter:
-`crlf-line-endings.yml`, `bom-utf8.yml`, `no-trailing-newline.yml`. `.gitattributes` in the
-corpus directory marks it `-text` so git never converts line endings, and
-`tests/corpus_integrity.rs` fails the build if any of the three loses its distinguishing bytes.
+**Eight corpus fixtures must never be "fixed" by an editor or a formatter.** Their whitespace
+*is* the test data — a stray "trim trailing whitespace" or "add final newline" on save destroys
+what they exist to pin:
+
+| Fixture | Bytes that must survive |
+|---|---|
+| `crlf-line-endings.yml` | `\r\n` line endings |
+| `bom-utf8.yml` | the leading `ef bb bf` |
+| `no-trailing-newline.yml` | absence of a final newline |
+| `unicode-offsets.yml` | precomposed **and** decomposed `é`, astral `😀` — never normalise |
+| `block-scalars.yml` | deliberate blank runs inside block scalars |
+| `block-scalar-terminal-spaces.yml` | two real trailing spaces, then EOF with no newline |
+| `block-scalar-leading-blank-lines.yml` | empty lines directly under a `\|`/`>` header |
+| `folded-more-indented.yml` | the extra indentation of more-indented folded lines |
+
+`.gitattributes` in the corpus directory marks it `-text` so git never converts line endings, and
+`tests/corpus_integrity.rs` fails the build if any of the eight loses its distinguishing bytes.
 
 ## 5. Coding conventions (plan §14)
 

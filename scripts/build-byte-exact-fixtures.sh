@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Regenerate the three byte-exact corpus fixtures.
+# Regenerate the byte-exact corpus fixtures.
 #
 # These files cannot be authored with a normal editor: every editor on this
 # machine will helpfully "fix" a CRLF file, strip a BOM, or add the missing
@@ -99,6 +99,38 @@ unicode="${corpus}/unicode-offsets.yml"
 } > "${unicode}"
 
 # ---------------------------------------------------------------------------
+# 5. Terminal spaces at end-of-source, inside a block scalar.
+#
+# The last two bytes are spaces and there is no final newline. Because nothing
+# follows the block scalar, those spaces cannot be the indentation of a next
+# token: they are scalar CONTENT. An editor that trims trailing whitespace
+# shortens the value by two characters without leaving a trace.
+# ---------------------------------------------------------------------------
+terminal="${corpus}/block-scalar-terminal-spaces.yml"
+{
+  printf '%s\n' \
+    '# A block scalar whose last content line ends in GENUINE TRAILING SPACES, at' \
+    '# the very end of the file.' \
+    '#' \
+    '# There is no next token after it, so those spaces cannot be the indentation of' \
+    '# whatever comes next: they are scalar CONTENT, and a trim that removes them' \
+    "# shortens the user's expansion by two characters. The file also has no final" \
+    '# newline, which is what puts the block scalar at end-of-source.' \
+    '#' \
+    '# `tests/corpus_integrity.rs` fails if an editor trims the trailing spaces or' \
+    '# adds a final newline.' \
+    'matches:' \
+    '  - trigger: :ordinary' \
+    '    replace: |' \
+    '      an ordinary block with a normal ending' \
+    '    label: after-ordinary' \
+    '' \
+    '  - trigger: :terminal-spaces' \
+    '    replace: |'
+  printf '%s' '      two real spaces end this line  '
+} > "${terminal}"
+
+# ---------------------------------------------------------------------------
 # Verification. Each assertion is on the raw bytes, not on parsed content.
 # ---------------------------------------------------------------------------
 fail=0
@@ -140,6 +172,9 @@ case "${unicode_hex}" in
   *)          check "unicode: astral emoji is still f0 9f 98 80" "ok" "missing" ;;
 esac
 
+terminal_tail=$(tail -c 3 "${terminal}" | od -An -tx1 | tr -d ' \n')
+check "terminal-spaces: last three bytes end in two spaces" "652020" "${terminal_tail}"
+
 printf '\n--- %s ---\n' "$(basename "${crlf}")"
 od -c "${crlf}" | head -6
 printf '\n--- %s ---\n' "$(basename "${bom}")"
@@ -148,5 +183,7 @@ printf '\n--- %s (tail) ---\n' "$(basename "${no_newline}")"
 od -c "${no_newline}" | tail -4
 printf '\n--- %s (tail) ---\n' "$(basename "${unicode}")"
 od -c "${unicode}" | tail -4
+printf '\n--- %s (tail) ---\n' "$(basename "${terminal}")"
+od -c "${terminal}" | tail -3
 
 exit "${fail}"

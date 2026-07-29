@@ -1,0 +1,19 @@
+# A block scalar whose last content line ends in GENUINE TRAILING SPACES, at
+# the very end of the file.
+#
+# There is no next token after it, so those spaces cannot be the indentation of
+# whatever comes next: they are scalar CONTENT, and a trim that removes them
+# shortens the user's expansion by two characters. The file also has no final
+# newline, which is what puts the block scalar at end-of-source.
+#
+# `tests/corpus_integrity.rs` fails if an editor trims the trailing spaces or
+# adds a final newline.
+matches:
+  - trigger: :ordinary
+    replace: |
+      an ordinary block with a normal ending
+    label: after-ordinary
+
+  - trigger: :terminal-spaces
+    replace: |
+      two real spaces end this line  

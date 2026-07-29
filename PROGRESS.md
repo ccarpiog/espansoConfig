@@ -12,7 +12,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | Phase | Scope | State |
 |---|---|---|
 | **0a** | Workspace scaffold · golden corpus · parser evaluation | ✅ complete |
-| **0b** | Span-accurate `SyntaxIndex` (parser marks + gap scanner) | ⬜️ next |
+| **0b-1** | Byte-accurate span layer: `CharToByte`, BOM/line endings, `SyntaxIndex`, span trimming | ✅ complete |
+| **0b-2** | Gap scanner: trivia classification and comment ownership | 🚧 in progress |
 | **0c** | Patch engine · `choose_scalar` · round-trip property test | ⬜️ not started |
 | 1 | Read-only browser | ⬜️ blocked on the Phase 0 gate |
 | 2–5 | See plan §12 | ⬜️ not started |
@@ -117,6 +118,35 @@ The parser is **not** sufficient alone. Two adapters are ours:
    because the parser already said. This confirms plan §6.2's anticipated outcome while making
    the scanner's job much smaller than feared.
 
+### D2c — one content-start convention for every block scalar
+
+Closed out from the Phase 0b-1 review
+([`docs/reviews/phase-0b-1-span-layer.md`](docs/reviews/phase-0b-1-span-layer.md)),
+whose top-ranked failure mode was that the span layer used **two** conventions: an
+ordinary block started at the first content *character*, leaving that line's indentation
+in the gap, while a block opening with empty lines started just past the header's break.
+A uniform emitter cannot serve both and would under- or double-indent the first line,
+changing YAML structure rather than a value.
+
+**The content span now always begins immediately after the line break that terminates the
+header line**, so it carries every body line's indentation, the first included. Decoding is
+uniformly "strip `indent` columns from each line", replacement is uniformly "write whole,
+`indent`-indented lines", and a block opening with blank lines needs no special case. The
+rule is documented on `ScalarPresentation::content_span` and enforced across all three
+shapes — ordinary, leading-blank, truncated header (R5) — by
+`every_block_shape_uses_the_same_content_start_convention` in `tests/syntax_index.rs`.
+
+Two consequences worth recording:
+
+- A block scalar's reported *end* is no longer the only overshoot: the reported **start**
+  is one line's indentation too late for every ordinary block, which
+  `docs/parser-evaluation.md`'s "block-scalar start — exact, at the content indent column"
+  overstated.
+- Corpus-wide blank-line recovery from the gaps dropped from 667 to 636 over the original
+  19 fixtures — exactly the 31 block scalars in them. Each one used to leave its first
+  line's indentation in the preceding gap, where a per-gap line scan counted that fragment
+  as a blank line it never was. The figure is real recovery now, not an artefact.
+
 ### D2b — the gap frontier is **trimmed leaf spans**
 
 Measured, not assumed: saphyr's spans **do not nest**. Block collection markers are zero width,
@@ -155,11 +185,13 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R2 | If a future saphyr release "fixes" `index()` to genuinely return bytes, the `CharToByte` adapter silently becomes wrong | Desired failure mode already wired: `all_three_crates_report_character_offsets_not_byte_offsets` and `saphyr_offsets_count_unicode_scalar_values_not_bytes_utf16_units_or_graphemes` both fail immediately. |
 | R3 | **Block-scalar** and block **collection** end offsets overshoot into trailing trivia | Must be trimmed by us. The block-scalar trim rule is derived and asserted in 0a; applying it is 0b, and collection trimming is 0c. |
 | R4 | Phase 0 gate is **not yet cleared** — the round-trip property test does not exist yet | Lands in 0c. No UI work until it passes. |
-| R5 | An empty block scalar (`replace: \|` mid-keystroke) reports a span that **includes** its header — the one exception to "the header is outside the span" | Phase 0b: the backwards header lexer must refuse to run when the span itself starts with `\|` or `>`. Pinned by `a_truncated_block_scalar_header_produces_a_span_that_swallows_the_header`. |
+| R5 | An empty block scalar (`replace: \|` mid-keystroke) reports a span that **includes** its header — the one exception to "the header is outside the span" | Phase 0b: the backwards header lexer must refuse to run when the span itself starts with `\|` or `>`. Pinned by `a_truncated_block_scalar_header_produces_a_span_that_swallows_the_header`. The content span now starts past the header *line*, never past the indicator alone, so rewriting it cannot splice a value onto the header line. |
 | R6 | **Flow-collection comment ownership** is undefined: in `items: [one, # why` / `two]` the comment belongs to no obvious node | Phase 0b/0c. Value replacement can ignore it; delete/move/insert cannot. An explicit attachment policy is required before those operations ship. |
 | R7 | **Empty and implicit nodes** (`empty:`, bare `- `, `? key` / `: value`, compact `- key: value`) create zero-width or shared boundaries with no unique owner | Phase 0b. The shape of the problem is measured in `implicit_and_empty_nodes_produce_zero_width_spans`; the ownership policy is still to be written. |
 | R8 | **Merge keys and aliases** can defeat a path resolver that assumes key/value scalar pairs — `<<` arrives as an ordinary scalar key, aliases are not scalar values | Phase 0b path resolution must classify these syntactically rather than positionally. |
 | R9 | The missing evaluation criterion is **replacement-envelope correctness**, not endpoint accuracy | Phase 0c. Mutate real documents and assert: the span matches the requested structural path despite duplicate keys, nested sequence mappings, merge keys, aliases, explicit keys and empty values; the replacement reparses to the intended value and stays valid YAML; every byte outside the envelope is identical (CRLF/LF, BOM, missing final newline, trailing spaces, comments, block-scalar terminal newlines). This is the Phase 0 gate's round-trip property test. |
+| R10 | A block scalar whose header cannot be located has **no correct span**: the reported one runs into trailing blank lines and the next node's indentation | The index is **rejected** with `InvariantViolation::BlockHeaderNotFound` rather than publishing the known-bad span. There is deliberately no fallback. From the Phase 0b-1 review, ranked failure mode 3. |
+| R11 | **Terminal spaces or tabs at end-of-source** are scalar content, not the next token's indentation — there is no next token | `block::content_len` takes `at_end_of_source` and keeps a trailing run that sits on a content line. Pinned by `terminal_spaces_at_end_of_source_stay_inside_the_block_scalar` and the `block-scalar-terminal-spaces.yml` fixture. |
 
 ---
 

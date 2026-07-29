@@ -14,9 +14,11 @@ repository.workspace = true
 # ---------------------------------------------------------------------------
 [dependencies]
 sha2.workspace = true
+# The YAML substrate chosen in Phase 0a (docs/parser-evaluation.md). It is
+# confined to `crate::syntax`; no other module may import it.
+saphyr-parser.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 yaml-rust2.workspace = true
-saphyr-parser.workspace = true
 marked-yaml.workspace = true

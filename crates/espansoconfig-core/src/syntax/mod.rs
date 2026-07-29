@@ -1,18 +1,58 @@
 //! Span-aware parse and syntax index.
 //!
-//! **Phase 0a scope:** this module defines the vocabulary the rest of the crate
-//! speaks — [`ByteSpan`], [`ScalarStyle`], [`Chomping`] and
-//! [`ScalarPresentation`] — exactly as specified in `IMPLEMENTATION_PLAN.md`
-//! section 6.2. The [`SyntaxIndex`] itself is a placeholder.
+//! This module owns the whole relationship with the YAML substrate. **No other
+//! module may import `saphyr_parser`** (`PROGRESS.md`, R1): confining it here is
+//! what makes a pre-1.0 dependency tolerable, and the 31 pinned tests in
+//! `tests/parser_evaluation.rs` fail loudly if its behaviour changes.
 //!
-//! **Phase 0b responsibility:** build the real index — every node in the
-//! document paired with its byte span, its presentation, and the comment and
-//! blank-line trivia attached to it under the ownership rules in section 6.2.
-//! `docs/parser-evaluation.md` records which parser marks we build on and which
-//! facts we must recover with our own lexical scanner.
+//! # What is here
+//!
+//! - [`ByteSpan`], [`ScalarStyle`], [`Chomping`] and [`ScalarPresentation`] —
+//!   the vocabulary `IMPLEMENTATION_PLAN.md` section 6.2 specifies.
+//! - [`CharToByte`] — the offset adapter. Substrate offsets count Unicode
+//!   scalar values, not bytes, and 29 of the 33 spans in the non-ASCII fixture
+//!   truncate a character if that is not corrected.
+//! - [`DocumentPreamble`] — the BOM strip-and-record, plus line-ending
+//!   detection.
+//! - [`SyntaxIndex`] and [`Node`] — the tree, with a byte span on every node.
+//! - [`FrontierEntry`] and [`Segment`] — the gap frontier and its complement.
+//!
+//! # Coordinate system
+//!
+//! **Every published span is a byte range into the original document exactly as
+//! it sits on disk, BOM included.** A document that starts with a BOM has its
+//! first node span starting at byte 3 or later, and the BOM itself falls in the
+//! first gap. That is what makes "concatenate every segment in order" restore
+//! the file byte for byte.
+//!
+//! # Phase status
+//!
+//! Phase 0b-1 is the byte-accurate span layer: spans, the frontier, and the
+//! gaps. Phase 0b-2 classifies what is *inside* those gaps — comments, blank
+//! lines, anchor names, block-scalar headers — and attaches them to nodes under
+//! the ownership rules in plan section 6.2.
 //!
 //! Nothing here re-serializes. Emission is [`crate::emit`]'s job, and it only
 //! ever produces the bytes for the span being replaced.
+
+pub mod block;
+mod char_to_byte;
+pub mod error;
+mod frontier;
+mod index;
+mod node;
+mod preamble;
+
+pub use block::{BlockHeader, BlockScalarLayout};
+pub use char_to_byte::CharToByte;
+pub use error::{InvariantViolation, OffsetOutOfDomain, ParseFailure, SyntaxError};
+pub use frontier::{FrontierEntry, Segment};
+pub use index::SyntaxIndex;
+pub use node::{
+    AnchorId, CollectionStyle, DocumentMarkers, Node, NodeId, NodeKind, NodeRole, ScalarNode,
+    TagSpelling,
+};
+pub use preamble::DocumentPreamble;
 
 /// A half-open byte range `[start, end)` into a document's UTF-8 source.
 ///
@@ -146,23 +186,44 @@ pub struct ScalarPresentation {
     /// for plain scalars).
     pub header_span: ByteSpan,
     /// The scalar's content bytes, quotes and block header excluded.
+    ///
+    /// # The block-scalar convention — one rule, no exceptions
+    ///
+    /// For a `|` or `>` scalar the content span begins **immediately after the
+    /// line break that terminates the header line**, and therefore *includes*
+    /// every body line's indentation, the first line's included. It ends where
+    /// the chomping indicator says the value ends, with the trailing blank
+    /// lines and the next token's indentation trimmed off.
+    ///
+    /// This holds identically for an ordinary block, for a block that opens
+    /// with empty lines and for a truncated header (`replace: |` with nothing
+    /// after it, which yields an empty content span just past the break). A
+    /// consumer therefore never has to ask which shape it is looking at:
+    ///
+    /// - **decoding** is uniformly "strip [`ScalarPresentation::indent`]
+    ///   columns from each line", which is YAML's own model;
+    /// - **replacing** is uniformly "write whole, `indent`-indented lines",
+    ///   which can neither leave the header's line break behind nor duplicate
+    ///   the first line's indentation.
+    ///
+    /// For a flow scalar the content span is the token with its quotes removed,
+    /// and for a plain scalar it is the token itself.
     pub content_span: ByteSpan,
     /// Content indentation in columns, for block scalars.
+    ///
+    /// Taken from the start marker's column, which for a block scalar is the
+    /// content-indentation column exactly — the number of columns
+    /// [`ScalarPresentation::content_span`] carries at the head of every body
+    /// line. For a flow scalar it is simply the column the token starts at.
     pub indent: usize,
     /// Trailing-newline behaviour, meaningful for block scalars only.
     pub chomping: Chomping,
-}
-
-/// Parsed structure of a document paired with its byte spans.
-///
-/// **Phase 0b will fill this in.** It is deliberately empty rather than
-/// speculatively shaped: `docs/parser-evaluation.md` decides what the parser
-/// hands us and what our own scanner must recover, and that decision drives the
-/// index's design.
-#[derive(Debug, Clone, Default)]
-pub struct SyntaxIndex {
-    /// Span covering the whole document, BOM excluded.
-    pub document_span: ByteSpan,
+    /// The block header's explicit indentation indicator, e.g. the `2` of
+    /// `|2-`.
+    ///
+    /// No parser API reports this; the header text is its only source. `None`
+    /// for a flow scalar and for a block scalar without an indicator.
+    pub explicit_indent: Option<usize>,
 }
 
 #[cfg(test)]

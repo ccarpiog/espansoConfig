@@ -1,0 +1,49 @@
+# Block scalars that OPEN with one or more empty lines.
+#
+# The leading line breaks are part of the decoded value, but the substrate
+# reports the span from the first NON-empty content line, so a span that trusted
+# the reported start would silently delete a blank line from the expansion.
+# These fixtures pin the single content-start convention: the content span
+# begins immediately after the header line's break, whatever follows it.
+#
+# Do NOT let an editor collapse the blank runs directly under a `|` or `>`
+# header, and do NOT let it add indentation to them: every one of those line
+# breaks is scalar CONTENT.
+matches:
+  # Clip chomping, one leading empty line.
+  - trigger: :leading-blank-clip
+    replace: |
+
+      first body line
+    label: after-leading-blank-clip
+
+  # Strip chomping, two leading empty lines.
+  - trigger: :leading-blank-strip
+    replace: |-
+
+
+      two empty lines above this one
+    label: after-leading-blank-strip
+
+  # Keep chomping, with a blank line above and below the body.
+  - trigger: :leading-blank-keep
+    replace: |+
+
+      kept between two blank lines
+
+    label: after-leading-blank-keep
+
+  # Folded, where the leading break is kept in full rather than folded away.
+  - trigger: :leading-blank-folded
+    replace: >
+
+      folded body after an empty line
+    label: after-leading-blank-folded
+
+  # A block that is nothing but empty lines: every byte of its value is a line
+  # break, and the header carries the only clue about how many survive.
+  - trigger: :leading-blank-only
+    replace: |+
+
+
+    label: after-leading-blank-only
