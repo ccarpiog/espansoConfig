@@ -79,11 +79,29 @@ pnpm-debug.log*
 !.vscode/extensions.json
 !.vscode/settings.json
 
-# Claude Code: shared project settings are committed, machine-local ones are not.
-.claude/settings.local.json
+# Claude Code: agent config is local to each machine, never shared.
+.claude/
 
 # ---------------------------------------------------------------------------
 # App-generated data (should never appear in the repo, but be explicit)
 # ---------------------------------------------------------------------------
 .espansoconfig-backups/
 *.espansoconfig-*.tmp
+
+# ---------------------------------------------------------------------------
+# Real-config test corpus — PRIVACY CRITICAL
+# ---------------------------------------------------------------------------
+# This repository is PUBLIC. The owner's live espanso config contains personal
+# email templates, addresses and names. `scripts/sync-real-corpus.sh` copies it
+# into the tree on demand so the fidelity tests can run against real files, and
+# this rule is the only thing standing between that copy and the public
+# internet. Do not narrow it, do not add a negation below it.
+#
+# The committed corpus is `tests/corpus/synthetic/` — neutral, hand-authored
+# fixtures. Tests that need the real corpus skip cleanly when it is absent.
+#
+# Verify after any change to this file:
+#   ./scripts/sync-real-corpus.sh
+#   git check-ignore -v crates/espansoconfig-core/tests/corpus/real/match/base.yml
+#   git status --short        # no real-config path may appear
+crates/espansoconfig-core/tests/corpus/real/
