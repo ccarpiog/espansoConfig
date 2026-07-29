@@ -16,6 +16,8 @@
 //!   detection.
 //! - [`SyntaxIndex`] and [`Node`] — the tree, with a byte span on every node.
 //! - [`FrontierEntry`] and [`Segment`] — the gap frontier and its complement.
+//! - [`TriviaIndex`] — the classified contents of every gap, with the comment
+//!   ownership rules of plan section 6.2 applied.
 //!
 //! # Coordinate system
 //!
@@ -28,9 +30,12 @@
 //! # Phase status
 //!
 //! Phase 0b-1 is the byte-accurate span layer: spans, the frontier, and the
-//! gaps. Phase 0b-2 classifies what is *inside* those gaps — comments, blank
-//! lines, anchor names, block-scalar headers — and attaches them to nodes under
-//! the ownership rules in plan section 6.2.
+//! gaps. **Phase 0b-2 completes Phase 0b**: [`TriviaIndex`] classifies what is
+//! *inside* those gaps — comments, blank lines, anchor and tag spelling,
+//! block-scalar headers, structural punctuation — and attaches each to a node
+//! under the ownership rules in plan section 6.2. Together the two halves make
+//! **every byte of a document belong to exactly one frontier leaf or exactly
+//! one trivia item.**
 //!
 //! Nothing here re-serializes. Emission is [`crate::emit`]'s job, and it only
 //! ever produces the bytes for the span being replaced.
@@ -41,7 +46,9 @@ pub mod error;
 mod frontier;
 mod index;
 mod node;
+mod ownership;
 mod preamble;
+mod trivia;
 
 pub use block::{BlockHeader, BlockScalarLayout};
 pub use char_to_byte::CharToByte;
@@ -53,6 +60,10 @@ pub use node::{
     TagSpelling,
 };
 pub use preamble::DocumentPreamble;
+pub use trivia::{
+    BlankRun, CommentAttachment, CommentOwner, Hazard, HazardKind, OwnershipRule, Punctuation,
+    TriviaIndex, TriviaItem, TriviaKind,
+};
 
 /// A half-open byte range `[start, end)` into a document's UTF-8 source.
 ///
