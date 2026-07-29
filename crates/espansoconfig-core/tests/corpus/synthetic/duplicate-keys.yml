@@ -1,0 +1,31 @@
+# Duplicate mapping keys.
+#
+# This file is well-formed at the YAML *parse* level but ill-defined at the
+# *compose* level: YAML 1.2 says duplicate keys are an error, yet parsers differ
+# on whether they reject, keep the first, or keep the last.
+#
+# It lives outside invalid/ on purpose. A tokenizing parser accepts it, and the
+# editor's job is to notice the duplication and warn, never to silently drop one
+# of the two entries while saving.
+matches:
+  - trigger: :dup
+    replace: first value
+    replace: second value
+
+  - trigger: :dup-nested
+    replace: 'value with {{name}}'
+    vars:
+      - name: name
+        type: echo
+        params:
+          echo: alpha
+      - name: name
+        type: echo
+        params:
+          echo: beta
+
+  # Duplicate keys with different scalar styles, so a de-duplicating parser
+  # cannot be told apart from a style-normalising one.
+  - trigger: :dup-styles
+    label: plain
+    label: 'single quoted'

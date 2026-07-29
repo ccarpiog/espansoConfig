@@ -1,0 +1,87 @@
+# Block-scalar matrix. Every header shape the reader must survive, each one
+# followed by something whose position depends on exactly where the block
+# scalar's reported span is agreed to end.
+#
+# Do NOT let an editor trim the trailing spaces or collapse the blank runs:
+# the blank lines after :clip and :keep are the difference between clip and
+# keep chomping, and the blank line inside :interior-blank is scalar CONTENT,
+# not document trivia.
+matches:
+  # Clip chomping: exactly one trailing newline in the value, no matter how
+  # many blank lines follow the block.
+  - trigger: :clip
+    replace: |
+      clip line one
+      clip line two
+
+
+    label: after-clip
+
+  # Strip chomping: no trailing newline at all.
+  - trigger: :strip
+    replace: |-
+      stripped
+    label: after-strip
+
+  # Keep chomping: every trailing newline survives into the value.
+  - trigger: :keep
+    replace: |+
+      kept
+
+
+    label: after-keep
+
+  # Explicit indentation indicator plus strip chomping, indicator first.
+  - trigger: :indent-strip
+    replace: |2-
+        four-space first line
+      two-space second line
+    label: after-indent-strip
+
+  # Explicit indentation indicator plus keep chomping.
+  - trigger: :indent-keep
+    replace: |2+
+        four-space first line
+
+    label: after-indent-keep
+
+  # A blank line that is scalar CONTENT. A trivia scanner that recovers this
+  # one as a document blank line has corrupted the value.
+  - trigger: :interior-blank
+    replace: |
+      before the blank
+
+      after the blank
+    label: after-interior-blank
+
+  # A hash inside a block scalar is data, never a comment.
+  - trigger: :hash-inside
+    replace: |2-
+        echo hello
+        # this is shell text, not a YAML comment
+    label: after-hash-inside
+
+  # Folded, all three chomping modes.
+  - trigger: :folded-clip
+    replace: >
+      folded clip
+    label: after-folded-clip
+
+  - trigger: :folded-strip
+    replace: >-
+      folded strip
+    label: after-folded-strip
+
+  - trigger: :folded-keep
+    replace: >+
+      folded keep
+
+    label: after-folded-keep
+
+  # A comment on the line immediately after a block scalar. Where the comment
+  # starts depends entirely on where the scalar's span is agreed to stop.
+  - trigger: :block-then-comment
+    replace: |
+      body
+    # comment directly after a block scalar
+    label: after-comment

@@ -1,0 +1,65 @@
+# Every scalar style espanso files use in practice.
+# We must READ all five. We only ever EMIT the first four (see plan section 6.3).
+matches:
+  # Plain (unquoted).
+  - trigger: :plain
+    replace: hello from a plain scalar
+
+  # Single-quoted: backslashes stay literal, so regex survives intact.
+  - regex: '(?P<ticket>[A-Z]+-\d+)'
+    replace: 'ticket {{ticket}} — don''t panic'
+
+  # Double-quoted: the only style with escape sequences.
+  - trigger: ":double"
+    replace: "line one\nline two\ttabbed é"
+
+  # Single-quoted across three source lines, with a blank line in the middle
+  # and a doubled quote. That blank line is scalar CONTENT: a trivia scanner
+  # that recovers it as a document blank line has corrupted the value.
+  - regex: 'first part
+
+      second''part'
+    label: multiline-single
+
+  # The same hazard in double-quoted form.
+  - trigger: :multiline-double
+    replace: "double across
+
+      two paragraphs"
+
+  # Literal block, clip chomping: exactly one trailing newline.
+  - trigger: :literal-clip
+    replace: |
+      first line
+      second line
+
+  # Literal block, strip chomping: no trailing newline.
+  - trigger: :literal-strip
+    replace: |-
+      no trailing newline here
+
+  # Literal block, keep chomping: every trailing newline preserved.
+  - trigger: :literal-keep
+    replace: |+
+      keeps the blank lines below
+
+
+  # Literal block with an explicit indentation indicator, because the first
+  # content line is itself indented and would otherwise be ambiguous.
+  - trigger: :literal-indent
+    replace: |2
+        indented first line
+      back to base
+
+  # Folded. We never emit this, but files in the wild contain it and we must
+  # read it without corrupting it.
+  - trigger: :folded
+    replace: >
+      this folded scalar
+      becomes one long line
+
+  # Folded with strip chomping.
+  - trigger: :folded-strip
+    replace: >-
+      folded and stripped
+      of its trailing newline

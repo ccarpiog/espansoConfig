@@ -1,0 +1,28 @@
+# File-header comment, line one.
+# File-header comment, line two.
+#
+# Per plan section 6.2, a file-header comment before the first top-level key
+# NEVER belongs to the first match. Moving the first match must leave these
+# four lines exactly where they are.
+
+matches: # inline comment on the top-level key
+  # Leading comment attached to the first match (no blank line between).
+  - trigger: :first
+    replace: first expansion # inline comment on a mapping entry
+
+  # Comment between sequence entries, attached to the SECOND match.
+  - trigger: :second
+    # Leading comment on a nested mapping entry.
+    replace: second expansion
+    # Trailing comment inside the second match's mapping.
+
+  # This comment is separated from the next match by a blank line, so under our
+  # ownership rules it belongs to the FILE, not to :third.
+
+  - trigger: :third
+    replace: |
+      block scalar content
+      # this hash is DATA, not a comment — it is inside a literal block
+    label: third # inline after the last entry
+
+# Trailing comment at end of file, owned by the file.

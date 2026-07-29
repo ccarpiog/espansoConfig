@@ -1,0 +1,22 @@
+[package]
+name = "espansoconfig-core"
+description = "Fidelity-preserving espanso YAML configuration engine. Never depends on tauri."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ---------------------------------------------------------------------------
+# IMPORTANT: this crate must NEVER depend on tauri, directly or transitively.
+# It is the standalone, independently testable and fuzzable domain library
+# described in IMPLEMENTATION_PLAN.md section 6.1.
+# ---------------------------------------------------------------------------
+[dependencies]
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+yaml-rust2.workspace = true
+saphyr-parser.workspace = true
+marked-yaml.workspace = true

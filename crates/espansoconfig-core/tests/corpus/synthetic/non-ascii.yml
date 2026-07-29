@@ -1,0 +1,36 @@
+# Non-ASCII content: Spanish accents and macOS modifier symbols.
+# Every span in this file is a BYTE span, so a parser that reports character
+# offsets will disagree with `&source[span]` here and nowhere else.
+matches:
+  - trigger: :saludo
+    replace: '¡Hola! ¿Qué tal? Añádelo aquí.'
+
+  - trigger: :acentos
+    replace: áéíóú ÁÉÍÓÚ ñÑ üÜ ¿¡ «» —
+
+  - trigger: :atajos
+    replace: 'Pulsa ⌘⇧P y luego ⌥⌘I'
+
+  - trigger: :modificadores
+    replace: |
+      ⌘ comando
+      ⌥ opción
+      ⇧ mayúsculas
+      ⌃ control
+      ⎋ escape
+      ⏎ retorno
+
+  # Accented characters in KEYS as well as values.
+  - trigger: :campos
+    replace: 'Dirección: {{dirección}}'
+    vars:
+      - name: dirección
+        type: echo
+        params:
+          echo: 'Calle Mayor, número 1'
+
+  # Emoji sit outside the Basic Multilingual Plane, so they are 4 UTF-8 bytes
+  # and a surrogate pair in UTF-16. Any offset arithmetic that assumes
+  # "one char, one unit" breaks precisely here.
+  - trigger: :emoji
+    replace: 'listo ✅ atención ⚠️ fuego 🔥 familia 👨‍👩‍👧'

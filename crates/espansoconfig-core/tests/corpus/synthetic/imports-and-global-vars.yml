@@ -1,0 +1,44 @@
+# `imports` and `global_vars`, the two top-level keys besides `matches`.
+#
+# Key ORDER at the top level is meaningful to the reader even though YAML says
+# mappings are unordered. The editor must never reorder these three keys.
+imports:
+  - _scoped.yml
+  - ../match/subfolder/extra.yml
+  - $CONFIG/match/absolute-style.yml
+
+global_vars:
+  - name: fecha_hoy
+    type: date
+    params:
+      format: '%d/%m/%Y'
+
+  - name: portapapeles
+    type: clipboard
+
+  - name: host
+    type: shell
+    params:
+      cmd: hostname
+      trim: true
+
+matches:
+  - trigger: :hoy
+    replace: 'Hoy es {{fecha_hoy}} en {{host}}'
+
+  - trigger: :pegar
+    replace: 'copiado: {{portapapeles}}'
+
+  # Word-boundary and case-propagation options, plus force_mode.
+  - trigger: 'esp'
+    replace: espanso
+    word: true
+    propagate_case: true
+    uppercase_style: capitalize_words
+
+  - trigger: :portapapeles-forzado
+    replace: 'texto largo que conviene pegar'
+    force_mode: clipboard
+    search_terms:
+      - pegar
+      - clipboard

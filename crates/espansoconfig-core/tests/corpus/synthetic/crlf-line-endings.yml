@@ -1,0 +1,13 @@
+# CRLF fixture — every line break in this file is \r\n.
+# Do NOT let an editor normalise it. See README.md in this directory.
+matches:
+  - trigger: :crlf
+    replace: single line with a CRLF terminator
+
+  - trigger: :crlf-block
+    replace: |
+      first block line
+      second block line
+
+  - trigger: :crlf-quoted
+    replace: 'quoted value, CRLF after it'

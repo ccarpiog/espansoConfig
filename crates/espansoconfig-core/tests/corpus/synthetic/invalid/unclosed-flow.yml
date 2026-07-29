@@ -1,0 +1,5 @@
+# INVALID ON PURPOSE — do not "fix" this file.
+# The flow sequence is never closed with `]`.
+matches:
+  - triggers: [":one", ":two"
+    replace: unclosed flow sequence

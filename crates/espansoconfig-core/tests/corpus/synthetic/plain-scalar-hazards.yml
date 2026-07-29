@@ -1,0 +1,93 @@
+# Scalars that a naive emitter quotes wrongly, or fails to quote at all.
+# This is the fixture behind the `choose_scalar()` unit table in plan section 11.
+matches:
+  # These are STRINGS in espanso but resolve to bool/null/number/timestamp in
+  # YAML unless quoted. Emitting them unquoted changes their type.
+  - trigger: :yes
+    replace: 'yes'
+  - trigger: :no
+    replace: 'no'
+  - trigger: :on
+    replace: 'on'
+  - trigger: :off
+    replace: 'off'
+  - trigger: :true
+    replace: 'true'
+  - trigger: :null
+    replace: 'null'
+  - trigger: :tilde
+    replace: '~'
+  - trigger: :number
+    replace: '1.50'
+  - trigger: :sexagesimal
+    replace: '12:30:00'
+  - trigger: :date
+    replace: '2026-07-29'
+  - trigger: :inf
+    replace: '.inf'
+  - trigger: :nan
+    replace: '.NaN'
+  - trigger: :hex
+    replace: '0x1F'
+
+  # Leading indicator characters.
+  - trigger: :colon-start
+    replace: ':sig'
+  - trigger: :dash-start
+    replace: '- item'
+  - trigger: :question
+    replace: '? maybe'
+  - trigger: :ampersand
+    replace: '&notananchor'
+  - trigger: :asterisk
+    replace: '*notanalias'
+  - trigger: :exclamation
+    replace: '!notatag'
+  - trigger: :percent
+    replace: '%notadirective'
+  - trigger: :at
+    replace: '@reserved'
+  - trigger: :backtick
+    replace: '`reserved'
+
+  # Interior hazards: `: ` and ` #` end a plain scalar.
+  - trigger: :colon-space
+    replace: 'key: value'
+  - trigger: :hash-space
+    replace: 'text # not a comment'
+  - trigger: :hash-nospace
+    replace: text#stays-plain
+
+  # Whitespace hazards, invisible in a GUI text field.
+  - trigger: :padded
+    replace: '  padded  '
+  - trigger: :empty
+    replace: ''
+  - trigger: :just-spaces
+    replace: '   '
+
+  # Quote handling.
+  - trigger: :apostrophe
+    replace: 'Don''t panic'
+  - trigger: :double-inside-single
+    replace: 'She said "hello"'
+  - trigger: :both-quotes
+    replace: "mixed ' and \" quotes"
+
+  # Backslashes: the reason single quotes are preferred for regex.
+  - regex: 'C:\\Users\\(?P<user>\w+)'
+    replace: 'ruta de {{user}}'
+  - trigger: :backslash
+    replace: 'a\b\c not escapes'
+  - trigger: :double-escaped
+    replace: "a\\b\\c escaped in double quotes"
+
+  # Document markers as content.
+  - trigger: :marker
+    replace: '--- looks like a document start'
+  - trigger: :end-marker
+    replace: '... looks like a document end'
+
+  # The espanso cursor hint, which contains a YAML-hostile pipe.
+  - trigger: :cursor
+    replace: 'before $|$ after'

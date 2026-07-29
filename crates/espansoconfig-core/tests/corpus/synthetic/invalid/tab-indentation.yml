@@ -1,0 +1,6 @@
+# INVALID ON PURPOSE — do not "fix" this file.
+# YAML forbids tabs as indentation. The line below is indented with a real tab,
+# which is invisible in most editors and is a classic hand-editing mistake.
+matches:
+  - trigger: :tabbed
+	replace: indented with a tab

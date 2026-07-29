@@ -1,0 +1,46 @@
+# Anchors, aliases, explicit tags and merge keys.
+# Espanso's own docs recommend anchors for shared variable blocks, so this is
+# not a synthetic curiosity: real configs contain it.
+
+# A top-level anchors block, which espanso ignores but YAML resolves.
+anchors:
+  shared_defaults: &shared_defaults
+    word: true
+    propagate_case: true
+
+  clipboard_var: &clipboard_var
+    name: clip
+    type: clipboard
+
+global_vars:
+  - *clipboard_var
+
+matches:
+  # Merge key: pulls in every entry of the anchored mapping.
+  - <<: *shared_defaults
+    trigger: :merged
+    replace: uses the merged defaults
+
+  # Merge key plus a local override of one merged entry.
+  - <<: *shared_defaults
+    trigger: :merged-override
+    word: false
+    replace: overrides one merged entry
+
+  # Explicit tags. `!!str` forces a string that would otherwise resolve to a
+  # bool or a number — exactly the hazard our plain-scalar check guards against.
+  - trigger: :tagged
+    replace: !!str yes
+    label: !!str 1.50
+
+  # An alias used as a whole sequence entry.
+  - trigger: :aliased-vars
+    replace: 'clipboard says {{clip}}'
+    vars:
+      - *clipboard_var
+
+  # Anchor declared inline on a scalar, then aliased later in the same file.
+  - trigger: :anchor-scalar
+    replace: &greeting hello there
+  - trigger: :alias-scalar
+    replace: *greeting

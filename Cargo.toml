@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/espansoconfig-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/ccarpiog/espansoConfig"
+
+# Shared dependency versions. Every member crate inherits from here so the
+# workspace can never end up with two versions of the YAML substrate.
+[workspace.dependencies]
+sha2 = "0.10"
+tempfile = "3"
+yaml-rust2 = "0.11"
+saphyr-parser = "0.0.11"
+marked-yaml = "0.8"

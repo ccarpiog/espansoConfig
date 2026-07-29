@@ -1,0 +1,79 @@
+# A variable chain: form -> date -> shell, ordered by `depends_on`.
+#
+# Espanso evaluates variables in declaration order unless `depends_on` says
+# otherwise. Reordering these entries without honouring `depends_on` changes
+# behaviour, so this file is the regression case for the reorder feature.
+matches:
+  - trigger: :informe-diario
+    replace: |
+      # {{titulo}}
+
+      Fecha:   {{fecha}}
+      Rama:    {{rama}}
+      Estado:  {{estado}}
+    vars:
+      # 1. Collected from the user first.
+      - name: entrada
+        type: form
+        params:
+          layout: |
+            Título: [[titulo]]
+            Días de desfase: [[desfase]]
+          fields:
+            desfase:
+              type: choice
+              values:
+                - '0'
+                - '-1'
+                - '-7'
+
+      - name: titulo
+        type: echo
+        depends_on:
+          - entrada
+        params:
+          echo: '{{entrada.titulo}}'
+
+      # 2. A date derived from the form's offset field.
+      - name: fecha
+        type: date
+        depends_on:
+          - entrada
+        params:
+          format: '%Y-%m-%d'
+          offset: 0
+          locale: es-ES
+          tz: Europe/Madrid
+
+      # 3. A shell command that consumes the date. `trim` matters: without it
+      #    the command's trailing newline lands in the expansion.
+      - name: rama
+        type: shell
+        depends_on:
+          - fecha
+        params:
+          cmd: 'echo "release/{{fecha}}"'
+          shell: bash
+          trim: true
+
+      # 4. A script variable, the other command-running type.
+      - name: estado
+        type: script
+        depends_on:
+          - rama
+        params:
+          args:
+            - /bin/echo
+            - 'rama {{rama}} lista'
+          trim: true
+
+  # `inject_vars: false` stops espanso expanding {{...}} inside the value, which
+  # is how a literal double-brace survives.
+  - trigger: :plantilla
+    replace: '{{plantilla}}'
+    vars:
+      - name: plantilla
+        type: echo
+        inject_vars: false
+        params:
+          echo: 'literal {{no_expandido}} intacto'

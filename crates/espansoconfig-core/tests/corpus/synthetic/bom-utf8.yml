@@ -1,0 +1,7 @@
+﻿# UTF-8 BOM fixture — the first three bytes are EF BB BF.
+# Do NOT let an editor strip them. See README.md in this directory.
+matches:
+  - trigger: :bom
+    replace: 'the file starts with a byte-order mark'
+  - trigger: :bom-acentos
+    replace: 'áéíóú after a BOM'

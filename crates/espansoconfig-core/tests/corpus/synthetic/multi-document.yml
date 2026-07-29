@@ -1,0 +1,25 @@
+# A multi-document stream.
+#
+# Espanso loads only the first document, but a user can still author a file like
+# this, and truncating documents two and three on save would destroy data.
+---
+# Document 1: the matches espanso actually loads.
+matches:
+  - trigger: :doc-one
+    replace: from the first document
+...
+---
+# Document 2, after an explicit end-of-document marker above.
+matches:
+  - trigger: :doc-two
+    replace: from the second document
+
+# A bare `---` with no `...` before it starts document 3.
+---
+matches:
+  - trigger: :doc-three
+    replace: |
+      A literal block whose content contains a line that merely looks like a
+      document marker:
+      --- not a marker, it is indented content
+...

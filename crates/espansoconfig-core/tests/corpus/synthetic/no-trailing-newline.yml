@@ -1,0 +1,5 @@
+# No-trailing-newline fixture — the last byte of this file is an
+# apostrophe, not a line feed. Do NOT let an editor add one.
+matches:
+  - trigger: :no-final-newline
+    replace: 'the last line has no terminator'

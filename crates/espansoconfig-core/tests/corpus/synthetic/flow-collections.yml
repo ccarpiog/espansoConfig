@@ -1,0 +1,29 @@
+# Flow-style collections. Espanso accepts them and users write them for short
+# lists, so the editor must round-trip flow style rather than expanding it to
+# block style.
+matches:
+  - triggers: [":hi", ":hello", ":hey"]
+    replace: greetings
+
+  - trigger: :flow-map
+    replace: 'pick {{choice}}'
+    vars: [{name: choice, type: choice, params: {values: [alpha, beta, gamma]}}]
+
+  - trigger: :flow-mixed
+    search_terms: [greeting, saludo, "hola"]
+    replace: mixed quoting inside a flow sequence
+
+  # Flow collection spanning several lines, with a comment inside it.
+  - label: multi-line flow
+    triggers: [
+      ":one",   # first alias
+      ":two",
+      ":three"
+      ]
+    replace: multi-line flow sequence
+
+  # Empty flow collections.
+  - trigger: :flow-empty
+    replace: empty collections
+    vars: []
+    form_fields: {}

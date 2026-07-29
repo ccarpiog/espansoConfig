@@ -1,0 +1,7 @@
+# INVALID ON PURPOSE — do not "fix" this file.
+# The single-quoted scalar is never closed, so the parser runs to end of stream.
+matches:
+  - trigger: :broken
+    replace: 'this quote never closes
+  - trigger: :next
+    replace: unreachable

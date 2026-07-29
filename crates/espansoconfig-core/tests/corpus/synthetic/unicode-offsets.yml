@@ -1,0 +1,6 @@
+# Offset-counting probe. Do NOT normalise this file.
+# Element 1 is PRECOMPOSED U+00E9. Element 2 is DECOMPOSED U+0065 U+0301.
+# Element 3 is U+1F600, outside the Basic Multilingual Plane.
+# Together they distinguish byte / scalar-value / UTF-16 / grapheme offsets.
+probe: [é, é, 😀, tail]
+after: end

@@ -1,0 +1,8 @@
+# INVALID ON PURPOSE — do not "fix" this file.
+# `*missing_anchor` is never defined, so composition fails even though the token
+# stream is well-formed. This distinguishes parse-level from compose-level
+# errors, which the editor must report differently.
+matches:
+  - <<: *missing_anchor
+    trigger: :orphan
+    replace: references an anchor that does not exist

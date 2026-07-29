@@ -1,0 +1,25 @@
+matches:
+  - trigger: :one
+    replace: one
+
+
+  # Two blank lines above this comment. They are intentional visual grouping
+  # and must survive a reorder of the matches around them.
+  - trigger: :two
+    replace: two
+
+
+
+  # Three blank lines above. Runs of 2+ blank lines are the case a naive
+  # "normalise whitespace" emitter destroys first.
+  - trigger: :three
+
+    # A blank line INSIDE a match mapping, between two entries.
+    replace: three
+
+  - trigger: :four
+    replace: |
+      block content with a genuinely blank line below
+
+      and content after it
+    label: four

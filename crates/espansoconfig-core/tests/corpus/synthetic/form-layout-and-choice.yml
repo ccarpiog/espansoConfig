@@ -1,0 +1,69 @@
+# Forms: both the shorthand and the verbose `type: form` variable.
+matches:
+  # Shorthand form: `form` + `form_fields`.
+  - trigger: :ticket
+    form: |
+      Project: [[project]]
+      Summary: [[summary]]
+      Details:
+      [[details]]
+    form_fields:
+      project:
+        type: choice
+        values:
+          - alpha
+          - beta
+          - gamma
+      summary:
+        type: text
+        default: 'short summary'
+      details:
+        multiline: true
+
+  # Verbose equivalent: a variable of `type: form` with `params.layout` and
+  # `params.fields`. This is the shape that lets form values feed into shell and
+  # script variables, so it is the one the form builder must emit.
+  - trigger: :informe
+    replace: |
+      Asunto: {{formulario.asunto}}
+      Prioridad: {{formulario.prioridad}}
+      Equipo: {{formulario.equipo}}
+    vars:
+      - name: formulario
+        type: form
+        params:
+          layout: |
+            Asunto:     [[asunto]]
+            Prioridad:  [[prioridad]]
+            Equipo:     [[equipo]]
+          fields:
+            asunto:
+              multiline: false
+            prioridad:
+              type: choice
+              values:
+                - baja
+                - media
+                - alta
+            equipo:
+              type: list
+              values: |
+                soporte
+                ventas
+                ingeniería
+              trim_string_values: true
+
+  # `choice` with the {label, id} object form rather than plain strings.
+  - trigger: :entorno
+    replace: 'desplegando en {{entorno}}'
+    vars:
+      - name: entorno
+        type: choice
+        params:
+          values:
+            - label: Producción
+              id: prod
+            - label: Preproducción
+              id: staging
+            - label: Local
+              id: local

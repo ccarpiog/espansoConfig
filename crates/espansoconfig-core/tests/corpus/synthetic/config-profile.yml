@@ -1,0 +1,28 @@
+# A `config/*.yml` profile rather than a match file.
+# Profiles are a different top-level shape and get their own editor surface,
+# so the corpus needs at least one.
+filter_title: '(?i).*terminal.*'
+filter_exec: '.*/(iTerm2|Terminal)$'
+
+backend: auto
+auto_restart: true
+preserve_clipboard: true
+clipboard_threshold: 100
+
+# Duration values are plain integers; quoting them would change their type.
+key_delay: 8
+inject_delay: 0
+
+toggle_key: ALT
+search_shortcut: ALT+SPACE
+
+# Extra includes are how `_`-prefixed files get loaded: they are excluded from
+# the default glob `../match/**/[!_]*.yml` on purpose.
+extra_includes:
+  - ../match/_terminal.yml
+
+# A profile can also disable the defaults entirely.
+use_standard_includes: true
+
+# Values that LOOK like other types and must stay strings.
+word_separators: ["'", '"', ' ', "\t"]

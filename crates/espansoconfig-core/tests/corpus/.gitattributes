@@ -1,0 +1,13 @@
+# The golden corpus is byte-exact test data, not source code.
+#
+# `-text` disables git's end-of-line conversion entirely: no CRLF normalisation
+# on commit, no re-expansion on checkout. Without this, `crlf-line-endings.yml`
+# would be silently converted to LF and the test it exists for would pass
+# vacuously on every machine.
+*           -text
+*.yml       -text
+*.yaml      -text
+
+# Keep diffs readable but never let a merge driver rewrite bytes here.
+*.yml       -merge
+*.yaml      -merge

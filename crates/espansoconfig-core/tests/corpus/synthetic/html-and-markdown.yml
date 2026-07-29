@@ -1,0 +1,32 @@
+# `html`, `markdown` and `image_path` content types.
+matches:
+  # HTML must be single-quoted or blocked, never re-indented: whitespace inside
+  # <pre> is significant, and the folded style would silently join these lines.
+  - trigger: :firma
+    html: |
+      <p>Saludos cordiales,</p>
+      <p><strong>Nombre Apellido</strong><br>
+      <span style="color:#555">Equipo de soporte</span></p>
+
+  - trigger: :aviso
+    html: '<span style="color: red">Atención: revisar antes de enviar</span>'
+
+  - trigger: :codigo
+    html: |-
+      <pre><code>if (a &lt; b) {
+        return "a &amp; b";
+      }</code></pre>
+
+  - trigger: :notas
+    markdown: |
+      ## Notas de la reunión
+
+      - Punto uno
+      - Punto dos con `código`
+      - [Enlace](https://example.invalid/página)
+
+      > Cita textual
+    paragraph: true
+
+  - trigger: :captura
+    image_path: $CONFIG/images/example.png
