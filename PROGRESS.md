@@ -450,7 +450,7 @@ _Updated at each phase boundary._
 |---|---|---|---|
 | 0a | `10f3e70` | ✅ pushed to `origin/main` | clean |
 | 0b-1 | `813f809` | ✅ pushed to `origin/main` | clean |
-| 0b-2 | `PENDING` | pending | pending |
+| 0b-2 | `9825d9e` | ✅ pushed to `origin/main` | clean |
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
