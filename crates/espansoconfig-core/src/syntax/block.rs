@@ -37,7 +37,7 @@
 //! lines, and an emitter that cannot tell the two apart under- or
 //! double-indents the first line, which changes YAML structure.
 
-use crate::syntax::{ByteSpan, Chomping, ScalarStyle};
+use crate::syntax::{ByteSpan, Chomping, HeaderIndicatorOrder, ScalarStyle};
 
 /// The characters YAML treats as separation around a block-scalar header:
 /// horizontal indentation and the two line-break bytes.
@@ -74,6 +74,12 @@ pub struct BlockHeader {
     /// The chomping indicator, which decides how many trailing line breaks
     /// belong to the value.
     pub chomping: Chomping,
+    /// Which of the two indicators was written first, `|2+` or `|+2`.
+    ///
+    /// The pair (indentation, chomping) is the same for both spellings, so an
+    /// emitter that does not carry this cannot reproduce the source bytes of a
+    /// `|+2` header.
+    pub indicator_order: HeaderIndicatorOrder,
     /// `true` when the header was found *inside* the reported span rather than
     /// on the line above it.
     ///
@@ -93,6 +99,8 @@ struct HeaderShape {
     explicit_indent: Option<usize>,
     /// Chomping indicator.
     chomping: Chomping,
+    /// Which indicator came first in the source text.
+    indicator_order: HeaderIndicatorOrder,
 }
 
 /// Matches a block-scalar header at the start of `text`.
@@ -111,6 +119,8 @@ fn match_header(text: &str) -> Option<HeaderShape> {
 
     let mut explicit_indent = None;
     let mut chomping = Chomping::Clip;
+    // `|2+` and `|+2` are the same header; only the source records which.
+    let mut chomping_came_first = false;
     let mut len = indicator.len_utf8();
     for (offset, character) in characters.by_ref() {
         match character {
@@ -118,17 +128,18 @@ fn match_header(text: &str) -> Option<HeaderShape> {
                 explicit_indent = Some(character as usize - '0' as usize);
                 len = offset + character.len_utf8();
             }
-            '-' if chomping == Chomping::Clip => {
-                chomping = Chomping::Strip;
-                len = offset + character.len_utf8();
-            }
-            '+' if chomping == Chomping::Clip => {
-                chomping = Chomping::Keep;
+            '-' | '+' if chomping == Chomping::Clip => {
+                chomping = if character == '-' {
+                    Chomping::Strip
+                } else {
+                    Chomping::Keep
+                };
+                chomping_came_first = explicit_indent.is_none();
                 len = offset + character.len_utf8();
             }
             _ => break,
         }
-    }
+    } // End of the loop that reads the header's indicator characters
 
     // Everything after the indicators must be blank or a comment, otherwise
     // this `|` is not a header at all.
@@ -136,11 +147,19 @@ fn match_header(text: &str) -> Option<HeaderShape> {
     if !tail.is_empty() && !tail.starts_with('#') {
         return None;
     }
+    // The order only exists when both indicators do: `|-` and `|2` each have
+    // exactly one spelling.
+    let indicator_order = if chomping_came_first && explicit_indent.is_some() {
+        HeaderIndicatorOrder::ChompingFirst
+    } else {
+        HeaderIndicatorOrder::IndentFirst
+    };
     Some(HeaderShape {
         len,
         indicator,
         explicit_indent,
         chomping,
+        indicator_order,
     })
 } // End of function match_header()
 
@@ -150,34 +169,37 @@ fn match_header(text: &str) -> Option<HeaderShape> {
 /// `source` is the whole original document and `span_start` a byte offset into
 /// it. Two cases, and the distinction is the R5 guard:
 ///
-/// - The span starts with `|` or `>`: the block is truncated and its header is
-///   *inside* the span. The header is read forwards from `span_start` and
-///   [`BlockHeader::inside_span`] is set. The backwards lexer must not run.
-/// - Otherwise the span starts on the first content character, so the header is
-///   the tail of the preceding line. It is read backwards.
+/// - The span starts on the first content character, so the header is the tail
+///   of the preceding line. It is read backwards, and this is tried **first**
+///   (see the comment in the body: a body line may itself open with `|` or `>`
+///   and read as a well-formed truncated header).
+/// - The span starts with `|` or `>` and nothing precedes it on its own line:
+///   the block is truncated and its header is *inside* the span. The header is
+///   then read forwards from `span_start` and [`BlockHeader::inside_span`] is
+///   set.
 ///
 /// Returns `None` when no well-formed header is found, which on valid input
 /// cannot happen.
 pub fn locate_header(source: &str, span_start: usize) -> Option<BlockHeader> {
-    let rest = source.get(span_start..)?;
-    if rest.starts_with(['|', '>']) {
-        // R5: the reported span swallowed the header. Read it forwards, and do
-        // not touch the line above.
-        let line = rest.split(YAML_LINE_BREAK).next().unwrap_or(rest);
-        let shape = match_header(line)?;
-        return Some(BlockHeader {
-            span: ByteSpan::new(span_start, span_start + shape.len),
-            indicator: shape.indicator,
-            explicit_indent: shape.explicit_indent,
-            chomping: shape.chomping,
-            inside_span: true,
-        });
-    }
+    // Backwards first, forwards only as the fallback. The two lexers can both
+    // match, and the ambiguity is not hypothetical: a block scalar whose first
+    // body line is `> ` or `|` — a Markdown table inside `replace: |`, or a
+    // quoted-reply template — reports a span that starts on that character and
+    // reads as a perfectly well-formed truncated header. Preferring the
+    // backwards answer resolves every such case correctly, because a genuinely
+    // truncated header has nothing but its own key on the line before it, so
+    // the backwards lexer finds nothing and the forward path still fires.
+    locate_header_backwards(source, span_start)
+        .or_else(|| locate_header_inside_span(source, span_start))
+} // End of function locate_header()
 
-    // The span begins at the content indentation column, which may sit in the
-    // middle of the first content line's leading whitespace when the header
-    // carried an explicit indentation indicator. Trimming whitespace and line
-    // breaks backwards therefore lands on the header line in every case.
+/// Reads a block-scalar header from the tail of the line preceding the span.
+///
+/// The span begins at the content indentation column, which may sit in the
+/// middle of the first content line's leading white space when the header
+/// carried an explicit indentation indicator. Trimming white space and line
+/// breaks backwards therefore lands on the header line in every case.
+fn locate_header_backwards(source: &str, span_start: usize) -> Option<BlockHeader> {
     let before = source.get(..span_start)?;
     let trimmed = before.trim_end_matches(YAML_SEPARATION);
     let line_start = trimmed.rfind(YAML_LINE_BREAK).map_or(0, |index| index + 1);
@@ -196,11 +218,33 @@ pub fn locate_header(source: &str, span_start: usize) -> Option<BlockHeader> {
             indicator: shape.indicator,
             explicit_indent: shape.explicit_indent,
             chomping: shape.chomping,
+            indicator_order: shape.indicator_order,
             inside_span: false,
         });
-    }
+    } // End of the loop that scans the preceding line for an indicator
     None
-} // End of function locate_header()
+} // End of function locate_header_backwards()
+
+/// Reads a block-scalar header that the reported span swallowed (risk R5).
+///
+/// Only reachable from incomplete input such as a `replace: |` the user has not
+/// finished typing, which a desktop editor sees on every keystroke.
+fn locate_header_inside_span(source: &str, span_start: usize) -> Option<BlockHeader> {
+    let rest = source.get(span_start..)?;
+    if !rest.starts_with(['|', '>']) {
+        return None;
+    }
+    let line = rest.split(YAML_LINE_BREAK).next().unwrap_or(rest);
+    let shape = match_header(line)?;
+    Some(BlockHeader {
+        span: ByteSpan::new(span_start, span_start + shape.len),
+        indicator: shape.indicator,
+        explicit_indent: shape.explicit_indent,
+        chomping: shape.chomping,
+        indicator_order: shape.indicator_order,
+        inside_span: true,
+    })
+} // End of function locate_header_inside_span()
 
 /// Length, in bytes, of the genuine content prefix of a block scalar's span.
 ///
@@ -213,21 +257,39 @@ pub fn locate_header(source: &str, span_start: usize) -> Option<BlockHeader> {
 /// `at_end_of_source` says whether the reported end is the end of the document.
 /// It exists because trailing spaces and tabs are ambiguous: mid-document they
 /// are the *next* token's indentation and must be handed back as trivia, but at
-/// EOF there is no next token, so horizontal whitespace sitting on a content
-/// line is genuine scalar data and discarding it would silently shorten the
-/// user's value. A trailing run that forms a whitespace-only line of its own is
-/// still trivia in both cases: the line break before it already terminated the
-/// content.
+/// EOF there is no next token, so horizontal whitespace that carries columns of
+/// its own is genuine scalar data and discarding it would silently shorten the
+/// user's value.
+///
+/// # Why the indentation column is needed
+///
+/// A terminal run of spaces at EOF is content in two different ways, and the
+/// second one cannot be seen without knowing how wide the block's indentation
+/// is:
+///
+/// 1. the run sits on a line that already has content before it — `  body  `;
+/// 2. the run **is** the whole final line, but reaches past the indentation
+///    column, so the surplus columns are scalar data — `|2` plus a final line
+///    of three spaces holds one space of content.
+///
+/// Judging case 2 without `indent` is what made `key: |2-\n   \n   ` decode to
+/// `" "` instead of `" \n "`: the final line was written off as trivia because
+/// there was nothing to compare its width against. The rule is the substrate's
+/// own, measured across spaces, tabs and mixtures of the two: a whitespace-only
+/// final line is content exactly when it is **longer than `indent`
+/// characters**. A line of `\t` under a two-column block is an empty line; a
+/// line of `  \t` is two columns of indentation plus a tab of content.
 ///
 /// This is the derivation `PROGRESS.md` D2 records, and every block scalar in
-/// the synthetic corpus re-decodes byte-for-byte from its result.
-pub fn content_len(span_text: &str, chomping: Chomping, at_end_of_source: bool) -> usize {
+/// both corpora re-decodes byte-for-byte from its result.
+pub fn content_len(
+    span_text: &str,
+    chomping: Chomping,
+    at_end_of_source: bool,
+    indent: usize,
+) -> usize {
     let trimmed = span_text.trim_end_matches(YAML_HORIZONTAL);
-    // Keep the trailing spaces or tabs only when they are at EOF *and* sit on a
-    // line that has content before them.
-    let keeps_terminal_whitespace =
-        at_end_of_source && !trimmed.is_empty() && !trimmed.ends_with(YAML_LINE_BREAK);
-    let without_spaces = if keeps_terminal_whitespace {
+    let without_spaces = if at_end_of_source && terminal_whitespace_is_content(span_text, indent) {
         span_text
     } else {
         trimmed
@@ -253,6 +315,31 @@ pub fn content_len(span_text: &str, chomping: Chomping, at_end_of_source: bool) 
         }
     }
 } // End of function content_len()
+
+/// Returns `true` when the horizontal whitespace ending `span_text` at
+/// end-of-source is scalar content rather than the next token's indentation.
+///
+/// Two shapes qualify, and both are measured against the substrate rather than
+/// read off the grammar (see [`content_len`]):
+///
+/// - the final line has non-whitespace before the run, so the run is trailing
+///   white space on a content line;
+/// - the final line is whitespace only but longer than `indent` characters, so
+///   everything past the indentation column is content.
+fn terminal_whitespace_is_content(span_text: &str, indent: usize) -> bool {
+    if !span_text.ends_with(YAML_HORIZONTAL) {
+        return false;
+    }
+    let last_line = match span_text.rfind(YAML_LINE_BREAK) {
+        Some(offset) => &span_text[offset + 1..],
+        None => span_text,
+    };
+    let whitespace_only = last_line.chars().all(|c| YAML_HORIZONTAL.contains(&c));
+    if !whitespace_only {
+        return true;
+    }
+    last_line.chars().count() > indent
+} // End of function terminal_whitespace_is_content()
 
 /// Byte offset at which a block scalar's content begins.
 ///
@@ -304,18 +391,29 @@ pub struct BlockScalarLayout {
 /// ordinary block, a block that opens with empty lines and a truncated header
 /// all produce spans a caller can treat identically.
 ///
+/// `indent` is the block's content-indentation column — the substrate's own
+/// start-marker column, which is the very number
+/// [`crate::ScalarPresentation::indent`] carries and the decoder strips. It is
+/// threaded in because the end of a block that closes the file cannot be found
+/// without it: see [`content_len`].
+///
 /// Returns `None` when the header cannot be located or the span does not slice
 /// the source. The caller must **reject the index** in that case: the reported
 /// span is known to overshoot into trailing blank lines and the next node's
 /// indentation, so publishing it would hand an editor a replacement envelope
 /// that eats a following node.
-pub fn layout(source: &str, reported: ByteSpan, style: ScalarStyle) -> Option<BlockScalarLayout> {
+pub fn layout(
+    source: &str,
+    reported: ByteSpan,
+    style: ScalarStyle,
+    indent: usize,
+) -> Option<BlockScalarLayout> {
     debug_assert!(style.is_block(), "layout() is only for `|` and `>` scalars");
     let header = locate_header(source, reported.start)?;
     let start = content_start(source, header.span.end, reported.end);
     let span_text = source.get(start..reported.end)?;
     let at_end_of_source = reported.end == source.len();
-    let content_end = start + content_len(span_text, header.chomping, at_end_of_source);
+    let content_end = start + content_len(span_text, header.chomping, at_end_of_source, indent);
     Some(BlockScalarLayout {
         header,
         content: ByteSpan::new(start, content_end),
@@ -369,6 +467,21 @@ mod tests {
     }
 
     #[test]
+    fn a_body_line_opening_with_a_block_indicator_is_not_a_truncated_header() {
+        // A Markdown table inside `replace: |` starts its reported span on a
+        // `|`, exactly like the R5 truncated header does. Before the guard was
+        // narrowed to "and `match_header` agrees", every such document was
+        // rejected outright with `BlockHeaderNotFound`.
+        for body in ["|rest", "| a | b |", ">quoted", "> ", "|", ">"] {
+            let source = format!("a: |-\n  {body}\n");
+            let span_start = source.rfind(body).expect("body");
+            let header = locate_header(&source, span_start).expect("the real header is found");
+            assert!(!header.inside_span, "{body}");
+            assert_eq!(header.span.slice(&source), Some("|-"), "{body}");
+        }
+    } // End of function a_body_line_opening_with_a_block_indicator_is_not_a_truncated_header()
+
+    #[test]
     fn a_truncated_header_is_read_forwards_and_flagged() {
         // R5. `replace: |` reports a span that starts with the header itself.
         let source = "replace: |\n";
@@ -405,73 +518,155 @@ mod tests {
             content_len(
                 "      clip line one\n      clip line two\n\n\n    ",
                 Chomping::Clip,
-                false
+                false,
+                6
             ),
             "      clip line one\n      clip line two\n".len()
         );
         assert_eq!(
-            content_len("      stripped\n    ", Chomping::Strip, false),
+            content_len("      stripped\n    ", Chomping::Strip, false, 6),
             "      stripped".len()
         );
         assert_eq!(
-            content_len("      kept\n\n\n    ", Chomping::Keep, false),
+            content_len("      kept\n\n\n    ", Chomping::Keep, false, 6),
             "      kept\n\n\n".len()
         );
         assert_eq!(
-            content_len("      folded clip\n    ", Chomping::Clip, false),
+            content_len("      folded clip\n    ", Chomping::Clip, false, 6),
             "      folded clip\n".len()
         );
     } // End of function the_trim_follows_the_chomping_table()
 
     #[test]
     fn terminal_spaces_and_tabs_at_end_of_source_are_content_not_indentation() {
-        // F2. Mid-document a trailing run of spaces is the next token's
-        // indentation; at EOF there is no next token, so it is scalar data. The
-        // substrate agrees: `a: |\n  body  ` decodes to "body  \n".
+        // F2 of the Phase 0b-1 review. Mid-document a trailing run of spaces is
+        // the next token's indentation; at EOF there is no next token, so it is
+        // scalar data. The substrate agrees: `a: |\n  body  ` decodes to
+        // "body  \n".
         for chomping in [Chomping::Clip, Chomping::Strip, Chomping::Keep] {
             assert_eq!(
-                content_len("  body  ", chomping, true),
+                content_len("  body  ", chomping, true, 2),
                 "  body  ".len(),
                 "terminal spaces at EOF are content under {chomping:?}"
             );
             assert_eq!(
-                content_len("  body\t\t", chomping, true),
+                content_len("  body\t\t", chomping, true, 2),
                 "  body\t\t".len(),
                 "terminal tabs at EOF are content under {chomping:?}"
             );
             assert_eq!(
-                content_len("  body  ", chomping, false),
+                content_len("  body  ", chomping, false, 2),
                 "  body".len(),
                 "the same run mid-document is the next token's indentation"
             );
         }
-        // A trailing run that forms a whitespace-only line of its own is still
-        // trivia at EOF: the line break before it already ended the content.
+        // A trailing run that forms a whitespace-only line **at or inside** the
+        // indentation column is still trivia at EOF: YAML calls that an empty
+        // line, so the line break before it already ended the content.
         assert_eq!(
-            content_len("  body\n  ", Chomping::Clip, true),
+            content_len("  body\n  ", Chomping::Clip, true, 2),
             "  body\n".len()
         );
         assert_eq!(
-            content_len("  body\n  ", Chomping::Strip, true),
+            content_len("  body\n  ", Chomping::Strip, true, 2),
             "  body".len()
         );
     } // End of function terminal_spaces_and_tabs_at_end_of_source_are_content_not_indentation()
 
     #[test]
+    fn a_whitespace_only_final_line_wider_than_the_indentation_is_content() {
+        // Phase 0c-1 review, finding 2. A final line of nothing but white space
+        // still carries content when it reaches past the indentation column,
+        // and only the indentation column can tell. Every row is a measurement
+        // against `saphyr-parser`: `key: |2-` plus a final line of three spaces
+        // decodes to " \n ", not to " ".
+        assert_eq!(
+            content_len("  a\n   ", Chomping::Strip, true, 2),
+            "  a\n   ".len(),
+            "three columns under a two-column block: one of them is content"
+        );
+        assert_eq!(
+            content_len("  a\n    ", Chomping::Strip, true, 2),
+            "  a\n    ".len(),
+            "four columns: two of them are content"
+        );
+        assert_eq!(
+            content_len("  a\n  ", Chomping::Strip, true, 2),
+            "  a".len(),
+            "exactly the indentation is an empty line"
+        );
+        assert_eq!(
+            content_len("  a\n\t", Chomping::Strip, true, 2),
+            "  a".len(),
+            "a single tab is narrower than the indentation, so it is empty"
+        );
+        assert_eq!(
+            content_len("  a\n  \t", Chomping::Strip, true, 2),
+            "  a\n  \t".len(),
+            "two columns then a tab: the tab is content"
+        );
+        // The whole block can be one such line, with no earlier content at all.
+        assert_eq!(content_len("   ", Chomping::Strip, true, 2), 3);
+        assert_eq!(content_len("  ", Chomping::Strip, true, 2), 0);
+        // And keep chomping still counts the trailing breaks as content.
+        assert_eq!(
+            content_len("  a\n   \n   ", Chomping::Keep, true, 2),
+            "  a\n   \n   ".len()
+        );
+        // Mid-document the same bytes are the next token's indentation.
+        assert_eq!(
+            content_len("  a\n   ", Chomping::Strip, false, 2),
+            "  a".len()
+        );
+    } // End of function a_whitespace_only_final_line_wider_than_the_indentation_is_content()
+
+    #[test]
     fn a_crlf_clip_keeps_both_bytes_of_the_terminator() {
         assert_eq!(
-            content_len("  body\r\n\r\n  ", Chomping::Clip, false),
+            content_len("  body\r\n\r\n  ", Chomping::Clip, false, 2),
             "  body\r\n".len()
         );
         assert_eq!(
-            content_len("  body\r\n\r\n  ", Chomping::Strip, false),
+            content_len("  body\r\n\r\n  ", Chomping::Strip, false, 2),
             "  body".len()
         );
         assert_eq!(
-            content_len("  body\r\n\r\n  ", Chomping::Keep, false),
+            content_len("  body\r\n\r\n  ", Chomping::Keep, false, 2),
             "  body\r\n\r\n".len()
         );
+        // The final-line width test must see the line after a `\r\n`, not the
+        // `\n` alone.
+        assert_eq!(
+            content_len("  body\r\n   ", Chomping::Strip, true, 2),
+            "  body\r\n   ".len()
+        );
     } // End of function a_crlf_clip_keeps_both_bytes_of_the_terminator()
+
+    #[test]
+    fn both_header_indicator_orders_are_recorded() {
+        // Phase 0c-1 review, finding 5. `|2+` and `|+2` are the same header to
+        // YAML and to the decoded value; only this flag tells them apart, and
+        // without it a `|+2` source re-encodes to `|2+`.
+        for (text, order) in [
+            ("|2+", HeaderIndicatorOrder::IndentFirst),
+            ("|+2", HeaderIndicatorOrder::ChompingFirst),
+            ("|2-", HeaderIndicatorOrder::IndentFirst),
+            ("|-2", HeaderIndicatorOrder::ChompingFirst),
+            (">3+", HeaderIndicatorOrder::IndentFirst),
+            (">+3", HeaderIndicatorOrder::ChompingFirst),
+            // A header with fewer than two indicators has only one spelling.
+            ("|+", HeaderIndicatorOrder::IndentFirst),
+            ("|-", HeaderIndicatorOrder::IndentFirst),
+            ("|2", HeaderIndicatorOrder::IndentFirst),
+            ("|", HeaderIndicatorOrder::IndentFirst),
+        ] {
+            let source = format!("replace: {text}\n  body\n");
+            let content_start = source.find("body").unwrap();
+            let header = locate_header(&source, content_start).expect("header");
+            assert_eq!(header.indicator_order, order, "order of {text}");
+            assert_eq!(header.span.slice(&source), Some(text), "span of {text}");
+        }
+    } // End of function both_header_indicator_orders_are_recorded()
 
     #[test]
     fn every_block_shape_starts_its_content_after_the_header_line_break() {
@@ -485,6 +680,7 @@ mod tests {
             ordinary,
             ByteSpan::new(start, ordinary.len()),
             ScalarStyle::Literal,
+            2,
         )
         .expect("layout");
         assert_eq!(ordinary_layout.content.slice(ordinary), Some("  body\n"));
@@ -494,6 +690,7 @@ mod tests {
             leading,
             ByteSpan::new(leading.find("body").unwrap(), leading.len()),
             ScalarStyle::Literal,
+            2,
         )
         .expect("layout");
         assert_eq!(leading_layout.content.slice(leading), Some("\n\n  body\n"));
@@ -506,6 +703,7 @@ mod tests {
             truncated,
             ByteSpan::new(9, truncated.len()),
             ScalarStyle::Literal,
+            9,
         )
         .expect("layout");
         assert!(truncated_layout.header.inside_span);
@@ -520,7 +718,7 @@ mod tests {
         // line break inside the content span.
         let source = "replace: |\r  body  \r";
         let reported = ByteSpan::new(source.find("body").unwrap(), source.len());
-        let block = layout(source, reported, ScalarStyle::Literal).expect("layout");
+        let block = layout(source, reported, ScalarStyle::Literal, 2).expect("layout");
         assert_eq!(block.content.slice(source), Some("  body  \r"));
         // And CRLF still counts as one break rather than two.
         let crlf = "replace: |\r\n  body\r\n";
@@ -528,6 +726,7 @@ mod tests {
             crlf,
             ByteSpan::new(crlf.find("body").unwrap(), crlf.len()),
             ScalarStyle::Literal,
+            2,
         )
         .expect("layout");
         assert_eq!(crlf_layout.content.slice(crlf), Some("  body\r\n"));
@@ -538,7 +737,7 @@ mod tests {
         let source = "replace: |\n  body\n\n\nnext: 1\n";
         let start = source.find("body").unwrap();
         let reported = ByteSpan::new(start, source.find("next").unwrap());
-        let block = layout(source, reported, ScalarStyle::Literal).expect("layout");
+        let block = layout(source, reported, ScalarStyle::Literal, 2).expect("layout");
         assert_eq!(block.content.slice(source), Some("  body\n"));
         assert_eq!(block.reported, reported);
         assert_eq!(block.header.span.slice(source), Some("|"));

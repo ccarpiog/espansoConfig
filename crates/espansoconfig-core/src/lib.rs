@@ -26,9 +26,15 @@
 //!
 //! # Phase status
 //!
-//! Phase 0a implements [`discovery`] and the shared vocabulary types. The
-//! remaining modules are deliberate stubs carrying only the types the plan
-//! already specifies; their internals land in Phase 0b/0c.
+//! - **0a** — [`discovery`] and the shared vocabulary types.
+//! - **0b** — [`syntax`]: byte-accurate spans, the gap frontier, the trivia
+//!   scanner and comment ownership.
+//! - **0c-1** — [`emit`]: the scalar codec. Source bytes decode to a logical
+//!   value; a logical value encodes back to source bytes, in a style chosen by
+//!   plan section 6.3's rules.
+//!
+//! [`model`], [`patch`], [`validate`], [`persist`] and [`watch`] are still
+//! deliberate stubs carrying only the types the plan already specifies.
 
 #![deny(missing_docs)]
 
@@ -44,8 +50,8 @@ pub mod watch;
 use std::path::PathBuf;
 
 pub use syntax::{
-    ByteSpan, Chomping, Node, NodeId, NodeKind, ScalarPresentation, ScalarStyle, SyntaxError,
-    SyntaxIndex,
+    ByteSpan, Chomping, HeaderIndicatorOrder, Node, NodeId, NodeKind, ScalarPresentation,
+    ScalarStyle, SyntaxError, SyntaxIndex,
 };
 pub use watch::ContentRevision;
 

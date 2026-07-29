@@ -182,6 +182,24 @@ impl Chomping {
     }
 }
 
+/// The order a block header's two optional indicators were written in.
+///
+/// YAML's `c-b-block-header` production accepts **either** order — `|2+` and
+/// `|+2` are the same header — and nothing in the decoded value or in the pair
+/// (indentation, chomping) records which one the file actually holds. Without
+/// this field a `|+2` header re-encodes to `|2+` and the emitter reports
+/// success while the file changed, which is precisely the class of unrequested
+/// reformatting this crate exists to prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum HeaderIndicatorOrder {
+    /// `|2+`, `|2`, `|+`, `|` — the indentation indicator first, which is also
+    /// the spelling chosen for a header this crate writes from scratch.
+    #[default]
+    IndentFirst,
+    /// `|+2` — the chomping indicator first.
+    ChompingFirst,
+}
+
 /// Everything needed to rewrite a scalar in place without disturbing its
 /// presentation (plan section 6.2).
 ///
@@ -235,6 +253,11 @@ pub struct ScalarPresentation {
     /// No parser API reports this; the header text is its only source. `None`
     /// for a flow scalar and for a block scalar without an indicator.
     pub explicit_indent: Option<usize>,
+    /// Which of the two block-header indicators was written first.
+    ///
+    /// Meaningless — and always [`HeaderIndicatorOrder::IndentFirst`] — for a
+    /// flow scalar and for a header carrying fewer than two indicators.
+    pub indicator_order: HeaderIndicatorOrder,
 }
 
 #[cfg(test)]

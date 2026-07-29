@@ -26,7 +26,9 @@ mod common;
 use espansoconfig_core::syntax::{
     CollectionStyle, Node, NodeKind, ScalarNode, SyntaxError, SyntaxIndex,
 };
-use espansoconfig_core::{ByteSpan, Chomping, ScalarPresentation, ScalarStyle};
+use espansoconfig_core::{
+    ByteSpan, Chomping, HeaderIndicatorOrder, ScalarPresentation, ScalarStyle,
+};
 
 // ===========================================================================
 // Pinned corpus measurements
@@ -1350,6 +1352,7 @@ fn flow_scalar_node(style: ScalarStyle, value: &str) -> ScalarNode {
             indent: 0,
             chomping: Chomping::Clip,
             explicit_indent: None,
+            indicator_order: HeaderIndicatorOrder::IndentFirst,
         },
         reported_span: ByteSpan::default(),
         header: None,

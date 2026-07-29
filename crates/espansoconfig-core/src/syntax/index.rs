@@ -423,7 +423,7 @@ impl<'source> Builder<'source> {
             // the next node's indentation, and publishing it would hand an
             // editor a replacement envelope that eats a following node. Reject
             // the index instead of quietly returning a known-bad span.
-            let layout = block_layout(self.source, reported, style)?;
+            let layout = block_layout(self.source, reported, style, column)?;
             (
                 layout.content,
                 ScalarPresentation {
@@ -433,6 +433,7 @@ impl<'source> Builder<'source> {
                     indent: column,
                     chomping: layout.header.chomping,
                     explicit_indent: layout.header.explicit_indent,
+                    indicator_order: layout.header.indicator_order,
                 },
                 Some(layout.header),
             )
@@ -603,8 +604,9 @@ fn block_layout(
     source: &str,
     reported: ByteSpan,
     style: ScalarStyle,
+    indent: usize,
 ) -> Result<block::BlockScalarLayout, SyntaxError> {
-    block::layout(source, reported, style).ok_or_else(|| {
+    block::layout(source, reported, style, indent).ok_or_else(|| {
         InvariantViolation::BlockHeaderNotFound {
             start: reported.start,
             end: reported.end,
@@ -655,6 +657,7 @@ fn flow_presentation(
         indent: column,
         chomping: Chomping::Clip,
         explicit_indent: None,
+        indicator_order: crate::syntax::HeaderIndicatorOrder::IndentFirst,
     }
 } // End of function flow_presentation()
 
@@ -840,9 +843,12 @@ mod tests {
         // header, so no `|`/`>` precedes the span and the layout fails.
         let source = "next: 1\n  body\n";
         let reported = ByteSpan::new(source.find("body").unwrap(), source.len());
-        assert_eq!(block::layout(source, reported, ScalarStyle::Literal), None);
         assert_eq!(
-            block_layout(source, reported, ScalarStyle::Literal),
+            block::layout(source, reported, ScalarStyle::Literal, 2),
+            None
+        );
+        assert_eq!(
+            block_layout(source, reported, ScalarStyle::Literal, 2),
             Err(SyntaxError::Invariant(
                 InvariantViolation::BlockHeaderNotFound {
                     start: reported.start,
@@ -857,7 +863,8 @@ mod tests {
         assert!(block_layout(
             truncated,
             ByteSpan::new(9, truncated.len()),
-            ScalarStyle::Literal
+            ScalarStyle::Literal,
+            9
         )
         .is_ok());
     } // End of function a_block_scalar_whose_header_cannot_be_found_is_a_hard_error()
