@@ -32,9 +32,13 @@
 //! - **0c-1** — [`emit`]: the scalar codec. Source bytes decode to a logical
 //!   value; a logical value encodes back to source bytes, in a style chosen by
 //!   plan section 6.3's rules.
+//! - **0c-2a** — [`patch::path`]: the structural path resolver. A path such as
+//!   `matches[3].replace` is the node identity that survives the reparse every
+//!   edit must be verified against.
 //!
-//! [`model`], [`patch`], [`validate`], [`persist`] and [`watch`] are still
-//! deliberate stubs carrying only the types the plan already specifies.
+//! [`model`], [`validate`], [`persist`] and [`watch`] are still deliberate
+//! stubs carrying only the types the plan already specifies, and [`patch`]
+//! still mutates nothing.
 
 #![deny(missing_docs)]
 

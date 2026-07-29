@@ -1,8 +1,5 @@
 //! The edit engine — byte-span surgery.
 //!
-//! **Phase 0a scope:** none. This module is a placeholder; the parser
-//! evaluation in `docs/parser-evaluation.md` is what unblocks it.
-//!
 //! **Phase 0c responsibility:** apply a `DocumentEdit` as the smallest safe
 //! byte-span replacement (`IMPLEMENTATION_PLAN.md` section 6.2), under three
 //! non-negotiable rules:
@@ -17,3 +14,22 @@
 //!
 //! A full-match rewrite is an acceptable fallback but destroys comments inside
 //! that match, so it is surfaced to the user rather than performed silently.
+//!
+//! # Phase status
+//!
+//! **0c-2a — [`path`], the structural path resolver.** Rule 2 above is why this
+//! exists before any mutation does: verifying an edit means re-finding the
+//! edited node in a *freshly parsed* index, whose `NodeId`s bear no relation to
+//! the ones the edit was planned against. A [`DocumentPath`] is the identity
+//! that survives that reparse, and [`resolve`] / [`path_to`] are its two
+//! directions.
+//!
+//! Nothing in this module mutates a document yet. Applying an edit, consulting
+//! the hazard gate and the reparse-verify cycle are step 0c-2b.
+
+pub mod path;
+
+pub use path::{
+    path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,
+    PathParseError, PathSegment, Resolved,
+};

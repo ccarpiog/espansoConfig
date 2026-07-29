@@ -15,14 +15,18 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **0b-1** | Byte-accurate span layer: `CharToByte`, BOM/line endings, `SyntaxIndex`, span trimming | ✅ complete |
 | **0b-2** | Gap scanner: trivia classification, comment ownership, safety gate | ✅ complete — **Phase 0b done**, after the review fix round below |
 | **0c-1** | Scalar codec: decode/encode, `choose_scalar`, style preservation | ✅ complete — after the review fix round below |
-| **0c-2** | Patch engine: path resolution, span replacement, reparse-verify, hazard gate | ⬜️ **next** |
+| **0c-2a** | Structural path resolver: `DocumentPath`, `resolve`, `path_to` | ✅ complete — after the review fix round below |
+| **0c-2b** | Span replacement, reparse-verify, the hazard gate at the mutation entry point | ⬜️ **next** |
 | **0c-3** | Structural edits (insert/remove field, move match) · the round-trip property test | ⬜️ not started — **this is the Phase 0 gate** |
 | 1 | Read-only browser | ⬜️ blocked on the Phase 0 gate |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 Phase 0 as written in the plan was split into **0a / 0b / 0c** because it was too large for one
 coherent unit of work, and **0c** was split again into **0c-1 / 0c-2 / 0c-3** for the same reason:
-0c-1 is value-level and mutates nothing, 0c-2 mutates one scalar, 0c-3 mutates structure. The
+0c-1 is value-level and mutates nothing, 0c-2 mutates one scalar, 0c-3 mutates structure.
+**0c-2 was split once more into 0c-2a / 0c-2b**: addressing a node and mutating one are
+independent problems, and the addressing half is what the mutating half's verification step
+depends on, so it had to be correct and independently tested first. The
 plan's stated exit criterion for Phase 0 — *the round-trip property test passes on the full
 corpus* — is unchanged and lands at the end of **0c-3**. The architectural gate is not cleared
 until then; no UI work begins before it.
@@ -123,6 +127,41 @@ bytes came out different" — a self-fulfilling check would prove nothing. `choo
 is round-tripped through the substrate for 149 adversarial values plus a 1 500-value seeded sweep,
 across nine block sites (LF and CRLF, nested indents, deltas of 9, 10 and 20, at EOF and followed)
 plus a flow site and a mapping-key site.
+
+### Phase 0c-2a — the structural path resolver
+
+The addressing half of the patch engine, in [`src/patch/path.rs`](crates/espansoconfig-core/src/patch/path.rs).
+It mutates nothing; 0c-2b is the first code that does.
+
+`DocumentPath` is a document index plus an ordered list of `PathSegment::Key`/`Index`, with an
+exact textual serialization (`matches[3].replace`). `resolve` walks it to the value node's
+`NodeId`, `resolve_key` to the key node that introduces it, `resolve_full` reports value, key and
+parent together, and `path_to` is the inverse. Every refusal is typed: `PathError` has nine
+variants and `AddressError` six, each carrying the segment position and the node the walk reached.
+
+**Why this exists at all, and why it is not a match identity.** Plan §6.2 requires the engine to
+reparse the whole candidate document after every edit, and a reparse mints a *new* arena whose
+`NodeId`s bear no relation to the ones the edit was planned against. A path is what survives that
+reparse, so it is the mechanism the verify step re-finds the edited node with. It is emphatically
+**not** the match identity §6.2 forbids being positional — `matches[3]` shifts on reorder, and
+`NodeId` remains the session-local identity.
+
+**What is proven.** The headline is a corpus-wide **inverse-pair oracle** over all 22 synthetic
+fixtures and the 13 real files: for every node, either `path_to` refuses for a reason the test
+**re-derives from the tree itself**, or `resolve(path_to(n)) == n` and the path's textual form
+re-parses to the same path. The re-derivation matters — a resolver that refused everything would
+satisfy "no round trip ever failed" while being useless. Synthetic figures are pinned per
+category so two opposing drifts cannot cancel: **1 095 nodes = 634 addressable + 24 documents +
+433 mapping keys + 4 ambiguous + 0 non-scalar keys.** The 24 is itself a cross-check: 21
+single-document fixtures plus `multi-document.yml`'s three. No count from the real corpus is
+hard-coded.
+
+The two universal contracts are swept rather than sampled, after the review found them advertised
+and untested: **4 000 seeded paths** round-trip through their textual form byte for byte (keys
+drawn from an alphabet holding the grammar's own punctuation, `'`, `#`, NUL, BEL, DEL, ESC, `\n`,
+`\r`, `\t`, U+0085, U+00A0, the BOM, `é` and `😀`), and **20 000 seeded strings** go through
+`DocumentPath::parse` with zero panics. Both use the same hand-written xorshift64* generator
+`tests/scalar_codec.rs` already uses, so the crate gains no dependency.
 
 ---
 
@@ -426,6 +465,39 @@ meanings but not their **source order**, so a `|+2` header re-encoded to `|2+` a
 order it was given. Recording beats refusing here: the file stays byte-identical, which is the
 product's whole premise.
 
+### D2j — the path is document-scoped, refuses ambiguity, and knows nothing about hazards
+
+Phase 0c-2a. Five decisions, each pinned by a test:
+
+- **Document-scoped, not stream-scoped.** A path carries a zero-based document index. Espanso
+  loads only the first document, but a file may hold several, and a path that could not say which
+  one it meant would silently address the wrong half of the file. The textual form spells a
+  non-zero document `#N`; document 0 omits the prefix, except for the root path, which renders
+  `#0` so that it is not the empty string.
+- **A key segment matches the *decoded* value of the mapping key.** `replace:`, `'replace':` and
+  `"replace":` are one segment, so a style change to a key cannot silently break every path
+  through it. A key that is not a scalar at all — an alias, or a collection used as a key — never
+  matches, and `path_to` refuses it with `NonScalarKey` rather than approximating it from source
+  text. This is R13 seen from the resolver's side.
+- **A duplicate key refuses in both directions**, and this is the resolver's *only* concession to
+  semantics. A duplicate does not make a node unsafe to edit, it makes the path **meaningless**:
+  `matches[0].replace` names two nodes in `duplicate-keys.yml`. Ambiguity propagates to
+  descendants — the reported key is the duplicated ancestor's, not the descendant's — because
+  otherwise `resolve(path_to(n)) == n` would hold only where duplicates happen not to occur.
+- **The hazard gate is deliberately not consulted here.** The resolver answers "which node does
+  this path name"; `is_safely_editable` answers "may it be edited". Keeping them apart is what
+  lets the resolver stay a total function of the text while the gate stays free to be pessimistic.
+  The reviewer's condition on this, adopted: **the mutation entry point in 0c-2b must own the gate
+  check internally.** Making safety a caller convention would be unacceptable.
+- **The textual form is exact, not legible.** A YAML key may hold a NUL or a line break, and
+  `Display` emits it verbatim so `FromStr` returns it unchanged. Escaping inside the format was
+  rejected: it would buy log-legibility by inserting an unescaping step into the middle of the
+  round trip the type exists to guarantee. Callers that need a log-safe rendering use
+  `str::escape_debug`.
+
+Nodes inside **flow** collections are addressed exactly like block ones (`vars[0].name`). See R17
+for what that costs 0c-2b.
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -459,6 +531,8 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R14 | **A Markdown table inside `replace: \|` rejected the whole document.** `locate_header` treated any block whose first body line opens with `\|` or `>` as a truncated R5 header | **Fixed in 0c-1.** The backwards lexer runs first and the forward R5 path is the fallback; a genuinely truncated header has nothing but its key on the preceding line, so backwards finds nothing and forwards still fires. Reviewer-approved. Pinned by `a_body_line_opening_with_a_block_indicator_is_not_a_truncated_header`. This was a latent **Phase 0b** bug that the codec work surfaced — a real espanso config with a Markdown table would have been entirely unopenable. |
 | R15 | **`NonCanonicalEscaping` is deliberately over-broad**: it refuses every double-quoted source containing any backslash, including already-canonical `\\`, `\"`, `\n`, `\t` | Accepted for now, and safe — it only costs the ability to re-encode such a scalar byte-identically, never correctness. Carries a `TODO(0c-2)` in its doc comment. Narrow it only if 0c-2 finds real files where editing an escaped double-quoted value matters. |
 | R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | Partly mitigated in 0c-1 (D2h): the three known divergent character classes are escaped or refused, and the plain predicate rejects every YAML 1.1 boolean/null/sexagesimal spelling. **Not** fully closed — there is still no second parser in the test suite. Revisit in 0c-3: the cheapest real mitigation is to reparse the round-trip corpus with a 1.1 implementation as a second oracle. |
+| R17 | **A flow collection is not refused by the hazard gate.** `HazardKind` has only `CommentInFlowCollection`, so `matches: [{trigger: ":a", replace: old}]` both resolves *and* passes `is_safely_editable`. A block scalar is illegal inside `{…}`/`[…]`, so an edit that turns a short value into a multi-line one would emit invalid YAML | **Open, and it is 0c-2b's to close.** Found by the Phase 0c-2a review, whose evidence was that `path.rs`'s own module doc claimed the gate refused every flow collection — it does not, and D2d never promised it would. The doc is corrected and the true behaviour is now **pinned in both directions** by `a_flow_collection_without_a_comment_passes_the_hazard_gate`, so the claim cannot rot again. 0c-2b must choose one of two answers and state it: refuse edits inside a flow collection outright, or thread flow context into rendering and guarantee flow-legal bytes. It may **not** assume the gate has already said no. |
+| R18 | **A node in key position cannot be verified by the path that found it.** Renaming the `replace` of `replace: old` makes the path `replace` resolve to `NoSuchKey` in the reparsed document, so the verify step fails on a *correct* edit | Accepted and bounded. A scalar edit targets `Resolved::value` only; `resolve_key` exists for the **spans** a structural edit needs (where an entry begins, so removing it takes its key too), not as an edit target. Documented on `resolve_key` itself. A key-rename operation needs its own protocol — verify against the **intended new** path, not the old one — and is 0c-3's problem if it is wanted at all. Editing an ordinary value that merely equals some other entry's key string is harmless. |
 | R10 | A block scalar whose header cannot be located has **no correct span**: the reported one runs into trailing blank lines and the next node's indentation | The index is **rejected** with `InvariantViolation::BlockHeaderNotFound` rather than publishing the known-bad span. There is deliberately no fallback. From the Phase 0b-1 review, ranked failure mode 3. |
 | R11 | **Terminal spaces or tabs at end-of-source** are scalar content, not the next token's indentation — there is no next token | `block::content_len` takes `at_end_of_source` and keeps a trailing run that sits on a content line. Pinned by `terminal_spaces_at_end_of_source_stay_inside_the_block_scalar` and the `block-scalar-terminal-spaces.yml` fixture. |
 
@@ -515,6 +589,48 @@ family, so two scalars can no longer swap eligibility inside one family undetect
 One divergence from the reviewer, recorded in D2f: F1 is fixed by re-indenting rather than by a
 typed refusal. Decisions A, B, D and E were approved as implemented.
 
+## Phase 0c-2a review disposition
+
+The review is
+[`docs/reviews/phase-0c-2a-path-resolver.md`](docs/reviews/phase-0c-2a-path-resolver.md).
+Verdict: **accept with fixes**. Unlike the three previous rounds it found **no counterexample to
+either round-trip property and no reachable panic** — it verified `resolve(path_to(n)) == n` by
+direct argument and `parse(display(p)) == p` for every Rust `String`, and confirmed
+`Resolved::parent` correct. What it did find was one **false claim in the documentation** and a
+set of contract-critical branches that were advertised and untested. All six are fixed.
+
+| # | Finding | Disposition |
+|---|---|---|
+| P1 | The module doc claimed the gate refuses every flow collection a path resolves into. It does not — only `CommentInFlowCollection` exists | **Fixed, and promoted to a risk.** Doc corrected to say exactly which constructs the gate does refuse; the true flow behaviour pinned in both directions by a new test. Recorded as **R17**, which 0c-2b must close. |
+| P2 | Editing a node in key position invalidates the path that found it, so the advertised verify cycle cannot check a key rename | **Fixed as documentation plus a constraint.** `resolve_key`'s doc now states that a scalar edit targets `Resolved::value` only and that a rename needs its own protocol. Recorded as **R18**. |
+| P3 | `parse(display(p)) == p` and `parse`'s totality were universal claims backed by a hand-picked table | **Fixed.** Two seeded sweeps: 4 000 generated paths round-trip byte for byte, 20 000 generated strings parse with zero panics, over an alphabet holding controls, both YAML 1.1 line separators, the BOM and astral characters. |
+| P4 | `AddressError::NonScalarKey` was unreachable from the corpus, so the pinned `0` documented a coverage hole rather than proving the branch; duplicate-key *descendants* and duplicates across scalar presentations were unpinned | **Fixed.** Three new tests: a collection used as an explicit key, a duplicated key with children (ambiguity must name the *ancestor*), and `a` / `'a'` / `"a"` as three spellings of one duplicated key. |
+| P5 | `an_unknown_node_identifier_is_refused_not_panicked_on` never passed an unknown `NodeId` to `path_to` | **Fixed.** It now takes a high `NodeId` from a larger index and calls `path_to` on a smaller one, asserting `AddressError::UnknownNode`. |
+| P6 | The textual form emits control characters verbatim, which is exact but poor for logs | **Fixed by describing it accurately**, which is the reviewer's first option. Escaping was rejected: it would put an unescaping step inside the round trip the type exists to guarantee. The doc now says the form is an exact serialization, not a log-safe rendering, and points at `str::escape_debug`. |
+
+The reviewer's assessment of the pinned counts is recorded because it is fair and should temper
+how much they are trusted: `addressable`, `mapping_keys` and `ambiguous` catch coarse
+reachability regressions, the `1 095` total is mostly a corpus-shape lock, and **no count can
+detect compensating category changes**. That is why the per-category split exists and why the
+sweeps and the re-derivation oracle carry the real weight.
+
+## Verification — Phase 0c-2a
+
+All run at the repo root, all exit 0:
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | exit 0 — **256 tests pass** (126 unit + 10 corpus integrity + 31 parser evaluation + 15 patch path + 4 real corpus + 14 scalar codec + 24 span layer + 32 trivia scanner) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `cargo doc --no-deps -p espansoconfig-core` | exit 0, no warnings |
+| Same suite with `tests/corpus/real/` renamed away | exit 0 — the real-corpus tests skip cleanly |
+| `git status --short --untracked-files=all` | no real-config path present ✅ |
+
+Test output prints counts, file names and synthetic path shapes only — no line of real
+configuration content, and no count taken from the real corpus is hard-coded.
+
 ## Verification — Phase 0c-1
 
 All run at the repo root, all exit 0:
@@ -569,36 +685,40 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Start Phase 0c-2 — the patch engine: path resolution, span replacement, reparse-verify and the
-hazard gate.**
+**Start Phase 0c-2b — the first code that mutates a document: span replacement, reparse-verify,
+and the hazard gate at the mutation entry point.**
 
-Phase 0c-1 is complete: a scalar's bytes decode to a value and a value encodes back to bytes,
-byte-identically or with a typed refusal. Nothing yet mutates a document — 0c-2 is the first code
-that does.
+Phase 0c-2a is complete: a path names a node, `resolve`/`path_to` are exact inverses, and the
+addressing layer needed by the verify step is independently tested. Phase 0c-1 gave the codec that
+turns a value into bytes. Nothing yet mutates a document — 0c-2b is the first code that does.
 
-The exact scope of 0c-2:
+The exact scope of 0c-2b:
 
-1. **A structural path resolver.** Given a document and a path (e.g. `matches[3].replace`), return
-   the `NodeId` of the value node. It must survive duplicate keys, nested sequence mappings,
-   explicit keys and empty values — R9's list. Resolve **by node identity, never by array index**
-   (plan §6.2).
-2. **A single-scalar edit applied as a byte-span replacement.** Replace the `content_span` (and
-   the `header_span` when the style changes) with `preserve_scalar`'s rendering. **Apply edits
-   from the highest byte offset downwards** so earlier offsets stay valid.
-3. **Consult `TriviaIndex::is_safely_editable` first and refuse rather than guess.** The 0b-1
-   review's ranked failure mode 6 stands: `Node::span` is not yet a safe replacement envelope for
-   every node.
+1. **A single-scalar edit applied as a byte-span replacement.** Resolve the target with
+   `patch::resolve`, then replace the `content_span` (and the `header_span` when the style
+   changes) with `preserve_scalar`'s rendering. **Apply edits from the highest byte offset
+   downwards** so earlier offsets stay valid.
+2. **The mutation entry point consults `TriviaIndex::is_safely_editable` itself.** Not its
+   callers — the 0c-2a reviewer was explicit that making safety a caller convention would be
+   unacceptable, and the resolver deliberately knows nothing about hazards (D2j). The 0b-1
+   review's ranked failure mode 6 also stands: `Node::span` is not yet a safe replacement envelope
+   for every node.
+3. **Close R17: decide what happens inside a flow collection.** The gate does *not* refuse one, so
+   either refuse flow-interior edits outright or thread flow context into rendering and guarantee
+   flow-legal bytes. A block scalar is illegal inside `{…}`/`[…]`, so doing neither emits invalid
+   YAML. Whichever is chosen, say so in D2-something and pin it.
 4. **Reparse the whole candidate document and verify before it goes anywhere near disk.** Local
-   patching is never trusted on its own (plan §6.2). Verify: it still parses; the target path
-   decodes to exactly the intended value; and **every byte outside the replaced span is
-   identical**.
+   patching is never trusted on its own (plan §6.2). Verify: it still parses; **re-resolving the
+   same path** against the freshly parsed index decodes to exactly the intended value; and **every
+   byte outside the replaced span is identical**. Note R18 — this cycle is valid for values only,
+   so the edit target is `Resolved::value`, never `Resolved::key`.
 5. A property test for scalar edits over both corpora — the 0c-3 gate test in miniature.
 
 Then **0c-3**: structural edits (insert/remove a match field, move a whole match) plus the full
 round-trip property test of R9. **That is the Phase 0 architectural gate** (R4) and no UI work
 begins before it passes.
 
-What 0c-2 inherits and must not undo:
+What 0c-2b inherits and must not undo:
 
 - **Move and delete envelopes** must include the trivia a node's whole **subtree** owns —
   `TriviaIndex::items_owned_by_subtree` and `comments_owned_by_subtree` are the source of truth
@@ -614,6 +734,9 @@ What 0c-2 inherits and must not undo:
   normalisation the user is told about, or is refused.
 - **Do not let the saphyr-only oracle (R16) stand into 0c-3.** Agreement with the parser we build
   on does not prove the file still means the same thing to espanso.
+- **The resolver knows nothing about hazards, and that is deliberate (D2j).** Do not "fix" it by
+  making `resolve` consult the gate; put the check in the mutation entry point instead, where it
+  cannot be bypassed.
 
 ---
 
@@ -621,6 +744,8 @@ What 0c-2 inherits and must not undo:
 
 | Path | Why it matters next |
 |---|---|
+| [`crates/espansoconfig-core/src/patch/path.rs`](crates/espansoconfig-core/src/patch/path.rs) | **0c-2a**: `DocumentPath`, `resolve`, `resolve_key`, `resolve_full`, `path_to`. What 0c-2b calls to find its target and to re-find it after the reparse |
+| [`crates/espansoconfig-core/tests/patch_path.rs`](crates/espansoconfig-core/tests/patch_path.rs) | Phase 0c-2a acceptance: the inverse-pair oracle, the two seeded sweeps, the pinned per-category counts, and the flow-collection gate pin (R17) |
 | [`docs/parser-evaluation.md`](docs/parser-evaluation.md) | The Phase 0b build order, in the division-of-labour table |
 | [`crates/espansoconfig-core/src/syntax/mod.rs`](crates/espansoconfig-core/src/syntax/mod.rs) | Where 0b is implemented |
 | [`crates/espansoconfig-core/src/emit/choose.rs`](crates/espansoconfig-core/src/emit/choose.rs) | `choose_scalar`, `preserve_scalar`, `reencode_in_place`, `NotReencodable` — what 0c-2 calls to render a new value |
@@ -635,6 +760,7 @@ What 0c-2 inherits and must not undo:
 | [`docs/reviews/phase-0b-1-span-layer.md`](docs/reviews/phase-0b-1-span-layer.md) | The Phase 0b-1 review; D2c and R10–R11 come from it |
 | [`docs/reviews/phase-0b-2-trivia-and-ownership.md`](docs/reviews/phase-0b-2-trivia-and-ownership.md) | The Phase 0b-2 review; G1–G8 and R12–R13 come from it |
 | [`docs/reviews/phase-0c-1-scalar-codec.md`](docs/reviews/phase-0c-1-scalar-codec.md) | The Phase 0c-1 review; F1–F7, D2f–D2i and R14–R16 come from it |
+| [`docs/reviews/phase-0c-2a-path-resolver.md`](docs/reviews/phase-0c-2a-path-resolver.md) | The Phase 0c-2a review; P1–P6, D2j and R17–R18 come from it |
 | [`crates/espansoconfig-core/tests/corpus/synthetic/`](crates/espansoconfig-core/tests/corpus/synthetic/) | The committed corpus |
 | [`scripts/sync-real-corpus.sh`](scripts/sync-real-corpus.sh) | Run once locally to enable the real-corpus tests |
 | [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §6.2, §6.3, §11 | Fidelity model, scalar style rules, testing strategy |
@@ -652,6 +778,7 @@ _Updated at each phase boundary._
 | 0b-1 | `813f809` | ✅ pushed to `origin/main` | clean |
 | 0b-2 | `9825d9e` | ✅ pushed to `origin/main` | clean |
 | 0c-1 | `f8693cd` | ✅ pushed to `origin/main` | clean |
+| 0c-2a | _this commit_ | see below | clean |
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
