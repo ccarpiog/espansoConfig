@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# Credentials and signing material
+# ---------------------------------------------------------------------------
+# Contains the App Store Connect Key ID and Issuer ID inline. The actual secret
+# (the .p8 private key) lives outside this repo, so this is not a credential
+# leak — but these identifiers should not be published either.
+# See IMPLEMENTATION_PLAN.md section 10.2 "Repo hygiene".
+SIGN_AND_NOTARIZE.md
+
+# Never commit signing keys or certificates, wherever they land.
+*.p8
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+
+# Tauri updater signing key — the app's chain of trust for updates.
+# The public key belongs in tauri.conf.json; the private key never leaves CI.
+*.key
+!**/public.key
+
+# Notarization run output (may contain submission IDs and file paths).
+notarization.json
+notarization-log.json
+ExportOptions.plist
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/build/
+/dist/
+/target/
+src-tauri/target/
+src-tauri/gen/
+*.xcarchive
+*.app
+*.dmg
+*.pkg
+
+# ---------------------------------------------------------------------------
+# Node / frontend
+# ---------------------------------------------------------------------------
+node_modules/
+.vite/
+.svelte-kit/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+**/*.rs.bk
+# Cargo.lock IS committed — this ships as a binary, not a library.
+
+# ---------------------------------------------------------------------------
+# Local environment
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ---------------------------------------------------------------------------
+# Editors
+# ---------------------------------------------------------------------------
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Claude Code: shared project settings are committed, machine-local ones are not.
+.claude/settings.local.json
+
+# ---------------------------------------------------------------------------
+# App-generated data (should never appear in the repo, but be explicit)
+# ---------------------------------------------------------------------------
+.espansoconfig-backups/
+*.espansoconfig-*.tmp
