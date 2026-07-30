@@ -998,6 +998,11 @@ _Updated at each phase boundary._
 | 0c-2a | `f56d5dd` | ✅ pushed to `origin/main` | clean |
 | 0c-2b | `4f92c03` | ✅ pushed to `origin/main` | clean |
 
+Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
+and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
+added, so no historical paragraph states a count the suite no longer pins. A fresh session should
+start from `2eb12cb` or later.
+
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
 `.claude/`. Benign and left in place.
