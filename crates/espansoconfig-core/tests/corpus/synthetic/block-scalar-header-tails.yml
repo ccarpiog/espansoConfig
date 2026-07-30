@@ -1,0 +1,20 @@
+# Block-scalar header tails: the bytes between the indicator and the line
+# break. A style change must keep them, so this fixture is the only one that
+# pairs a block scalar with a comment on its header line and with trailing
+# spaces after its indicator. Do NOT let an editor trim the whitespace on the
+# `|-` header line below: those three spaces are the test data.
+# See README.md in this directory.
+matches:
+  - trigger: :header-comment
+    replace: | # why this block exists
+      first line
+      second line
+
+  - trigger: :header-spaces
+    replace: |-   
+      no trailing break
+
+  - trigger: :folded-header-tail
+    replace: >2 # a folded header carrying both indicators and a comment
+      folded one
+      folded two

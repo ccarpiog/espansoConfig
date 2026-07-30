@@ -82,8 +82,12 @@ fn our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar() {
     }
     println!("synthetic corpus: {total} scalars decoded in agreement with the substrate");
     assert!(problems.is_empty(), "decoder disagreements: {problems:#?}");
+    // 838, not the 825 pinned before Phase 0c-2b's fix round: the new
+    // `block-scalar-header-tails.yml` adds 13 scalars — the `matches` key plus
+    // each of its three items' `trigger` and `replace` keys and values — and our
+    // decoder agrees with the substrate on every one of them.
     assert_eq!(
-        total, 825,
+        total, 838,
         "the synthetic corpus scalar count is pinned; update it deliberately"
     );
 } // End of function our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar()
@@ -213,11 +217,15 @@ fn every_synthetic_scalar_reencodes_to_its_own_bytes() {
         "re-encoding changed bytes: {:#?}",
         tally.mismatches
     );
-    assert_eq!(tally.identical, 808, "pinned; update deliberately");
+    // 820, not the 808 pinned before Phase 0c-2b's fix round: the new
+    // `block-scalar-header-tails.yml` holds 13 scalars, 12 of which re-encode
+    // byte-identically. The thirteenth is its `>2` folded scalar, which joins the
+    // `FoldedStyle` family below because `>` is decode-only (D2e).
+    assert_eq!(tally.identical, 820, "pinned; update deliberately");
     assert_eq!(
         tally.refused,
         BTreeMap::from([
-            ("FoldedStyle".to_owned(), 10),
+            ("FoldedStyle".to_owned(), 11),
             ("NonCanonicalEscaping".to_owned(), 4),
             ("FoldedFlowScalar".to_owned(), 2),
             ("SynthesisedFinalBreak".to_owned(), 1),
@@ -256,7 +264,14 @@ fn refusals_of(source: &str) -> Vec<String> {
 /// list names the byte range of every refused scalar, so any such swap changes
 /// it. There is deliberately **no real-corpus counterpart**: that corpus is
 /// private (`PROGRESS.md`, D1) and no figure derived from it may be committed.
-const SYNTHETIC_REFUSALS: [(&str, &str); 17] = [
+const SYNTHETIC_REFUSALS: [(&str, &str); 18] = [
+    (
+        // Phase 0c-2b's fix round added this fixture. Its `>2` header is the only
+        // refusal it contributes: `>` is decode-only (D2e), so the other 12
+        // scalars re-encode byte-identically.
+        "synthetic/block-scalar-header-tails.yml",
+        "Folded 694..728 FoldedStyle",
+    ),
     (
         "synthetic/block-scalar-leading-blank-lines.yml",
         "Folded 1265..1304 FoldedStyle",

@@ -46,32 +46,50 @@ use espansoconfig_core::{
 /// Valid fixtures in `corpus/synthetic/`.
 ///
 /// 19 from Phase 0a, plus the three block-scalar shapes neither corpus
-/// contained until the Phase 0b-1 review was closed out.
-const SYNTHETIC_FIXTURES: usize = 22;
+/// contained until the Phase 0b-1 review was closed out, plus
+/// `block-scalar-header-tails.yml` from the Phase 0c-2b review's fix round.
+///
+/// That last fixture moves every figure below, and each delta is exactly its own
+/// shape: 19 nodes — 1 document, 1 root mapping, the `matches` key, the sequence,
+/// 3 item mappings and 12 scalars — carrying 3 block scalars and 6 whole-line
+/// comments.
+const SYNTHETIC_FIXTURES: usize = 23;
 
 /// Scalar nodes across the valid synthetic corpus.
-const SYNTHETIC_SCALARS: usize = 825;
+const SYNTHETIC_SCALARS: usize = 838;
 
 /// Collection nodes across the valid synthetic corpus.
-const SYNTHETIC_COLLECTIONS: usize = 241;
+const SYNTHETIC_COLLECTIONS: usize = 246;
 
 /// Alias nodes across the valid synthetic corpus.
 const SYNTHETIC_ALIASES: usize = 5;
 
 /// Frontier members across the valid synthetic corpus.
-const SYNTHETIC_FRONTIER_MEMBERS: usize = 830;
+const SYNTHETIC_FRONTIER_MEMBERS: usize = 843;
 
 /// Block scalars across the valid synthetic corpus.
-const SYNTHETIC_BLOCK_SCALARS: usize = 42;
+const SYNTHETIC_BLOCK_SCALARS: usize = 45;
 
 /// Block scalars whose reported end overshot their true content end (R3).
-const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 40;
+///
+/// 42 of the 45, not 45: `block-scalar-header-tails.yml` contributes 2 of its 3,
+/// because its `>2` block ends the file and so has no following token to
+/// overshoot into.
+const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 42;
 
 /// Comment lines recoverable from the gaps of the valid synthetic corpus.
-const SYNTHETIC_GAP_COMMENTS: usize = 195;
+const SYNTHETIC_GAP_COMMENTS: usize = 201;
 
 /// Blank lines recoverable from the gaps of the valid synthetic corpus.
-const SYNTHETIC_GAP_BLANK_LINES: usize = 688;
+///
+/// This is the deliberately loose **per-gap line scan** of D2d, kept as the
+/// Phase 0b-1 tripwire on the block-scalar trim: it counts every gap line that
+/// trims to nothing, the break that merely *terminates* a content line included.
+/// `tests/trivia_scanner.rs` pins the token-accurate figure, and the two are
+/// expected to disagree. So `block-scalar-header-tails.yml` moves this by 9 while
+/// adding only the **two** real blank lines that separate its three items — and
+/// the trivia scanner's own count is what proves that, by moving by 2.
+const SYNTHETIC_GAP_BLANK_LINES: usize = 697;
 
 // ===========================================================================
 // 1. Slice fidelity
@@ -906,6 +924,59 @@ fn a_multi_line_plain_scalar_decodes_from_its_span() {
         assert_reconstructs("multiline-plain", source, &index);
     } // End of the loop over the multi-line plain sources
 } // End of function a_multi_line_plain_scalar_decodes_from_its_span()
+
+#[test]
+fn no_quoted_scalar_in_either_corpus_falls_back_to_its_reported_span() {
+    // The Phase 0c-2b review's finding 5. `SyntaxIndex` trims a quoted scalar's
+    // reported end back to its closing delimiter (R20), and when it cannot lex
+    // that delimiter it keeps the reported span rather than rejecting the
+    // document: rejecting would make a real file unopenable for a case no
+    // accepted document reaches, which is the R14 mistake. The span it keeps is
+    // the exact one shown capable of swallowing a trailing comment, so the
+    // fallback must be **observable**, and this is where it is observed — on real
+    // documents, not on a hand-written probe.
+    //
+    // Pinned at zero over both corpora. If the substrate ever changes so that an
+    // accepted document reaches the fallback, this fails instead of silently
+    // publishing an overshooting span again.
+    let mut quoted = 0usize;
+    let mut fallbacks = 0usize;
+    for file in common::synthetic_valid() {
+        let index = SyntaxIndex::parse(&file.source).expect("parses");
+        quoted += index
+            .nodes()
+            .iter()
+            .filter(|node| {
+                node.scalar.as_ref().is_some_and(|scalar| {
+                    matches!(
+                        scalar.style(),
+                        ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+                    )
+                })
+            })
+            .count();
+        fallbacks += index.unlexable_quoted_scalars();
+    } // End of the loop over the valid synthetic corpus
+    println!("\nsynthetic: {quoted} quoted scalars, {fallbacks} reported-span fallbacks");
+    assert!(quoted > 0, "the corpus must contain quoted scalars");
+    assert_eq!(fallbacks, 0, "quoted-span fallbacks in the corpus");
+
+    let files = common::real_corpus();
+    if common::skip_without_real_corpus(
+        "no_quoted_scalar_in_either_corpus_falls_back_to_its_reported_span",
+        &files,
+    ) {
+        return;
+    }
+    let mut real = 0usize;
+    for file in &files {
+        real += SyntaxIndex::parse(&file.source)
+            .expect("parses")
+            .unlexable_quoted_scalars();
+    } // End of the loop over the real corpus
+    println!("real: {real} reported-span fallbacks");
+    assert_eq!(real, 0, "quoted-span fallbacks in the real corpus");
+} // End of function no_quoted_scalar_in_either_corpus_falls_back_to_its_reported_span()
 
 // ===========================================================================
 // 4. No character offset may be mistaken for a byte offset

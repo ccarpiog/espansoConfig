@@ -47,6 +47,9 @@ pub struct SyntaxIndex {
     documents: Vec<NodeId>,
     /// The gap frontier: ordered, non-overlapping, zero-width leaves excluded.
     frontier: Vec<FrontierEntry>,
+    /// Quoted scalars whose closing delimiter could not be lexed, so the
+    /// substrate's overshooting span was published unchanged.
+    unlexable_quoted_scalars: usize,
 }
 
 impl SyntaxIndex {
@@ -132,13 +135,36 @@ impl SyntaxIndex {
     /// Every block scalar whose reported end overshot its true content end.
     ///
     /// Kept as an observable so tests and diagnostics can measure risk R3
-    /// without re-deriving it.
+    /// without re-deriving it. Restricted to the two **block** styles on
+    /// purpose: a quoted scalar's end overshoots as well (see `quoted_span`),
+    /// and folding both into one figure is how the block overshoot went
+    /// unnoticed in the first place (`PROGRESS.md`, D2).
     pub fn trimmed_block_scalars(&self) -> impl Iterator<Item = &Node> {
         self.nodes.iter().filter(|node| {
-            node.scalar
-                .as_ref()
-                .is_some_and(|scalar| scalar.reported_span.end > node.span.end)
+            node.scalar.as_ref().is_some_and(|scalar| {
+                scalar.style().is_block() && scalar.reported_span.end > node.span.end
+            })
         })
+    }
+
+    /// How many quoted scalars fell back to the substrate's overshooting span.
+    ///
+    /// `quoted_span` trims a quoted scalar's reported end back to its closing
+    /// delimiter, and when it cannot find that delimiter it keeps the reported
+    /// span rather than rejecting the document — a quoted scalar with no closing
+    /// quote inside its own reported span cannot come from a document the
+    /// substrate accepted, and making a real file unopenable for an unreachable
+    /// case is the R14 mistake.
+    ///
+    /// **This counter is what stops that fallback being silent** (the Phase
+    /// 0c-2b review's finding 5). The reported span is the very one shown capable
+    /// of swallowing a trailing comment, so if a substrate change ever makes the
+    /// fallback reachable the number stops being zero and
+    /// `no_quoted_scalar_in_either_corpus_falls_back_to_its_reported_span`
+    /// (`tests/syntax_index.rs`) says so on real documents rather than on a
+    /// hand-written probe.
+    pub fn unlexable_quoted_scalars(&self) -> usize {
+        self.unlexable_quoted_scalars
     }
 } // End of impl SyntaxIndex
 
@@ -158,6 +184,8 @@ struct Builder<'source> {
     stack: Vec<Frame>,
     /// Index of the document currently being read.
     document_index: usize,
+    /// Quoted scalars whose closing delimiter could not be lexed.
+    unlexable_quoted_scalars: usize,
 }
 
 /// One open document or collection.
@@ -197,6 +225,7 @@ impl<'source> Builder<'source> {
             documents: Vec::new(),
             stack: Vec::new(),
             document_index: 0,
+            unlexable_quoted_scalars: 0,
         };
 
         for item in Parser::new_from_str(body) {
@@ -438,9 +467,24 @@ impl<'source> Builder<'source> {
                 Some(layout.header),
             )
         } else {
+            // A quoted scalar's reported end overshoots too, and for the same
+            // reason a block scalar's does — see `quoted_span`. A plain scalar's
+            // end is exact and is left alone. Unlike a block scalar the fallback
+            // is the reported span rather than a rejected index (R14), so it is
+            // **counted**: see `SyntaxIndex::unlexable_quoted_scalars`.
+            let span = match quote_character(style) {
+                None => reported,
+                Some(quote) => match quoted_span(self.source, reported, quote) {
+                    Some(trimmed) => trimmed,
+                    None => {
+                        self.unlexable_quoted_scalars += 1;
+                        reported
+                    }
+                },
+            };
             (
-                reported,
-                flow_presentation(self.source, reported, style, column),
+                span,
+                flow_presentation(self.source, span, style, column),
                 None,
             )
         };
@@ -584,6 +628,7 @@ impl<'source> Builder<'source> {
             nodes: self.nodes,
             documents: self.documents,
             frontier,
+            unlexable_quoted_scalars: self.unlexable_quoted_scalars,
         })
     } // End of function finish()
 } // End of impl Builder
@@ -625,6 +670,102 @@ fn map_style(style: saphyr_parser::ScalarStyle) -> ScalarStyle {
         saphyr_parser::ScalarStyle::Folded => ScalarStyle::Folded,
     }
 }
+
+/// Trims a **quoted** scalar's reported end back to its closing delimiter.
+///
+/// # The measurement this exists for
+///
+/// A quoted scalar's reported end is *not* the closing quote. Like a block
+/// scalar's (risk R3) it is the position of the next token on the line, so it
+/// swallows trailing spaces and a following comment:
+///
+/// | Source | Reported span |
+/// |---|---|
+/// | `a: 'x'` | `'x'` |
+/// | `a: 'x'   ` | `'x'   ` |
+/// | `a: 'x' # c` | `'x' # c` |
+/// | `a: ['x' , 'y']` | `'x' ` |
+///
+/// A **plain** scalar's end is exact — `a: x  # c` reports `x` — so only the
+/// two quoted styles are trimmed here.
+///
+/// No corpus fixture happened to put a comment or a trailing space after a
+/// quoted scalar, which is why the whole of Phase 0b measured flow-scalar ends
+/// as "exact": every one of the 1 892 quoted scalars in the two corpora ends its
+/// line at its closing quote. Phase 0c-2b found it by *writing* such a
+/// document — replacing the value of `replace: hello # note` requotes it — and
+/// the untrimmed span then covered the comment, so the value decoded as
+/// `'…' # note` and the reparse-verify step refused a correct edit.
+///
+/// # Why lexing forwards is sound here
+///
+/// The substrate accepted the document, so the token is well formed and its
+/// opening delimiter is the span's first byte: the closing one is the first
+/// unescaped delimiter after it (`''` inside a single-quoted scalar and `\"`
+/// inside a double-quoted one are literal characters, not terminators). The
+/// scan crosses line breaks, so a multi-line quoted scalar trims correctly too.
+///
+/// # Fallible, and the fallback is counted rather than silent
+///
+/// `None` means the derivation failed: the reported span does not slice the
+/// source, does not begin with the opening delimiter, or holds no closing
+/// delimiter. The caller then keeps the reported span **and increments
+/// `SyntaxIndex::unlexable_quoted_scalars`**.
+///
+/// That is deliberately unlike [`block_layout`], which rejects the whole index.
+/// The two cases are not alike: a block scalar whose header cannot be found has
+/// **no** correct span, whereas a quoted scalar with no closing quote inside its
+/// own reported span cannot arise from a document the substrate accepted, so
+/// rejecting would make a real file unopenable for an unreachable case — the R14
+/// mistake. The Phase 0c-2b review's finding 5 is the other half of that
+/// argument: the fallback returns the exact span already shown capable of
+/// swallowing a comment, so it must not be *invisible*. The counter is pinned at
+/// zero over both corpora, which turns a substrate behaviour change from silent
+/// corruption into a failing test.
+fn quoted_span(source: &str, reported: ByteSpan, quote: char) -> Option<ByteSpan> {
+    let text = reported.slice(source)?;
+    if !text.starts_with(quote) {
+        return None;
+    }
+    let offset = closing_quote(text, quote)?;
+    Some(ByteSpan::new(reported.start, reported.start + offset))
+} // End of function quoted_span()
+
+/// The delimiter of a quoted scalar style, or `None` for a style that has none.
+///
+/// A plain scalar's reported end is exact (`a: x  # c` reports `x`), so only the
+/// two quoted styles are trimmed; the block styles never reach here.
+fn quote_character(style: ScalarStyle) -> Option<char> {
+    match style {
+        ScalarStyle::SingleQuoted => Some('\''),
+        ScalarStyle::DoubleQuoted => Some('"'),
+        _ => None,
+    }
+}
+
+/// Byte offset just past the closing `quote` of `text`, which opens with one.
+fn closing_quote(text: &str, quote: char) -> Option<usize> {
+    let mut characters = text.char_indices();
+    // Step over the opening delimiter, which never closes the scalar.
+    characters.next();
+    while let Some((offset, character)) = characters.next() {
+        if quote == '"' && character == '\\' {
+            // An escaped character is data, `\"` included.
+            characters.next();
+            continue;
+        }
+        if character != quote {
+            continue;
+        }
+        if quote == '\'' && text[offset + character.len_utf8()..].starts_with(quote) {
+            // `''` is one literal apostrophe.
+            characters.next();
+            continue;
+        }
+        return Some(offset + character.len_utf8());
+    } // End of the loop that scans for the closing delimiter
+    None
+} // End of function closing_quote()
 
 /// Splits a flow scalar's token into its opening delimiter and its content.
 ///
@@ -731,6 +872,111 @@ mod tests {
         assert_eq!(scalar.presentation.indent, 6);
         assert!(reconstructs(source));
     } // End of function a_block_scalar_span_excludes_the_header_and_the_overshoot()
+
+    #[test]
+    fn a_quoted_scalar_span_stops_at_its_closing_quote_not_at_the_next_token() {
+        // Found in Phase 0c-2b. The substrate's end for a quoted scalar is the
+        // next token on the line, so it swallows trailing spaces and a comment.
+        // No corpus fixture put either after a quoted scalar, so the whole of
+        // Phase 0b measured flow ends as "exact"; an edit that requotes a value
+        // whose line carries a comment writes exactly that shape.
+        let cases: [(&str, &str); 8] = [
+            ("a: 'x'\n", "'x'"),
+            ("a: 'x'   \n", "'x'"),
+            ("a: 'x' # c\n", "'x'"),
+            ("a: 'it''s' # c\n", "'it''s'"),
+            ("a: \"x\" # c\n", "\"x\""),
+            ("a: \"e\\\"s\" # c\n", "\"e\\\"s\""),
+            ("- 'x' # c\n", "'x'"),
+            ("a: ['x' , 'y']\n", "'x'"),
+        ];
+        for (source, token) in cases {
+            let index = SyntaxIndex::parse(source).expect("the probe parses");
+            let quoted = index
+                .nodes()
+                .iter()
+                .find(|node| {
+                    node.scalar.as_ref().is_some_and(|scalar| {
+                        matches!(
+                            scalar.style(),
+                            ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+                        )
+                    })
+                })
+                .expect("a quoted scalar");
+            assert_eq!(quoted.span.slice(source), Some(token), "span of {source:?}");
+            let scalar = quoted.scalar.as_ref().expect("scalar data");
+            // The content span excludes both delimiters, which is what makes the
+            // decoded value agree with the substrate's.
+            assert_eq!(
+                scalar.presentation.content_span.slice(source),
+                Some(&token[1..token.len() - 1]),
+                "content of {source:?}"
+            );
+            // The overshoot is recorded rather than lost, exactly as it is for a
+            // block scalar, and what it handed back is never scalar data.
+            assert!(scalar.reported_span.end >= quoted.span.end);
+            assert!(reconstructs(source), "reconstruction of {source:?}");
+        } // End of the loop over the quoted-scalar probes
+
+        // A *plain* scalar's end really is exact, trailing spaces excluded, so
+        // the trim is deliberately limited to the two quoted styles.
+        let plain = SyntaxIndex::parse("a: x  # c\n").expect("parses");
+        let value = plain
+            .nodes()
+            .iter()
+            .filter(|node| node.role == NodeRole::MappingValue)
+            .find_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
+            .expect("a value scalar");
+        assert_eq!(value.0.span.slice("a: x  # c\n"), Some("x"));
+        assert_eq!(value.1.reported_span, value.0.span);
+
+        // Nothing accepted by the substrate reaches the fallback.
+        for (source, _) in cases {
+            assert_eq!(
+                SyntaxIndex::parse(source)
+                    .expect("parses")
+                    .unlexable_quoted_scalars(),
+                0,
+                "{source:?} must not fall back to its reported span"
+            );
+        } // End of the loop that re-checks the fallback counter
+    } // End of function a_quoted_scalar_span_stops_at_its_closing_quote_not_at_the_next_token()
+
+    #[test]
+    fn the_quoted_span_fallback_is_fallible_and_counted_rather_than_silent() {
+        // The Phase 0c-2b review's finding 5. `quoted_span` cannot reject the
+        // index — a real file would become unopenable for a case no accepted
+        // document reaches, which is the R14 mistake — so it keeps the reported
+        // span. The span it keeps is the one already shown capable of swallowing a
+        // trailing comment, so the choice is only defensible if the event is
+        // **observable**: the derivation is fallible, and every failure is
+        // counted.
+        //
+        // Each precondition, driven directly, because no document the substrate
+        // accepts can produce one:
+        let source = "a: 'x' # c\n";
+        // The happy path trims to the closing quote.
+        assert_eq!(
+            quoted_span(source, ByteSpan::new(3, 10), '\''),
+            Some(ByteSpan::new(3, 6))
+        );
+        // A span that does not open with the delimiter.
+        assert_eq!(quoted_span(source, ByteSpan::new(4, 10), '\''), None);
+        // A span with no closing delimiter inside it.
+        assert_eq!(quoted_span(source, ByteSpan::new(3, 5), '\''), None);
+        // A span that does not slice the source.
+        assert_eq!(quoted_span(source, ByteSpan::new(3, 999), '\''), None);
+        // A span that does not land on a character boundary.
+        let astral = "a: '😀' # c\n";
+        assert_eq!(quoted_span(astral, ByteSpan::new(3, 6), '\''), None);
+        // Only the two quoted styles are trimmed at all.
+        assert_eq!(quote_character(ScalarStyle::Plain), None);
+        assert_eq!(quote_character(ScalarStyle::Literal), None);
+        assert_eq!(quote_character(ScalarStyle::Folded), None);
+        assert_eq!(quote_character(ScalarStyle::SingleQuoted), Some('\''));
+        assert_eq!(quote_character(ScalarStyle::DoubleQuoted), Some('"'));
+    } // End of function the_quoted_span_fallback_is_fallible_and_counted_rather_than_silent()
 
     #[test]
     fn flow_collections_span_bracket_to_bracket() {

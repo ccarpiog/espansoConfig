@@ -24,11 +24,21 @@
 //! that survives that reparse, and [`resolve`] / [`path_to`] are its two
 //! directions.
 //!
-//! Nothing in this module mutates a document yet. Applying an edit, consulting
-//! the hazard gate and the reparse-verify cycle are step 0c-2b.
+//! **0c-2b — [`edit`], the first code here that mutates a document.** One
+//! scalar's value, replaced as a byte-span surgery, with the hazard gate
+//! consulted by [`apply_scalar_edits`] **itself** rather than by its callers,
+//! and the whole candidate reparsed and verified before a [`PatchedDocument`]
+//! exists at all. Structural edits — insert or remove a field, move a match —
+//! are step 0c-3, and the batch shape of [`apply_scalar_edits`] is where they
+//! will land.
 
+pub mod edit;
 pub mod path;
 
+pub use edit::{
+    apply_scalar_edit, apply_scalar_edits, EditError, PatchedDocument, PresentationNote,
+    Replacement, ScalarEdit, VerificationFailure,
+};
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,
     PathParseError, PathSegment, Resolved,

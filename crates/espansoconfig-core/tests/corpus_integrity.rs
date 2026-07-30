@@ -165,6 +165,31 @@ fn the_terminal_spaces_fixture_still_ends_in_two_spaces_with_no_final_newline() 
 } // End of function the_terminal_spaces_fixture_still_ends_in_two_spaces_with_no_final_newline()
 
 #[test]
+fn the_header_tails_fixture_keeps_the_spaces_after_its_block_indicator() {
+    // Added by the Phase 0c-2b review's fix round, which found that a block-to-
+    // flow style change silently deleted the bytes between a block scalar's
+    // header indicator and its line break. This fixture is the only one that
+    // pairs a block scalar with a header-line comment and with trailing spaces
+    // after its indicator, so those three spaces on the `|-` line ARE the test:
+    // a "trim trailing whitespace" on save removes the regression test for a
+    // byte-fidelity bug without leaving a trace.
+    let bytes = fixture_bytes("block-scalar-header-tails.yml");
+    let text = String::from_utf8(bytes).expect("the fixture is valid UTF-8");
+    assert!(
+        text.contains("replace: |-   \n"),
+        "the three spaces after the `|-` indicator must still be there"
+    );
+    assert!(
+        text.contains("replace: | # why this block exists\n"),
+        "the comment on the `|` header line must still be there"
+    );
+    assert!(
+        text.contains("replace: >2 # a folded header"),
+        "the folded header's indicators and comment must still be there"
+    );
+} // End of function the_header_tails_fixture_keeps_the_spaces_after_its_block_indicator()
+
+#[test]
 fn the_leading_blank_line_fixture_keeps_its_empty_lines_directly_under_the_headers() {
     // Every blank line under a `|` or `>` header here is scalar content, and
     // every one of them must stay COMPLETELY empty: a blank line indented past

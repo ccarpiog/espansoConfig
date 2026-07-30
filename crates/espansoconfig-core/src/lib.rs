@@ -35,10 +35,12 @@
 //! - **0c-2a** — [`patch::path`]: the structural path resolver. A path such as
 //!   `matches[3].replace` is the node identity that survives the reparse every
 //!   edit must be verified against.
+//! - **0c-2b** — [`patch::edit`]: one scalar value rewritten as a byte-span
+//!   replacement, with the hazard gate consulted at the mutation entry point
+//!   and the whole candidate reparsed and verified before it exists.
 //!
 //! [`model`], [`validate`], [`persist`] and [`watch`] are still deliberate
-//! stubs carrying only the types the plan already specifies, and [`patch`]
-//! still mutates nothing.
+//! stubs carrying only the types the plan already specifies.
 
 #![deny(missing_docs)]
 

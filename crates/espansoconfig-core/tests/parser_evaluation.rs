@@ -335,6 +335,58 @@ fn saphyr_flow_scalar_spans_cover_the_exact_source_token() {
 } // End of function saphyr_flow_scalar_spans_cover_the_exact_source_token()
 
 #[test]
+fn saphyr_quoted_scalar_ends_overshoot_trailing_spaces_and_a_comment() {
+    // Measured in Phase 0c-2b, and it corrects the headline of the test below:
+    // "flow scalar end offsets are exact" is a statement about the **corpus**,
+    // not about the substrate. A quoted scalar's reported end is the next token
+    // on its line, exactly like a block scalar's (`PROGRESS.md`, D2), so it
+    // swallows trailing spaces and a following comment. No corpus fixture ever
+    // put either after a quoted scalar, which is why Phase 0b never saw it; an
+    // edit that requotes the value of `replace: hello # note` writes precisely
+    // that shape, and the untrimmed span then covered the comment.
+    //
+    // `crate::syntax`'s own `quoted_span` trims it. This test pins the substrate
+    // behaviour that makes the trim necessary, so a future release that fixes
+    // the end offsets fails here rather than silently making the trim dead code.
+    let cases: [(&str, &str, &str); 5] = [
+        // source, the token, what the reported span additionally swallowed
+        ("a: 'x'\n", "'x'", ""),
+        ("a: 'x'   \n", "'x'", "   "),
+        ("a: 'x' # c\n", "'x'", " # c"),
+        ("a: \"x\"  # c\n", "\"x\"", "  # c"),
+        ("a: ['x' , 'y']\n", "'x'", " "),
+    ];
+    println!("\n--- quoted-scalar end overshoot ---");
+    for (source, token, overshoot) in cases {
+        let quoted = saphyr_scalars(source)
+            .into_iter()
+            .find(|scalar| {
+                matches!(
+                    scalar.style,
+                    ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+                )
+            })
+            .expect("a quoted scalar");
+        let text = &source[quoted.span.start..quoted.span.end];
+        println!("{source:?} reports {text:?}");
+        assert_eq!(
+            text,
+            format!("{token}{overshoot}"),
+            "reported span for {source:?}"
+        );
+    } // End of the loop over the quoted-scalar overshoot probes
+
+    // A plain scalar's end really is exact: trailing spaces are excluded, so the
+    // trim is deliberately limited to the two quoted styles.
+    let plain_source = "a: x  # c\n";
+    let plain = saphyr_scalars(plain_source)
+        .into_iter()
+        .rfind(|scalar| scalar.style == ScalarStyle::Plain)
+        .expect("the value scalar");
+    assert_eq!(&plain_source[plain.span.start..plain.span.end], "x");
+} // End of function saphyr_quoted_scalar_ends_overshoot_trailing_spaces_and_a_comment()
+
+#[test]
 fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     // Toy documents prove an API exists; the corpus proves it holds. This test
     // covers FLOW scalars only — plain, single-quoted, double-quoted — because

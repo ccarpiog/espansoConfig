@@ -52,19 +52,25 @@ use espansoconfig_core::ByteSpan;
 // constants rather than something a comparison quietly absorbs.
 
 /// Valid fixtures in `corpus/synthetic/`. Must agree with `syntax_index.rs`.
-const SYNTHETIC_FIXTURES: usize = 22;
+const SYNTHETIC_FIXTURES: usize = 23;
 
 /// Trivia items across the valid synthetic corpus.
-const SYNTHETIC_TRIVIA_ITEMS: usize = 2687;
+const SYNTHETIC_TRIVIA_ITEMS: usize = 2742;
 
 /// Comments the scanner finds in the gaps of the valid synthetic corpus.
 ///
-/// Two more than the 195 `syntax_index.rs` pins from its per-gap line scan, and
+/// Four more than the 201 `syntax_index.rs` pins from its per-gap line scan, and
 /// the difference is the point of this phase: that scan trims a whole gap line
 /// and asks whether it starts with `#`, so an inline comment sharing its line
 /// with structural punctuation — `matches: # …` — is invisible to it. The
 /// scanner classifies by token, so it sees both.
-const SYNTHETIC_COMMENTS: usize = 197;
+///
+/// The Phase 0c-2b fix round's `block-scalar-header-tails.yml` widened the gap
+/// from two to four, and that is the cross-check that its comments were counted
+/// correctly: the fixture carries 6 whole-line comments, which **both** counts
+/// see, and 2 comments sharing a block-scalar header line, which only this one
+/// does. So the line scan gained 6 and the scanner gained 8.
+const SYNTHETIC_COMMENTS: usize = 205;
 
 /// Blank lines — whole physical lines holding nothing but spaces and tabs.
 ///
@@ -73,10 +79,10 @@ const SYNTHETIC_COMMENTS: usize = 197;
 /// break that merely *terminates* a content line is counted as a blank line of
 /// its own. Here a line break is a `LineBreak` item and only a line that lies
 /// wholly inside a gap and holds nothing can be blank.
-const SYNTHETIC_BLANK_LINES: usize = 94;
+const SYNTHETIC_BLANK_LINES: usize = 96;
 
 /// Maximal runs of consecutive blank lines.
-const SYNTHETIC_BLANK_RUNS: usize = 90;
+const SYNTHETIC_BLANK_RUNS: usize = 92;
 
 /// Bytes the scanner could not name. **Zero, and pinned at zero**: the whole
 /// point of the category is that it stays empty and says so loudly if it does
@@ -856,8 +862,8 @@ fn every_block_scalar_header_is_adopted_from_the_span_layer_and_owned_by_its_sca
     } // End of the loop over the valid synthetic corpus
 
     println!("\nblock-scalar headers adopted from the span layer: {headers}");
-    // The same 42 block scalars `syntax_index.rs` pins.
-    assert_eq!(headers, 42, "block scalars in the corpus");
+    // The same 45 block scalars `syntax_index.rs` pins.
+    assert_eq!(headers, 45, "block scalars in the corpus");
 } // End of function every_block_scalar_header_is_adopted_from_the_span_layer_and_owned_by_its_scalar()
 
 #[test]

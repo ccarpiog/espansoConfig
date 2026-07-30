@@ -491,27 +491,33 @@ impl TriviaIndex {
     /// understand" reported *every* node as safe, which is the exact inverse of
     /// "refuse rather than guess". A node-less hazard now refuses everything.
     pub fn is_safely_editable(&self, index: &SyntaxIndex, node: NodeId) -> bool {
-        if self.hazards.iter().any(|hazard| hazard.node.is_none()) {
-            return false;
+        self.disqualifying_hazard(index, node).is_none()
+    }
+
+    /// The hazard that makes `node` unsafe to edit, or `None` when it is safe.
+    ///
+    /// [`TriviaIndex::is_safely_editable`] is exactly "this returned `None`";
+    /// the two are one function so that the answer and the *reason* for it can
+    /// never drift apart. The reason exists because the mutation entry point
+    /// refuses by name (`crate::patch::edit::EditError::Refused`), and "the gate
+    /// said no" is not a diagnostic a user can act on.
+    ///
+    /// The scan order is deliberate: a hazard with **no node** is reported
+    /// first, because it disqualifies the whole document and any other answer
+    /// would understate the problem. After that, the first flagged node that is
+    /// `node`, an ancestor of it or a descendant of it wins.
+    pub fn disqualifying_hazard(&self, index: &SyntaxIndex, node: NodeId) -> Option<&Hazard> {
+        if let Some(orphan) = self.hazards.iter().find(|hazard| hazard.node.is_none()) {
+            return Some(orphan);
         }
-        let flagged: Vec<NodeId> = self
-            .hazards
-            .iter()
-            .filter_map(|hazard| hazard.node)
-            .collect();
-        if flagged.is_empty() {
-            return true;
-        }
-        for candidate in &flagged {
-            if *candidate == node
-                || is_ancestor(index, *candidate, node)
-                || is_ancestor(index, node, *candidate)
-            {
-                return false;
-            }
-        } // End of the loop over the flagged nodes
-        true
-    } // End of function is_safely_editable()
+        self.hazards.iter().find(|hazard| {
+            hazard.node.is_some_and(|flagged| {
+                flagged == node
+                    || is_ancestor(index, flagged, node)
+                    || is_ancestor(index, node, flagged)
+            })
+        })
+    } // End of function disqualifying_hazard()
 } // End of impl TriviaIndex
 
 /// `root` and every node beneath it, in no particular order.

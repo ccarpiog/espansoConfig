@@ -241,11 +241,17 @@ fn every_addressable_node_of_the_synthetic_corpus_round_trips_through_its_path()
     // Pinned exactly, so a change in the resolver's reach shows up as a failing
     // number rather than as silently narrower addressing. The two opposing
     // drifts a single total could hide are separated into their own figures.
-    assert_eq!(total.total(), 1095);
-    assert_eq!(total.addressable, 634);
-    // 21 single-document fixtures plus multi-document.yml's three.
-    assert_eq!(total.documents, 24);
-    assert_eq!(total.mapping_keys, 433);
+    // Phase 0c-2b's fix round added `block-scalar-header-tails.yml`, which moved
+    // every figure below by exactly the fixture's own shape: 19 nodes = 1
+    // document + 1 root mapping + the `matches` key + the sequence + 3 item
+    // mappings + 12 scalars. So +1 document, +7 mapping keys (`matches` and each
+    // item's `trigger` and `replace`), +11 addressable (the root mapping, the
+    // sequence, the 3 item mappings and the 6 values), and no new ambiguity.
+    assert_eq!(total.total(), 1114);
+    assert_eq!(total.addressable, 645);
+    // 22 single-document fixtures plus multi-document.yml's three.
+    assert_eq!(total.documents, 25);
+    assert_eq!(total.mapping_keys, 440);
     // Exactly the four values under a duplicated key in duplicate-keys.yml:
     // `replace` twice in `matches[0]` and `label` twice in `matches[2]`.
     assert_eq!(total.ambiguous, 4);

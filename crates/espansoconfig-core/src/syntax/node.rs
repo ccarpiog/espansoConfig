@@ -104,9 +104,12 @@ pub struct ScalarNode {
     pub presentation: ScalarPresentation,
     /// The span the substrate reported, before any trimming.
     ///
-    /// For a flow scalar this equals the node's span. For a block scalar it
-    /// overshoots into trailing blank lines and the next line's indentation,
-    /// which is exactly risk R3.
+    /// For a **plain** scalar this equals the node's span. For a **block**
+    /// scalar it overshoots into trailing blank lines and the next line's
+    /// indentation, which is exactly risk R3; for a **quoted** scalar it
+    /// overshoots trailing spaces and a following comment on the same line, a
+    /// smaller version of the same problem that Phase 0c-2b measured and that
+    /// `SyntaxIndex`'s own `quoted_span` trims.
     pub reported_span: ByteSpan,
     /// The block-scalar header, for `|` and `>` scalars only.
     pub header: Option<BlockHeader>,
