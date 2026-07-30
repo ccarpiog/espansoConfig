@@ -1734,7 +1734,7 @@ _Updated at each phase boundary._
 | 0c-3a | `8989c16` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
-| 0c-3b-2b | `PENDING` | pending | pending |
+| 0c-3b-2b | `912cb89` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -1759,6 +1759,15 @@ holds the demonstrated defect. It contains `ItemMove` and D2q's five verificatio
 `tests/parser_evaluation.rs`, the `entry_hull_lines` fix in `tests/patch_structure.rs`, retabulated pins
 across seven test files, `CLAUDE.md` §4 entries 13–15, the review, `docs/decisions/0c-3b-2a-notes.md` and
 this checkpoint. **A fresh session should start from `7fd9850` or later.**
+
+`912cb89` is Phase 0c-3b-2b **including its review fix round** — the phase was held open until the
+blocking finding was closed **in production** and the verdict re-derived rather than reworded, so, as with
+every phase since `8989c16`, no commit holds the demonstrated defect. It contains `tests/gate_roundtrip.rs`,
+`src/emit/tags.rs`, `RemovalCarriesMoreThanTheEntry` in `src/patch/edit.rs`, the memoised
+`src/syntax/ownership.rs`, the `explicit-key-mappings.yml` fixture, retabulated pins across seven test
+files, the R16 consultation, the review, `docs/decisions/0c-3b-2b-notes.md`, `CLAUDE.md` §6 and this
+checkpoint. **This commit closes Phase 0. A fresh session starting Phase 1 should start from `912cb89`
+or later.**
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
