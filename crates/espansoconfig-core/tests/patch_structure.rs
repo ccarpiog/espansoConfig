@@ -112,12 +112,26 @@ struct Tally {
     key_present: usize,
     /// Removals refused because a keep-chomped block above would grow.
     kept_block: usize,
-    /// Removals refused because the envelope crosses a file-owned comment.
+    /// Removals refused because a run of the envelope still covers a file-owned
+    /// comment.
     ///
-    /// The Phase 0c-3a review's finding 1. Added with the refusal itself: a
-    /// category that exists in the engine and not in this table is a category
-    /// nothing measures.
+    /// **Pinned at zero since Phase 0c-3b-1, and it changed meaning rather than
+    /// merely changing value.** In Phase 0c-3a this was the *policy*: a removal
+    /// whose contiguous hull crossed a comment the file owns was refused, because
+    /// one span cannot delete the entry and keep the comment. The envelope is now
+    /// a set of runs with those comments punched out, so the refusal is what is
+    /// left over — an assertion on the derived run set, read off
+    /// `TriviaIndex::file_comments` rather than off the punch-out. It is argued
+    /// unreachable, and `docs/decisions/0c-3b-1-notes.md` records the experiment
+    /// that makes it fire, so the zero is a live layer rather than dead code.
     file_comment: usize,
+    /// Removals refused because the bytes they would keep would join a block
+    /// scalar above.
+    ///
+    /// The residual shape of R21: a comment left in place directly under a block
+    /// scalar's content, at that block's own body column, is content of the block
+    /// rather than a comment. Reached by `run-based-removal-envelope.yml`.
+    block_absorbs: usize,
     /// Insertions refused because `FieldInsert::after` named no entry.
     ///
     /// Absent from this table until the review's fix round, although the engine
@@ -143,7 +157,7 @@ struct Tally {
 }
 
 /// How many categories a [`Tally`] has. Every pinned row states all of them.
-const CATEGORIES: usize = 12;
+const CATEGORIES: usize = 13;
 
 impl Tally {
     /// Builds a tally from a pinned row's numbers, in declaration order.
@@ -158,9 +172,10 @@ impl Tally {
             key_present: row[6],
             kept_block: row[7],
             file_comment: row[8],
-            no_such_sibling: row[9],
-            inconsistent_indent: row[10],
-            no_line_ending: row[11],
+            block_absorbs: row[9],
+            no_such_sibling: row[10],
+            inconsistent_indent: row[11],
+            no_line_ending: row[12],
         }
     } // End of function from_row()
 
@@ -175,6 +190,7 @@ impl Tally {
             + self.key_present
             + self.kept_block
             + self.file_comment
+            + self.block_absorbs
             + self.no_such_sibling
             + self.inconsistent_indent
             + self.no_line_ending
@@ -191,6 +207,7 @@ impl Tally {
         self.key_present += other.key_present;
         self.kept_block += other.kept_block;
         self.file_comment += other.file_comment;
+        self.block_absorbs += other.block_absorbs;
         self.no_such_sibling += other.no_such_sibling;
         self.inconsistent_indent += other.inconsistent_indent;
         self.no_line_ending += other.no_line_ending;
@@ -216,84 +233,117 @@ type OutcomeRow = (&'static str, [usize; CATEGORIES]);
 /// mapping, so every row's total grows; a removal whose envelope crosses a
 /// file-owned comment is now refused rather than applied; and two fixtures
 /// joined the corpus.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 26] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
     (
         "anchors-aliases-tags-merge.yml",
-        [0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ),
-    ("blank-lines.yml", [40, 5, 0, 0, 1, 4, 5, 0, 0, 5, 0, 0]),
+    ("blank-lines.yml", [40, 5, 0, 0, 1, 4, 5, 0, 0, 0, 5, 0, 0]),
     (
         "block-scalar-header-tails.yml",
-        [31, 3, 0, 0, 1, 3, 4, 0, 0, 4, 0, 0],
+        [31, 3, 0, 0, 1, 3, 4, 0, 0, 0, 4, 0, 0],
     ),
     (
         "block-scalar-leading-blank-lines.yml",
-        [52, 9, 0, 0, 1, 5, 6, 1, 0, 6, 0, 0],
+        [52, 9, 0, 0, 1, 5, 6, 1, 0, 0, 6, 0, 0],
     ),
     (
         "block-scalar-terminal-spaces.yml",
-        [24, 3, 0, 0, 1, 2, 3, 0, 0, 3, 0, 0],
+        [24, 3, 0, 0, 1, 2, 3, 0, 0, 0, 3, 0, 0],
     ),
     (
         "block-scalars.yml",
-        [106, 19, 0, 0, 1, 11, 12, 3, 0, 12, 0, 0],
+        [106, 19, 0, 0, 1, 11, 12, 3, 0, 0, 12, 0, 0],
     ),
-    ("bom-utf8.yml", [23, 2, 0, 0, 1, 2, 3, 0, 0, 3, 0, 0]),
+    ("bom-utf8.yml", [23, 2, 0, 0, 1, 2, 3, 0, 0, 0, 3, 0, 0]),
     (
         "comments-everywhere.yml",
-        [32, 4, 0, 0, 1, 3, 4, 0, 0, 4, 0, 0],
+        [32, 4, 0, 0, 1, 3, 4, 0, 0, 0, 4, 0, 0],
     ),
-    ("config-profile.yml", [19, 13, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
+    (
+        "config-profile.yml",
+        [19, 13, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
+    ),
     (
         "crlf-line-endings.yml",
-        [31, 3, 0, 0, 1, 3, 4, 0, 0, 4, 0, 0],
+        [31, 3, 0, 0, 1, 3, 4, 0, 0, 0, 4, 0, 0],
     ),
-    ("duplicate-keys.yml", [41, 6, 34, 0, 2, 3, 5, 0, 0, 5, 0, 0]),
+    (
+        "duplicate-keys.yml",
+        [41, 6, 34, 0, 2, 3, 5, 0, 0, 0, 5, 0, 0],
+    ),
     (
         "empty-entries-and-extents.yml",
-        [52, 11, 0, 0, 0, 5, 6, 0, 0, 6, 0, 0],
+        [52, 11, 0, 0, 0, 5, 6, 0, 0, 0, 6, 0, 0],
     ),
-    // The fixture the review's fix round added for finding 1. Its one
-    // file-comment refusal is the `vars` entry whose value holds a comment the
-    // ownership rules give to the file; before the fix that removal *applied*,
-    // and deleted the comment.
+    // The fixture the Phase 0c-3a review's fix round added for finding 1. Its
+    // `vars` entry holds a comment the ownership rules give to the file, so its
+    // removal was **refused** for the whole of 0c-3a. Since 0c-3b-1 the envelope
+    // is a set of runs and that removal applies, which is why this row's
+    // file-comment column is 0 and its removed column is one higher.
     (
         "file-comments-and-mixed-endings.yml",
-        [41, 6, 0, 0, 1, 3, 5, 0, 1, 5, 0, 0],
+        [41, 7, 0, 0, 1, 3, 5, 0, 0, 0, 5, 0, 0],
     ),
     (
         "flow-collections.yml",
-        [36, 8, 24, 24, 0, 4, 4, 0, 0, 4, 0, 0],
+        [36, 8, 24, 24, 0, 4, 4, 0, 0, 0, 4, 0, 0],
     ),
     (
         "folded-more-indented.yml",
-        [43, 7, 0, 0, 1, 4, 5, 1, 0, 5, 0, 0],
+        [43, 7, 0, 0, 1, 4, 5, 1, 0, 0, 5, 0, 0],
     ),
     (
         "form-layout-and-choice.yml",
-        [156, 30, 0, 0, 4, 8, 19, 0, 0, 19, 0, 0],
+        [156, 30, 0, 0, 4, 8, 19, 0, 0, 0, 19, 0, 0],
     ),
     (
         "html-and-markdown.yml",
-        [48, 6, 0, 0, 1, 5, 6, 0, 0, 6, 0, 0],
+        [48, 6, 0, 0, 1, 5, 6, 0, 0, 0, 6, 0, 0],
     ),
     (
         "imports-and-global-vars.yml",
-        [87, 19, 0, 0, 1, 7, 10, 0, 0, 10, 0, 0],
+        [87, 19, 0, 0, 1, 7, 10, 0, 0, 0, 10, 0, 0],
     ),
-    ("multi-document.yml", [0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    (
+        "multi-document.yml",
+        [0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ),
     (
         "no-trailing-newline.yml",
-        [15, 1, 0, 0, 1, 1, 2, 0, 0, 2, 0, 0],
+        [15, 1, 0, 0, 1, 1, 2, 0, 0, 0, 2, 0, 0],
     ),
-    ("non-ascii.yml", [72, 9, 0, 0, 2, 7, 9, 0, 0, 9, 0, 0]),
+    ("non-ascii.yml", [72, 9, 0, 0, 2, 7, 9, 0, 0, 0, 9, 0, 0]),
+    // The fixture the Phase 0c-3b-1 review's fix round added for finding 2, and
+    // the counter-example to the row below it: the *same* two `vars` removals,
+    // both of which apply. Its first match keeps a **column-zero** comment under
+    // a folded block, so R23's column comparison proves the comment cannot become
+    // block content; its second match pairs an entry-owned leading comment block
+    // with an interior file comment, the run-boundary construct that makes the
+    // envelope start above the entry's own first line. `block_absorbs` is 0 here
+    // and 1 below, which is the narrowing pinned as a difference between two
+    // fixtures rather than as a unit test.
+    (
+        "run-based-removal-boundaries.yml",
+        [41, 8, 0, 0, 1, 2, 5, 0, 0, 0, 5, 0, 0],
+    ),
+    // The fixture Phase 0c-3b-1 added, and the only source of `block_absorbs` in
+    // the sweep. Its first match's `vars` removal is the run-based envelope
+    // succeeding with blank lines preserved on **both** sides of the kept
+    // comment; its second match's `vars` removal is the one shape a run set
+    // cannot express, because the bytes it would keep sit at the body column of a
+    // block scalar directly above them.
+    (
+        "run-based-removal-envelope.yml",
+        [41, 7, 0, 0, 1, 2, 5, 0, 0, 1, 5, 0, 0],
+    ),
     (
         "plain-scalar-hazards.yml",
-        [303, 37, 0, 0, 1, 37, 38, 0, 0, 38, 0, 0],
+        [303, 37, 0, 0, 1, 37, 38, 0, 0, 0, 38, 0, 0],
     ),
     (
         "scalar-styles.yml",
-        [95, 11, 0, 0, 1, 11, 12, 0, 0, 12, 0, 0],
+        [95, 11, 0, 0, 1, 11, 12, 0, 0, 0, 12, 0, 0],
     ),
     // The fixture the review's fix round added for finding 2, and the only
     // source of `NoObservableLineEnding` in the sweep: 6 appended values plus 1
@@ -302,12 +352,15 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 26] = [
     // refused earlier, and its one entry cannot be removed.
     (
         "single-line-no-line-ending.yml",
-        [0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 7],
+        [0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 7],
     ),
-    ("unicode-offsets.yml", [8, 2, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0]),
+    (
+        "unicode-offsets.yml",
+        [8, 2, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
+    ),
     (
         "variable-chain.yml",
-        [148, 34, 0, 0, 4, 8, 17, 0, 0, 17, 0, 0],
+        [148, 34, 0, 0, 4, 8, 17, 0, 0, 0, 17, 0, 0],
     ),
 ];
 
@@ -457,43 +510,75 @@ fn check_candidate_is_the_splice(label: &str, source: &str, patched: &PatchedDoc
 
 /// Checks a removal envelope by its **properties**, not by how it was built.
 ///
-/// Four of them, and none is a restatement of `subtree_extent`:
+/// Since Phase 0c-3b-1 the envelope is an ordered set of **runs** rather than one
+/// span (`PROGRESS.md`, R21), and that changed what has to be proved: a hull
+/// covered every byte of the entry by construction, a set does not, and a set can
+/// be split anywhere at all. Eight properties since that phase's review rewrote
+/// property 6 and split property 8 out of it, none of them a restatement of
+/// `subtree_extent` or of the punch-out that derived the runs:
 ///
-/// 1. it starts at the beginning of a line and ends at the beginning of one, or
-///    at end of file — a removal deletes whole lines;
-/// 2. it covers the entry's key and its value entirely;
-/// 3. it covers no node that is neither part of the entry nor an ancestor of
+/// 1. every run is non-empty, they are in ascending order and they are disjoint;
+/// 2. every run starts a line and ends a line or the file — a removal deletes
+///    whole lines;
+/// 3. no run reaches into the BOM;
+/// 4. the runs together cover every **frontier leaf** of the entry, so no token
+///    of it survives. Stated over leaves rather than over every node because the
+///    span of a collection inside the entry legitimately straddles a preserved
+///    comment: it is derived from children that lie on both sides of it;
+/// 5. no run covers a node that is neither part of the entry nor an ancestor of
 ///    it — an envelope one entry too long fails here, and nowhere else;
-/// 4. it stays clear of the BOM.
-fn check_removal_envelope(
+/// 6. **the runs and the bytes the preservation rule protects partition the
+///    envelope's own byte range.** Every byte the envelope spans is either deleted
+///    or protected by [`preserved_by_the_rule`], and none is both. Stated in both
+///    directions, so an engine that *under*-preserves — deleting the blank line
+///    that makes a kept comment file-owned — fails as loudly as one that keeps
+///    bytes the rule does not protect. This replaces the Phase 0c-3b-1 property
+///    "every gap holds a file-owned comment", which the review found could not see
+///    under-preservation at all and which rejected any change to the rule
+///    mechanically instead of reporting a disagreement about named bytes;
+/// 7. no run intersects a comment the file owns;
+/// 8. every gap holds whole lines and holds nothing but comment and blank lines.
+///    Property 6 already pins *which* bytes are kept; this pins what kind of bytes
+///    the rule is allowed to be about, and it is written over the source text
+///    rather than over the trivia index, so a `preserved_by_the_rule` that
+///    protected a content line would be caught by it rather than agreed with.
+fn check_removal_runs(
     label: &str,
     source: &str,
     index: &SyntaxIndex,
-    span: ByteSpan,
+    trivia: &TriviaIndex,
+    runs: &[ByteSpan],
     key: NodeId,
     value: NodeId,
 ) {
     let body_offset = index.preamble().body_offset;
-    assert!(
-        span.start >= body_offset,
-        "{label}: the envelope reaches into the BOM"
-    );
-    assert!(
-        begins_its_line(source, span.start, body_offset)
-            && span.start == line_start(source, span.start, body_offset),
-        "{label}: the envelope does not start a line"
-    );
-    assert!(
-        span.end == source.len() || line_start(source, span.end, body_offset) == span.end,
-        "{label}: the envelope does not end a line"
-    );
-    for node in [key, value] {
-        let owned = index.node(node).expect("a node of the entry").span;
+    assert!(!runs.is_empty(), "{label}: the envelope deletes nothing");
+    let mut previous_end = 0usize;
+    for run in runs {
+        assert!(!run.is_empty(), "{label}: an envelope run is empty");
         assert!(
-            span.contains(owned),
-            "{label}: the envelope does not cover the entry's own bytes"
+            run.start >= previous_end,
+            "{label}: the envelope runs are not ordered and disjoint"
         );
-    } // End of the loop over the entry's two halves
+        previous_end = run.end;
+        assert!(
+            run.start >= body_offset,
+            "{label}: an envelope run reaches into the BOM"
+        );
+        assert!(
+            begins_its_line(source, run.start, body_offset)
+                && run.start == line_start(source, run.start, body_offset),
+            "{label}: an envelope run does not start a line"
+        );
+        assert!(
+            run.end == source.len() || line_start(source, run.end, body_offset) == run.end,
+            "{label}: an envelope run does not end a line"
+        );
+        assert!(
+            file_comment_in_entry(trivia, *run).is_none(),
+            "{label}: an envelope run covers a comment the file owns"
+        );
+    } // End of the loop over the envelope's runs
 
     let mut inside = vec![key, value];
     let mut pending = vec![key, value];
@@ -513,22 +598,81 @@ fn check_removal_envelope(
     } // End of the walk over the entry's ancestors
 
     for node in index.nodes() {
-        if node.span.is_empty()
-            || inside.contains(&node.id)
-            || ancestors.contains(&node.id)
-            || node.span.end <= span.start
-            || node.span.start >= span.end
-        {
+        if node.span.is_empty() {
             continue;
         }
-        panic!(
-            "{label}: the envelope {}..{} reaches into node {}",
-            span.start,
-            span.end,
-            node.id.get()
-        );
+        let of_the_entry = inside.contains(&node.id);
+        if of_the_entry && node.is_frontier_leaf() {
+            assert!(
+                runs.iter().any(|run| run.contains(node.span)),
+                "{label}: no run covers node {}, which the entry owns",
+                node.id.get()
+            );
+        }
+        if of_the_entry || ancestors.contains(&node.id) {
+            continue;
+        }
+        if let Some(run) = runs.iter().find(|run| run.intersects(node.span)) {
+            panic!(
+                "{label}: the envelope run {}..{} reaches into node {}",
+                run.start,
+                run.end,
+                node.id.get()
+            );
+        }
     } // End of the loop over every node the envelope might disturb
-} // End of function check_removal_envelope()
+
+    // Property 6, both directions. The envelope's own byte range is used rather
+    // than a re-derived hull so that nothing here depends on reproducing
+    // `subtree_extent`; a region the rule protects outside that range was never at
+    // risk, because the envelope does not reach it.
+    let envelope = ByteSpan::new(
+        runs.first().expect("checked non-empty").start,
+        runs.last().expect("checked non-empty").end,
+    );
+    let expected = preserved_by_the_rule(source, trivia, envelope, body_offset);
+    let gaps: Vec<ByteSpan> = runs
+        .windows(2)
+        .map(|pair| ByteSpan::new(pair[0].end, pair[1].start))
+        .collect();
+    for region in &expected {
+        let held = gaps
+            .iter()
+            .any(|gap| gap.start <= region.start && region.end <= gap.end);
+        assert!(
+            held,
+            "{label}: the envelope deletes {}..{}, which the preservation rule protects \
+             for a comment the file owns",
+            region.start, region.end
+        );
+    } // End of the loop over the regions the rule protects
+    for gap in &gaps {
+        let justified = expected
+            .iter()
+            .any(|region| region.start <= gap.start && gap.end <= region.end);
+        assert!(
+            justified,
+            "{label}: the envelope keeps {}..{}, which the preservation rule does not protect",
+            gap.start, gap.end
+        );
+    } // End of the loop over the bytes the envelope declined to delete
+
+    // Property 8: what kind of bytes the rule may be about, read off the source.
+    for gap in &gaps {
+        let text = gap.slice(source).expect("the gap slices");
+        for line in text.split_inclusive(['\n', '\r']) {
+            let content = line.trim_start_matches([' ', '\t']).trim_end();
+            assert!(
+                content.is_empty() || content.starts_with('#'),
+                "{label}: the envelope skips a line that is neither blank nor a comment"
+            );
+        } // End of the loop over the lines the envelope leaves in place
+        assert!(
+            text.ends_with(['\n', '\r']),
+            "{label}: the envelope skips part of a line"
+        );
+    } // End of the loop over the gaps between the runs
+} // End of function check_removal_runs()
 
 /// Re-derives whether a keep-chomped block above this entry would grow.
 ///
@@ -567,6 +711,153 @@ fn kept_block_above(source: &str, index: &SyntaxIndex, lines: ByteSpan) -> bool 
         })
     })
 } // End of function kept_block_above()
+
+/// Re-derives whether the bytes a removal keeps would join a block scalar.
+///
+/// The independent statement of `EditError::RemovalWouldExtendABlockScalar`, and
+/// three facts rather than the two it used to be — the third is the Phase
+/// 0c-3b-1 review's finding 2:
+///
+/// 1. the removal has something to preserve at all (`kept` is non-empty, which
+///    [`preserved_by_the_rule`] answers from the file's own comments);
+/// 2. some block scalar's content ends at or before `at` with nothing but
+///    whitespace in between, so once the entry's runs are gone the kept bytes sit
+///    directly under that content;
+/// 3. the first non-blank line among the kept bytes is at that block's body
+///    column **or deeper**, so YAML would read it as one more body line. A
+///    shallower line ends the block, which is what the removed entry's own key
+///    already did.
+///
+/// Fact 3 is stated here over `ScalarPresentation::indent` and the source text,
+/// and in the engine over the same published column: there is one body-column
+/// fact in the document and both sides read it rather than re-lexing the block.
+/// What is independent is the byte range the columns are measured in — this file
+/// finds the entry textually, the engine derives it from `subtree_extent`.
+///
+/// `at` is [`entry_hull_lines`]'s start, which covers the entry's leading comment
+/// block as the engine's ownership hull does. Measuring from [`entry_lines`]
+/// instead used to make the two disagree for an entry that owns a leading comment
+/// block, a shape no fixture paired with an interior file comment until
+/// `run-based-removal-boundaries.yml` did.
+fn kept_bytes_would_join_a_block(
+    source: &str,
+    index: &SyntaxIndex,
+    kept: &[ByteSpan],
+    at: usize,
+) -> bool {
+    let Some(column) = first_kept_column(source, kept, index.preamble().body_offset) else {
+        return false;
+    };
+    index.nodes().iter().any(|node| {
+        node.scalar.as_ref().is_some_and(|scalar| {
+            let presentation = &scalar.presentation;
+            presentation.style.is_block()
+                && presentation.content_span.end <= at
+                && source[presentation.content_span.end..at].trim().is_empty()
+                // An empty content span means the span layer observed no body
+                // column, so there is nothing to compare and the engine refuses.
+                && (presentation.content_span.is_empty() || column >= presentation.indent)
+        })
+    })
+} // End of function kept_bytes_would_join_a_block()
+
+/// The column of the first non-blank line among the bytes a removal keeps.
+///
+/// Every byte between the block scalar above and this line is deleted, so this is
+/// the line that ends up directly under that block's content — and one column
+/// answers the question for the whole kept set, because a line shallower than the
+/// body column ends the block and nothing after it can rejoin one.
+fn first_kept_column(source: &str, kept: &[ByteSpan], body_offset: usize) -> Option<usize> {
+    for region in kept {
+        let Some(text) = region.slice(source) else {
+            continue;
+        };
+        let mut at = region.start;
+        for line in text.split_inclusive(['\n', '\r']) {
+            let body = line.trim_start_matches([' ', '\t']);
+            if !body.trim_end().is_empty() {
+                let opener = at + (line.len() - body.len());
+                return Some(
+                    source[line_start(source, opener, body_offset)..opener]
+                        .chars()
+                        .count(),
+                );
+            }
+            at += line.len();
+        } // End of the loop over this region's lines
+    } // End of the loop over the kept regions, in ascending order
+    None
+} // End of function first_kept_column()
+
+/// The bytes a removal of this entry **must keep**, from the document's own
+/// trivia facts.
+///
+/// **This is the preservation rule, written down once on the test side.** The
+/// Phase 0c-3b-1 review's finding 1 was that the sweep's old property 6 —
+/// "every gap between two runs holds a comment the file owns" — *codified* the
+/// engine's behaviour instead of checking it. It could not see a kept comment's
+/// ownership-establishing blank line being deleted, and had the rule ever changed
+/// it would have rejected the new behaviour mechanically rather than reporting a
+/// disagreement about named bytes. An oracle that cannot fail for the right
+/// reason is not an oracle.
+///
+/// The rule, both halves:
+///
+/// - the **whole line** each file-owned comment inside `region` occupies survives,
+///   indentation and terminating break included;
+/// - so does **every blank run touching one of those lines**. The run below is what
+///   plan section 6.2's rule 2 reads to give the comment to the file, so deleting
+///   it re-attributes the comment; the run above is grouped with the comment's line
+///   by the same `blank_runs()` answer.
+/// - **nothing else.** A blank run touching no such comment is trivia interior to
+///   the entry the user asked to remove, and goes with it.
+///
+/// The two inputs are the document's ownership answers, `file_comments()` and
+/// `blank_runs()`, which this file is entitled to read — the same way
+/// [`file_comment_in_entry`] does. The line arithmetic, the intersection test, the
+/// clamp and the merge are written here, so an off-by-one, a wrong side or a
+/// missing merge in the engine's `preserved_regions` shows up as a disagreement.
+/// If the rule itself is ever changed, **this function is the one place to change
+/// it**, and until it is changed the sweep names the exact bytes the two sides
+/// disagree about and in which direction.
+fn preserved_by_the_rule(
+    source: &str,
+    trivia: &TriviaIndex,
+    region: ByteSpan,
+    body_offset: usize,
+) -> Vec<ByteSpan> {
+    let mut kept: Vec<ByteSpan> = Vec::new();
+    for comment in trivia.file_comments() {
+        if !comment.span.intersects(region) {
+            continue;
+        }
+        let mut start = line_start(source, comment.span.start, body_offset);
+        let mut end = line_end(source, comment.span.end);
+        for run in trivia.blank_runs() {
+            if run.span.end == start {
+                start = run.span.start.max(body_offset);
+            }
+            if run.span.start == end {
+                end = run.span.end;
+            }
+        } // End of the loop that grows the region over the blank runs beside it
+        let start = start.max(region.start).min(region.end);
+        let end = end.min(region.end).max(start);
+        if start < end {
+            kept.push(ByteSpan::new(start, end));
+        }
+    } // End of the loop over the comments the file owns
+
+    kept.sort_by_key(|span| (span.start, span.end));
+    let mut merged: Vec<ByteSpan> = Vec::new();
+    for span in kept {
+        match merged.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => merged.push(span),
+        }
+    } // End of the loop that merges the kept regions into a disjoint, ordered set
+    merged
+} // End of function preserved_by_the_rule()
 
 /// The whole lines one mapping entry occupies, found textually.
 ///
@@ -622,6 +913,49 @@ fn line_start(source: &str, position: usize, body_offset: usize) -> usize {
         .map_or(body_offset, |at| at + 1)
         .max(body_offset)
 }
+
+/// The offset just past the break that terminates `position`'s physical line.
+fn line_end(source: &str, position: usize) -> usize {
+    match source[position..].find(['\n', '\r']) {
+        None => source.len(),
+        Some(offset) => {
+            let at = position + offset;
+            at + if source[at..].starts_with("\r\n") {
+                2
+            } else {
+                1
+            }
+        }
+    }
+} // End of function line_end()
+
+/// The whole lines a removal of this entry deletes or keeps, leading comment
+/// block included.
+///
+/// [`entry_lines`] starts at the key's own line. The engine's envelope starts at
+/// the start of the **ownership hull**, which reaches further up whenever the
+/// entry owns a leading comment block: plan section 6.2's rule 1 gives contiguous
+/// comments immediately above a node to that node, so they are the entry's trivia
+/// and are deleted with it.
+///
+/// Derived textually — walk up over comment-only lines and stop at the first line
+/// that is blank or holds anything else — rather than by asking
+/// `TriviaIndex::subtree_extent`, which is the very hull the engine used. The walk
+/// cannot pull a **file-owned** comment in: a blank line above the block is what
+/// rule 2 reads to give the comments above it to the file, and the walk stops
+/// there.
+fn entry_hull_lines(source: &str, lines: ByteSpan, body_offset: usize) -> ByteSpan {
+    let mut start = lines.start;
+    while start > body_offset {
+        let above = line_start(source, start - 1, body_offset);
+        let text = source[above..start].trim_start_matches([' ', '\t']);
+        if !text.starts_with('#') {
+            return ByteSpan::new(start, lines.end);
+        }
+        start = above;
+    } // End of the walk up over the entry's own leading comment block
+    ByteSpan::new(start, lines.end)
+} // End of function entry_hull_lines()
 
 /// Checks an insertion point by its properties.
 ///
@@ -818,6 +1152,8 @@ struct Derived {
     has_a_line_ending: bool,
     /// A file-owned comment inside the entry's own lines, if there is one.
     file_comment: Option<ByteSpan>,
+    /// Whether the bytes a removal would keep would join a block scalar above.
+    block_absorbs: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -913,6 +1249,7 @@ fn audit(name: &str, source: &str, stride: usize) -> Tally {
             columns_agree,
             has_a_line_ending,
             file_comment: None,
+            block_absorbs: false,
         };
 
         // 1. Append a new entry, once per replacement value.
@@ -1025,15 +1362,15 @@ fn audit(name: &str, source: &str, stride: usize) -> Tally {
                     );
                     assert!(entries.len() > 1, "{label}: emptied its mapping");
                     check_candidate_is_the_splice(&label, source, &patched);
-                    assert_eq!(patched.replacements().len(), 1, "{label}: one replacement");
-                    check_removal_envelope(
-                        &label,
-                        source,
-                        &index,
-                        patched.replacements()[0].span,
-                        *key,
-                        *value,
-                    );
+                    let runs: Vec<ByteSpan> = patched
+                        .replacements()
+                        .iter()
+                        .map(|replacement| {
+                            assert_eq!(replacement.text, "", "{label}: a removal writes no bytes");
+                            replacement.span
+                        })
+                        .collect();
+                    check_removal_runs(&label, source, &index, &trivia, &runs, *key, *value);
                     check_removed(&label, &index, &mapping_path, *key, &before, &patched);
                     // The oracle finding 1 walked past: a comment the document
                     // gives to the file must still be in the candidate.
@@ -1042,16 +1379,26 @@ fn audit(name: &str, source: &str, stride: usize) -> Tally {
                     }
                     tally.removed += 1;
                 }
-                Err(error) => classify(
-                    &label,
-                    &error,
-                    &Derived {
-                        kept_block: kept_block_above(source, &index, lines),
-                        file_comment: file_comment_in_entry(&trivia, lines),
-                        ..base(owns_its_line(*key))
-                    },
-                    &mut tally,
-                ),
+                Err(error) => {
+                    // The engine's envelope starts at the ownership hull, which
+                    // covers the entry's leading comment block; the bytes it would
+                    // keep are what the preservation rule protects inside it.
+                    let hull = entry_hull_lines(source, lines, body_offset);
+                    let kept = preserved_by_the_rule(source, &trivia, hull, body_offset);
+                    classify(
+                        &label,
+                        &error,
+                        &Derived {
+                            kept_block: kept_block_above(source, &index, lines),
+                            file_comment: file_comment_in_entry(&trivia, lines),
+                            block_absorbs: kept_bytes_would_join_a_block(
+                                source, &index, &kept, hull.start,
+                            ),
+                            ..base(owns_its_line(*key))
+                        },
+                        &mut tally,
+                    );
+                }
             }
         } // End of the loop over the mapping's entries, removing each
     } // End of the loop over every mapping of the document
@@ -1145,6 +1492,13 @@ fn classify(label: &str, error: &EditError, derived: &Derived, tally: &mut Tally
             );
             tally.file_comment += 1;
         }
+        EditError::RemovalWouldExtendABlockScalar { .. } => {
+            assert!(
+                derived.block_absorbs,
+                "{label}: nothing would be kept, or no block scalar's content ends above it"
+            );
+            tally.block_absorbs += 1;
+        }
         other => panic!("{label}: unexpected outcome {other}"),
     }
 } // End of function classify()
@@ -1233,12 +1587,13 @@ fn check_removed(
 // ---------------------------------------------------------------------------
 
 /// Column headings for the printed tables, in [`Tally`] declaration order.
-const HEADINGS: &str = "   ins    rem  gate  flow  last  line   dup  keep  cmnt   sib  ind  brk";
+const HEADINGS: &str =
+    "   ins    rem  gate  flow  last  line   dup  keep  cmnt   blk   sib  ind  brk";
 
-/// One tally's twelve numbers, formatted under [`HEADINGS`].
+/// One tally's thirteen numbers, formatted under [`HEADINGS`].
 fn columns(tally: &Tally) -> String {
     format!(
-        "{:>6} {:>6} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>4} {:>4}",
+        "{:>6} {:>6} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>4} {:>4}",
         tally.inserted,
         tally.removed,
         tally.refused_by_the_gate,
@@ -1248,6 +1603,7 @@ fn columns(tally: &Tally) -> String {
         tally.key_present,
         tally.kept_block,
         tally.file_comment,
+        tally.block_absorbs,
         tally.no_such_sibling,
         tally.inconsistent_indent,
         tally.no_line_ending
@@ -1320,20 +1676,14 @@ fn every_mapping_of_the_synthetic_corpus_is_edited_or_refused_for_a_derivable_re
         "the keep-chomping refusal is unreached"
     );
     // Every refusal family must be reached by the corpus, or its assertion is a
-    // statement about nothing. The three the Phase 0c-3a review's fix round added
-    // are here too: a file-owned comment inside a removable collection
-    // (`file-comments-and-mixed-endings.yml`), an insertion after an entry that
-    // does not exist (every mapping), and a document with no line break at all
-    // (`single-line-no-line-ending.yml`).
+    // statement about nothing. Two the Phase 0c-3a review's fix round added are
+    // here: an insertion after an entry that does not exist (every mapping), and
+    // a document with no line break at all (`single-line-no-line-ending.yml`).
     assert!(total.refused_by_the_gate > 0);
     assert!(total.flow > 0);
     assert!(total.last_entry > 0);
     assert!(total.shares_a_line > 0);
     assert!(total.key_present > 0);
-    assert!(
-        total.file_comment > 0,
-        "no fixture offers a removal whose envelope crosses a file-owned comment"
-    );
     assert!(
         total.no_such_sibling > 0,
         "the missing-sibling refusal is unreached"
@@ -1342,13 +1692,45 @@ fn every_mapping_of_the_synthetic_corpus_is_edited_or_refused_for_a_derivable_re
         total.no_line_ending > 0,
         "no fixture offers an insertion with no line ending to copy"
     );
-    // And the one category that is unreachable rather than unreached: a block
-    // mapping whose keys disagree on a column does not parse, and the two shapes
-    // that can disagree are refused earlier. Asserted at zero deliberately, with
-    // the reason recorded on `Tally::inconsistent_indent`.
+    // Phase 0c-3b-1's own refusal: the residual shape a run-based envelope cannot
+    // express, reached by `run-based-removal-envelope.yml`.
+    assert!(
+        total.block_absorbs > 0,
+        "no fixture offers a removal whose kept bytes would join a block scalar"
+    );
+    // …and a removal that keeps a file-owned comment has to be **reached** as a
+    // success, or R21's closure is a claim about nothing. Four fixtures offer one,
+    // and the last two are the shapes the Phase 0c-3b-1 review's finding 2 named:
+    // a preserved comment at column zero under a folded block, and an entry that
+    // owns a leading comment block as well as holding a file-owned one.
+    let multi_run = [
+        ("file-comments-and-mixed-endings.yml", "matches[0].vars"),
+        ("run-based-removal-envelope.yml", "matches[0].vars"),
+        ("run-based-removal-boundaries.yml", "matches[0].vars"),
+        ("run-based-removal-boundaries.yml", "matches[1].vars"),
+    ];
+    for (name, field) in multi_run {
+        let file = fixture(name);
+        let path = DocumentPath::parse(field).expect("the path parses");
+        let patched = remove_field(&file.source, &path)
+            .unwrap_or_else(|error| panic!("{name}: {field} must be removable: {error}"));
+        assert!(
+            patched.replacements().len() > 1,
+            "{name}: {field} is the corpus's run-based envelope and it has one run"
+        );
+    } // End of the loop over the fixtures that offer a multi-run removal
+
+    // The two categories that are unreachable rather than unreached, both pinned
+    // at zero deliberately with the argument recorded on their `Tally` fields: a
+    // valid block mapping cannot have keys at two columns, and the punch-out
+    // cannot leave a file-owned comment inside a run.
     assert_eq!(
         total.inconsistent_indent, 0,
         "a valid block mapping cannot have keys at two columns"
+    );
+    assert_eq!(
+        total.file_comment, 0,
+        "a derived run can no longer cover a comment the file owns"
     );
 } // End of function every_mapping_of_the_synthetic_corpus_is_edited_or_refused_for_a_derivable_reason()
 
@@ -1477,17 +1859,19 @@ fn the_empty_entry_fixture_removes_and_inserts_around_its_zero_width_values() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn removing_a_collection_that_holds_a_file_comment_is_refused_rather_than_applied() {
-    // The review's finding 1, on its own input. Before the fix this removal
-    // **applied** and returned `b: 3\n`: the comment is separated from `y` by a
-    // blank line, so `PROGRESS.md` D2d gives it to the file, and the file's
-    // comments are the one thing an entry's envelope may never contain.
+fn removing_a_collection_that_holds_a_file_comment_keeps_the_comment_byte_for_byte() {
+    // **The D2o example, and the whole point of Phase 0c-3b-1 (R21).** The Phase
+    // 0c-3a review's finding 1 was that this removal *applied* and returned
+    // `b: 3\n`, deleting a comment the ownership rules give to the file. 0c-3a
+    // answered by refusing the removal outright, which was the safe half of an
+    // unfinished answer: one contiguous span cannot delete the entry and keep the
+    // comment. The envelope is now the set of runs either side of it.
     let source = "a:\n  x: 1\n  # keep this file comment\n\n  y: 2\nb: 3\n";
     let index = SyntaxIndex::parse(source).expect("the probe parses");
     let trivia = TriviaIndex::scan(source, &index);
 
-    // Stated first as a fact about the document, so the refusal below is not the
-    // only thing claiming it.
+    // Stated first as a fact about the document, so the assertions below are not
+    // the only thing claiming it.
     let owned: Vec<_> = trivia.file_comments().collect();
     assert_eq!(owned.len(), 1, "the file owns exactly the one comment");
     assert_eq!(
@@ -1496,29 +1880,359 @@ fn removing_a_collection_that_holds_a_file_comment_is_refused_rather_than_applie
     );
 
     let path = DocumentPath::parse("a").expect("the path parses");
-    match remove_field(source, &path) {
-        Err(EditError::RemovalWouldDeleteAFileComment { comment, .. }) => {
-            assert_eq!(comment, owned[0].span, "the refusal names that comment");
+    let patched = remove_field(source, &path).expect("the removal applies");
+    // Byte-exact, indentation and the blank line under the comment included.
+    assert_eq!(patched.text(), "  # keep this file comment\n\nb: 3\n");
+    assert_eq!(
+        patched.replacements().len(),
+        2,
+        "the envelope is two runs, not one span"
+    );
+    check_removal_runs(
+        "the D2o example",
+        source,
+        &index,
+        &trivia,
+        &patched
+            .replacements()
+            .iter()
+            .map(|replacement| replacement.span)
+            .collect::<Vec<ByteSpan>>(),
+        espansoconfig_core::patch::resolve_full(&index, &path)
+            .expect("resolves")
+            .key
+            .expect("a key"),
+        espansoconfig_core::patch::resolve(&index, &path).expect("resolves"),
+    );
+
+    // …and the entries *inside* the collection are still removable, exactly as
+    // they were while the whole entry was refused (`PROGRESS.md`, R12).
+    for field in ["a.x", "a.y"] {
+        remove_field(source, &DocumentPath::parse(field).expect("parses"))
+            .unwrap_or_else(|error| panic!("{field} must still be removable: {error}"));
+    }
+} // End of function removing_a_collection_that_holds_a_file_comment_keeps_the_comment_byte_for_byte()
+
+#[test]
+fn the_one_shape_a_run_based_envelope_still_refuses_is_the_block_scalar_above() {
+    // The residual shape, on corpus data. Keeping the file-owned comment inside
+    // `vars` would leave it directly below the `replace: |` block's content, at
+    // that block's own body column — where it is content of the block rather than
+    // a comment, so `replace` would decode with an extra line although nothing
+    // about it was edited. Refused by name rather than performed.
+    let file = fixture("run-based-removal-envelope.yml");
+    let refused = DocumentPath::parse("matches[1].vars").expect("the path parses");
+    match remove_field(&file.source, &refused) {
+        Err(EditError::RemovalWouldExtendABlockScalar { block, .. }) => {
+            let index = SyntaxIndex::parse(&file.source).expect("the fixture parses");
+            let node = index.node(block).expect("the named node exists");
+            let presentation = &node.scalar.as_ref().expect("a scalar").presentation;
+            assert!(
+                presentation.style.is_block(),
+                "the refusal must name a block scalar"
+            );
         }
         Ok(patched) => panic!("the removal applied and produced {:?}", patched.text()),
         Err(other) => panic!("refused for the wrong reason: {other}"),
     }
 
-    // …and the entries *inside* the collection are still removable, so the
-    // refusal is scoped to the envelope that actually crosses the comment
-    // (`PROGRESS.md`, R12) rather than to anything near one.
-    for field in ["a.x", "a.y"] {
-        remove_field(source, &DocumentPath::parse(field).expect("parses"))
-            .unwrap_or_else(|error| panic!("{field} must still be removable: {error}"));
+    // Its own siblings, and the same shape without a block above it, are
+    // unaffected: the refusal is scoped to the one hazard rather than to comments
+    // or to block scalars in general.
+    for field in [
+        "matches[1].replace",
+        "matches[1].vars.only",
+        "matches[1].vars.last",
+        "matches[0].vars",
+    ] {
+        remove_field(
+            &file.source,
+            &DocumentPath::parse(field).expect("the path parses"),
+        )
+        .unwrap_or_else(|error| panic!("{field} must be removable: {error}"));
+    } // End of the loop over the removals the refusal must not touch
+} // End of function the_one_shape_a_run_based_envelope_still_refuses_is_the_block_scalar_above()
+
+#[test]
+fn a_kept_file_comment_keeps_the_blank_lines_on_both_sides_of_it() {
+    // The fixture's first match, and the reason `preserved_regions` grows over
+    // the blank runs on **both** sides: the ownership layer groups both with this
+    // comment's line. The one *below* is literally what rule 2 reads to give the
+    // comment to the file, so deleting it would hand the surviving comment to
+    // whatever ends up underneath; the one above is the rest of the neighbourhood
+    // `blank_runs()` reports, and the gap layer does not arbitrate side by side.
+    // **Neither survives as "layout"** — the Phase 0c-3b-1 review's finding 1
+    // withdrew that wording, and
+    // `a_blank_run_survives_only_where_it_touches_a_kept_comment` in
+    // `src/patch/edit.rs` pins the other direction: a blank run touching no kept
+    // comment is deleted with the entry.
+    let file = fixture("run-based-removal-envelope.yml");
+    let path = DocumentPath::parse("matches[0].vars").expect("the path parses");
+    let patched = remove_field(&file.source, &path).expect("the removal applies");
+
+    let kept = concat!(
+        "\n",
+        "      # A blank line above AND below, and blank_runs() groups both with this\n",
+        "      # line: the one below is literally what gives this comment to the FILE.\n",
+        "      # Not \"layout\" — a run touching no kept comment goes with the entry.\n",
+        "\n"
+    );
+    assert!(
+        file.source.contains(kept),
+        "the fixture no longer holds the shape this test is about"
+    );
+    assert!(
+        patched.text().contains(kept),
+        "the kept comment and its blank lines are not byte-identical"
+    );
+    // The entry itself is gone, keys and values alike. `vars:` is counted rather
+    // than searched for, because the fixture's second match has one too — and the
+    // second match is what proves the removal was scoped to the first.
+    assert_eq!(file.source.matches("vars:").count(), 2);
+    assert_eq!(patched.text().matches("vars:").count(), 1);
+    for gone in ["first: 'one'", "second: 'two'"] {
+        assert!(
+            !patched.text().contains(gone),
+            "{gone} survived the removal"
+        );
     }
-} // End of function removing_a_collection_that_holds_a_file_comment_is_refused_rather_than_applied()
+    assert!(patched.text().contains("      only: 'one'"));
+} // End of function a_kept_file_comment_keeps_the_blank_lines_on_both_sides_of_it()
+
+// ---------------------------------------------------------------------------
+// The Phase 0c-3b-1 review's findings, pinned
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_kept_comment_shallower_than_the_folded_block_above_it_applies_byte_for_byte() {
+    // **Finding 2, on corpus data.** The reviewer's case: a folded block whose
+    // body is indented six columns, and a preserved comment block at column zero.
+    // A line shallower than the body column *ends* the block exactly as the
+    // removed `vars:` key already did, so nothing about `replace` can change and
+    // the removal must apply. R23 refused it until this round because
+    // `block_scalar_ending_above` compared no columns at all.
+    let file = fixture("run-based-removal-boundaries.yml");
+    let path = DocumentPath::parse("matches[0].vars").expect("the path parses");
+    let patched = remove_field(&file.source, &path)
+        .unwrap_or_else(|error| panic!("the reviewer's safe removal must apply: {error}"));
+
+    // Byte-exact, and stated as the whole file rather than as a `contains`: the
+    // point of the fix is that the bytes *outside* the two runs are untouched.
+    let expected = concat!(
+        "# Phase 0c-3b-1 review, finding 2: the two run-boundary shapes neither corpus\n",
+        "# held. Nothing else is in this file, so every pinned count it moves is one of\n",
+        "# its own.\n",
+        "matches:\n",
+        "  - trigger: ':folded-above-a-shallow-comment'\n",
+        "    replace: >\n",
+        "      the folded body of this block is indented six columns\n",
+        "# These four comment lines sit at column zero, shallower than the folded\n",
+        "# block's body column above them, so leaving them where they are cannot turn\n",
+        "# them into that block's content: removing vars applies rather than being\n",
+        "# refused for R23.\n",
+        "\n",
+        "  - trigger: ':leading-comment-block'\n",
+        "    # This block leads vars with no blank line under it, so the ownership rules\n",
+        "    # give it to the entry and it is deleted with the entry.\n",
+        "    vars:\n",
+        "      only: 'one'\n",
+        "      # This comment has a blank line under it, so the file owns it and the\n",
+        "      # removal keeps it. Pairing the two is the run-boundary construct neither\n",
+        "      # corpus held: the hull starts above the entry's own first line.\n",
+        "\n",
+        "      last: 'two'\n",
+        "    replace: 'the entry owns its leading comments and the file owns the interior one'\n",
+    );
+    assert_eq!(patched.text(), expected);
+    assert_eq!(
+        patched.replacements().len(),
+        2,
+        "the envelope is two runs either side of the kept comment block"
+    );
+
+    // And the folded block really does still decode to what it decoded to. The
+    // sibling digest already says so inside the engine; saying it again from
+    // outside is the point of an oracle.
+    let before = SyntaxIndex::parse(&file.source).expect("the fixture parses");
+    let after = SyntaxIndex::parse(patched.text()).expect("the candidate parses");
+    let folded = |index: &SyntaxIndex| {
+        index
+            .nodes()
+            .iter()
+            .filter_map(|node| node.scalar.as_ref())
+            .find(|scalar| scalar.presentation.style.is_block())
+            .map(|scalar| scalar.value.clone())
+            .expect("the fixture's one folded block")
+    };
+    assert_eq!(folded(&before), folded(&after));
+} // End of function a_kept_comment_shallower_than_the_folded_block_above_it_applies_byte_for_byte()
+
+#[test]
+fn an_entry_owned_leading_comment_block_is_deleted_and_the_interior_file_one_is_kept() {
+    // **The run-boundary construct neither corpus held**, and the one the Phase
+    // 0c-3b-1 notes admitted to: an entry that owns a leading comment block *and*
+    // holds a comment the file owns. The envelope therefore starts **above** the
+    // entry's own first line — which is where the engine's ownership hull starts
+    // and where `entry_hull_lines` now starts in this file too, so the sweep's own
+    // R23 derivation measures from the same place the engine does.
+    let file = fixture("run-based-removal-boundaries.yml");
+    let path = DocumentPath::parse("matches[1].vars").expect("the path parses");
+    let patched = remove_field(&file.source, &path).expect("the removal applies");
+
+    // The entry's leading comments go with the entry: rule 1 gives contiguous
+    // comments immediately above a node to that node.
+    for owned in [
+        "# This block leads vars with no blank line under it",
+        "# give it to the entry and it is deleted with the entry.",
+        "only: 'one'",
+        "last: 'two'",
+    ] {
+        assert!(
+            file.source.contains(owned),
+            "the fixture no longer holds the shape this test is about"
+        );
+        assert!(
+            !patched.text().contains(owned),
+            "{owned} is the entry's own trivia and must go with it"
+        );
+    } // End of the loop over the bytes the entry owns
+
+    // The interior comment, its indentation and the blank line that makes it
+    // file-owned come out byte-identical.
+    let kept = concat!(
+        "      # This comment has a blank line under it, so the file owns it and the\n",
+        "      # removal keeps it. Pairing the two is the run-boundary construct neither\n",
+        "      # corpus held: the hull starts above the entry's own first line.\n",
+        "\n"
+    );
+    assert!(file.source.contains(kept));
+    assert!(
+        patched.text().contains(kept),
+        "the kept comment block and its blank line are not byte-identical"
+    );
+    // The envelope really did start above the entry's first line: the first run
+    // begins at the leading comment block, not at `vars:`.
+    let first = patched.replacements()[0].span;
+    let at = first.slice(&file.source).expect("the run slices");
+    assert!(
+        at.trim_start().starts_with("# This block leads vars"),
+        "the first run must begin at the entry's leading comment block"
+    );
+} // End of function an_entry_owned_leading_comment_block_is_deleted_and_the_interior_file_one_is_kept()
+
+#[test]
+fn the_preservation_rule_oracle_reports_a_disagreement_in_both_directions() {
+    // **Finding 3 of the review's finding 1: an oracle that cannot fail for the
+    // right reason is not an oracle.** The property this replaces asked only that
+    // every gap hold a file-owned comment, which no under-preservation could ever
+    // trip: delete the blank line that makes a kept comment file-owned and the gap
+    // still holds a comment. `preserved_by_the_rule` states the rule instead, and
+    // the two directions are driven here against run sets the planner cannot
+    // produce, exactly as `the_oracle_catches_a_lost_file_comment...` drives the
+    // comment scan against bytes no planner emits any more.
+    let source = "a:\n  x: 1\n\n  # file\n\n  y: 2\nb: 3\n";
+    let index = SyntaxIndex::parse(source).expect("the probe parses");
+    let trivia = TriviaIndex::scan(source, &index);
+    let hull = ByteSpan::new(0, source.len() - "b: 3\n".len());
+
+    // What the rule protects: the comment's whole line and the blank run on each
+    // side of it. Stated first as bytes, so the two experiments below are not the
+    // only thing claiming it.
+    let expected = preserved_by_the_rule(source, &trivia, hull, 0);
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].slice(source), Some("\n  # file\n\n"));
+
+    // Direction one — **under-preservation**, the case the old property was blind
+    // to. These runs keep the comment line and delete the blank run below it, so
+    // the surviving comment would be re-attributed to whatever ends up under it.
+    let under = [
+        ByteSpan::new(hull.start, expected[0].start + 1),
+        ByteSpan::new(expected[0].end - 1, hull.end),
+    ];
+    let complaint = std::panic::catch_unwind(|| {
+        check_removal_runs(
+            "under",
+            source,
+            &index,
+            &trivia,
+            &under,
+            key(&index),
+            value(&index),
+        );
+    })
+    .expect_err("the oracle must reject an envelope that deletes what the rule protects");
+    assert!(
+        message(&complaint).contains("which the preservation rule protects"),
+        "the oracle must name the bytes it lost, not merely fail: {}",
+        message(&complaint)
+    );
+
+    // Direction two — **over-preservation**. These runs keep a blank run the rule
+    // does not protect, which is the behaviour the review asked for and this phase
+    // declined. The oracle must report a disagreement about named bytes rather
+    // than rejecting it as "a gap with no comment in it", so that a future round
+    // that *does* adopt it has one function to change and a real message to read.
+    let unowned = "a:\n  x: 1\n\n  y: 2\nb: 3\n";
+    let plain = SyntaxIndex::parse(unowned).expect("the probe parses");
+    let plain_trivia = TriviaIndex::scan(unowned, &plain);
+    let blank = unowned.find("\n\n").expect("the blank line is there") + 1;
+    let over = [
+        ByteSpan::new(0, blank),
+        ByteSpan::new(blank + 1, unowned.len() - "b: 3\n".len()),
+    ];
+    let complaint = std::panic::catch_unwind(|| {
+        check_removal_runs(
+            "over",
+            unowned,
+            &plain,
+            &plain_trivia,
+            &over,
+            key(&plain),
+            value(&plain),
+        );
+    })
+    .expect_err("the oracle must reject an envelope that keeps what the rule does not protect");
+    assert!(
+        message(&complaint).contains("which the preservation rule does not protect"),
+        "the oracle must name the bytes it kept: {}",
+        message(&complaint)
+    );
+} // End of function the_preservation_rule_oracle_reports_a_disagreement_in_both_directions()
+
+/// The key node of the entry `a` in the probe documents above.
+fn key(index: &SyntaxIndex) -> NodeId {
+    espansoconfig_core::patch::resolve_full(index, &DocumentPath::parse("a").expect("parses"))
+        .expect("resolves")
+        .key
+        .expect("a key")
+}
+
+/// The value node of the entry `a` in the probe documents above.
+fn value(index: &SyntaxIndex) -> NodeId {
+    espansoconfig_core::patch::resolve(index, &DocumentPath::parse("a").expect("parses"))
+        .expect("resolves")
+}
+
+/// The panic message of a caught assertion, whichever payload type it carried.
+fn message(payload: &Box<dyn std::any::Any + Send>) -> &str {
+    payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("<non-string panic payload>")
+} // End of function message()
 
 #[test]
 fn the_oracle_catches_a_lost_file_comment_that_every_other_check_accepts() {
-    // The refusal is not the interesting half. Finding 1 got through because
-    // **nothing could see it**: the candidate parsed, `b` was unchanged, the
-    // entry count had dropped by one, and the digests hold no comments. So this
-    // asserts the oracle itself, on the exact bytes the old engine produced.
+    // **The third of R21's three visibility layers, and the one that has to stay
+    // live now that the planner performs the removal instead of refusing it.**
+    // Finding 1 got through because *nothing could see it*: the candidate parsed,
+    // `b` was unchanged, the entry count had dropped by one, and the digests hold
+    // no comments. So this asserts the oracle itself, on the exact bytes the
+    // hull-based engine produced — bytes no planner in the tree can produce any
+    // more, which is precisely why the oracle has to be driven directly.
+    // `docs/decisions/0c-3b-1-notes.md` records the disabling experiment that
+    // confirms each of the three layers catches the class on its own.
     let source = "a:\n  x: 1\n  # keep this file comment\n\n  y: 2\nb: 3\n";
     let index = SyntaxIndex::parse(source).expect("the probe parses");
     let trivia = TriviaIndex::scan(source, &index);

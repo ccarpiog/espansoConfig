@@ -1,0 +1,26 @@
+# Phase 0c-3b-1 review, finding 2: the two run-boundary shapes neither corpus
+# held. Nothing else is in this file, so every pinned count it moves is one of
+# its own.
+matches:
+  - trigger: ':folded-above-a-shallow-comment'
+    replace: >
+      the folded body of this block is indented six columns
+    vars:
+      first: 'one'
+# These four comment lines sit at column zero, shallower than the folded
+# block's body column above them, so leaving them where they are cannot turn
+# them into that block's content: removing vars applies rather than being
+# refused for R23.
+
+      second: 'two'
+  - trigger: ':leading-comment-block'
+    # This block leads vars with no blank line under it, so the ownership rules
+    # give it to the entry and it is deleted with the entry.
+    vars:
+      only: 'one'
+      # This comment has a blank line under it, so the file owns it and the
+      # removal keeps it. Pairing the two is the run-boundary construct neither
+      # corpus held: the hull starts above the entry's own first line.
+
+      last: 'two'
+    replace: 'the entry owns its leading comments and the file owns the interior one'

@@ -125,9 +125,12 @@ fn our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar() {
     // adds 31 scalars, of which **5 are zero width** and are skipped above, so
     // the figure moves by 26 and our decoder agrees with the substrate on every
     // one of the 26. 886 since the review's fix round added 22 more scalars in
-    // two fixtures, none of them zero width, all of them in agreement.
+    // two fixtures, none of them zero width, all of them in agreement. 905 since
+    // Phase 0c-3b-1's `run-based-removal-envelope.yml` added 19, likewise none
+    // zero width and all in agreement, and 924 since its review's fix round added
+    // the 19 of `run-based-removal-boundaries.yml` on the same terms.
     assert_eq!(
-        total, 886,
+        total, 924,
         "the synthetic corpus scalar count is pinned; update it deliberately"
     );
 } // End of function our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar()
@@ -267,11 +270,19 @@ fn every_synthetic_scalar_reencodes_to_its_own_bytes() {
     // 873 since the Phase 0c-3a review's fix round: the 20 scalars of
     // `file-comments-and-mixed-endings.yml` and the 2 of
     // `single-line-no-line-ending.yml`, all quoted or plain and all identical.
-    assert_eq!(tally.identical, 873, "pinned; update deliberately");
+    // 892 since Phase 0c-3b-1's `run-based-removal-envelope.yml`: 18 quoted or
+    // plain scalars plus its one `|` block, all of which re-encode identically —
+    // a literal block does, unlike a folded one (D2e).
+    // 910 since its review's fix round added `run-based-removal-boundaries.yml`,
+    // which moves this figure by **18 of its 19** rather than by all of them: its
+    // one block scalar is a `>`, so it joins the `FoldedStyle` family below. That
+    // asymmetry between the two otherwise identically shaped fixtures is its own
+    // cross-check on D2e.
+    assert_eq!(tally.identical, 910, "pinned; update deliberately");
     assert_eq!(
         tally.refused,
         BTreeMap::from([
-            ("FoldedStyle".to_owned(), 11),
+            ("FoldedStyle".to_owned(), 12),
             ("NonCanonicalEscaping".to_owned(), 4),
             ("FoldedFlowScalar".to_owned(), 2),
             ("SynthesisedFinalBreak".to_owned(), 1),
@@ -310,7 +321,7 @@ fn refusals_of(source: &str) -> Vec<String> {
 /// list names the byte range of every refused scalar, so any such swap changes
 /// it. There is deliberately **no real-corpus counterpart**: that corpus is
 /// private (`PROGRESS.md`, D1) and no figure derived from it may be committed.
-const SYNTHETIC_REFUSALS: [(&str, &str); 18] = [
+const SYNTHETIC_REFUSALS: [(&str, &str); 19] = [
     (
         // Phase 0c-2b's fix round added this fixture. Its `>2` header is the only
         // refusal it contributes: `>` is decode-only (D2e), so the other 12
@@ -365,6 +376,14 @@ const SYNTHETIC_REFUSALS: [(&str, &str); 18] = [
     (
         "synthetic/plain-scalar-hazards.yml",
         "DoubleQuoted 2138..2172 NonCanonicalEscaping",
+    ),
+    (
+        // The Phase 0c-3b-1 review's fix round added this fixture, and its one
+        // block scalar is a `>` on purpose: it is the folded shape finding 2's
+        // safe case needs, and it is also the only refusal the fixture
+        // contributes, so its other 18 scalars re-encode byte-identically.
+        "synthetic/run-based-removal-boundaries.yml",
+        "Folded 239..299 FoldedStyle",
     ),
     (
         "synthetic/scalar-styles.yml",

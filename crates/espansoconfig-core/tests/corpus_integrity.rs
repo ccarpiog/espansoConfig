@@ -1,13 +1,14 @@
 //! Guards on the corpus itself.
 //!
-//! Eleven fixtures exist precisely because they violate what an editor considers
+//! Twelve fixtures exist precisely because they violate what an editor considers
 //! tidy: CRLF line endings, a leading UTF-8 BOM, a missing final newline, an
 //! unnormalised (NFD) `é`, deliberate runs of blank lines around block scalars,
 //! spaces after a block indicator, more-indented folded lines, a *mixture* of
-//! CRLF and LF endings in one file, and a document with no line break at all.
-//! Editors, formatters, Unicode normalisation and git's own end-of-line
-//! conversion all offer to "fix" them, and every one of those fixes silently
-//! deletes the test.
+//! CRLF and LF endings in one file, a document with no line break at all, and
+//! comment lines whose **column** — zero under an indented folded block, flush
+//! against the key below them — is the whole test. Editors, formatters, Unicode
+//! normalisation and git's own end-of-line conversion all offer to "fix" them,
+//! and every one of those fixes silently deletes the test.
 //!
 //! These assertions are on raw bytes, not parsed content, so they fail loudly
 //! the moment a fixture is normalised.
@@ -238,6 +239,52 @@ fn the_folded_fixture_keeps_its_more_indented_lines() {
 } // End of function the_folded_fixture_keeps_its_more_indented_lines()
 
 #[test]
+fn the_boundaries_fixture_keeps_its_column_zero_comments_and_its_leading_block() {
+    // Added by the Phase 0c-3b-1 review's fix round for finding 2. Two things in
+    // this file are indentation rather than text, and an editor that re-indents
+    // comment lines — which several offer to do — destroys both:
+    //
+    // - four comment lines at **column zero** under a folded block whose body is
+    //   indented six columns. Their column is the whole test: it is what proves
+    //   they cannot become that block's content, so `RemovalWouldExtendABlockScalar`
+    //   must not fire. Indent them and the fixture silently starts testing the
+    //   refusal instead of the narrowing;
+    // - a comment block indented to the **same** column as the `vars:` key
+    //   directly under it, with no blank line between the two. That is what plan
+    //   section 6.2's rule 1 reads to give those comments to the entry, so the
+    //   removal envelope starts above the entry's own first line. A blank line
+    //   inserted there hands them to the file instead and the construct is gone.
+    let bytes = fixture_bytes("run-based-removal-boundaries.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    // Only the comments *inside* the document body count: the file's own three
+    // header lines are at column zero too, and they are ordinary file-header
+    // trivia rather than the shape this fixture exists for.
+    let body = text
+        .split_once("matches:\n")
+        .expect("the fixture still opens with its `matches` key")
+        .1;
+    let at_column_zero = body.lines().filter(|line| line.starts_with("# ")).count();
+    println!("run-based-removal-boundaries.yml: {at_column_zero} interior column-zero comments");
+    assert_eq!(
+        at_column_zero, 4,
+        "the four column-zero comment lines under the folded block must survive"
+    );
+    assert!(
+        text.contains("    replace: >\n      the folded body"),
+        "the folded header and its six-column body must keep their columns"
+    );
+    assert!(
+        text.contains("    # give it to the entry and it is deleted with the entry.\n    vars:\n"),
+        "the leading comment block must stay flush against `vars:` with no blank line"
+    );
+    assert!(
+        text.ends_with("interior one'\n"),
+        "the file must still end with a single line break"
+    );
+} // End of function the_boundaries_fixture_keeps_its_column_zero_comments_and_its_leading_block()
+
+#[test]
 fn the_mixed_ending_fixture_keeps_its_two_crlf_lines_and_its_missing_final_break() {
     // Added by the Phase 0c-3a review's fix round. Two of this file's lines end
     // with CRLF and the rest with a bare LF, so the document-wide "dominant"
@@ -337,6 +384,17 @@ fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
         // that supplies no line-ending evidence at all.
         "file-comments-and-mixed-endings.yml",
         "single-line-no-line-ending.yml",
+        // Added by Phase 0c-3b-1: the two shapes that tell a run-based removal
+        // envelope from a contiguous hull — a file-owned comment with blank lines
+        // on both sides, and one whose lines would join a block scalar above if
+        // they were kept where they are.
+        "run-based-removal-envelope.yml",
+        // Added by the Phase 0c-3b-1 **review's** fix round, for finding 2: a
+        // folded block above a preserved comment at column zero, which R23's
+        // column comparison must allow, and an entry-owned leading comment block
+        // paired with an interior file comment, which makes a removal envelope
+        // start above the entry's own first line.
+        "run-based-removal-boundaries.yml",
     ];
     for fixture in required {
         assert!(

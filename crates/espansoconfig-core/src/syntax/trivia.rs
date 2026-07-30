@@ -519,14 +519,15 @@ impl TriviaIndex {
     /// finding 1 was exactly the difference — a removal built on this hull
     /// deleted a comment the document assigns to the file.
     ///
-    /// **A consumer that deletes these bytes must therefore check
-    /// [`TriviaIndex::file_comments`] against the span it is about to remove**
-    /// and refuse when the two intersect, which is what
-    /// `crate::patch::edit::EditError::RemovalWouldDeleteAFileComment` does. The
-    /// eventual answer is an envelope expressed as owned *runs* rather than one
-    /// hull, since a single [`ByteSpan`] cannot say "remove the collection but
-    /// keep this interior comment"; that is recorded in
-    /// `docs/decisions/0c-3a-notes.md`.
+    /// **A consumer that deletes these bytes must therefore reconcile the hull
+    /// with [`TriviaIndex::file_comments`].** Phase 0c-3a refused the removal
+    /// outright, which was safe and cost a legal edit. Since Phase 0c-3b-1
+    /// `crate::patch::edit` instead punches those comments' whole lines — and the
+    /// blank runs beside them — out of the hull and deletes the ordered set of
+    /// **runs** that is left, because a single [`ByteSpan`] cannot say "remove the
+    /// collection but keep this interior comment" and a set can. This call is
+    /// deliberately unchanged: it answers "which bytes could the subtree's own
+    /// trivia reach", and turning that into an envelope is the edit layer's job.
     ///
     /// Nothing between two owned runs is *claimed* by this call, and
     /// `tests/syntax_index.rs` asserts corpus-wide that the hull never reaches

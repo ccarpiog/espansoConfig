@@ -19,6 +19,17 @@ move needs, and the full R9 round-trip property test. Those are **0c-3b**.
 > refusal reason is re-derived independently". Section 2's description of the envelope was also
 > wrong about file-owned comments, and section 8 has been retabulated.
 
+> **Superseded in part by Phase 0c-3b-1**
+> ([`docs/decisions/0c-3b-1-notes.md`](0c-3b-1-notes.md)). The envelope is **no longer a contiguous
+> hull**: it is an ordered, disjoint set of owned runs, so the removal section 2.1 records as
+> *refused* is now performed and the file's comment is kept byte for byte. Wherever this file says
+> "the envelope is one `ByteSpan`", "such a removal is refused" or "0c-3b owns it", read the 0c-3b-1
+> notes instead. Two of this file's own predictions were also measured wrong there — section 2.1
+> overstated what the change would disturb, and neither this file nor the review noticed that keeping
+> a comment can feed it to a block scalar above (now **R23**). Every count in section 8 still
+> describes the fixtures it names correctly; the corpus-wide totals have since moved, and 0c-3b-1's
+> section 5 carries the current ones.
+
 ---
 
 ## 1. R3 — where a block collection really ends
@@ -166,6 +177,15 @@ out of it — spliced as several replacements rather than one. That changes the 
 `PlannedEdit`, of `StructuralGuard`, of the permitted-span check and of the per-fixture golden
 tables, and it interacts with the whole-document invariant 0c-3b needs for a move. Doing it here
 would mean rewriting the verification layer in the same round that is fixing it. **0c-3b owns it.**
+
+> **Landed in 0c-3b-1, and this paragraph was measurably too pessimistic.** `PlannedEdit` did not
+> change shape at all — it already held a `Vec<Replacement>`, because a block scalar is two
+> replacements (D2c) — and neither did the permitted-span check, and nothing about the move's
+> whole-document invariant was touched. `StructuralGuard` and the golden tables did change, as
+> predicted, and the guard got a **second** half a hull had made unstatable. The paragraph also missed
+> the one thing punching the comments out is not sufficient for: a kept comment directly under a block
+> scalar's content becomes that block's content, now refused as `RemovalWouldExtendABlockScalar`
+> (**R23**). See [`0c-3b-1-notes.md`](0c-3b-1-notes.md) §3 and §7.1.
 
 **And the refusal alone was not accepted as sufficient.** A refusal in the planner leaves the
 *verification* layer exactly as blind as it was, so the next envelope defect would hide the same way.
@@ -711,7 +731,8 @@ Two things this round deliberately did not do, both of which belong to whoever o
 
 - **The run-based envelope** (§2.1). Recorded here, in `EditError::RemovalWouldDeleteAFileComment`'s
   own doc comment, and on `TriviaIndex::subtree_extent`. Until it lands, a removal whose envelope
-  crosses a file-owned comment is refused rather than performed-minus-the-comment.
+  crosses a file-owned comment is refused rather than performed-minus-the-comment. **Landed in
+  0c-3b-1** — see [`0c-3b-1-notes.md`](0c-3b-1-notes.md).
 - **`PROGRESS.md` is not updated by this round**, by instruction: no status row, no risk entry for the
   hull/file-comment refusal, no `Phase 0c-3a review disposition` section, no `Verification — Phase
   0c-3a` section. `PROGRESS.md` is the file this project declares authoritative for a fresh session,

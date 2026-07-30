@@ -266,11 +266,26 @@ fn every_addressable_node_of_the_synthetic_corpus_round_trips_through_its_path()
     // 9 values). `single-line-no-line-ending.yml`: 4 nodes = 1 document + the
     // root mapping + its one key and one value, so +1 document, +1 mapping key,
     // +2 addressable.
-    assert_eq!(total.total(), 1185);
-    assert_eq!(total.addressable, 685);
-    // 25 single-document fixtures plus multi-document.yml's three.
-    assert_eq!(total.documents, 28);
-    assert_eq!(total.mapping_keys, 468);
+    //
+    // Phase 0c-3b-1 added `run-based-removal-envelope.yml`, again by exactly its
+    // own shape: 26 nodes = 1 document + 6 collections (the root mapping, the
+    // `matches` sequence, 2 item mappings and their 2 nested `vars` mappings) + 19
+    // scalars, of which 11 are keys (`matches`, each item's `trigger`, `replace`
+    // and `vars`, and the four keys inside the two `vars` mappings) and 8 are
+    // values. So +1 document, +11 mapping keys, +14 addressable (6 collections + 8
+    // values), and no new ambiguity.
+    //
+    // That phase's **review** added `run-based-removal-boundaries.yml`, whose node
+    // shape is the same again — 26 nodes = 1 document + 6 collections + 19 scalars,
+    // 11 keys and 8 values — so it moves every figure by the same deltas: +1
+    // document, +11 mapping keys, +14 addressable, no new ambiguity. What differs
+    // is its trivia, not its tree, which is why `trivia_scanner.rs` separates the
+    // two fixtures and this file does not.
+    assert_eq!(total.total(), 1237);
+    assert_eq!(total.addressable, 713);
+    // 27 single-document fixtures plus multi-document.yml's three.
+    assert_eq!(total.documents, 30);
+    assert_eq!(total.mapping_keys, 490);
     // Exactly the four values under a duplicated key in duplicate-keys.yml:
     // `replace` twice in `matches[0]` and `label` twice in `matches[2]`.
     assert_eq!(total.ambiguous, 4);

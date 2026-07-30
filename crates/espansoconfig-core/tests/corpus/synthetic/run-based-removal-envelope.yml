@@ -1,0 +1,24 @@
+# Phase 0c-3b-1: the two shapes that tell a run set from a contiguous hull.
+# Nothing else is in this file, so every pinned count it moves is one of its own.
+matches:
+  - trigger: ':runs-either-side'
+    vars:
+      first: 'one'
+
+      # A blank line above AND below, and blank_runs() groups both with this
+      # line: the one below is literally what gives this comment to the FILE.
+      # Not "layout" — a run touching no kept comment goes with the entry.
+
+      second: 'two'
+    replace: 'removing vars keeps this comment and both blank lines'
+  - trigger: ':block-scalar-above'
+    replace: |
+      the content of this block ends where the next entry begins
+    vars:
+      only: 'one'
+      # Keeping this comment would leave it directly under the block above, at
+      # that block's own body column, where it is content rather than a comment.
+      # Removing vars is therefore refused instead of changing a value nobody
+      # edited.
+
+      last: 'two'

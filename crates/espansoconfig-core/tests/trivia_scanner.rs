@@ -52,10 +52,10 @@ use espansoconfig_core::ByteSpan;
 // constants rather than something a comparison quietly absorbs.
 
 /// Valid fixtures in `corpus/synthetic/`. Must agree with `syntax_index.rs`.
-const SYNTHETIC_FIXTURES: usize = 26;
+const SYNTHETIC_FIXTURES: usize = 28;
 
 /// Trivia items across the valid synthetic corpus.
-const SYNTHETIC_TRIVIA_ITEMS: usize = 2923;
+const SYNTHETIC_TRIVIA_ITEMS: usize = 3072;
 
 /// Comments the scanner finds in the gaps of the valid synthetic corpus.
 ///
@@ -80,7 +80,12 @@ const SYNTHETIC_TRIVIA_ITEMS: usize = 2923;
 /// with 6 whole-line comments and **no** inline one, so here the two conventions
 /// agree and both gained exactly 6. `single-line-no-line-ending.yml` has no
 /// comment at all.
-const SYNTHETIC_COMMENTS: usize = 229;
+///
+/// Phase 0c-3b-1's `run-based-removal-envelope.yml` is the same again: 9
+/// whole-line comments, no inline one, so both counts gained exactly 9, and so is
+/// its review's `run-based-removal-boundaries.yml`, whose 12 whole-line comments
+/// and absent inline one moved both counts by exactly 12.
+const SYNTHETIC_COMMENTS: usize = 250;
 
 /// Blank lines — whole physical lines holding nothing but spaces and tabs.
 ///
@@ -95,13 +100,24 @@ const SYNTHETIC_COMMENTS: usize = 229;
 /// ownership rules give that fixture's interior comment to the **file** — the
 /// whole reason it exists. The loose line scan gained 18 for the same file,
 /// which is the documented difference between the two conventions.
-const SYNTHETIC_BLANK_LINES: usize = 103;
+///
+/// The 3 Phase 0c-3b-1 added are `run-based-removal-envelope.yml`'s, and two of
+/// them are what give its two interior comment blocks to the **file**, which is
+/// the whole reason that fixture exists. Its loose line-scan figure gained 18 too,
+/// exactly as the mixed-endings fixture's did.
+///
+/// The 2 its review's fix round added are `run-based-removal-boundaries.yml`'s, and
+/// **both** are ownership: one gives the column-zero comment block to the file, the
+/// other the interior comment of its second match. Its loose line-scan figure gained
+/// 17.
+const SYNTHETIC_BLANK_LINES: usize = 108;
 
 /// Maximal runs of consecutive blank lines.
 ///
-/// Still one run per blank line: the three the review's fix round added are each
-/// isolated.
-const SYNTHETIC_BLANK_RUNS: usize = 99;
+/// Still one run per blank line: the three the Phase 0c-3a review's fix round
+/// added, the three Phase 0c-3b-1 added and the two its review's fix round added
+/// are each isolated.
+const SYNTHETIC_BLANK_RUNS: usize = 104;
 
 /// Bytes the scanner could not name. **Zero, and pinned at zero**: the whole
 /// point of the category is that it stays empty and says so loudly if it does
@@ -881,8 +897,8 @@ fn every_block_scalar_header_is_adopted_from_the_span_layer_and_owned_by_its_sca
     } // End of the loop over the valid synthetic corpus
 
     println!("\nblock-scalar headers adopted from the span layer: {headers}");
-    // The same 45 block scalars `syntax_index.rs` pins.
-    assert_eq!(headers, 45, "block scalars in the corpus");
+    // The same 47 block scalars `syntax_index.rs` pins.
+    assert_eq!(headers, 47, "block scalars in the corpus");
 } // End of function every_block_scalar_header_is_adopted_from_the_span_layer_and_owned_by_its_scalar()
 
 #[test]

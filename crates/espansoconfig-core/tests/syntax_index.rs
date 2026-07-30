@@ -50,7 +50,8 @@ use espansoconfig_core::{
 /// contained until the Phase 0b-1 review was closed out, plus
 /// `block-scalar-header-tails.yml` from the Phase 0c-2b review's fix round, plus
 /// `empty-entries-and-extents.yml` from Phase 0c-3a, plus the two the Phase
-/// 0c-3a **review's** fix round added.
+/// 0c-3a **review's** fix round added, plus
+/// `run-based-removal-envelope.yml` from Phase 0c-3b-1.
 ///
 /// Each of those moves every figure below, and each delta is exactly its own
 /// shape. `block-scalar-header-tails.yml`: 19 nodes — 1 document, 1 root
@@ -68,32 +69,44 @@ use espansoconfig_core::{
 /// its one key and one value — with no comment, no blank line and no line break
 /// at all. `docs/decisions/0c-3a-notes.md` section 8 tabulates every count they
 /// moved.
-const SYNTHETIC_FIXTURES: usize = 26;
+/// `run-based-removal-envelope.yml`: 26 nodes — 1 document, 6 collections (the
+/// root mapping, the `matches` sequence, 2 item mappings and their 2 nested
+/// `vars` mappings) and 19 scalars, none zero width, one of them a `|` block,
+/// carrying 9 whole-line comments and 3 real blank lines.
+/// `run-based-removal-boundaries.yml`, from that phase's **review**: the same
+/// shape again — 26 nodes, 6 collections, 19 scalars, none zero width — but its
+/// one block scalar is a `>` and it carries **12** whole-line comments and 2 real
+/// blank lines. `docs/decisions/0c-3b-1-notes.md` section 5 tabulates every count
+/// the two of them moved.
+const SYNTHETIC_FIXTURES: usize = 28;
 
 /// Scalar nodes across the valid synthetic corpus.
-const SYNTHETIC_SCALARS: usize = 891;
+const SYNTHETIC_SCALARS: usize = 929;
 
 /// Collection nodes across the valid synthetic corpus.
-const SYNTHETIC_COLLECTIONS: usize = 261;
+const SYNTHETIC_COLLECTIONS: usize = 273;
 
 /// Alias nodes across the valid synthetic corpus.
 const SYNTHETIC_ALIASES: usize = 5;
 
 /// Frontier members across the valid synthetic corpus.
-const SYNTHETIC_FRONTIER_MEMBERS: usize = 891;
+const SYNTHETIC_FRONTIER_MEMBERS: usize = 929;
 
 /// Block scalars across the valid synthetic corpus.
-const SYNTHETIC_BLOCK_SCALARS: usize = 45;
+const SYNTHETIC_BLOCK_SCALARS: usize = 47;
 
 /// Block scalars whose reported end overshot their true content end (R3).
 ///
-/// 42 of the 45, not 45: `block-scalar-header-tails.yml` contributes 2 of its 3,
-/// because its `>2` block ends the file and so has no following token to
-/// overshoot into.
-const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 42;
+/// 44 of the 47, not 47, and the three exceptions are exactly the blocks with no
+/// following token to overshoot into: `block-scalar-header-tails.yml`'s `>2` at
+/// end of file, `block-scalar-terminal-spaces.yml`'s block that ends the file,
+/// and `multi-document.yml`'s. The `|` of `run-based-removal-envelope.yml` and the
+/// `>` of `run-based-removal-boundaries.yml` are both followed by further entries,
+/// so both overshoot.
+const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 44;
 
 /// Comment lines recoverable from the gaps of the valid synthetic corpus.
-const SYNTHETIC_GAP_COMMENTS: usize = 224;
+const SYNTHETIC_GAP_COMMENTS: usize = 245;
 
 /// Flow collections across the valid synthetic corpus.
 ///
@@ -113,7 +126,12 @@ const SYNTHETIC_FLOW_COLLECTIONS: usize = 11;
 /// sequence and its last item mapping all end at end of file, so they have
 /// nowhere to overshoot into. `single-line-no-line-ending.yml`'s one mapping
 /// ends the file too, and adds nothing here.
-const SYNTHETIC_OVERSHOOTING_COLLECTIONS: usize = 234;
+/// `run-based-removal-envelope.yml` adds **all 6** of its block collections,
+/// because it does end with a line break: every collection that reaches the end of
+/// the file still has that break to overshoot into, which is exactly why the
+/// mixed-endings fixture — which has no final break — contributed only 3 of its 6.
+/// `run-based-removal-boundaries.yml` adds all 6 of its own for the same reason.
+const SYNTHETIC_OVERSHOOTING_COLLECTIONS: usize = 246;
 
 /// Block collections that own bytes past their published span end.
 ///
@@ -144,8 +162,11 @@ const SYNTHETIC_ZERO_WIDTH_LEAVES: usize = 5;
 /// adding only the **two** real blank lines that separate its three items — and
 /// the trivia scanner's own count is what proves that, by moving by 2. The same
 /// cross-check holds for `file-comments-and-mixed-endings.yml`, which moves this
-/// loose figure by 18 and the scanner's by its **three** real blank lines.
-const SYNTHETIC_GAP_BLANK_LINES: usize = 738;
+/// loose figure by 18 and the scanner's by its **three** real blank lines, and for
+/// `run-based-removal-envelope.yml`, which also moves it by 18 while the scanner
+/// moves by its **three**. `run-based-removal-boundaries.yml` moves it by 17 and
+/// the scanner's by its **two**.
+const SYNTHETIC_GAP_BLANK_LINES: usize = 773;
 
 // ===========================================================================
 // 1. Slice fidelity

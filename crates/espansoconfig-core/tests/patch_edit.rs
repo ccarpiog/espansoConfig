@@ -1,7 +1,7 @@
 //! Phase 0c-2b acceptance: the first code that mutates a document.
 //!
 //! This is the 0c-3 gate test in miniature. For **every addressable scalar** of
-//! all 26 synthetic fixtures and of the real corpus, a set of replacement values
+//! all 28 synthetic fixtures and of the real corpus, a set of replacement values
 //! is attempted, and each attempt must end in one of exactly two ways:
 //!
 //! - a **typed refusal whose reason this file re-derives from the document
@@ -144,7 +144,7 @@ type OutcomeRow = (&'static str, usize, usize, usize, usize, usize);
 /// disappearing into a total.
 ///
 /// Each row is `addressable scalars × 12` replacement values, split by outcome.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 26] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
     ("anchors-aliases-tags-merge.yml", 60, 144, 0, 0, 0),
     ("blank-lines.yml", 106, 0, 0, 2, 0),
     // Every one of its 72 attempts applies, header comment and header spaces
@@ -178,6 +178,12 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 26] = [
     ("no-trailing-newline.yml", 24, 0, 0, 0, 0),
     ("non-ascii.yml", 180, 0, 0, 0, 0),
     ("plain-scalar-hazards.yml", 888, 0, 0, 0, 0),
+    // Added by Phase 0c-3b-1 for the run-based removal envelope, and by its
+    // review's fix round for the run-boundary shapes finding 2 named. Each has 8
+    // value scalars x 12 values, and every attempt applies: nothing about a
+    // run-based *structural* envelope reaches the scalar path.
+    ("run-based-removal-boundaries.yml", 96, 0, 0, 0, 0),
+    ("run-based-removal-envelope.yml", 96, 0, 0, 0, 0),
     ("scalar-styles.yml", 264, 0, 0, 0, 0),
     // One addressable scalar × 12. A scalar edit is unaffected by the absence of
     // a line break; only a structural edit needs one to copy.
@@ -639,14 +645,16 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
     // everything would show up here as `applied == 0` even though every refusal
     // is separately justified above.
     //
-    // 419 addressable scalars × 12 replacement values. The 394 this figure held
+    // 435 addressable scalars × 12 replacement values. The 394 this figure held
     // before Phase 0c-3a gained the 15 addressable scalars of the new
     // `empty-entries-and-extents.yml` — 10 values with a token, 4 empty values
-    // and the bare sequence item's empty value — and then 10 more when the
+    // and the bare sequence item's empty value — then 10 more when the
     // review's fix round added two fixtures: 9 in
     // `file-comments-and-mixed-endings.yml` and 1 in
-    // `single-line-no-line-ending.yml`.
-    assert_eq!(total.total(), 5028);
+    // `single-line-no-line-ending.yml` — then the 8 value scalars of Phase
+    // 0c-3b-1's `run-based-removal-envelope.yml`, and finally the 8 of
+    // `run-based-removal-boundaries.yml`, which its review's fix round added.
+    assert_eq!(total.total(), 5220);
     assert_eq!(
         total.total(),
         SYNTHETIC_OUTCOMES
@@ -655,7 +663,7 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
             .sum::<usize>(),
         "the pinned rows must add up to the pinned total"
     );
-    assert_eq!(total.applied, 4687);
+    assert_eq!(total.applied, 4879);
     // 3, all in `single-line-no-line-ending.yml`: the three multi-line values of
     // `REPLACEMENTS` render as a `|` block, and a block writes line breaks into
     // a document that holds none to copy. Added by the Phase 0c-3a review's fix
