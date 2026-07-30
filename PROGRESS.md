@@ -1448,7 +1448,7 @@ _Updated at each phase boundary._
 | 0c-2a | `f56d5dd` | ✅ pushed to `origin/main` | clean |
 | 0c-2b | `4f92c03` | ✅ pushed to `origin/main` | clean |
 | 0c-3a | `8989c16` | ✅ pushed to `origin/main` | clean |
-| 0c-3b-1 | _uncommitted_ | — | **dirty on purpose** — the phase worker left the work in the tree for the orchestrator to verify and commit |
+| 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -1459,11 +1459,12 @@ findings were closed, so there is no intermediate commit holding the demonstrate
 the implementation, the three new fixtures, the review, the notes doc and this checkpoint. A fresh
 session should start from `8989c16` or later.
 
-Phase 0c-3b-1's work is in the tree at the time of writing and has **not** been committed: the run
-derivation in `src/patch/edit.rs`, the `subtree_extent` doc correction in `src/syntax/trivia.rs`, the
-new fixture `run-based-removal-envelope.yml`, the retabulated pins in six test files,
-`docs/decisions/0c-3b-1-notes.md`, and this checkpoint. It has **not** had its once-per-phase
-adversarial review yet.
+`4015ff7` is Phase 0c-3b-1 **including its review fix round** — the phase was held open until both
+findings were closed, so, as with `8989c16`, no commit holds the demonstrated defect. It contains the
+run derivation in `src/patch/edit.rs`, the `subtree_extent` doc correction in `src/syntax/trivia.rs`,
+the two new fixtures, the retabulated pins in seven test files, `CLAUDE.md` §4's twelfth fixture row,
+the review, `docs/decisions/0c-3b-1-notes.md` and this checkpoint. **A fresh session should start
+from `4015ff7` or later.**
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
