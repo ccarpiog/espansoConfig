@@ -95,7 +95,8 @@ than re-lexing. `ownership.rs` implements the plan §6.2 comment rules with the 
 documented extensions recorded in D2d, and `HazardKind` / `is_safely_editable` is the
 refuse-rather-than-guess gate Phase 0c must consult.
 
-**What is actually proven, over 22 synthetic fixtures and the 13 real files:** every byte is
+**What is actually proven, over the synthetic corpus (22 fixtures then, 23 since Phase 0c-2b added
+one) and the 13 real files:** every byte is
 either a frontier leaf or a named trivia item, the two concatenate back to the file **byte for
 byte**, and **0 bytes are unclassified in either corpus**. Because tiling alone cannot catch a
 *mislabelled* byte, two corpus-wide oracles independently re-derive each item's kind and each
@@ -119,9 +120,10 @@ keeps the current style whenever the new value is still safely representable in 
 **typed `NotReencodable` refusal**, never a silent difference.
 
 **What is proven.** Our decoder agrees with the saphyr substrate's own decoded value on
-**825/825** synthetic and **1067/1067** real scalars — zero disagreements, so the decoder is
+**838/838** synthetic (825 before Phase 0c-2b added a fixture) and **1067/1067** real scalars — zero
+disagreements, so the decoder is
 checked against an independent implementation rather than against itself. Decode-then-re-encode
-is **byte-identical on 808 synthetic and 1056 real** scalars; every remaining scalar is covered by
+is **byte-identical on 820 synthetic and 1056 real** scalars; every remaining scalar is covered by
 a named refusal, and the refusals are **structural predicates on the source text**, never "the
 bytes came out different" — a self-fulfilling check would prove nothing. `choose_scalar`'s output
 is round-tripped through the substrate for 149 adversarial values plus a 1 500-value seeded sweep,
@@ -146,14 +148,16 @@ reparse, so it is the mechanism the verify step re-finds the edited node with. I
 **not** the match identity §6.2 forbids being positional — `matches[3]` shifts on reorder, and
 `NodeId` remains the session-local identity.
 
-**What is proven.** The headline is a corpus-wide **inverse-pair oracle** over all 22 synthetic
-fixtures and the 13 real files: for every node, either `path_to` refuses for a reason the test
+**What is proven.** The headline is a corpus-wide **inverse-pair oracle** over every synthetic
+fixture and the 13 real files: for every node, either `path_to` refuses for a reason the test
 **re-derives from the tree itself**, or `resolve(path_to(n)) == n` and the path's textual form
 re-parses to the same path. The re-derivation matters — a resolver that refused everything would
 satisfy "no round trip ever failed" while being useless. Synthetic figures are pinned per
-category so two opposing drifts cannot cancel: **1 095 nodes = 634 addressable + 24 documents +
-433 mapping keys + 4 ambiguous + 0 non-scalar keys.** The 24 is itself a cross-check: 21
-single-document fixtures plus `multi-document.yml`'s three. No count from the real corpus is
+category so two opposing drifts cannot cancel: **1 114 nodes = 645 addressable + 25 documents +
+440 mapping keys + 4 ambiguous + 0 non-scalar keys.** The 25 is itself a cross-check: 22
+single-document fixtures plus `multi-document.yml`'s three. (These were 1 095 / 634 / 24 / 433 until
+Phase 0c-2b's fix round added a fixture; every delta is that fixture's own shape, tabulated in
+`docs/decisions/0c-2b-notes.md` §7.) No count from the real corpus is
 hard-coded.
 
 The two universal contracts are swept rather than sampled, after the review found them advertised
@@ -386,8 +390,10 @@ the node, on any ancestor or on any descendant disqualifies it, and a hazard wit
 because refusing a safe edit costs one fallback to the raw YAML editor while accepting an unsafe
 one costs the user their file.
 
-**Measured, and pinned exactly for the synthetic corpus:** 2 687 trivia items, 197 comments,
-94 blank lines in 90 runs, **18 hazards**, and **0 unclassified spans**. The hazard figure was 1
+**Measured, and pinned exactly for the synthetic corpus:** 2 742 trivia items, 205 comments,
+96 blank lines in 92 runs, **18 hazards**, and **0 unclassified spans**. (2 687 / 197 / 94 / 90
+until Phase 0c-2b's fix round added a fixture; the hazard count did not move, because that fixture
+raises none.) The hazard figure was 1
 before the 0b-2 review fix round, which was precisely the reviewer's evidence that the gate was
 not pessimistic; the 18 are pinned *per family* as well as in aggregate — 3 `AnchorDefinition`,
 5 `AliasReference`, 2 `MergeKey`, 2 `ExplicitTag` (all from `anchors-aliases-tags-merge.yml`),
@@ -405,10 +411,13 @@ plus two corpus-wide oracles that re-derive every item's kind and every comment'
 relationship from the source text independently of the scanner, over **both** corpora.
 
 Two count conventions now coexist and both are pinned, deliberately:
-`tests/syntax_index.rs` keeps its per-gap line scan (195 comments, 688 blank lines) as the 0b-1
+`tests/syntax_index.rs` keeps its per-gap line scan (201 comments, 697 blank lines) as the 0b-1
 tripwire on the block-scalar trim; `tests/trivia_scanner.rs` pins the scanner's token-accurate
-figures (197 comments, 94 blank lines). The comment difference is two inline comments sharing a
-line with punctuation (`matches: # …`), which a whole-line scan cannot see. The blank-line
+figures (205 comments, 96 blank lines). The comment difference is now four inline comments that share
+a line with something else — two with structural punctuation (`matches: # …`) and two, added by
+Phase 0c-2b, with a block-scalar header (`replace: | # …`) — none of which a whole-line scan can
+see. That widening from two to four is the cross-check that the new fixture's comments were counted
+correctly in both conventions. The blank-line
 difference is that the line scan counts every gap line that trims to nothing, including the break
 that merely *terminates* a content line; the scanner calls that a `LineBreak` and reserves
 `BlankLine` for a line that lies wholly inside a gap and holds nothing.
@@ -482,9 +491,10 @@ at EOF is content exactly when it is wider than `indent`.** The round-trip test'
 data loss — and the old "known shortfall" test is inverted into one that asserts correct decoding,
 plus eight neighbouring shapes.
 
-No committed corpus count moved, because no synthetic fixture has a whitespace-only final line
-inside a block at EOF. The Phase 0b figures in `tests/syntax_index.rs` (195 comments, 688 blank
-lines) and `tests/trivia_scanner.rs` (197, 94, 18 hazards) are untouched.
+No committed corpus count moved **at the time**, because no synthetic fixture has a whitespace-only
+final line inside a block at EOF: the Phase 0b figures were untouched by this fix. They have since
+moved, but only because Phase 0c-2b's fix round added a fixture — see that phase's disposition, not
+this one.
 
 ### D2h — the destination parser is YAML 1.1, so saphyr agreeing is not sufficient
 
@@ -738,7 +748,7 @@ set of contract-critical branches that were advertised and untested. All six are
 
 The reviewer's assessment of the pinned counts is recorded because it is fair and should temper
 how much they are trusted: `addressable`, `mapping_keys` and `ambiguous` catch coarse
-reachability regressions, the `1 095` total is mostly a corpus-shape lock, and **no count can
+reachability regressions, the node total is mostly a corpus-shape lock, and **no count can
 detect compensating category changes**. That is why the per-category split exists and why the
 sweeps and the re-derivation oracle carry the real weight.
 
