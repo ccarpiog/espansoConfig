@@ -1600,7 +1600,7 @@ _Updated at each phase boundary._
 | 0c-2b | `4f92c03` | ✅ pushed to `origin/main` | clean |
 | 0c-3a | `8989c16` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
-| 0c-3b-2a | `PENDING` | pending | pending |
+| 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -1617,6 +1617,14 @@ run derivation in `src/patch/edit.rs`, the `subtree_extent` doc correction in `s
 the two new fixtures, the retabulated pins in seven test files, `CLAUDE.md` §4's twelfth fixture row,
 the review, `docs/decisions/0c-3b-1-notes.md` and this checkpoint. **A fresh session should start
 from `4015ff7` or later.**
+
+`7fd9850` is Phase 0c-3b-2a **including its review fix round** — the phase was held open until all five
+findings and three of the four coverage holes were closed, so, as with `8989c16` and `4015ff7`, no commit
+holds the demonstrated defect. It contains `ItemMove` and D2q's five verification properties in
+`src/patch/edit.rs`, the new `tests/patch_move.rs`, four new fixtures, the quoted-overshoot bucket in
+`tests/parser_evaluation.rs`, the `entry_hull_lines` fix in `tests/patch_structure.rs`, retabulated pins
+across seven test files, `CLAUDE.md` §4 entries 13–15, the review, `docs/decisions/0c-3b-2a-notes.md` and
+this checkpoint. **A fresh session should start from `7fd9850` or later.**
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
