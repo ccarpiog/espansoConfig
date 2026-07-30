@@ -1,7 +1,7 @@
 //! Phase 0c-2b acceptance: the first code that mutates a document.
 //!
 //! This is the 0c-3 gate test in miniature. For **every addressable scalar** of
-//! all 28 synthetic fixtures and of the real corpus, a set of replacement values
+//! all 30 synthetic fixtures and of the real corpus, a set of replacement values
 //! is attempted, and each attempt must end in one of exactly two ways:
 //!
 //! - a **typed refusal whose reason this file re-derives from the document
@@ -144,7 +144,7 @@ type OutcomeRow = (&'static str, usize, usize, usize, usize, usize);
 /// disappearing into a total.
 ///
 /// Each row is `addressable scalars × 12` replacement values, split by outcome.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
     ("anchors-aliases-tags-merge.yml", 60, 144, 0, 0, 0),
     ("blank-lines.yml", 106, 0, 0, 2, 0),
     // Every one of its 72 attempts applies, header comment and header spaces
@@ -174,6 +174,17 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
     ("form-layout-and-choice.yml", 384, 0, 0, 0, 0),
     ("html-and-markdown.yml", 132, 0, 0, 0, 0),
     ("imports-and-global-vars.yml", 312, 0, 0, 0, 0),
+    // The two fixtures Phase 0c-3b-2a added for the move. Nothing about
+    // relocating a whole sequence item reaches the scalar path, so every attempt
+    // applies, exactly as the run-based-envelope pair does.
+    ("move-a-match.yml", 96, 0, 0, 0, 0),
+    ("move-block-scalar-seams.yml", 144, 0, 0, 0, 0),
+    // Added by the Phase 0c-3b-2a review's fix round: the internal seam of its
+    // finding 3, and R23 reached by a move. Each has 10 value scalars x 12 values,
+    // and every attempt applies — a block body at an unusual column is a *move's*
+    // problem, and nothing about it reaches the scalar path.
+    ("move-kept-comment-joins-a-block.yml", 120, 0, 0, 0, 0),
+    ("move-run-joins.yml", 120, 0, 0, 0, 0),
     ("multi-document.yml", 0, 72, 0, 0, 0),
     ("no-trailing-newline.yml", 24, 0, 0, 0, 0),
     ("non-ascii.yml", 180, 0, 0, 0, 0),
@@ -645,16 +656,20 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
     // everything would show up here as `applied == 0` even though every refusal
     // is separately justified above.
     //
-    // 435 addressable scalars × 12 replacement values. The 394 this figure held
+    // 455 addressable scalars × 12 replacement values. The 394 this figure held
     // before Phase 0c-3a gained the 15 addressable scalars of the new
     // `empty-entries-and-extents.yml` — 10 values with a token, 4 empty values
     // and the bare sequence item's empty value — then 10 more when the
     // review's fix round added two fixtures: 9 in
     // `file-comments-and-mixed-endings.yml` and 1 in
     // `single-line-no-line-ending.yml` — then the 8 value scalars of Phase
-    // 0c-3b-1's `run-based-removal-envelope.yml`, and finally the 8 of
-    // `run-based-removal-boundaries.yml`, which its review's fix round added.
-    assert_eq!(total.total(), 5220);
+    // 0c-3b-1's `run-based-removal-envelope.yml`, then the 8 of
+    // `run-based-removal-boundaries.yml`, which its review's fix round added, then
+    // Phase 0c-3b-2a's two move fixtures — 8 in `move-a-match.yml` and 12 in
+    // `move-block-scalar-seams.yml` — and finally the two its **review's** fix
+    // round added, 10 apiece: `move-kept-comment-joins-a-block.yml` and
+    // `move-run-joins.yml`.
+    assert_eq!(total.total(), 5700);
     assert_eq!(
         total.total(),
         SYNTHETIC_OUTCOMES
@@ -663,7 +678,7 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
             .sum::<usize>(),
         "the pinned rows must add up to the pinned total"
     );
-    assert_eq!(total.applied, 4879);
+    assert_eq!(total.applied, 5359);
     // 3, all in `single-line-no-line-ending.yml`: the three multi-line values of
     // `REPLACEMENTS` render as a `|` block, and a block writes line breaks into
     // a document that holds none to copy. Added by the Phase 0c-3a review's fix

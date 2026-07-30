@@ -167,10 +167,40 @@
 //! under that block's content, become part of it
 //! ([`EditError::RemovalWouldExtendABlockScalar`]).
 //!
+//! # Phase 0c-3b-2a — the move, and the invariant it forces
+//!
+//! [`ItemMove`] relocates a whole sequence item inside its own sequence. It is
+//! **a removal plus an insertion whose replacements do not overlap**, and it got
+//! no engine of its own for the same reason the structural edits did not: the
+//! source half is `removal_envelope`, the call [`FieldRemoval`] makes, and the
+//! destination half is `insertion_point`, the call [`FieldInsert`] makes. The
+//! bytes written are the bytes the source runs hold, **copied verbatim** — two
+//! positions in one block sequence sit at the same column, so there is nothing to
+//! re-indent and nothing to render.
+//!
+//! **What a move breaks is the sufficiency of property 4.** "Every byte outside
+//! the replaced spans is identical" was doing more work than it looked: it held
+//! for an insertion and a removal because neither relocates anything, so a
+//! neighbour's meaning could only change through bytes the edit declared. A move
+//! declares that its bytes moved, and the property then says nothing about the
+//! seams the relocation opens. Five whole-document properties replace it — the
+//! written bytes are the taken bytes, the lines are conserved, the sequence holds
+//! the intended permutation, every construct the move did not name still decodes
+//! to what it decoded to before, and no comment changed hands — and all five are
+//! derived from the **original** document rather than from the edit.
+//!
+//! Four shapes are refused before a byte moves, each read off the document:
+//! [`EditError::MoveChangesNothing`], [`EditError::MoveWouldInventALineEnding`],
+//! [`EditError::MoveWouldTerminateTheFinalLine`] and
+//! [`EditError::MoveWouldExtendABlockScalar`], the last of them at three external
+//! seams plus one internal seam per adjacent pair of carried runs
+//! ([`MoveSeam`]) — a removal creates one join, and a move creates all of those.
+//!
 //! # What is *not* here
 //!
-//! Moving a whole match, the multiset invariant a move needs, and the full R9
-//! round-trip property test are step 0c-3b-2.
+//! Cross-**document** and cross-**file** moves (plan section 8.4, a UI-phase
+//! concern), the full R9 round-trip property test and R16's second YAML 1.1
+//! oracle are step 0c-3b-2b.
 
 use std::fmt;
 
@@ -381,6 +411,74 @@ impl FieldRemoval {
     }
 } // End of impl FieldRemoval
 
+/// One requested change: relocate a whole **sequence item** inside its own
+/// sequence.
+///
+/// This is plan section 6.3's `MoveSourceBlock`, expressed the way every other
+/// edit in this module is expressed — by [`DocumentPath`] rather than by a
+/// [`ByteSpan`] the caller supplies. A caller that could name the source bytes
+/// could name the wrong ones, and the whole point of `PROGRESS.md` D2j is that
+/// the engine derives the bytes from the document.
+///
+/// # What a move is, mechanically
+///
+/// **A removal plus an insertion whose replacements do not overlap.** The source
+/// half derives exactly the envelope [`FieldRemoval`] derives — the ownership
+/// hull widened to whole lines, with the file's own comments and the blank runs
+/// beside them punched out — and the destination half writes the bytes those
+/// runs hold, verbatim, at a point derived exactly as an insertion's is. There is
+/// no second engine and no rendering step: the moved bytes are the source's own.
+///
+/// # Where it goes
+///
+/// [`ItemMove::after`] names the item the moved one is written after **by its
+/// index in the original sequence**, and [`ItemMove::to_front`] writes it above
+/// the sequence's first item. "In the original sequence" matters: the batch is
+/// planned against the document as it stands, so an index never means "after the
+/// item that will be there afterwards".
+///
+/// Unlike [`FieldInsert`], a move *can* be asked to go to the front. A mapping's
+/// first entry may share its line with the `-` that introduces a compact item, so
+/// there is no line to write above it; a sequence item always begins its own line
+/// (`removal_span` refuses it otherwise), and the front destination is the start
+/// of the first item's own **hull**, so a leading comment block that belongs to
+/// that first item stays with it rather than being adopted by the arrival.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemMove {
+    /// The sequence item to relocate.
+    item: DocumentPath,
+    /// The item it is written after, by index in the **original** sequence.
+    /// `None` writes it before the sequence's first item.
+    after: Option<usize>,
+}
+
+impl ItemMove {
+    /// Builds a move that writes the item after the sequence's `index`-th item,
+    /// counted in the **original** document order.
+    pub fn after(item: DocumentPath, index: usize) -> ItemMove {
+        ItemMove {
+            item,
+            after: Some(index),
+        }
+    }
+
+    /// Builds a move that writes the item above the sequence's first item.
+    pub fn to_front(item: DocumentPath) -> ItemMove {
+        ItemMove { item, after: None }
+    }
+
+    /// The sequence item being relocated.
+    pub fn item(&self) -> &DocumentPath {
+        &self.item
+    }
+
+    /// The index of the item the moved one is written after, or `None` for the
+    /// front of the sequence.
+    pub fn destination(&self) -> Option<usize> {
+        self.after
+    }
+} // End of impl ItemMove
+
 /// One requested change of any kind, for [`apply_edits`].
 ///
 /// The batch protocol is written once, over this enum, rather than once per
@@ -396,6 +494,8 @@ pub enum DocumentEdit {
     InsertField(FieldInsert),
     /// Delete an entry from a mapping.
     RemoveField(FieldRemoval),
+    /// Relocate a whole sequence item inside its own sequence.
+    MoveItem(ItemMove),
 }
 
 impl From<ScalarEdit> for DocumentEdit {
@@ -413,6 +513,12 @@ impl From<FieldInsert> for DocumentEdit {
 impl From<FieldRemoval> for DocumentEdit {
     fn from(edit: FieldRemoval) -> DocumentEdit {
         DocumentEdit::RemoveField(edit)
+    }
+}
+
+impl From<ItemMove> for DocumentEdit {
+    fn from(edit: ItemMove) -> DocumentEdit {
+        DocumentEdit::MoveItem(edit)
     }
 }
 
@@ -808,8 +914,235 @@ pub enum EditError {
         /// The mapping that would be emptied.
         mapping: NodeId,
     },
+    /// A move named something that is not an item of a **block sequence**.
+    ///
+    /// [`ItemMove`] relocates a sequence item, so its path must end in an index
+    /// segment whose parent is a sequence. A mapping entry is a different
+    /// operation — it has a key, and moving it is a question about key order
+    /// that this phase has not measured.
+    NotASequenceItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The node the path named.
+        node: NodeId,
+        /// What its parent actually is.
+        kind: NodeKind,
+    },
+    /// [`ItemMove::after`] named an index the sequence does not have.
+    NoSuchDestinationItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The sequence that was searched.
+        sequence: NodeId,
+        /// How many items it has.
+        items: usize,
+    },
+    /// The move would leave the item exactly where it already is.
+    ///
+    /// Three requests land here, and they are the same request: moving the first
+    /// item to the front, moving an item after itself, and moving an item after
+    /// its immediate predecessor. All three leave the sequence in the order it
+    /// was already in, so there is nothing to verify and nothing to undo.
+    ///
+    /// It is refused rather than answered with the document unchanged, because
+    /// the bytes would **not** be unchanged: an item whose ownership hull is
+    /// split by a comment the file owns would be lifted over that comment and
+    /// written back below it, which is a real edit nobody asked for.
+    MoveChangesNothing {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The item that is already where it was asked to go.
+        item: NodeId,
+    },
+    /// A batch that contains a move contains something else as well.
+    ///
+    /// **A deliberate scope limit of Phase 0c-3b-2a, not an invariant.** It is
+    /// recorded as a restriction because that is what it is: making move
+    /// verification *compositional* is real work that this phase did not do, and
+    /// the batch is refused rather than half-verified.
+    ///
+    /// The whole-document expectation a move is checked against is the original
+    /// document plus one permutation of the sequence's child positions. A second
+    /// edit in the same batch changes what the candidate must say, so the
+    /// expectation would have to model it — and the reviewer of this phase is right
+    /// that doing so is not circular in itself: verifying a caller-requested scalar
+    /// value against the caller's intended value is exactly how a scalar edit is
+    /// already verified, and a combined expectation could apply the permutation and
+    /// exempt precisely the independently verified rewritten node, as
+    /// `fold_expectations` already does for field batching. The earlier claim that
+    /// a combined expectation would be "authorised by the very declaration it
+    /// exists to check" was too strong and is withdrawn.
+    ///
+    /// # What the restriction costs
+    ///
+    /// - A safe, obvious request is refused: *move this match, and change its
+    ///   `replace` value*. The caller must send two batches.
+    /// - [`EditError::OverlappingEdits`] is consequently **never exercised against
+    ///   a conflict between a move and another edit**, because this check rejects
+    ///   such a batch before overlap analysis runs. Its coverage is the scalar and
+    ///   structural cases only.
+    ///
+    /// Lifting it belongs to whichever phase makes the move expectation
+    /// compositional; nothing here depends on it staying.
+    MoveMustBeTheOnlyEditInItsBatch {
+        /// Position of the move in the requested batch.
+        edit: usize,
+        /// How many edits the batch holds.
+        edits: usize,
+    },
+    /// Relocating this item would invent or destroy a line break.
+    ///
+    /// The item is the document's **last line and that line has no terminator**,
+    /// so the bytes it occupies end without a break. Writing them anywhere but the
+    /// end of the file would need a break the move does not carry — inventing one
+    /// is the silent reformatting `PROGRESS.md` D2p forbids — and taking one from
+    /// the line above instead would delete a blank line the file holds.
+    ///
+    /// Two fixtures reach it, both of them files whose bytes are the test data:
+    /// `no-trailing-newline.yml`'s family, and `block-scalar-terminal-spaces.yml`,
+    /// whose last item ends in genuine trailing spaces at end of source (R11).
+    MoveWouldInventALineEnding {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the item's bytes end, which is the end of the document.
+        at: usize,
+    },
+    /// The destination is the end of a document whose last line has **no
+    /// terminator**, so writing the item there would give that line one.
+    ///
+    /// **The twin of [`EditError::MoveWouldInventALineEnding`], and deliberately a
+    /// separate variant rather than a second reason inside it.** That one is about
+    /// the *moved* item's own last line; this one is about a line the move does not
+    /// touch at all. Folding two distinct conditions into one measured figure is
+    /// how the quoted-scalar overshoot hid for three phases (`PROGRESS.md`, R20),
+    /// so they are named and counted apart.
+    ///
+    /// # Why this is refused rather than rotated
+    ///
+    /// Phase 0c-3b-2a first answered this case by taking the carried item's own
+    /// trailing break and writing it **in front of** the item instead of behind
+    /// it: the document still ends unterminated, the byte count is unchanged, and
+    /// every whole-document property certifies the result. Its review demonstrated
+    /// that the certification is worthless here, because the break now terminates
+    /// the **previously unterminated destination line** — a line the edit never
+    /// named — and that break may not even be the style its neighbours use. In a
+    /// document whose last line is bare-LF-terminated elsewhere and whose moved
+    /// item ends in CRLF, the untouched line acquires a CRLF the user never wrote.
+    ///
+    /// `PROGRESS.md` D2p is explicit: **copy the break already in use where the
+    /// bytes land, or refuse when there is no such evidence.** At an unterminated
+    /// end of file there is no such break, so this refuses. Overriding a recorded
+    /// decision is not a phase's call to make, and the refusal costs one rare edit:
+    /// moving a match to the very end of a file that has no final newline.
+    MoveWouldTerminateTheFinalLine {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The end of the document, which is where the bytes would land.
+        at: usize,
+    },
+    /// The **block scalar the moved item ends with** would decode differently
+    /// where the move puts it.
+    ///
+    /// The mirror of [`EditError::RemovalWouldExtendAKeptBlock`], and the shape a
+    /// removal cannot have: that one is about a keep-chomped block *above* the
+    /// deleted lines gaining the blank lines below them, this one about a
+    /// keep-chomped block *inside* the relocated lines meeting different bytes
+    /// when it lands. A `|+` block's value is every line break physically present
+    /// after its last content line, and those breaks belong to whatever follows
+    /// the block rather than to the block itself, so they are not something a
+    /// move can carry.
+    ///
+    /// One clause, about the block whose content ends the item's own bytes with
+    /// nothing but blank lines between it and the end: the block is
+    /// **keep-chomped** and the first line at the destination is **blank**, so the
+    /// block would gain that break.
+    ///
+    /// A second clause used to sit beside it — the move *rotating* a line ending
+    /// at an unterminated end of file, which a clip-chomped block also counts.
+    /// [`EditError::MoveWouldTerminateTheFinalLine`] refuses that destination
+    /// outright since the Phase 0c-3b-2a review, so no move rotates anything and
+    /// the clause had nothing left to describe.
+    ///
+    /// Found on corpus data rather than reasoned about in advance:
+    /// `scalar-styles.yml`'s `:literal-keep` match is exactly this shape, and the
+    /// whole-document invariant caught it before this refusal existed.
+    MoveWouldExtendAKeptBlock {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar whose value would change.
+        block: NodeId,
+    },
+    /// A **block scalar** would swallow a line the move puts under it.
+    ///
+    /// The move's version of [`EditError::RemovalWouldExtendABlockScalar`], and
+    /// it fires at several distinct seams because a move creates several joins
+    /// where a removal creates one: three external ones, plus one internal join for
+    /// every adjacent pair of carried runs. Each is the same condition — some block scalar's
+    /// content ends directly above the line in question, with nothing but blank
+    /// lines in between, and that line sits at the block's own body column or
+    /// deeper — asked at a different place; see [`MoveSeam`].
+    ///
+    /// The body column is [`ScalarPresentation::indent`], read off the span layer
+    /// and never re-lexed, exactly as the removal's twin reads it, and a block
+    /// whose content span is **empty** is refused whatever the column is, for the
+    /// same reason: `indent` then holds the header's column rather than any
+    /// observed body's.
+    ///
+    /// **A move re-indents nothing**, which is why the condition is a column
+    /// comparison and not a column *computation*: the source and the destination
+    /// are two positions in one block sequence, so both sit at the same column by
+    /// construction and the bytes travel verbatim. What varies is the column of the
+    /// moved item's own leading comment block, which the user chose and the move
+    /// preserves.
+    MoveWouldExtendABlockScalar {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar whose value would grow.
+        block: NodeId,
+        /// Which of the joins the move creates would feed it.
+        seam: MoveSeam,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
+}
+
+/// Which join a [`EditError::MoveWouldExtendABlockScalar`] refusal is about.
+///
+/// A removal creates one seam — what follows the deleted lines rises to sit under
+/// what preceded them. A move creates **three external ones plus one internal
+/// seam for every adjacent pair of carried runs**, and they are counted separately
+/// rather than folded into one figure (`PROGRESS.md`, R20): two distinct
+/// overshoots inside one number is exactly how the quoted-scalar overshoot hid for
+/// three phases.
+///
+/// # Why three is not the whole set
+///
+/// Phase 0c-3b-2a claimed three, and its review disproved the claim. Since D2o an
+/// envelope is a **set of runs** with the file's own comments punched out of it,
+/// and the runs are concatenated at the destination — so every hole in the
+/// envelope becomes a *new* adjacency that exists nowhere in the original
+/// document. A run ending in a block scalar's body followed by a run beginning
+/// with a deeper-indented comment feeds that comment to the block, and none of the
+/// three external seams looks there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveSeam {
+    /// **The source closes.** What followed the item rises to sit under what
+    /// preceded it. This is the seam a plain removal also creates.
+    SourceCloses,
+    /// **The moved bytes land.** The item's own first non-blank line comes to sit
+    /// under whatever precedes the destination.
+    ArrivalLands,
+    /// **The moved bytes are left behind.** Whatever followed the destination
+    /// comes to sit under the item's own last line.
+    ArrivalCloses,
+    /// **Two carried runs meet.** The envelope has a hole — a comment the file
+    /// owns, and the blank runs beside it, stay at the source — so the run before
+    /// the hole and the run after it become neighbours at the destination although
+    /// they never were in the original document.
+    ///
+    /// Unlike the three above, this seam does not exist for every move: an
+    /// envelope of one run has no internal join, and one of *n* runs has *n − 1*.
+    CarriedRunsJoin,
 }
 
 /// Why a candidate document was rejected after being reparsed.
@@ -1016,6 +1349,147 @@ pub enum VerificationFailure {
         /// Where the missing comment sat in the original document.
         at: usize,
     },
+    /// A move did not put the sequence in the order it was asked for.
+    ///
+    /// Compared over the items' **subtree digests** rather than over their spans,
+    /// so an item that arrived at the right index carrying the wrong bytes is a
+    /// failure too. Carries the position in the sequence at which the candidate
+    /// first disagrees with the intended permutation, never any item's content.
+    ItemsNotInTheIntendedOrder {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first sequence position that holds something other than the item
+        /// the move intended to put there.
+        position: usize,
+    },
+    /// A construct the move did not name decodes to something else now.
+    ///
+    /// **The whole-document form of the sibling digest, and the invariant this
+    /// phase exists to state.** For an insertion and a removal, "every byte
+    /// outside the replaced spans is identical" carried the weight, because those
+    /// edits never relocate anything: bytes are written where nothing was, or
+    /// deleted where something was, and everything else stands still. A move
+    /// relocates, so the byte statement is satisfied by definition — the
+    /// replacement list *says* those bytes moved — and it can no longer see a
+    /// neighbour whose meaning changed because of where the bytes landed.
+    ///
+    /// So the two documents are walked in lockstep, node for node, with the moved
+    /// sequence's children taken in the intended order on the original's side.
+    /// Kinds, decoded scalar values and child counts must agree everywhere. A
+    /// block scalar that swallowed a comment, an entry that lost its value, a
+    /// mapping that gained one, a scalar whose bytes were re-indented into a
+    /// different value: all of them fail here, and none of them is anything the
+    /// edit declared.
+    ///
+    /// Carries the identifier of the candidate node at which the two disagree,
+    /// never a value (`CLAUDE.md` section 1).
+    ConstructChangedOutsideTheMove {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The candidate node that is not what the original said.
+        node: NodeId,
+    },
+    /// A move did not conserve the document's lines.
+    ///
+    /// The byte-level half of the same invariant, and the half that sees what a
+    /// tree walk cannot: re-indenting a whole item uniformly leaves every decoded
+    /// value intact, and a document that gained or lost a line break still parses.
+    ///
+    /// **Two multisets, both taken over physical lines and both required to be
+    /// equal**: the lines' contents with their terminators stripped, and the
+    /// terminators themselves. Stripping them apart is what lets the one legal
+    /// relocation of a break through — a move to the end of a file that does not
+    /// end in one carries its own trailing break to the front, so a line ending is
+    /// *relocated* rather than invented — while still refusing a break the
+    /// document never held.
+    ///
+    /// Carries the offset in the **original** document of the first line the
+    /// candidate does not hold, never the line (`CLAUDE.md` section 1).
+    DocumentLinesNotConserved {
+        /// Where the unconserved line sat in the original document.
+        at: usize,
+    },
+    /// A move's envelope run reaches outside the item's **own lines**.
+    ///
+    /// The bound that stops a move carrying away one line too many. Every other
+    /// property is blind to it when the extra line is **blank**: a blank line holds
+    /// no node, so `StructuralGuard::Removal` cannot see it; it conserves the
+    /// document's lines when it travels; it changes no decoded value; and
+    /// `bytes_outside_the_replacements_match` positively authorises it, because the
+    /// envelope declared it. That was experiment C5 of
+    /// `docs/decisions/0c-3b-2a-notes.md`, and until this phase's review it was
+    /// caught only by the external sweep.
+    ///
+    /// The bound is derived **textually** — the item's own physical lines, plus the
+    /// comment-only lines directly above it, walked from the source and the item's
+    /// node span — and therefore owes nothing to the `TriviaIndex::subtree_extent`
+    /// the planner used. A `#` inside a block scalar's body is not a comment, and
+    /// the walk asks the syntax index rather than the text to tell the two apart.
+    ///
+    /// Carries the run that reaches too far, never any content.
+    MoveCarriesMoreThanTheItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The envelope run that reaches outside the item's own lines.
+        at: ByteSpan,
+        /// The item's own lines, as the bound derived them.
+        lines: ByteSpan,
+    },
+    /// The bytes a move wrote at the destination are not the bytes it took.
+    ///
+    /// **The simplest statement of what a move is, and the property the Phase
+    /// 0c-3b-2a review found missing from production.** A move renders nothing: the
+    /// text written at the destination must be, byte for byte, the concatenation of
+    /// the source runs the same edit deleted.
+    ///
+    /// Without it the three whole-document properties jointly certify presentation
+    /// corruption. A planner that permuted two carried comment lines conserves the
+    /// line multisets exactly, leaves every digest unchanged (a digest holds no
+    /// comments), produces an identical tree, loses no file-owned comment, and is
+    /// positively authorised by `bytes_outside_the_replacements_match`, which
+    /// compares the candidate against the source with *the planner's own insertion
+    /// text* applied. The same blind spot admitted exchanged LF/CRLF terminators,
+    /// blank lines shuffled between strip-chomped block scalars, and comment lines
+    /// swapped between columns.
+    ///
+    /// The comparison is an oracle rather than a restatement because the expected
+    /// bytes are read **out of the original document** at runs that
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`] and
+    /// `StructuralGuard::Removal` bound independently. Nothing in it comes from the
+    /// insertion string being checked.
+    ///
+    /// Carries offsets only, never bytes (`CLAUDE.md` section 1).
+    MovedBytesWereRewritten {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the bytes were written.
+        at: usize,
+        /// Offset inside the carried text of the first byte that differs, or the
+        /// shorter of the two lengths when one is a prefix of the other.
+        first_difference: usize,
+    },
+    /// A move changed **which construct owns a comment**.
+    ///
+    /// The re-attribution property, and the one the byte comparison above cannot
+    /// make: an envelope that swallows the blank line *below* a file-owned comment
+    /// still writes back every byte it took, so the arrival is the departure and
+    /// the document's lines are conserved — but rule 2 of plan section 6.2 no
+    /// longer applies to that comment, and it now belongs to whatever ended up
+    /// underneath it. Its text survives, so
+    /// [`VerificationFailure::FileCommentLost`] sees nothing either.
+    ///
+    /// Derived from the **ownership layer on both documents** — every comment of
+    /// the original with the answer `TriviaIndex` gives for it, against every
+    /// comment of the candidate with the answer `TriviaIndex` gives for that —
+    /// so it is a fact about two parses rather than anything the planner declared.
+    ///
+    /// Carries the offset the comment had in the original document, never its text.
+    CommentOwnershipChanged {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the re-attributed comment sat in the original document.
+        at: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -1128,6 +1602,52 @@ impl fmt::Display for EditError {
                 "edit {edit}: removing it would leave mapping {} with no entries",
                 mapping.get()
             ),
+            EditError::NotASequenceItem { edit, node, kind } => write!(
+                formatter,
+                "edit {edit}: node {} is not an item of a block sequence; its parent is a {kind:?}",
+                node.get()
+            ),
+            EditError::NoSuchDestinationItem {
+                edit,
+                sequence,
+                items,
+            } => write!(
+                formatter,
+                "edit {edit}: sequence {} holds {items} items, so there is no such destination",
+                sequence.get()
+            ),
+            EditError::MoveChangesNothing { edit, item } => write!(
+                formatter,
+                "edit {edit}: node {} is already where the move would put it",
+                item.get()
+            ),
+            EditError::MoveMustBeTheOnlyEditInItsBatch { edit, edits } => write!(
+                formatter,
+                "edit {edit}: a move must be the only edit in its batch, and this batch holds \
+                 {edits}"
+            ),
+            EditError::MoveWouldInventALineEnding { edit, at } => write!(
+                formatter,
+                "edit {edit}: the item ends the document at byte {at} without a line break, so \
+                 relocating it would invent one or destroy one"
+            ),
+            EditError::MoveWouldTerminateTheFinalLine { edit, at } => write!(
+                formatter,
+                "edit {edit}: the document ends at byte {at} without a line break, so writing the \
+                 item there would give an untouched line a terminator it never had"
+            ),
+            EditError::MoveWouldExtendAKeptBlock { edit, block } => write!(
+                formatter,
+                "edit {edit}: the move would change the value of the keep-chomped block scalar \
+                 at node {} that ends the item",
+                block.get()
+            ),
+            EditError::MoveWouldExtendABlockScalar { edit, block, seam } => write!(
+                formatter,
+                "edit {edit}: at the {seam:?} seam the move would make a line content of the \
+                 block scalar at node {}",
+                block.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -1230,6 +1750,41 @@ impl fmt::Display for VerificationFailure {
                 formatter,
                 "the file-owned comment at byte {at} is not in the candidate"
             ),
+            VerificationFailure::ItemsNotInTheIntendedOrder { edit, position } => write!(
+                formatter,
+                "edit {edit}: sequence position {position} does not hold the item the move \
+                 intended to put there"
+            ),
+            VerificationFailure::ConstructChangedOutsideTheMove { edit, node } => write!(
+                formatter,
+                "edit {edit}: candidate node {} is not what the original document said, although \
+                 the move did not name it",
+                node.get()
+            ),
+            VerificationFailure::DocumentLinesNotConserved { at } => write!(
+                formatter,
+                "the line at byte {at} of the original document is not in the candidate; a move \
+                 relocates lines and creates none"
+            ),
+            VerificationFailure::MoveCarriesMoreThanTheItem { edit, at, lines } => write!(
+                formatter,
+                "edit {edit}: the envelope run {}..{} reaches outside the item's own lines {}..{}",
+                at.start, at.end, lines.start, lines.end
+            ),
+            VerificationFailure::MovedBytesWereRewritten {
+                edit,
+                at,
+                first_difference,
+            } => write!(
+                formatter,
+                "edit {edit}: the bytes written at byte {at} are not the bytes taken from the \
+                 source; they first differ {first_difference} bytes in"
+            ),
+            VerificationFailure::CommentOwnershipChanged { edit, at } => write!(
+                formatter,
+                "edit {edit}: the comment at byte {at} of the original document is owned by \
+                 something else in the candidate"
+            ),
         }
     } // End of function fmt() for VerificationFailure
 }
@@ -1331,6 +1886,29 @@ pub fn remove_field(source: &str, field: &DocumentPath) -> Result<PatchedDocumen
     )
 } // End of function remove_field()
 
+/// Relocates one sequence item inside its own sequence, and verifies the result.
+///
+/// `after` names the item the moved one is written after, **by its index in the
+/// original sequence**; `None` writes it above the sequence's first item. See
+/// [`ItemMove`] for what travels with it and
+/// [`EditError::MoveMustBeTheOnlyEditInItsBatch`] for why it is always a batch of
+/// one.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn move_item(
+    source: &str,
+    item: &DocumentPath,
+    after: Option<usize>,
+) -> Result<PatchedDocument, EditError> {
+    let edit = match after {
+        None => ItemMove::to_front(item.clone()),
+        Some(index) => ItemMove::after(item.clone(), index),
+    };
+    apply_edits(source, &[DocumentEdit::MoveItem(edit)])
+} // End of function move_item()
+
 /// Applies a batch of edits of **any kind** to one document and verifies it.
 ///
 /// This is the batch protocol itself, and [`apply_scalar_edits`] is a wrapper
@@ -1363,6 +1941,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     let mut expectations = Vec::new();
     let mut guards = Vec::new();
     let mut rewritten = Vec::new();
+    let mut moves = Vec::new();
     for (position, edit) in edits.iter().enumerate() {
         let planned = match edit {
             DocumentEdit::Scalar(scalar) => plan_one(source, &index, &trivia, position, scalar)?,
@@ -1371,6 +1950,19 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             }
             DocumentEdit::RemoveField(removal) => {
                 plan_removal(source, &index, &trivia, position, removal)?
+            }
+            DocumentEdit::MoveItem(relocation) => {
+                // A move is verified against the original document plus one
+                // permutation, and nothing else in the batch is modelled by that
+                // expectation. Checked here rather than inside `plan_move`
+                // because it is a fact about the batch, not about the item.
+                if edits.len() != 1 {
+                    return Err(EditError::MoveMustBeTheOnlyEditInItsBatch {
+                        edit: position,
+                        edits: edits.len(),
+                    });
+                }
+                plan_move(source, &index, &trivia, position, relocation)?
             }
         };
         replacements.extend(planned.replacements);
@@ -1381,11 +1973,12 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
         if let Some(expectation) = planned.expectation {
             expectations.push(expectation);
         }
-        if let Some(guard) = planned.guard {
-            guards.push(guard);
-        }
+        guards.extend(planned.guards);
         if let Some(node) = planned.rewritten {
             rewritten.push(node);
+        }
+        if let Some(relocation) = planned.moved {
+            moves.push(relocation);
         }
     } // End of the loop that plans every requested edit
 
@@ -1423,9 +2016,13 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
         &candidate,
         &replacements,
         &permitted,
-        edits,
-        &expectations,
-        &trivia,
+        Expected {
+            index: &index,
+            trivia: &trivia,
+            edits,
+            fields: &expectations,
+            moves: &moves,
+        },
     )?;
     Ok(PatchedDocument {
         text: candidate,
@@ -1447,8 +2044,15 @@ struct PlannedEdit {
     note: Option<PresentationNote>,
     /// What `verify` must find in the candidate, for a structural edit.
     expectation: Option<PendingField>,
-    /// A check on the planned span, stated in terms of the **original** index.
-    guard: Option<StructuralGuard>,
+    /// What `verify` must find in the candidate, for a move.
+    moved: Option<MoveExpectation>,
+    /// Checks on the planned spans, stated in terms of the **original** index.
+    ///
+    /// A list rather than one, because a move plans a removal envelope *and* an
+    /// insertion point and both have to be pinned: the source half from both
+    /// sides, exactly as a plain removal's is, and the destination against the
+    /// nodes it must not land inside.
+    guards: Vec<StructuralGuard>,
     /// The node a scalar edit rewrites, in the **original** index.
     ///
     /// A structural edit's sibling check compares each untouched entry with
@@ -1646,7 +2250,8 @@ fn plan_one(
         permitted: permitted_spans(node, presentation),
         note,
         expectation: None,
-        guard: None,
+        moved: None,
+        guards: Vec::new(),
         rewritten: Some(resolved.value),
     })
 } // End of function plan_one()
@@ -1932,7 +2537,8 @@ fn plan_insertion(
         permitted: vec![ByteSpan::new(point, point)],
         note: None,
         expectation: Some(expectation),
-        guard: Some(StructuralGuard::Insertion { at: point }),
+        moved: None,
+        guards: vec![StructuralGuard::Insertion { at: point }],
         rewritten: None,
     })
 } // End of function plan_insertion()
@@ -1992,6 +2598,73 @@ fn plan_removal(
     }
 
     let extent = entry_extent(index, trivia, key, resolved.value);
+    let runs = removal_envelope(source, index, trivia, position, extent)?.runs;
+
+    let expectation = pending_field(
+        position,
+        mapping_path,
+        mapping,
+        &entries,
+        Some(resolved.value),
+        None,
+    );
+    Ok(PlannedEdit {
+        replacements: runs
+            .iter()
+            .map(|run| Replacement {
+                span: *run,
+                text: String::new(),
+            })
+            .collect(),
+        // The runs themselves: each is derived from the entry's key and value
+        // node identifiers, the ownership rules and the source text, so the
+        // permitted set is a syntax fact rather than a restatement of the
+        // replacement list. `StructuralGuard::Removal` is what makes it more than
+        // that, by stating what the runs may and must cover in terms of the
+        // original index's node spans.
+        permitted: runs.clone(),
+        note: None,
+        expectation: Some(expectation),
+        moved: None,
+        guards: vec![StructuralGuard::Removal {
+            runs,
+            entry: (key, resolved.value),
+        }],
+        rewritten: None,
+    })
+} // End of function plan_removal()
+
+/// The envelope a removal deletes: the hull, the holes and the runs left over.
+///
+/// Factored out of [`plan_removal`] when Phase 0c-3b-2 gave the **source half of
+/// a move** the same job. The two share this function rather than each deriving
+/// an envelope, because a move that deleted a different set of bytes from the one
+/// a removal deletes would be a second answer to a question that already has one
+/// — and the run set is the answer `PROGRESS.md` D2o spent a whole phase on.
+///
+/// The steps are unchanged from Phase 0c-3b-1, in the order they must run:
+///
+/// 1. widen the ownership hull to whole lines ([`removal_span`]);
+/// 2. punch the file's own comments, and the blank runs beside them, out of it
+///    ([`preserved_regions`]);
+/// 3. keep what is left ([`runs_between`]);
+/// 4. refuse the three residual shapes, each read off the document rather than
+///    off the arithmetic in steps 2 and 3.
+///
+/// # Errors
+///
+/// [`EditError::EntryDoesNotOwnItsLines`] from the widening,
+/// [`EditError::RemovalWouldDeleteAFileComment`],
+/// [`EditError::RemovalWouldExtendAKeptBlock`] and
+/// [`EditError::RemovalWouldExtendABlockScalar`] from the refusals, and
+/// [`EditError::MalformedSpan`] for an empty run set.
+fn removal_envelope(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    extent: ByteSpan,
+) -> Result<RemovalEnvelope, EditError> {
     let hull = removal_span(source, index, position, extent)?;
     // The file's comments punched out of the hull, and the runs that survive.
     // Both are derived after the hull has been widened to whole lines, because
@@ -2037,38 +2710,463 @@ fn plan_removal(
         }
     }
 
-    let expectation = pending_field(
-        position,
-        mapping_path,
-        mapping,
-        &entries,
-        Some(resolved.value),
-        None,
-    );
+    Ok(RemovalEnvelope {
+        hull,
+        preserved,
+        runs,
+    })
+} // End of function removal_envelope()
+
+/// What [`removal_envelope`] derived: the hull, the holes and the runs.
+struct RemovalEnvelope {
+    /// The ownership hull, widened to whole lines.
+    hull: ByteSpan,
+    /// The regions inside it the preservation rule protects.
+    preserved: Vec<ByteSpan>,
+    /// The ordered, disjoint runs the edit deletes.
+    runs: Vec<ByteSpan>,
+}
+
+/// What [`verify`] must find in the candidate after a move.
+///
+/// Recorded **before** the splice and derived from the original index, so the
+/// candidate is compared against what the document said rather than against what
+/// the planner believed. `from` and `to` are indices into the sequence's own child
+/// list, which is what makes the expectation a permutation of facts rather than a
+/// description of bytes.
+struct MoveExpectation {
+    /// Position of the edit in the requested batch.
+    edit: usize,
+    /// The sequence. Re-resolved against the candidate by its own path.
+    sequence: DocumentPath,
+    /// Its identifier in the **original** index.
+    sequence_id: NodeId,
+    /// The item being relocated, in the **original** index.
+    ///
+    /// Carried so that verification can bound the envelope runs by the item's own
+    /// physical lines without asking the planner where it thought they were; see
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`].
+    item: NodeId,
+    /// The item's index in the original sequence.
+    from: usize,
+    /// The index it must occupy in the candidate.
+    to: usize,
+}
+
+impl MoveExpectation {
+    /// The sequence's child positions, in the order the move intends.
+    ///
+    /// Stated as a permutation of the original indices rather than as a list of
+    /// node identifiers, because the candidate is a **fresh parse** whose
+    /// identifiers bear no relation to the original's (`PROGRESS.md`, D2j). The
+    /// comparison is then "candidate position *i* holds what original position
+    /// `order[i]` held", which is checkable across two parses.
+    fn order(&self, items: usize) -> Vec<usize> {
+        let mut positions: Vec<usize> = (0..items).collect();
+        if self.from >= positions.len() {
+            return positions;
+        }
+        let moved = positions.remove(self.from);
+        positions.insert(self.to.min(positions.len()), moved);
+        positions
+    } // End of function order()
+} // End of impl MoveExpectation
+
+/// Plans a move, or refuses it.
+///
+/// A move is **a removal plus an insertion whose replacements do not overlap**,
+/// and this function is deliberately not an engine: the source half is
+/// [`removal_envelope`], the same call [`plan_removal`] makes, and the
+/// destination half is [`insertion_point`], the same call [`plan_insertion`]
+/// makes. What is new is the join between them.
+///
+/// The order of the steps is the contract:
+///
+/// 1. address the item, establish that its parent is a **block sequence**, and
+///    ask the gate about that whole sequence — a move changes the sequence's own
+///    shape, so a hazard anywhere in it makes the change unreasonable locally,
+///    exactly as `editable_mapping` argues for an entry's mapping;
+/// 2. work out where the item ends up, and refuse a request that leaves it where
+///    it is;
+/// 3. derive the source envelope, which refuses everything a removal refuses;
+/// 4. derive the destination point, and take the moved bytes **verbatim** from
+///    the source runs;
+/// 5. refuse every seam at which a block scalar could swallow a line — three
+///    external ones and one per adjacent pair of carried runs ([`MoveSeam`]).
+///
+/// # Nothing is rendered, and nothing is re-indented
+///
+/// The bytes written at the destination are the bytes the runs hold, copied. Two
+/// positions in one block sequence sit at the same column by construction, so
+/// there is no indentation to recompute — and a leading comment block at a column
+/// the user chose keeps that column. The only byte a move ever writes that it did
+/// not carry is **none**: when the destination is the end of a file that does not
+/// end in a line break, the item's own trailing break is written in front of it
+/// instead of behind it, which relocates a break rather than inventing one
+/// (`PROGRESS.md`, D2p).
+fn plan_move(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &ItemMove,
+) -> Result<PlannedEdit, EditError> {
+    let resolved = resolve_full(index, edit.item()).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let item = resolved.value;
+    let Some(parent) = resolved.parent else {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: NodeKind::Document,
+        });
+    };
+    let sequence = index.node(parent).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    if sequence.kind != NodeKind::Sequence {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: sequence.kind,
+        });
+    }
+    // The gate, before anything is derived and before a byte is read.
+    if let Some(hazard) = trivia.disqualifying_hazard(index, sequence.id) {
+        return Err(EditError::Refused {
+            edit: position,
+            node: sequence.id,
+            hazard: hazard.kind,
+            at: hazard.span,
+        });
+    }
+    if sequence.collection_style == Some(CollectionStyle::Flow)
+        || is_inside_a_flow_collection(index, sequence)
+    {
+        return Err(EditError::FlowCollection {
+            edit: position,
+            node: sequence.id,
+        });
+    }
+    let sequence_path = containing_path(edit.item()).ok_or(EditError::NotASequenceItem {
+        edit: position,
+        node: item,
+        kind: sequence.kind,
+    })?;
+
+    let items = &sequence.children;
+    let Some(from) = items.iter().position(|id| *id == item) else {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: sequence.kind,
+        });
+    };
+    // Where the item ends up, counted in the sequence **after** it has been taken
+    // out: an anchor above it keeps its index, one below it loses one.
+    let to = match edit.destination() {
+        None => 0,
+        Some(anchor) => {
+            if anchor >= items.len() {
+                return Err(EditError::NoSuchDestinationItem {
+                    edit: position,
+                    sequence: sequence.id,
+                    items: items.len(),
+                });
+            }
+            if anchor < from {
+                anchor + 1
+            } else {
+                anchor
+            }
+        }
+    };
+    if to == from {
+        return Err(EditError::MoveChangesNothing {
+            edit: position,
+            item,
+        });
+    }
+
+    // The source half. Every refusal a removal makes, made here by the same call.
+    let envelope = removal_envelope(source, index, trivia, position, {
+        // A sequence item has no key half: the `-` that introduces it is trivia
+        // the item itself owns (`PROGRESS.md`, D2d), so one subtree extent is the
+        // whole of it.
+        trivia.subtree_extent(index, item)
+    })?;
+
+    // The destination half. The front of the sequence is the start of the first
+    // item's own **hull**, so a leading comment block belonging to that item stays
+    // above the arrival rather than being adopted by it.
+    let anchor = items[edit.destination().unwrap_or(0)];
+    let anchor_extent = trivia.subtree_extent(index, anchor);
+    let (point, at_end_of_file) = match edit.destination() {
+        None => (
+            removal_span(source, index, position, anchor_extent)?.start,
+            false,
+        ),
+        Some(_) => insertion_point(source, anchor_extent, position)?,
+    };
+    if point >= envelope.hull.start && point <= envelope.hull.end {
+        // Unreachable: `to != from` puts the anchor's own lines strictly outside
+        // the item's. A bug in this crate rather than a request to refuse.
+        return Err(EditError::MalformedSpan {
+            edit: position,
+            at: ByteSpan::new(point, point),
+        });
+    }
+
+    let mut carried = String::new();
+    for run in &envelope.runs {
+        carried.push_str(run.slice(source).ok_or(EditError::MalformedSpan {
+            edit: position,
+            at: *run,
+        })?);
+    } // End of the loop that collects the bytes the item's runs hold
+    if at_end_of_file {
+        // The document's last line has no terminator. Writing the item after it
+        // gives that line one — and the only break available is the item's own,
+        // which may not even be the style the destination's neighbours use.
+        // D2p allows exactly one answer where there is no local break to copy, and
+        // it is this one (the Phase 0c-3b-2a review's finding 2).
+        return Err(EditError::MoveWouldTerminateTheFinalLine {
+            edit: position,
+            at: point,
+        });
+    }
+    if !carried.ends_with(['\n', '\r']) {
+        // The item is the document's unterminated last line and the destination is
+        // not the end of the document. Terminating it there would invent a break;
+        // taking one from the line above instead would delete a line the file
+        // holds. Refused rather than either (`PROGRESS.md`, D2p).
+        return Err(EditError::MoveWouldInventALineEnding {
+            edit: position,
+            at: envelope.hull.end,
+        });
+    }
+    let text = carried.clone();
+
+    // The block the item **ends with** is not carried whole: a keep-chomped
+    // block's trailing breaks belong to whatever follows it, and what follows it
+    // changes.
+    if let Some(block) = kept_block_the_move_would_extend(source, index, envelope.hull, point) {
+        return Err(EditError::MoveWouldExtendAKeptBlock {
+            edit: position,
+            block,
+        });
+    }
+
+    let body_offset = index.preamble().body_offset;
+    // Seam 1 — the source closes. What followed the item rises to sit under what
+    // preceded it. When the removal preserves something, the preserved lines are
+    // what rises, and `removal_envelope` has already refused that case by name.
+    if envelope.preserved.is_empty() {
+        if let Some(column) = first_non_blank_column_from(source, envelope.hull.end, body_offset) {
+            if let Some(block) = block_absorbing_a_line(source, index, envelope.hull.start, column)
+            {
+                return Err(EditError::MoveWouldExtendABlockScalar {
+                    edit: position,
+                    block,
+                    seam: MoveSeam::SourceCloses,
+                });
+            }
+        }
+    }
+    // Seam 2 — the arrival lands. The item's own first non-blank line comes to sit
+    // under whatever precedes the destination.
+    if let Some(column) = first_kept_column(source, &envelope.runs, body_offset) {
+        if let Some(block) = block_absorbing_a_line(source, index, point, column) {
+            return Err(EditError::MoveWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: MoveSeam::ArrivalLands,
+            });
+        }
+    }
+    // Seam 3 — the arrival closes. Whatever followed the destination comes to sit
+    // under the item's own last line, which may be a block scalar's content.
+    if let Some(column) = first_non_blank_column_from(source, point, body_offset) {
+        if let Some(block) = block_absorbing_a_line(source, index, envelope.hull.end, column) {
+            return Err(EditError::MoveWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: MoveSeam::ArrivalCloses,
+            });
+        }
+    }
+    // The **internal** seams, one per adjacent pair of carried runs. A hole in the
+    // envelope is a comment the file owns staying behind, so the two runs on
+    // either side of it become neighbours at the destination although they never
+    // were in the document. The Phase 0c-3b-2a review's finding 3 is that the
+    // three seams above are not the whole set.
+    for after in 1..envelope.runs.len() {
+        let before = envelope.runs[after - 1];
+        let Some(column) = first_kept_column(source, &envelope.runs[after..], body_offset) else {
+            continue;
+        };
+        if let Some(block) = block_absorbing_a_line(source, index, before.end, column) {
+            return Err(EditError::MoveWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: MoveSeam::CarriedRunsJoin,
+            });
+        }
+    } // End of the loop over the joins the concatenated runs create
+
+    let arrival = ByteSpan::new(point, point);
+    let mut replacements: Vec<Replacement> = envelope
+        .runs
+        .iter()
+        .map(|run| Replacement {
+            span: *run,
+            text: String::new(),
+        })
+        .collect();
+    replacements.push(Replacement {
+        span: arrival,
+        text,
+    });
+    let mut permitted = envelope.runs.clone();
+    permitted.push(arrival);
     Ok(PlannedEdit {
-        replacements: runs
-            .iter()
-            .map(|run| Replacement {
-                span: *run,
-                text: String::new(),
-            })
-            .collect(),
-        // The runs themselves: each is derived from the entry's key and value
-        // node identifiers, the ownership rules and the source text, so the
-        // permitted set is a syntax fact rather than a restatement of the
-        // replacement list. `StructuralGuard::Removal` is what makes it more than
-        // that, by stating what the runs may and must cover in terms of the
-        // original index's node spans.
-        permitted: runs.clone(),
+        replacements,
+        permitted,
         note: None,
-        expectation: Some(expectation),
-        guard: Some(StructuralGuard::Removal {
-            runs,
-            entry: (key, resolved.value),
+        expectation: None,
+        moved: Some(MoveExpectation {
+            edit: position,
+            sequence: sequence_path,
+            sequence_id: sequence.id,
+            item,
+            from,
+            to,
         }),
+        // Both halves are pinned against the original index's node spans: the
+        // source from both sides, exactly as a plain removal's is, and the
+        // destination against the leaves it must not land inside.
+        guards: vec![
+            StructuralGuard::Removal {
+                runs: envelope.runs,
+                entry: (item, item),
+            },
+            StructuralGuard::Insertion { at: point },
+        ],
         rewritten: None,
     })
-} // End of function plan_removal()
+} // End of function plan_move()
+
+/// The block scalar the moved item ends with, when relocating it would change
+/// that block's value.
+///
+/// See [`EditError::MoveWouldExtendAKeptBlock`] for the clause. The block is
+/// identified the same way [`kept_block_the_removal_would_extend`] identifies its
+/// own: content ending at or before a boundary with nothing but blank lines in
+/// between. Here the boundary is the **end of the item's own hull**, so a block
+/// anywhere else in the document has the item's remaining bytes between it and
+/// that boundary and is excluded by construction.
+fn kept_block_the_move_would_extend(
+    source: &str,
+    index: &SyntaxIndex,
+    hull: ByteSpan,
+    point: usize,
+) -> Option<NodeId> {
+    let lands_on_a_blank_line = source.get(point..).is_some_and(|after| {
+        !after.is_empty() && {
+            let next = after.find(['\n', '\r']).unwrap_or(after.len());
+            after[..next]
+                .chars()
+                .all(|character| character == ' ' || character == '\t')
+        }
+    });
+    if !lands_on_a_blank_line {
+        return None;
+    }
+    index
+        .nodes()
+        .iter()
+        .filter_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
+        .find(|(_, scalar)| {
+            let presentation = &scalar.presentation;
+            presentation.style.is_block()
+                // A clip- or strip-chomped block does not count a blank line
+                // after it either way, so only a keep-chomped one can grow.
+                && presentation.chomping == crate::Chomping::Keep
+                && presentation.content_span.end <= hull.end
+                && source
+                    .get(presentation.content_span.end..hull.end)
+                    .is_some_and(|between| between.trim().is_empty())
+        })
+        .map(|(node, _)| node.id)
+} // End of function kept_block_the_move_would_extend()
+
+/// The column of the first non-blank line at or after `at`.
+///
+/// `at` must begin a physical line, which every caller's offset does: a run
+/// boundary, a hull end and an insertion point are all line starts or end of
+/// file. `None` when nothing but blank lines follows.
+fn first_non_blank_column_from(source: &str, at: usize, body_offset: usize) -> Option<usize> {
+    let rest = source.get(at..)?;
+    let mut cursor = at;
+    for line in rest.split_inclusive(['\n', '\r']) {
+        let body = line.trim_start_matches([' ', '\t']);
+        if !body.trim_end().is_empty() {
+            return Some(column_of(
+                source,
+                cursor + (line.len() - body.len()),
+                body_offset,
+            ));
+        }
+        cursor += line.len();
+    } // End of the loop over the lines that follow `at`
+    None
+} // End of function first_non_blank_column_from()
+
+/// The block scalar whose content ends directly above `at` and would swallow a
+/// line written there at `column`.
+///
+/// The one statement of the hazard `EditError::RemovalWouldExtendABlockScalar`
+/// and [`EditError::MoveWouldExtendABlockScalar`] both report, so the removal and
+/// the move cannot drift apart about what "directly above" and "deep enough"
+/// mean. Two facts:
+///
+/// 1. **adjacency.** The block's content ends at or before `at` with nothing but
+///    blank lines in between, so once the edit's runs are gone the line in
+///    question sits immediately under that content.
+/// 2. **indentation.** [`absorbs_a_line_at`] compares `column` against the block's
+///    own body column, which the span layer published and which is read here
+///    rather than re-lexed (`PROGRESS.md`, D2 / D2d).
+///
+/// A block whose content lies inside the bytes being relocated cannot satisfy
+/// fact 1 for any of the move's **external** seams, so no subtree filter is needed
+/// there: the item's own bytes stand between such a block and every one of them. At
+/// an **internal** seam the block is deliberately one of the item's own — that is the
+/// shape the seam exists for — and the boundary is the end of the run before the
+/// join, so the same two facts still decide it.
+fn block_absorbing_a_line(
+    source: &str,
+    index: &SyntaxIndex,
+    at: usize,
+    column: usize,
+) -> Option<NodeId> {
+    index
+        .nodes()
+        .iter()
+        .filter_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
+        .find(|(_, scalar)| {
+            let presentation = &scalar.presentation;
+            presentation.style.is_block()
+                && presentation.content_span.end <= at
+                && source
+                    .get(presentation.content_span.end..at)
+                    .is_some_and(|between| between.trim().is_empty())
+                && absorbs_a_line_at(presentation, column)
+        })
+        .map(|(node, _)| node.id)
+} // End of function block_absorbing_a_line()
 
 /// Resolves a mapping and checks it is one a structural edit may change.
 ///
@@ -2458,20 +3556,9 @@ fn block_scalar_the_kept_bytes_would_join(
     // Nothing non-blank to place means nothing can be absorbed. Unreachable from
     // `preserved_regions`, whose every region exists for a comment line.
     let column = first_kept_column(source, preserved, body_offset)?;
-    index
-        .nodes()
-        .iter()
-        .filter_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
-        .find(|(_, scalar)| {
-            let presentation = &scalar.presentation;
-            presentation.style.is_block()
-                && presentation.content_span.end <= at
-                && source
-                    .get(presentation.content_span.end..at)
-                    .is_some_and(|between| between.trim().is_empty())
-                && absorbs_a_line_at(presentation, column)
-        })
-        .map(|(node, _)| node.id)
+    // The two facts are stated once, in `block_absorbing_a_line`, which the move's
+    // move's seams ask as well: one document fact, one implementation of it.
+    block_absorbing_a_line(source, index, at, column)
 } // End of function block_scalar_the_kept_bytes_would_join()
 
 /// Whether a line at `column` would become part of this block scalar's body.
@@ -2491,17 +3578,22 @@ fn absorbs_a_line_at(presentation: &ScalarPresentation, column: usize) -> bool {
     presentation.content_span.is_empty() || column >= presentation.indent
 } // End of function absorbs_a_line_at()
 
-/// The column of the first non-blank line among the regions a removal preserves.
+/// The column of the first non-blank line among a set of regions that survive an
+/// edit.
 ///
-/// `preserved` is [`preserved_regions`]'s answer, so it is ordered, disjoint and
-/// made of whole lines. The first non-blank line it holds is the line that ends up
-/// directly under whatever precedes the envelope, because every byte between the
-/// two is deleted — which is why one column answers the question for the whole
-/// preserved set: a line shallower than the block's body column ends the block,
-/// and nothing after it can rejoin one.
+/// Two callers, and "kept" means the same thing to both: the bytes that are still
+/// in the document afterwards. For a **removal** the regions are
+/// [`preserved_regions`]'s answer, the lines left where they are; for a **move**
+/// they are the envelope's own runs, the lines carried to the destination. Either
+/// way they are ordered, disjoint and made of whole lines, and the first non-blank
+/// line among them is the one that ends up directly under whatever precedes them —
+/// which is why one column answers the question for the whole set: a line
+/// shallower than a block's body column ends that block, and nothing after it can
+/// rejoin one.
 ///
-/// `None` when every preserved byte is blank, which `preserved_regions` cannot
-/// produce: a region exists only for a comment line.
+/// `None` when every byte in the set is blank. `preserved_regions` cannot produce
+/// that, because a region exists only for a comment line, and neither can a
+/// removal envelope, because an entry has a key.
 fn first_kept_column(source: &str, preserved: &[ByteSpan], body_offset: usize) -> Option<usize> {
     for region in preserved {
         let Some(text) = region.slice(source) else {
@@ -2804,6 +3896,23 @@ fn parent_path(path: &DocumentPath) -> Option<DocumentPath> {
         segments[..segments.len() - 1].to_vec(),
     ))
 } // End of function parent_path()
+
+/// The path of the **sequence** that holds the item `path` names.
+///
+/// The move's counterpart of [`parent_path`], and separate from it because the
+/// two accept opposite last segments: an entry's path ends in a key and an item's
+/// in an index. `None` when the path does not end in an index, which is a path
+/// that names no sequence item.
+fn containing_path(path: &DocumentPath) -> Option<DocumentPath> {
+    let segments = path.segments();
+    if !matches!(segments.last(), Some(PathSegment::Index(_))) {
+        return None;
+    }
+    Some(DocumentPath::new(
+        path.document_index(),
+        segments[..segments.len() - 1].to_vec(),
+    ))
+} // End of function containing_path()
 
 /// Chooses how the new value is spelled, and the context it is spelled for.
 ///
@@ -3327,6 +4436,26 @@ fn splice(source: &str, replacements: &[Replacement]) -> String {
     candidate
 } // End of function splice()
 
+/// Everything the candidate is compared against, collected so the comparison has
+/// one argument rather than five.
+///
+/// Every field is a fact about the **original** document or a claim recorded
+/// before the splice, and that is the property which makes [`verify`] an oracle
+/// rather than a restatement: nothing here is read off the candidate.
+struct Expected<'a> {
+    /// The original document's syntax index.
+    index: &'a SyntaxIndex,
+    /// Its trivia, scanned against the same text.
+    trivia: &'a TriviaIndex,
+    /// The edits as the caller requested them.
+    edits: &'a [DocumentEdit],
+    /// What each mapping a structural edit changed must hold afterwards.
+    fields: &'a [FieldExpectation],
+    /// What the batch's move must have done. At most one (see
+    /// [`EditError::MoveMustBeTheOnlyEditInItsBatch`]).
+    moves: &'a [MoveExpectation],
+} // End of struct Expected
+
 /// Reparses `candidate` and checks it says exactly what the edits asked for.
 ///
 /// Five properties, all of them required by plan section 6.2 and none of them
@@ -3351,9 +4480,38 @@ fn splice(source: &str, replacements: &[Replacement]) -> String {
 ///    neither: the Phase 0c-3a review's finding 1 destroyed one while passing
 ///    every other check on this list.
 ///
+/// # And five more when the batch is a move (Phase 0c-3b-2)
+///
+/// Property 4 is the one a move breaks. "Every byte outside the replaced spans is
+/// identical" survived Phases 0c-2b and 0c-3a because insert and remove never
+/// relocate anything; a move does, so the statement is satisfied by construction
+/// — the replacement list *says* those bytes moved — and it can no longer see a
+/// neighbour whose meaning changed because of where they landed. Five properties
+/// replace it, and none of them is derived from the edit:
+///
+/// 6. **the bytes written are the bytes taken, and nothing but the item was
+///    taken** ([`the_arrival_is_the_departure`]). Added by this phase's review,
+///    which demonstrated that properties 7 to 9 jointly certify a planner that
+///    permutes the carried lines: line multisets, digests and the tree are all
+///    blind to it, and property 4 authorises whatever insertion text the planner
+///    supplied;
+/// 7. **the document's lines are conserved**
+///    ([`document_lines_are_conserved`]) — a multiset over physical lines, each
+///    paired with its own terminator, taken from the two texts;
+/// 8. **the sequence holds the intended permutation**
+///    ([`items_are_in_the_intended_order`]), compared over subtree digests so an
+///    item that arrived carrying the wrong bytes fails too;
+/// 9. **every construct the move did not name decodes to what it decoded to
+///    before** ([`constructs_outside_the_move_are_unchanged`]) — the whole-document
+///    form of the sibling digest, walked in lockstep with the permutation applied;
+/// 10. **no comment changed hands** ([`comment_ownership_survives`]) — the
+///     re-attribution property, which is what a comment's *ownership* needs and
+///     which none of the others can state.
+///
 /// What this still cannot catch is recorded in
-/// `docs/decisions/0c-2b-notes.md` section 7 and
-/// `docs/decisions/0c-3a-notes.md` section 7.4.
+/// `docs/decisions/0c-2b-notes.md` section 7,
+/// `docs/decisions/0c-3a-notes.md` section 7.4 and
+/// `docs/decisions/0c-3b-2a-notes.md` section 3.
 ///
 /// # Errors
 ///
@@ -3363,14 +4521,31 @@ fn verify(
     candidate: &str,
     replacements: &[Replacement],
     permitted: &[ByteSpan],
-    edits: &[DocumentEdit],
-    expectations: &[FieldExpectation],
-    trivia: &TriviaIndex,
+    expected: Expected<'_>,
 ) -> Result<(), VerificationFailure> {
+    let Expected {
+        index: original,
+        trivia,
+        edits,
+        fields: expectations,
+        moves,
+    } = expected;
     replacements_stay_inside_the_permitted_spans(replacements, permitted)?;
     bytes_outside_the_replacements_match(source, candidate, replacements)?;
     let index = SyntaxIndex::parse(candidate).map_err(VerificationFailure::DoesNotParse)?;
     file_comments_survive(source, candidate, &index, trivia)?;
+    for relocation in moves {
+        the_arrival_is_the_departure(source, original, replacements, relocation)?;
+        document_lines_are_conserved(source, candidate)?;
+        items_are_in_the_intended_order(original, &index, relocation)?;
+        constructs_outside_the_move_are_unchanged(original, &index, relocation)?;
+        // The candidate's trivia is scanned only here, and only for a move: the
+        // scan is quadratic (`PROGRESS.md`, R19) and no other edit can change
+        // which construct owns a comment without also changing a byte one of the
+        // properties above already reads.
+        let candidate_trivia = TriviaIndex::scan(candidate, &index);
+        comment_ownership_survives(source, candidate, trivia, &candidate_trivia, relocation)?;
+    } // End of the loop over the batch's moves, which holds at most one
 
     for (position, edit) in edits.iter().enumerate() {
         let DocumentEdit::Scalar(edit) = edit else {
@@ -3613,6 +4788,455 @@ fn file_comments_survive(
     Ok(())
 } // End of function file_comments_survive()
 
+/// Checks that a move relocated the document's lines and created none.
+///
+/// # Why lines rather than bytes
+///
+/// `PROGRESS.md`'s scope item 3 offers "a multiset of bytes **or** of lines". A
+/// multiset of bytes is too weak to be worth stating on its own — it cannot tell
+/// `ab` from `ba`, so an engine that scrambled a line's characters would satisfy
+/// it. A multiset of lines is what a move actually promises: the same lines, in a
+/// different order.
+///
+/// # Why each line is paired with its own terminator
+///
+/// Phase 0c-3b-2a compared contents and terminators as **two separate multisets**,
+/// because it allowed one relocation that moves a break from one line to another:
+/// a move to the end of a file with no final break wrote the item's own trailing
+/// break in front of it, so the previously final line gained a terminator. Its
+/// review showed that this silently rewrites an untouched line's ending, and that
+/// destination is now refused outright
+/// ([`EditError::MoveWouldTerminateTheFinalLine`]).
+///
+/// With the rotation gone, no move relocates a terminator away from its own line,
+/// so the pairing is restored and the check is strictly stronger: contents pin
+/// that no line was invented, lost, truncated or re-indented, and the pairing pins
+/// that no line ending was invented, lost, rewritten **or exchanged with another
+/// line's** — a bare `\r` becoming `\r\n` fails, a CRLF document that came back
+/// with one LF in it fails, and so does an engine that swapped an LF-terminated
+/// carried line with a CRLF-terminated one.
+///
+/// # Errors
+///
+/// [`VerificationFailure::DocumentLinesNotConserved`], carrying the offset in the
+/// **original** document of a line the candidate does not hold — never the line
+/// (`CLAUDE.md` section 1).
+fn document_lines_are_conserved(source: &str, candidate: &str) -> Result<(), VerificationFailure> {
+    let before = physical_lines(source);
+    let after = physical_lines(candidate);
+
+    // Greedy consumption, as `file_comments_survive` does it and for the same
+    // reason: the first line that finds no counterpart is the one that went, and
+    // counting per distinct text would name some other occurrence of it.
+    let mut lines: Vec<(&str, &str)> = after.iter().map(|line| (line.1, line.2)).collect();
+    for (at, content, ending) in &before {
+        match lines.iter().position(|seen| *seen == (*content, *ending)) {
+            Some(found) => {
+                lines.swap_remove(found);
+            }
+            None => return Err(VerificationFailure::DocumentLinesNotConserved { at: *at }),
+        }
+    } // End of the loop that claims one candidate line per original line
+    if !lines.is_empty() {
+        // The candidate holds more lines than the original. Reported against the
+        // original's end, because there is no original line to name.
+        return Err(VerificationFailure::DocumentLinesNotConserved { at: source.len() });
+    }
+    Ok(())
+} // End of function document_lines_are_conserved()
+
+/// Every physical line of `text`, as (offset, content, terminator).
+///
+/// The terminator is `""` for a final line that has none, which is what makes a
+/// document with no final newline distinguishable from one with it. A `\r\n` is
+/// one terminator, and a bare `\r` is its own, so no comparison over these can
+/// silently accept a rewritten line ending.
+fn physical_lines(text: &str) -> Vec<(usize, &str, &str)> {
+    let mut lines = Vec::new();
+    let mut at = 0usize;
+    while at < text.len() {
+        let rest = &text[at..];
+        match rest.find(['\n', '\r']) {
+            None => {
+                lines.push((at, rest, ""));
+                break;
+            }
+            Some(offset) => {
+                let ending = if rest[offset..].starts_with("\r\n") {
+                    "\r\n"
+                } else {
+                    &rest[offset..offset + 1]
+                };
+                lines.push((at, &rest[..offset], ending));
+                at += offset + ending.len();
+            }
+        }
+    } // End of the walk over the text's physical lines
+    lines
+} // End of function physical_lines()
+
+/// The physical lines a move of `item` may take, derived **textually**.
+///
+/// From the start of the item's own first line to the end of its last, then up
+/// over the contiguous comment-only lines directly above it — which plan section
+/// 6.2's rule 1 gives to the item, and which its ownership hull therefore covers.
+/// The walk stops at the first line that is blank or holds anything else, so it
+/// can never pull in a comment the *file* owns: the blank line above such a block
+/// is what gives it to the file, and the walk stops there.
+///
+/// **Written from the source text and the item's node span**, so it owes nothing
+/// to the `TriviaIndex::subtree_extent` the planner used to build the envelope.
+/// That is the whole point of it: two derivations of the same boundary that can
+/// disagree.
+///
+/// # The one thing a textual walk gets wrong, and how this avoids it
+///
+/// A line whose first non-blank byte is `#` is a comment **only if it does not lie
+/// inside a frontier leaf**. A line of shell or Python inside a `replace: |`
+/// block's body looks exactly like a leading comment, and the real corpus contains
+/// one. The syntax index says where the leaves are; nothing in the text can tell
+/// the two apart.
+///
+/// `None` when the item is not in the index, which is a bug in this crate rather
+/// than a document a user can write.
+fn item_own_lines(
+    source: &str,
+    index: &SyntaxIndex,
+    item: NodeId,
+    body_offset: usize,
+) -> Option<ByteSpan> {
+    let span = index.node(item)?.span;
+    // A block-scalar value already ends past its own final break (D2c), so the
+    // item's lines are complete and there is nothing to walk.
+    let mut end = span.end;
+    if !source.get(..end)?.ends_with(['\n', '\r']) {
+        end = line_end_of(source, end);
+    }
+
+    let mut start = line_start_of(source, span.start, body_offset);
+    while start > body_offset {
+        let above = line_start_of(source, start - 1, body_offset);
+        let line = source.get(above..start)?;
+        let text = line.trim_start_matches([' ', '\t']);
+        let opener = above + (line.len() - text.len());
+        let inside_a_leaf = index.nodes().iter().any(|node| {
+            node.is_frontier_leaf() && node.span.start <= opener && opener < node.span.end
+        });
+        if !text.starts_with('#') || inside_a_leaf {
+            break;
+        }
+        start = above;
+    } // End of the walk up over the item's own leading comment block
+    Some(ByteSpan::new(start, end))
+} // End of function item_own_lines()
+
+/// Checks that a move wrote the bytes it took, and took nothing but the item.
+///
+/// **The property the Phase 0c-3b-2a review found missing from production**, in
+/// two halves that have to run together, because either alone is satisfiable by a
+/// defective planner:
+///
+/// 1. **every departure run lies inside the item's own lines**, as
+///    [`item_own_lines`] derives them from the text. Without this the second half
+///    is a comparison against whatever the planner chose to take, so an engine
+///    that carried one extra blank line away and wrote it back at the destination
+///    would satisfy it exactly (experiment C5 of
+///    `docs/decisions/0c-3b-2a-notes.md`);
+/// 2. **the text written at the destination is the concatenation of the source
+///    bytes at those runs**, byte for byte. Nothing is rendered, nothing is
+///    re-indented, nothing is re-terminated and no line is reordered.
+///
+/// The expected bytes are read out of the **original document**; the only thing
+/// taken from the planner is the list of spans, and half 1 is what bounds those.
+/// The insertion string itself is never an input to what it is compared against,
+/// which is the difference between an oracle and a restatement.
+///
+/// # Shape
+///
+/// A move's replacement list is exactly *n* departures — non-empty spans replaced
+/// by nothing — and one arrival: a zero-width span with text. Anything else is a
+/// planning defect and is reported here rather than analysed further, since
+/// [`EditError::MoveMustBeTheOnlyEditInItsBatch`] guarantees no other edit
+/// contributed to the list.
+///
+/// # Errors
+///
+/// [`VerificationFailure::MoveCarriesMoreThanTheItem`] and
+/// [`VerificationFailure::MovedBytesWereRewritten`], both carrying offsets only.
+fn the_arrival_is_the_departure(
+    source: &str,
+    original: &SyntaxIndex,
+    replacements: &[Replacement],
+    relocation: &MoveExpectation,
+) -> Result<(), VerificationFailure> {
+    let edit = relocation.edit;
+    let body_offset = original.preamble().body_offset;
+    let lines = item_own_lines(source, original, relocation.item, body_offset).ok_or(
+        VerificationFailure::MoveCarriesMoreThanTheItem {
+            edit,
+            at: ByteSpan::default(),
+            lines: ByteSpan::default(),
+        },
+    )?;
+
+    let mut carried = String::new();
+    let mut arrival: Option<&Replacement> = None;
+    for replacement in replacements {
+        if replacement.text.is_empty() {
+            if !lines.contains(replacement.span) {
+                return Err(VerificationFailure::MoveCarriesMoreThanTheItem {
+                    edit,
+                    at: replacement.span,
+                    lines,
+                });
+            }
+            let taken = replacement.span.slice(source).ok_or(
+                VerificationFailure::MoveCarriesMoreThanTheItem {
+                    edit,
+                    at: replacement.span,
+                    lines,
+                },
+            )?;
+            carried.push_str(taken);
+            continue;
+        }
+        // A second arrival, or an arrival that replaces bytes rather than being
+        // spliced between two lines, is not a move whatever else is true of it.
+        if arrival.is_some() || !replacement.span.is_empty() {
+            return Err(VerificationFailure::MovedBytesWereRewritten {
+                edit,
+                at: replacement.span.start,
+                first_difference: 0,
+            });
+        }
+        arrival = Some(replacement);
+    } // End of the loop that splits the departures from the arrival
+
+    let Some(arrival) = arrival else {
+        return Err(VerificationFailure::MovedBytesWereRewritten {
+            edit,
+            at: lines.start,
+            first_difference: 0,
+        });
+    };
+    if arrival.text != carried {
+        return Err(VerificationFailure::MovedBytesWereRewritten {
+            edit,
+            at: arrival.span.start,
+            first_difference: first_difference(&carried, &arrival.text),
+        });
+    }
+    Ok(())
+} // End of function the_arrival_is_the_departure()
+
+/// Checks that no comment changed hands.
+///
+/// The re-attribution property. A comment's owner is not a decoded value, is not a
+/// physical line and is not a byte the edit declared, so every other check in
+/// [`verify`] is blind to it — and an envelope that swallows the blank line *below*
+/// a file-owned comment writes back every byte it took, conserves every line and
+/// leaves the tree identical while handing that comment to whatever ends up
+/// underneath it.
+///
+/// Stated as a **multiset of (comment text, is it the file's?) pairs**, taken over
+/// the whole of both documents by the ownership layer, and compared by greedy
+/// consumption exactly as [`file_comments_survive`] compares its own. Both sides
+/// are facts about a parse; neither is anything the planner said.
+///
+/// Comparing texts rather than positions is deliberate: a move relocates comments
+/// on purpose, so their offsets are expected to change and their attribution is
+/// not.
+///
+/// # Errors
+///
+/// [`VerificationFailure::CommentOwnershipChanged`], carrying the offset the
+/// comment had in the original document — never its text (`CLAUDE.md` section 1).
+fn comment_ownership_survives(
+    source: &str,
+    candidate: &str,
+    trivia: &TriviaIndex,
+    candidate_trivia: &TriviaIndex,
+    relocation: &MoveExpectation,
+) -> Result<(), VerificationFailure> {
+    let mut survivors: Vec<(&str, bool)> = candidate_trivia
+        .comments()
+        .iter()
+        .filter_map(|comment| {
+            comment
+                .span
+                .slice(candidate)
+                .map(|text| (text, comment.owner.is_file()))
+        })
+        .collect();
+    for comment in trivia.comments() {
+        let Some(text) = comment.span.slice(source) else {
+            continue;
+        };
+        let wanted = (text, comment.owner.is_file());
+        match survivors.iter().position(|seen| *seen == wanted) {
+            Some(at) => {
+                survivors.swap_remove(at);
+            }
+            None => {
+                return Err(VerificationFailure::CommentOwnershipChanged {
+                    edit: relocation.edit,
+                    at: comment.span.start,
+                })
+            }
+        }
+    } // End of the loop that claims one candidate comment per original one
+    Ok(())
+} // End of function comment_ownership_survives()
+
+/// Checks that the moved item is where the move said it would be.
+///
+/// Compared over **subtree digests** rather than over positions alone: an item
+/// that arrived at the right index carrying the wrong bytes is exactly as much a
+/// failure as one that arrived at the wrong index. The digest holds decoded
+/// values, so it is compared and never printed (`CLAUDE.md` section 1).
+///
+/// The permutation itself is [`MoveExpectation::order`], stated over the original
+/// sequence's child positions, which is checkable across the reparse that mints
+/// new identifiers.
+///
+/// # Errors
+///
+/// [`VerificationFailure::ItemsNotInTheIntendedOrder`], carrying the first
+/// sequence position that disagrees; [`VerificationFailure::MappingLost`] when the
+/// sequence cannot be re-found at all.
+fn items_are_in_the_intended_order(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    relocation: &MoveExpectation,
+) -> Result<(), VerificationFailure> {
+    let edit = relocation.edit;
+    let found = resolve(candidate, &relocation.sequence)
+        .map_err(|error| VerificationFailure::MappingLost { edit, error })?;
+    let sequence = candidate
+        .node(found)
+        .filter(|node| node.kind == NodeKind::Sequence)
+        .ok_or(VerificationFailure::MappingLost {
+            edit,
+            error: PathError::MalformedIndex { node: found },
+        })?;
+    let before: Vec<NodeId> = original
+        .node(relocation.sequence_id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let order = relocation.order(before.len());
+    if sequence.children.len() != order.len() {
+        return Err(VerificationFailure::ItemsNotInTheIntendedOrder {
+            edit,
+            position: sequence.children.len().min(order.len()),
+        });
+    }
+    for (position, wanted) in order.iter().enumerate() {
+        let expected = digest(original, before[*wanted]);
+        if expected != digest(candidate, sequence.children[position]) {
+            return Err(VerificationFailure::ItemsNotInTheIntendedOrder { edit, position });
+        }
+    } // End of the loop that compares each position with the item intended for it
+    Ok(())
+} // End of function items_are_in_the_intended_order()
+
+/// Checks that nothing the move did not name says something else now.
+///
+/// **This is the whole-document invariant, and it is what replaces "every byte
+/// outside the replaced spans is identical" for an edit that relocates bytes.**
+/// The two indexes are walked in lockstep from every document root, with the
+/// moved sequence's children taken in the intended order on the original's side.
+/// Kinds, decoded scalar values and child counts must agree at every node.
+///
+/// # What it can see, and what it cannot
+///
+/// It sees every construct whose **decoded value or shape** changed: a block
+/// scalar that swallowed a comment line the move parked under it, an entry whose
+/// value was clipped, a mapping that gained or lost a key, a scalar re-indented
+/// into a different value. None of those is anything the edit declared, and the
+/// expectation is the original document plus one permutation of positions, so this
+/// is an oracle rather than a restatement.
+///
+/// It cannot see anything a **decoded value is blind to**: a comment, a blank
+/// line, a change of scalar style, an indentation change that leaves every value
+/// intact. Those are [`document_lines_are_conserved`]'s and
+/// [`file_comments_survive`]'s job, which is why all three run and why none of
+/// them is redundant.
+///
+/// # Errors
+///
+/// [`VerificationFailure::ConstructChangedOutsideTheMove`], carrying the candidate
+/// node at which the two documents first disagree — never a value.
+fn constructs_outside_the_move_are_unchanged(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    relocation: &MoveExpectation,
+) -> Result<(), VerificationFailure> {
+    let documents = original.documents();
+    let others = candidate.documents();
+    if documents.len() != others.len() {
+        return Err(VerificationFailure::ConstructChangedOutsideTheMove {
+            edit: relocation.edit,
+            // No candidate document to name when the candidate has none; the
+            // sequence the move was about is the next most useful pointer.
+            node: *others.first().unwrap_or(&relocation.sequence_id),
+        });
+    }
+    for (before, after) in documents.iter().zip(others) {
+        compare_subtree(original, *before, candidate, *after, relocation).map_err(|node| {
+            VerificationFailure::ConstructChangedOutsideTheMove {
+                edit: relocation.edit,
+                node,
+            }
+        })?;
+    } // End of the loop over the documents of the two parses
+    Ok(())
+} // End of function constructs_outside_the_move_are_unchanged()
+
+/// Compares two subtrees node for node, applying the move's permutation.
+///
+/// Returns the **candidate** node at which they first disagree, so the caller can
+/// report a position without ever holding a value. The permutation is applied on
+/// the original's side and only at the sequence the move names, which is
+/// identified by its identifier in the original index rather than by anything the
+/// candidate says.
+fn compare_subtree(
+    original: &SyntaxIndex,
+    before: NodeId,
+    candidate: &SyntaxIndex,
+    after: NodeId,
+    relocation: &MoveExpectation,
+) -> Result<(), NodeId> {
+    let (Some(was), Some(now)) = (original.node(before), candidate.node(after)) else {
+        return Err(after);
+    };
+    if was.kind != now.kind {
+        return Err(after);
+    }
+    match (was.scalar.as_ref(), now.scalar.as_ref()) {
+        (Some(was), Some(now)) if was.value != now.value => return Err(after),
+        (Some(_), None) | (None, Some(_)) => return Err(after),
+        _ => {}
+    }
+    if was.children.len() != now.children.len() {
+        return Err(after);
+    }
+    let order = if before == relocation.sequence_id {
+        relocation.order(was.children.len())
+    } else {
+        (0..was.children.len()).collect()
+    };
+    for (position, child) in now.children.iter().enumerate() {
+        compare_subtree(
+            original,
+            was.children[order[position]],
+            candidate,
+            *child,
+            relocation,
+        )?;
+    } // End of the loop over the children, in the order the move intends
+    Ok(())
+} // End of function compare_subtree()
+
 /// Checks every replacement against the spans the edited scalars own.
 ///
 /// The list is the concatenation of every edit's [`permitted_spans`], and
@@ -3705,6 +5329,22 @@ fn first_difference(left: &str, right: &str) -> usize {
 mod tests {
     use super::*;
     use crate::syntax::NodeRole;
+
+    /// The expectation for a batch of scalar edits, for tests that call `verify`
+    /// directly.
+    fn expected<'a>(
+        index: &'a SyntaxIndex,
+        trivia: &'a TriviaIndex,
+        edits: &'a [DocumentEdit],
+    ) -> Expected<'a> {
+        Expected {
+            index,
+            trivia,
+            edits,
+            fields: &[],
+            moves: &[],
+        }
+    } // End of function expected()
 
     /// Scans `source`'s trivia, for the tests that call `verify` directly.
     fn trivia_of(source: &str) -> TriviaIndex {
@@ -4202,6 +5842,7 @@ mod tests {
         ))];
         let token = [ByteSpan::new(3, 6)];
         let trivia = trivia_of(source);
+        let index = SyntaxIndex::parse(source).expect("the probe parses");
         let replacements = vec![Replacement {
             span: ByteSpan::new(3, 6),
             text: "two".to_owned(),
@@ -4212,9 +5853,7 @@ mod tests {
                 "a: two\n",
                 &replacements,
                 &token,
-                &edits,
-                &[],
-                &trivia
+                expected(&index, &trivia, &edits)
             ),
             Ok(())
         );
@@ -4230,9 +5869,7 @@ mod tests {
                 "a: \"unclosed\n",
                 &broken,
                 &token,
-                &edits,
-                &[],
-                &trivia
+                expected(&index, &trivia, &edits)
             ),
             Err(VerificationFailure::DoesNotParse(_))
         ));
@@ -4243,7 +5880,13 @@ mod tests {
             text: "three".to_owned(),
         }];
         assert!(matches!(
-            verify(source, "a: three\n", &wrong, &token, &edits, &[], &trivia),
+            verify(
+                source,
+                "a: three\n",
+                &wrong,
+                &token,
+                expected(&index, &trivia, &edits)
+            ),
             Err(VerificationFailure::ValueMismatch {
                 wanted_len: 3,
                 found_len: 5,
@@ -4262,9 +5905,7 @@ mod tests {
                 "a: [one]\n",
                 &restructured,
                 &token,
-                &edits,
-                &[],
-                &trivia
+                expected(&index, &trivia, &edits)
             ),
             Err(VerificationFailure::TargetKindChanged {
                 kind: NodeKind::Sequence,
@@ -5657,4 +7298,657 @@ mod structural_tests {
             None
         );
     }
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+
+    /// The three-match document every byte-exact pin below works from.
+    const THREE: &str = "matches:\n  - trigger: ':a'\n    replace: 'A'\n  - trigger: ':b'\n    replace: 'B'\n  - trigger: ':c'\n    replace: 'C'\n";
+
+    /// Moves one item of `source` and returns the candidate text.
+    fn moved(source: &str, item: usize, after: Option<usize>) -> String {
+        let path = DocumentPath::parse(&format!("matches[{item}]")).expect("the path parses");
+        move_item(source, &path, after)
+            .expect("the move applies")
+            .into_text()
+    } // End of function moved()
+
+    #[test]
+    fn a_move_relocates_the_bytes_and_writes_none_of_its_own() {
+        assert_eq!(
+            moved(THREE, 2, None),
+            "matches:\n  - trigger: ':c'\n    replace: 'C'\n  - trigger: ':a'\n    replace: 'A'\n  - trigger: ':b'\n    replace: 'B'\n"
+        );
+        assert_eq!(
+            moved(THREE, 0, Some(2)),
+            "matches:\n  - trigger: ':b'\n    replace: 'B'\n  - trigger: ':c'\n    replace: 'C'\n  - trigger: ':a'\n    replace: 'A'\n"
+        );
+        // The two replacements are the departure and the arrival, and nothing
+        // else: one empty run and one zero-width span.
+        let path = DocumentPath::parse("matches[0]").expect("the path parses");
+        let patched = move_item(THREE, &path, Some(1)).expect("the move applies");
+        assert_eq!(patched.replacements().len(), 2);
+        assert!(patched.notes().is_empty(), "a move rewrites no scalar");
+    } // End of function a_move_relocates_the_bytes_and_writes_none_of_its_own()
+
+    #[test]
+    fn a_move_to_the_front_goes_above_the_first_items_own_leading_comments() {
+        // Plan section 6.2's rule 1 gives the comment to the match below it, so
+        // the arrival must land above the comment rather than between the two.
+        let source = "matches:\n  # about a\n  - trigger: ':a'\n  - trigger: ':b'\n";
+        assert_eq!(
+            moved(source, 1, None),
+            "matches:\n  - trigger: ':b'\n  # about a\n  - trigger: ':a'\n"
+        );
+    } // End of function a_move_to_the_front_goes_above_the_first_items_own_leading_comments()
+
+    #[test]
+    fn a_move_carries_what_the_item_owns_and_leaves_what_the_file_owns() {
+        // The inline comment belongs to the value scalar, which is inside the
+        // item's subtree, so it travels. The blank-line-separated one belongs to
+        // the file, so it stays — and so do the blank runs that give it to the
+        // file.
+        let source = "matches:\n  - trigger: ':a'\n    replace: 'A'  # inline\n\n  # the file owns this\n\n  - trigger: ':b'\n";
+        assert_eq!(
+            moved(source, 0, Some(1)),
+            "matches:\n\n  # the file owns this\n\n  - trigger: ':b'\n  - trigger: ':a'\n    replace: 'A'  # inline\n"
+        );
+    } // End of function a_move_carries_what_the_item_owns_and_leaves_what_the_file_owns()
+
+    #[test]
+    fn a_move_into_a_crlf_document_writes_the_bytes_it_carried() {
+        let source = "matches:\r\n  - trigger: \':a\'\r\n  - trigger: \':b\'\r\n";
+        assert_eq!(
+            moved(source, 1, None),
+            "matches:\r\n  - trigger: \':b\'\r\n  - trigger: \':a\'\r\n"
+        );
+    } // End of function a_move_into_a_crlf_document_writes_the_bytes_it_carried()
+
+    #[test]
+    fn a_move_never_touches_the_bom() {
+        let source = "\u{feff}matches:\n  - trigger: ':a'\n  - trigger: ':b'\n";
+        let path = DocumentPath::parse("matches[1]").expect("the path parses");
+        let patched = move_item(source, &path, None).expect("the move applies");
+        assert!(patched.text().starts_with('\u{feff}'));
+        for replacement in patched.replacements() {
+            assert!(replacement.span.start >= 3, "no move may touch the BOM");
+        }
+    } // End of function a_move_never_touches_the_bom()
+
+    #[test]
+    fn a_move_to_the_end_of_an_unterminated_document_is_refused() {
+        // Phase 0c-3b-2a rotated the item's own trailing break to the front here,
+        // so that the document kept not ending in one and no byte was created.
+        // Its review demonstrated what the byte count hides: the break now
+        // terminates the **destination's** previously unterminated last line, a
+        // line the move never named, and it may be a CRLF imposed on an LF file.
+        // D2p answers this case with a refusal, and so does this crate.
+        let source = "matches:\n  - trigger: ':a'\n  - trigger: ':b'";
+        let path = DocumentPath::parse("matches[0]").expect("the path parses");
+        assert!(matches!(
+            move_item(source, &path, Some(1)),
+            Err(EditError::MoveWouldTerminateTheFinalLine { .. })
+        ));
+        // The same document with a final break moves, so what is refused is the
+        // missing terminator and nothing else about the request.
+        assert_eq!(
+            moved(
+                "matches:\n  - trigger: ':a'\n  - trigger: ':b'\n",
+                0,
+                Some(1)
+            ),
+            "matches:\n  - trigger: ':b'\n  - trigger: ':a'\n"
+        );
+        // A CRLF item moving to the end of an LF document is the byte shape the
+        // review gave, and it is the same refusal.
+        let mixed = "matches:\n  - trigger: ':a'\r\n  - trigger: ':b'\n    replace: tail";
+        let path = DocumentPath::parse("matches[0]").expect("the path parses");
+        assert!(matches!(
+            move_item(mixed, &path, Some(1)),
+            Err(EditError::MoveWouldTerminateTheFinalLine { .. })
+        ));
+    } // End of function a_move_to_the_end_of_an_unterminated_document_is_refused()
+
+    #[test]
+    fn an_item_that_ends_an_unterminated_document_is_refused_rather_than_terminated() {
+        let source = "matches:\n  - trigger: ':a'\n  - trigger: ':b'";
+        let path = DocumentPath::parse("matches[1]").expect("the path parses");
+        assert!(matches!(
+            move_item(source, &path, None),
+            Err(EditError::MoveWouldInventALineEnding { .. })
+        ));
+    } // End of function an_item_that_ends_an_unterminated_document_is_refused_rather_than_terminated()
+
+    #[test]
+    fn a_move_that_would_leave_the_item_where_it_is_is_refused() {
+        for (item, after) in [(0usize, None), (1, Some(1)), (1, Some(0))] {
+            let path = DocumentPath::parse(&format!("matches[{item}]")).expect("parses");
+            assert!(
+                matches!(
+                    move_item(THREE, &path, after),
+                    Err(EditError::MoveChangesNothing { .. })
+                ),
+                "matches[{item}] -> {after:?} leaves the order unchanged"
+            );
+        } // End of the loop over the three requests that change nothing
+        let path = DocumentPath::parse("matches[0]").expect("parses");
+        assert!(matches!(
+            move_item(THREE, &path, Some(9)),
+            Err(EditError::NoSuchDestinationItem { items: 3, .. })
+        ));
+    } // End of function a_move_that_would_leave_the_item_where_it_is_is_refused()
+
+    #[test]
+    fn the_intended_order_is_a_permutation_of_the_original_positions() {
+        let expectation = |from: usize, to: usize| MoveExpectation {
+            edit: 0,
+            sequence: DocumentPath::root(0),
+            sequence_id: NodeId::from_index(0),
+            item: NodeId::from_index(0),
+            from,
+            to,
+        };
+        assert_eq!(expectation(2, 0).order(3), vec![2, 0, 1]);
+        assert_eq!(expectation(0, 2).order(3), vec![1, 2, 0]);
+        assert_eq!(expectation(1, 2).order(4), vec![0, 2, 1, 3]);
+        // A `from` the sequence does not have leaves the order alone, which is
+        // the only answer that cannot invent a position.
+        assert_eq!(expectation(9, 0).order(3), vec![0, 1, 2]);
+    } // End of function the_intended_order_is_a_permutation_of_the_original_positions()
+
+    #[test]
+    fn the_line_conservation_check_names_the_line_that_went() {
+        // Driven directly, against candidates no planner in this tree produces,
+        // for the reason `0c-3b-1-notes.md` gives for the file-comment oracle: a
+        // check that has never been shown to fail is not known to be able to.
+        let source = "a: 1\nb: 2\n";
+        assert_eq!(document_lines_are_conserved(source, "b: 2\na: 1\n"), Ok(()));
+        assert!(matches!(
+            document_lines_are_conserved(source, "b: 2\na: 1\nc: 3\n"),
+            Err(VerificationFailure::DocumentLinesNotConserved { .. })
+        ));
+        assert!(matches!(
+            document_lines_are_conserved(source, "b: 2\n"),
+            Err(VerificationFailure::DocumentLinesNotConserved { at: 0 })
+        ));
+        // A line ending rewritten in place.
+        assert!(matches!(
+            document_lines_are_conserved("a: 1\r\nb: 2\n", "a: 1\nb: 2\n"),
+            Err(VerificationFailure::DocumentLinesNotConserved { .. })
+        ));
+        // Two line endings **exchanged** between two lines. Phase 0c-3b-2a
+        // compared contents and terminators as separate multisets, which accepted
+        // this; the pairing was restored when its review made the rotation that
+        // needed the separation a refusal.
+        assert!(matches!(
+            document_lines_are_conserved("a: 1\r\nb: 2\n", "a: 1\nb: 2\r\n"),
+            Err(VerificationFailure::DocumentLinesNotConserved { .. })
+        ));
+        // …and the rotation itself, which no planner performs any more and which
+        // the paired comparison therefore refuses.
+        assert!(matches!(
+            document_lines_are_conserved("a: 1\nb: 2", "b: 2\na: 1"),
+            Err(VerificationFailure::DocumentLinesNotConserved { .. })
+        ));
+    } // End of function the_line_conservation_check_names_the_line_that_went()
+
+    #[test]
+    fn the_whole_document_check_sees_a_value_the_move_did_not_name() {
+        let source = "matches:\n  - trigger: ':a'\n  - trigger: ':b'\n";
+        let original = SyntaxIndex::parse(source).expect("parses");
+        let sequence = original
+            .nodes()
+            .iter()
+            .find(|node| node.kind == NodeKind::Sequence)
+            .expect("a sequence")
+            .id;
+        let item = original
+            .node(sequence)
+            .expect("the sequence")
+            .children
+            .get(1)
+            .copied()
+            .expect("a second item");
+        let relocation = MoveExpectation {
+            edit: 0,
+            sequence: DocumentPath::parse("matches").expect("parses"),
+            sequence_id: sequence,
+            item,
+            from: 1,
+            to: 0,
+        };
+        let honest = "matches:\n  - trigger: ':b'\n  - trigger: ':a'\n";
+        let candidate = SyntaxIndex::parse(honest).expect("parses");
+        assert_eq!(
+            constructs_outside_the_move_are_unchanged(&original, &candidate, &relocation),
+            Ok(())
+        );
+        assert_eq!(
+            items_are_in_the_intended_order(&original, &candidate, &relocation),
+            Ok(())
+        );
+
+        // The same permutation with one untouched value changed.
+        let tampered = "matches:\n  - trigger: ':b'\n  - trigger: ':A'\n";
+        let candidate = SyntaxIndex::parse(tampered).expect("parses");
+        assert!(matches!(
+            constructs_outside_the_move_are_unchanged(&original, &candidate, &relocation),
+            Err(VerificationFailure::ConstructChangedOutsideTheMove { .. })
+        ));
+        // …and the permutation not performed at all.
+        let candidate = SyntaxIndex::parse(source).expect("parses");
+        assert!(matches!(
+            items_are_in_the_intended_order(&original, &candidate, &relocation),
+            Err(VerificationFailure::ItemsNotInTheIntendedOrder { position: 0, .. })
+        ));
+    } // End of function the_whole_document_check_sees_a_value_the_move_did_not_name()
+
+    #[test]
+    fn a_move_must_be_the_only_edit_in_its_batch() {
+        let relocation: DocumentEdit =
+            ItemMove::after(DocumentPath::parse("matches[0]").unwrap(), 2).into();
+        let scalar: DocumentEdit = ScalarEdit::new(
+            DocumentPath::parse("matches[1].replace").unwrap(),
+            "changed",
+        )
+        .into();
+        assert!(apply_edits(THREE, std::slice::from_ref(&relocation)).is_ok());
+        assert!(matches!(
+            apply_edits(THREE, &[relocation, scalar]),
+            Err(EditError::MoveMustBeTheOnlyEditInItsBatch { edits: 2, .. })
+        ));
+    } // End of function a_move_must_be_the_only_edit_in_its_batch()
+
+    #[test]
+    fn a_path_that_names_no_sequence_item_is_refused_by_name() {
+        for path in ["matches", "matches[0].trigger"] {
+            let parsed = DocumentPath::parse(path).expect("parses");
+            assert!(
+                matches!(
+                    move_item(THREE, &parsed, Some(1)),
+                    Err(EditError::NotASequenceItem { .. })
+                ),
+                "{path} names no sequence item"
+            );
+        } // End of the loop over the paths that name no sequence item
+    } // End of function a_path_that_names_no_sequence_item_is_refused_by_name()
+
+    // -----------------------------------------------------------------------
+    // The engine broken on purpose, retained
+    // -----------------------------------------------------------------------
+    //
+    // `docs/decisions/0c-3b-2a-notes.md` section 6.2 records five experiments in
+    // which the **engine** was made to misbehave and every layer left in place, to
+    // measure whether the layers can disagree with it at all. They were documented
+    // history: the repository could not reproduce them, and the Phase 0c-3b-2a
+    // review's finding 4 is that documented history is not a test.
+    //
+    // These are those experiments, retained. Each drives the **complete**
+    // post-planning pipeline — disjointness, the structural guards, the splice and
+    // `verify` in full — over a plan a defective planner could have produced, and
+    // asserts the typed failure that catches it. The mutations the review added
+    // are here too, and they are the important ones: a *permutation-preserving*
+    // rewrite alters no multiset count, which is the case C1 and C2 do not cover.
+
+    /// The runs a planned move deletes, in ascending order.
+    fn runs_of(planned: &PlannedEdit) -> Vec<ByteSpan> {
+        planned
+            .replacements
+            .iter()
+            .filter(|replacement| replacement.text.is_empty())
+            .map(|replacement| replacement.span)
+            .collect()
+    } // End of function runs_of()
+
+    /// Rewrites a planned move as if its envelope had been `runs` all along.
+    ///
+    /// The arrival becomes the concatenation of the new runs and the guard is told
+    /// about them, so the only thing wrong with the plan is the **run set itself**.
+    /// A mutation that left the guard behind would be caught by the guard for the
+    /// wrong reason and would prove nothing about the rest of the pipeline.
+    fn recarve(source: &str, planned: &mut PlannedEdit, runs: Vec<ByteSpan>) {
+        let carried: String = runs
+            .iter()
+            .map(|run| run.slice(source).expect("a run slices"))
+            .collect();
+        let arrival = planned
+            .replacements
+            .iter()
+            .find(|replacement| !replacement.text.is_empty())
+            .map(|replacement| replacement.span)
+            .expect("a move writes its bytes once");
+        planned.replacements = runs
+            .iter()
+            .map(|run| Replacement {
+                span: *run,
+                text: String::new(),
+            })
+            .collect();
+        planned.replacements.push(Replacement {
+            span: arrival,
+            text: carried,
+        });
+        planned.permitted = runs.clone();
+        planned.permitted.push(arrival);
+        for guard in &mut planned.guards {
+            if let StructuralGuard::Removal { runs: guarded, .. } = guard {
+                *guarded = runs.clone();
+            }
+        } // End of the loop that tells the removal guard about the new runs
+    } // End of function recarve()
+
+    /// Plans a move, lets `tamper` rewrite the plan, and runs everything
+    /// [`apply_edits`] runs afterwards.
+    ///
+    /// Deliberately not a wrapper over `apply_edits`: the point is to inject a
+    /// plan no planner in this tree produces and then subject it to the **whole**
+    /// safety boundary — the disjointness check, both structural guards, the
+    /// splice and all ten verification properties — rather than to a chosen one.
+    fn tampered_move(
+        source: &str,
+        item: usize,
+        after: Option<usize>,
+        tamper: impl FnOnce(&str, &mut PlannedEdit),
+    ) -> Result<String, EditError> {
+        let index = SyntaxIndex::parse(source).expect("the document parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let path = DocumentPath::parse(&format!("matches[{item}]")).expect("the path parses");
+        let request = match after {
+            None => ItemMove::to_front(path),
+            Some(anchor) => ItemMove::after(path, anchor),
+        };
+        let mut planned = plan_move(source, &index, &trivia, 0, &request)?;
+        tamper(source, &mut planned);
+        planned
+            .replacements
+            .sort_by_key(|replacement| (replacement.span.start, replacement.span.end));
+        for pair in planned.replacements.windows(2) {
+            if pair[0].span.end > pair[1].span.start || pair[0].span.start == pair[1].span.start {
+                return Err(EditError::OverlappingEdits {
+                    first: pair[0].span,
+                    second: pair[1].span,
+                });
+            }
+        } // End of the loop that checks the tampered replacements are disjoint
+        for guard in &planned.guards {
+            guard.check(&index)?;
+        }
+        let candidate = splice(source, &planned.replacements);
+        let moves: Vec<MoveExpectation> = planned.moved.into_iter().collect();
+        verify(
+            source,
+            &candidate,
+            &planned.replacements,
+            &planned.permitted,
+            Expected {
+                index: &index,
+                trivia: &trivia,
+                edits: &[],
+                fields: &[],
+                moves: &moves,
+            },
+        )?;
+        Ok(candidate)
+    } // End of function tampered_move()
+
+    /// Rewrites the arrival's text with `rewrite`, leaving the runs alone.
+    fn rewrite_arrival(planned: &mut PlannedEdit, rewrite: impl Fn(&str) -> String) {
+        for replacement in &mut planned.replacements {
+            if !replacement.text.is_empty() {
+                replacement.text = rewrite(&replacement.text);
+            }
+        } // End of the loop that finds the one replacement a move writes
+    } // End of function rewrite_arrival()
+
+    /// The document the review's own counterexample uses: two carried comment
+    /// lines that a defective planner can swap without changing anything a
+    /// multiset, a digest or a tree can see.
+    const TWO_COMMENTS: &str = "matches:\n  - trigger: ':a'\n    # first\n    # second\n    replace: x\n  - trigger: ':b'\n    replace: y\n";
+
+    #[test]
+    fn a_planner_that_permutes_the_carried_lines_is_rejected() {
+        // **The Phase 0c-3b-2a review's headline counterexample.** Line contents
+        // and terminators are the same multisets, the item digests are unchanged
+        // because a digest holds no comments, the reparsed tree is identical,
+        // neither comment is file-owned, and `bytes_outside_the_replacements_match`
+        // authorises whatever insertion text the planner supplied. Before this
+        // phase's fix round nothing in production said no.
+        let swapped = tampered_move(TWO_COMMENTS, 0, Some(1), |_, planned| {
+            rewrite_arrival(planned, |text| {
+                text.replace("    # first\n    # second\n", "    # second\n    # first\n")
+            });
+        });
+        assert!(
+            matches!(
+                swapped,
+                Err(EditError::Verification(
+                    VerificationFailure::MovedBytesWereRewritten { .. }
+                ))
+            ),
+            "a swap of two carried comment lines must be refused, got {swapped:?}"
+        );
+        // The honest move applies, so what is refused is the swap and not the
+        // request.
+        assert!(tampered_move(TWO_COMMENTS, 0, Some(1), |_, _| {}).is_ok());
+    } // End of function a_planner_that_permutes_the_carried_lines_is_rejected()
+
+    #[test]
+    fn every_other_move_property_certifies_the_permuted_candidate() {
+        // Why the property above had to be added rather than argued for: the four
+        // whole-document properties are run here **against the corrupted
+        // candidate** and every one of them passes. An oracle that cannot disagree
+        // is not an oracle, and this is the measurement rather than the claim.
+        let source = TWO_COMMENTS;
+        let original = SyntaxIndex::parse(source).expect("parses");
+        let trivia = TriviaIndex::scan(source, &original);
+        let sequence = original
+            .nodes()
+            .iter()
+            .find(|node| node.kind == NodeKind::Sequence)
+            .expect("a sequence");
+        let relocation = MoveExpectation {
+            edit: 0,
+            sequence: DocumentPath::parse("matches").expect("parses"),
+            sequence_id: sequence.id,
+            item: sequence.children[0],
+            from: 0,
+            to: 1,
+        };
+        let corrupt = "matches:\n  - trigger: ':b'\n    replace: y\n  - trigger: ':a'\n    # second\n    # first\n    replace: x\n";
+        let candidate = SyntaxIndex::parse(corrupt).expect("parses");
+        let candidate_trivia = TriviaIndex::scan(corrupt, &candidate);
+        assert_eq!(document_lines_are_conserved(source, corrupt), Ok(()));
+        assert_eq!(
+            items_are_in_the_intended_order(&original, &candidate, &relocation),
+            Ok(())
+        );
+        assert_eq!(
+            constructs_outside_the_move_are_unchanged(&original, &candidate, &relocation),
+            Ok(())
+        );
+        assert_eq!(
+            file_comments_survive(source, corrupt, &candidate, &trivia),
+            Ok(())
+        );
+        assert_eq!(
+            comment_ownership_survives(source, corrupt, &trivia, &candidate_trivia, &relocation),
+            Ok(())
+        );
+    } // End of function every_other_move_property_certifies_the_permuted_candidate()
+
+    #[test]
+    fn experiment_c1_an_engine_that_tidies_the_bytes_it_carries_is_rejected() {
+        // C1: trim trailing whitespace from each carried line, which is what an
+        // editor does by default. The two real spaces after `':a'` are the
+        // byte-fidelity shape of the Phase 0c-2b review's finding 1.
+        let source = "matches:\n  - trigger: ':a'  \n  - trigger: ':b'\n";
+        let tidied = tampered_move(source, 0, Some(1), |_, planned| {
+            rewrite_arrival(planned, |text| text.replace("a'  \n", "a'\n"));
+        });
+        assert!(
+            matches!(
+                tidied,
+                Err(EditError::Verification(
+                    VerificationFailure::MovedBytesWereRewritten { .. }
+                ))
+            ),
+            "a tidied carried line must be refused, got {tidied:?}"
+        );
+    } // End of function experiment_c1_an_engine_that_tidies_the_bytes_it_carries_is_rejected()
+
+    #[test]
+    fn experiment_c2_an_engine_that_votes_on_a_line_ending_is_rejected() {
+        // C2: copy the destination's line ending onto every carried line, which is
+        // precisely what D2p forbids. The carried CRLF becomes LF and the document
+        // still parses, still holds the intended order and still decodes the same.
+        let source = "matches:\n  - trigger: ':a'\r\n  - trigger: ':b'\n";
+        let voted = tampered_move(source, 0, Some(1), |_, planned| {
+            rewrite_arrival(planned, |text| text.replace("\r\n", "\n"));
+        });
+        assert!(
+            matches!(
+                voted,
+                Err(EditError::Verification(
+                    VerificationFailure::MovedBytesWereRewritten { .. }
+                ))
+            ),
+            "a rewritten line ending must be refused, got {voted:?}"
+        );
+        // The review's second variant: the terminators are **exchanged** rather
+        // than rewritten, so their multiset is unchanged. The paired line
+        // comparison is what sees this one, and the byte comparison sees it first.
+        let two = "matches:\n  - trigger: ':a'\r\n    replace: x\n  - trigger: ':b'\n";
+        let exchanged = tampered_move(two, 0, Some(1), |_, planned| {
+            rewrite_arrival(planned, |text| {
+                text.replace("':a'\r\n", "':a'\n").replace("x\n", "x\r\n")
+            });
+        });
+        assert!(
+            matches!(
+                exchanged,
+                Err(EditError::Verification(
+                    VerificationFailure::MovedBytesWereRewritten { .. }
+                ))
+            ),
+            "exchanged terminators must be refused, got {exchanged:?}"
+        );
+    } // End of function experiment_c2_an_engine_that_votes_on_a_line_ending_is_rejected()
+
+    #[test]
+    fn a_blank_line_shuffled_between_two_strip_chomped_blocks_is_rejected() {
+        // The review's third variant. Both blocks are `|-`, so the number of blank
+        // lines after each is invisible to every decoded value; the blank lines are
+        // byte-identical, so the line multiset is unchanged; and no comment is
+        // involved, so ownership is unchanged. Only the byte comparison sees it.
+        let source = "matches:\n  - trigger: ':a'\n    first: |-\n      one\n\n\n    second: |-\n      two\n\n    third: '3'\n  - trigger: ':b'\n    replace: 'y'\n";
+        let shuffled = tampered_move(source, 0, Some(1), |_, planned| {
+            rewrite_arrival(planned, |text| {
+                text.replace("one\n\n\n", "one\n\n")
+                    .replace("two\n\n", "two\n\n\n")
+            });
+        });
+        assert!(
+            matches!(
+                shuffled,
+                Err(EditError::Verification(
+                    VerificationFailure::MovedBytesWereRewritten { .. }
+                ))
+            ),
+            "a relocated blank line must be refused, got {shuffled:?}"
+        );
+    } // End of function a_blank_line_shuffled_between_two_strip_chomped_blocks_is_rejected()
+
+    #[test]
+    fn experiment_c4_an_engine_that_leaves_a_token_behind_is_rejected_by_the_guard() {
+        // C4: shorten the first run so the item's first token stays where it was.
+        // Caught before a byte is spliced, by the half of `StructuralGuard::Removal`
+        // that Phase 0c-3b-1 added — the one a contiguous hull made unstatable.
+        let source = "matches:\n  - trigger: ':a'\n  - trigger: ':b'\n";
+        let clipped = tampered_move(source, 0, Some(1), |source, planned| {
+            let mut runs = runs_of(planned);
+            runs[0].start += 8;
+            recarve(source, planned, runs);
+        });
+        assert!(
+            matches!(
+                clipped,
+                Err(EditError::Verification(
+                    VerificationFailure::EnvelopeMissesTheEntry { .. }
+                ))
+            ),
+            "an envelope that leaves a token behind must be refused, got {clipped:?}"
+        );
+    } // End of function experiment_c4_an_engine_that_leaves_a_token_behind_is_rejected_by_the_guard()
+
+    #[test]
+    fn experiment_c5_an_engine_that_carries_one_blank_line_too_many_is_rejected() {
+        // **C5, and the experiment that changed this crate twice.** An extra
+        // *blank* line reaches no node, so the guard cannot see it; it is relocated
+        // rather than created, so line conservation cannot; it holds no value, so
+        // the tree walk cannot; and the arrival really is the departure, so the
+        // byte comparison cannot either. Phase 0c-3b-2a caught it only in the
+        // external sweep's hull bound, which its review named as a production hole.
+        // `MoveCarriesMoreThanTheItem` is that bound, in production, derived
+        // textually from the item's own lines.
+        let source = "matches:\n  - trigger: ':a'\n\n  - trigger: ':b'\n  - trigger: ':c'\n";
+        let greedy = tampered_move(source, 0, Some(2), |source, planned| {
+            let mut runs = runs_of(planned);
+            let last = runs.len() - 1;
+            runs[last].end = line_end_of(source, runs[last].end);
+            recarve(source, planned, runs);
+        });
+        assert!(
+            matches!(
+                greedy,
+                Err(EditError::Verification(
+                    VerificationFailure::MoveCarriesMoreThanTheItem { .. }
+                ))
+            ),
+            "carrying one blank line too many must be refused, got {greedy:?}"
+        );
+        // …and the same plan without the extra line applies, so the bound is not
+        // simply refusing the request.
+        assert!(tampered_move(source, 0, Some(2), |_, _| {}).is_ok());
+    } // End of function experiment_c5_an_engine_that_carries_one_blank_line_too_many_is_rejected()
+
+    #[test]
+    fn an_engine_that_relocates_a_comments_ownership_blank_line_is_rejected() {
+        // The review's fourth variant, and the one the byte comparison cannot make:
+        // the blank line **below** a file-owned comment is what rule 2 reads to give
+        // that comment to the file. Swallow it into the envelope and write it back
+        // at the destination and every byte is accounted for — the arrival is still
+        // the departure, the lines are still conserved, the tree is still identical
+        // and the comment's text is still in the candidate — but the comment now
+        // leads the match that ended up underneath it.
+        let source = "matches:\n  - trigger: ':a'\n    first: 1\n\n    # the file owns this\n\n    second: 2\n  - trigger: ':b'\n";
+        let reattributed = tampered_move(source, 0, Some(1), |source, planned| {
+            let mut runs = runs_of(planned);
+            assert_eq!(runs.len(), 2, "the file comment must split the envelope");
+            // The second run starts after the blank line under the comment. Start
+            // it one line earlier, so that line travels with the match.
+            runs[1].start = line_start_of(source, runs[1].start - 1, 0);
+            recarve(source, planned, runs);
+        });
+        assert!(
+            matches!(
+                reattributed,
+                Err(EditError::Verification(
+                    VerificationFailure::CommentOwnershipChanged { .. }
+                ))
+            ),
+            "a re-attributed comment must be refused, got {reattributed:?}"
+        );
+    } // End of function an_engine_that_relocates_a_comments_ownership_blank_line_is_rejected()
+
+    #[test]
+    fn a_document_is_split_into_physical_lines_with_their_own_terminators() {
+        assert_eq!(
+            physical_lines("a\r\nb\nc"),
+            vec![(0, "a", "\r\n"), (3, "b", "\n"), (5, "c", "")]
+        );
+        assert_eq!(physical_lines(""), Vec::new());
+        assert_eq!(physical_lines("\n"), vec![(0, "", "\n")]);
+    } // End of function a_document_is_split_into_physical_lines_with_their_own_terminators()
 }

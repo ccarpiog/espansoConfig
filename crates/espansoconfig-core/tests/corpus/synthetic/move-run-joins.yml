@@ -1,0 +1,41 @@
+# Phase 0c-3b-2a review, finding 3: a move creates a seam INSIDE the bytes it
+# carries, one for every adjacent pair of runs in its envelope.
+#
+# Since D2o an envelope is a set of runs with the file's own comments punched out
+# of it, and the runs are concatenated at the destination. A hole is therefore a
+# new adjacency that exists nowhere in this file: the run that ends in a block
+# scalar's body meets the run that begins with the comment written after the hole.
+#
+# THE COLUMNS IN THIS FILE ARE THE TEST DATA. Both `|` block bodies sit at column
+# SEVEN, one deeper than the `x:` key that carries them. The first match's second
+# run begins with a comment at column seven too, so concatenating the runs feeds
+# that comment to the block and the move is refused. The second match is the same
+# shape with its comment at column FOUR, which ends the block instead, so it
+# moves. Re-indenting either comment, or "tidying" a block body to the usual six,
+# silently swaps one case for the other and dissolves what this file pins.
+matches:
+  - trigger: ':deep-join'
+    vars:
+      x: |
+       the body of this block sits at column seven
+
+      # A blank line on either side gives this comment to the FILE, so it stays
+      # here and the envelope around it is two runs rather than one.
+
+       # A leading comment at column seven, which the run above would feed to the
+       # block once the two runs meet.
+      y: 'one'
+    replace: 'done'
+  - trigger: ':shallow-join'
+    vars:
+      x: |
+       the body of this block sits at column seven too
+
+      # The same file-owned comment, splitting this envelope into the same two
+      # runs.
+
+    # A leading comment at column four, too shallow to become block content.
+      y: 'one'
+    replace: 'done'
+  - trigger: ':plain-destination'
+    replace: 'nothing about me is a block or a comment'

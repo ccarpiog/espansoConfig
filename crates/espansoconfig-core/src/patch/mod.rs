@@ -35,17 +35,26 @@
 //! by [`apply_edits`]; [`apply_scalar_edits`] is now a wrapper over it. Planning
 //! against the original index, rejecting overlaps, splicing from the highest
 //! offset downwards and reparsing to verify are the same steps whatever the edit
-//! is, so there is one engine rather than two. Moving a whole match, the
-//! multiset invariant a move needs, and the full round-trip property test are
-//! step 0c-3b.
+//! is, so there is one engine rather than two.
+//!
+//! **0c-3b-2a — [`ItemMove`], the first edit that relocates bytes.** A whole
+//! sequence item moves inside its own sequence, as a removal plus an insertion in
+//! one batch, through the same [`apply_edits`]. It is the edit that breaks "every
+//! byte outside the replaced spans is identical" as a *sufficient* statement —
+//! the replacement list says those bytes moved — so verification gains the
+//! whole-document form: the bytes written are the bytes taken and nothing but the
+//! item was taken, the document's lines are conserved, the sequence holds the
+//! intended permutation, every construct the move did not name decodes to exactly
+//! what it decoded to before, and no comment changed hands. The full round-trip
+//! property test (R9) and the second YAML 1.1 oracle (R16) are step 0c-3b-2b.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
-    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, remove_field, DocumentEdit,
-    EditError, FieldInsert, FieldRemoval, PatchedDocument, PresentationNote, Replacement,
-    ScalarEdit, VerificationFailure,
+    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, move_item, remove_field,
+    DocumentEdit, EditError, FieldInsert, FieldRemoval, ItemMove, MoveSeam, PatchedDocument,
+    PresentationNote, Replacement, ScalarEdit, VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

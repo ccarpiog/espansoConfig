@@ -1,0 +1,19 @@
+# Phase 0c-3b-2a: what travels with a match when it moves, and what stays put.
+# Nothing else is in this file, so every pinned count it moves is one of its own.
+matches:
+  # This comment block introduces the match below and is not separated from it
+  # by a blank line, so rule 1 gives it to that match and a move carries it.
+  - trigger: ':leading-comment'
+    replace: 'the block above travels with me'  # and so does this inline comment
+  - trigger: ':interior-file-comment'
+    vars:
+      first: 'one'
+
+      # A blank line on either side makes this comment the FILE's rather than
+      # the match's, so a move of this match leaves it exactly where it is and
+      # carries only the runs around it.
+
+      second: 'two'
+    replace: 'the comment inside me does not come with me'
+  - trigger: ':nothing-attached'
+    replace: 'no leading block, no inline comment, no interior file comment'

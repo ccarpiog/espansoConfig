@@ -1,0 +1,36 @@
+# Phase 0c-3b-2a: the three seams at which a move can feed a block scalar, each
+# with a refused case and a safe one that differ ONLY in a comment's column.
+#
+# THE COLUMNS IN THIS FILE ARE THE TEST DATA, and two of them are unusual on
+# purpose. Both blocks below have their body at column FIVE, one deeper than the
+# `replace:` key that carries them and one SHALLOWER than the six an emitted
+# block would use. Both deep leading comments sit at column five too.
+#
+# That pairing is what isolates the move. A comment at the block's own body
+# column becomes content of that block when a move parks it directly underneath;
+# a comment at column two ends the block instead, exactly as the `- ` of a match
+# already would. And because five is shallower than any body column this crate
+# would *emit* — an inserted or re-rendered entry at column four writes its block
+# body at six — no scalar edit and no insertion in this file can absorb either
+# comment. The comments answer a question about moving a match, and only that.
+#
+# An editor that re-indents comment lines, or that "tidies" a block body to the
+# usual six, silently turns each refused case into its own safe case and
+# dissolves what the file exists to pin.
+matches:
+  - trigger: ':block-tail-a'
+    replace: |
+     the body of this block sits at column five
+  - trigger: ':between-a'
+    replace: 'moving me away lets the comment below rise under the block above'
+     # A leading comment block at column FIVE, deep enough to be absorbed.
+  - trigger: ':deep-lead'
+    replace: 'moving me under a block would feed that block my own comment'
+  - trigger: ':block-tail-b'
+    replace: |
+     the body of this block sits at column five too
+  - trigger: ':between-b'
+    replace: 'moving me away lets the comment below rise under the block above'
+  # A leading comment block at column TWO, too shallow to be absorbed.
+  - trigger: ':shallow-lead'
+    replace: 'moving me under a block is legal, and my comment ends that block'

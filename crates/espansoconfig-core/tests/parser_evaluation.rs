@@ -386,6 +386,45 @@ fn saphyr_quoted_scalar_ends_overshoot_trailing_spaces_and_a_comment() {
     assert_eq!(&plain_source[plain.span.start..plain.span.end], "x");
 } // End of function saphyr_quoted_scalar_ends_overshoot_trailing_spaces_and_a_comment()
 
+/// The token and the trailing trivia of a quoted scalar whose reported span
+/// overshoots its closing delimiter.
+///
+/// `None` when the reported span really is the exact token. The closing delimiter
+/// is found by lexing forwards from the opening one, so `''` inside a single-quoted
+/// scalar and `\"` inside a double-quoted one are data rather than terminators —
+/// the same reading `SyntaxIndex::quoted_span` performs, written here from scratch
+/// because this file is the **substrate tripwire** (`PROGRESS.md`, R1) and may not
+/// borrow the crate's answer to the question it is measuring.
+fn quoted_overshoot(text: &str) -> Option<(&str, &str)> {
+    let mut characters = text.char_indices();
+    let (_, quote) = characters.next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let mut skip_next = false;
+    for (at, character) in characters {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if quote == '"' && character == '\\' {
+            skip_next = true;
+            continue;
+        }
+        if character != quote {
+            continue;
+        }
+        let close = at + character.len_utf8();
+        if quote == '\'' && text[close..].starts_with('\'') {
+            // A doubled quote is one escaped apostrophe, not the end.
+            skip_next = true;
+            continue;
+        }
+        return (close < text.len()).then(|| (&text[..close], &text[close..]));
+    } // End of the walk to the closing delimiter
+    None
+} // End of function quoted_overshoot()
+
 #[test]
 fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     // Toy documents prove an API exists; the corpus proves it holds. This test
@@ -395,10 +434,19 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     // their end offsets are NOT exact. An earlier revision of this file folded
     // both groups into one number and gave block scalars the assertion
     // `_ => true`, which is why the overshoot went unnoticed.
+    //
+    // A **quoted** scalar's end is not exact either when something follows it on
+    // its line (R20), and since Phase 0c-3b-2a's fix round the corpus contains one:
+    // `move-a-match.yml`'s single-quoted value with an inline comment after it.
+    // That fixture spelling was deleted when it first made this test fail, which is
+    // deleting the evidence to protect the claim; it is back, and the overshoots
+    // are counted here and asserted in their own test rather than folded into this
+    // one. R20's seventh occurrence, and its own rule applied to itself.
     let mut flow_checked = 0usize;
     let mut block_seen = 0usize;
     let mut multiline_plain_skipped = 0usize;
     let mut implicit_skipped = 0usize;
+    let mut quoted_overshoot_deferred = 0usize;
     let mut mismatches: Vec<String> = Vec::new();
 
     for file in common::synthetic_valid() {
@@ -439,6 +487,17 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
                 continue;
             }
             let multiline_quoted = text.contains('\n');
+            // A quoted scalar with trailing spaces or a comment after it on the
+            // same line: counted here, asserted in
+            // `saphyr_quoted_scalar_ends_overshoot_into_trivia_across_the_corpus`.
+            if matches!(
+                scalar.style,
+                ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+            ) && quoted_overshoot(text).is_some()
+            {
+                quoted_overshoot_deferred += 1;
+                continue;
+            }
 
             flow_checked += 1;
             let ok = match scalar.style {
@@ -471,6 +530,7 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     println!("flow scalars asserted exact:   {flow_checked}");
     println!("multi-line plain scalars skipped (they fold): {multiline_plain_skipped}");
     println!("implicit zero-width scalars skipped (no token): {implicit_skipped}");
+    println!("quoted overshoots deferred to their own test: {quoted_overshoot_deferred}");
     println!("block scalars deferred to their own test:     {block_seen}");
     println!("mismatches:                    {}", mismatches.len());
     for line in mismatches.iter().take(10) {
@@ -491,11 +551,88 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
         implicit_skipped, 5,
         "the four empty entries of empty-entries-and-extents.yml plus its bare sequence item"
     );
+    // Pinned for the same reason `implicit_skipped` is: a deferral that can grow
+    // silently is a hiding place, and this is the exact class R20 records.
+    assert_eq!(
+        quoted_overshoot_deferred, 1,
+        "move-a-match.yml's single-quoted value with an inline comment after it is \
+         the corpus's only quoted overshoot"
+    );
     assert!(
         mismatches.is_empty(),
-        "saphyr end offsets must be exact for every flow scalar in the corpus"
+        "saphyr end offsets must be exact for every flow scalar in the corpus \
+         whose line holds nothing after it"
     );
 } // End of function saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus()
+
+#[test]
+fn saphyr_quoted_scalar_ends_overshoot_into_trivia_across_the_corpus() {
+    // The bucket the test above defers to, and the Phase 0c-3b-2a review's
+    // coverage hole 3. `saphyr_quoted_scalar_ends_overshoot_trailing_spaces_and_a_comment`
+    // pins the substrate behaviour on toy documents; this pins what the **corpus**
+    // holds, so the two figures stay apart (R20) and neither can absorb the other.
+    //
+    // What is asserted about an overshoot is not that it is absent — it is not —
+    // but that it is **exactly** trailing blanks and an optional comment, and that
+    // the token trimmed back to its closing delimiter is the exact source token.
+    // That is the property `SyntaxIndex::quoted_span` relies on, measured here
+    // without asking it.
+    let mut overshoots: Vec<String> = Vec::new();
+    let mut bad: Vec<String> = Vec::new();
+
+    for file in common::synthetic_valid() {
+        let source = file.source_without_bom();
+        let Some(scalars) = saphyr_scalars_or_none(source) else {
+            continue;
+        };
+        let table = CharToByte::new(source);
+        for scalar in &scalars {
+            if !matches!(
+                scalar.style,
+                ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted
+            ) {
+                continue;
+            }
+            let start = table.byte(scalar.span.start);
+            let end = table.byte(scalar.span.end);
+            let Some(text) = source.get(start..end) else {
+                continue;
+            };
+            let Some((token, excess)) = quoted_overshoot(text) else {
+                continue;
+            };
+            overshoots.push(format!("{}: {} bytes over", file.name, excess.len()));
+            let tail = excess.trim_start_matches([' ', '\t']);
+            if !(tail.is_empty() || tail.starts_with('#')) {
+                bad.push(format!("{}: the overshoot is not trivia", file.name));
+            }
+            let exact = match scalar.style {
+                ScalarStyle::SingleQuoted => {
+                    token.len() >= 2 && token[1..token.len() - 1].replace("''", "'") == scalar.value
+                }
+                // A double-quoted token still holds its raw escapes, so only the
+                // delimiters are asserted, exactly as the corpus test does.
+                _ => token.len() >= 2 && token.ends_with('"'),
+            };
+            if !exact {
+                bad.push(format!("{}: the trimmed token is not the value", file.name));
+            }
+        } // End of the loop over this file's quoted scalars
+    } // End of the loop over the valid synthetic fixtures
+
+    println!("\n--- corpus-wide QUOTED-scalar end overshoots ---");
+    for line in &overshoots {
+        println!("  {line}");
+    }
+    println!("overshooting quoted scalars: {}", overshoots.len());
+    assert!(bad.is_empty(), "{bad:?}");
+    assert_eq!(
+        overshoots.len(),
+        1,
+        "the corpus must hold exactly one quoted scalar with an inline comment \
+         after it, in move-a-match.yml"
+    );
+} // End of function saphyr_quoted_scalar_ends_overshoot_into_trivia_across_the_corpus()
 
 #[test]
 fn yaml_rust2_exposes_a_start_marker_only() {

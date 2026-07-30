@@ -1,14 +1,15 @@
 //! Guards on the corpus itself.
 //!
-//! Twelve fixtures exist precisely because they violate what an editor considers
-//! tidy: CRLF line endings, a leading UTF-8 BOM, a missing final newline, an
-//! unnormalised (NFD) `é`, deliberate runs of blank lines around block scalars,
-//! spaces after a block indicator, more-indented folded lines, a *mixture* of
-//! CRLF and LF endings in one file, a document with no line break at all, and
-//! comment lines whose **column** — zero under an indented folded block, flush
-//! against the key below them — is the whole test. Editors, formatters, Unicode
-//! normalisation and git's own end-of-line conversion all offer to "fix" them,
-//! and every one of those fixes silently deletes the test.
+//! Fifteen fixtures exist precisely because they violate what an editor
+//! considers tidy: CRLF line endings, a leading UTF-8 BOM, a missing final
+//! newline, an unnormalised (NFD) `é`, deliberate runs of blank lines around
+//! block scalars, spaces after a block indicator, more-indented folded lines, a
+//! *mixture* of CRLF and LF endings in one file, a document with no line break at
+//! all, and comment lines whose **column** — zero under an indented folded block,
+//! flush against the key below them, five or seven where a block's body sits at
+//! the same column, two or four where it does not — is the whole test. Editors,
+//! formatters, Unicode normalisation and git's own end-of-line conversion all
+//! offer to "fix" them, and every one of those fixes silently deletes the test.
 //!
 //! These assertions are on raw bytes, not parsed content, so they fail loudly
 //! the moment a fixture is normalised.
@@ -285,6 +286,141 @@ fn the_boundaries_fixture_keeps_its_column_zero_comments_and_its_leading_block()
 } // End of function the_boundaries_fixture_keeps_its_column_zero_comments_and_its_leading_block()
 
 #[test]
+fn the_move_seams_fixture_keeps_its_five_column_bodies_and_comments() {
+    // Added by Phase 0c-3b-2a. Three columns in this file are the test data, and
+    // an editor that "tidies" any of them dissolves the construct silently:
+    //
+    // - both block bodies sit at column **five**, one deeper than the `replace:`
+    //   key that carries them and one shallower than the six an emitted block
+    //   would use. Five is what keeps every scalar edit and every insertion in
+    //   this file out of the question, so the only thing that can absorb a
+    //   comment here is a *move*;
+    // - one leading comment block sits at column **five** as well, deep enough to
+    //   become content of the block a move would park it under. That is the
+    //   refused side of `MoveWouldExtendABlockScalar`;
+    // - one leading comment block sits at column **two**, which ends a block
+    //   rather than joining it. That is the safe side of the same condition, and
+    //   the two differ in nothing else.
+    let bytes = fixture_bytes("move-block-scalar-seams.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    let at_five = text
+        .lines()
+        .filter(|line| line.starts_with("     #") && !line.starts_with("      "))
+        .count();
+    let at_two = text
+        .lines()
+        .filter(|line| line.starts_with("  #") && !line.starts_with("   "))
+        .count();
+    println!("move-block-scalar-seams.yml: {at_five} comments at column five, {at_two} at two");
+    assert_eq!(
+        at_five, 1,
+        "the leading comment block at column five must keep that column"
+    );
+    assert_eq!(
+        at_two, 1,
+        "the leading comment block at column two must keep that column"
+    );
+    assert_eq!(
+        text.matches("    replace: |\n     the body of this block sits at column five")
+            .count(),
+        2,
+        "both block bodies must stay at column five"
+    );
+    assert!(
+        text.ends_with("ends that block'\n"),
+        "the file must still end with a single line break"
+    );
+} // End of function the_move_seams_fixture_keeps_its_five_column_bodies_and_comments()
+
+#[test]
+fn the_run_join_fixture_keeps_its_seven_column_bodies_and_its_two_comment_columns() {
+    // Added by the Phase 0c-3b-2a review's fix round, for the **internal** seam its
+    // finding 3 named. Three columns are the test data:
+    //
+    // - both `|` block bodies sit at column **seven**, one deeper than the `x:`
+    //   key that carries them;
+    // - the first match's second envelope run begins with a comment at column
+    //   seven as well, so concatenating the runs at the destination feeds that
+    //   comment to the block the first run ends with. That is the refused side;
+    // - the second match's is at column **four**, which ends the block instead.
+    //   That is the safe side, and the two differ in nothing else.
+    let bytes = fixture_bytes("move-run-joins.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    assert_eq!(
+        text.matches("      x: |\n       the body of this block sits at column seven")
+            .count(),
+        2,
+        "both block bodies must stay at column seven"
+    );
+    let at_seven = text
+        .lines()
+        .filter(|line| line.starts_with("       #") && !line.starts_with("        "))
+        .count();
+    let at_four = text
+        .lines()
+        .filter(|line| line.starts_with("    #") && !line.starts_with("     "))
+        .count();
+    println!("move-run-joins.yml: {at_seven} comment lines at column seven, {at_four} at four");
+    assert_eq!(
+        at_seven, 2,
+        "the leading comment block at column seven must keep that column"
+    );
+    assert_eq!(
+        at_four, 1,
+        "the leading comment block at column four must keep that column"
+    );
+    assert_eq!(
+        text.matches("\n\n").count(),
+        4,
+        "the four blank lines that make two comments file-owned must survive"
+    );
+} // End of function the_run_join_fixture_keeps_its_seven_column_bodies_and_its_two_comment_columns()
+
+#[test]
+fn the_kept_comment_fixture_keeps_its_five_column_bodies_and_its_two_comment_columns() {
+    // Added by the Phase 0c-3b-2a review's coverage hole 2, for R23 reached by a
+    // move. Both `|` block bodies sit at column **five**; the comment the file owns
+    // inside the second match sits at column five as well, so carrying that match
+    // away leaves the comment at the block's own body column and it becomes part of
+    // the block's value. The one inside the fourth match sits at column **two**,
+    // which ends the block instead. Re-indenting either turns one case into the
+    // other.
+    let bytes = fixture_bytes("move-kept-comment-joins-a-block.yml");
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+
+    assert_eq!(
+        text.matches("    replace: |\n     the body of this block sits at column five")
+            .count(),
+        2,
+        "both block bodies must stay at column five"
+    );
+    let at_five = text
+        .lines()
+        .filter(|line| line.starts_with("     #") && !line.starts_with("      "))
+        .count();
+    let at_two = text
+        .lines()
+        .filter(|line| line.starts_with("  #") && !line.starts_with("   "))
+        .count();
+    println!("move-kept-comment-joins-a-block.yml: {at_five} at column five, {at_two} at two");
+    assert_eq!(
+        at_five, 3,
+        "the file-owned comment block at column five must keep that column"
+    );
+    assert_eq!(
+        at_two, 2,
+        "the file-owned comment block at column two must keep that column"
+    );
+    assert_eq!(
+        text.matches("\n\n").count(),
+        4,
+        "the four blank lines that make both comments file-owned must survive"
+    );
+} // End of function the_kept_comment_fixture_keeps_its_five_column_bodies_and_its_two_comment_columns()
+
+#[test]
 fn the_mixed_ending_fixture_keeps_its_two_crlf_lines_and_its_missing_final_break() {
     // Added by the Phase 0c-3a review's fix round. Two of this file's lines end
     // with CRLF and the rest with a bare LF, so the document-wide "dominant"
@@ -395,6 +531,17 @@ fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
         // paired with an interior file comment, which makes a removal envelope
         // start above the entry's own first line.
         "run-based-removal-boundaries.yml",
+        // Added by Phase 0c-3b-2a for the move: what travels with a match and
+        // what stays behind, and the three external seams at which a relocation can
+        // feed a block scalar a line that is not its own.
+        "move-a-match.yml",
+        "move-block-scalar-seams.yml",
+        // Added by that phase's review: the internal seam two carried runs create
+        // when they are concatenated at the destination, and R23 reached by a move
+        // rather than by a removal — each with the safe side of its condition
+        // beside it.
+        "move-run-joins.yml",
+        "move-kept-comment-joins-a-block.yml",
     ];
     for fixture in required {
         assert!(

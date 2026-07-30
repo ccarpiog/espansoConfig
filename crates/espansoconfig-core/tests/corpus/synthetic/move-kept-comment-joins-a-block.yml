@@ -1,0 +1,37 @@
+# Phase 0c-3b-2a review, coverage hole 2: R23 reached by a MOVE, with a fixture
+# on each side of its condition (`PROGRESS.md`, R20's standing rule).
+#
+# `RemovalWouldExtendABlockScalar` is inherited whole by a move, because the
+# source half of a move is a removal: when the match carried away holds a comment
+# the file owns, that comment stays behind and comes to sit directly under
+# whatever preceded the match. If what preceded it is a block scalar's content and
+# the comment is at or past that block's body column, the comment becomes part of
+# the block's value although nothing about the block was edited.
+#
+# THE COLUMNS IN THIS FILE ARE THE TEST DATA. Both `|` block bodies sit at column
+# FIVE. The comment the file owns inside the second match sits at column five as
+# well, so moving that match away feeds it to the block above and the move is
+# refused; the one inside the fourth match sits at column two, which ends the
+# block instead, so that match moves. The two cases differ in nothing else.
+matches:
+  - trigger: ':block-above-a'
+    replace: |
+     the body of this block sits at column five
+  - trigger: ':deep-kept-comment'
+    first: 'one'
+
+     # A blank line on either side gives this comment to the FILE, so a move of
+     # the match around it leaves it exactly here, at the body column of the
+     # block directly above.
+
+    second: 'two'
+  - trigger: ':block-above-b'
+    replace: |
+     the body of this block sits at column five too
+  - trigger: ':shallow-kept-comment'
+    first: 'one'
+
+  # The same file-owned comment at column TWO, which ends the block above rather
+  # than joining it.
+
+    second: 'two'

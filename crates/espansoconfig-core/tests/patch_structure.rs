@@ -1,7 +1,7 @@
 //! Phase 0c-3a acceptance: inserting and removing a mapping field.
 //!
 //! The same shape as `tests/patch_edit.rs`, one level up. For **every mapping**
-//! of all 26 synthetic fixtures and of the real corpus, every entry is offered
+//! of all 30 synthetic fixtures and of the real corpus, every entry is offered
 //! for removal and a new entry is offered for insertion at several positions —
 //! including after a sibling the mapping does not have — and each attempt must
 //! end in one of exactly two ways:
@@ -233,7 +233,7 @@ type OutcomeRow = (&'static str, [usize; CATEGORIES]);
 /// mapping, so every row's total grows; a removal whose envelope crosses a
 /// file-owned comment is now refused rather than applied; and two fixtures
 /// joined the corpus.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
     (
         "anchors-aliases-tags-merge.yml",
         [0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -304,6 +304,27 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 28] = [
     (
         "imports-and-global-vars.yml",
         [87, 19, 0, 0, 1, 7, 10, 0, 0, 0, 10, 0, 0],
+    ),
+    // The two fixtures Phase 0c-3b-2a added for the move. They are swept here as
+    // well, because a fixture that only one sweep sees is a fixture whose other
+    // outcomes nobody has looked at.
+    ("move-a-match.yml", [40, 6, 0, 0, 1, 3, 5, 0, 0, 0, 5, 0, 0]),
+    (
+        "move-block-scalar-seams.yml",
+        [55, 6, 0, 0, 1, 6, 7, 0, 0, 0, 7, 0, 0],
+    ),
+    // The two fixtures the Phase 0c-3b-2a **review** added, given a structural row
+    // as well for the same reason the two above are: a fixture only one sweep looks
+    // at is a fixture whose other outcomes nobody has checked. Neither reaches a
+    // structural refusal the corpus did not already reach — what is new in them is
+    // a *move's* seam, not a removal's.
+    (
+        "move-kept-comment-joins-a-block.yml",
+        [41, 6, 0, 0, 1, 4, 5, 0, 0, 0, 5, 0, 0],
+    ),
+    (
+        "move-run-joins.yml",
+        [49, 9, 0, 0, 1, 3, 6, 0, 0, 0, 6, 0, 0],
     ),
     (
         "multi-document.yml",
@@ -944,12 +965,34 @@ fn line_end(source: &str, position: usize) -> usize {
 /// cannot pull a **file-owned** comment in: a blank line above the block is what
 /// rule 2 reads to give the comments above it to the file, and the walk stops
 /// there.
-fn entry_hull_lines(source: &str, lines: ByteSpan, body_offset: usize) -> ByteSpan {
+///
+/// # The `#` that is not a comment
+///
+/// A line whose first non-blank byte is `#` is a comment **only if it does not lie
+/// inside a frontier leaf**: a line of shell or Python inside a `replace: |`
+/// block's body looks exactly like a leading comment to a textual walk, and the
+/// real corpus contains one. Phase 0c-3b-2a found this in its own copy of the
+/// walk, fixed it there and recorded the defect here as a live hole; its review
+/// asked for the fix to be ported before any future structural sweep count is
+/// treated as authoritative, and this is that port. No removal in either corpus
+/// pairs the two shapes today, so no count moves — which is exactly why it had to
+/// be fixed rather than waited for.
+fn entry_hull_lines(
+    source: &str,
+    index: &SyntaxIndex,
+    lines: ByteSpan,
+    body_offset: usize,
+) -> ByteSpan {
     let mut start = lines.start;
     while start > body_offset {
         let above = line_start(source, start - 1, body_offset);
-        let text = source[above..start].trim_start_matches([' ', '\t']);
-        if !text.starts_with('#') {
+        let line = &source[above..start];
+        let text = line.trim_start_matches([' ', '\t']);
+        let opener = above + (line.len() - text.len());
+        let inside_a_leaf = index.nodes().iter().any(|node| {
+            node.is_frontier_leaf() && node.span.start <= opener && opener < node.span.end
+        });
+        if !text.starts_with('#') || inside_a_leaf {
             return ByteSpan::new(start, lines.end);
         }
         start = above;
@@ -1383,7 +1426,7 @@ fn audit(name: &str, source: &str, stride: usize) -> Tally {
                     // The engine's envelope starts at the ownership hull, which
                     // covers the entry's leading comment block; the bytes it would
                     // keep are what the preservation rule protects inside it.
-                    let hull = entry_hull_lines(source, lines, body_offset);
+                    let hull = entry_hull_lines(source, &index, lines, body_offset);
                     let kept = preserved_by_the_rule(source, &trivia, hull, body_offset);
                     classify(
                         &label,

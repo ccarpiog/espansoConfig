@@ -69,7 +69,7 @@ cargo test -p espansoconfig-core --test parser_evaluation -- --nocapture --test-
 ./scripts/sync-real-corpus.sh
 ```
 
-**Twelve corpus fixtures must never be "fixed" by an editor or a formatter.** Their whitespace
+**Fifteen corpus fixtures must never be "fixed" by an editor or a formatter.** Their whitespace
 *is* the test data — a stray "trim trailing whitespace", "add final newline" or "reindent" on save
 destroys what they exist to pin:
 
@@ -87,9 +87,12 @@ destroys what they exist to pin:
 | `file-comments-and-mixed-endings.yml` | exactly two CRLF lines among bare-LF ones, the blank line under an interior comment, no final newline |
 | `single-line-no-line-ending.yml` | one line and **no line break at all** — the only document that gives an insertion no ending to copy |
 | `run-based-removal-boundaries.yml` | four comment lines at **column zero** under a folded block indented six, and a comment block flush against the `vars:` below it with no blank line between — both are indentation, and re-indenting either silently swaps the shape the fixture tests |
+| `move-block-scalar-seams.yml` | two `\|` block bodies at **column five** — deeper than their `replace:` key and shallower than the six an emitted block uses — with one leading comment block at column five and one at column two. Every column is the test: "tidying" a body to six, or re-indenting either comment, turns a refused move into its own safe twin |
+| `move-run-joins.yml` | two `\|` block bodies at **column seven**, one leading comment block at column seven and one at column four, and the four blank lines that give two interior comments to the file. The blank lines split each envelope into two runs; the columns decide whether concatenating those runs feeds the second one's first comment to the block the first one ends with |
+| `move-kept-comment-joins-a-block.yml` | two `\|` block bodies at **column five**, a file-owned comment block at column five and another at column two, and the four blank lines that make both file-owned. The columns are the two sides of R23 seen by a move |
 
 `.gitattributes` in the corpus directory marks it `-text` so git never converts line endings, and
-`tests/corpus_integrity.rs` fails the build if any of the twelve loses its distinguishing bytes.
+`tests/corpus_integrity.rs` fails the build if any of the fifteen loses its distinguishing bytes.
 
 ## 5. Coding conventions (plan §14)
 

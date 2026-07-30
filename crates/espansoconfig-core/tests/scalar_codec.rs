@@ -128,9 +128,13 @@ fn our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar() {
     // two fixtures, none of them zero width, all of them in agreement. 905 since
     // Phase 0c-3b-1's `run-based-removal-envelope.yml` added 19, likewise none
     // zero width and all in agreement, and 924 since its review's fix round added
-    // the 19 of `run-based-removal-boundaries.yml` on the same terms.
+    // the 19 of `run-based-removal-boundaries.yml` on the same terms. 967 since
+    // Phase 0c-3b-2a's two move fixtures added 20 and 23, none zero width and all
+    // in agreement. 1 011 since that phase's review added two more: the 23 scalars
+    // of `move-run-joins.yml` and the 21 of `move-kept-comment-joins-a-block.yml`,
+    // on the same terms.
     assert_eq!(
-        total, 924,
+        total, 1011,
         "the synthetic corpus scalar count is pinned; update it deliberately"
     );
 } // End of function our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar()
@@ -278,7 +282,14 @@ fn every_synthetic_scalar_reencodes_to_its_own_bytes() {
     // one block scalar is a `>`, so it joins the `FoldedStyle` family below. That
     // asymmetry between the two otherwise identically shaped fixtures is its own
     // cross-check on D2e.
-    assert_eq!(tally.identical, 910, "pinned; update deliberately");
+    // 953 since Phase 0c-3b-2a's two move fixtures: 20 in `move-a-match.yml` and
+    // 23 in `move-block-scalar-seams.yml`, whose two `|` blocks re-encode
+    // identically as literal blocks do.
+    // 997 since that phase's review added two more, both moving this figure by
+    // **all** of their scalars: 23 in `move-run-joins.yml`, whose two `|` blocks
+    // re-encode identically, and 21 in `move-kept-comment-joins-a-block.yml`,
+    // whose two do as well.
+    assert_eq!(tally.identical, 997, "pinned; update deliberately");
     assert_eq!(
         tally.refused,
         BTreeMap::from([

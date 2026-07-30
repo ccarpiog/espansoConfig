@@ -281,11 +281,28 @@ fn every_addressable_node_of_the_synthetic_corpus_round_trips_through_its_path()
     // document, +11 mapping keys, +14 addressable, no new ambiguity. What differs
     // is its trivia, not its tree, which is why `trivia_scanner.rs` separates the
     // two fixtures and this file does not.
-    assert_eq!(total.total(), 1237);
-    assert_eq!(total.addressable, 713);
-    // 27 single-document fixtures plus multi-document.yml's three.
-    assert_eq!(total.documents, 30);
-    assert_eq!(total.mapping_keys, 490);
+    //
+    // Phase 0c-3b-2a added the two move fixtures, and again each moves every
+    // figure by exactly its own shape. `move-a-match.yml`: 25 nodes = 1 document
+    // + 5 collections (the root mapping, the `matches` sequence, 3 item mappings
+    // — one of which carries a nested `vars` mapping, so 6 in all) + scalars, and
+    // `move-block-scalar-seams.yml`: 38 nodes over 6 matches, two of which carry
+    // a one-entry `vars` mapping. Their exact splits are in
+    // `docs/decisions/0c-3b-2a-notes.md` section 6.
+    //
+    // That phase's **review** added two more, and again each moves every figure by
+    // exactly its own shape. `move-run-joins.yml`: 31 nodes = 1 document + 7
+    // collections (the root mapping, the `matches` sequence, 3 item mappings and 2
+    // nested `vars` mappings) + 23 scalars, 13 keys and 10 values, so +1 document,
+    // +13 mapping keys and +17 addressable. `move-kept-comment-joins-a-block.yml`:
+    // 28 nodes = 1 document + 6 collections (the root mapping, the `matches`
+    // sequence and 4 item mappings) + 21 scalars, 11 keys and 10 values, so +1
+    // document, +11 mapping keys and +16 addressable. Neither adds an ambiguity.
+    assert_eq!(total.total(), 1355);
+    assert_eq!(total.addressable, 780);
+    // 31 single-document fixtures plus multi-document.yml's three.
+    assert_eq!(total.documents, 34);
+    assert_eq!(total.mapping_keys, 537);
     // Exactly the four values under a duplicated key in duplicate-keys.yml:
     // `replace` twice in `matches[0]` and `label` twice in `matches[2]`.
     assert_eq!(total.ambiguous, 4);
