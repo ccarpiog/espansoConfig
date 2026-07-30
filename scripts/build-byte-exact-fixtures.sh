@@ -131,6 +131,69 @@ terminal="${corpus}/block-scalar-terminal-spaces.yml"
 } > "${terminal}"
 
 # ---------------------------------------------------------------------------
+# 6. A file-owned comment inside a removable collection, mixed line endings,
+#    and no final break.
+#
+# Added by the Phase 0c-3a review's fix round, for two demonstrated defects the
+# corpus could not see:
+#
+#   * finding 1 — an entry whose value is a collection with a FILE-owned comment
+#     between two of its descendants. The removal envelope is a contiguous hull,
+#     so it crosses that comment although no node owns it, and every layer of
+#     verification used to certify the result;
+#   * finding 2 — most of this file ends its lines with a bare LF and two lines
+#     end with CRLF, so the document-wide "dominant" ending is LF while the
+#     anchor an insertion must copy is CRLF. An insertion that consults the
+#     document instead of the anchor writes the wrong bytes here.
+#
+# The file also has no final line break, so an insertion at end of file has to
+# learn its ending from a sibling rather than from a terminator that is not
+# there.
+# ---------------------------------------------------------------------------
+mixed="${corpus}/file-comments-and-mixed-endings.yml"
+{
+  printf '%s\n' \
+    '# Structural-edit shapes neither corpus had. This file BYTES are the test:' \
+    '# most lines end with a bare LF, two end with CRLF, and the file has no final' \
+    '# line break at all. Do NOT let an editor normalise any of that.' \
+    'matches:' \
+    "  - trigger: ':interior-file-comment'" \
+    '    vars:' \
+    "      first: 'one'" \
+    '      # A blank line separates this comment from what follows, so the' \
+    '      # ownership rules give it to the FILE. Removing the vars entry that' \
+    '      # contains it must not take it away.' \
+    '' \
+    "      second: 'two'" \
+    "    replace: 'the entry above carries a comment the file owns'" \
+    ''
+  printf '%s\r\n' \
+    "  - trigger: ':crlf-anchor'" \
+    "    replace: 'this line ends with CRLF although the file is mostly LF'"
+  printf '%s\n' \
+    "    label: 'an entry inserted after either line above must end with CRLF'" \
+    '' \
+    "  - trigger: ':ends-the-file'"
+  printf '%s' "    replace: 'nothing terminates this line'"
+} > "${mixed}"
+
+# ---------------------------------------------------------------------------
+# 7. A document that supplies NO line-ending evidence at all.
+#
+# One line, no final break. `LineEnding::detect` answers LF for it — by
+# defaulting, not by measuring — and an insertion that trusted that answer would
+# write a line ending this file never contained (the Phase 0c-3a review's
+# finding 2). The engine refuses instead, and this fixture is what makes that
+# refusal reachable from corpus data rather than only from a unit test.
+#
+# It deliberately carries no explanatory header: a comment line would add the
+# very line break the fixture exists not to have. The explanation lives here, in
+# `tests/corpus_integrity.rs`, and in `docs/decisions/0c-3a-notes.md`.
+# ---------------------------------------------------------------------------
+single="${corpus}/single-line-no-line-ending.yml"
+printf '%s' "only: 'one entry, one line, and no line break anywhere'" > "${single}"
+
+# ---------------------------------------------------------------------------
 # Verification. Each assertion is on the raw bytes, not on parsed content.
 # ---------------------------------------------------------------------------
 fail=0
@@ -175,6 +238,20 @@ esac
 terminal_tail=$(tail -c 3 "${terminal}" | od -An -tx1 | tr -d ' \n')
 check "terminal-spaces: last three bytes end in two spaces" "652020" "${terminal_tail}"
 
+mixed_crlf=$(od -An -tx1 -v "${mixed}" | tr ' ' '\n' | grep -c '^0d$' || true)
+mixed_lf=$(od -An -tx1 -v "${mixed}" | tr ' ' '\n' | grep -c '^0a$' || true)
+check "mixed: exactly two CRLF line endings" "2" "${mixed_crlf}"
+if (( mixed_lf > mixed_crlf + 2 )); then
+  check "mixed: bare LF endings outnumber CRLF ones" "ok" "ok"
+else
+  check "mixed: bare LF endings outnumber CRLF ones" "ok" "NORMALISED"
+fi
+mixed_last=$(tail -c 1 "${mixed}" | od -An -tx1 | tr -d ' \n')
+check "mixed: last byte is an apostrophe (0x27)" "27" "${mixed_last}"
+
+single_breaks=$(od -An -tx1 -v "${single}" | tr ' ' '\n' | grep -cE '^(0a|0d)$' || true)
+check "single-line: contains no line break at all" "0" "${single_breaks}"
+
 printf '\n--- %s ---\n' "$(basename "${crlf}")"
 od -c "${crlf}" | head -6
 printf '\n--- %s ---\n' "$(basename "${bom}")"
@@ -185,5 +262,7 @@ printf '\n--- %s (tail) ---\n' "$(basename "${unicode}")"
 od -c "${unicode}" | tail -4
 printf '\n--- %s (tail) ---\n' "$(basename "${terminal}")"
 od -c "${terminal}" | tail -3
+printf '\n--- %s (tail) ---\n' "$(basename "${mixed}")"
+od -c "${mixed}" | tail -6
 
 exit "${fail}"

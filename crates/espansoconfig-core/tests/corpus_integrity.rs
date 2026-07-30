@@ -1,11 +1,13 @@
 //! Guards on the corpus itself.
 //!
-//! Five fixtures exist precisely because they violate what an editor considers
+//! Eleven fixtures exist precisely because they violate what an editor considers
 //! tidy: CRLF line endings, a leading UTF-8 BOM, a missing final newline, an
-//! unnormalised (NFD) `é`, and deliberate runs of blank lines around block
-//! scalars. Editors, formatters, Unicode normalisation and git's own
-//! end-of-line conversion all offer to "fix" them, and every one of those fixes
-//! silently deletes the test.
+//! unnormalised (NFD) `é`, deliberate runs of blank lines around block scalars,
+//! spaces after a block indicator, more-indented folded lines, a *mixture* of
+//! CRLF and LF endings in one file, and a document with no line break at all.
+//! Editors, formatters, Unicode normalisation and git's own end-of-line
+//! conversion all offer to "fix" them, and every one of those fixes silently
+//! deletes the test.
 //!
 //! These assertions are on raw bytes, not parsed content, so they fail loudly
 //! the moment a fixture is normalised.
@@ -236,6 +238,63 @@ fn the_folded_fixture_keeps_its_more_indented_lines() {
 } // End of function the_folded_fixture_keeps_its_more_indented_lines()
 
 #[test]
+fn the_mixed_ending_fixture_keeps_its_two_crlf_lines_and_its_missing_final_break() {
+    // Added by the Phase 0c-3a review's fix round. Two of this file's lines end
+    // with CRLF and the rest with a bare LF, so the document-wide "dominant"
+    // ending is LF while the anchor an insertion must copy is CRLF — an
+    // insertion that consults the document instead of the anchor writes the
+    // wrong bytes, and only these two CR bytes can catch it. The file also ends
+    // without a final break, which is what makes an end-of-file insertion learn
+    // its ending from a sibling.
+    let bytes = fixture_bytes("file-comments-and-mixed-endings.yml");
+    let crlf = bytes.windows(2).filter(|pair| pair == b"\r\n").count();
+    let lf = bytes.iter().filter(|byte| **byte == b'\n').count();
+    let cr = bytes.iter().filter(|byte| **byte == b'\r').count();
+    println!("file-comments-and-mixed-endings.yml: {crlf} CRLF, {lf} LF, {cr} CR");
+    assert_eq!(crlf, 2, "exactly two lines must still end with CRLF");
+    assert_eq!(cr, crlf, "a bare CR would be a line ending we cannot write");
+    assert!(
+        lf > crlf + 2,
+        "bare LF endings must still outnumber the CRLF ones, or the document-wide \
+         ending stops disagreeing with the anchor's"
+    );
+    assert_ne!(
+        *bytes.last().expect("non-empty file"),
+        b'\n',
+        "an editor added a final newline"
+    );
+
+    // And the shape finding 1 was demonstrated on: a comment with a blank line
+    // under it, sitting between two entries of a collection that can be removed.
+    let text = String::from_utf8(bytes).expect("valid UTF-8");
+    assert!(
+        text.contains("must not take it away.\n\n      second:"),
+        "the blank line under the interior comment is what makes the file own it"
+    );
+} // End of function the_mixed_ending_fixture_keeps_its_two_crlf_lines_and_its_missing_final_break()
+
+#[test]
+fn the_single_line_fixture_still_holds_no_line_break_at_all() {
+    // The only fixture in the corpus that gives an insertion no line ending to
+    // copy. `LineEnding::detect` answers LF for it by defaulting rather than by
+    // measuring, so an engine that trusted that answer would write a byte this
+    // file never held. One added newline — from an editor, from git, from a
+    // "tidy up on save" — deletes the whole test.
+    let bytes = fixture_bytes("single-line-no-line-ending.yml");
+    let breaks = bytes
+        .iter()
+        .filter(|byte| **byte == b'\n' || **byte == b'\r')
+        .count();
+    println!("single-line-no-line-ending.yml: {breaks} line-break bytes");
+    assert_eq!(breaks, 0, "the fixture must hold no line break at all");
+    assert_eq!(
+        *bytes.last().expect("non-empty file"),
+        b'\'',
+        "the file must still end with the closing quote"
+    );
+} // End of function the_single_line_fixture_still_holds_no_line_break_at_all()
+
+#[test]
 fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
     // Cheap insurance against a fixture being deleted or renamed without the
     // matching test being updated. The categories come from plan section 11.
@@ -269,6 +328,15 @@ fn the_synthetic_corpus_covers_every_category_the_plan_requires() {
         "block-scalar-leading-blank-lines.yml",
         "block-scalar-terminal-spaces.yml",
         "folded-more-indented.yml",
+        // Added by Phase 0c-2b's fix round and by Phase 0c-3a: two shapes
+        // neither corpus contained, each of which was hiding a real defect.
+        "block-scalar-header-tails.yml",
+        "empty-entries-and-extents.yml",
+        // Added by the Phase 0c-3a review's fix round: a file-owned comment
+        // inside a removable collection with mixed line endings, and a document
+        // that supplies no line-ending evidence at all.
+        "file-comments-and-mixed-endings.yml",
+        "single-line-no-line-ending.yml",
     ];
     for fixture in required {
         assert!(

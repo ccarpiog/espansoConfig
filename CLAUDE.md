@@ -69,7 +69,7 @@ cargo test -p espansoconfig-core --test parser_evaluation -- --nocapture --test-
 ./scripts/sync-real-corpus.sh
 ```
 
-**Nine corpus fixtures must never be "fixed" by an editor or a formatter.** Their whitespace
+**Eleven corpus fixtures must never be "fixed" by an editor or a formatter.** Their whitespace
 *is* the test data — a stray "trim trailing whitespace" or "add final newline" on save destroys
 what they exist to pin:
 
@@ -84,9 +84,11 @@ what they exist to pin:
 | `block-scalar-leading-blank-lines.yml` | empty lines directly under a `\|`/`>` header |
 | `folded-more-indented.yml` | the extra indentation of more-indented folded lines |
 | `block-scalar-header-tails.yml` | three real spaces after a `\|-` indicator, plus comments on a `\|` and a `>2` header line |
+| `file-comments-and-mixed-endings.yml` | exactly two CRLF lines among bare-LF ones, the blank line under an interior comment, no final newline |
+| `single-line-no-line-ending.yml` | one line and **no line break at all** — the only document that gives an insertion no ending to copy |
 
 `.gitattributes` in the corpus directory marks it `-text` so git never converts line endings, and
-`tests/corpus_integrity.rs` fails the build if any of the nine loses its distinguishing bytes.
+`tests/corpus_integrity.rs` fails the build if any of the eleven loses its distinguishing bytes.
 
 ## 5. Coding conventions (plan §14)
 

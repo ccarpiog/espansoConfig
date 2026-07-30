@@ -1,0 +1,20 @@
+# Structural-edit shapes neither corpus had. This file BYTES are the test:
+# most lines end with a bare LF, two end with CRLF, and the file has no final
+# line break at all. Do NOT let an editor normalise any of that.
+matches:
+  - trigger: ':interior-file-comment'
+    vars:
+      first: 'one'
+      # A blank line separates this comment from what follows, so the
+      # ownership rules give it to the FILE. Removing the vars entry that
+      # contains it must not take it away.
+
+      second: 'two'
+    replace: 'the entry above carries a comment the file owns'
+
+  - trigger: ':crlf-anchor'
+    replace: 'this line ends with CRLF although the file is mostly LF'
+    label: 'an entry inserted after either line above must end with CRLF'
+
+  - trigger: ':ends-the-file'
+    replace: 'nothing terminates this line'

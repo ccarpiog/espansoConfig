@@ -26,18 +26,26 @@
 //!
 //! **0c-2b — [`edit`], the first code here that mutates a document.** One
 //! scalar's value, replaced as a byte-span surgery, with the hazard gate
-//! consulted by [`apply_scalar_edits`] **itself** rather than by its callers,
-//! and the whole candidate reparsed and verified before a [`PatchedDocument`]
-//! exists at all. Structural edits — insert or remove a field, move a match —
-//! are step 0c-3, and the batch shape of [`apply_scalar_edits`] is where they
-//! will land.
+//! consulted by the entry point **itself** rather than by its callers, and the
+//! whole candidate reparsed and verified before a [`PatchedDocument`] exists at
+//! all.
+//!
+//! **0c-3a — structural edits, in the same engine.** [`FieldInsert`] and
+//! [`FieldRemoval`] join [`ScalarEdit`] in one [`DocumentEdit`] batch, applied
+//! by [`apply_edits`]; [`apply_scalar_edits`] is now a wrapper over it. Planning
+//! against the original index, rejecting overlaps, splicing from the highest
+//! offset downwards and reparsing to verify are the same steps whatever the edit
+//! is, so there is one engine rather than two. Moving a whole match, the
+//! multiset invariant a move needs, and the full round-trip property test are
+//! step 0c-3b.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
-    apply_scalar_edit, apply_scalar_edits, EditError, PatchedDocument, PresentationNote,
-    Replacement, ScalarEdit, VerificationFailure,
+    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, remove_field, DocumentEdit,
+    EditError, FieldInsert, FieldRemoval, PatchedDocument, PresentationNote, Replacement,
+    ScalarEdit, VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

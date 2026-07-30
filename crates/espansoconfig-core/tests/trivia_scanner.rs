@@ -52,10 +52,10 @@ use espansoconfig_core::ByteSpan;
 // constants rather than something a comparison quietly absorbs.
 
 /// Valid fixtures in `corpus/synthetic/`. Must agree with `syntax_index.rs`.
-const SYNTHETIC_FIXTURES: usize = 23;
+const SYNTHETIC_FIXTURES: usize = 26;
 
 /// Trivia items across the valid synthetic corpus.
-const SYNTHETIC_TRIVIA_ITEMS: usize = 2742;
+const SYNTHETIC_TRIVIA_ITEMS: usize = 2923;
 
 /// Comments the scanner finds in the gaps of the valid synthetic corpus.
 ///
@@ -70,7 +70,17 @@ const SYNTHETIC_TRIVIA_ITEMS: usize = 2742;
 /// correctly: the fixture carries 6 whole-line comments, which **both** counts
 /// see, and 2 comments sharing a block-scalar header line, which only this one
 /// does. So the line scan gained 6 and the scanner gained 8.
-const SYNTHETIC_COMMENTS: usize = 205;
+///
+/// Phase 0c-3a's `empty-entries-and-extents.yml` is the same cross-check again:
+/// 17 whole-line comments, which both counts see, and 1 sharing a line with an
+/// entry written `label:`, which only this one does — the line scan gained 17
+/// and the scanner gained 18.
+///
+/// The Phase 0c-3a review's fix round added `file-comments-and-mixed-endings.yml`
+/// with 6 whole-line comments and **no** inline one, so here the two conventions
+/// agree and both gained exactly 6. `single-line-no-line-ending.yml` has no
+/// comment at all.
+const SYNTHETIC_COMMENTS: usize = 229;
 
 /// Blank lines — whole physical lines holding nothing but spaces and tabs.
 ///
@@ -79,10 +89,19 @@ const SYNTHETIC_COMMENTS: usize = 205;
 /// break that merely *terminates* a content line is counted as a blank line of
 /// its own. Here a line break is a `LineBreak` item and only a line that lies
 /// wholly inside a gap and holds nothing can be blank.
-const SYNTHETIC_BLANK_LINES: usize = 96;
+///
+/// The 3 the Phase 0c-3a review's fix round added are the real blank lines of
+/// `file-comments-and-mixed-endings.yml`, one of which is what makes the
+/// ownership rules give that fixture's interior comment to the **file** — the
+/// whole reason it exists. The loose line scan gained 18 for the same file,
+/// which is the documented difference between the two conventions.
+const SYNTHETIC_BLANK_LINES: usize = 103;
 
 /// Maximal runs of consecutive blank lines.
-const SYNTHETIC_BLANK_RUNS: usize = 92;
+///
+/// Still one run per blank line: the three the review's fix round added are each
+/// isolated.
+const SYNTHETIC_BLANK_RUNS: usize = 99;
 
 /// Bytes the scanner could not name. **Zero, and pinned at zero**: the whole
 /// point of the category is that it stays empty and says so loudly if it does

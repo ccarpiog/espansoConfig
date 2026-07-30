@@ -1,7 +1,7 @@
 //! Phase 0c-2b acceptance: the first code that mutates a document.
 //!
 //! This is the 0c-3 gate test in miniature. For **every addressable scalar** of
-//! all 23 synthetic fixtures and of the real corpus, a set of replacement values
+//! all 26 synthetic fixtures and of the real corpus, a set of replacement values
 //! is attempted, and each attempt must end in one of exactly two ways:
 //!
 //! - a **typed refusal whose reason this file re-derives from the document
@@ -84,8 +84,8 @@ const REAL_CORPUS_STRIDE: usize = 3;
 
 /// How every attempted edit of one corpus ended.
 ///
-/// The four categories are exhaustive over the outcomes an addressable,
-/// non-zero-width scalar can produce: [`audit`] panics on anything else, so a
+/// The five categories are exhaustive over the outcomes an addressable scalar
+/// can produce: [`audit`] panics on anything else, so a
 /// new refusal family cannot slip in as "some other error".
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Tally {
@@ -97,12 +97,27 @@ struct Tally {
     empty_target: usize,
     /// Edits refused because the value's trailing newlines are unrepresentable.
     trailing_newlines: usize,
+    /// Edits refused because the value needs a line break the document has none
+    /// of.
+    ///
+    /// Added by the Phase 0c-3a review's fix round. Finding 2 was demonstrated
+    /// on an *insertion*, but the root cause — `LineEnding::detect`'s
+    /// document-wide vote, which defaults a break-less document to LF — was
+    /// shared with the scalar path: a multi-line value renders as a block, and a
+    /// block writes breaks, so editing the one entry of
+    /// `single-line-no-line-ending.yml` used to give a file with no final
+    /// newline one.
+    no_line_ending: usize,
 }
 
 impl Tally {
     /// Every attempt this tally accounts for.
     fn total(&self) -> usize {
-        self.applied + self.refused_by_the_gate + self.empty_target + self.trailing_newlines
+        self.applied
+            + self.refused_by_the_gate
+            + self.empty_target
+            + self.trailing_newlines
+            + self.no_line_ending
     }
 
     /// Folds another file's tally into this one.
@@ -111,13 +126,14 @@ impl Tally {
         self.refused_by_the_gate += other.refused_by_the_gate;
         self.empty_target += other.empty_target;
         self.trailing_newlines += other.trailing_newlines;
+        self.no_line_ending += other.no_line_ending;
     }
 } // End of impl Tally
 
-/// One fixture's pinned outcome row: its file name followed by the four
+/// One fixture's pinned outcome row: its file name followed by the five
 /// [`Tally`] fields in declaration order — applied, refused by the gate, empty
-/// target, trailing newlines.
-type OutcomeRow = (&'static str, usize, usize, usize, usize);
+/// target, trailing newlines, no line ending.
+type OutcomeRow = (&'static str, usize, usize, usize, usize, usize);
 
 /// Every synthetic fixture's complete outcome split, pinned exactly.
 ///
@@ -128,33 +144,46 @@ type OutcomeRow = (&'static str, usize, usize, usize, usize);
 /// disappearing into a total.
 ///
 /// Each row is `addressable scalars × 12` replacement values, split by outcome.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 23] = [
-    ("anchors-aliases-tags-merge.yml", 60, 144, 0, 0),
-    ("blank-lines.yml", 106, 0, 0, 2),
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 26] = [
+    ("anchors-aliases-tags-merge.yml", 60, 144, 0, 0, 0),
+    ("blank-lines.yml", 106, 0, 0, 2, 0),
     // Every one of its 72 attempts applies, header comment and header spaces
     // included: that is the Phase 0c-2b review's finding 1 and finding 2 pinned
     // on corpus data rather than on a hand-written source string.
-    ("block-scalar-header-tails.yml", 72, 0, 0, 0),
-    ("block-scalar-leading-blank-lines.yml", 180, 0, 0, 0),
-    ("block-scalar-terminal-spaces.yml", 60, 0, 0, 0),
-    ("block-scalars.yml", 396, 0, 0, 0),
-    ("bom-utf8.yml", 48, 0, 0, 0),
-    ("comments-everywhere.yml", 84, 0, 0, 0),
-    ("config-profile.yml", 192, 0, 0, 0),
-    ("crlf-line-endings.yml", 72, 0, 0, 0),
-    ("duplicate-keys.yml", 96, 24, 0, 0),
-    ("flow-collections.yml", 240, 36, 0, 0),
-    ("folded-more-indented.yml", 144, 0, 0, 0),
-    ("form-layout-and-choice.yml", 384, 0, 0, 0),
-    ("html-and-markdown.yml", 132, 0, 0, 0),
-    ("imports-and-global-vars.yml", 312, 0, 0, 0),
-    ("multi-document.yml", 0, 72, 0, 0),
-    ("no-trailing-newline.yml", 24, 0, 0, 0),
-    ("non-ascii.yml", 180, 0, 0, 0),
-    ("plain-scalar-hazards.yml", 888, 0, 0, 0),
-    ("scalar-styles.yml", 264, 0, 0, 0),
-    ("unicode-offsets.yml", 60, 0, 0, 0),
-    ("variable-chain.yml", 456, 0, 0, 0),
+    ("block-scalar-header-tails.yml", 72, 0, 0, 0, 0),
+    ("block-scalar-leading-blank-lines.yml", 180, 0, 0, 0, 0),
+    ("block-scalar-terminal-spaces.yml", 60, 0, 0, 0, 0),
+    ("block-scalars.yml", 396, 0, 0, 0, 0),
+    ("bom-utf8.yml", 48, 0, 0, 0, 0),
+    ("comments-everywhere.yml", 84, 0, 0, 0, 0),
+    ("config-profile.yml", 192, 0, 0, 0, 0),
+    ("crlf-line-endings.yml", 72, 0, 0, 0, 0),
+    ("duplicate-keys.yml", 96, 24, 0, 0, 0),
+    // Added by Phase 0c-3a for the collection-extent work. It is the only
+    // fixture with an **addressable empty entry**, so it is also the only source
+    // of `EmptyTarget` refusals in the whole sweep — a category that was pinned
+    // at 0 for two phases because no fixture exercised it (R20).
+    ("empty-entries-and-extents.yml", 120, 0, 60, 0, 0),
+    // Added by the Phase 0c-3a review's fix round. Every one of its 9
+    // addressable scalars × 12 values applies: a mixed-ending document is only a
+    // structural problem, and a scalar edit never writes a line break of its own
+    // unless the value has one.
+    ("file-comments-and-mixed-endings.yml", 108, 0, 0, 0, 0),
+    ("flow-collections.yml", 240, 36, 0, 0, 0),
+    ("folded-more-indented.yml", 144, 0, 0, 0, 0),
+    ("form-layout-and-choice.yml", 384, 0, 0, 0, 0),
+    ("html-and-markdown.yml", 132, 0, 0, 0, 0),
+    ("imports-and-global-vars.yml", 312, 0, 0, 0, 0),
+    ("multi-document.yml", 0, 72, 0, 0, 0),
+    ("no-trailing-newline.yml", 24, 0, 0, 0, 0),
+    ("non-ascii.yml", 180, 0, 0, 0, 0),
+    ("plain-scalar-hazards.yml", 888, 0, 0, 0, 0),
+    ("scalar-styles.yml", 264, 0, 0, 0, 0),
+    // One addressable scalar × 12. A scalar edit is unaffected by the absence of
+    // a line break; only a structural edit needs one to copy.
+    ("single-line-no-line-ending.yml", 9, 0, 0, 0, 3),
+    ("unicode-offsets.yml", 60, 0, 0, 0, 0),
+    ("variable-chain.yml", 456, 0, 0, 0, 0),
 ];
 
 /// Parses a corpus file, failing loudly with its name if it does not parse.
@@ -508,6 +537,28 @@ fn audit(name: &str, source: &str, stride: usize) -> Tally {
                     );
                     tally.trailing_newlines += 1;
                 }
+                Err(EditError::NoObservableLineEnding { at, .. }) => {
+                    // Re-derived, not taken on trust: a value that renders with
+                    // a line break cannot be written into a document that holds
+                    // none to copy. Both halves are read off the document — the
+                    // value's own breaks, and the absence of any `\n` in the
+                    // source — so an engine that refused a single-line value, or
+                    // refused inside a document that does have breaks, fails
+                    // here.
+                    assert!(
+                        value.contains('\n'),
+                        "{label}: a single-line value needs no line ending"
+                    );
+                    assert!(
+                        !source.contains('\n'),
+                        "{label}: the document holds a break the edit could have copied"
+                    );
+                    assert_eq!(
+                        at, node.span.start,
+                        "{label}: the reported offset is not the scalar's"
+                    );
+                    tally.no_line_ending += 1;
+                }
                 Err(other) => panic!("{label}: unexpected outcome {other}"),
             }
         } // End of the loop over the replacement values
@@ -529,21 +580,22 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
 
     println!("\n--- attempted edits per synthetic fixture ---");
     println!(
-        "{:<48} {:>7} {:>7} {:>7} {:>7} {:>7}",
-        "fixture", "total", "applied", "gate", "empty", "breaks"
+        "{:<48} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}",
+        "fixture", "total", "applied", "gate", "empty", "breaks", "noend"
     );
     let mut total = Tally::default();
     for file in &files {
         let _ = index_of(file);
         let tally = audit(&file.name, &file.source, 1);
         println!(
-            "{:<48} {:>7} {:>7} {:>7} {:>7} {:>7}",
+            "{:<48} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}",
             file.name,
             tally.total(),
             tally.applied,
             tally.refused_by_the_gate,
             tally.empty_target,
-            tally.trailing_newlines
+            tally.trailing_newlines,
+            tally.no_line_ending
         );
         // Pinned per fixture *and* per category. A corpus-wide per-category total
         // cannot tell two fixtures that exchanged eligibility from two that did
@@ -563,6 +615,7 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
                 refused_by_the_gate: row.2,
                 empty_target: row.3,
                 trailing_newlines: row.4,
+                no_line_ending: row.5,
             },
             "{}: outcome split",
             file.name
@@ -572,12 +625,13 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
 
     println!(
         "synthetic: {} attempted edits — {} applied, {} refused by the gate, \
-         {} empty-target, {} trailing-newline",
+         {} empty-target, {} trailing-newline, {} no-line-ending",
         total.total(),
         total.applied,
         total.refused_by_the_gate,
         total.empty_target,
-        total.trailing_newlines
+        total.trailing_newlines,
+        total.no_line_ending
     );
 
     // The rows must also add up to the corpus-wide figures, so neither the rows
@@ -585,28 +639,41 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
     // everything would show up here as `applied == 0` even though every refusal
     // is separately justified above.
     //
-    // 394 addressable scalars × 12 replacement values. The 388 this figure held
-    // before Phase 0c-2b's fix round gained the 6 scalars of the new
-    // `block-scalar-header-tails.yml`.
-    assert_eq!(total.total(), 4728);
+    // 419 addressable scalars × 12 replacement values. The 394 this figure held
+    // before Phase 0c-3a gained the 15 addressable scalars of the new
+    // `empty-entries-and-extents.yml` — 10 values with a token, 4 empty values
+    // and the bare sequence item's empty value — and then 10 more when the
+    // review's fix round added two fixtures: 9 in
+    // `file-comments-and-mixed-endings.yml` and 1 in
+    // `single-line-no-line-ending.yml`.
+    assert_eq!(total.total(), 5028);
     assert_eq!(
         total.total(),
         SYNTHETIC_OUTCOMES
             .iter()
-            .map(|row| row.1 + row.2 + row.3 + row.4)
+            .map(|row| row.1 + row.2 + row.3 + row.4 + row.5)
             .sum::<usize>(),
         "the pinned rows must add up to the pinned total"
     );
-    assert_eq!(total.applied, 4450);
+    assert_eq!(total.applied, 4687);
+    // 3, all in `single-line-no-line-ending.yml`: the three multi-line values of
+    // `REPLACEMENTS` render as a `|` block, and a block writes line breaks into
+    // a document that holds none to copy. Added by the Phase 0c-3a review's fix
+    // round — before it, those three edits *applied* and gave a file with no
+    // final newline one.
+    assert_eq!(total.no_line_ending, 3);
     // 23 scalars × 12: everything an anchor, alias, tag, merge key, duplicate
     // key, multi-document marker or flow-interior comment reaches.
     assert_eq!(total.refused_by_the_gate, 276);
-    // An empty entry (`empty:`) is a zero-width scalar with no bytes to replace,
+    // An empty entry (`label:`) is a zero-width scalar with no bytes to replace,
     // so giving it a value is a structural edit rather than a span replacement.
-    // No fixture holds an *addressable* one that the gate does not already
-    // refuse, so this is a coverage statement; the branch is covered by
+    // **60, not 0**: this was pinned at zero for two phases with a note saying no
+    // fixture held an addressable empty entry, which was true and was a coverage
+    // hole rather than a property. Phase 0c-3a's `empty-entries-and-extents.yml`
+    // closes it — 5 zero-width scalars × 12 values — and the branch is now
+    // exercised by corpus data as well as by the unit test
     // `an_empty_value_has_no_bytes_to_replace` in `src/patch/edit.rs`.
-    assert_eq!(total.empty_target, 0);
+    assert_eq!(total.empty_target, 60);
     // The one block scalar followed by more blank lines than `one\ntwo\n\n`
     // wants, in two fixtures. The only refusal a *representable* value can still
     // meet: keep chomping is the one indicator that cannot leave a trailing break
@@ -690,6 +757,52 @@ fn an_edit_to_a_crlf_document_disturbs_no_other_line_ending() {
         "the block scalar's own lines are CRLF too"
     );
 }
+
+#[test]
+fn an_edit_in_a_mixed_ending_document_copies_its_own_lines_ending() {
+    // The Phase 0c-3a review's finding 2, reaching the **scalar** path. The
+    // review demonstrated the defect on an insertion, but the cause was shared:
+    // the line ending came from `LineEnding::detect`'s document-wide vote. This
+    // fixture is LF-dominant with two CRLF entries, so the vote and the anchor
+    // disagree, and only a byte assertion can tell which one was used.
+    let file = fixture("file-comments-and-mixed-endings.yml");
+    assert_eq!(
+        espansoconfig_core::LineEnding::detect(&file.source),
+        espansoconfig_core::LineEnding::Lf,
+        "the document-wide answer must still be the wrong one for the CRLF entry"
+    );
+
+    // `matches[1].replace` sits on a CRLF-terminated line: a multi-line value
+    // there must render a CRLF-bodied block, or the new scalar mixes its own
+    // breaks — which `reencode_in_place` itself calls unrepresentable.
+    let crlf = DocumentPath::parse("matches[1].replace").expect("the path parses");
+    let patched = apply_scalar_edit(&file.source, &crlf, "one\ntwo\n").expect("the edit applies");
+    assert!(
+        patched
+            .text()
+            .contains("replace: |\r\n      one\r\n      two\r\n"),
+        "a value on a CRLF line must be written with CRLF breaks"
+    );
+
+    // …and its LF-terminated neighbour in the same document still gets LF, so
+    // the rule is "copy this line's ending", not "prefer CRLF".
+    let lf = DocumentPath::parse("matches[0].replace").expect("the path parses");
+    let patched = apply_scalar_edit(&file.source, &lf, "one\ntwo\n").expect("the edit applies");
+    assert!(
+        patched
+            .text()
+            .contains("replace: |\n      one\n      two\n"),
+        "a value on an LF line must be written with LF breaks"
+    );
+    let bare = patched.text().matches('\n').count() - patched.text().matches("\r\n").count();
+    let before = file.source.matches('\n').count() - file.source.matches("\r\n").count();
+    assert_eq!(
+        patched.text().matches("\r\n").count(),
+        file.source.matches("\r\n").count(),
+        "the document's two CRLF lines are untouched by an edit elsewhere"
+    );
+    assert!(bare > before, "the new block's own breaks are the LF ones");
+} // End of function an_edit_in_a_mixed_ending_document_copies_its_own_lines_ending()
 
 #[test]
 fn an_edit_to_a_bom_document_leaves_the_bom_alone() {

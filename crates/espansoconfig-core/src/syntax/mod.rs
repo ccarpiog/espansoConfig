@@ -9,6 +9,10 @@
 //!
 //! - [`ByteSpan`], [`ScalarStyle`], [`Chomping`] and [`ScalarPresentation`] —
 //!   the vocabulary `IMPLEMENTATION_PLAN.md` section 6.2 specifies.
+//! - [`CollectionExtent`] — where a collection really ends, which the
+//!   substrate's own end marker overstates for every block collection
+//!   (`PROGRESS.md`, R3). See [`crate::syntax::collection`] for the measurement
+//!   and the rule derived from it.
 //! - [`CharToByte`] — the offset adapter. Substrate offsets count Unicode
 //!   scalar values, not bytes, and 29 of the 33 spans in the non-ASCII fixture
 //!   truncate a character if that is not corrected.
@@ -42,6 +46,7 @@
 
 pub mod block;
 mod char_to_byte;
+pub mod collection;
 pub mod error;
 mod frontier;
 mod index;
@@ -52,6 +57,7 @@ mod trivia;
 
 pub use block::{BlockHeader, BlockScalarLayout};
 pub use char_to_byte::CharToByte;
+pub use collection::{CollectionExtent, ExtentDerivation};
 pub use error::{InvariantViolation, OffsetOutOfDomain, ParseFailure, SyntaxError};
 pub use frontier::{FrontierEntry, Segment};
 pub use index::SyntaxIndex;
@@ -112,7 +118,21 @@ impl ByteSpan {
     pub fn contains(&self, other: ByteSpan) -> bool {
         self.start <= other.start && other.end <= self.end
     }
-}
+
+    /// Returns `true` when the two spans share at least one byte.
+    ///
+    /// **A zero-width span intersects nothing, itself included.** That is the
+    /// right answer for the question this method is asked — "would replacing
+    /// these bytes disturb those?" — because an empty span has no bytes to
+    /// disturb and none to lose. It is *not* the right answer to "may two
+    /// replacements be applied in either order": two insertions at one offset
+    /// are both empty and still ambiguous, which is why
+    /// `crate::patch::edit::apply_edits` tests a shared start separately rather
+    /// than calling this.
+    pub fn intersects(&self, other: ByteSpan) -> bool {
+        self.start < other.end && other.start < self.end
+    }
+} // End of impl ByteSpan
 
 /// How a scalar is written in the source, independent of its decoded value.
 ///

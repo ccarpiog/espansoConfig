@@ -20,6 +20,7 @@ use saphyr_parser::{Event, Parser, Span};
 
 use crate::syntax::block;
 use crate::syntax::char_to_byte::CharToByte;
+use crate::syntax::collection::{self, ExtentDerivation};
 use crate::syntax::error::{InvariantViolation, ParseFailure, SyntaxError};
 use crate::syntax::frontier::{self, FrontierEntry, Segment};
 use crate::syntax::node::{
@@ -50,6 +51,9 @@ pub struct SyntaxIndex {
     /// Quoted scalars whose closing delimiter could not be lexed, so the
     /// substrate's overshooting span was published unchanged.
     unlexable_quoted_scalars: usize,
+    /// Collections whose extent could not be derived from the substrate's own
+    /// end marker, so the span's own end was published as the owned end.
+    unaccountable_collection_extents: usize,
 }
 
 impl SyntaxIndex {
@@ -166,6 +170,37 @@ impl SyntaxIndex {
     pub fn unlexable_quoted_scalars(&self) -> usize {
         self.unlexable_quoted_scalars
     }
+
+    /// Every **block** collection whose reported end marker overshot the span.
+    ///
+    /// The R3 observable, and the exact counterpart of
+    /// [`SyntaxIndex::trimmed_block_scalars`]. Restricted to the block styles
+    /// for the same reason that one is: a flow collection's marker is its
+    /// closing bracket and is exact, and folding two different overshoots into
+    /// one figure is how the block-scalar one hid for three phases
+    /// (`PROGRESS.md`, D2 and R20).
+    pub fn overshooting_block_collections(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.iter().filter(|node| {
+            node.collection_style == Some(CollectionStyle::Block)
+                && node
+                    .collection_extent
+                    .is_some_and(|extent| extent.overshoots(node.span))
+        })
+    } // End of function overshooting_block_collections()
+
+    /// How many collections published **no** owned end.
+    ///
+    /// The counterpart of [`SyntaxIndex::unlexable_quoted_scalars`], and it
+    /// exists for the same reason (the Phase 0c-2b review's finding 5): a
+    /// derivation that gives up must be **observable**, or a substrate change
+    /// turns into a silently truncated removal envelope. Since the Phase 0c-3a
+    /// review's finding 4 the failure is also visible in the *type* —
+    /// `CollectionExtent::owned_end()` is `None` — so a consumer cannot read a
+    /// known-bad number by forgetting to check this count. Pinned at zero across
+    /// both corpora.
+    pub fn unaccountable_collection_extents(&self) -> usize {
+        self.unaccountable_collection_extents
+    }
 } // End of impl SyntaxIndex
 
 /// Assembles a [`SyntaxIndex`] from the substrate's event stream.
@@ -186,6 +221,8 @@ struct Builder<'source> {
     document_index: usize,
     /// Quoted scalars whose closing delimiter could not be lexed.
     unlexable_quoted_scalars: usize,
+    /// Collections whose extent could not be derived from the end marker.
+    unaccountable_collection_extents: usize,
 }
 
 /// One open document or collection.
@@ -226,6 +263,7 @@ impl<'source> Builder<'source> {
             stack: Vec::new(),
             document_index: 0,
             unlexable_quoted_scalars: 0,
+            unaccountable_collection_extents: 0,
         };
 
         for item in Parser::new_from_str(body) {
@@ -316,6 +354,7 @@ impl<'source> Builder<'source> {
             tag: None,
             scalar: None,
             collection_style: None,
+            collection_extent: None,
             document_markers: Some(DocumentMarkers { start, end: None }),
         });
         self.documents.push(id);
@@ -398,6 +437,7 @@ impl<'source> Builder<'source> {
             } else {
                 CollectionStyle::Block
             }),
+            collection_extent: None,
             document_markers: None,
         });
         self.attach(id)?;
@@ -414,14 +454,22 @@ impl<'source> Builder<'source> {
         Ok(())
     } // End of function open_collection()
 
-    /// Closes a mapping or a sequence and computes its extent.
+    /// Closes a mapping or a sequence and computes its span and its extent.
     ///
-    /// A flow collection ends at its closing bracket, which the substrate
-    /// reports exactly. A **block** collection's end marker overshoots into
-    /// trailing trivia (risk R3) and cannot simply be trimmed backwards,
-    /// because a comment may sit between the collection and the next token. So
-    /// the extent is taken from the children, whose own ends are already
-    /// trimmed.
+    /// Two different numbers, and `PROGRESS.md` R3 is the reason both exist:
+    ///
+    /// - the **span** ends at the closing bracket for a flow collection and at
+    ///   the last child for a block one, because the block end marker overshoots
+    ///   into trailing trivia and because a collection that out-ended its own
+    ///   deepest child would take that child's trailing `:` and inline comment
+    ///   away from it in `ownership.rs`;
+    /// - the **extent** ([`crate::syntax::collection::CollectionExtent`]) carries
+    ///   the substrate's own marker and the `owned_end` derived from it, which
+    ///   is what a structural edit needs.
+    ///
+    /// A derivation failure publishes **no** owned end — `owned_end()` returns
+    /// `None` — and is counted, never silent: see
+    /// [`SyntaxIndex::unaccountable_collection_extents`].
     fn close_collection(&mut self, marker: ByteSpan) -> Result<(), SyntaxError> {
         let frame = self.pop_frame()?;
         let child_extent = self.children_extent(frame.node);
@@ -431,9 +479,47 @@ impl<'source> Builder<'source> {
         } else {
             child_extent.map_or(start, |child| child.end.max(start))
         };
-        self.nodes[frame.node.get()].span = ByteSpan::new(start, end);
+
+        let extent = self.collection_extent(frame.flow, marker, end);
+        if extent.is_unaccountable() {
+            self.unaccountable_collection_extents += 1;
+        }
+        let node = &mut self.nodes[frame.node.get()];
+        node.span = ByteSpan::new(start, end);
+        node.collection_extent = Some(extent);
         Ok(())
     } // End of function close_collection()
+
+    /// Derives one collection's extent from the substrate's end marker.
+    ///
+    /// A flow collection's marker is its closing bracket and is exact; anything
+    /// else there is a substrate change rather than a document we can read, so
+    /// it falls back and is counted. A block collection's marker is a zero-width
+    /// position that overshoots, and
+    /// [`crate::syntax::collection::owned_end`] scans that overshoot.
+    fn collection_extent(
+        &self,
+        flow: bool,
+        marker: ByteSpan,
+        span_end: usize,
+    ) -> collection::CollectionExtent {
+        let extent = |owned_end, derivation| {
+            collection::CollectionExtent::new(marker, owned_end, derivation)
+        };
+        if flow {
+            return match marker.slice(self.source) {
+                Some("]") | Some("}") => extent(Some(span_end), ExtentDerivation::ClosingBracket),
+                _ => extent(None, ExtentDerivation::Unaccountable),
+            };
+        }
+        if marker.end <= span_end {
+            return extent(Some(span_end), ExtentDerivation::NoOvershoot);
+        }
+        match collection::owned_end(self.source, span_end, marker.end) {
+            Some(owned) => extent(Some(owned), ExtentDerivation::TrimmedOvershoot),
+            None => extent(None, ExtentDerivation::Unaccountable),
+        }
+    } // End of function collection_extent()
 
     /// Records a scalar, trimming a block scalar's overshooting end.
     fn push_scalar(
@@ -508,6 +594,7 @@ impl<'source> Builder<'source> {
                 header,
             }),
             collection_style: None,
+            collection_extent: None,
             document_markers: None,
         });
         self.attach(id)
@@ -529,6 +616,7 @@ impl<'source> Builder<'source> {
             tag: None,
             scalar: None,
             collection_style: None,
+            collection_extent: None,
             document_markers: None,
         });
         self.attach(id)
@@ -629,6 +717,7 @@ impl<'source> Builder<'source> {
             documents: self.documents,
             frontier,
             unlexable_quoted_scalars: self.unlexable_quoted_scalars,
+            unaccountable_collection_extents: self.unaccountable_collection_extents,
         })
     } // End of function finish()
 } // End of impl Builder

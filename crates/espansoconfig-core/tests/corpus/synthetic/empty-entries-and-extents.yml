@@ -1,0 +1,38 @@
+# Empty mapping entries, and where a collection really ends.
+#
+# Added in Phase 0c-3a. An entry with no value is reported by the substrate as a
+# zero-width scalar positioned BEFORE its own colon, so the enclosing mapping's
+# span stops one byte short of a byte the entry plainly owns. No other fixture
+# in either corpus has that shape, which is why every measured overshoot before
+# this one held nothing but whitespace and comments (PROGRESS.md, R20).
+#
+# Nothing here depends on invisible bytes: no trailing spaces, no CRLF, no
+# missing final newline.
+matches:
+  # The last entry has no value, so the mapping owns a `:` its span misses.
+  - trigger: ':extent-plain'
+    replace: 'first'
+    label:
+
+  # The same shape carrying an inline comment, which the entry also owns.
+  - trigger: ':extent-comment'
+    replace: 'second'
+    label: # deliberately left blank
+
+  # An empty entry that is not last: the tail is ordinary layout instead.
+  - trigger: ':extent-interior'
+    label:
+    replace: 'third'
+
+  # A nested sequence whose final item is bare. The dash is already inside the
+  # sequence's span, because the empty item's zero-width scalar is reported
+  # after it rather than before it — the mirror image of the mapping case.
+  - trigger: ':extent-sequence'
+    replace: 'fourth'
+    vars:
+      - name: 'one'
+        type: 'echo'
+      -
+
+# A top-level entry with no value, closing the root mapping the same way.
+trailing:

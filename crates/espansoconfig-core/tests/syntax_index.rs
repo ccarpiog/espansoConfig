@@ -24,10 +24,11 @@
 mod common;
 
 use espansoconfig_core::syntax::{
-    CollectionStyle, Node, NodeKind, ScalarNode, SyntaxError, SyntaxIndex,
+    CollectionStyle, ExtentDerivation, Node, NodeKind, ScalarNode, SyntaxError, SyntaxIndex,
+    TriviaIndex,
 };
 use espansoconfig_core::{
-    ByteSpan, Chomping, HeaderIndicatorOrder, ScalarPresentation, ScalarStyle,
+    ByteSpan, Chomping, HeaderIndicatorOrder, NodeId, ScalarPresentation, ScalarStyle,
 };
 
 // ===========================================================================
@@ -47,25 +48,39 @@ use espansoconfig_core::{
 ///
 /// 19 from Phase 0a, plus the three block-scalar shapes neither corpus
 /// contained until the Phase 0b-1 review was closed out, plus
-/// `block-scalar-header-tails.yml` from the Phase 0c-2b review's fix round.
+/// `block-scalar-header-tails.yml` from the Phase 0c-2b review's fix round, plus
+/// `empty-entries-and-extents.yml` from Phase 0c-3a, plus the two the Phase
+/// 0c-3a **review's** fix round added.
 ///
-/// That last fixture moves every figure below, and each delta is exactly its own
-/// shape: 19 nodes — 1 document, 1 root mapping, the `matches` key, the sequence,
-/// 3 item mappings and 12 scalars — carrying 3 block scalars and 6 whole-line
-/// comments.
-const SYNTHETIC_FIXTURES: usize = 23;
+/// Each of those moves every figure below, and each delta is exactly its own
+/// shape. `block-scalar-header-tails.yml`: 19 nodes — 1 document, 1 root
+/// mapping, the `matches` key, the sequence, 3 item mappings and 12 scalars —
+/// carrying 3 block scalars and 6 whole-line comments.
+/// `empty-entries-and-extents.yml`: 40 nodes — 1 document, 1 root mapping, the
+/// `matches` sequence, 4 item mappings, the nested `vars` sequence, its 1 item
+/// mapping and 31 scalars — of which **5 are zero width**, so it adds 31 scalars
+/// but only 26 frontier members.
+/// `file-comments-and-mixed-endings.yml`: 27 nodes — 1 document, 6 collections
+/// (the root mapping, the `matches` sequence, 3 item mappings and the nested
+/// `vars` mapping) and 20 scalars, none zero width, carrying 6 whole-line
+/// comments and 3 real blank lines.
+/// `single-line-no-line-ending.yml`: 4 nodes — 1 document, the root mapping and
+/// its one key and one value — with no comment, no blank line and no line break
+/// at all. `docs/decisions/0c-3a-notes.md` section 8 tabulates every count they
+/// moved.
+const SYNTHETIC_FIXTURES: usize = 26;
 
 /// Scalar nodes across the valid synthetic corpus.
-const SYNTHETIC_SCALARS: usize = 838;
+const SYNTHETIC_SCALARS: usize = 891;
 
 /// Collection nodes across the valid synthetic corpus.
-const SYNTHETIC_COLLECTIONS: usize = 246;
+const SYNTHETIC_COLLECTIONS: usize = 261;
 
 /// Alias nodes across the valid synthetic corpus.
 const SYNTHETIC_ALIASES: usize = 5;
 
 /// Frontier members across the valid synthetic corpus.
-const SYNTHETIC_FRONTIER_MEMBERS: usize = 843;
+const SYNTHETIC_FRONTIER_MEMBERS: usize = 891;
 
 /// Block scalars across the valid synthetic corpus.
 const SYNTHETIC_BLOCK_SCALARS: usize = 45;
@@ -78,7 +93,46 @@ const SYNTHETIC_BLOCK_SCALARS: usize = 45;
 const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 42;
 
 /// Comment lines recoverable from the gaps of the valid synthetic corpus.
-const SYNTHETIC_GAP_COMMENTS: usize = 201;
+const SYNTHETIC_GAP_COMMENTS: usize = 224;
+
+/// Flow collections across the valid synthetic corpus.
+///
+/// Kept apart from the block ones because their end markers are a different
+/// measurement: a flow collection's is its closing bracket and is exact, a block
+/// one's is a zero-width position that overshoots (`PROGRESS.md`, R3). Folding
+/// the two into one figure is how the block-scalar overshoot hid for three
+/// phases (R20).
+const SYNTHETIC_FLOW_COLLECTIONS: usize = 11;
+
+/// Block collections whose reported end marker overshot their span (R3).
+///
+/// Measured before the trim rule was written: 223 of the 235 block collections
+/// then in the corpus, plus all 8 of `empty-entries-and-extents.yml`, none of
+/// which ends the file, plus 3 of the 6 in
+/// `file-comments-and-mixed-endings.yml` — its root mapping, its `matches`
+/// sequence and its last item mapping all end at end of file, so they have
+/// nowhere to overshoot into. `single-line-no-line-ending.yml`'s one mapping
+/// ends the file too, and adds nothing here.
+const SYNTHETIC_OVERSHOOTING_COLLECTIONS: usize = 234;
+
+/// Block collections that own bytes past their published span end.
+///
+/// The trailing `:` of an empty final entry, or an inline comment after the
+/// final value. **4 before Phase 0c-3a, and all four were inline comments**: no
+/// fixture in either corpus ended a mapping with an entry that has no value, so
+/// the entry-punctuation half of the rule was unreachable from corpus data.
+/// That is R20 exactly, and `empty-entries-and-extents.yml` closes it with three
+/// more.
+const SYNTHETIC_COLLECTIONS_WITH_AN_OWNED_TAIL: usize = 7;
+
+/// Zero-width scalar leaves across the valid synthetic corpus (R7).
+///
+/// The value of an entry written `label:` with nothing after it, and of a bare
+/// `-` sequence item. All five come from `empty-entries-and-extents.yml`: until
+/// Phase 0c-3a added it, **no fixture in either corpus had an empty entry**, so
+/// two corpus-wide tests that must skip such a node had no skip at all and this
+/// count would have been zero.
+const SYNTHETIC_ZERO_WIDTH_LEAVES: usize = 5;
 
 /// Blank lines recoverable from the gaps of the valid synthetic corpus.
 ///
@@ -88,8 +142,10 @@ const SYNTHETIC_GAP_COMMENTS: usize = 201;
 /// `tests/trivia_scanner.rs` pins the token-accurate figure, and the two are
 /// expected to disagree. So `block-scalar-header-tails.yml` moves this by 9 while
 /// adding only the **two** real blank lines that separate its three items — and
-/// the trivia scanner's own count is what proves that, by moving by 2.
-const SYNTHETIC_GAP_BLANK_LINES: usize = 697;
+/// the trivia scanner's own count is what proves that, by moving by 2. The same
+/// cross-check holds for `file-comments-and-mixed-endings.yml`, which moves this
+/// loose figure by 18 and the scanner's by its **three** real blank lines.
+const SYNTHETIC_GAP_BLANK_LINES: usize = 738;
 
 // ===========================================================================
 // 1. Slice fidelity
@@ -119,7 +175,22 @@ fn every_node_span_slices_the_source_it_was_written_as() {
         );
     }
 
-    println!("scalars asserted: {scalars}  collections: {collections}  aliases: {aliases}");
+    let zero_width: usize = common::synthetic_valid()
+        .iter()
+        .map(|file| {
+            SyntaxIndex::parse(&file.source)
+                .expect("parses")
+                .zero_width_leaves()
+                .count()
+        })
+        .sum();
+    println!(
+        "scalars asserted: {scalars}  collections: {collections}  aliases: {aliases}           zero-width leaves skipped: {zero_width}"
+    );
+    assert_eq!(
+        zero_width, SYNTHETIC_ZERO_WIDTH_LEAVES,
+        "the zero-width skip above must stay bounded"
+    );
     for failure in failures.iter().take(20) {
         println!("  {failure}");
     }
@@ -1384,6 +1455,15 @@ fn check_slice_fidelity(
             NodeKind::Scalar => {
                 let scalar = node.scalar.as_ref().expect("a scalar carries its detail");
                 scalars += 1;
+                // An **implicit** node — the value of `label:` with nothing
+                // after it — owns no bytes at all (`PROGRESS.md`, R7), and the
+                // substrate gives it the null value `~`. There is no token to
+                // decode, so "the span slices to what the node is written as" is
+                // vacuous rather than false. The skip is bounded:
+                // `SYNTHETIC_ZERO_WIDTH_LEAVES` pins how many there are.
+                if node.is_zero_width() {
+                    continue;
+                }
                 if !scalar_text_matches(source, text, scalar) {
                     failures.push(format!(
                         "{name}: {:?} scalar at byte {} does not decode to its value",
@@ -1884,3 +1964,338 @@ fn fold_block_lines(lines: &[String]) -> String {
 fn char_offset(source: &str, byte_offset: usize) -> usize {
     source[..byte_offset].chars().count()
 }
+
+// ===========================================================================
+// 5. Where a collection ends (`PROGRESS.md`, R3) — Phase 0c-3a
+// ===========================================================================
+
+/// The bytes between a collection's published span end and its owned end.
+///
+/// `owned_end()` is fallible since the Phase 0c-3a review's finding 4, and the
+/// `expect` here is the point: a golden that silently accepted "the derivation
+/// gave up" would be measuring nothing.
+fn owned_tail<'source>(source: &'source str, node: &Node) -> &'source str {
+    let extent = node.collection_extent.expect("a collection has an extent");
+    let owned_end = extent
+        .owned_end()
+        .expect("this probe's collections are all accountable");
+    &source[node.span.end..owned_end]
+}
+
+#[test]
+fn the_collection_extent_agrees_with_the_ownership_rules_over_both_corpora() {
+    // The R3 answer, cross-checked by two derivations that share no code.
+    //
+    // `crate::syntax::collection` derives a block collection's owned end
+    // **textually**, by scanning the substrate's own overshooting end marker.
+    // `TriviaIndex::subtree_extent` derives the same number from the plan
+    // section 6.2 **ownership rules**, by taking the hull of everything the
+    // collection's subtree owns. They must agree on every block collection of
+    // both corpora — which is what makes either of them trustworthy, because a
+    // single derivation checked against itself proves nothing.
+    //
+    // Flow collections are deliberately excluded from the equality: their span
+    // ends at the closing bracket, which is exact and is asserted separately,
+    // while an inline comment *after* the bracket is still attached to the
+    // collection by rule 3 and so widens the ownership hull. Two different
+    // questions, and folding them into one figure is the R20 mistake.
+    let mut block_collections = 0usize;
+    let mut overshooting = 0usize;
+    let mut with_a_tail = 0usize;
+    let mut unaccountable = 0usize;
+
+    for tier in [common::synthetic_valid(), common::real_corpus()] {
+        for file in &tier {
+            let index = SyntaxIndex::parse(&file.source)
+                .unwrap_or_else(|error| panic!("{} must parse: {error}", file.name));
+            let trivia = TriviaIndex::scan(&file.source, &index);
+            unaccountable += index.unaccountable_collection_extents();
+
+            for node in index.nodes() {
+                let Some(extent) = node.collection_extent else {
+                    continue;
+                };
+                // Fallible since the review's finding 4: `None` is "the
+                // derivation gave up", and a consumer that unwrapped it would be
+                // reading a number known to be too small. Here it must never be
+                // `None`, which is the same statement the `unaccountable` count
+                // makes and is worth making twice.
+                let owned_end = extent.owned_end().unwrap_or_else(|| {
+                    panic!(
+                        "{}: node {} published no owned end",
+                        file.name,
+                        node.id.get()
+                    )
+                });
+                assert!(
+                    owned_end >= node.span.end,
+                    "{}: node {} owns less than its span",
+                    file.name,
+                    node.id.get()
+                );
+                if node.collection_style == Some(CollectionStyle::Flow) {
+                    assert_eq!(
+                        extent.reported_end.end, node.span.end,
+                        "{}: a flow collection ends at its closing bracket",
+                        file.name
+                    );
+                    assert_eq!(
+                        extent.derivation,
+                        ExtentDerivation::ClosingBracket,
+                        "{}: node {}",
+                        file.name,
+                        node.id.get()
+                    );
+                    continue;
+                }
+
+                block_collections += 1;
+                if extent.overshoots(node.span) {
+                    overshooting += 1;
+                }
+                if owned_end > node.span.end {
+                    with_a_tail += 1;
+                }
+                // The substrate's marker never *undershoots*: measured 0 of 475
+                // across both corpora, and the whole derivation rests on it.
+                assert!(
+                    extent.reported_end.end >= node.span.end,
+                    "{}: node {} reported an end before its own last child",
+                    file.name,
+                    node.id.get()
+                );
+                assert_eq!(
+                    trivia.subtree_extent(&index, node.id).end,
+                    owned_end,
+                    "{}: node {} — the textual extent and the ownership hull disagree",
+                    file.name,
+                    node.id.get()
+                );
+            } // End of the loop over one file's collections
+        } // End of the loop over one corpus tier
+    } // End of the loop over the two corpus tiers
+
+    println!(
+        "\ncollection extents: {block_collections} block collections, \
+         {overshooting} whose marker overshoots, {with_a_tail} that own bytes past their span, \
+         {unaccountable} unaccountable"
+    );
+    assert!(block_collections > 0, "no collection was checked at all");
+    // The counted fallback of `crate::syntax::collection`, pinned at zero: a
+    // derivation that quietly gave up would under-claim exactly the bytes a
+    // removal envelope needs.
+    assert_eq!(unaccountable, 0, "unaccountable collection extents");
+    // And the shape the corpus was missing until this phase added a fixture for
+    // it (R20): a collection that owns bytes its span does not cover.
+    assert!(
+        with_a_tail > 0,
+        "no fixture exercises a collection whose owned end passes its span end"
+    );
+} // End of function the_collection_extent_agrees_with_the_ownership_rules_over_both_corpora()
+
+#[test]
+fn the_synthetic_collection_extents_are_pinned_exactly() {
+    // The per-corpus figures, so a substrate change cannot move them silently.
+    // Measured before the rule was written, which is the point: R3 and R20 were
+    // both found by measuring span behaviour rather than assuming it.
+    let mut block = 0usize;
+    let mut flow = 0usize;
+    let mut overshooting = 0usize;
+    let mut with_a_tail = 0usize;
+    for file in common::synthetic_valid() {
+        let index = SyntaxIndex::parse(&file.source).expect("parses");
+        for node in index.nodes() {
+            let Some(extent) = node.collection_extent else {
+                continue;
+            };
+            if node.collection_style == Some(CollectionStyle::Flow) {
+                flow += 1;
+                continue;
+            }
+            block += 1;
+            if extent.overshoots(node.span) {
+                overshooting += 1;
+            }
+            if extent.owned_end().is_some_and(|end| end > node.span.end) {
+                with_a_tail += 1;
+            }
+        } // End of the loop over one fixture's collections
+    } // End of the loop over the valid synthetic corpus
+
+    println!(
+        "\nsynthetic collections: {block} block + {flow} flow; \
+         {overshooting} overshoot, {with_a_tail} own a tail"
+    );
+    assert_eq!(block + flow, SYNTHETIC_COLLECTIONS);
+    assert_eq!(flow, SYNTHETIC_FLOW_COLLECTIONS);
+    assert_eq!(overshooting, SYNTHETIC_OVERSHOOTING_COLLECTIONS);
+    assert_eq!(with_a_tail, SYNTHETIC_COLLECTIONS_WITH_AN_OWNED_TAIL);
+} // End of function the_synthetic_collection_extents_are_pinned_exactly()
+
+#[test]
+fn each_case_of_the_collection_extent_rule_has_its_own_golden() {
+    // The rule has cases, so each one is pinned by exact bytes rather than by a
+    // corpus-wide count that two opposing drifts could cancel inside.
+    //
+    // `(source, the innermost mapping's span, the bytes it owns past that span)`
+    let cases: [(&str, &str, &str); 9] = [
+        // No overshoot at all: the marker stops where the last child does.
+        ("a:\n  b: 1", "b: 1", ""),
+        // Pure layout in the overshoot: a line break, blank lines.
+        ("a:\n  b: 1\nnext: 2\n", "b: 1", ""),
+        ("a:\n  b: 1\n\n\nnext: 2\n", "b: 1", ""),
+        // A comment on a *later* line belongs to the file or to what follows,
+        // so the collection does not claim it.
+        ("a:\n  b: 1\n  # later\nnext: 2\n", "b: 1", ""),
+        ("a:\n  b: 1\n\n# spaced\nnext: 2\n", "b: 1", ""),
+        // An **inline** comment is rule 3 trivia and travels with the entry.
+        ("a:\n  b: 1 # why\nnext: 2\n", "b: 1", " # why"),
+        // The entry punctuation of an empty final value. The substrate reports
+        // the empty value as a zero-width scalar *before* its colon, so the
+        // span stops one byte short of a byte the entry plainly owns.
+        ("a:\n  b: 1\n  c:\nnext: 2\n", "b: 1\n  c", ":"),
+        // …and the same shape carrying an inline comment as well.
+        ("a:\n  c: # why\nnext: 2\n", "c", ": # why"),
+        // A block-scalar value already ends past its own line, so there is
+        // nothing left for the collection to claim.
+        (
+            "a:\n  b: |\n    body\n\n\nnext: 2\n",
+            "b: |\n    body\n",
+            "",
+        ),
+    ];
+    for (source, span, tail) in cases {
+        let index = SyntaxIndex::parse(source).expect("the probe parses");
+        let mapping = index
+            .nodes()
+            .iter()
+            .filter(|node| node.kind == NodeKind::Mapping)
+            .max_by_key(|node| node.span.start)
+            .expect("a mapping");
+        assert_eq!(mapping.span.slice(source), Some(span), "span of {source:?}");
+        assert_eq!(
+            owned_tail(source, mapping),
+            tail,
+            "owned tail of {source:?}"
+        );
+    } // End of the loop over the extent rule's cases
+
+    // A bare final sequence item: the dash and the space after it are already
+    // inside the span, because the substrate reports the empty item's
+    // zero-width scalar *after* them rather than before.
+    let source = "a:\n  - x\n  - \nnext: 2\n";
+    let index = SyntaxIndex::parse(source).expect("the probe parses");
+    let sequence = index
+        .nodes()
+        .iter()
+        .find(|node| node.kind == NodeKind::Sequence)
+        .expect("a sequence");
+    assert_eq!(sequence.span.slice(source), Some("- x\n  - "));
+    assert_eq!(owned_tail(source, sequence), "");
+
+    // A flow collection ends at its bracket, and the derivation says so.
+    let source = "a: [1, 2]\n";
+    let index = SyntaxIndex::parse(source).expect("the probe parses");
+    let flow = index
+        .nodes()
+        .iter()
+        .find(|node| node.collection_style == Some(CollectionStyle::Flow))
+        .expect("a flow sequence");
+    assert_eq!(flow.span.slice(source), Some("[1, 2]"));
+    assert_eq!(
+        flow.collection_extent.unwrap().derivation,
+        ExtentDerivation::ClosingBracket
+    );
+} // End of function each_case_of_the_collection_extent_rule_has_its_own_golden()
+
+#[test]
+fn a_collection_span_never_out_ends_its_own_deepest_child() {
+    // Why the published span stops at the last child although the collection
+    // owns more: `ownership.rs` gives a trailing `:` and an inline comment to
+    // the node with the **greatest** end, so a mapping that reached past its own
+    // key would take both away from that key. `PROGRESS.md` D2d pins them to the
+    // key, and this is the measurement that shows the two facts are in tension
+    // rather than independent.
+    let source = "empty: # why\n";
+    let index = SyntaxIndex::parse(source).expect("parses");
+    let trivia = TriviaIndex::scan(source, &index);
+    let mapping = index
+        .nodes()
+        .iter()
+        .find(|node| node.kind == NodeKind::Mapping)
+        .expect("a mapping");
+    let key = index
+        .nodes()
+        .iter()
+        .find(|node| node.role == espansoconfig_core::syntax::NodeRole::MappingKey)
+        .expect("a key");
+    assert_eq!(mapping.span.end, key.span.end, "the span stops at the key");
+    assert_eq!(
+        trivia
+            .comments()
+            .iter()
+            .map(|comment| comment.owner.node())
+            .collect::<Vec<_>>(),
+        vec![Some(key.id)],
+        "the inline comment stays on the key, not on the mapping"
+    );
+    // The collection still *owns* the colon and the comment through its subtree.
+    assert_eq!(owned_tail(source, mapping), ": # why");
+} // End of function a_collection_span_never_out_ends_its_own_deepest_child()
+
+#[test]
+fn a_subtree_extent_never_reaches_into_a_node_outside_the_subtree() {
+    // `subtree_extent` is a hull, so the one thing that could go wrong is that
+    // it swallows a neighbour. Checked over both corpora for every node: no byte
+    // of the hull may fall strictly inside a node that is neither an ancestor
+    // nor a descendant.
+    let mut checked = 0usize;
+    for tier in [common::synthetic_valid(), common::real_corpus()] {
+        for file in &tier {
+            let index = SyntaxIndex::parse(&file.source).expect("parses");
+            let trivia = TriviaIndex::scan(&file.source, &index);
+            for node in index.nodes() {
+                if node.kind == NodeKind::Document {
+                    continue;
+                }
+                let hull = trivia.subtree_extent(&index, node.id);
+                for other in index.nodes() {
+                    if other.kind == NodeKind::Document
+                        || other.span.is_empty()
+                        || related(&index, node.id, other.id)
+                    {
+                        continue;
+                    }
+                    assert!(
+                        other.span.end <= hull.start || other.span.start >= hull.end,
+                        "{}: the hull of node {} overlaps unrelated node {}",
+                        file.name,
+                        node.id.get(),
+                        other.id.get()
+                    );
+                } // End of the loop over the other nodes
+                checked += 1;
+            } // End of the loop over one file's nodes
+        } // End of the loop over one corpus tier
+    } // End of the loop over the two corpus tiers
+    println!("\nsubtree hulls checked for overlap: {checked}");
+    assert!(checked > 0);
+} // End of function a_subtree_extent_never_reaches_into_a_node_outside_the_subtree()
+
+/// Whether one node is the other, an ancestor of it, or a descendant of it.
+fn related(index: &SyntaxIndex, first: NodeId, second: NodeId) -> bool {
+    if first == second {
+        return true;
+    }
+    let ancestor_of = |ancestor: NodeId, node: NodeId| {
+        let mut current = index.node(node).and_then(|node| node.parent);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = index.node(id).and_then(|node| node.parent);
+        }
+        false
+    };
+    ancestor_of(first, second) || ancestor_of(second, first)
+} // End of function related()

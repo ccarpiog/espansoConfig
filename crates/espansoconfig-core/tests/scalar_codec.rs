@@ -54,6 +54,45 @@ fn compare_decoders(source: &str) -> (usize, Vec<String>) {
         let Some(scalar) = &node.scalar else {
             continue;
         };
+        // An **implicit** node owns no bytes (`PROGRESS.md`, R7), and the two
+        // decoders answer different questions about it: ours reads the span and
+        // returns the empty string, the substrate resolves the absent node and
+        // returns YAML's null, `~`. Neither is wrong, and there is nothing to
+        // reconcile without a null in the value model — which is a projection
+        // question, not a codec one. It is out of scope here and **bounded**:
+        // `an_implicit_node_is_the_one_place_the_two_decoders_answer_differently`
+        // pins the divergence and its count instead of this skip hiding it.
+        // The branch became reachable in Phase 0c-3a, when
+        // `empty-entries-and-extents.yml` gave the corpus its first empty entry.
+        //
+        // **The skip is qualified, not merely counted.** The Phase 0c-3a review
+        // accepted the reasoning and asked for the guard, and it is cheap: an
+        // implicit node is written with no characters at all, so it is plain,
+        // carries no block header, and the substrate resolves it to `~`. A
+        // zero-width scalar that is any of those things is not an implicit node,
+        // and letting it through this branch would hide a genuine disagreement
+        // rather than a documented one.
+        if node.is_zero_width() {
+            assert_eq!(
+                scalar.presentation.style,
+                ScalarStyle::Plain,
+                "a zero-width scalar at bytes {}..{} is not plain",
+                node.span.start,
+                node.span.end
+            );
+            assert!(
+                scalar.presentation.header_span.is_empty(),
+                "a zero-width scalar at bytes {}..{} carries a block header",
+                node.span.start,
+                node.span.end
+            );
+            assert_eq!(
+                scalar.value, "~",
+                "a zero-width scalar at bytes {}..{} is not the substrate's implicit null",
+                node.span.start, node.span.end
+            );
+            continue;
+        }
         match decode(source, &scalar.presentation) {
             Ok(ours) if ours == scalar.value => agreements += 1,
             Ok(_) => disagreements.push(format!(
@@ -82,12 +121,13 @@ fn our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar() {
     }
     println!("synthetic corpus: {total} scalars decoded in agreement with the substrate");
     assert!(problems.is_empty(), "decoder disagreements: {problems:#?}");
-    // 838, not the 825 pinned before Phase 0c-2b's fix round: the new
-    // `block-scalar-header-tails.yml` adds 13 scalars — the `matches` key plus
-    // each of its three items' `trigger` and `replace` keys and values — and our
-    // decoder agrees with the substrate on every one of them.
+    // 864, not the 838 pinned before Phase 0c-3a: `empty-entries-and-extents.yml`
+    // adds 31 scalars, of which **5 are zero width** and are skipped above, so
+    // the figure moves by 26 and our decoder agrees with the substrate on every
+    // one of the 26. 886 since the review's fix round added 22 more scalars in
+    // two fixtures, none of them zero width, all of them in agreement.
     assert_eq!(
-        total, 838,
+        total, 886,
         "the synthetic corpus scalar count is pinned; update it deliberately"
     );
 } // End of function our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar()
@@ -221,7 +261,13 @@ fn every_synthetic_scalar_reencodes_to_its_own_bytes() {
     // `block-scalar-header-tails.yml` holds 13 scalars, 12 of which re-encode
     // byte-identically. The thirteenth is its `>2` folded scalar, which joins the
     // `FoldedStyle` family below because `>` is decode-only (D2e).
-    assert_eq!(tally.identical, 820, "pinned; update deliberately");
+    // 851 since Phase 0c-3a: `empty-entries-and-extents.yml` adds 31 scalars and
+    // every one of them re-encodes byte-identically, its 5 zero-width ones
+    // included — an empty span re-encodes to no bytes, which is exactly right.
+    // 873 since the Phase 0c-3a review's fix round: the 20 scalars of
+    // `file-comments-and-mixed-endings.yml` and the 2 of
+    // `single-line-no-line-ending.yml`, all quoted or plain and all identical.
+    assert_eq!(tally.identical, 873, "pinned; update deliberately");
     assert_eq!(
         tally.refused,
         BTreeMap::from([
@@ -1318,3 +1364,64 @@ fn an_unchanged_corpus_scalar_keeps_its_style_when_rewritten_with_its_own_value(
     assert!(surprises.is_empty(), "rule 1 violations: {surprises:#?}");
     assert!(kept > 0 && changed > 0);
 } // End of function an_unchanged_corpus_scalar_keeps_its_style_when_rewritten_with_its_own_value()
+
+// ---------------------------------------------------------------------------
+// The one place the two decoders answer differently — Phase 0c-3a
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_implicit_node_is_the_one_place_the_two_decoders_answer_differently() {
+    // `compare_decoders` skips zero-width scalars, and a skip that is not
+    // bounded is a hiding place. This states exactly what is being skipped, why,
+    // and how many there are.
+    //
+    // An entry written `label:` with nothing after it has an **implicit** value:
+    // the substrate resolves it to YAML's null and reports the value `~`, while
+    // our decoder reads the span — which is empty — and returns the empty
+    // string. The two are answering different questions, and reconciling them
+    // needs a null in the value model rather than a change to the codec.
+    //
+    // Phase 0c-3a found this by adding the corpus's first empty mapping entry;
+    // before that no fixture in either corpus had one, so the divergence existed
+    // and was invisible. Nothing edits such a node — `EditError::EmptyTarget`
+    // refuses it — so nothing is corrupted by it today.
+    let source = "label:\n";
+    let index = SyntaxIndex::parse(source).expect("parses");
+    let implicit = index
+        .nodes()
+        .iter()
+        .find(|node| node.scalar.is_some() && node.is_zero_width())
+        .expect("an implicit value");
+    let scalar = implicit.scalar.as_ref().expect("scalar data");
+    assert_eq!(scalar.value, "~", "the substrate resolves it to null");
+    assert_eq!(
+        decode(source, &scalar.presentation),
+        Ok(String::new()),
+        "our decoder reads the span, which is empty"
+    );
+
+    // The three properties `compare_decoders` asserts of every node it skips,
+    // stated once here on a node that is unambiguously implicit. Added by the
+    // Phase 0c-3a review, which accepted the skip's reasoning and asked that it
+    // be unable to widen: a zero-width scalar that is quoted, or carries a block
+    // header, or resolves to anything but `~`, is not an implicit node and must
+    // not be skipped.
+    assert_eq!(scalar.presentation.style, ScalarStyle::Plain);
+    assert!(scalar.presentation.header_span.is_empty());
+
+    // And the corpus-wide count of the skip, pinned.
+    let skipped: usize = common::synthetic_valid()
+        .iter()
+        .map(|file| {
+            SyntaxIndex::parse(&file.source)
+                .expect("parses")
+                .zero_width_leaves()
+                .count()
+        })
+        .sum();
+    println!("\nsynthetic corpus: {skipped} implicit nodes skipped by the decoder oracle");
+    assert_eq!(
+        skipped, 5,
+        "the four empty entries of empty-entries-and-extents.yml plus its bare item"
+    );
+} // End of function an_implicit_node_is_the_one_place_the_two_decoders_answer_differently()

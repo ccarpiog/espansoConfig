@@ -247,11 +247,30 @@ fn every_addressable_node_of_the_synthetic_corpus_round_trips_through_its_path()
     // mappings + 12 scalars. So +1 document, +7 mapping keys (`matches` and each
     // item's `trigger` and `replace`), +11 addressable (the root mapping, the
     // sequence, the 3 item mappings and the 6 values), and no new ambiguity.
-    assert_eq!(total.total(), 1114);
-    assert_eq!(total.addressable, 645);
-    // 22 single-document fixtures plus multi-document.yml's three.
-    assert_eq!(total.documents, 25);
-    assert_eq!(total.mapping_keys, 440);
+    //
+    // Phase 0c-3a added `empty-entries-and-extents.yml` the same way: 40 nodes =
+    // 1 document + 1 root mapping + the `matches` sequence + 4 item mappings +
+    // the nested `vars` sequence + its item mapping + 31 scalars. So +1
+    // document, +16 mapping keys (`matches`, `trailing`, each item's `trigger`,
+    // `replace` and `label`, `vars`, and the nested `name` and `type`), and +23
+    // addressable — its 8 collections, its 10 values with a token, and its **5
+    // zero-width values**, which are addressable although they own no bytes
+    // (R7): four empty entries and one bare sequence item.
+    //
+    // The Phase 0c-3a **review's fix round** added two more, and every figure
+    // below moves by exactly their own shapes.
+    // `file-comments-and-mixed-endings.yml`: 27 nodes = 1 document + 6
+    // collections (the root mapping, the `matches` sequence, 3 item mappings and
+    // the nested `vars` mapping) + 20 scalars, of which 11 are keys and 9 are
+    // values. So +1 document, +11 mapping keys, +15 addressable (6 collections +
+    // 9 values). `single-line-no-line-ending.yml`: 4 nodes = 1 document + the
+    // root mapping + its one key and one value, so +1 document, +1 mapping key,
+    // +2 addressable.
+    assert_eq!(total.total(), 1185);
+    assert_eq!(total.addressable, 685);
+    // 25 single-document fixtures plus multi-document.yml's three.
+    assert_eq!(total.documents, 28);
+    assert_eq!(total.mapping_keys, 468);
     // Exactly the four values under a duplicated key in duplicate-keys.yml:
     // `replace` twice in `matches[0]` and `label` twice in `matches[2]`.
     assert_eq!(total.ambiguous, 4);

@@ -5,6 +5,7 @@
 //! in the tree.
 
 use crate::syntax::block::BlockHeader;
+use crate::syntax::collection::CollectionExtent;
 use crate::syntax::{ByteSpan, ScalarPresentation, ScalarStyle};
 
 /// Stable identity of a node inside one parsed document.
@@ -148,7 +149,11 @@ pub struct Node {
     /// For a scalar this is the token as written: quotes included for a quoted
     /// style, the `|`/`>` header excluded and the trailing overshoot trimmed
     /// for a block style. For a collection it is the extent from its first byte
-    /// to the end of its last child (or its closing bracket, in flow style).
+    /// to the end of its last child (or its closing bracket, in flow style) —
+    /// deliberately **not** as far as [`Node::collection_extent`]'s
+    /// `owned_end`, because a collection that out-ends its own deepest child
+    /// takes that child's trailing `:` and inline comment away from it under
+    /// the ownership rules.
     pub span: ByteSpan,
     /// Zero-based index of the document this node belongs to.
     pub document_index: usize,
@@ -162,6 +167,17 @@ pub struct Node {
     pub scalar: Option<ScalarNode>,
     /// Collection style, present exactly for mappings and sequences.
     pub collection_style: Option<CollectionStyle>,
+    /// Where the collection ends, present exactly for mappings and sequences.
+    ///
+    /// [`Node::span`] stops at the last child, which is what the trivia
+    /// ownership rules need; [`CollectionExtent::owned_end`] answers one past
+    /// the last byte the collection's subtree can claim, which is what a
+    /// structural edit needs. The two differ whenever the last entry's
+    /// punctuation or inline comment falls past the last child — see
+    /// [`crate::syntax::collection`] for the measurement behind that split.
+    /// `owned_end()` is deliberately fallible: `None` means the derivation gave
+    /// up, and a consumer must refuse rather than substitute this span's end.
+    pub collection_extent: Option<CollectionExtent>,
     /// Document markers, present exactly for [`NodeKind::Document`] nodes.
     pub document_markers: Option<DocumentMarkers>,
 }

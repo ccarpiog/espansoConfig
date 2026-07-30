@@ -17,7 +17,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **0c-1** | Scalar codec: decode/encode, `choose_scalar`, style preservation | ✅ complete — after the review fix round below |
 | **0c-2a** | Structural path resolver: `DocumentPath`, `resolve`, `path_to` | ✅ complete — after the review fix round below |
 | **0c-2b** | Span replacement, reparse-verify, the hazard gate at the mutation entry point | ✅ complete — after the review fix round below |
-| **0c-3** | Structural edits (insert/remove field, move match) · the round-trip property test | ⬜️ **next** — **this is the Phase 0 gate** |
+| **0c-3a** | Insert/remove a mapping field · the removal envelope · the block-collection extent (R3) | ✅ complete — after the review fix round below |
+| **0c-3b** | Move a match · the run-based envelope · the stronger invariant · the round-trip property test | ⬜️ **next** — **this is the Phase 0 gate** |
 | 1 | Read-only browser | ⬜️ blocked on the Phase 0 gate |
 | 2–5 | See plan §12 | ⬜️ not started |
 
@@ -26,9 +27,12 @@ coherent unit of work, and **0c** was split again into **0c-1 / 0c-2 / 0c-3** fo
 0c-1 is value-level and mutates nothing, 0c-2 mutates one scalar, 0c-3 mutates structure.
 **0c-2 was split once more into 0c-2a / 0c-2b**: addressing a node and mutating one are
 independent problems, and the addressing half is what the mutating half's verification step
-depends on, so it had to be correct and independently tested first. The
+depends on, so it had to be correct and independently tested first. **0c-3 was split into 0c-3a /
+0c-3b** along the cut its own "Next action" predicted: 0c-3a changes a mapping's *membership*, where
+every byte the edit touches stays in place; 0c-3b *relocates* bytes, which is what breaks the
+byte-identity invariant and forces a stronger one. The
 plan's stated exit criterion for Phase 0 — *the round-trip property test passes on the full
-corpus* — is unchanged and lands at the end of **0c-3**. The architectural gate is not cleared
+corpus* — is unchanged and lands at the end of **0c-3b**. The architectural gate is not cleared
 until then; no UI work begins before it.
 
 ---
@@ -205,6 +209,48 @@ real corpus **2 004 of 2 004 attempted edits applied**, and no count from it is 
 Two error variants an earlier draft of this phase had are **gone**, because the fix round found they
 were refusing edits with an exact lossless answer: `CommentOnBlockHeader` and
 `LineNotFreeForBlockScalar`. See the review disposition.
+
+### Phase 0c-3a — the first edits that change a document's structure
+
+0c-2b changed one scalar's bytes in place. 0c-3a changes a mapping's **membership**: `FieldInsert` and
+`FieldRemoval` join `ScalarEdit` in a single `DocumentEdit` batch, applied by `apply_edits`
+(`apply_scalar_edits` is now a thin wrapper over it). Every byte the edit touches still stays where it
+is — *relocating* bytes is 0c-3b, and is why the invariant has to change again there.
+
+**The envelope is the phase, not the bytes.** Which colon, line break, blank line and comment travel
+with a removed entry is the whole problem; writing the replacement is trivial once that is settled. The
+envelope is built from `items_owned_by_subtree` / `comments_owned_by_subtree`, never the direct
+queries, and is then widened to whole lines. It is a **contiguous hull**, and D2o records what that
+costs.
+
+**R3 is closed by measurement, not by assumption** (D2n). A block collection's end marker was measured
+across both corpora *before* any rule was written: it overshoots in 223/235 synthetic and 228/240 real
+collections, never undershoots, and lands at EOF, on a node or mid-trivia (111/42/298). It is therefore
+unusable *and* unreconstructible, so the published span deliberately stays child-derived and
+`CollectionExtent::owned_end()` is a second, **fallible** derivation cross-checked against
+`TriviaIndex::subtree_extent` on every block collection of both corpora.
+
+**Verification is generalised, not weakened** (D2p). "Every byte outside the replaced spans is
+identical" cannot survive a removal, which deliberately deletes bytes. The invariant is now: *the
+candidate is exactly the source with the declared replacements applied, and every declared replacement
+lies wholly inside a span derived from immutable syntax facts.* Byte identity alone cannot police a
+removal — an envelope one entry too long confirms itself — so three checks carry the weight, none of
+them a restatement of what the planner decided: `StructuralGuard` against the **original** index, a
+**sibling digest** proving every unnamed entry still decodes to what it decoded to before (kinds and
+lengths as well as values, so `{a: "1"}` and `[a, 1]` cannot collide), and a **file-comment check**
+that the review's finding 1 forced.
+
+**What is proven.** A structural sweep over every mapping of all 26 synthetic fixtures — every entry
+offered for removal, insertions attempted at every position, plus one duplicate key and one missing
+sibling per mapping: **2 572 attempted structural edits = 1 503 inserted + 248 removed + 256 gate +
+24 flow + 28 last-entry + 136 shares-a-line + 182 duplicate-key + 5 kept-block + 1 file-comment +
+182 no-such-sibling + 0 inconsistent-indentation + 7 no-line-ending**, pinned **per fixture, a complete
+row each**, with the table asserted to cover the corpus exactly. On the real corpus **1 856 attempted
+structural edits — 928 inserted, 419 removed** — and no count from it is hard-coded. Applied edits are
+re-verified from **outside** the engine: the removal envelope satisfies four properties none of which
+restates how it was built, the insertion point three, every line break an insertion writes is
+byte-identical to the one already in use where it lands, and every comment the file owns is still
+there.
 
 ---
 
@@ -634,6 +680,81 @@ discharges plan §6.2's "never silently normalise" without blocking an edit that
 documents as intended behaviour. Refusing instead would make a folded scalar permanently
 uneditable.
 
+### D2n — the collection end marker is unusable, so the published span stays child-derived
+
+Phase 0c-3a, closing **R3**. The substrate's own end marker for a block collection was measured over
+both corpora before any rule was adopted: it **overshoots in 223 of 235 synthetic and 228 of 240 real
+collections**, never undershoots, and lands at EOF, on an unrelated node, or in the middle of trivia
+(111 / 42 / 298). Unlike a block scalar's end — which D2 records as *reconstructible* from three known
+inputs — a collection's is neither usable nor reconstructible.
+
+So the published span **deliberately does not change**. Extending it to the measured end would move a
+key's `:` and its inline comment into the mapping, breaking the D2d ownership the whole trivia layer
+rests on. Instead `CollectionExtent::owned_end()` is a **second, fallible** derivation, cross-checked
+against `TriviaIndex::subtree_extent` on every block collection of both corpora, with
+`unaccountable_collection_extents()` as the counted observable pinned at zero and
+`overshooting_block_collections()` as the R3 observable — the exact counterpart of
+`trimmed_block_scalars()`, and restricted to the block styles for the same reason R20 gives.
+
+`owned_end()` returns `Option<usize>`, `None` exactly when the derivation is `Unaccountable`, and the
+field is private. That is the review's finding 4: a value known to be wrong must not be publishable as
+an ordinary `usize` that a future consumer can read without confronting it. It is the same discipline
+`quoted_span` got from 0c-2b's finding E5.
+
+### D2o — the removal envelope is a **hull**, and a hull is not a set
+
+The Phase 0c-3a review's finding 1, and the phase's most important admission. A removal envelope is one
+contiguous `ByteSpan`, so it necessarily covers everything between the entry's first and last byte —
+including trivia that **no node in the entry owns**. The concrete case the reviewer built:
+
+```yaml
+a:
+  x: 1
+  # keep this file comment
+
+  y: 2
+b: 3
+```
+
+By D2d that comment is separated from `y` by a blank line, so it belongs to the **file** and must
+survive any edit. Removing `a` deleted it, and all four layers certified the result: `subtree_extent`'s
+hull already crossed it, `StructuralGuard` examined no trivia, the sibling digest compares decoded
+nodes and holds no comments, and the external oracle had the same blind spot. This is the structural
+form of 0c-2b's E1/E3 — a synthesized envelope, authorised by the very declaration that should have
+been checked against it.
+
+**A single contiguous span cannot express "remove the collection but keep this interior file comment."**
+The real fix is to represent envelopes as owned **runs** rather than a hull, and that is deferred to
+0c-3b, where a move needs run-based envelopes anyway. Until it lands, such a removal is **refused**
+(`EditError::RemovalWouldDeleteAFileComment`) rather than performed-minus-the-comment. The cost is
+recorded as **R21**: a removal that ought to be legal is refused. One synthetic removal hits it; zero
+real ones do.
+
+The refusal alone was explicitly judged insufficient, because it leaves the *class* invisible.
+`VerificationFailure::FileCommentLost` derives the loss from `file_comments()` rather than from the
+edit, and the test oracle compares file-owned comments before and after using a comment scan written
+independently of `TriviaIndex`. All three layers were confirmed to catch it **independently**, by
+disabling each in turn.
+
+### D2p — a line ending is copied from the most local evidence, never voted on
+
+The review's finding 2, and a defect the fix round then found live in the **scalar** path too, which
+the reviewer had not named. `LineEnding::detect` answers LF for a single-line document **by defaulting,
+not by measuring**, and both edit paths were writing that document-wide answer. Two failures follow: a
+file with no final newline gets an invented LF, and in a mixed document an insertion after a
+CRLF-terminated sibling writes LF whenever LF is globally dominant.
+
+The rule is now: **copy the break already in use where the bytes land** — the anchor's own terminated
+line for an insertion, the scalar's own line terminator for a scalar edit — and when the document
+supplies no break at all, **refuse by name** (`NoObservableLineEnding`) rather than guess. Choosing a
+line ending the file never contained is precisely the silent reformatting this crate exists to prevent,
+and a document-wide majority is a guess dressed as evidence.
+
+The scalar half is worth recording separately from the insertion half because of **how it was found**:
+the two fixtures written to prove the insertion fix walked straight into it, and it had been passing
+every sweep for two phases. Fourth time in this project that the corpus, not the code, was the weak
+link (R20), and the second time in two rounds that a fixture written for one defect uncovered another.
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -655,7 +776,7 @@ carries a `bom` flag so the byte is restored verbatim on write.
 |---|---|---|
 | R1 | `saphyr-parser` is **pre-1.0 (0.0.11)**; the API can break between patch releases | Confined to `crate::syntax` — no other module imports it. 31 pinned tests fail loudly on any behaviour change. Deliberately **not** vendored: vendoring creates ownership without removing upgrade risk. |
 | R2 | If a future saphyr release "fixes" `index()` to genuinely return bytes, the `CharToByte` adapter silently becomes wrong | Desired failure mode already wired: `all_three_crates_report_character_offsets_not_byte_offsets` and `saphyr_offsets_count_unicode_scalar_values_not_bytes_utf16_units_or_graphemes` both fail immediately. |
-| R3 | **Block-scalar** and block **collection** end offsets overshoot into trailing trivia | Must be trimmed by us. The block-scalar trim rule is derived and asserted in 0a; applying it is 0b, and collection trimming is 0c. |
+| R3 | **Block-scalar** and block **collection** end offsets overshoot into trailing trivia | **Closed in 0c-3a (D2n).** The block-scalar half was trimmed in 0b. The collection half was *measured* before a rule was chosen — the end marker overshoots in 223/235 synthetic and 228/240 real collections, never undershoots, and lands at EOF, on a node or mid-trivia (111/42/298), so it is neither usable nor reconstructible. The published span therefore stays child-derived on purpose, and `CollectionExtent::owned_end()` is a second, fallible derivation cross-checked against `TriviaIndex::subtree_extent` over both corpora, with 0 unaccountable extents. |
 | R4 | Phase 0 gate is **not yet cleared** — the round-trip property test does not exist yet | Lands in 0c. No UI work until it passes. |
 | R5 | An empty block scalar (`replace: \|` mid-keystroke) reports a span that **includes** its header — the one exception to "the header is outside the span" | Phase 0b: the backwards header lexer must refuse to run when the span itself starts with `\|` or `>`. Pinned by `a_truncated_block_scalar_header_produces_a_span_that_swallows_the_header`. The content span now starts past the header *line*, never past the indicator alone, so rewriting it cannot splice a value onto the header line. |
 | R6 | **Flow-collection comment ownership** is undefined: in `items: [one, # why` / `two]` the comment belongs to no obvious node | **Closed in 0b-2 (D2d).** The comment attaches to the innermost enclosing flow collection and raises `HazardKind::CommentInFlowCollection`; the collection is then refused **outright**, whole-collection replacement included. Pinned by `a_comment_inside_a_flow_collection_belongs_to_the_collection_and_flags_it`. |
@@ -673,6 +794,8 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R20 | **A quoted scalar's reported end overshoots trailing spaces and a following comment**, exactly as a block scalar's does (R3) — the same class of latent silent-corruption bug, in a layer everything else rests on | **Fixed in 0c-2b, in the span layer rather than worked around in the edit engine.** `SyntaxIndex::quoted_span()` trims the reported end back to the closing delimiter, lexing forwards from the opening one (`''` and `\"` are data, not terminators; the scan crosses line breaks so multi-line quoted scalars trim correctly). Unlike `block_layout` it falls back to the reported span rather than rejecting the index, because a quoted scalar with no closing quote inside its own reported span cannot come from a document the substrate accepted, and making a file unopenable for an unreachable case is the R14 mistake. **The residual risk is the corpus, not the code:** this was invisible for three phases because no fixture exercised the shape. `trimmed_block_scalars()` is now restricted to the two block styles so the two overshoots can never again be folded into one figure — which is precisely how this one hid. |
 | R10 | A block scalar whose header cannot be located has **no correct span**: the reported one runs into trailing blank lines and the next node's indentation | The index is **rejected** with `InvariantViolation::BlockHeaderNotFound` rather than publishing the known-bad span. There is deliberately no fallback. From the Phase 0b-1 review, ranked failure mode 3. |
 | R11 | **Terminal spaces or tabs at end-of-source** are scalar content, not the next token's indentation — there is no next token | `block::content_len` takes `at_end_of_source` and keeps a trailing run that sits on a content line. Pinned by `terminal_spaces_at_end_of_source_stay_inside_the_block_scalar` and the `block-scalar-terminal-spaces.yml` fixture. |
+| R21 | **A removal envelope is a contiguous hull, so it cannot express "remove this entry but keep the file-owned comment inside it."** Such a removal is refused rather than performed | Open, and **deliberately** so — the refusal is the safe half of D2o, added by the 0c-3a review's finding 1. The real answer is run-based envelopes, which **0c-3b needs anyway** for a move, so it is scheduled rather than merely deferred. Cost measured: **1** synthetic removal is refused for this reason and **0** real ones, so it costs today's corpus nothing. The class is visible at three independent layers (`RemovalWouldDeleteAFileComment`, `VerificationFailure::FileCommentLost`, and the test oracle's own before/after comment scan), each confirmed to catch it with the other two disabled — so if 0c-3b's envelope is wrong, it fails loudly rather than silently. |
+| R22 | **`InconsistentEntryIndentation` is pinned at 0 and is argued to be *unreachable*, not merely unreached** — a coverage hole and a proof look identical in a count | Accepted, with the argument recorded in `docs/decisions/0c-3a-notes.md` §3: a valid block mapping cannot have its keys at two columns, and the two shapes that can are refused earlier by other variants. No fixture was invented to reach it, because an impossible fixture would prove nothing. This is the one refusal family whose pinned zero rests on an argument rather than on a construction — treat it as the weakest pin in the table, and revisit if a real file ever trips it. |
 
 ---
 
@@ -786,6 +909,63 @@ the sharpest cross-check being that the whole-line comment scan gained **6** whi
 scanner gained **8**, the difference being its two comments that share a header line, which is the
 documented distinction between the two conventions (D2d).
 
+## Phase 0c-3a review disposition
+
+The mandatory once-per-phase adversarial review is
+[`docs/reviews/phase-0c-3a-structural-edits.md`](docs/reviews/phase-0c-3a-structural-edits.md).
+Verdict: **do not accept** — "finding 1 is silent deletion of a byte ownership explicitly says must
+remain, and present verification certifies the corrupted result." The phase was held open until all
+five were fixed, as the four before it were.
+
+The review also cleared a substantial set **explicitly**, and that distinction is worth keeping:
+ordinary removal envelopes correctly use subtree rather than direct ownership; inline comments, leading
+comments, file headers, blank runs either side, CRLF, empty values, block scalars, first/last entries
+and compact sequence mappings are handled or refused as documented; indentation is learned from sibling
+keys including in compact items and deep nesting; node-level verification detects a changed or deleted
+kept sibling including nested collections; normal overlap cases classify correctly with no corrupt
+interleaving; and the flow, compact-first-entry, last-entry and `RemovalWouldExtendAKeptBlock` refusals
+are correctly scoped. Each of those was **examined and found clean**, not merely unexamined.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High, demonstrated.** Removing a collection-valued entry deletes file-owned comments, and every layer certifies the result | **Fixed at four layers** (D2o). `subtree_extent`'s doc claim that file comments are excluded was **false** and is corrected — it is a hull. `EditError::RemovalWouldDeleteAFileComment` refuses; `VerificationFailure::FileCommentLost` makes the class visible to verification, derived from ownership rather than from the edit; the external oracle compares file-owned comments before and after with its own scan. All three confirmed to catch it **independently**, by disabling each in turn. The run-based envelope the reviewer names as the real answer is scheduled into 0c-3b as **R21** with its cost measured. |
+| 2 | **Medium, demonstrated.** Insertion defaults its line ending — and learns from the document's dominant style rather than the anchor | **Fixed** (D2p), **and the same defect fixed in the scalar path**, which the review did not name. The break is copied from the most local evidence; a document supplying none is refused by name rather than given LF. |
+| 3 | **Medium, demonstrated.** `[remove a, remove a, remove a]` panics — `fold_expectations` ran before the overlap check and underflowed `usize` | **Fixed twice over**: disjointness is now checked **before** expectations are folded, *and* the fold's arithmetic is checked, so no ordering can panic. Backed by the specific case and a 600-batch seeded sweep. This restores the standing "a public entry point never panics on bad input" property (D3b). |
+| 4 | **Medium, suspected.** The collection extent publishes a known-bad `owned_end` as an ordinary `usize` | **Fixed** (D2n). `owned_end()` returns `Option<usize>`, `None` exactly when the derivation is `Unaccountable`, field private. Counted observable still pinned at zero. |
+| 5 | **Medium, demonstrated test-claim gap.** "Every refusal is independently re-derived" was false in four ways | **Fixed, all four**, and the false claim corrected rather than softened: `KeyAlreadyPresent` is now checked against a re-derived fact instead of counted blind; `NoSuchSibling` and `InconsistentEntryIndentation` are categories in the tally and the sweep; the removal oracle compares file-owned comments; and two fixtures add the missing shapes. |
+| — | The reviewer's optional hardening of the zero-width decoder skip | **Adopted.** `compare_decoders` asserts every skipped node is plain, headerless and has substrate value `~`, so the skip cannot widen later to cover a genuine disagreement. |
+
+**One defect this fix round found that the review did not**, and it is recorded because of how it was
+found rather than for its size: the line-ending invention of finding 2 was **also live in the scalar
+path**, and the two fixtures written to prove the *insertion* fix walked straight into it. It had been
+passing every sweep for two phases. Fourth time the corpus rather than the code was the weak link
+(R20), and the second consecutive round in which a fixture written for one defect uncovered another.
+
+## Verification — Phase 0c-3a
+
+All run at the repo root by the orchestrator, independently of the phase worker's own claims, all
+exit 0:
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | exit 0 — **366 tests pass** (202 unit + 13 corpus integrity + 32 parser evaluation + 12 patch edit + 15 patch path + 11 patch structure + 4 real corpus + 15 scalar codec + 30 span layer + 32 trivia scanner) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `cargo doc --no-deps -p espansoconfig-core` | exit 0, no warnings |
+| Same suite with `tests/corpus/real/` renamed away | exit 0 — 366 pass; `patch_structure` drops from 17.8 s to 3.7 s and `patch_edit` from 21.1 s to 7.8 s, which is the real-corpus sweep skipping cleanly |
+| `./scripts/build-byte-exact-fixtures.sh` | exit 0 — regenerating the fixtures leaves the seven previously tracked ones **byte-identical** (`git status` reports no modification), so the generator is faithful rather than merely present |
+| `git status --short --untracked-files=all` | no real-config path present ✅ |
+
+The three regression tests that decide whether the fix round succeeded, all passing:
+`removing_a_collection_that_holds_a_file_comment_is_refused_rather_than_applied`,
+`the_oracle_catches_a_lost_file_comment_that_every_other_check_accepts` (the finding-1 class is visible
+to the *oracle*, not merely refused by the planner), and
+`a_malformed_batch_is_refused_by_name_and_never_panics`.
+
+Test output prints counts, file names, byte offsets and synthetic values only — no line of real
+configuration content, and no count taken from the real corpus is hard-coded.
+
 ## Verification — Phase 0c-2b
 
 All run at the repo root by the orchestrator, independently of the phase worker's own claims, all
@@ -875,53 +1055,58 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Start Phase 0c-3 — structural edits, plus the full round-trip property test. This is the Phase 0
-architectural gate (R4), and no UI work begins until it passes.**
+**Start Phase 0c-3b — move a match, the run-based envelope, the stronger verification invariant, and
+the full round-trip property test. This is the Phase 0 architectural gate (R4), and no UI work begins
+until it passes.**
 
-Everything below the structural layer is now in place and independently tested: 0b gives byte-exact
-spans, trivia classification, comment ownership and the hazard gate; 0c-1 the scalar codec; 0c-2a the
-path that survives a reparse; 0c-2b the mutation entry point, the splice-and-verify cycle and the
-first proof that an edit leaves every other byte untouched. 0c-3 moves whole *constructs* rather than
-one scalar's bytes, which is why it is last and why it is the gate.
+Everything below is now in place and independently tested: 0b gives byte-exact spans, trivia
+classification, comment ownership and the hazard gate; 0c-1 the scalar codec; 0c-2a the path that
+survives a reparse; 0c-2b the mutation entry point and the splice-and-verify cycle; 0c-3a insert and
+remove, the removal envelope, and a measured answer to the collection extent. 0c-3b is the only
+remaining operation that **relocates** bytes, which is exactly what breaks every invariant proven so
+far — and it is why the gate lands here.
 
-The exact scope of 0c-3:
+The exact scope of 0c-3b, in the order the dependencies run:
 
-1. **Insert and remove a mapping field** (a match's `replace`, `label`, `vars` entry). The hard part
-   is not the bytes, it is the **envelope**: which colon, which line break, which blank line and
-   which comment belong to the entry being removed. Build it from
-   `TriviaIndex::items_owned_by_subtree` / `comments_owned_by_subtree` — see the inherited
-   constraints below — and decide the indentation of an inserted field from its siblings, never from
-   a default.
-2. **Move a whole match** within a sequence, and between files if the plan asks for it. This is the
-   operation that turns R3's collection-end overshoot from a worked-around problem into a real one:
-   a block collection's extent is currently derived from its children, not from the substrate's own
-   end marker, and a move needs a defensible extent for the item *including* its trivia.
-3. **Extend the batch protocol to structural edits.** `apply_scalar_edits`' shape — plan every edit
-   against the original index, reject overlaps, splice highest-offset-first, reparse and verify — is
-   deliberately the shape 0c-3 needs. A move is a removal plus an insertion whose spans do not
-   overlap, so it should fall out of the existing machinery rather than needing a second engine.
-   **`OverlappingEdits` becomes load-bearing** here in a way it is not for scalars.
-4. **Verification cannot stay "every byte outside the replaced span is identical"**, because a move
-   deliberately relocates bytes. It needs a stronger invariant — the natural one is a **multiset of
-   bytes or of lines that is preserved under a move**, plus "every construct not named by the edit
-   decodes to the same value as before". Design this deliberately; it is the heart of the gate.
-5. **The full round-trip property test of R9**, over both corpora: mutate real documents and assert
-   the span matches the requested structural path despite duplicate keys, nested sequence mappings,
-   merge keys, aliases, explicit keys and empty values; the replacement reparses to the intended
-   value and stays valid YAML; and every byte outside the envelope is identical — across CRLF/LF,
-   BOM, missing final newline, trailing spaces, comments and block-scalar terminal newlines.
-6. **Close R16, or state plainly that it stays open.** The verify step reparses with saphyr, which is
-   YAML 1.2, while espanso consumes with a 1.1-ish stack. 0c-2b cross-checks our decoder against the
-   substrate's, which catches a disagreement between *our two* implementations and still proves
-   nothing about espanso. The cheapest real mitigation named so far is to reparse the round-trip
-   corpus with a 1.1 implementation as a second oracle. This is the last phase where deferring it is
-   cheap, because the gate is what the UI is allowed to trust.
+1. **Run-based envelopes first, before the move.** This is **R21**, and it is not optional cleanup: a
+   removal envelope is currently a contiguous hull, so it cannot express "take this entry but leave the
+   file-owned comment inside it," and a move has exactly the same problem in a worse form — it would
+   *carry the comment to the destination*. Represent an envelope as the ordered set of **runs** the
+   subtree owns, splice the runs, and D2o's refusal becomes a real edit. Do this first: the move is
+   easy once the envelope is right, and impossible to get right while it is a hull.
+2. **Move a whole match** within a sequence, and between files if the plan asks for it. A move is a
+   removal plus an insertion whose spans do not overlap, so it should fall out of `apply_edits` rather
+   than needing a second engine. `OverlappingEdits` is already load-bearing (0c-3a finding 3); a move
+   is the case that makes ordering matter most.
+3. **The stronger invariant.** "Every byte outside the replaced spans is identical" survived 0c-3a only
+   because insert and remove never relocate anything. A move does, so the natural replacement is a
+   **multiset of bytes or of lines preserved under the move**, plus "every construct the edit did not
+   name decodes to the same value as before" — which 0c-3a's sibling digest already provides in local
+   form and which now has to become global. Design this deliberately; it is the heart of the gate, and
+   0c-3a's experience is that the check which cannot see the destroyed byte is the one that lets it
+   through.
+4. **The full round-trip property test of R9**, over both corpora: mutate real documents and assert the
+   span matches the requested structural path despite duplicate keys, nested sequence mappings, merge
+   keys, aliases, explicit keys and empty values; the result reparses to the intended value and stays
+   valid YAML; and every byte outside the envelope is identical — across CRLF/LF, BOM, missing final
+   newline, trailing spaces, comments and block-scalar terminal newlines.
+5. **Close R16, or state plainly that it stays open.** The verify step reparses with saphyr, which is
+   YAML 1.2, while espanso consumes with a 1.1-ish stack. Cross-checking our decoder against the
+   substrate's catches a disagreement between *our two* implementations and still proves nothing about
+   espanso. The cheapest real mitigation named so far is to reparse the round-trip corpus with a 1.1
+   implementation as a second oracle. **This is the last phase where deferring it is cheap**, because
+   the gate is what the UI is allowed to trust.
 
-Expect to split 0c-3, as 0b and 0c were split. A defensible cut is **0c-3a** (insert/remove a field,
-the envelope problem, and a real answer to R3's collection extent) and **0c-3b** (move, the stronger
-verification invariant, and the full R9 property test).
+What 0c-3b inherits and must not undo:
 
-What 0c-3 inherits and must not undo:
+- **R21 is scheduled work, not a known bug to live with.** `RemovalWouldDeleteAFileComment` is the
+  *safe half* of an unfinished answer (D2o). Do not treat the refusal as the design.
+- **Line endings are copied from local evidence, never voted on (D2p).** A move writes bytes at a
+  destination whose line ending may differ from the source's. Copy the destination's, and refuse when
+  there is no evidence — do not reuse the moved text's own breaks blindly.
+- **The three-layer visibility discipline.** 0c-3a's finding 1 was caught by none of four checks. The
+  fix made the class visible to the planner, to verification and to the test oracle *independently*,
+  each confirmed by disabling the other two. A move's envelope deserves the same treatment.
 
 - **Move and delete envelopes** must include the trivia a node's whole **subtree** owns —
   `TriviaIndex::items_owned_by_subtree` and `comments_owned_by_subtree` are the source of truth
@@ -930,13 +1115,15 @@ What 0c-3 inherits and must not undo:
   and **must not** be used to build an envelope: the trivia a reader attributes to a sequence
   item is mostly owned by its descendants, so a direct-ownership envelope strands the final
   inline comment on the snippet below.
-- **Collection-end overshoot (R3)** is still only worked around: a block collection's extent is
-  derived from its children, not from the substrate's own end marker. 0c-3 needs a real answer.
+- **Collection-end overshoot (R3) is closed, and the answer is "the marker is unusable" (D2n).** The
+  published span stays child-derived *deliberately*; `CollectionExtent::owned_end()` is the second,
+  fallible derivation. Do not "fix" this by extending the published span to the measured end — that
+  moves a key's `:` and inline comment into the mapping and breaks D2d.
 - **A scalar that `reencode_in_place` refuses must not be silently rewritten.** 0c-2b discharged
   this with `PresentationNote` rather than a refusal (D2m) — the reason travels to the caller and the
   edit proceeds. Structural edits must keep that property: the user is told what changed spelling.
 - **Agreement with saphyr is not agreement with espanso (R16).** Do not let the single-parser oracle
-  stand past the gate; see scope item 6.
+  stand past the gate; see scope item 5.
 - **The resolver knows nothing about hazards, and that is deliberate (D2j).** Do not "fix" it by
   making `resolve` consult the gate. 0c-2b put the check inside `plan_one`, before anything is
   rendered, and made it structural by having `apply_scalar_edits` take the source *text* — keep that
@@ -944,10 +1131,11 @@ What 0c-3 inherits and must not undo:
 - **`PatchedDocument` has no public constructor on purpose.** It is the type-level guarantee that
   candidate bytes cannot exist without having passed `verify()`. Do not add one, and do not add a
   public field.
-- **The corpus is the weak link, not the code (R20).** Three phases missed the quoted-scalar
-  overshoot because no fixture exercised the shape. When 0c-3 finds a construct the corpus does not
-  cover, **add the fixture**; do not settle for a unit test alone, and never fold two distinct
-  overshoots into one measured figure.
+- **The corpus is the weak link, not the code (R20), and this is now a four-time pattern.** Three
+  phases missed the quoted-scalar overshoot; 0c-3a's review then found a file-comment shape no fixture
+  held, and the fixtures written to fix *that* uncovered the scalar line-ending defect (D2p). When
+  0c-3b finds a construct the corpus does not cover, **add the fixture**; do not settle for a unit test
+  alone, and never fold two distinct overshoots into one measured figure.
 - **`TriviaIndex::scan` is quadratic (R19).** The gate test will be the largest sweep yet; if it is
   slow, memoise `ownership.rs`'s primitives rather than thinning the sweep.
 
@@ -957,7 +1145,10 @@ What 0c-3 inherits and must not undo:
 
 | Path | Why it matters next |
 |---|---|
-| [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **0c-2b, and where 0c-3 lands.** `apply_scalar_edits` is the batch protocol structural edits extend: plan against the original index, reject overlaps, splice highest-offset-first, reparse, verify. Also `EditError`, `VerificationFailure`, `PresentationNote`, `PatchedDocument` |
+| [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **Where 0c-3b lands.** `apply_edits` is the one batch protocol for `ScalarEdit`, `FieldInsert` and `FieldRemoval`: plan against the original index, reject overlaps, splice highest-offset-first, reparse, verify. Also `EditError`, `VerificationFailure`, `StructuralGuard`, `PresentationNote`, `PatchedDocument` |
+| [`crates/espansoconfig-core/tests/patch_structure.rs`](crates/espansoconfig-core/tests/patch_structure.rs) | **Phase 0c-3a acceptance**, and the sweep 0c-3b extends: the per-fixture `SYNTHETIC_OUTCOMES` table, the independently re-derived refusals, the external removal/insertion oracles, and the before/after file-comment scan that finding 1 forced |
+| [`crates/espansoconfig-core/src/syntax/collection.rs`](crates/espansoconfig-core/src/syntax/collection.rs) | The block-collection extent (D2n, closing R3): the textual derivation, `CollectionExtent::owned_end()` and the `Unaccountable` fallback |
+| [`docs/decisions/0c-3a-notes.md`](docs/decisions/0c-3a-notes.md) | Phase 0c-3a's own decision record: what was measured about collection ends before any rule was chosen, the hull-versus-set argument (§2.1), the line-ending rule (§3.1–3.2), the verification invariant (§5), and every claim the review proved false |
 | [`crates/espansoconfig-core/tests/patch_edit.rs`](crates/espansoconfig-core/tests/patch_edit.rs) | Phase 0c-2b acceptance: the corpus-wide edit sweep with independently re-derived refusals, the pinned per-fixture counts, the flow-legality pins (R17/D2k) and the hazard-scope pin (R12) |
 | [`docs/decisions/0c-2b-notes.md`](docs/decisions/0c-2b-notes.md) | The phase's own decision record: the R17 rationale, every new error variant and why it exists, the three claims it found false, and the coverage holes it pinned at 0 rather than papered over |
 | [`crates/espansoconfig-core/src/patch/path.rs`](crates/espansoconfig-core/src/patch/path.rs) | **0c-2a**: `DocumentPath`, `resolve`, `resolve_key`, `resolve_full`, `path_to`. What the edit engine calls to find its target and to re-find it after the reparse |
@@ -978,6 +1169,7 @@ What 0c-3 inherits and must not undo:
 | [`docs/reviews/phase-0c-1-scalar-codec.md`](docs/reviews/phase-0c-1-scalar-codec.md) | The Phase 0c-1 review; F1–F7, D2f–D2i and R14–R16 come from it |
 | [`docs/reviews/phase-0c-2a-path-resolver.md`](docs/reviews/phase-0c-2a-path-resolver.md) | The Phase 0c-2a review; P1–P6, D2j and R17–R18 come from it |
 | [`docs/reviews/phase-0c-2b-span-replacement.md`](docs/reviews/phase-0c-2b-span-replacement.md) | The Phase 0c-2b review; D2k–D2m and R19–R20 come from the phase, and this review's findings are dispositioned above |
+| [`docs/reviews/phase-0c-3a-structural-edits.md`](docs/reviews/phase-0c-3a-structural-edits.md) | The Phase 0c-3a review; D2n–D2p and R21–R22 come from the phase and this review, dispositioned above. **Read finding 1 before designing 0c-3b's envelope** — it is the hull-versus-set argument in its concrete form |
 | [`crates/espansoconfig-core/tests/corpus/synthetic/`](crates/espansoconfig-core/tests/corpus/synthetic/) | The committed corpus |
 | [`scripts/sync-real-corpus.sh`](scripts/sync-real-corpus.sh) | Run once locally to enable the real-corpus tests |
 | [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) §6.2, §6.3, §11 | Fidelity model, scalar style rules, testing strategy |

@@ -346,12 +346,7 @@ impl TriviaIndex {
     /// become [`TriviaKind::Unclassified`] items and raise a hazard, which is
     /// strictly more informative than an error that discards the rest.
     pub fn scan(source: &str, index: &SyntaxIndex) -> TriviaIndex {
-        let known = known_spans(index);
-        let body_offset = index.preamble().body_offset;
-        let mut items = Vec::new();
-        for gap in index.gaps() {
-            scan_gap(source, gap, &known, body_offset, &mut items);
-        }
+        let mut items = scan_items(source, index);
         let blank_runs = blank_runs(&items);
         let (comments, hazards) = ownership::attribute(source, index, &mut items);
         TriviaIndex {
@@ -361,6 +356,26 @@ impl TriviaIndex {
             hazards,
         }
     } // End of function scan()
+
+    /// Every comment of `source`, classified but **not attributed**.
+    ///
+    /// The same gap lexer [`TriviaIndex::scan`] runs, stopping before the
+    /// ownership pass. It exists because a *candidate* document only has to be
+    /// asked "which comments are in you", never "who owns them": the ownership
+    /// pass is quadratic (`PROGRESS.md`, R19) and the verification step runs on
+    /// every edit, so paying for attribution it does not use would make the
+    /// corpus sweeps several times slower for no answer.
+    ///
+    /// Returned in document order. The spans are the comment text itself, `#`
+    /// included and the terminating line break excluded, exactly as
+    /// [`CommentAttachment::span`] reports it.
+    pub fn comment_spans(source: &str, index: &SyntaxIndex) -> Vec<ByteSpan> {
+        scan_items(source, index)
+            .iter()
+            .filter(|item| item.kind == TriviaKind::Comment)
+            .map(|item| item.span)
+            .collect()
+    } // End of function comment_spans()
 
     /// Every trivia item, in document order.
     pub fn items(&self) -> &[TriviaItem] {
@@ -464,6 +479,80 @@ impl TriviaIndex {
             .collect()
     } // End of function comments_owned_by_subtree()
 
+    /// The bytes `node`'s whole subtree occupies — **the edit envelope**.
+    ///
+    /// The hull of the node's own span, every descendant's span, and the span of
+    /// every trivia item the subtree owns. That is the answer to "which colon,
+    /// which dash, which anchor and which comment travel with this node", and it
+    /// is the query a removal or a move must build on.
+    ///
+    /// # Why it is bigger than the span, in both directions
+    ///
+    /// - **Forwards**, because a node's span stops at its last *child*
+    ///   ([`crate::syntax::collection`]): the `:` of a final `empty:` entry and
+    ///   the inline comment after a final value both sit past it, and both belong
+    ///   to the entry.
+    /// - **Backwards**, because the `-` that introduces a sequence item, the `&`
+    ///   of an anchor, the `!` of a tag and a leading comment block all sit
+    ///   before the node they decorate and are owned by it.
+    ///
+    /// # A hull is not a set, and a file comment can sit inside it
+    ///
+    /// The result is the smallest **contiguous** span covering everything the
+    /// subtree owns. No file-owned comment *widens* it — the file's comments
+    /// have no owning node and so never enter the maximum — but a file-owned
+    /// comment that lies **between two descendants** is inside the hull anyway,
+    /// because the hull spans everything in between:
+    ///
+    /// ```text
+    /// a:
+    ///   x: 1
+    ///   # this comment is the file's (rule 2 — a blank line follows it)
+    ///
+    ///   y: 2
+    /// ```
+    ///
+    /// `subtree_extent` of `a`'s value runs from `x` to `y` and therefore
+    /// crosses that comment. An earlier version of this doc comment claimed file
+    /// comments were "excluded by construction"; that is true only of comments
+    /// *outside* the subtree's own byte range, and the Phase 0c-3a review's
+    /// finding 1 was exactly the difference — a removal built on this hull
+    /// deleted a comment the document assigns to the file.
+    ///
+    /// **A consumer that deletes these bytes must therefore check
+    /// [`TriviaIndex::file_comments`] against the span it is about to remove**
+    /// and refuse when the two intersect, which is what
+    /// `crate::patch::edit::EditError::RemovalWouldDeleteAFileComment` does. The
+    /// eventual answer is an envelope expressed as owned *runs* rather than one
+    /// hull, since a single [`ByteSpan`] cannot say "remove the collection but
+    /// keep this interior comment"; that is recorded in
+    /// `docs/decisions/0c-3a-notes.md`.
+    ///
+    /// Nothing between two owned runs is *claimed* by this call, and
+    /// `tests/syntax_index.rs` asserts corpus-wide that the hull never reaches
+    /// into a node outside the subtree.
+    pub fn subtree_extent(&self, index: &SyntaxIndex, node: NodeId) -> ByteSpan {
+        let subtree = subtree(index, node);
+        let Some(root) = index.node(node) else {
+            return ByteSpan::default();
+        };
+        let mut start = root.span.start;
+        let mut end = root.span.end;
+        for id in &subtree {
+            if let Some(descendant) = index.node(*id) {
+                start = start.min(descendant.span.start);
+                end = end.max(descendant.span.end);
+            }
+        } // End of the loop over the subtree's own nodes
+        for item in &self.items {
+            if item.owner.is_some_and(|owner| subtree.contains(&owner)) {
+                start = start.min(item.span.start);
+                end = end.max(item.span.end);
+            }
+        } // End of the loop over the trivia items the subtree owns
+        ByteSpan::new(start, end)
+    } // End of function subtree_extent()
+
     /// Every comment the file owns, in document order.
     pub fn file_comments(&self) -> impl Iterator<Item = &CommentAttachment> {
         self.comments
@@ -519,6 +608,24 @@ impl TriviaIndex {
         })
     } // End of function disqualifying_hazard()
 } // End of impl TriviaIndex
+
+/// Classifies every gap of `index` into typed items, without attributing them.
+///
+/// The gap lexer, and **the one copy of it**: [`TriviaIndex::scan`] runs this
+/// and then the ownership pass, [`TriviaIndex::comment_spans`] runs only this.
+/// Keeping it in one place matters more than the five lines it saves — the
+/// second caller is the candidate side of the patch engine's file-comment check,
+/// so a driver that drifted into scanning fewer gaps would make that check pass
+/// vacuously rather than fail loudly.
+fn scan_items(source: &str, index: &SyntaxIndex) -> Vec<TriviaItem> {
+    let known = known_spans(index);
+    let body_offset = index.preamble().body_offset;
+    let mut items = Vec::new();
+    for gap in index.gaps() {
+        scan_gap(source, gap, &known, body_offset, &mut items);
+    } // End of the loop over the document's gaps
+    items
+} // End of function scan_items()
 
 /// `root` and every node beneath it, in no particular order.
 ///

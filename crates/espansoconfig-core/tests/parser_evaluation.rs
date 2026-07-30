@@ -398,6 +398,7 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     let mut flow_checked = 0usize;
     let mut block_seen = 0usize;
     let mut multiline_plain_skipped = 0usize;
+    let mut implicit_skipped = 0usize;
     let mut mismatches: Vec<String> = Vec::new();
 
     for file in common::synthetic_valid() {
@@ -416,6 +417,19 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
             };
             if matches!(scalar.style, ScalarStyle::Literal | ScalarStyle::Folded) {
                 block_seen += 1;
+                continue;
+            }
+            // An **implicit** node — the value of `label:` with nothing after
+            // it — is reported as a zero-width plain scalar whose value is the
+            // substrate's null spelling `~` (`PROGRESS.md`, R7). There is no
+            // source token, so "the span is the exact token" is not a claim that
+            // can be made about it either way; it is counted rather than
+            // asserted. This branch became reachable in Phase 0c-3a, when
+            // `empty-entries-and-extents.yml` gave the corpus its first empty
+            // mapping entry — until then no fixture had one, which is why the
+            // skip did not exist.
+            if scalar.span.start == scalar.span.end {
+                implicit_skipped += 1;
                 continue;
             }
             // Multi-line plain scalars fold, so their source text legitimately
@@ -456,6 +470,7 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     println!("\n--- corpus-wide FLOW-scalar end-offset check ---");
     println!("flow scalars asserted exact:   {flow_checked}");
     println!("multi-line plain scalars skipped (they fold): {multiline_plain_skipped}");
+    println!("implicit zero-width scalars skipped (no token): {implicit_skipped}");
     println!("block scalars deferred to their own test:     {block_seen}");
     println!("mismatches:                    {}", mismatches.len());
     for line in mismatches.iter().take(10) {
@@ -469,6 +484,12 @@ fn saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus() {
     assert!(
         block_seen > 20,
         "the corpus must exercise block scalars too"
+    );
+    // Pinned rather than merely tolerated, so the skip cannot quietly grow into
+    // a hiding place for scalars that do have a token.
+    assert_eq!(
+        implicit_skipped, 5,
+        "the four empty entries of empty-entries-and-extents.yml plus its bare sequence item"
     );
     assert!(
         mismatches.is_empty(),

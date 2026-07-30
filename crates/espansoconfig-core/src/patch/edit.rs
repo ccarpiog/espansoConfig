@@ -2,19 +2,20 @@
 //!
 //! # The contract
 //!
-//! [`apply_scalar_edits`] is the **only** way to obtain a [`PatchedDocument`],
-//! and a `PatchedDocument` only exists once the candidate text has been
-//! reparsed and verified. There is deliberately no constructor, no `text`
-//! field and no "unchecked" variant: a caller that holds one is holding bytes
-//! that passed every check in `verify`, and a caller that holds an
-//! [`EditError`] is holding no bytes at all.
+//! [`apply_edits`] is the **only** way to obtain a [`PatchedDocument`], and a
+//! `PatchedDocument` only exists once the candidate text has been reparsed and
+//! verified. There is deliberately no constructor, no `text` field and no
+//! "unchecked" variant: a caller that holds one is holding bytes that passed
+//! every check in `verify`, and a caller that holds an [`EditError`] is holding
+//! no bytes at all. [`apply_scalar_edits`], [`apply_scalar_edit`],
+//! [`insert_field`] and [`remove_field`] are all wrappers over it.
 //!
 //! The four rules of `IMPLEMENTATION_PLAN.md` section 6.2, and where each one
 //! lives:
 //!
 //! | Rule | Here |
 //! |---|---|
-//! | the smallest safe edit | one scalar's header and content spans, never its mapping |
+//! | the smallest safe edit | one scalar's header and content spans, or one entry's own lines — never its mapping |
 //! | highest byte offset downwards | `splice` sorts descending before writing |
 //! | reparse the whole candidate and verify | `verify`, on the way out |
 //! | byte-identical outside the intended span | `bytes_outside_the_replacements_match` |
@@ -40,9 +41,15 @@
 //! `TriviaIndex::is_safely_editable`, and **this module calls it itself**, on
 //! every edit, before rendering a single byte. Making safety a caller
 //! convention would mean one forgotten call costs a user their file, so
-//! [`apply_scalar_edits`] takes the *source text* rather than a pre-scanned
+//! [`apply_edits`] takes the *source text* rather than a pre-scanned
 //! [`TriviaIndex`]: there is no argument a caller can get wrong, and no way to
 //! pass an index that says something different from the document being edited.
+//!
+//! A **structural** edit asks the gate about the whole **mapping** rather than
+//! about the one entry, because it changes the mapping's own shape: a merge key,
+//! a duplicate key or an anchor anywhere inside makes "one entry more or fewer"
+//! a question that cannot be answered locally. That is strictly more pessimistic
+//! than a scalar edit, deliberately.
 //!
 //! # Flow collections (`PROGRESS.md`, R17) — decided here
 //!
@@ -64,21 +71,75 @@
 //! already provided by construction. `docs/decisions/0c-2b-notes.md` records
 //! the reasoning; `tests/patch_edit.rs` pins it in both directions.
 //!
+//! # Structural edits — Phase 0c-3a
+//!
+//! [`FieldInsert`] and [`FieldRemoval`] join [`ScalarEdit`] in one
+//! [`DocumentEdit`] batch. They did **not** get an engine of their own: the
+//! offset-ordering, overlap, splice and verification machinery is written once,
+//! for a list of replacements, and a second copy would be a second place for it
+//! to drift. An insertion is a replacement of a zero-width span; a removal is a
+//! replacement with empty text; both go through `splice`, `verify` and the
+//! permitted-span check unchanged.
+//!
+//! Three things structural edits add, and each is a rule rather than a
+//! convenience:
+//!
+//! - **[`EditError::OverlappingEdits`] becomes load-bearing.** For scalars it
+//!   only ever caught the same path twice. Here a removal's envelope covers
+//!   whole lines, so a scalar edit inside it, a second removal of the same entry
+//!   and two insertions at the same point all collide — and the last of those is
+//!   invisible to `end > start` alone, because both spans are zero width, so the
+//!   test also rejects two replacements that share a start.
+//! - **Verification is more than byte identity.** A removal deliberately deletes
+//!   bytes, so "every byte outside the replaced span is identical" is generalised
+//!   to *the candidate is the source with exactly these replacements applied*,
+//!   which `bytes_outside_the_replacements_match` already states, plus: the
+//!   mapping is still there, the named entry is present or absent as asked, and
+//!   **every sibling entry still decodes to exactly what it decoded to before**,
+//!   nested collections included. That last one is what an oversized envelope
+//!   fails.
+//! - **The envelope is not self-declared.** `StructuralGuard` states the limit in
+//!   terms of the **original index's node spans** and runs before a byte moves,
+//!   which is the Phase 0c-2b review's finding 3 carried forward: an envelope one
+//!   entry too long would otherwise confirm itself.
+//!
+//! # What the Phase 0c-3a review's fix round changed
+//!
+//! Three of its five findings land in this module, and each one is a case of a
+//! check that was about *nodes* missing something that is not a node:
+//!
+//! - **A removal envelope may not cross a file-owned comment**
+//!   ([`EditError::RemovalWouldDeleteAFileComment`]). An entry's envelope is the
+//!   contiguous hull of what its subtree owns, so a comment the ownership rules
+//!   give to the **file** can sit inside it between two descendants. Removing
+//!   the entry deleted it, and every layer — the guard, the digests, the byte
+//!   check, the external oracle — certified the result, because none of them can
+//!   see a comment. `verify` now also requires every file-owned comment of the
+//!   original to still be in the candidate
+//!   ([`VerificationFailure::FileCommentLost`]), so the next envelope defect
+//!   cannot hide the same way.
+//! - **An insertion copies a line ending; it never picks one.** The break comes
+//!   from the anchor's own terminated line, or at end of file from the last break
+//!   before the insertion point. A document that supplies neither is refused
+//!   ([`EditError::NoObservableLineEnding`]) rather than given the LF that
+//!   `LineEnding::detect` defaults to.
+//! - **A malformed batch answers rather than panicking.** Disjointness is checked
+//!   before expectations are folded, and the fold's arithmetic is checked, so
+//!   three removals of one entry return [`EditError::OverlappingEdits`] instead
+//!   of underflowing an entry count.
+//!
 //! # What is *not* here
 //!
-//! Structural edits — inserting or removing a field, moving a match — are step
-//! 0c-3. The batch shape of [`apply_scalar_edits`] exists so that they can join
-//! it without changing the entry point: the offset-ordering, overlap and
-//! verification machinery is written once, for a list of replacements, rather
-//! than once per edit kind.
+//! Moving a whole match, the multiset invariant a move needs, and the full R9
+//! round-trip property test are step 0c-3b.
 
 use std::fmt;
 
 use crate::emit::{
-    decode, preserve_scalar, reencode_in_place, DecodeError, NotReencodable, ScalarContext,
-    ScalarPlan,
+    choose_scalar, decode, preserve_scalar, reencode_in_place, DecodeError, NotReencodable,
+    ScalarContext, ScalarPlan,
 };
-use crate::patch::path::{resolve, resolve_full, DocumentPath, PathError};
+use crate::patch::path::{resolve, resolve_full, DocumentPath, PathError, PathSegment};
 use crate::syntax::{
     ByteSpan, CollectionStyle, HazardKind, Node, NodeId, NodeKind, ScalarPresentation, ScalarStyle,
     SyntaxError, SyntaxIndex, TriviaIndex,
@@ -120,6 +181,174 @@ impl ScalarEdit {
     /// The new logical value.
     pub fn value(&self) -> &str {
         &self.value
+    }
+}
+
+/// One requested change: add a `key: value` entry to a **block** mapping.
+///
+/// # Where the entry goes, and where its indentation comes from
+///
+/// The entry is written on its own line, immediately after an **anchor entry**
+/// — the mapping's last entry by default, or the entry named by
+/// [`FieldInsert::after`]. Every insertion is therefore "after an existing
+/// entry", which is what makes the insertion point a single well-defined offset
+/// and the bytes written a single well-defined shape.
+///
+/// Inserting **before the first** entry is deliberately not offered. The first
+/// entry of a mapping may share its line with the thing that introduces the
+/// mapping — the `-` of a compact `- trigger: x` item — so there is no line to
+/// insert before without either stranding that punctuation or re-indenting what
+/// follows. `docs/decisions/0c-3a-notes.md` records the choice.
+///
+/// **The indentation comes from the mapping's own entries and never from a
+/// default.** Every key of the mapping must already sit at one column, and the
+/// new key is written at exactly that column; a mapping whose keys disagree is
+/// refused with [`EditError::InconsistentEntryIndentation`] rather than guessed
+/// at. A block mapping always has at least one entry to learn from — an empty
+/// block mapping has no YAML spelling — so the "no siblings" case cannot arise
+/// here. It can arise for a flow mapping (`{}`), which is refused outright: see
+/// [`EditError::FlowCollection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldInsert {
+    /// The mapping to add the entry to.
+    mapping: DocumentPath,
+    /// The existing entry to write the new one after, by decoded key. `None`
+    /// means the mapping's last entry.
+    after: Option<String>,
+    /// The new entry's key, as a decoded string.
+    key: String,
+    /// The new entry's value, as a decoded string.
+    value: String,
+}
+
+impl FieldInsert {
+    /// Builds an insertion that appends `key: value` after the mapping's last
+    /// entry.
+    pub fn new(
+        mapping: DocumentPath,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> FieldInsert {
+        FieldInsert {
+            mapping,
+            after: None,
+            key: key.into(),
+            value: value.into(),
+        }
+    } // End of function new()
+
+    /// Builds an insertion that writes `key: value` after the entry whose
+    /// decoded key is `sibling`.
+    pub fn after(
+        mapping: DocumentPath,
+        sibling: impl Into<String>,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> FieldInsert {
+        FieldInsert {
+            mapping,
+            after: Some(sibling.into()),
+            key: key.into(),
+            value: value.into(),
+        }
+    } // End of function after()
+
+    /// The mapping the entry is added to.
+    pub fn mapping(&self) -> &DocumentPath {
+        &self.mapping
+    }
+
+    /// The entry the new one is written after, or `None` for the last entry.
+    pub fn sibling(&self) -> Option<&str> {
+        self.after.as_deref()
+    }
+
+    /// The new entry's key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The new entry's value.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+} // End of impl FieldInsert
+
+/// One requested change: delete a mapping entry, key, value and trivia
+/// together.
+///
+/// The path names the entry's **value**, exactly as a [`ScalarEdit`]'s does, so
+/// `matches[0].label` removes the whole `label:` entry from that match's
+/// mapping. The value may be of any kind — a scalar, a nested collection, an
+/// empty entry with no value at all.
+///
+/// # What travels with it
+///
+/// The envelope is built from `TriviaIndex::subtree_extent` over the entry's
+/// **key** and its **value**, so it carries everything the ownership rules
+/// (plan section 6.2) attribute to either subtree: the `:` that separates them,
+/// the leading comment block immediately above the key, the inline comment
+/// after the value, and every anchor, tag and dash inside. The direct queries
+/// `items_owned_by` / `comments_owned_by` are **not** used, because trivia is
+/// attributed to the deepest node a rule can name and an envelope built from
+/// them strands the entry's final inline comment on the entry below
+/// (`PROGRESS.md`, D2d). Comments the **file** owns have no owning node and are
+/// excluded by construction, which is what keeps a file header in place.
+///
+/// The envelope is then widened to whole lines, so no fragment of a deleted
+/// entry is left behind. A **blank line** above the entry is layout the file
+/// owns rather than trivia the entry owns, and it stays: the user's visual
+/// grouping is not ours to delete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldRemoval {
+    /// The value node of the entry to remove.
+    field: DocumentPath,
+}
+
+impl FieldRemoval {
+    /// Builds a removal of the entry `field` names.
+    pub fn new(field: DocumentPath) -> FieldRemoval {
+        FieldRemoval { field }
+    }
+
+    /// The value node of the entry being removed.
+    pub fn field(&self) -> &DocumentPath {
+        &self.field
+    }
+} // End of impl FieldRemoval
+
+/// One requested change of any kind, for [`apply_edits`].
+///
+/// The batch protocol is written once, over this enum, rather than once per
+/// edit kind: planning against the original index, rejecting overlaps, splicing
+/// from the highest offset downwards and reparsing to verify are the same steps
+/// whatever the edit is, and a second engine would be a second place for them to
+/// drift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentEdit {
+    /// Give an existing scalar a new value.
+    Scalar(ScalarEdit),
+    /// Add an entry to a mapping.
+    InsertField(FieldInsert),
+    /// Delete an entry from a mapping.
+    RemoveField(FieldRemoval),
+}
+
+impl From<ScalarEdit> for DocumentEdit {
+    fn from(edit: ScalarEdit) -> DocumentEdit {
+        DocumentEdit::Scalar(edit)
+    }
+}
+
+impl From<FieldInsert> for DocumentEdit {
+    fn from(edit: FieldInsert) -> DocumentEdit {
+        DocumentEdit::InsertField(edit)
+    }
+}
+
+impl From<FieldRemoval> for DocumentEdit {
+    fn from(edit: FieldRemoval) -> DocumentEdit {
+        DocumentEdit::RemoveField(edit)
     }
 }
 
@@ -296,6 +525,178 @@ pub enum EditError {
         /// The span that failed to slice.
         at: ByteSpan,
     },
+    /// A structural edit named something that is not a mapping.
+    ///
+    /// [`FieldInsert`] takes the mapping the entry joins, and [`FieldRemoval`]
+    /// takes an entry of one; a sequence item is addressed by position and has
+    /// no key to remove, so it is a different operation.
+    NotAMapping {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The node the path named.
+        node: NodeId,
+        /// What that node actually is.
+        kind: NodeKind,
+    },
+    /// A structural edit named a **flow** collection, or something inside one.
+    ///
+    /// This is a deliberate, documented refusal rather than an oversight, and it
+    /// is where flow context parts company with `PROGRESS.md` D2k. D2k threads
+    /// flow context into *rendering*, so a scalar edit inside `{…}`/`[…]` writes
+    /// flow-legal bytes and is allowed. A **structural** edit is a different
+    /// problem: `{a: 1, b: 2}` has no line of its own to add an entry to and no
+    /// line to delete, so an insertion or a removal there is a question about
+    /// commas and spacing rather than about lines, with no answer this phase has
+    /// measured. An empty flow mapping `{}` additionally has no sibling entry to
+    /// take an indentation from, which is the "no siblings to learn from" case.
+    FlowCollection {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The flow collection, or the entry inside one.
+        node: NodeId,
+    },
+    /// An insertion would give the mapping a key it already has.
+    ///
+    /// Two entries with the same key make every path through the mapping
+    /// ambiguous (`PathError::DuplicateKey`) and raise
+    /// [`HazardKind::DuplicateMappingKey`], so the mapping would become
+    /// uneditable the moment the edit landed. Carries no key text: the real
+    /// corpus is private (`CLAUDE.md` section 1).
+    KeyAlreadyPresent {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The mapping that already has it.
+        mapping: NodeId,
+    },
+    /// [`FieldInsert::after`] named an entry the mapping does not have.
+    NoSuchSibling {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The mapping that was searched.
+        mapping: NodeId,
+    },
+    /// The mapping's keys do not all start at one column.
+    ///
+    /// An inserted entry's indentation comes from its siblings and from nothing
+    /// else, so a mapping that cannot agree with itself about where its keys go
+    /// has no answer to give. Every block mapping in both corpora does agree;
+    /// this exists so that the one that does not is refused rather than guessed
+    /// at.
+    InconsistentEntryIndentation {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The mapping whose keys disagree.
+        mapping: NodeId,
+        /// The column its first key sits at.
+        expected: usize,
+        /// The column that disagreed with it.
+        found: usize,
+    },
+    /// The entry does not occupy whole lines of its own.
+    ///
+    /// A removal deletes lines, and an insertion writes one, so both need the
+    /// entry they work from to begin its own line and end it. The reachable case
+    /// is the **first entry of a compact `- key: value` mapping**, which shares
+    /// its line with the `-` that introduces the mapping: deleting it either
+    /// strands a bare dash or re-indents everything below, and neither is an
+    /// edit the user asked for.
+    EntryDoesNotOwnItsLines {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The bytes that share the entry's line.
+        at: ByteSpan,
+    },
+    /// Removing this entry would lengthen a **keep-chomped block scalar** that
+    /// sits above it.
+    ///
+    /// A `|+` block's value is every line break physically present after its
+    /// last content line, so the bytes that terminate it are not its own. Delete
+    /// the entry that terminates one and the blank line below moves up into the
+    /// value: `a: |+` / `  x` / blank / `b: 1` / blank / `c: 2` becomes a
+    /// document whose `a` decodes with one newline more. Nothing about the
+    /// removal is wrong; the neighbour's value simply is not local, so this step
+    /// refuses rather than silently changing a value nobody edited.
+    ///
+    /// Found by the sibling check, on corpus data, rather than reasoned about in
+    /// advance — `block-scalar-leading-blank-lines.yml` has exactly this shape.
+    RemovalWouldExtendAKeptBlock {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar whose value would grow.
+        block: NodeId,
+    },
+    /// Removing this entry would delete a comment the **file** owns.
+    ///
+    /// An entry's envelope is the hull of everything its subtree owns
+    /// (`TriviaIndex::subtree_extent`), and a hull is contiguous: a comment that
+    /// sits *between* two descendants is inside it even though no node owns it.
+    /// In
+    ///
+    /// ```text
+    /// a:
+    ///   x: 1
+    ///   # the file's comment — a blank line separates it from `y`
+    ///
+    ///   y: 2
+    /// ```
+    ///
+    /// the envelope of `a` runs from `x` to `y` and crosses that comment, which
+    /// `PROGRESS.md` D2d assigns to the file and therefore says must stay put.
+    ///
+    /// The refusal is the **smallest correct answer available today**, and it
+    /// costs something real: a removal that ought to succeed, minus the comment,
+    /// becomes impossible. Expressing "delete these bytes but keep those" needs
+    /// an envelope of owned *runs* rather than one [`ByteSpan`], which is
+    /// recorded in `docs/decisions/0c-3a-notes.md` as the eventual fix. Until
+    /// then, refusing costs the user one comment they must move by hand;
+    /// proceeding costs them the comment itself, silently.
+    ///
+    /// Carries the comment's span and never its text: the real corpus is private
+    /// (`CLAUDE.md` section 1).
+    RemovalWouldDeleteAFileComment {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the comment sits in the original document.
+        comment: ByteSpan,
+    },
+    /// An insertion found no line break it could copy.
+    ///
+    /// A new entry needs a line terminator, and this step **never invents one**.
+    /// It copies the break that ends the anchor's own line, or — when the anchor
+    /// ends the file — the last break before the insertion point, which is a
+    /// nearby sibling's. Two documents supply neither: one with no line break at
+    /// all (`a: 1` with no final newline), and one whose only breaks are bare
+    /// carriage returns, which [`LineEnding`] cannot express.
+    ///
+    /// Defaulting to LF is what `LineEnding::detect` does for a single-line
+    /// document, and writing that into a file is precisely the silent
+    /// reformatting this crate exists to prevent, so the edit is refused
+    /// instead.
+    NoObservableLineEnding {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the new entry would have gone.
+        at: usize,
+    },
+    /// Removing this entry would leave the mapping with none.
+    ///
+    /// `a:` with nothing under it is not the same document as `a: {…}` with one
+    /// entry: the mapping becomes an implicit null, which changes what the file
+    /// means rather than what it contains. Emptying a mapping is a decision
+    /// about the *parent* entry — remove that instead — so this step refuses.
+    ///
+    /// A **batch** lands here too, and by the same reasoning: two removals that
+    /// are individually legal can still take a two-entry mapping down to none,
+    /// and a batch that asks for more removals than the mapping has entries is
+    /// the degenerate case of that. Both are caught when the batch's claims are
+    /// folded together, because only the folded claim knows how many removals
+    /// one mapping received.
+    LastEntryOfMapping {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The mapping that would be emptied.
+        mapping: NodeId,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
 }
@@ -392,6 +793,96 @@ pub enum VerificationFailure {
         /// The candidate's actual length.
         found: usize,
     },
+    /// The mapping a structural edit changed cannot be re-found.
+    MappingLost {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// What the resolver said this time.
+        error: PathError,
+    },
+    /// An inserted entry is not in the candidate, or does not hold its value.
+    ///
+    /// Carries lengths only, never the key or the value: this error is printed
+    /// by tests that sweep the private corpus.
+    FieldNotInserted {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Length in bytes of the key that should be there.
+        key_len: usize,
+    },
+    /// A removed entry is still in the candidate.
+    FieldNotRemoved {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Length in bytes of the key that should be gone.
+        key_len: usize,
+    },
+    /// A **sibling** entry of the changed mapping is not what it was.
+    ///
+    /// The strongest thing a structural edit can be asked to prove locally:
+    /// every entry the edit did not name still decodes, key and whole value
+    /// subtree, to exactly what it decoded to before, and in the same order.
+    /// Identified by position in the mapping, never by key text.
+    SiblingChanged {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Which entry of the mapping differs, zero-based in source order.
+        entry: usize,
+    },
+    /// The mapping holds a different number of entries than it should.
+    EntryCountChanged {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// How many entries the edit intended.
+        expected: usize,
+        /// How many the candidate holds.
+        found: usize,
+    },
+    /// A removal envelope reaches into a node it is not removing.
+    ///
+    /// Derived from immutable syntax facts — the spans of the nodes that are
+    /// neither the entry's own subtree nor an ancestor of it — and therefore not
+    /// authorised by the envelope's own declaration. That independence is the
+    /// Phase 0c-2b review's finding 3 applied to a removal, where an oversized
+    /// envelope deletes a neighbouring entry rather than merely rewriting it.
+    EnvelopeCoversAnotherNode {
+        /// The envelope that reaches too far.
+        at: ByteSpan,
+        /// The node it reaches into.
+        node: NodeId,
+    },
+    /// An insertion point falls strictly inside a node's span.
+    ///
+    /// Splicing there would write bytes into the middle of a scalar rather than
+    /// between two lines. Like [`VerificationFailure::EnvelopeCoversAnotherNode`]
+    /// it is read off the syntax index and knows nothing about what the planner
+    /// chose to write.
+    InsertionPointInsideANode {
+        /// The offset the insertion was planned at.
+        at: usize,
+        /// The node it falls inside.
+        node: NodeId,
+    },
+    /// A comment the **document assigns to the file** is not in the candidate.
+    ///
+    /// The check every other verification property could not make. Node-level
+    /// verification compares decoded values, and a digest holds no comments, so
+    /// an envelope that deleted a file-owned comment satisfied *every* other
+    /// assertion — that is the Phase 0c-3a review's finding 1, and it is the
+    /// structural form of the 0c-2b review's finding 3: the edit's own
+    /// declaration authorised the bytes it destroyed.
+    ///
+    /// Derived from **ownership**, not from the edit: the comments that must
+    /// survive come from `TriviaIndex::file_comments` on the *original*
+    /// document, and the comments that did survive from a fresh scan of the
+    /// candidate. Neither list is anything the planner said.
+    ///
+    /// Carries the comment's offset in the original document and never its text
+    /// (`CLAUDE.md` section 1).
+    FileCommentLost {
+        /// Where the missing comment sat in the original document.
+        at: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -439,6 +930,64 @@ impl fmt::Display for EditError {
                 formatter,
                 "edit {edit}: span {}..{} does not slice the document",
                 at.start, at.end
+            ),
+            EditError::NotAMapping { edit, kind, .. } => write!(
+                formatter,
+                "edit {edit}: the path names a {kind:?}, not a mapping"
+            ),
+            EditError::FlowCollection { edit, node } => write!(
+                formatter,
+                "edit {edit}: node {} is a flow collection, or inside one; structural edits \
+                 there are refused",
+                node.get()
+            ),
+            EditError::KeyAlreadyPresent { edit, mapping } => write!(
+                formatter,
+                "edit {edit}: mapping {} already holds that key",
+                mapping.get()
+            ),
+            EditError::NoSuchSibling { edit, mapping } => write!(
+                formatter,
+                "edit {edit}: mapping {} has no entry to insert after",
+                mapping.get()
+            ),
+            EditError::InconsistentEntryIndentation {
+                edit,
+                mapping,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "edit {edit}: mapping {} has keys at columns {expected} and {found}, so an \
+                 inserted entry has no indentation to inherit",
+                mapping.get()
+            ),
+            EditError::EntryDoesNotOwnItsLines { edit, at } => write!(
+                formatter,
+                "edit {edit}: bytes {}..{} share the entry's line",
+                at.start, at.end
+            ),
+            EditError::RemovalWouldExtendAKeptBlock { edit, block } => write!(
+                formatter,
+                "edit {edit}: removing it would add a line break to the keep-chomped block \
+                 scalar at node {}",
+                block.get()
+            ),
+            EditError::RemovalWouldDeleteAFileComment { edit, comment } => write!(
+                formatter,
+                "edit {edit}: the removal envelope crosses the file-owned comment at bytes \
+                 {}..{}",
+                comment.start, comment.end
+            ),
+            EditError::NoObservableLineEnding { edit, at } => write!(
+                formatter,
+                "edit {edit}: no line break before byte {at} can be copied, and this step never \
+                 invents one"
+            ),
+            EditError::LastEntryOfMapping { edit, mapping } => write!(
+                formatter,
+                "edit {edit}: removing it would leave mapping {} with no entries",
+                mapping.get()
             ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
@@ -493,6 +1042,47 @@ impl fmt::Display for VerificationFailure {
             VerificationFailure::LengthMismatch { expected, found } => write!(
                 formatter,
                 "the candidate is {found} bytes long; the replacements account for {expected}"
+            ),
+            VerificationFailure::MappingLost { edit, error } => write!(
+                formatter,
+                "edit {edit}: the changed mapping cannot be re-found in the candidate: {error}"
+            ),
+            VerificationFailure::FieldNotInserted { edit, key_len } => write!(
+                formatter,
+                "edit {edit}: the {key_len}-byte key is missing from the candidate, or does not \
+                 hold the intended value"
+            ),
+            VerificationFailure::FieldNotRemoved { edit, key_len } => write!(
+                formatter,
+                "edit {edit}: the {key_len}-byte key is still in the candidate"
+            ),
+            VerificationFailure::SiblingChanged { edit, entry } => write!(
+                formatter,
+                "edit {edit}: entry {entry} of the mapping is not what it was"
+            ),
+            VerificationFailure::EntryCountChanged {
+                edit,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "edit {edit}: the mapping holds {found} entries where {expected} were intended"
+            ),
+            VerificationFailure::EnvelopeCoversAnotherNode { at, node } => write!(
+                formatter,
+                "the removal envelope {}..{} reaches into node {}",
+                at.start,
+                at.end,
+                node.get()
+            ),
+            VerificationFailure::InsertionPointInsideANode { at, node } => write!(
+                formatter,
+                "the insertion point at byte {at} falls inside node {}",
+                node.get()
+            ),
+            VerificationFailure::FileCommentLost { at } => write!(
+                formatter,
+                "the file-owned comment at byte {at} is not in the candidate"
             ),
         }
     } // End of function fmt() for VerificationFailure
@@ -551,24 +1141,121 @@ pub fn apply_scalar_edits(
     source: &str,
     edits: &[ScalarEdit],
 ) -> Result<PatchedDocument, EditError> {
+    let batch: Vec<DocumentEdit> = edits.iter().cloned().map(DocumentEdit::Scalar).collect();
+    apply_edits(source, &batch)
+} // End of function apply_scalar_edits()
+
+/// Adds one `key: value` entry to a mapping, returning the verified candidate.
+///
+/// A convenience over [`apply_edits`] with a single-element batch; every rule
+/// and every check is the same. See [`FieldInsert`] for where the entry goes and
+/// where its indentation comes from.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn insert_field(
+    source: &str,
+    mapping: &DocumentPath,
+    key: &str,
+    value: &str,
+) -> Result<PatchedDocument, EditError> {
+    apply_edits(
+        source,
+        &[DocumentEdit::InsertField(FieldInsert::new(
+            mapping.clone(),
+            key,
+            value,
+        ))],
+    )
+} // End of function insert_field()
+
+/// Deletes the mapping entry `field` names, returning the verified candidate.
+///
+/// A convenience over [`apply_edits`] with a single-element batch. See
+/// [`FieldRemoval`] for what travels with the entry.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn remove_field(source: &str, field: &DocumentPath) -> Result<PatchedDocument, EditError> {
+    apply_edits(
+        source,
+        &[DocumentEdit::RemoveField(FieldRemoval::new(field.clone()))],
+    )
+} // End of function remove_field()
+
+/// Applies a batch of edits of **any kind** to one document and verifies it.
+///
+/// This is the batch protocol itself, and [`apply_scalar_edits`] is a wrapper
+/// over it. The steps are the ones plan section 6.2 lays down, and they are the
+/// same for a scalar edit, an insertion and a removal — which is why structural
+/// edits joined this function rather than getting an engine of their own:
+///
+/// 1. parse `source` and scan its trivia, **once**, against the original text;
+/// 2. plan every edit **against that original index**, consulting the hazard
+///    gate before anything is rendered;
+/// 3. reject the batch if any two replacements overlap;
+/// 4. splice **from the highest byte offset downwards**;
+/// 5. check every replacement against spans derived from immutable syntax
+///    facts, reparse the candidate, and `verify` it;
+/// 6. only then hand back a [`PatchedDocument`].
+///
+/// `source` is the original bytes, BOM included. An empty batch is legal and
+/// returns the document unchanged, verified.
+///
+/// # Errors
+///
+/// See [`EditError`]. Every failure discards the candidate text.
+pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocument, EditError> {
     let index = SyntaxIndex::parse(source).map_err(EditError::SourceDoesNotParse)?;
     let trivia = TriviaIndex::scan(source, &index);
 
     let mut replacements = Vec::new();
     let mut permitted = Vec::new();
     let mut notes = Vec::new();
+    let mut expectations = Vec::new();
+    let mut guards = Vec::new();
+    let mut rewritten = Vec::new();
     for (position, edit) in edits.iter().enumerate() {
-        let planned = plan_one(source, &index, &trivia, position, edit)?;
+        let planned = match edit {
+            DocumentEdit::Scalar(scalar) => plan_one(source, &index, &trivia, position, scalar)?,
+            DocumentEdit::InsertField(insert) => {
+                plan_insertion(source, &index, &trivia, position, insert)?
+            }
+            DocumentEdit::RemoveField(removal) => {
+                plan_removal(source, &index, &trivia, position, removal)?
+            }
+        };
         replacements.extend(planned.replacements);
         permitted.extend(planned.permitted);
         if let Some(note) = planned.note {
             notes.push(note);
         }
+        if let Some(expectation) = planned.expectation {
+            expectations.push(expectation);
+        }
+        if let Some(guard) = planned.guard {
+            guards.push(guard);
+        }
+        if let Some(node) = planned.rewritten {
+            rewritten.push(node);
+        }
     } // End of the loop that plans every requested edit
 
+    // **Disjointness first.** A malformed batch — three removals of one entry,
+    // say — is nonsense whatever else is true of it, and every later step
+    // assumes it is not looking at one: folding three removals of the same entry
+    // out of a two-entry mapping used to underflow its entry count and panic
+    // (the Phase 0c-3a review's finding 3). A public entry point must answer a
+    // bad request with a typed error, never with a panic.
     replacements.sort_by_key(|replacement| (replacement.span.start, replacement.span.end));
     for pair in replacements.windows(2) {
-        if pair[0].span.end > pair[1].span.start {
+        // Two spans that share a start are always ambiguous, and a zero-width
+        // insertion point makes that reachable in a way it never was for
+        // scalars: `pair[0].end > pair[1].start` alone would let two insertions
+        // at the same offset through, and their order would decide the result.
+        if pair[0].span.end > pair[1].span.start || pair[0].span.start == pair[1].span.start {
             return Err(EditError::OverlappingEdits {
                 first: pair[0].span,
                 second: pair[1].span,
@@ -576,25 +1263,149 @@ pub fn apply_scalar_edits(
         }
     } // End of the loop that checks the replacements are disjoint
 
+    // Against the **original** index, before a byte moves: an envelope that
+    // reaches into a node it is not removing, or an insertion point inside one,
+    // is a planning defect that the candidate-side checks cannot see.
+    for guard in &guards {
+        guard.check(&index)?;
+    }
+    let expectations = fold_expectations(&index, expectations, &rewritten)?;
+
     let candidate = splice(source, &replacements);
-    verify(source, &candidate, &replacements, &permitted, edits)?;
+    verify(
+        source,
+        &candidate,
+        &replacements,
+        &permitted,
+        edits,
+        &expectations,
+        &trivia,
+    )?;
     Ok(PatchedDocument {
         text: candidate,
         replacements,
         notes,
     })
-} // End of function apply_scalar_edits()
+} // End of function apply_edits()
 
 /// One edit resolved down to the bytes it writes.
 struct PlannedEdit {
     /// The spans it replaces, and with what.
     replacements: Vec<Replacement>,
-    /// The spans the edited scalar owns, from [`permitted_spans`]. Every
-    /// replacement must lie wholly inside one of them.
+    /// The spans the edit is allowed to rewrite, from [`permitted_spans`] or
+    /// from the structural planners. Every replacement must lie wholly inside
+    /// one of them, and each is derived from syntax facts rather than from
+    /// anything the planner chose to render.
     permitted: Vec<ByteSpan>,
     /// A presentation change worth telling the user about.
     note: Option<PresentationNote>,
+    /// What `verify` must find in the candidate, for a structural edit.
+    expectation: Option<PendingField>,
+    /// A check on the planned span, stated in terms of the **original** index.
+    guard: Option<StructuralGuard>,
+    /// The node a scalar edit rewrites, in the **original** index.
+    ///
+    /// A structural edit's sibling check compares each untouched entry with
+    /// itself, and a scalar edit elsewhere in the same mapping legitimately
+    /// changes one of those entries. This is how the two are told apart.
+    rewritten: Option<NodeId>,
 }
+
+/// A structural edit's span, checked against the nodes it must not disturb.
+///
+/// This is the Phase 0c-2b review's finding 3 carried into structural edits.
+/// `bytes_outside_the_replacements_match` compares the candidate against the
+/// source with the *declared* replacements applied, so a removal envelope that
+/// is one entry too long confirms itself: the bytes it claimed to delete did
+/// indeed go. The guard states the limit in terms the planner cannot bend —
+/// **the spans of the nodes in the original document** — and it runs before a
+/// byte is spliced.
+enum StructuralGuard {
+    /// A removal envelope, with the entry's own subtree it is allowed to cover.
+    Removal {
+        /// The bytes the removal deletes.
+        span: ByteSpan,
+        /// The key and value node of the entry being removed.
+        entry: (NodeId, NodeId),
+    },
+    /// An insertion point, which must lie between nodes and not inside one.
+    Insertion {
+        /// The offset the new entry is spliced at.
+        at: usize,
+    },
+}
+
+impl StructuralGuard {
+    /// Checks the guard against the original index.
+    ///
+    /// # Errors
+    ///
+    /// [`VerificationFailure::EnvelopeCoversAnotherNode`] when a removal reaches
+    /// into a node that is neither part of the entry nor an ancestor of it —
+    /// ancestors necessarily overlap, since they contain the entry — and
+    /// [`VerificationFailure::InsertionPointInsideANode`] when an insertion
+    /// point falls strictly inside a node's span.
+    fn check(&self, index: &SyntaxIndex) -> Result<(), VerificationFailure> {
+        match self {
+            StructuralGuard::Removal { span, entry } => {
+                for node in index.nodes() {
+                    if node.kind == NodeKind::Document
+                        || node.span.is_empty()
+                        || node.span.end <= span.start
+                        || node.span.start >= span.end
+                    {
+                        continue;
+                    }
+                    if in_subtree(index, entry.0, node.id)
+                        || in_subtree(index, entry.1, node.id)
+                        || is_ancestor(index, node.id, entry.0)
+                    {
+                        continue;
+                    }
+                    return Err(VerificationFailure::EnvelopeCoversAnotherNode {
+                        at: *span,
+                        node: node.id,
+                    });
+                } // End of the loop over every node the envelope might disturb
+                Ok(())
+            }
+            StructuralGuard::Insertion { at } => {
+                // **Frontier leaves only.** A point between two entries is
+                // legitimately inside the enclosing mapping, its ancestors and
+                // the document — that is what "between two entries" means. What
+                // it must never be inside is a *token*, and the frontier leaves
+                // are exactly the nodes whose interior bytes are one
+                // (`PROGRESS.md`, D2b).
+                for node in index.nodes() {
+                    if node.is_frontier_leaf() && node.span.start < *at && *at < node.span.end {
+                        return Err(VerificationFailure::InsertionPointInsideANode {
+                            at: *at,
+                            node: node.id,
+                        });
+                    }
+                } // End of the loop over every leaf the point might fall inside
+                Ok(())
+            }
+        }
+    } // End of function check()
+} // End of impl StructuralGuard
+
+/// Whether `node` is `root` or a descendant of it.
+fn in_subtree(index: &SyntaxIndex, root: NodeId, node: NodeId) -> bool {
+    node == root || is_ancestor(index, root, node)
+}
+
+/// Whether `ancestor` is a strict ancestor of `node`.
+fn is_ancestor(index: &SyntaxIndex, ancestor: NodeId, node: NodeId) -> bool {
+    let mut current = index.node(node).and_then(|node| node.parent);
+    while let Some(id) = current {
+        if id == ancestor {
+            return true;
+        }
+        current = index.node(id).and_then(|node| node.parent);
+    }
+    false
+} // End of function is_ancestor()
 
 /// Resolves one edit, checks it, and renders the bytes it replaces.
 ///
@@ -646,12 +1457,874 @@ fn plan_one(
     let (plan, context) = choose_plan(source, index, node, presentation, edit.value());
     let note = presentation_note(source, position, presentation, &plan);
     let replacements = render_replacements(source, position, node, presentation, &plan, context)?;
+
+    // The Phase 0c-3a review's finding 2, in the one place it also reaches a
+    // *scalar* edit. A multi-line value renders as a block, and a block writes
+    // line breaks — so writing one into a document that contains none invents a
+    // byte the file never held, and gives a file with no final newline one. The
+    // condition is exactly that: bytes are being written that hold a break, and
+    // the document offers no break to copy. A single-line value into the same
+    // document is untouched by this, which is why the test is on the rendered
+    // bytes rather than on the document alone.
+    if replacements
+        .iter()
+        .any(|replacement| replacement.text.contains(['\n', '\r']))
+        && line_ending_before(source, source.len()).is_none()
+    {
+        return Err(EditError::NoObservableLineEnding {
+            edit: position,
+            at: node.span.start,
+        });
+    }
+
     Ok(PlannedEdit {
         replacements,
         permitted: permitted_spans(node, presentation),
         note,
+        expectation: None,
+        guard: None,
+        rewritten: Some(resolved.value),
     })
 } // End of function plan_one()
+
+// ---------------------------------------------------------------------------
+// Structural edits: adding and removing one mapping entry
+// ---------------------------------------------------------------------------
+
+/// One structural edit's claim about the mapping it changes, before the splice.
+///
+/// Deliberately **not** the finished expectation: a batch may change one mapping
+/// more than once, and two independently-built expectations would each demand
+/// "one fewer entry than before" and contradict each other. [`fold_expectations`]
+/// merges every claim about the same mapping into one.
+struct PendingField {
+    /// Position of the edit in the requested batch.
+    edit: usize,
+    /// The mapping the edit changes.
+    mapping: DocumentPath,
+    /// Its identifier in the **original** index, which is what groups claims.
+    mapping_id: NodeId,
+    /// Its entries in the original index, in source order.
+    entries: Vec<Entry>,
+    /// The value node of an entry being removed.
+    removed: Option<NodeId>,
+    /// The key and value an insertion must produce.
+    inserted: Option<(String, String)>,
+}
+
+/// What [`verify`] must find in the candidate for one changed mapping.
+///
+/// Recorded **before** the splice, from the original index, because the whole
+/// point is to compare the candidate against what the document said rather than
+/// against what the planner believed.
+struct FieldExpectation {
+    /// Position of the first edit that changed this mapping.
+    edit: usize,
+    /// The mapping. Re-resolved against the candidate by its own path.
+    mapping: DocumentPath,
+    /// Every key an insertion must find, with the value it must decode to.
+    inserted: Vec<(String, String)>,
+    /// Every key a removal must not find.
+    removed: Vec<String>,
+    /// Every entry no structural edit named, as (decoded key, subtree digest),
+    /// in source order.
+    ///
+    /// The digest is `None` for an entry a **scalar** edit in the same batch
+    /// rewrites: its value legitimately changes, and that edit's own
+    /// verification is what checks it. The key and its position are still
+    /// compared, so a batch can never reorder or lose such an entry unnoticed.
+    siblings: Vec<(String, Option<String>)>,
+    /// How many entries the mapping must hold afterwards.
+    entries: usize,
+}
+
+/// Merges every claim about one mapping into a single expectation.
+///
+/// Two removals from one mapping must ask for **two** fewer entries, not one
+/// each; a removal and an insertion must ask for the same number back. Grouping
+/// by the mapping's identifier in the original index is what makes that
+/// possible, and it is also where two insertions of the same key are caught —
+/// neither one alone is a duplicate, and together they are.
+///
+/// # Arithmetic is checked, because a malformed batch reaches here
+///
+/// Each claim moves the mapping's entry count by one, and a batch that removes
+/// more entries than the mapping has would take an unsigned count below zero.
+/// That is not a hypothetical: three removals of one entry were rejected as
+/// overlapping only *after* this function ran, so `2 - 1 - 1 - 1` underflowed
+/// and panicked in a debug build (the Phase 0c-3a review's finding 3).
+/// [`apply_edits`] now rejects overlapping replacements first, and the
+/// subtraction is checked as well — one fix would have sufficed, and a public
+/// API that can panic on bad input deserves both.
+///
+/// # Errors
+///
+/// [`EditError::KeyAlreadyPresent`] when one batch would insert a key twice, and
+/// [`EditError::LastEntryOfMapping`] when the folded claims would leave a
+/// mapping with no entries — including the impossible case of taking away more
+/// than it has.
+fn fold_expectations(
+    index: &SyntaxIndex,
+    pending: Vec<PendingField>,
+    rewritten: &[NodeId],
+) -> Result<Vec<FieldExpectation>, EditError> {
+    let mut folded: Vec<(NodeId, FieldExpectation, Vec<NodeId>, Vec<Entry>)> = Vec::new();
+    for claim in pending {
+        let slot = match folded
+            .iter_mut()
+            .find(|(id, _, _, _)| *id == claim.mapping_id)
+        {
+            Some(slot) => slot,
+            None => {
+                folded.push((
+                    claim.mapping_id,
+                    FieldExpectation {
+                        edit: claim.edit,
+                        mapping: claim.mapping,
+                        inserted: Vec::new(),
+                        removed: Vec::new(),
+                        siblings: Vec::new(),
+                        entries: claim.entries.len(),
+                    },
+                    Vec::new(),
+                    claim.entries,
+                ));
+                folded.last_mut().expect("just pushed")
+            }
+        };
+        if let Some(removed) = claim.removed {
+            slot.2.push(removed);
+            slot.1.entries =
+                slot.1
+                    .entries
+                    .checked_sub(1)
+                    .ok_or(EditError::LastEntryOfMapping {
+                        edit: claim.edit,
+                        mapping: claim.mapping_id,
+                    })?;
+            if let Some(key) = decoded_value(index, key_of(&slot.3, removed)) {
+                slot.1.removed.push(key.to_owned());
+            }
+        }
+        if let Some((key, value)) = claim.inserted {
+            if slot.1.inserted.iter().any(|(seen, _)| *seen == key) {
+                return Err(EditError::KeyAlreadyPresent {
+                    edit: claim.edit,
+                    mapping: claim.mapping_id,
+                });
+            }
+            slot.1.inserted.push((key, value));
+            slot.1.entries += 1;
+        }
+    } // End of the loop that groups every claim by the mapping it changes
+
+    // Two removals that are individually legal can still empty a two-entry
+    // mapping between them, and `a:` with nothing under it is an implicit null —
+    // a different document, not a smaller one. Only the folded claim can see
+    // this, because each removal was planned against the original entry count.
+    for (mapping_id, expectation, _, _) in &folded {
+        if expectation.entries == 0 {
+            return Err(EditError::LastEntryOfMapping {
+                edit: expectation.edit,
+                mapping: *mapping_id,
+            });
+        }
+    } // End of the loop that refuses a batch which would empty a mapping
+
+    Ok(folded
+        .into_iter()
+        .map(|(_, mut expectation, removed, entries)| {
+            for entry in &entries {
+                if removed.contains(&entry.value) {
+                    continue;
+                }
+                let key = decoded_value(index, entry.key)
+                    .unwrap_or_default()
+                    .to_owned();
+                let touched = rewritten
+                    .iter()
+                    .any(|node| in_subtree(index, entry.value, *node));
+                let digest = (!touched).then(|| digest(index, entry.value));
+                expectation.siblings.push((key, digest));
+            } // End of the loop over the mapping's surviving entries
+            expectation
+        })
+        .collect())
+} // End of function fold_expectations()
+
+/// The key node of the entry whose value is `value`.
+fn key_of(entries: &[Entry], value: NodeId) -> NodeId {
+    entries
+        .iter()
+        .find(|entry| entry.value == value)
+        .map_or(value, |entry| entry.key)
+}
+
+/// One mapping entry: the node that names it and the node that holds its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Entry {
+    /// The key node.
+    key: NodeId,
+    /// The value node, zero width for an entry written `label:`.
+    value: NodeId,
+}
+
+/// Plans an insertion, or refuses it.
+///
+/// The order of the checks is the contract, exactly as in [`plan_one`]: address
+/// the mapping, **ask the gate**, establish that the shape is one this step
+/// understands, and only then render anything.
+fn plan_insertion(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &FieldInsert,
+) -> Result<PlannedEdit, EditError> {
+    let (mapping, entries) = editable_mapping(index, trivia, position, edit.mapping())?;
+
+    if entries
+        .iter()
+        .any(|entry| decoded_value(index, entry.key) == Some(edit.key()))
+    {
+        return Err(EditError::KeyAlreadyPresent {
+            edit: position,
+            mapping: mapping.id,
+        });
+    }
+    let anchor = match edit.sibling() {
+        None => *entries.last().ok_or(EditError::NoSuchSibling {
+            edit: position,
+            mapping: mapping.id,
+        })?,
+        Some(key) => *entries
+            .iter()
+            .find(|entry| decoded_value(index, entry.key) == Some(key))
+            .ok_or(EditError::NoSuchSibling {
+                edit: position,
+                mapping: mapping.id,
+            })?,
+    };
+
+    let indent = entry_column(source, index, position, mapping, &entries)?;
+    // The **whole entry's** extent, not merely the value's: an entry written
+    // `label:` has a zero-width value that the substrate reports *before* the
+    // colon, so an insertion point taken from the value alone would land in the
+    // middle of the entry's own punctuation.
+    let (point, at_end_of_file) = insertion_point(
+        source,
+        entry_extent(index, trivia, anchor.key, anchor.value),
+        position,
+    )?;
+    // Learned from the **anchor**, never from the document-wide preamble. The
+    // preamble's answer is a majority vote that defaults to LF when a document
+    // holds no break at all, so it invents a line ending for a single-line file
+    // and writes LF after a CRLF sibling in a mixed one — the Phase 0c-3a
+    // review's finding 2.
+    let line_ending =
+        line_ending_before(source, point).ok_or(EditError::NoObservableLineEnding {
+            edit: position,
+            at: point,
+        })?;
+
+    // Rendered in the mapping's own context: the parent indent is the column the
+    // entry's key sits at, so a multi-line value becomes a `|` block two columns
+    // further in. Flow context cannot arise — `editable_mapping` refuses a flow
+    // mapping outright — but the context is still built through the same walk
+    // D2k uses, so the two answers cannot drift apart.
+    let context = ScalarContext::block(indent, line_ending);
+    let key = choose_scalar(edit.key(), context.as_key());
+    let value = choose_scalar(edit.value(), context);
+    let mut entry = format!("{}: {}", key.render(), value.render());
+    let text = if at_end_of_file {
+        // Nothing terminates the previous line, so the break goes in front and
+        // the file keeps not ending in one.
+        format!("{}{}{entry}", line_ending.as_str(), " ".repeat(indent))
+    } else {
+        // A literal block's rendering already ends with the value's own trailing
+        // breaks; only a value that ends without one needs the line terminated.
+        if !entry.ends_with(['\n', '\r']) {
+            entry.push_str(line_ending.as_str());
+        }
+        format!("{}{entry}", " ".repeat(indent))
+    };
+
+    let expectation = pending_field(
+        position,
+        edit.mapping().clone(),
+        mapping,
+        &entries,
+        None,
+        Some((edit.key().to_owned(), edit.value().to_owned())),
+    );
+    Ok(PlannedEdit {
+        replacements: vec![Replacement {
+            span: ByteSpan::new(point, point),
+            text,
+        }],
+        // The insertion point, and nothing else. Derived from the anchor entry's
+        // ownership extent and the line it ends, so it is a syntax fact rather
+        // than a restatement of what is being written.
+        permitted: vec![ByteSpan::new(point, point)],
+        note: None,
+        expectation: Some(expectation),
+        guard: Some(StructuralGuard::Insertion { at: point }),
+        rewritten: None,
+    })
+} // End of function plan_insertion()
+
+/// Plans a removal, or refuses it.
+fn plan_removal(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &FieldRemoval,
+) -> Result<PlannedEdit, EditError> {
+    let resolved = resolve_full(index, edit.field()).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let (Some(key), Some(parent)) = (resolved.key, resolved.parent) else {
+        // A root path and a path ending in an index name no mapping entry.
+        return Err(EditError::NotAMapping {
+            edit: position,
+            node: resolved.value,
+            kind: index
+                .node(resolved.value)
+                .map_or(NodeKind::Document, |node| node.kind),
+        });
+    };
+    let mapping_path = parent_path(edit.field()).ok_or(EditError::NotAMapping {
+        edit: position,
+        node: parent,
+        kind: NodeKind::Document,
+    })?;
+    let (mapping, entries) = editable_mapping(index, trivia, position, &mapping_path)?;
+    if mapping.id != parent {
+        return Err(EditError::NotAMapping {
+            edit: position,
+            node: parent,
+            kind: mapping.kind,
+        });
+    }
+    if entries.len() < 2 {
+        return Err(EditError::LastEntryOfMapping {
+            edit: position,
+            mapping: mapping.id,
+        });
+    }
+
+    let extent = entry_extent(index, trivia, key, resolved.value);
+    let span = removal_span(source, index, position, extent)?;
+    // Checked against the **final** envelope, after it has been widened to whole
+    // lines, because widening is what can pull a comment in at either end.
+    if let Some(comment) = file_comment_inside(trivia, span) {
+        return Err(EditError::RemovalWouldDeleteAFileComment {
+            edit: position,
+            comment,
+        });
+    }
+    if let Some(block) = kept_block_the_removal_would_extend(source, index, span) {
+        return Err(EditError::RemovalWouldExtendAKeptBlock {
+            edit: position,
+            block,
+        });
+    }
+    let expectation = pending_field(
+        position,
+        mapping_path,
+        mapping,
+        &entries,
+        Some(resolved.value),
+        None,
+    );
+    Ok(PlannedEdit {
+        replacements: vec![Replacement {
+            span,
+            text: String::new(),
+        }],
+        permitted: vec![span],
+        note: None,
+        expectation: Some(expectation),
+        guard: Some(StructuralGuard::Removal {
+            span,
+            entry: (key, resolved.value),
+        }),
+        rewritten: None,
+    })
+} // End of function plan_removal()
+
+/// Resolves a mapping and checks it is one a structural edit may change.
+///
+/// Four gates in a fixed order, and the hazard gate is asked **before** the
+/// shape is examined so that nothing about a refused mapping is inspected:
+///
+/// 1. the path resolves;
+/// 2. the node is a mapping;
+/// 3. `TriviaIndex::disqualifying_hazard` says nothing about **the mapping**,
+///    not merely about the entry. A structural edit changes the mapping's own
+///    shape, so a merge key, a duplicate key or an anchor anywhere in it makes
+///    the change unreasonable locally. This is strictly more pessimistic than a
+///    scalar edit, deliberately;
+/// 4. neither the mapping nor any ancestor is bracket-delimited.
+fn editable_mapping<'index>(
+    index: &'index SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    path: &DocumentPath,
+) -> Result<(&'index Node, Vec<Entry>), EditError> {
+    let id = resolve(index, path).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let mapping = index.node(id).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    if mapping.kind != NodeKind::Mapping {
+        return Err(EditError::NotAMapping {
+            edit: position,
+            node: id,
+            kind: mapping.kind,
+        });
+    }
+    if let Some(hazard) = trivia.disqualifying_hazard(index, id) {
+        return Err(EditError::Refused {
+            edit: position,
+            node: id,
+            hazard: hazard.kind,
+            at: hazard.span,
+        });
+    }
+    if mapping.collection_style == Some(CollectionStyle::Flow)
+        || is_inside_a_flow_collection(index, mapping)
+    {
+        return Err(EditError::FlowCollection {
+            edit: position,
+            node: id,
+        });
+    }
+    Ok((mapping, mapping_entries(mapping)))
+} // End of function editable_mapping()
+
+/// A mapping's entries, taken from the flat key/value child list.
+fn mapping_entries(mapping: &Node) -> Vec<Entry> {
+    mapping
+        .children
+        .chunks(2)
+        .filter_map(|pair| match (pair.first(), pair.get(1)) {
+            (Some(&key), Some(&value)) => Some(Entry { key, value }),
+            _ => None,
+        })
+        .collect()
+} // End of function mapping_entries()
+
+/// The column every key of the mapping sits at.
+///
+/// An inserted entry's indentation comes from here and from nowhere else. A
+/// mapping whose keys disagree is refused, because there is then no column the
+/// document itself endorses and a default would be this crate deciding how the
+/// user's file should look.
+fn entry_column(
+    source: &str,
+    index: &SyntaxIndex,
+    position: usize,
+    mapping: &Node,
+    entries: &[Entry],
+) -> Result<usize, EditError> {
+    let body_offset = index.preamble().body_offset;
+    let mut columns = entries.iter().filter_map(|entry| {
+        index
+            .node(entry.key)
+            .map(|key| column_of(source, key.span.start, body_offset))
+    });
+    let expected = columns.next().ok_or(EditError::NoSuchSibling {
+        edit: position,
+        mapping: mapping.id,
+    })?;
+    for found in columns {
+        if found != expected {
+            return Err(EditError::InconsistentEntryIndentation {
+                edit: position,
+                mapping: mapping.id,
+                expected,
+                found,
+            });
+        }
+    } // End of the loop over the mapping's key columns
+    Ok(expected)
+} // End of function entry_column()
+
+/// The bytes one mapping entry occupies: its key, its `:`, its value, and every
+/// trivia item either subtree owns.
+///
+/// Built from `TriviaIndex::subtree_extent` on **both** halves of the entry.
+/// The direct-ownership queries are deliberately not used: trivia is attributed
+/// to the deepest node a rule can name, so the entry's inline comment belongs to
+/// its *value scalar* and its colon to its *key*, and an envelope built from
+/// either node alone leaves the other's trivia behind (`PROGRESS.md`, D2d).
+fn entry_extent(index: &SyntaxIndex, trivia: &TriviaIndex, key: NodeId, value: NodeId) -> ByteSpan {
+    let key_extent = trivia.subtree_extent(index, key);
+    let value_extent = trivia.subtree_extent(index, value);
+    ByteSpan::new(
+        key_extent.start.min(value_extent.start),
+        key_extent.end.max(value_extent.end),
+    )
+} // End of function entry_extent()
+
+/// Widens an entry's extent to the whole lines a removal deletes.
+///
+/// Backwards to the start of the entry's first line, which must hold nothing but
+/// indentation, and forwards past the break that terminates its last. Anything
+/// else on either side means the entry shares a line with something that is not
+/// part of it — the `-` of a compact `- key: value` item is the reachable case —
+/// and the removal is refused rather than made to guess what happens to the
+/// neighbour.
+///
+/// The BOM is never crossed: `body_offset` bounds the backwards walk, so
+/// removing the first entry of a BOM-prefixed document cannot delete the BOM.
+fn removal_span(
+    source: &str,
+    index: &SyntaxIndex,
+    position: usize,
+    extent: ByteSpan,
+) -> Result<ByteSpan, EditError> {
+    let body_offset = index.preamble().body_offset;
+    let before = source.get(..extent.start).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: extent,
+    })?;
+    let line_start = before
+        .rfind(['\n', '\r'])
+        .map_or(body_offset, |offset| offset + 1)
+        .max(body_offset);
+    let head = source
+        .get(line_start..extent.start)
+        .ok_or(EditError::MalformedSpan {
+            edit: position,
+            at: extent,
+        })?;
+    if head
+        .chars()
+        .any(|character| character != ' ' && character != '\t')
+    {
+        return Err(EditError::EntryDoesNotOwnItsLines {
+            edit: position,
+            at: ByteSpan::new(line_start, extent.start),
+        });
+    }
+
+    // A block scalar's content span already ends **past** the line break that
+    // terminates its last body line (`PROGRESS.md`, D2c), so an entry whose
+    // value is one already covers whole lines and there is no break left to
+    // take. Skipping this check would walk into the next entry's indentation and
+    // refuse a perfectly ordinary removal.
+    if terminates_a_line(source, extent.end) {
+        return Ok(ByteSpan::new(line_start, extent.end));
+    }
+
+    let bytes = source.as_bytes();
+    let mut end = extent.end;
+    while matches!(bytes.get(end), Some(b' ') | Some(b'\t')) {
+        end += 1;
+    }
+    let tail = source.get(end..).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: extent,
+    })?;
+    if let Some(rest) = tail.strip_prefix("\r\n") {
+        end += tail.len() - rest.len();
+    } else if tail.starts_with('\n') || tail.starts_with('\r') {
+        end += 1;
+    } else if !tail.is_empty() {
+        return Err(EditError::EntryDoesNotOwnItsLines {
+            edit: position,
+            at: ByteSpan::new(extent.end, end + tail.len().min(1)),
+        });
+    }
+    Ok(ByteSpan::new(line_start, end))
+} // End of function removal_span()
+
+/// The line ending of the last break at or before `at`, or `None`.
+///
+/// **The document's own evidence, taken as locally as possible.** For an
+/// insertion whose anchor line is terminated, `at` sits immediately after that
+/// terminator, so the answer is the anchor's *own* break. For an insertion at
+/// end of file the anchor has no terminator, and the answer is the last break
+/// before it — a nearby sibling's, which is the closest thing the document says
+/// about how its lines end.
+///
+/// `None` has two causes and one meaning:
+///
+/// - the document holds **no break at all** — a single-line file with no final
+///   newline, which `LineEnding::detect` answers by defaulting to LF;
+/// - the last break is a **bare carriage return**, which [`LineEnding`] cannot
+///   express, so copying it is not something this function can offer.
+///
+/// Either way the caller must refuse ([`EditError::NoObservableLineEnding`])
+/// rather than pick one: inventing a line ending is exactly the unrequested
+/// reformatting this crate exists to prevent.
+fn line_ending_before(source: &str, at: usize) -> Option<LineEnding> {
+    let before = source.get(..at)?;
+    let last = before.rfind(['\n', '\r'])?;
+    if !before[last..].starts_with('\n') {
+        // A `\r` that is the last break character in `before` is not followed by
+        // a `\n`, or that `\n` would have been found instead: a bare CR.
+        return None;
+    }
+    if before[..last].ends_with('\r') {
+        Some(LineEnding::Crlf)
+    } else {
+        Some(LineEnding::Lf)
+    }
+} // End of function line_ending_before()
+
+/// The line ending of the first break at or after `at`, or `None`.
+///
+/// The forward counterpart of [`line_ending_before`], and the two answer
+/// different questions because the two callers stand in different places. An
+/// **insertion point** sits immediately after a terminator, so its evidence is
+/// behind it. A **scalar** sits before the terminator of its own line, so its
+/// evidence is ahead of it: in `a: 1\nb: 2\r\n` the break in force for `b`'s
+/// value is the `\r\n` that follows it, and the `\n` behind it belongs to `a`.
+/// Looking the wrong way is how a multi-line value on a CRLF line came out with
+/// an LF-bodied block.
+///
+/// `None` when nothing follows, or when the next break is a bare carriage
+/// return, which [`LineEnding`] cannot express.
+fn line_ending_after(source: &str, at: usize) -> Option<LineEnding> {
+    let after = source.get(at..)?;
+    let next = after.find(['\n', '\r'])?;
+    if after[next..].starts_with("\r\n") || after[next..].starts_with('\n') {
+        Some(if after[next..].starts_with('\r') {
+            LineEnding::Crlf
+        } else {
+            LineEnding::Lf
+        })
+    } else {
+        None
+    }
+} // End of function line_ending_after()
+
+/// The first file-owned comment the span would delete, if there is one.
+///
+/// A removal envelope is a contiguous hull, so a comment the ownership rules
+/// hand to the **file** can sit inside it without any node claiming it — see
+/// `TriviaIndex::subtree_extent`. Deleting it is byte loss the rest of
+/// verification cannot see, because digests compare decoded nodes and a decoded
+/// node has no comments.
+///
+/// Intersection is tested rather than containment: an envelope that clips even
+/// one byte off a comment has changed it.
+fn file_comment_inside(trivia: &TriviaIndex, span: ByteSpan) -> Option<ByteSpan> {
+    trivia
+        .file_comments()
+        .map(|comment| comment.span)
+        .find(|comment| comment.intersects(span))
+} // End of function file_comment_inside()
+
+/// Whether `offset` sits immediately after a line break.
+///
+/// True exactly when everything before `offset` already forms whole lines, which
+/// is the case for an entry whose value is a `|` or `>` block: D2c puts the end
+/// of a block scalar's content span past its final break.
+fn terminates_a_line(source: &str, offset: usize) -> bool {
+    offset > 0
+        && source
+            .get(..offset)
+            .is_some_and(|before| before.ends_with(['\n', '\r']))
+}
+
+/// The keep-chomped block scalar a removal would lengthen, if there is one.
+///
+/// A `|+` block's value runs to the next line that is not blank, so the bytes
+/// that end it belong to whatever comes next rather than to the block. Deleting
+/// the lines that terminate one hands it the blank lines below, and the block's
+/// **decoded value** changes although nothing about it was edited.
+///
+/// The condition is stated exactly rather than conservatively, so that the
+/// refusal costs only the shape it has to:
+///
+/// 1. a block scalar with [`crate::Chomping::Keep`] whose content ends at or
+///    before the removal;
+/// 2. nothing but blank lines between that content end and the removal, so the
+///    removal really is what terminates the block's run;
+/// 3. a blank line immediately **after** the removal, which is what would move
+///    up into the value. End of file does not qualify: a block's run is bounded
+///    by the end of the document either way.
+fn kept_block_the_removal_would_extend(
+    source: &str,
+    index: &SyntaxIndex,
+    span: ByteSpan,
+) -> Option<NodeId> {
+    let after = source.get(span.end..)?;
+    if after.is_empty() {
+        return None;
+    }
+    let next_line = after
+        .find(['\n', '\r'])
+        .map_or(after.len(), |offset| offset);
+    if !after[..next_line]
+        .chars()
+        .all(|character| character == ' ' || character == '\t')
+    {
+        return None;
+    }
+
+    index
+        .nodes()
+        .iter()
+        .filter_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
+        .find(|(_, scalar)| {
+            let presentation = &scalar.presentation;
+            presentation.style.is_block()
+                && presentation.chomping == crate::Chomping::Keep
+                && presentation.content_span.end <= span.start
+                && source
+                    .get(presentation.content_span.end..span.start)
+                    .is_some_and(|between| between.trim().is_empty())
+        })
+        .map(|(node, _)| node.id)
+} // End of function kept_block_the_removal_would_extend()
+
+/// Where a new entry is spliced in, and whether that place is end of file.
+///
+/// From the anchor entry's ownership extent, past any trailing spaces, to just
+/// after the break that terminates its line. When there is no such break the
+/// anchor ends the file, and the caller writes the break in front of the new
+/// entry instead of behind it, so a file with no final newline keeps not having
+/// one.
+fn insertion_point(
+    source: &str,
+    anchor: ByteSpan,
+    position: usize,
+) -> Result<(usize, bool), EditError> {
+    // As in `removal_span`: an entry whose value is a block scalar already ends
+    // past its own final line break, so the new entry starts exactly there.
+    if terminates_a_line(source, anchor.end) {
+        return Ok((anchor.end, false));
+    }
+
+    let bytes = source.as_bytes();
+    let mut cursor = anchor.end;
+    while matches!(bytes.get(cursor), Some(b' ') | Some(b'\t')) {
+        cursor += 1;
+    }
+    let tail = source.get(cursor..).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: anchor,
+    })?;
+    if let Some(rest) = tail.strip_prefix("\r\n") {
+        return Ok((cursor + (tail.len() - rest.len()), false));
+    }
+    if tail.starts_with('\n') || tail.starts_with('\r') {
+        return Ok((cursor + 1, false));
+    }
+    if tail.is_empty() {
+        return Ok((cursor, true));
+    }
+    Err(EditError::EntryDoesNotOwnItsLines {
+        edit: position,
+        at: ByteSpan::new(anchor.end, cursor + 1),
+    })
+} // End of function insertion_point()
+
+/// Records one structural edit's claim about the mapping it changes.
+///
+/// `omit` is the value node of an entry being removed; `inserted` is the key and
+/// value an insertion must produce. The siblings this becomes carry a
+/// **structural digest** of each entry's whole value subtree, so "every entry
+/// the edit did not name still decodes to what it decoded to before" covers
+/// nested collections and not merely scalars.
+fn pending_field(
+    position: usize,
+    mapping_path: DocumentPath,
+    mapping: &Node,
+    entries: &[Entry],
+    omit: Option<NodeId>,
+    inserted: Option<(String, String)>,
+) -> PendingField {
+    PendingField {
+        edit: position,
+        mapping: mapping_path,
+        mapping_id: mapping.id,
+        entries: entries.to_vec(),
+        removed: omit,
+        inserted,
+    }
+} // End of function pending_field()
+
+/// A canonical rendering of everything a node's subtree decodes to.
+///
+/// Kinds and lengths are written into the string as well as values, so two
+/// different shapes cannot produce the same digest: `{a: "1"}` and `[a, 1]` do
+/// not collide. Never printed — it holds decoded values, and the real corpus is
+/// private (`CLAUDE.md` section 1) — only compared.
+fn digest(index: &SyntaxIndex, node: NodeId) -> String {
+    let mut out = String::new();
+    write_digest(index, node, &mut out);
+    out
+}
+
+/// Appends `node`'s digest to `out`.
+fn write_digest(index: &SyntaxIndex, node: NodeId, out: &mut String) {
+    let Some(current) = index.node(node) else {
+        out.push('?');
+        return;
+    };
+    match current.kind {
+        NodeKind::Scalar => match current.scalar.as_ref() {
+            Some(scalar) => {
+                out.push_str(&format!("s{}:", scalar.value.len()));
+                out.push_str(&scalar.value);
+            }
+            None => out.push('?'),
+        },
+        NodeKind::Alias => out.push_str(&format!("*{}", current.span.len())),
+        NodeKind::Mapping | NodeKind::Sequence => {
+            out.push(if current.kind == NodeKind::Mapping {
+                '{'
+            } else {
+                '['
+            });
+            for child in &current.children {
+                write_digest(index, *child, out);
+                out.push(',');
+            } // End of the loop over the node's children
+            out.push(if current.kind == NodeKind::Mapping {
+                '}'
+            } else {
+                ']'
+            });
+        }
+        NodeKind::Document => out.push('@'),
+    }
+} // End of function write_digest()
+
+/// The decoded value of a scalar node, or `None` when it is not a scalar.
+fn decoded_value(index: &SyntaxIndex, node: NodeId) -> Option<&str> {
+    let node = index.node(node)?;
+    if node.kind != NodeKind::Scalar {
+        return None;
+    }
+    Some(node.scalar.as_ref()?.value.as_str())
+}
+
+/// The path of the mapping that holds the entry `path` names.
+///
+/// `None` when the path names no mapping entry — a root path, or one whose last
+/// step is a sequence index.
+fn parent_path(path: &DocumentPath) -> Option<DocumentPath> {
+    let segments = path.segments();
+    if !matches!(segments.last(), Some(PathSegment::Key(_))) {
+        return None;
+    }
+    Some(DocumentPath::new(
+        path.document_index(),
+        segments[..segments.len() - 1].to_vec(),
+    ))
+} // End of function parent_path()
 
 /// Chooses how the new value is spelled, and the context it is spelled for.
 ///
@@ -978,10 +2651,21 @@ fn occupied_line_tail(source: &str, at: usize) -> Option<ByteSpan> {
 ///   to the enclosing node, not to the left margin.
 /// - **the block body's column**, kept from the scalar's own presentation when
 ///   it already is a block, so an edit moves no line sideways.
-/// - **the line ending**, taken from the block's *own* body when its breaks are
-///   consistent and from the document otherwise. A file may legitimately mix
-///   endings, and rewriting a body's `\n` as `\r\n` because the rest of the
-///   file uses CRLF would change bytes for no reason.
+/// - **the line ending**, taken from the most local evidence there is and never
+///   from a majority vote. In order: the block's *own* body when its breaks are
+///   consistent, then the break that **terminates the scalar's own line**, then
+///   the last break before it (for a scalar on an unterminated final line), and
+///   only when the document offers none of those, the preamble's answer. A file
+///   may legitimately mix endings, and rewriting a body's `\n` as `\r\n` because
+///   the rest of the file uses CRLF would change bytes for no reason.
+///
+/// The middle step is the Phase 0c-3a review's finding 2 applied to the scalar
+/// path. The review demonstrated it on [`plan_insertion`], but the root cause —
+/// `LineEnding::detect`'s document-wide vote — was shared: rendering a
+/// multi-line value on a CRLF-terminated line in an LF-dominant document used to
+/// write an LF-bodied block, producing a scalar with mixed breaks that
+/// `reencode_in_place` itself calls unrepresentable
+/// ([`crate::emit::NotReencodable::MixedLineBreaks`]).
 ///
 /// The role is always [`crate::emit::ScalarRole::Value`]: a scalar edit never
 /// targets a key (`PROGRESS.md`, R18).
@@ -998,6 +2682,8 @@ fn scalar_context(
         .slice(source)
         .filter(|_| presentation.style.is_block())
         .and_then(consistent_line_ending)
+        .or_else(|| line_ending_after(source, node.span.end))
+        .or_else(|| line_ending_before(source, node.span.start))
         .unwrap_or(document_ending);
 
     if is_inside_a_flow_collection(index, node) {
@@ -1164,7 +2850,7 @@ fn splice(source: &str, replacements: &[Replacement]) -> String {
 
 /// Reparses `candidate` and checks it says exactly what the edits asked for.
 ///
-/// Four properties, all of them required by plan section 6.2 and none of them
+/// Five properties, all of them required by plan section 6.2 and none of them
 /// inferable from the code that built the candidate:
 ///
 /// 1. **every replacement lies wholly inside a span the edited scalar owns** —
@@ -1179,10 +2865,16 @@ fn splice(source: &str, replacements: &[Replacement]) -> String {
 ///    decoded value *and* with our decoder, so a disagreement between the two
 ///    is a failure rather than a coin toss;
 /// 4. **every byte outside the replaced spans is byte-identical** — re-derived
-///    from the replacement list, so an off-by-one in `splice` cannot hide.
+///    from the replacement list, so an off-by-one in `splice` cannot hide;
+/// 5. **every comment the original document assigns to the file is still
+///    there** — see [`file_comments_survive`]. Properties 1 to 4 are all about
+///    nodes and about bytes the edit *declared*, and a file-owned comment is
+///    neither: the Phase 0c-3a review's finding 1 destroyed one while passing
+///    every other check on this list.
 ///
 /// What this still cannot catch is recorded in
-/// `docs/decisions/0c-2b-notes.md` section 7.
+/// `docs/decisions/0c-2b-notes.md` section 7 and
+/// `docs/decisions/0c-3a-notes.md` section 7.4.
 ///
 /// # Errors
 ///
@@ -1192,13 +2884,19 @@ fn verify(
     candidate: &str,
     replacements: &[Replacement],
     permitted: &[ByteSpan],
-    edits: &[ScalarEdit],
+    edits: &[DocumentEdit],
+    expectations: &[FieldExpectation],
+    trivia: &TriviaIndex,
 ) -> Result<(), VerificationFailure> {
     replacements_stay_inside_the_permitted_spans(replacements, permitted)?;
     bytes_outside_the_replacements_match(source, candidate, replacements)?;
     let index = SyntaxIndex::parse(candidate).map_err(VerificationFailure::DoesNotParse)?;
+    file_comments_survive(source, candidate, &index, trivia)?;
 
     for (position, edit) in edits.iter().enumerate() {
+        let DocumentEdit::Scalar(edit) = edit else {
+            continue;
+        };
         let id = resolve(&index, edit.path()).map_err(|error| VerificationFailure::TargetLost {
             edit: position,
             error,
@@ -1234,8 +2932,207 @@ fn verify(
         }
     } // End of the loop that re-resolves and re-decodes every edited value
 
+    for expectation in expectations {
+        verify_field(candidate, &index, expectation)?;
+    }
     Ok(())
 } // End of function verify()
+
+/// Checks one structural edit against the reparsed candidate.
+///
+/// Four properties, and the third is the one that makes a removal safe:
+///
+/// 1. the **mapping** is still there, found by re-resolving its own path against
+///    the freshly parsed index;
+/// 2. the entry the edit named is **present with its intended value** (an
+///    insertion) or **absent** (a removal), by the same re-resolution;
+/// 3. **every other entry still decodes to exactly what it decoded to before**,
+///    key and whole value subtree, in the same order. This is what stops an
+///    oversized envelope: a removal that also swallowed the neighbouring entry
+///    passes properties 1, 2 and 4 and fails only this one;
+/// 4. the mapping holds exactly one entry more, or fewer, than it did.
+fn verify_field(
+    candidate: &str,
+    index: &SyntaxIndex,
+    expectation: &FieldExpectation,
+) -> Result<(), VerificationFailure> {
+    let edit = expectation.edit;
+    let id = resolve(index, &expectation.mapping)
+        .map_err(|error| VerificationFailure::MappingLost { edit, error })?;
+    let mapping = index
+        .node(id)
+        .filter(|node| node.kind == NodeKind::Mapping)
+        .ok_or(VerificationFailure::MappingLost {
+            edit,
+            error: PathError::MalformedIndex { node: id },
+        })?;
+    let entries = mapping_entries(mapping);
+    if entries.len() != expectation.entries {
+        return Err(VerificationFailure::EntryCountChanged {
+            edit,
+            expected: expectation.entries,
+            found: entries.len(),
+        });
+    }
+
+    let mut siblings = Vec::new();
+    let mut inserted_seen = 0usize;
+    for entry in &entries {
+        let key = decoded_value(index, entry.key).unwrap_or_default();
+        if let Some(removed) = expectation.removed.iter().find(|gone| *gone == key) {
+            return Err(VerificationFailure::FieldNotRemoved {
+                edit,
+                key_len: removed.len(),
+            });
+        }
+        if let Some((wanted_key, wanted_value)) = expectation
+            .inserted
+            .iter()
+            .find(|(wanted, _)| wanted == key)
+        {
+            {
+                // Checked with our decoder as well as the substrate's, exactly as
+                // a scalar edit is: a disagreement means one of the two is wrong
+                // about bytes we just wrote.
+                let value = index
+                    .node(entry.value)
+                    .and_then(|node| node.scalar.as_ref())
+                    .ok_or(VerificationFailure::FieldNotInserted {
+                        edit,
+                        key_len: wanted_key.len(),
+                    })?;
+                let ours = decode(candidate, &value.presentation)
+                    .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
+                if ours != value.value {
+                    return Err(VerificationFailure::DecoderDisagreement { edit });
+                }
+                if &value.value != wanted_value {
+                    return Err(VerificationFailure::FieldNotInserted {
+                        edit,
+                        key_len: wanted_key.len(),
+                    });
+                }
+                inserted_seen += 1;
+                continue;
+            }
+        }
+        siblings.push((key.to_owned(), entry.value));
+    } // End of the loop over the candidate mapping's entries
+
+    if inserted_seen != expectation.inserted.len() {
+        return Err(VerificationFailure::FieldNotInserted {
+            edit,
+            key_len: expectation
+                .inserted
+                .iter()
+                .map(|(key, _)| key.len())
+                .next()
+                .unwrap_or(0),
+        });
+    }
+    for (position, ((key, before), (found, value))) in
+        expectation.siblings.iter().zip(&siblings).enumerate()
+    {
+        let unchanged = key == found
+            && match before {
+                Some(before) => *before == digest(index, *value),
+                // A scalar edit in the same batch rewrites this entry; its own
+                // verification checks the value, and only the key and its
+                // position are this check's business.
+                None => true,
+            };
+        if !unchanged {
+            return Err(VerificationFailure::SiblingChanged {
+                edit,
+                entry: position,
+            });
+        }
+    } // End of the loop that compares every untouched entry with itself
+    if siblings.len() != expectation.siblings.len() {
+        return Err(VerificationFailure::SiblingChanged {
+            edit,
+            entry: siblings.len().min(expectation.siblings.len()),
+        });
+    }
+    Ok(())
+} // End of function verify_field()
+
+/// Checks that no comment the **file** owns was lost.
+///
+/// # Why this is not a restatement of anything above it
+///
+/// Every other property in [`verify`] is stated in terms the edit itself
+/// supplied — the spans it declared, the paths it named, the values it intended.
+/// A comment the ownership rules give to the *file* is named by none of them: it
+/// has no owning node, so no digest holds it, no sibling comparison sees it, and
+/// `bytes_outside_the_replacements_match` positively *authorises* its deletion,
+/// because a removal envelope that crosses it declares those bytes replaced.
+/// That is the Phase 0c-3a review's finding 1, and it is why this check reads
+/// the two documents rather than the edit.
+///
+/// # The comparison
+///
+/// The comments that must survive come from `TriviaIndex::file_comments` on the
+/// **original**, which is the document's own ownership answer. The comments that
+/// did survive come from a fresh classification of the candidate — all of them,
+/// whoever owns them there, because a legal edit may re-attribute a comment
+/// (removing the entry above a leading block hands that block to whatever
+/// follows) and re-attribution is not loss.
+///
+/// So the test is on **multisets of comment text**: every file-owned comment of
+/// the original must appear in the candidate at least as many times as it
+/// appeared among the original's file-owned comments. Comparing text rather than
+/// offsets is what lets an edit above a comment move it without tripping this,
+/// and comparing multisets is what stops two identical comments collapsing into
+/// one unnoticed.
+///
+/// It is deliberately a **one-sided** test. A candidate with *more* comments is
+/// not a failure: an inserted block scalar may legitimately contain a `#` line,
+/// which is content rather than a comment in the original and a comment in
+/// neither.
+///
+/// # Errors
+///
+/// [`VerificationFailure::FileCommentLost`], carrying the offset the comment had
+/// in the original document — never its text (`CLAUDE.md` section 1).
+fn file_comments_survive(
+    source: &str,
+    candidate: &str,
+    candidate_index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+) -> Result<(), VerificationFailure> {
+    // Multiset containment by **greedy consumption**: each file-owned comment
+    // claims one matching comment out of the candidate's, and the first that
+    // finds none is the one that was lost. Counting instead would report the
+    // first *occurrence* of the missing text rather than the missing occurrence
+    // itself, and this failure's only payload is that offset.
+    //
+    // The candidate is not scanned at all until a file-owned comment is found,
+    // which is most documents.
+    let mut survivors: Option<Vec<&str>> = None;
+    for comment in trivia.file_comments() {
+        let Some(text) = comment.span.slice(source) else {
+            continue;
+        };
+        let survivors = survivors.get_or_insert_with(|| {
+            TriviaIndex::comment_spans(candidate, candidate_index)
+                .iter()
+                .filter_map(|span| span.slice(candidate))
+                .collect()
+        });
+        match survivors.iter().position(|seen| *seen == text) {
+            Some(at) => {
+                survivors.swap_remove(at);
+            }
+            None => {
+                return Err(VerificationFailure::FileCommentLost {
+                    at: comment.span.start,
+                })
+            }
+        }
+    } // End of the loop that claims one surviving comment per file-owned one
+    Ok(())
+} // End of function file_comments_survive()
 
 /// Checks every replacement against the spans the edited scalars own.
 ///
@@ -1329,6 +3226,12 @@ fn first_difference(left: &str, right: &str) -> usize {
 mod tests {
     use super::*;
     use crate::syntax::NodeRole;
+
+    /// Scans `source`'s trivia, for the tests that call `verify` directly.
+    fn trivia_of(source: &str) -> TriviaIndex {
+        let index = SyntaxIndex::parse(source).expect("the probe parses");
+        TriviaIndex::scan(source, &index)
+    }
 
     /// Applies one edit to `source` and returns the candidate text.
     fn edited(source: &str, path: &str, value: &str) -> String {
@@ -1814,14 +3717,26 @@ mod tests {
     #[test]
     fn verification_rejects_a_candidate_that_does_not_parse_or_says_the_wrong_thing() {
         let source = "a: one\n";
-        let edits = [ScalarEdit::new(DocumentPath::parse("a").unwrap(), "two")];
+        let edits = [DocumentEdit::Scalar(ScalarEdit::new(
+            DocumentPath::parse("a").unwrap(),
+            "two",
+        ))];
         let token = [ByteSpan::new(3, 6)];
+        let trivia = trivia_of(source);
         let replacements = vec![Replacement {
             span: ByteSpan::new(3, 6),
             text: "two".to_owned(),
         }];
         assert_eq!(
-            verify(source, "a: two\n", &replacements, &token, &edits),
+            verify(
+                source,
+                "a: two\n",
+                &replacements,
+                &token,
+                &edits,
+                &[],
+                &trivia
+            ),
             Ok(())
         );
 
@@ -1831,7 +3746,15 @@ mod tests {
             text: "\"unclosed".to_owned(),
         }];
         assert!(matches!(
-            verify(source, "a: \"unclosed\n", &broken, &token, &edits),
+            verify(
+                source,
+                "a: \"unclosed\n",
+                &broken,
+                &token,
+                &edits,
+                &[],
+                &trivia
+            ),
             Err(VerificationFailure::DoesNotParse(_))
         ));
 
@@ -1841,7 +3764,7 @@ mod tests {
             text: "three".to_owned(),
         }];
         assert!(matches!(
-            verify(source, "a: three\n", &wrong, &token, &edits),
+            verify(source, "a: three\n", &wrong, &token, &edits, &[], &trivia),
             Err(VerificationFailure::ValueMismatch {
                 wanted_len: 3,
                 found_len: 5,
@@ -1855,7 +3778,15 @@ mod tests {
             text: "[one]".to_owned(),
         }];
         assert!(matches!(
-            verify(source, "a: [one]\n", &restructured, &token, &edits),
+            verify(
+                source,
+                "a: [one]\n",
+                &restructured,
+                &token,
+                &edits,
+                &[],
+                &trivia
+            ),
             Err(VerificationFailure::TargetKindChanged {
                 kind: NodeKind::Sequence,
                 ..
@@ -2012,6 +3943,885 @@ mod tests {
         assert_eq!(
             occupied_line_tail("a: b # why\n", 4),
             Some(ByteSpan::new(5, 10))
+        );
+    }
+}
+
+#[cfg(test)]
+mod structural_tests {
+    use super::*;
+
+    /// The hand-written xorshift64\* generator the seeded batch sweep uses.
+    ///
+    /// Written out a third time rather than shared, because
+    /// `tests/scalar_codec.rs` and `tests/patch_path.rs` are separate test
+    /// binaries this module cannot reach. Kept **identical in shape** to those
+    /// two so the three cannot quietly diverge, and hand-written so the crate
+    /// gains no dependency.
+    struct Prng(u64);
+
+    impl Prng {
+        /// Returns the next pseudo-random word.
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        /// Returns a value in `0..bound`.
+        fn below(&mut self, bound: usize) -> usize {
+            (self.next() % bound as u64) as usize
+        }
+    } // End of impl Prng
+
+    /// Inserts one field and returns the candidate text.
+    fn inserted(source: &str, mapping: &str, key: &str, value: &str) -> String {
+        let path = DocumentPath::parse(mapping).expect("the path parses");
+        insert_field(source, &path, key, value)
+            .unwrap_or_else(|error| panic!("the insertion applies: {error}"))
+            .into_text()
+    }
+
+    /// Removes one field and returns the candidate text.
+    fn removed(source: &str, field: &str) -> String {
+        let path = DocumentPath::parse(field).expect("the path parses");
+        remove_field(source, &path)
+            .unwrap_or_else(|error| panic!("the removal applies: {error}"))
+            .into_text()
+    }
+
+    /// The outcome of a removal, for the refusal tests.
+    fn removal_of(source: &str, field: &str) -> Result<PatchedDocument, EditError> {
+        remove_field(
+            source,
+            &DocumentPath::parse(field).expect("the path parses"),
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Inserting a field
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn an_inserted_field_takes_its_indentation_from_its_siblings() {
+        // Never from a default: the column comes from the mapping's own keys, so
+        // a nested mapping is written at its own depth and not at two spaces.
+        let source = "matches:\n  - trigger: ':a'\n    replace: b\n";
+        assert_eq!(
+            inserted(source, "matches[0]", "label", "hi"),
+            "matches:\n  - trigger: ':a'\n    replace: b\n    label: hi\n"
+        );
+        // A root mapping's keys sit at column 0.
+        assert_eq!(
+            inserted("a: 1\nb: 2\n", "#0", "c", "x"),
+            "a: 1\nb: 2\nc: x\n"
+        );
+        // And a deeply nested one at its own column.
+        assert_eq!(
+            inserted("a:\n  b:\n      c: 1\n", "a.b", "d", "x"),
+            "a:\n  b:\n      c: 1\n      d: x\n"
+        );
+    } // End of function an_inserted_field_takes_its_indentation_from_its_siblings()
+
+    #[test]
+    fn an_inserted_value_is_rendered_by_the_scalar_emitter() {
+        let source = "matches:\n  - trigger: ':a'\n    replace: b\n";
+        // A multi-line value becomes a literal block, indented from the entry.
+        assert_eq!(
+            inserted(source, "matches[0]", "label", "one\ntwo\n"),
+            "matches:\n  - trigger: ':a'\n    replace: b\n    label: |\n      one\n      two\n"
+        );
+        // A value that only looks like a number is quoted (D2e).
+        assert_eq!(inserted("a: 1\n", "#0", "b", "3"), "a: 1\nb: '3'\n");
+        // As is one YAML 1.1 would read as a boolean.
+        assert_eq!(inserted("a: 1\n", "#0", "b", "no"), "a: 1\nb: 'no'\n");
+        // A control character forces double quotes, the only style with escapes.
+        assert_eq!(
+            inserted("a: 1\n", "#0", "b", "x\u{7f}y"),
+            "a: 1\nb: \"x\\x7fy\"\n"
+        );
+        // An awkward key is quoted too, and never written as a block scalar.
+        assert_eq!(inserted("a: 1\n", "#0", "b: c", "x"), "a: 1\n'b: c': x\n");
+    } // End of function an_inserted_value_is_rendered_by_the_scalar_emitter()
+
+    #[test]
+    fn a_field_can_be_inserted_after_a_named_sibling() {
+        let source = "a: 1\nb: 2\nc: 3\n";
+        assert_eq!(
+            insert_field(source, &DocumentPath::root(0), "inserted", "x")
+                .expect("appends")
+                .text(),
+            "a: 1\nb: 2\nc: 3\ninserted: x\n"
+        );
+        let after = apply_edits(
+            source,
+            &[FieldInsert::after(DocumentPath::root(0), "a", "inserted", "x").into()],
+        )
+        .expect("inserts after `a`");
+        assert_eq!(after.text(), "a: 1\ninserted: x\nb: 2\nc: 3\n");
+    } // End of function a_field_can_be_inserted_after_a_named_sibling()
+
+    #[test]
+    fn an_insertion_after_an_entry_with_an_inline_comment_goes_below_the_comment() {
+        // The comment belongs to the entry (plan section 6.2 rule 3), so the new
+        // line goes after it rather than between the value and its comment.
+        let patched = apply_edits(
+            "a: 1 # why\nb: 2\n",
+            &[FieldInsert::after(DocumentPath::root(0), "a", "c", "x").into()],
+        )
+        .expect("applies");
+        assert_eq!(patched.text(), "a: 1 # why\nc: x\nb: 2\n");
+    } // End of function an_insertion_after_an_entry_with_an_inline_comment_goes_below_the_comment()
+
+    #[test]
+    fn an_insertion_after_a_block_scalar_starts_on_the_next_line() {
+        // A block scalar's content span already ends past its final line break
+        // (D2c), so the insertion point is that position exactly and no second
+        // break is written.
+        let patched = apply_edits(
+            "a: |\n  body\nb: 2\n",
+            &[FieldInsert::after(DocumentPath::root(0), "a", "c", "x").into()],
+        )
+        .expect("applies");
+        assert_eq!(patched.text(), "a: |\n  body\nc: x\nb: 2\n");
+        assert_eq!(
+            inserted("a: |\n  body\n", "#0", "c", "x"),
+            "a: |\n  body\nc: x\n"
+        );
+    }
+
+    #[test]
+    fn an_insertion_preserves_a_missing_final_newline_and_a_crlf_document() {
+        // At end of file the break goes in **front** of the new entry, so a file
+        // that did not end in a newline still does not.
+        assert_eq!(inserted("a: 1\nb: 2", "#0", "c", "x"), "a: 1\nb: 2\nc: x");
+        // And a CRLF document gets CRLF, inside the entry and after it.
+        assert_eq!(
+            inserted("a: 1\r\nb: 2\r\n", "#0", "c", "one\ntwo\n"),
+            "a: 1\r\nb: 2\r\nc: |\r\n  one\r\n  two\r\n"
+        );
+        assert_eq!(
+            inserted("a: 1\r\nb: 2", "#0", "c", "x"),
+            "a: 1\r\nb: 2\r\nc: x"
+        );
+    } // End of function an_insertion_preserves_a_missing_final_newline_and_a_crlf_document()
+
+    #[test]
+    fn an_insertion_into_a_bom_document_never_touches_the_bom() {
+        let source = "\u{feff}a: 1\n";
+        let candidate = inserted(source, "#0", "b", "x");
+        assert_eq!(candidate, "\u{feff}a: 1\nb: x\n");
+        assert!(candidate.starts_with('\u{feff}'));
+    }
+
+    #[test]
+    fn inserting_a_key_the_mapping_already_has_is_refused() {
+        // Two entries with one key make every path through the mapping
+        // ambiguous and raise `DuplicateMappingKey`, so the mapping would become
+        // uneditable the moment the edit landed.
+        let source = "a: 1\nb: 2\n";
+        assert!(matches!(
+            insert_field(source, &DocumentPath::root(0), "a", "x"),
+            Err(EditError::KeyAlreadyPresent { .. })
+        ));
+        // The same key spelled differently is the same key (D2j).
+        assert!(matches!(
+            insert_field("'a': 1\n", &DocumentPath::root(0), "a", "x"),
+            Err(EditError::KeyAlreadyPresent { .. })
+        ));
+    } // End of function inserting_a_key_the_mapping_already_has_is_refused()
+
+    #[test]
+    fn inserting_into_a_flow_mapping_is_refused_explicitly() {
+        // D2k threads flow context into *rendering*, so a scalar edit inside
+        // `{…}` is allowed. A structural edit is a different question — a flow
+        // mapping has no line to add an entry to — and it is refused by name
+        // rather than left undefined.
+        let source = "vars: [{name: one, type: echo}]\n";
+        assert!(matches!(
+            insert_field(source, &DocumentPath::parse("vars[0]").unwrap(), "x", "y"),
+            Err(EditError::FlowCollection { .. })
+        ));
+        assert!(matches!(
+            removal_of(source, "vars[0].name"),
+            Err(EditError::FlowCollection { .. })
+        ));
+    } // End of function inserting_into_a_flow_mapping_is_refused_explicitly()
+
+    #[test]
+    fn a_structural_edit_asks_the_gate_about_the_mapping_not_only_the_entry() {
+        // Strictly more pessimistic than a scalar edit, deliberately: a
+        // structural edit changes the mapping's own shape, so a merge key or an
+        // anchor anywhere inside it makes the change unreasonable locally.
+        let source = "defaults: &d\n  a: 1\nuse:\n  <<: *d\n  b: 2\n";
+        assert!(matches!(
+            insert_field(source, &DocumentPath::parse("use").unwrap(), "c", "x"),
+            Err(EditError::Refused {
+                hazard: HazardKind::MergeKey,
+                ..
+            })
+        ));
+        // The gate is consulted *before* anything about the shape is examined:
+        // the same mapping refuses an insertion of a key it already holds with
+        // the hazard, not with `KeyAlreadyPresent`.
+        assert!(matches!(
+            insert_field(source, &DocumentPath::parse("use").unwrap(), "b", "x"),
+            Err(EditError::Refused { .. })
+        ));
+    } // End of function a_structural_edit_asks_the_gate_about_the_mapping_not_only_the_entry()
+
+    #[test]
+    fn a_path_that_is_not_a_mapping_is_refused() {
+        let source = "matches:\n  - trigger: ':a'\n";
+        assert!(matches!(
+            insert_field(source, &DocumentPath::parse("matches").unwrap(), "x", "y"),
+            Err(EditError::NotAMapping {
+                kind: NodeKind::Sequence,
+                ..
+            })
+        ));
+        // A removal whose path ends in an index names a sequence item, which no
+        // key introduces.
+        assert!(matches!(
+            removal_of(source, "matches[0]"),
+            Err(EditError::NotAMapping { .. })
+        ));
+    } // End of function a_path_that_is_not_a_mapping_is_refused()
+
+    // -----------------------------------------------------------------------
+    // Removing a field
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_removal_takes_the_whole_entry_and_leaves_its_neighbours_alone() {
+        assert_eq!(removed("a: 1\nb: 2\nc: 3\n", "b"), "a: 1\nc: 3\n");
+        assert_eq!(removed("a: 1\nb: 2\nc: 3\n", "a"), "b: 2\nc: 3\n");
+        assert_eq!(removed("a: 1\nb: 2\nc: 3\n", "c"), "a: 1\nb: 2\n");
+        // A nested collection value goes with its entry.
+        assert_eq!(
+            removed("a: 1\nb:\n  x: 1\n  y: 2\nc: 3\n", "b"),
+            "a: 1\nc: 3\n"
+        );
+        // A block-scalar value, whose content span already ends a line.
+        assert_eq!(
+            removed(
+                "matches:\n  - trigger: ':a'\n    replace: |\n      body\n    label: x\n",
+                "matches[0].replace"
+            ),
+            "matches:\n  - trigger: ':a'\n    label: x\n"
+        );
+    } // End of function a_removal_takes_the_whole_entry_and_leaves_its_neighbours_alone()
+
+    #[test]
+    fn a_removal_takes_the_trivia_the_entrys_subtree_owns() {
+        // The inline comment belongs to the value scalar and the colon to the
+        // key, so an envelope built from *direct* ownership would leave one of
+        // them behind. `subtree_extent` takes both (D2d).
+        assert_eq!(removed("a: 1 # why\nb: 2\n", "a"), "b: 2\n");
+        // A leading comment block immediately above the entry belongs to it…
+        assert_eq!(
+            removed("a: 1\n# about b\n# still about b\nb: 2\nc: 3\n", "b"),
+            "a: 1\nc: 3\n"
+        );
+        // …but one separated **from what follows** by a blank line belongs to
+        // the file and stays put, blank line and all. Rule 2 turns on the blank
+        // line *below* the comment, not the one above it: a comment with a blank
+        // line above and none below is still a leading block for what follows,
+        // which is why the first shape here travels and the second does not.
+        assert_eq!(
+            removed("a: 1\n\n# about b\nb: 2\nc: 3\n", "b"),
+            "a: 1\n\nc: 3\n"
+        );
+        assert_eq!(
+            removed("a: 1\n# about the file\n\nb: 2\nc: 3\n", "b"),
+            "a: 1\n# about the file\n\nc: 3\n"
+        );
+        // A file-header comment never travels with the first entry (rule 4).
+        assert_eq!(removed("# header\na: 1\nb: 2\n", "a"), "# header\nb: 2\n");
+    } // End of function a_removal_takes_the_trivia_the_entrys_subtree_owns()
+
+    #[test]
+    fn a_removal_leaves_the_blank_lines_around_it_where_they_are() {
+        // A blank line is the file's layout rather than the entry's trivia, so
+        // the user's visual grouping survives the removal.
+        assert_eq!(removed("a: 1\n\nb: 2\n\nc: 3\n", "b"), "a: 1\n\n\nc: 3\n");
+    }
+
+    #[test]
+    fn a_removal_preserves_a_missing_final_newline_and_a_crlf_document() {
+        assert_eq!(removed("a: 1\nb: 2", "b"), "a: 1\n");
+        assert_eq!(removed("a: 1\nb: 2", "a"), "b: 2");
+        assert_eq!(removed("a: 1\r\nb: 2\r\nc: 3\r\n", "b"), "a: 1\r\nc: 3\r\n");
+    }
+
+    #[test]
+    fn a_removal_from_a_bom_document_never_touches_the_bom() {
+        let source = "\u{feff}a: 1\nb: 2\n";
+        let candidate = removed(source, "a");
+        assert_eq!(candidate, "\u{feff}b: 2\n");
+        assert!(candidate.starts_with('\u{feff}'));
+    }
+
+    #[test]
+    fn removing_the_last_entry_of_a_mapping_is_refused() {
+        // `a:` with nothing under it is not the same document as `a:` with one
+        // entry: the mapping becomes an implicit null. Emptying a mapping is a
+        // decision about the parent entry, so this step refuses.
+        assert!(matches!(
+            removal_of("a:\n  b: 1\nc: 2\n", "a.b"),
+            Err(EditError::LastEntryOfMapping { .. })
+        ));
+        assert!(matches!(
+            removal_of("a: 1\n", "a"),
+            Err(EditError::LastEntryOfMapping { .. })
+        ));
+        // Removing the parent entry instead is allowed.
+        assert_eq!(removed("a:\n  b: 1\nc: 2\n", "a"), "c: 2\n");
+    } // End of function removing_the_last_entry_of_a_mapping_is_refused()
+
+    #[test]
+    fn removing_the_first_entry_of_a_compact_item_is_refused() {
+        // `- trigger: ':a'` puts the entry on the same line as the `-` that
+        // introduces the mapping, and the dash belongs to the item rather than
+        // to the entry. Deleting the line strands the dash; deleting only the
+        // entry re-indents what follows. Both change bytes the user did not ask
+        // about, so the removal is refused and the reason is named.
+        let source = "matches:\n  - trigger: ':a'\n    replace: b\n";
+        assert!(matches!(
+            removal_of(source, "matches[0].trigger"),
+            Err(EditError::EntryDoesNotOwnItsLines { .. })
+        ));
+        // Its sibling, which does own its line, is removable.
+        assert_eq!(
+            removed(source, "matches[0].replace"),
+            "matches:\n  - trigger: ':a'\n"
+        );
+    } // End of function removing_the_first_entry_of_a_compact_item_is_refused()
+
+    #[test]
+    fn an_entry_with_no_value_is_removable_although_it_owns_no_bytes() {
+        // The value is a zero-width scalar, so the envelope comes from the
+        // key's subtree — which owns the colon — rather than from the value's.
+        assert_eq!(removed("a: 1\nb:\nc: 3\n", "b"), "a: 1\nc: 3\n");
+        assert_eq!(removed("a: 1\nb: # why\nc: 3\n", "b"), "a: 1\nc: 3\n");
+        assert_eq!(removed("a: 1\nb:\n", "b"), "a: 1\n");
+    }
+
+    // -----------------------------------------------------------------------
+    // The batch protocol, where `OverlappingEdits` becomes load-bearing
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn two_structural_edits_to_the_same_entry_are_refused_rather_than_ordered() {
+        let source = "a: 1\nb: 2\nc: 3\n";
+        // Two removals of the same entry: identical spans.
+        assert!(matches!(
+            apply_edits(
+                source,
+                &[
+                    FieldRemoval::new(DocumentPath::parse("b").unwrap()).into(),
+                    FieldRemoval::new(DocumentPath::parse("b").unwrap()).into(),
+                ]
+            ),
+            Err(EditError::OverlappingEdits { .. })
+        ));
+        // Two insertions at the same point: both spans are zero width and share
+        // a start, which the plain `end > start` test cannot see.
+        assert!(matches!(
+            apply_edits(
+                source,
+                &[
+                    FieldInsert::new(DocumentPath::root(0), "d", "x").into(),
+                    FieldInsert::new(DocumentPath::root(0), "e", "y").into(),
+                ]
+            ),
+            Err(EditError::OverlappingEdits { .. })
+        ));
+    } // End of function two_structural_edits_to_the_same_entry_are_refused_rather_than_ordered()
+
+    #[test]
+    fn a_malformed_batch_is_refused_by_name_and_never_panics() {
+        // The Phase 0c-3a review's finding 3. Three removals of one entry each
+        // planned successfully against the original mapping, and
+        // `fold_expectations` then subtracted 1 from a count of 2 three times.
+        // In a debug build that is not a wrong answer, it is a **panic** — from a
+        // public entry point, on input a caller is entitled to hand it.
+        let source = "a: 1\nb: 2\n";
+        let path = DocumentPath::parse("a").expect("the path parses");
+        let batch: Vec<DocumentEdit> = (0..3)
+            .map(|_| DocumentEdit::RemoveField(FieldRemoval::new(path.clone())))
+            .collect();
+        assert!(matches!(
+            apply_edits(source, &batch),
+            Err(EditError::OverlappingEdits { .. })
+        ));
+
+        // The same shape one entry deeper, so the count reaches zero rather than
+        // going below it, and with **distinct** entries so nothing overlaps:
+        // individually legal, together they empty the mapping into an implicit
+        // null, which is a different document rather than a smaller one.
+        let source = "m:\n  a: 1\n  b: 2\nn: 3\n";
+        assert!(matches!(
+            apply_edits(
+                source,
+                &[
+                    FieldRemoval::new(DocumentPath::parse("m.a").unwrap()).into(),
+                    FieldRemoval::new(DocumentPath::parse("m.b").unwrap()).into(),
+                ]
+            ),
+            Err(EditError::LastEntryOfMapping { .. })
+        ));
+        // …and removing one of the two is still fine, so the refusal is scoped to
+        // the batch that empties the mapping rather than to the mapping.
+        assert!(apply_edits(
+            source,
+            &[FieldRemoval::new(DocumentPath::parse("m.a").unwrap()).into()]
+        )
+        .is_ok());
+    } // End of function a_malformed_batch_is_refused_by_name_and_never_panics()
+
+    #[test]
+    fn a_seeded_sweep_of_adversarial_batches_produces_typed_errors_and_no_panic() {
+        // The generalisation of the test above, because the specific batch that
+        // panicked was found by a reviewer rather than by the suite. Batches are
+        // drawn from a small set of paths and edit kinds, so duplicates,
+        // overlaps, nested targets and mixed kinds all occur often. The property
+        // is the one `PROGRESS.md` D3b states for incomplete input and this file
+        // owes for malformed input: **a public entry point answers, it never
+        // panics**. Reaching that answer is the whole assertion; `apply_edits`
+        // returns a typed `Result`, so any outcome at all is typed.
+        let sources = [
+            "a: 1\nb: 2\n",
+            "m:\n  a: 1\n  b: 2\nn: 3\n",
+            "m:\n  a: 1\n  # a file comment\n\n  b: 2\nn: 3\n",
+            "matches:\n  - trigger: ':a'\n    replace: |\n      body\n    label: x\n",
+            "a: 1",
+        ];
+        let paths = ["a", "b", "m", "m.a", "m.b", "n", "matches", "matches[0]"];
+        let values = ["plain", "", "one\ntwo\n", "no"];
+
+        // The same hand-written xorshift64* generator `tests/scalar_codec.rs`
+        // and `tests/patch_path.rs` use, in the same shape, so the crate still
+        // gains no dependency and the three cannot drift apart unnoticed.
+        let mut prng = Prng(0x2545_f491_4f6c_dd1d);
+
+        let mut applied = 0usize;
+        for _ in 0..600 {
+            let source = sources[prng.below(sources.len())];
+            let mut batch: Vec<DocumentEdit> = Vec::new();
+            for _ in 0..1 + prng.below(4) {
+                let path = DocumentPath::parse(paths[prng.below(paths.len())])
+                    .expect("the probe paths parse");
+                let value = values[prng.below(values.len())];
+                batch.push(match prng.below(3) {
+                    0 => ScalarEdit::new(path, value).into(),
+                    1 => FieldRemoval::new(path).into(),
+                    _ => FieldInsert::new(path, "inserted", value).into(),
+                });
+            } // End of the loop that builds one batch
+            if apply_edits(source, &batch).is_ok() {
+                applied += 1;
+            }
+        } // End of the loop over the seeded batches
+
+        // Reaching this line is the property: 600 batches were answered rather
+        // than aborted. The one thing worth asserting beyond that is that the
+        // sweep is not vacuous — some of those batches really applied.
+        assert!(applied > 0, "no generated batch ever applied");
+    } // End of function a_seeded_sweep_of_adversarial_batches_produces_typed_errors_and_no_panic()
+
+    #[test]
+    fn a_scalar_edit_inside_a_removed_entry_overlaps_it() {
+        // The scalar's token lies inside the removal envelope, so which one wins
+        // would depend on the order they were applied in. There is no answer.
+        let source = "a:\n  x: 1\nb: 2\n";
+        assert!(matches!(
+            apply_edits(
+                source,
+                &[
+                    FieldRemoval::new(DocumentPath::parse("a").unwrap()).into(),
+                    ScalarEdit::new(DocumentPath::parse("a.x").unwrap(), "changed").into(),
+                ]
+            ),
+            Err(EditError::OverlappingEdits { .. })
+        ));
+    } // End of function a_scalar_edit_inside_a_removed_entry_overlaps_it()
+
+    #[test]
+    fn adjacent_but_not_overlapping_structural_edits_are_applied_together() {
+        // Two removals of neighbouring entries: their envelopes touch at a byte
+        // but do not overlap, so both apply and the highest offset goes first.
+        let source = "a: 1\nb: 2\nc: 3\nd: 4\n";
+        let patched = apply_edits(
+            source,
+            &[
+                FieldRemoval::new(DocumentPath::parse("b").unwrap()).into(),
+                FieldRemoval::new(DocumentPath::parse("c").unwrap()).into(),
+            ],
+        )
+        .expect("two adjacent removals apply");
+        assert_eq!(patched.text(), "a: 1\nd: 4\n");
+        assert_eq!(patched.replacements().len(), 2);
+        assert_eq!(
+            patched.replacements()[0].span.end,
+            patched.replacements()[1].span.start,
+            "the two envelopes are adjacent, which is exactly the boundary case"
+        );
+
+        // A removal and an insertion in the same batch, in one mapping.
+        let patched = apply_edits(
+            source,
+            &[
+                FieldRemoval::new(DocumentPath::parse("b").unwrap()).into(),
+                FieldInsert::new(DocumentPath::root(0), "e", "5").into(),
+            ],
+        )
+        .expect("a removal and an insertion apply together");
+        assert_eq!(patched.text(), "a: 1\nc: 3\nd: 4\ne: '5'\n");
+
+        // And a scalar edit alongside a structural one, in the same batch.
+        let patched = apply_edits(
+            source,
+            &[
+                ScalarEdit::new(DocumentPath::parse("a").unwrap(), "changed").into(),
+                FieldRemoval::new(DocumentPath::parse("d").unwrap()).into(),
+            ],
+        )
+        .expect("mixed kinds apply together");
+        assert_eq!(patched.text(), "a: changed\nb: 2\nc: 3\n");
+    } // End of function adjacent_but_not_overlapping_structural_edits_are_applied_together()
+
+    // -----------------------------------------------------------------------
+    // Verification, driven directly
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_removal_guard_refuses_an_envelope_that_reaches_into_a_neighbour() {
+        // The check that is **not** circular. `bytes_outside_the_replacements_match`
+        // compares the candidate against the source with the *declared*
+        // replacements applied, so an envelope one entry too long confirms
+        // itself. The guard is stated in terms of the original index's node
+        // spans, which the planner did not choose.
+        let source = "a: 1\nb: 2\nc: 3\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let resolved = resolve_full(&index, &DocumentPath::parse("b").unwrap()).expect("resolves");
+        let entry = (resolved.key.expect("a key"), resolved.value);
+
+        let honest = removal_span(
+            source,
+            &index,
+            0,
+            entry_extent(&index, &trivia, entry.0, entry.1),
+        )
+        .expect("the entry owns its lines");
+        assert_eq!(honest.slice(source), Some("b: 2\n"));
+        assert_eq!(
+            StructuralGuard::Removal {
+                span: honest,
+                entry
+            }
+            .check(&index),
+            Ok(())
+        );
+
+        // One entry too long: the same span extended over `c: 3`.
+        let greedy = ByteSpan::new(honest.start, source.len());
+        assert!(matches!(
+            StructuralGuard::Removal {
+                span: greedy,
+                entry
+            }
+            .check(&index),
+            Err(VerificationFailure::EnvelopeCoversAnotherNode { .. })
+        ));
+    } // End of function the_removal_guard_refuses_an_envelope_that_reaches_into_a_neighbour()
+
+    #[test]
+    fn the_insertion_guard_refuses_a_point_inside_a_node() {
+        let source = "a: hello\nb: 2\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        // Between the two lines: legal, although it is inside the root mapping
+        // and inside the document, which is what "between two entries" means.
+        assert_eq!(StructuralGuard::Insertion { at: 9 }.check(&index), Ok(()));
+        // Inside the scalar `hello`: not.
+        assert!(matches!(
+            StructuralGuard::Insertion { at: 5 }.check(&index),
+            Err(VerificationFailure::InsertionPointInsideANode { .. })
+        ));
+    }
+
+    #[test]
+    fn verification_rejects_a_candidate_that_lost_a_file_owned_comment() {
+        // **The Phase 0c-3a review's finding 1, at the layer that let it
+        // through.** The planner now refuses this removal, so the only way to
+        // ask whether verification could have caught it is to hand `verify` the
+        // candidate the old planner produced. Everything else about that
+        // candidate is impeccable: it parses, `b` is untouched, the mapping lost
+        // exactly the entry it was asked to lose, and the bytes outside the
+        // declared replacement are identical — because the declared replacement
+        // is precisely the span that ate the comment.
+        let source = "a:\n  x: 1\n  # keep this file comment\n\n  y: 2\nb: 3\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        assert_eq!(
+            trivia.file_comments().count(),
+            1,
+            "the document must give that comment to the file"
+        );
+
+        let envelope = ByteSpan::new(0, source.len() - "b: 3\n".len());
+        let replacements = vec![Replacement {
+            span: envelope,
+            text: String::new(),
+        }];
+        let candidate = splice(source, &replacements);
+        assert_eq!(candidate, "b: 3\n", "the bytes the old engine produced");
+
+        // The two checks that ran before this fix both pass on it.
+        assert_eq!(
+            bytes_outside_the_replacements_match(source, &candidate, &replacements),
+            Ok(())
+        );
+        assert_eq!(
+            replacements_stay_inside_the_permitted_spans(&replacements, &[envelope]),
+            Ok(())
+        );
+
+        // The new one does not.
+        let candidate_index = SyntaxIndex::parse(&candidate).expect("the candidate parses");
+        assert_eq!(
+            file_comments_survive(source, &candidate, &candidate_index, &trivia),
+            Err(VerificationFailure::FileCommentLost { at: 12 })
+        );
+        // And it is not simply "any removal fails": a candidate that keeps the
+        // comment passes, even though the comment has moved and been
+        // re-attributed.
+        let kept = "a:\n  # keep this file comment\n\n  y: 2\nb: 3\n";
+        let kept_index = SyntaxIndex::parse(kept).expect("parses");
+        assert_eq!(
+            file_comments_survive(source, kept, &kept_index, &trivia),
+            Ok(())
+        );
+    } // End of function verification_rejects_a_candidate_that_lost_a_file_owned_comment()
+
+    #[test]
+    fn a_removal_whose_envelope_crosses_a_file_comment_is_refused_by_name() {
+        let source = "a:\n  x: 1\n  # keep this file comment\n\n  y: 2\nb: 3\n";
+        assert!(matches!(
+            removal_of(source, "a"),
+            Err(EditError::RemovalWouldDeleteAFileComment { .. })
+        ));
+        // Scoped to the envelope that crosses it. The entries inside the
+        // collection, and the neighbouring entry, are all still removable:
+        // refusing more than the evidence supports costs real editing ability
+        // (`PROGRESS.md`, R12).
+        assert_eq!(
+            removed(source, "a.x"),
+            "a:\n  # keep this file comment\n\n  y: 2\nb: 3\n"
+        );
+        assert_eq!(
+            removed(source, "b"),
+            "a:\n  x: 1\n  # keep this file comment\n\n  y: 2\n"
+        );
+        // A comment the entry's own subtree owns is not the file's, and still
+        // travels with the entry it belongs to.
+        assert_eq!(removed("a: 1 # mine\nb: 2\n", "a"), "b: 2\n");
+        assert_eq!(
+            removed("a: 1\n# leads b\nb: 2\nc: 3\n", "b"),
+            "a: 1\nc: 3\n"
+        );
+        // The file **header** is the opposite case and is why the two must not
+        // be conflated: rule 4 outranks rule 1, so a comment above the first
+        // top-level key belongs to the file — and it stays put without needing a
+        // refusal, because it is above the envelope rather than inside it.
+        assert_eq!(
+            removed("# a header\na: 1\nb: 2\n", "a"),
+            "# a header\nb: 2\n"
+        );
+    } // End of function a_removal_whose_envelope_crosses_a_file_comment_is_refused_by_name()
+
+    #[test]
+    fn an_insertion_copies_a_line_ending_and_refuses_when_there_is_none_to_copy() {
+        // The review's finding 2. `LineEnding::detect` defaults a single-line
+        // document to LF, so the document-wide answer is an invention here.
+        assert!(matches!(
+            insert_field("a: 1", &DocumentPath::root(0), "b", "x"),
+            Err(EditError::NoObservableLineEnding { at: 4, .. })
+        ));
+        // A bare carriage return is a break `LineEnding` cannot write, so it is
+        // refused rather than normalised to LF.
+        assert!(matches!(
+            insert_field("a: 1\rb: 2", &DocumentPath::root(0), "c", "x"),
+            Err(EditError::NoObservableLineEnding { .. })
+        ));
+
+        // The anchor's own break, not the document's majority: this document is
+        // LF-dominant and the anchor is CRLF-terminated.
+        let mixed = "a: 1\nb: 2\r\nc: 3\n";
+        let inserted = apply_edits(
+            mixed,
+            &[FieldInsert::after(DocumentPath::root(0), "b", "d", "x").into()],
+        )
+        .expect("the insertion applies");
+        assert_eq!(inserted.text(), "a: 1\nb: 2\r\nd: x\r\nc: 3\n");
+        // …and the LF-terminated anchor beside it still gets LF.
+        let inserted = apply_edits(
+            mixed,
+            &[FieldInsert::after(DocumentPath::root(0), "a", "d", "x").into()],
+        )
+        .expect("the insertion applies");
+        assert_eq!(inserted.text(), "a: 1\nd: x\nb: 2\r\nc: 3\n");
+
+        // At end of file the anchor has no terminator, so the break comes from
+        // the last one before it — a nearby sibling's — and the file still does
+        // not end in one.
+        let at_eof = apply_edits(
+            "a: 1\r\nb: 2",
+            &[FieldInsert::new(DocumentPath::root(0), "c", "x").into()],
+        )
+        .expect("the insertion applies");
+        assert_eq!(at_eof.text(), "a: 1\r\nb: 2\r\nc: x");
+    } // End of function an_insertion_copies_a_line_ending_and_refuses_when_there_is_none_to_copy()
+
+    #[test]
+    fn the_line_ending_before_a_point_is_the_last_one_written() {
+        assert_eq!(line_ending_before("a\nb", 2), Some(LineEnding::Lf));
+        assert_eq!(line_ending_before("a\r\nb", 3), Some(LineEnding::Crlf));
+        // Taken from the *last* break before the point, not the first.
+        assert_eq!(line_ending_before("a\r\nb\nc", 5), Some(LineEnding::Lf));
+        assert_eq!(line_ending_before("a\nb\r\nc", 6), Some(LineEnding::Crlf));
+        // No break at all, and a break that cannot be written.
+        assert_eq!(line_ending_before("abc", 3), None);
+        assert_eq!(line_ending_before("a\rb", 3), None);
+        // A point before every break sees none.
+        assert_eq!(line_ending_before("a\nb", 1), None);
+    } // End of function the_line_ending_before_a_point_is_the_last_one_written()
+
+    #[test]
+    fn verification_rejects_a_candidate_in_which_a_sibling_changed() {
+        // The property a removal rests on: every entry the edit did not name
+        // still decodes, key and whole value subtree, to what it decoded to
+        // before. Driven directly, because the entry point by construction
+        // produces candidates that satisfy it.
+        let source = "a: 1\nb: 2\nc:\n  x: 1\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        let mapping = resolve(&index, &DocumentPath::root(0)).expect("resolves");
+        let node = index.node(mapping).expect("the root mapping");
+        let entries = mapping_entries(node);
+        let folded = fold_expectations(
+            &index,
+            vec![pending_field(
+                0,
+                DocumentPath::root(0),
+                node,
+                &entries,
+                Some(entries[1].value),
+                None,
+            )],
+            &[],
+        )
+        .expect("one claim folds");
+        let expectation = &folded[0];
+        assert_eq!(expectation.entries, 2);
+
+        // The honest candidate.
+        let good = SyntaxIndex::parse("a: 1\nc:\n  x: 1\n").expect("parses");
+        assert_eq!(
+            verify_field("a: 1\nc:\n  x: 1\n", &good, expectation),
+            Ok(())
+        );
+
+        // A sibling's value changed as well.
+        let text = "a: 9\nc:\n  x: 1\n";
+        let changed = SyntaxIndex::parse(text).expect("parses");
+        assert!(matches!(
+            verify_field(text, &changed, expectation),
+            Err(VerificationFailure::SiblingChanged { entry: 0, .. })
+        ));
+
+        // A sibling's *nested* value changed, which a scalar-only comparison
+        // would miss.
+        let text = "a: 1\nc:\n  x: 9\n";
+        let nested = SyntaxIndex::parse(text).expect("parses");
+        assert!(matches!(
+            verify_field(text, &nested, expectation),
+            Err(VerificationFailure::SiblingChanged { entry: 1, .. })
+        ));
+
+        // Two siblings went instead of one.
+        let text = "a: 1\n";
+        let short = SyntaxIndex::parse(text).expect("parses");
+        assert!(matches!(
+            verify_field(text, &short, expectation),
+            Err(VerificationFailure::EntryCountChanged {
+                expected: 2,
+                found: 1,
+                ..
+            })
+        ));
+
+        // The entry that should be gone is still there.
+        let sneaky = SyntaxIndex::parse(source).expect("parses");
+        assert!(matches!(
+            verify_field(source, &sneaky, expectation),
+            Err(VerificationFailure::EntryCountChanged { .. })
+        ));
+    } // End of function verification_rejects_a_candidate_in_which_a_sibling_changed()
+
+    #[test]
+    fn the_subtree_digest_tells_shapes_apart() {
+        // Two mappings that hold the same characters in a different structure
+        // must not produce the same digest, or `SiblingChanged` would miss a
+        // restructuring.
+        let first = SyntaxIndex::parse("a:\n  b: 1\n").expect("parses");
+        let second = SyntaxIndex::parse("a:\n  - b\n  - 1\n").expect("parses");
+        let root =
+            |index: &SyntaxIndex| resolve(index, &DocumentPath::parse("a").unwrap()).unwrap();
+        assert_ne!(digest(&first, root(&first)), digest(&second, root(&second)));
+        // And the same shape twice produces the same digest.
+        let same = SyntaxIndex::parse("a:\n  b: 1\n").expect("parses");
+        assert_eq!(digest(&first, root(&first)), digest(&same, root(&same)));
+    } // End of function the_subtree_digest_tells_shapes_apart()
+
+    #[test]
+    fn a_removal_reports_the_span_it_deleted_and_nothing_else() {
+        let source = "a: 1\nb: 2\nc: 3\n";
+        let patched = remove_field(source, &DocumentPath::parse("b").unwrap()).expect("applies");
+        assert_eq!(patched.replacements().len(), 1);
+        assert_eq!(patched.replacements()[0].span.slice(source), Some("b: 2\n"));
+        assert_eq!(patched.replacements()[0].text, "");
+        // Nothing changed spelling, so nothing is reported.
+        assert!(patched.notes().is_empty());
+    }
+
+    #[test]
+    fn an_insertion_reports_a_zero_width_span_at_the_point_it_wrote() {
+        let source = "a: 1\n";
+        let patched = insert_field(source, &DocumentPath::root(0), "b", "x").expect("applies");
+        assert_eq!(patched.replacements().len(), 1);
+        assert!(patched.replacements()[0].span.is_empty());
+        assert_eq!(patched.replacements()[0].span.start, source.len());
+        assert_eq!(patched.replacements()[0].text, "b: x\n");
+        assert!(patched.notes().is_empty());
+    }
+
+    #[test]
+    fn a_parent_path_is_the_path_minus_its_last_key() {
+        assert_eq!(
+            parent_path(&DocumentPath::parse("matches[0].replace").unwrap()),
+            Some(DocumentPath::parse("matches[0]").unwrap())
+        );
+        assert_eq!(
+            parent_path(&DocumentPath::parse("a").unwrap()),
+            Some(DocumentPath::root(0))
+        );
+        // A root path and one ending in an index name no mapping entry.
+        assert_eq!(parent_path(&DocumentPath::root(0)), None);
+        assert_eq!(
+            parent_path(&DocumentPath::parse("matches[0]").unwrap()),
+            None
         );
     }
 }
