@@ -1101,6 +1101,36 @@ own two bounds via `EnvelopeKind`, so the earlier experiments still fail under t
 *"Deleting a user's blank line is not acceptable collateral. The distinction is ownership, not whether the
 byte decodes to YAML data."*
 
+### D2u — the UI shows a scalar's **source text**, never an inferred type
+
+**Decided by the product owner at the Phase 0 / Phase 1 boundary. This is a locked decision — do not
+re-litigate it, and do not "improve" the browser by adding type-aware rendering.**
+
+R16's open half is that the *projection* of a **pre-existing** plain scalar is not proven to match
+espanso's resolver. **31 synthetic and 65 real plain scalars resolve non-`str` under YAML 1.1 today**: a
+bare `on`, `off`, `012` or `12:30` is a boolean, an octal or a sexagesimal to espanso, and a string to the
+YAML 1.2 substrate we read with. So the moment a UI renders one of those *as a type* — a toggle, a
+number field, a boolean chip — it makes a claim this project has not earned, in the one place the user
+will trust it most.
+
+**The rule:** the browser displays the scalar's source text as written. It may say what the *file* says;
+it may not say what the value *means*. Where a type would be useful, show the source and let the user read
+it.
+
+**Why this is the right trade rather than a stopgap.** The cost is cosmetic — a value looks like text
+instead of a toggle. The cost of the alternative is a user seeing `enable: on` rendered as a boolean,
+trusting it, and being wrong about their own config in a tool whose entire promise is fidelity. That
+asymmetry is the same one D2e made for the codec (*"over-quoting costs two apostrophes; under-quoting
+costs the user their value"*) and the same one the hazard gate makes (*"refusing a safe edit costs one
+fallback; accepting an unsafe one costs the user their file"*). This project resolves that asymmetry the
+same way every time, and doing so consistently is most of why its guarantees are believable.
+
+**What would unlock type-aware rendering**, if a later phase wants it: close R16's projection half —
+prove the projection agrees with espanso's actual resolver, not merely with our own table. Until then a
+type is a guess, however well-informed. **Flagging** a scalar as 1.1-ambiguous is permitted and
+encouraged, because that is a statement about *risk*, which we can prove, rather than about *meaning*,
+which we cannot.
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -1133,7 +1163,7 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R9 | The missing evaluation criterion is **replacement-envelope correctness**, not endpoint accuracy | Phase 0c. Mutate real documents and assert: the span matches the requested structural path despite duplicate keys, nested sequence mappings, merge keys, aliases, explicit keys and empty values; the replacement reparses to the intended value and stays valid YAML; every byte outside the envelope is identical (CRLF/LF, BOM, missing final newline, trailing spaces, comments, block-scalar terminal newlines). This is the Phase 0 gate's round-trip property test. |
 | R14 | **A Markdown table inside `replace: \|` rejected the whole document.** `locate_header` treated any block whose first body line opens with `\|` or `>` as a truncated R5 header | **Fixed in 0c-1.** The backwards lexer runs first and the forward R5 path is the fallback; a genuinely truncated header has nothing but its key on the preceding line, so backwards finds nothing and forwards still fires. Reviewer-approved. Pinned by `a_body_line_opening_with_a_block_indicator_is_not_a_truncated_header`. This was a latent **Phase 0b** bug that the codec work surfaced — a real espanso config with a Markdown table would have been entirely unopenable. |
 | R15 | **`NonCanonicalEscaping` is deliberately over-broad**: it refuses every double-quoted source containing any backslash, including already-canonical `\\`, `\"`, `\n`, `\t` | Accepted for now, and safe — it only costs the ability to re-encode such a scalar byte-identically, never correctness. Carries a `TODO(0c-2)` in its doc comment. Narrow it only if 0c-2 finds real files where editing an escaped double-quoted value matters. |
-| R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | **Partly closed in 0c-3b-2b (D2s), and the open half is stated so it cannot be mistaken for mitigated.** *R16 stays open: byte preservation and conservative emission prevent edits from changing untouched bytes or introducing known YAML 1.1-ambiguous plain scalars, but the UI projection of pre-existing plain scalars is not yet proven to match espanso's resolver.* **Closed half:** an in-house 1.1/1.2-core tag table in the library, consulted by the emitter and asserted in `verify()` as a differential property, so an edit can neither introduce a new ambiguity nor change an existing classification. Building it found D2h's predicate writing **34 distinct 1.1-ambiguous values plain** — a real corruption path, now fixed. **Open half:** the *projection*. 31 synthetic and 65 real plain scalars resolve non-`str` under 1.1 today; the app would display them as strings. That is a Phase 1 question about how the UI shows such a scalar. **Residual risk:** a pre-existing or explicitly tagged scalar may be displayed or used by the typed projection with a different type/value than espanso assigns, and an incomplete hand-maintained resolver table or an espanso-specific schema change could leave that disagreement undetected. **Two named weaknesses:** explicit tags are outside the table entirely, and the **1.2-core half has no second implementation** (the 1.1 half has one, differentially swept over 500 000 values with zero disagreements). Deliberately **no second parser crate** — see D2s for why, and do not add one without re-reading it. |
+| R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | **Partly closed in 0c-3b-2b (D2s), and the open half is stated so it cannot be mistaken for mitigated.** *R16 stays open: byte preservation and conservative emission prevent edits from changing untouched bytes or introducing known YAML 1.1-ambiguous plain scalars, but the UI projection of pre-existing plain scalars is not yet proven to match espanso's resolver.* **Closed half:** an in-house 1.1/1.2-core tag table in the library, consulted by the emitter and asserted in `verify()` as a differential property, so an edit can neither introduce a new ambiguity nor change an existing classification. Building it found D2h's predicate writing **34 distinct 1.1-ambiguous values plain** — a real corruption path, now fixed. **Open half:** the *projection*. 31 synthetic and 65 real plain scalars resolve non-`str` under 1.1 today; the app would display them as strings. **The UI consequence is settled by D2u — the browser shows source text, never an inferred type — so the open half costs display richness, not correctness.** R16 closes only when the projection is proven against espanso's actual resolver, which is also what would unlock type-aware rendering. **Residual risk:** a pre-existing or explicitly tagged scalar may be displayed or used by the typed projection with a different type/value than espanso assigns, and an incomplete hand-maintained resolver table or an espanso-specific schema change could leave that disagreement undetected. **Two named weaknesses:** explicit tags are outside the table entirely, and the **1.2-core half has no second implementation** (the 1.1 half has one, differentially swept over 500 000 values with zero disagreements). Deliberately **no second parser crate** — see D2s for why, and do not add one without re-reading it. |
 | R17 | **A flow collection is not refused by the hazard gate.** `HazardKind` has only `CommentInFlowCollection`, so `matches: [{trigger: ":a", replace: old}]` both resolves *and* passes `is_safely_editable`. A block scalar is illegal inside `{…}`/`[…]`, so an edit that turns a short value into a multi-line one would emit invalid YAML | **Closed in 0c-2b (D2k)**, by the second of the two answers R17 named: flow context is threaded into rendering, so a multi-line value inside a flow collection becomes a double-quoted one-liner and a block scalar is never emitted there. Flow-interior edits are **not** refused, because refusing them would cost the visual editor the ability to change a trigger list. The one collateral effect is that a plain scalar in flow context is requoted on edit. Pinned in both directions; a flow collection carrying a comment is still refused outright. |
 | R18 | **A node in key position cannot be verified by the path that found it.** Renaming the `replace` of `replace: old` makes the path `replace` resolve to `NoSuchKey` in the reparsed document, so the verify step fails on a *correct* edit | Accepted and bounded. A scalar edit targets `Resolved::value` only; `resolve_key` exists for the **spans** a structural edit needs (where an entry begins, so removing it takes its key too), not as an edit target. Documented on `resolve_key` itself. A key-rename operation needs its own protocol — verify against the **intended new** path, not the old one — and is 0c-3's problem if it is wanted at all. Editing an ordinary value that merely equals some other entry's key string is harmless. |
 | R19 | **`TriviaIndex::scan` is quadratic** — `ownership.rs`'s primitives each scan **every node** and are called **once per trivia item**, so the cost is O(items × nodes) | **Largely closed in 0c-3b-2b's fix round, by memoisation rather than by thinning any sweep** — which is what the 0c-3b-2a checkpoint instructed and what the first draft of the gate did *not* do (it strided the real corpus instead; the review caught it). The primitives now answer from precomputed orders, with a differential test asserting they agree with the linear scans they replaced. Measured: the gate binary went **34.3 s → 16.9 s while becoming exhaustive** (real attempts 1 373 → 1 998), `patch_edit` 23.6 s → 7.5 s, `patch_move` 16.4 s → 5.7 s, `patch_structure` 19.6 s → 5.9 s, and the whole suite **87.9 s → 39.4 s**. **Not fully closed:** the safe entry point still re-scans on every call by design, which is a Phase 1 concern — 20 ms per keystroke-triggered rescan is not viable, so the UI needs either a cached index or an incremental one. |
@@ -1627,9 +1657,9 @@ reordering matches **inside one sequence**.
 
 - **Presenting a plain scalar's *type*** to the user. R16's open half: 31 synthetic and 65 real plain
   scalars resolve non-`str` under YAML 1.1, and the projection is not proven to match espanso's resolver.
-  A UI that renders `on` as a boolean is making a claim this project has not earned. **This becomes a
-  Phase 1 design question the moment the browser shows a value** — decide it deliberately, and prefer
-  showing the source text over showing an inferred type.
+  A UI that renders `on` as a boolean is making a claim this project has not earned. **This question is
+  now decided — see D2u: the browser shows source text, never an inferred type.** Flagging a scalar as
+  1.1-ambiguous *is* permitted, because that is a claim about risk rather than about meaning.
 - **Moving a match between files or between sequences** (D2r). `ItemMove` is same-sequence only, and its
   "no re-indentation" proof does not transfer. Plan §8.4's drag-between-files needs its own operation.
 - **Combining a move with any other edit in one batch** (R25).

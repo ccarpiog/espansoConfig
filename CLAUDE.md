@@ -123,6 +123,8 @@ a mapping field, and move a match within one sequence.
 deliberately does **not** license, each with a reason recorded in `PROGRESS.md`:
 
 - **presenting a plain scalar's *type*** to the user — R16's open half: the projection of a
-  pre-existing plain scalar is not proven to match espanso's YAML 1.1 resolver;
+  pre-existing plain scalar is not proven to match espanso's YAML 1.1 resolver. **Decided (D2u): the
+  UI shows a scalar's source text as written, never an inferred type.** Flagging one as
+  1.1-ambiguous is permitted — that is a claim about risk, not about meaning;
 - **moving a match between files or between sequences** — D2r; `ItemMove` is same-sequence only;
 - **combining a move with any other edit in one batch** — R25.
