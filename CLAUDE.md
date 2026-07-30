@@ -109,8 +109,20 @@ destroys what they exist to pin:
 
 ## 6. Current phase
 
-Phase 0a is complete: workspace scaffold, `discovery` implemented, golden corpus built, parser
-evaluation done. The verdict is in `docs/parser-evaluation.md` — **`saphyr-parser` 0.0.11 plus
-a character-to-byte adapter and our own gap scanner**. Phase 0b builds the `SyntaxIndex` on
-that; Phase 0c the patch engine and emitter. No UI work begins until the round-trip property
-test passes on the full corpus (plan §12, Phase 0).
+**Phase 0 is complete and its architectural gate is PASSED.** The round-trip property test passes
+over **every eligible target of both corpora**, so plan §12's exit criterion is discharged in its
+strong reading. `PROGRESS.md` is the authoritative state file; the gate verdict with its evidence
+is `docs/decisions/0c-3b-2b-notes.md` §8.
+
+The substrate verdict is `docs/parser-evaluation.md` — **`saphyr-parser` 0.0.11 plus a
+character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex` (0b), the scalar
+codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
+a mapping field, and move a match within one sequence.
+
+**Phase 1 — the read-only browser — is next, and UI work is now unblocked.** Three things the gate
+deliberately does **not** license, each with a reason recorded in `PROGRESS.md`:
+
+- **presenting a plain scalar's *type*** to the user — R16's open half: the projection of a
+  pre-existing plain scalar is not proven to match espanso's YAML 1.1 resolver;
+- **moving a match between files or between sequences** — D2r; `ItemMove` is same-sequence only;
+- **combining a move with any other edit in one batch** — R25.

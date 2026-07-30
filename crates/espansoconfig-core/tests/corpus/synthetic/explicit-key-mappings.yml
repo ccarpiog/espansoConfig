@@ -1,0 +1,21 @@
+# Explicit-key mappings: YAML's `? key` / `: value` form (PROGRESS.md, R7).
+#
+# Espanso never writes this shape and the visual editor refuses it, so every
+# node of the `matches:` subtree below is non-editable. `global_vars:` is not,
+# which is the "refused by scope, not by file" behaviour R12 records.
+#
+# The fixture exists because Phase 0c-3b-2b's gate sweep found that
+# HazardKind::ExplicitKeyMapping — one of the six constructs R9 names — had no
+# corpus fixture at all and was reached only by a hand-written unit test. That
+# is R20's standing rule: a hazard gets a fixture, not only a unit test.
+matches:
+  - ? explicit trigger
+    : an explicit value
+  - trigger: ':second'
+    replace: a compact entry beside the explicit one
+
+global_vars:
+  - name: greeting
+    type: echo
+    params:
+      echo: hello

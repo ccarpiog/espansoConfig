@@ -196,17 +196,40 @@
 //! seams plus one internal seam per adjacent pair of carried runs
 //! ([`MoveSeam`]) — a removal creates one join, and a move creates all of those.
 //!
+//! # Phase 0c-3b-2b — the property the substrate cannot state
+//!
+//! Every property above is checked against a `saphyr-parser` reparse, and
+//! `saphyr-parser` is YAML **1.2**. Espanso reads the same file with a YAML
+//! **1.1**-ish stack, so a candidate can satisfy all of them and still mean
+//! something else where it is actually read: a plain `no` that becomes `false`, a
+//! plain `012` that becomes ten, a plain `12:30` that becomes 750
+//! (`PROGRESS.md`, R16). `no_ambiguous_plain_scalar_is_introduced` states it
+//! directly, from [`crate::emit`]'s hand-written tag-resolution table rather than
+//! from a second parser, as a **differential** property: a document may already
+//! hold such scalars — real espanso files do — but an edit may never leave the
+//! candidate holding more of them than the source did
+//! ([`VerificationFailure::AmbiguousPlainScalarIntroduced`]).
+//!
+//! It is deliberately a *second* statement of what
+//! [`crate::emit::is_conservatively_safe_plain_scalar`] already promises. The
+//! emitter decides what to write; this reads what the reparsed document holds,
+//! and a defect in the first is exactly what the second exists to catch
+//! (`PROGRESS.md`, R24).
+//!
 //! # What is *not* here
 //!
 //! Cross-**document** and cross-**file** moves (plan section 8.4, a UI-phase
-//! concern), the full R9 round-trip property test and R16's second YAML 1.1
-//! oracle are step 0c-3b-2b.
+//! concern). R16 is **not closed**: byte preservation and conservative emission
+//! prevent edits from changing untouched bytes or introducing known YAML
+//! 1.1-ambiguous plain scalars, but the UI projection of *pre-existing* plain
+//! scalars is not yet proven to match espanso's resolver.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::emit::{
-    choose_scalar, decode, preserve_scalar, reencode_in_place, DecodeError, NotReencodable,
-    ScalarContext, ScalarPlan,
+    choose_scalar, decode, plain_scalar_is_ambiguous, preserve_scalar, reencode_in_place,
+    DecodeError, NotReencodable, ScalarContext, ScalarPlan,
 };
 use crate::patch::path::{resolve, resolve_full, DocumentPath, PathError, PathSegment};
 use crate::syntax::{
@@ -1490,6 +1513,68 @@ pub enum VerificationFailure {
         /// Where the re-attributed comment sat in the original document.
         at: usize,
     },
+    /// The candidate holds a **plain** scalar that YAML 1.1 does not read as a
+    /// string, and the source did not already hold it.
+    ///
+    /// **`PROGRESS.md`'s R16, asserted rather than argued.** The round-trip
+    /// oracle reparses with `saphyr-parser`, which is YAML 1.2; espanso reads the
+    /// same file with a 1.1-ish stack. So a candidate that satisfies every other
+    /// property here can still mean something different where it is actually
+    /// read — a written `no` that becomes `false`, a `012` that becomes ten, a
+    /// `12:30` that becomes 750.
+    ///
+    /// [`crate::emit::is_conservatively_safe_plain_scalar`] is supposed to make
+    /// this unreachable by never choosing the plain style for such a value. This
+    /// is the second, independent statement of the same rule, and it is the one
+    /// that survives a defect in the first: the emitter decides what to
+    /// *write*, and this reads what the reparsed candidate actually *holds*.
+    ///
+    /// **Differential, not absolute.** A real espanso file legitimately contains
+    /// `true`, `100` and the like already, and refusing to edit such a file would
+    /// be wrong. The comparison is therefore a multiset containment: the
+    /// candidate may hold no more occurrences of an ambiguous plain scalar than
+    /// the source did. Deleting one is fine, relocating one is fine, and adding
+    /// one is not.
+    ///
+    /// Carries the offset in the **candidate** and never the text
+    /// (`CLAUDE.md` section 1).
+    AmbiguousPlainScalarIntroduced {
+        /// Where the new ambiguous plain scalar sits in the candidate.
+        at: usize,
+        /// Its length in bytes.
+        len: usize,
+    },
+    /// A removal envelope run reaches outside the runs the entry **owns**.
+    ///
+    /// **The removal's counterpart of
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`], and the Phase
+    /// 0c-3b-2b review's blocking finding.** Experiment E5 widened
+    /// `removal_span` by one **blank** line, and every production layer accepted
+    /// it: the extra line holds no node, so `StructuralGuard::Removal`'s
+    /// node-crossing half is blind; the mapping still loses exactly one entry,
+    /// so `verify_field` is blind; the line decodes to nothing, so every sibling
+    /// digest is unchanged; and `bytes_outside_the_replacements_match`
+    /// positively **authorises** the deleted byte, because the envelope declared
+    /// it. Only the gate sweep's own line bound saw it — which is R24's exact
+    /// pattern, a safety property living in a test file.
+    ///
+    /// The bound is derived **independently of the envelope**: the entry's own
+    /// physical lines, walked from the source text and the key's and value's
+    /// node spans, minus the whole lines of the file-owned comments inside them
+    /// and the blank runs the ownership rules attach to those comments (D2o).
+    /// It consults nothing `removal_envelope` produced, so an envelope that
+    /// widened by a line cannot authorise itself.
+    ///
+    /// A move's source half is a removal envelope built by the same call, so it
+    /// is bounded by this too — one document fact, one implementation of it.
+    ///
+    /// Carries offsets only, never content (`CLAUDE.md` section 1).
+    RemovalCarriesMoreThanTheEntry {
+        /// The envelope run that is not contained in what the entry owns.
+        at: ByteSpan,
+        /// The entry's own physical lines, as the independent bound derives them.
+        lines: ByteSpan,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -1785,6 +1870,17 @@ impl fmt::Display for VerificationFailure {
                 "edit {edit}: the comment at byte {at} of the original document is owned by \
                  something else in the candidate"
             ),
+            VerificationFailure::AmbiguousPlainScalarIntroduced { at, len } => write!(
+                formatter,
+                "the candidate holds a {len}-byte plain scalar at byte {at} that YAML 1.1 does \
+                 not read as a string and the source did not already hold"
+            ),
+            VerificationFailure::RemovalCarriesMoreThanTheEntry { at, lines } => write!(
+                formatter,
+                "the removal run {}..{} is not inside the runs the entry owns within its own \
+                 lines {}..{}",
+                at.start, at.end, lines.start, lines.end
+            ),
         }
     } // End of function fmt() for VerificationFailure
 }
@@ -2006,7 +2102,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     // reaches into a node it is not removing, or an insertion point inside one,
     // is a planning defect that the candidate-side checks cannot see.
     for guard in &guards {
-        guard.check(&index)?;
+        guard.check(source, &index, &trivia)?;
     }
     let expectations = fold_expectations(&index, expectations, &rewritten)?;
 
@@ -2076,6 +2172,13 @@ struct PlannedEdit {
 /// the entry, as the single span had to; and the runs together must cover every
 /// frontier leaf of the entry. The second half is new because a set can omit
 /// bytes a hull could not, so without it the empty run set would pass.
+///
+/// Phase 0c-3b-2b's review added a **third**: every run must lie inside the runs
+/// the entry owns, as [`entry_owned_runs`] derives them from the text without
+/// consulting the envelope at all. The first two halves are stated over *node
+/// spans*, and a blank line holds no node — which is exactly how experiment E5's
+/// one extra deleted blank line passed every production check
+/// ([`VerificationFailure::RemovalCarriesMoreThanTheEntry`]).
 enum StructuralGuard {
     /// A removal envelope, with the entry's own subtree it is allowed to cover.
     Removal {
@@ -2083,12 +2186,34 @@ enum StructuralGuard {
         runs: Vec<ByteSpan>,
         /// The key and value node of the entry being removed.
         entry: (NodeId, NodeId),
+        /// What the envelope is for, which decides who bounds its runs.
+        kind: EnvelopeKind,
     },
     /// An insertion point, which must lie between nodes and not inside one.
     Insertion {
         /// The offset the new entry is spliced at.
         at: usize,
     },
+}
+
+/// What a removal envelope is for, and therefore which layer bounds its runs.
+///
+/// Both kinds are built by the same [`removal_envelope`] call and both are
+/// checked against the original index's node spans here. They differ only in who
+/// states the third bound — the one a blank line is visible to — because that
+/// bound's failure has to name the operation the user asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvelopeKind {
+    /// A removal: the runs are deleted, and this guard bounds them by the runs
+    /// [`entry_owned_runs`] says the entry owns.
+    RemovesTheEntry,
+    /// A move's source half: the runs are relocated rather than deleted, and
+    /// `verify` bounds them twice over with the same two arguments —
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`] for the item's own
+    /// lines and [`VerificationFailure::CommentOwnershipChanged`] for the blank
+    /// run a kept comment's ownership rests on. Bounding them a third time here
+    /// would pre-empt both and report a removal's failure for a move.
+    CarriesTheItem,
 }
 
 impl StructuralGuard {
@@ -2100,12 +2225,20 @@ impl StructuralGuard {
     /// reaches into a node that is neither part of the entry nor an ancestor of
     /// it — ancestors necessarily overlap, since they contain the entry;
     /// [`VerificationFailure::EnvelopeMissesTheEntry`] when the runs leave part
-    /// of one of the entry's own tokens behind; and
+    /// of one of the entry's own tokens behind;
+    /// [`VerificationFailure::RemovalCarriesMoreThanTheEntry`] when a run
+    /// reaches outside what the entry owns, which is the only half that can see
+    /// a deleted **blank** line; and
     /// [`VerificationFailure::InsertionPointInsideANode`] when an insertion
     /// point falls strictly inside a node's span.
-    fn check(&self, index: &SyntaxIndex) -> Result<(), VerificationFailure> {
+    fn check(
+        &self,
+        source: &str,
+        index: &SyntaxIndex,
+        trivia: &TriviaIndex,
+    ) -> Result<(), VerificationFailure> {
         match self {
-            StructuralGuard::Removal { runs, entry } => {
+            StructuralGuard::Removal { runs, entry, kind } => {
                 for node in index.nodes() {
                     let of_the_entry =
                         in_subtree(index, entry.0, node.id) || in_subtree(index, entry.1, node.id);
@@ -2135,6 +2268,29 @@ impl StructuralGuard {
                         });
                     }
                 } // End of the loop over every node the envelope might disturb
+
+                // **The third half, and the only one that can see a deleted
+                // blank line.** Both loops above are stated over node spans, and
+                // a blank line holds no node — so experiment E5's one extra
+                // deleted line satisfies them exactly. This bound is derived
+                // from the text and the entry's frontier, and knows nothing
+                // about the envelope it is checking.
+                if *kind == EnvelopeKind::CarriesTheItem {
+                    return Ok(());
+                }
+                let (lines, owned) = entry_owned_runs(source, index, trivia, entry.0, entry.1)
+                    .ok_or(VerificationFailure::RemovalCarriesMoreThanTheEntry {
+                        at: ByteSpan::default(),
+                        lines: ByteSpan::default(),
+                    })?;
+                for run in runs {
+                    if !owned.iter().any(|allowed| allowed.contains(*run)) {
+                        return Err(VerificationFailure::RemovalCarriesMoreThanTheEntry {
+                            at: *run,
+                            lines,
+                        });
+                    }
+                } // End of the loop that bounds every run by what the entry owns
                 Ok(())
             }
             StructuralGuard::Insertion { at } => {
@@ -2629,6 +2785,7 @@ fn plan_removal(
         guards: vec![StructuralGuard::Removal {
             runs,
             entry: (key, resolved.value),
+            kind: EnvelopeKind::RemovesTheEntry,
         }],
         rewritten: None,
     })
@@ -3052,6 +3209,7 @@ fn plan_move(
             StructuralGuard::Removal {
                 runs: envelope.runs,
                 entry: (item, item),
+                kind: EnvelopeKind::CarriesTheItem,
             },
             StructuralGuard::Insertion { at: point },
         ],
@@ -4534,6 +4692,7 @@ fn verify(
     bytes_outside_the_replacements_match(source, candidate, replacements)?;
     let index = SyntaxIndex::parse(candidate).map_err(VerificationFailure::DoesNotParse)?;
     file_comments_survive(source, candidate, &index, trivia)?;
+    no_ambiguous_plain_scalar_is_introduced(original, &index)?;
     for relocation in moves {
         the_arrival_is_the_departure(source, original, replacements, relocation)?;
         document_lines_are_conserved(source, candidate)?;
@@ -4788,6 +4947,77 @@ fn file_comments_survive(
     Ok(())
 } // End of function file_comments_survive()
 
+/// Checks that no edit left the candidate holding a **new** YAML 1.1-ambiguous
+/// plain scalar.
+///
+/// **R16's production property, and the reason the tag-resolution oracle lives in
+/// the library rather than only in the test suite** (`PROGRESS.md`, R24). Every
+/// other property here is checked against a reparse by `saphyr-parser`, which
+/// resolves under YAML **1.2**; espanso resolves under **1.1**. A candidate can
+/// therefore satisfy all of them and still say something different where it is
+/// read — `no` for `false`, `012` for ten, `12:30` for 750.
+///
+/// # It is differential on purpose
+///
+/// Real espanso files legitimately contain `true`, `100` and `on` already, and a
+/// property demanding their absence would refuse to edit them. So the check is a
+/// **multiset containment**: for every ambiguous plain scalar text, the candidate
+/// may hold no more occurrences than the source did. A removal shrinks the
+/// multiset, a move leaves it alone, and only writing a new one can fail.
+///
+/// # Why this is an oracle and not a restatement
+///
+/// It reads the reparsed candidate's own scalars. Nothing in it comes from the
+/// planner, from the replacement list or from the style the emitter chose:
+/// [`crate::emit::is_conservatively_safe_plain_scalar`] decides what to *write*,
+/// and this reads what the document actually *holds*. A defect in the first is
+/// exactly what the second exists to catch.
+///
+/// # Errors
+///
+/// [`VerificationFailure::AmbiguousPlainScalarIntroduced`], carrying the offset
+/// and length in the candidate and never the text (`CLAUDE.md` section 1).
+fn no_ambiguous_plain_scalar_is_introduced(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+) -> Result<(), VerificationFailure> {
+    let mut budget: BTreeMap<&str, usize> = BTreeMap::new();
+    for node in original.nodes() {
+        if let Some(text) = ambiguous_plain_scalar(node) {
+            *budget.entry(text).or_insert(0) += 1;
+        }
+    }
+    for node in candidate.nodes() {
+        let Some(text) = ambiguous_plain_scalar(node) else {
+            continue;
+        };
+        match budget.get_mut(text) {
+            Some(remaining) if *remaining > 0 => *remaining -= 1,
+            _ => {
+                return Err(VerificationFailure::AmbiguousPlainScalarIntroduced {
+                    at: node.span.start,
+                    len: node.span.len(),
+                })
+            }
+        }
+    } // End of the loop that spends one budgeted occurrence per candidate scalar
+    Ok(())
+} // End of function no_ambiguous_plain_scalar_is_introduced()
+
+/// The decoded text of `node` when it is a plain scalar YAML 1.1 and YAML 1.2
+/// read differently, or that 1.1 reads as something other than a string.
+///
+/// Quoted and block scalars are excluded because quoting is precisely the act
+/// that suppresses implicit resolution: `'no'` is a string in every version of
+/// YAML, and so is a `|` block.
+fn ambiguous_plain_scalar(node: &Node) -> Option<&str> {
+    let scalar = node.scalar.as_ref()?;
+    if scalar.presentation.style != ScalarStyle::Plain {
+        return None;
+    }
+    plain_scalar_is_ambiguous(&scalar.value).then_some(scalar.value.as_str())
+}
+
 /// Checks that a move relocated the document's lines and created none.
 ///
 /// # Why lines rather than bytes
@@ -4929,6 +5159,131 @@ fn item_own_lines(
     } // End of the walk up over the item's own leading comment block
     Some(ByteSpan::new(start, end))
 } // End of function item_own_lines()
+
+/// The first and last byte any node of the entry's two subtrees occupies.
+///
+/// Node spans only — no trivia, no ownership query, nothing the planner built.
+/// The maximum is taken over the whole subtree rather than over the two roots
+/// because a block collection's own span stops at its last *child*
+/// (`crate::syntax::collection`) and a block scalar's content span ends past its
+/// final break (`PROGRESS.md`, D2c), so neither root alone bounds the entry.
+///
+/// `None` when neither identifier is in the index, which is a bug in this crate
+/// rather than a document a user can write.
+fn entry_frontier(index: &SyntaxIndex, key: NodeId, value: NodeId) -> Option<(usize, usize)> {
+    let mut first = usize::MAX;
+    let mut last = 0usize;
+    let mut seen = false;
+    let mut pending = vec![key, value];
+    while let Some(id) = pending.pop() {
+        let Some(node) = index.node(id) else {
+            continue;
+        };
+        seen = true;
+        first = first.min(node.span.start);
+        last = last.max(node.span.end);
+        pending.extend(node.children.iter().copied());
+    } // End of the walk over both halves of the entry
+    seen.then_some((first, last))
+} // End of function entry_frontier()
+
+/// The physical-line runs a removal of one mapping entry may delete, derived
+/// **textually and independently of the envelope**.
+///
+/// **The production bound the Phase 0c-3b-2b review's blocking finding asked
+/// for**, and the removal's counterpart of [`item_own_lines`]. It answers in two
+/// steps, and nothing in either comes from [`removal_envelope`], from
+/// [`removal_span`] or from any span the planner declared:
+///
+/// 1. **the entry's own lines** — from the start of the line its frontier begins
+///    on, up over the contiguous comment-only lines directly above it (plan
+///    section 6.2's rule 1 gives those to the entry), down to just past the break
+///    that ends its last line. The walk stops at the first line that is blank or
+///    holds anything else, so it can never climb over a blank line into a
+///    comment the *file* owns by rule 2. A `#` **inside a frontier leaf** is a
+///    block scalar's own content and not a comment, and only the syntax index can
+///    tell the two apart, so the upward walk asks it rather than the text;
+/// 2. **minus what the ownership rules keep** — the whole line of every
+///    file-owned comment inside those lines, grown over the blank runs that touch
+///    it. That is D2o's rule read the other way round: *a blank run survives
+///    exactly where it touches a kept file-owned comment's line*, so a blank run
+///    that touches no such line is the entry's own interior trivia and may go.
+///
+/// # Why this duplicates [`preserved_regions`] rather than calling it
+///
+/// Deliberately, and for the same reason [`item_own_lines`] duplicates the move
+/// envelope's boundary: [`preserved_regions`] punches its holes out of the hull
+/// **the planner built**, so an envelope that widened by a line would have its
+/// own widened hull handed back to it as the window to check against. This one
+/// punches them out of a window derived from the node spans and the text. The two
+/// consult the same ownership layer — there is one answer to "who owns this
+/// comment" and re-deciding it in the edit layer is exactly what D2/D2d forbids —
+/// but they disagree the moment the hull is wrong, which is the whole point.
+///
+/// Returns the entry's own lines and the ordered, disjoint runs inside them.
+fn entry_owned_runs(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    key: NodeId,
+    value: NodeId,
+) -> Option<(ByteSpan, Vec<ByteSpan>)> {
+    let body_offset = index.preamble().body_offset;
+    let (first, last) = entry_frontier(index, key, value)?;
+    let mut end = last;
+    if !source.get(..end)?.ends_with(['\n', '\r']) {
+        end = line_end_of(source, end);
+    }
+    let mut start = line_start_of(source, first, body_offset);
+    while start > body_offset {
+        let above = line_start_of(source, start - 1, body_offset);
+        let line = source.get(above..start)?;
+        let text = line.trim_start_matches([' ', '\t']);
+        let opener = above + (line.len() - text.len());
+        let inside_a_leaf = index.nodes().iter().any(|node| {
+            node.is_frontier_leaf() && node.span.start <= opener && opener < node.span.end
+        });
+        if !text.starts_with('#') || inside_a_leaf {
+            break;
+        }
+        start = above;
+    } // End of the walk up over the entry's own leading comment block
+    let lines = ByteSpan::new(start, end.max(start));
+
+    let mut kept: Vec<ByteSpan> = Vec::new();
+    for comment in trivia.file_comments() {
+        if !comment.span.intersects(lines) {
+            continue;
+        }
+        let mut from = line_start_of(source, comment.span.start, body_offset);
+        let mut to = line_end_of(source, comment.span.end);
+        for run in trivia.blank_runs() {
+            if run.span.end == from {
+                from = run.span.start.max(body_offset);
+            }
+            if run.span.start == to {
+                to = run.span.end;
+            }
+        } // End of the loop that grows the kept region over the blank runs beside it
+        let from = from.max(lines.start).min(lines.end);
+        let to = to.min(lines.end).max(from);
+        if from < to {
+            kept.push(ByteSpan::new(from, to));
+        }
+    } // End of the loop over the comments the file owns
+
+    kept.sort_by_key(|region| (region.start, region.end));
+    let mut merged: Vec<ByteSpan> = Vec::new();
+    for region in kept {
+        match merged.last_mut() {
+            Some(previous) if region.start <= previous.end => {
+                previous.end = previous.end.max(region.end)
+            }
+            _ => merged.push(region),
+        }
+    } // End of the loop that merges the kept regions into a disjoint, ordered set
+    Some((lines, runs_between(lines, &merged)))
+} // End of function entry_owned_runs()
 
 /// Checks that a move wrote the bytes it took, and took nothing but the item.
 ///
@@ -5440,6 +5795,41 @@ mod tests {
             })
         ));
     } // End of function the_gate_is_consulted_by_the_entry_point_not_by_the_caller()
+
+    #[test]
+    fn the_ambiguity_property_fires_on_a_candidate_no_emitter_would_produce() {
+        // **The oracle must be able to disagree.** R16's production property is
+        // pinned at zero over both corpora and is argued unreachable — the
+        // emitter never writes a 1.1-ambiguous value plain — so the only way to
+        // show it is load-bearing rather than dead is to hand it the candidate a
+        // defective emitter would have made. That candidate is built here by
+        // hand, which is the same discipline `RemovalWouldDeleteAFileComment`
+        // gets in `docs/decisions/0c-3b-1-notes.md` section 6.
+        let source = SyntaxIndex::parse("a: 'no'\nb: keep\n").expect("parses");
+        let plain = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
+        assert!(matches!(
+            no_ambiguous_plain_scalar_is_introduced(&source, &plain),
+            Err(VerificationFailure::AmbiguousPlainScalarIntroduced { .. })
+        ));
+
+        // And it must **not** fire on the shapes a real file legitimately has.
+        // The property is differential, not absolute: an edit may keep, relocate
+        // or delete an ambiguous plain scalar the document already held.
+        let held = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
+        assert_eq!(
+            no_ambiguous_plain_scalar_is_introduced(&held, &held),
+            Ok(())
+        );
+        let deleted = SyntaxIndex::parse("b: keep\n").expect("parses");
+        assert_eq!(
+            no_ambiguous_plain_scalar_is_introduced(&held, &deleted),
+            Ok(())
+        );
+        // Two occurrences where the source had one is still an introduction, so
+        // the comparison has to count rather than merely look up.
+        let twice = SyntaxIndex::parse("a: no\nb: no\n").expect("parses");
+        assert!(no_ambiguous_plain_scalar_is_introduced(&held, &twice).is_err());
+    } // End of function the_ambiguity_property_fires_on_a_candidate_no_emitter_would_produce()
 
     #[test]
     fn an_empty_value_has_no_bytes_to_replace() {
@@ -6953,9 +7343,10 @@ mod structural_tests {
         assert_eq!(
             StructuralGuard::Removal {
                 runs: vec![honest],
-                entry
+                entry,
+                kind: EnvelopeKind::RemovesTheEntry,
             }
-            .check(&index),
+            .check(source, &index, &trivia),
             Ok(())
         );
 
@@ -6964,9 +7355,10 @@ mod structural_tests {
         assert!(matches!(
             StructuralGuard::Removal {
                 runs: vec![greedy],
-                entry
+                entry,
+                kind: EnvelopeKind::RemovesTheEntry,
             }
-            .check(&index),
+            .check(source, &index, &trivia),
             Err(VerificationFailure::EnvelopeCoversAnotherNode { .. })
         ));
 
@@ -6977,32 +7369,204 @@ mod structural_tests {
         assert!(matches!(
             StructuralGuard::Removal {
                 runs: Vec::new(),
-                entry
+                entry,
+                kind: EnvelopeKind::RemovesTheEntry,
             }
-            .check(&index),
+            .check(source, &index, &trivia),
             Err(VerificationFailure::EnvelopeMissesTheEntry { .. })
         ));
         let clipped = ByteSpan::new(honest.start, honest.end - 2);
         assert!(matches!(
             StructuralGuard::Removal {
                 runs: vec![clipped],
-                entry
+                entry,
+                kind: EnvelopeKind::RemovesTheEntry,
             }
-            .check(&index),
+            .check(source, &index, &trivia),
             Err(VerificationFailure::EnvelopeMissesTheEntry { .. })
         ));
     } // End of function the_removal_guard_refuses_an_envelope_that_reaches_into_a_neighbour()
+
+    /// Plans a removal, lets `tamper` rewrite the plan, and runs everything
+    /// [`apply_edits`] runs afterwards.
+    ///
+    /// The removal's counterpart of `move_tests::tampered_move`, and deliberately
+    /// not a wrapper over [`apply_edits`]: the point is to inject a plan no
+    /// planner in this tree produces and subject it to the **whole** safety
+    /// boundary — the disjointness check, the structural guard, the splice and
+    /// every verification property — rather than to a chosen one.
+    fn tampered_removal(
+        source: &str,
+        field: &str,
+        tamper: impl FnOnce(&str, &mut PlannedEdit),
+    ) -> Result<String, EditError> {
+        let index = SyntaxIndex::parse(source).expect("the document parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let path = DocumentPath::parse(field).expect("the path parses");
+        let request = FieldRemoval::new(path);
+        let mut planned = plan_removal(source, &index, &trivia, 0, &request)?;
+        tamper(source, &mut planned);
+        planned
+            .replacements
+            .sort_by_key(|replacement| (replacement.span.start, replacement.span.end));
+        for pair in planned.replacements.windows(2) {
+            if pair[0].span.end > pair[1].span.start || pair[0].span.start == pair[1].span.start {
+                return Err(EditError::OverlappingEdits {
+                    first: pair[0].span,
+                    second: pair[1].span,
+                });
+            }
+        } // End of the loop that checks the tampered replacements are disjoint
+        for guard in &planned.guards {
+            guard.check(source, &index, &trivia)?;
+        }
+        let expectations =
+            fold_expectations(&index, planned.expectation.into_iter().collect(), &[])?;
+        let candidate = splice(source, &planned.replacements);
+        verify(
+            source,
+            &candidate,
+            &planned.replacements,
+            &planned.permitted,
+            Expected {
+                index: &index,
+                trivia: &trivia,
+                edits: &[],
+                fields: &expectations,
+                moves: &[],
+            },
+        )?;
+        Ok(candidate)
+    } // End of function tampered_removal()
+
+    /// Rewrites a planned removal as if its envelope had been `runs` all along.
+    ///
+    /// The replacements **and** the declared permitted spans **and** the guard's
+    /// own run list are all replaced, so the only thing wrong with the plan is
+    /// the run set itself. A mutation that left one of the three behind would be
+    /// caught for the wrong reason and would prove nothing.
+    fn recarve_removal(planned: &mut PlannedEdit, runs: Vec<ByteSpan>) {
+        planned.replacements = runs
+            .iter()
+            .map(|run| Replacement {
+                span: *run,
+                text: String::new(),
+            })
+            .collect();
+        planned.permitted = runs.clone();
+        for guard in &mut planned.guards {
+            if let StructuralGuard::Removal { runs: guarded, .. } = guard {
+                *guarded = runs.clone();
+            }
+        } // End of the loop that tells the removal guard about the new runs
+    } // End of function recarve_removal()
+
+    #[test]
+    fn experiment_e5_a_removal_that_swallows_a_following_blank_line_is_rejected() {
+        // **Experiment E5, and the Phase 0c-3b-2b review's blocking finding.**
+        // The review's exact shape: remove `matches[0].label`, with a blank line
+        // directly below the entry that the entry does not own.
+        //
+        // Every other production check accepts the widened envelope. No node is
+        // crossed, because a blank line holds none; the mapping still loses
+        // exactly one entry; every sibling digest is unchanged; no comment moves;
+        // and `bytes_outside_the_replacements_match` positively **authorises**
+        // the deleted byte, because the envelope declared it. Before this phase
+        // only the gate sweep's own line bound saw it, which is R24's exact
+        // pattern one phase after R24 was written down.
+        let source = "matches:\n  - trigger: ':a'\n    replace: x\n    label: remove-me\n\n  - trigger: ':b'\n    replace: y\n";
+        let greedy = tampered_removal(source, "matches[0].label", |source, planned| {
+            let mut runs: Vec<ByteSpan> = planned
+                .replacements
+                .iter()
+                .map(|replacement| replacement.span)
+                .collect();
+            let last = runs.len() - 1;
+            runs[last].end = line_end_of(source, runs[last].end);
+            recarve_removal(planned, runs);
+        });
+        assert!(
+            matches!(
+                greedy,
+                Err(EditError::Verification(
+                    VerificationFailure::RemovalCarriesMoreThanTheEntry { .. }
+                ))
+            ),
+            "deleting a blank line the entry does not own must be refused, got {greedy:?}"
+        );
+
+        // …and the honest plan applies, so the bound is not simply refusing the
+        // request. The blank line is still there afterwards, which is the byte
+        // the whole finding is about.
+        let honest = tampered_removal(source, "matches[0].label", |_, _| {})
+            .expect("the untampered removal applies");
+        assert_eq!(
+            honest,
+            "matches:\n  - trigger: ':a'\n    replace: x\n\n  - trigger: ':b'\n    replace: y\n"
+        );
+
+        // The oracle can also **agree**: a blank line the entry genuinely owns is
+        // inside the bound, so removing an entry whose own value spans it is
+        // untouched by the new check. The distinction is ownership, not whether
+        // the byte decodes to YAML data.
+        let owns_its_blank = "matches:\n  - trigger: ':a'\n    replace: |\n      one\n\n      two\n    label: keep\n";
+        assert!(
+            tampered_removal(owns_its_blank, "matches[0].replace", |_, _| {}).is_ok(),
+            "an entry whose own block scalar holds a blank line still removes"
+        );
+    } // End of function experiment_e5_a_removal_that_swallows_a_following_blank_line_is_rejected()
+
+    #[test]
+    fn the_entry_owned_runs_bound_keeps_the_blank_run_a_file_comment_rests_on() {
+        // The second half of D2o, stated as a bound rather than as an envelope:
+        // the blank run **below** a kept file-owned comment is what rule 2 reads
+        // to give that comment to the file, so it is outside what the entry owns
+        // and a run that swallowed it would re-attribute the comment. The
+        // envelope already punches it out; this asserts that the *independent*
+        // bound punches it out too, which is what makes the two able to disagree.
+        let source = "m:\n  a: 1\n\n  # the file owns this\n\n  b: 2\nn: 3\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let resolved =
+            resolve_full(&index, &DocumentPath::parse("m.b").unwrap()).expect("resolves");
+        let entry = (resolved.key.expect("a key"), resolved.value);
+        let (lines, owned) = entry_owned_runs(source, &index, &trivia, entry.0, entry.1)
+            .expect("the entry is in the index");
+        assert_eq!(lines.slice(source), Some("  b: 2\n"));
+        assert_eq!(
+            owned.iter().filter_map(|run| run.slice(source)).count(),
+            1,
+            "the entry's own lines hold one run"
+        );
+
+        // …and a run reaching one line up, into the blank line the comment's
+        // ownership rests on, is outside the bound.
+        let greedy = ByteSpan::new(line_start_of(source, lines.start - 1, 0), lines.end);
+        assert!(matches!(
+            StructuralGuard::Removal {
+                runs: vec![greedy],
+                entry,
+                kind: EnvelopeKind::RemovesTheEntry,
+            }
+            .check(source, &index, &trivia),
+            Err(VerificationFailure::RemovalCarriesMoreThanTheEntry { .. })
+        ));
+    } // End of function the_entry_owned_runs_bound_keeps_the_blank_run_a_file_comment_rests_on()
 
     #[test]
     fn the_insertion_guard_refuses_a_point_inside_a_node() {
         let source = "a: hello\nb: 2\n";
         let index = SyntaxIndex::parse(source).expect("parses");
+        let trivia = TriviaIndex::scan(source, &index);
         // Between the two lines: legal, although it is inside the root mapping
         // and inside the document, which is what "between two entries" means.
-        assert_eq!(StructuralGuard::Insertion { at: 9 }.check(&index), Ok(()));
+        assert_eq!(
+            StructuralGuard::Insertion { at: 9 }.check(source, &index, &trivia),
+            Ok(())
+        );
         // Inside the scalar `hello`: not.
         assert!(matches!(
-            StructuralGuard::Insertion { at: 5 }.check(&index),
+            StructuralGuard::Insertion { at: 5 }.check(source, &index, &trivia),
             Err(VerificationFailure::InsertionPointInsideANode { .. })
         ));
     }
@@ -7673,7 +8237,7 @@ mod move_tests {
             }
         } // End of the loop that checks the tampered replacements are disjoint
         for guard in &planned.guards {
-            guard.check(&index)?;
+            guard.check(source, &index, &trivia)?;
         }
         let candidate = splice(source, &planned.replacements);
         let moves: Vec<MoveExpectation> = planned.moved.into_iter().collect();

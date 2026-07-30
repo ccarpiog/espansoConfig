@@ -51,10 +51,22 @@
 //!   and which the decoder reads straight back.
 //! - A scalar is emitted as a **key** or as a **value**
 //!   ([`ScalarRole`]); a key is never a block scalar, and `<<` is never plain.
+//!
+//! # The tag-resolution oracle (Phase 0c-3b-2b, R16)
+//!
+//! [`resolve_plain_yaml_1_1`] and [`resolve_plain_yaml_1_2_core`] state, as a
+//! table rather than as a second parser, what a **plain** scalar's text resolves
+//! to under each schema. [`plain_scalar_is_ambiguous`] is the difference, and
+//! [`is_conservatively_safe_plain_scalar`] consults it: a value the two schemas
+//! read differently, or that 1.1 reads as anything but a string, is never
+//! written plain. `crate::patch::edit`'s verification asserts the same thing
+//! from the other side — no edit may leave the candidate holding a
+//! 1.1-ambiguous plain scalar the source did not already hold.
 
 mod choose;
 mod decode;
 mod plan;
+mod tags;
 
 pub use choose::{
     block_lines_are_canonical, choose_scalar, is_conservatively_safe_plain_scalar,
@@ -65,4 +77,8 @@ pub use decode::{decode, decode_content, DecodeError};
 pub use plan::{
     escape_double_quoted, is_unicode_noncharacter, requires_double_quoted_escape, LiteralBlockPlan,
     ScalarContext, ScalarContextKind, ScalarPlan, ScalarRole,
+};
+pub use tags::{
+    plain_scalar_is_ambiguous, resolve_plain_yaml_1_1, resolve_plain_yaml_1_2_core,
+    PlainResolution, YamlTag,
 };

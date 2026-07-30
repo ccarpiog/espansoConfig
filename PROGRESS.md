@@ -20,8 +20,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **0c-3a** | Insert/remove a mapping field · the removal envelope · the block-collection extent (R3) | ✅ complete — after the review fix round below |
 | **0c-3b-1** | The run-based envelope (R21 / D2o): an envelope is an ordered set of owned runs, not a hull | ✅ complete — after the review fix round below |
 | **0c-3b-2a** | Move a match · the stronger whole-document invariant · the move sweep | ✅ complete — after the review fix round below |
-| **0c-3b-2b** | The round-trip property test over both corpora (R9) · R16 | ⬜️ **next** — **this is the Phase 0 gate** |
-| 1 | Read-only browser | ⬜️ blocked on the Phase 0 gate |
+| **0c-3b-2b** | The round-trip property test over both corpora (R9) · R16 · the gate verdict | ✅ complete — after the review fix round below |
+| **Phase 0** | **⛔️ architectural gate (R4)** | ✅ **PASSED**, with four named qualifications — see the verdict below |
+| 1 | Read-only browser | ⬜️ **next** — unblocked by the gate |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 Phase 0 as written in the plan was split into **0a / 0b / 0c** because it was too large for one
@@ -392,6 +393,37 @@ now a production property derived from independently bounded source runs. Every 
 concrete counterexamples is a **retained test** that fails without the fix, and
 `every_other_move_property_certifies_the_permuted_candidate` pins that the other four properties **accept**
 the corrupted candidate — so the new one is demonstrably the thing doing the work.
+
+### Phase 0c-3b-2b — the gate, and the verdict
+
+**The Phase 0 architectural gate (R4) is PASSED, with four qualifications.** The full verdict, with its
+evidence, is [`docs/decisions/0c-3b-2b-notes.md`](docs/decisions/0c-3b-2b-notes.md) §8. Plan §12's exit
+criterion — *"the round-trip property test passes on the full corpus"* — is met, and **"full corpus" means
+every eligible target in every file**, not merely every file.
+
+**The R9 sweep** ([`tests/gate_roundtrip.rs`](crates/espansoconfig-core/tests/gate_roundtrip.rs)) crosses
+twelve axes — CRLF/LF, BOM, no final newline, trailing spaces, comments, block-scalar terminal newlines,
+duplicate keys, nested sequence mappings, merge keys, aliases, explicit keys, empty values — with all four
+operations, over both corpora: **2 080 synthetic attempts (1 696 applied) and 1 998 real (1 851 applied),
+with no stride and no thinning**. Eight properties are checked on every applied edit; not one verification
+failure occurred anywhere. Every refusal is typed, and the hazard families are re-derived from the
+document. The 48-cell axis×operation matrix has **no `Absent` cell**; 18 are `RefusedOnly`, each
+enumerated and asserted against the measurement rather than read off the table.
+
+**R16 is answered without a second parser, and the reasoning is D2s.** An in-house YAML 1.1 / 1.2-core
+tag-resolution table lives in the **library** ([`src/emit/tags.rs`](crates/espansoconfig-core/src/emit/tags.rs)),
+is consulted by the emitter, and is asserted in `verify()` as a **differential** property. R16 nonetheless
+**stays open** for the projection half — see the risk row, worded so it cannot be mistaken for mitigated.
+
+**The oracle immediately found a real defect, which is the whole argument for building it.** D2h's
+plain-safety predicate was **incomplete**: it wrote **34 distinct 1.1-ambiguous values plain** — `=`, an
+`._7`/`.__2` family, and `2001-1-1 10:00:00`. Every one of those is a value espanso would have read as a
+non-string. Fixed in `is_conservatively_safe_plain_scalar`.
+
+**The first verdict was wrong, and the review caught it.** This section's first draft said PASSED on
+evidence that included E5 — a demonstrated production escape — as *supporting* evidence. See the
+disposition below. The phase was held open, the blocker was closed **in production**, and the verdict was
+**re-derived rather than reworded**.
 
 ---
 
@@ -1014,6 +1046,61 @@ nested sequences is not expressible by `ItemMove`, and the future operation that
 or refuse — it cannot reuse these proofs unchanged.** R23's column comparison would then genuinely need
 the rework 0c-3b-1 predicted; today it does not, because nothing moves across an indentation boundary.
 
+### D2s — R16 is answered by our own tag table, not by a second parser
+
+Phase 0c-3b-2b, decided by consultation with a second model and recorded in
+[`docs/reviews/phase-0c-3b-2b-r16-consultation.md`](docs/reviews/phase-0c-3b-2b-r16-consultation.md).
+**Do not re-open it by adding a YAML crate.**
+
+**Why not a second parser.** A syntax-level reparse is close to theatre here: bytes outside an edit are
+already proven identical, and every scalar the emitter *writes* is conservatively quoted. The real danger
+class is **implicit type resolution** — in YAML 1.1 the plain scalars `y`, `n`, `on`, `off` are booleans,
+`012` is octal and `12:30` is a sexagesimal, while YAML 1.2 core calls them strings. And **no maintained
+crate faithfully implements 1.1 resolution**: libyaml's event parser provides no application-level
+resolver, `yaml-rust` 0.4 is unmaintained with an unreliable one, `yaml-rust2` and `saphyr` target 1.2,
+and `serde_yaml` is `0.9.34+deprecated` (verified against the registry). Adopting one would be
+reassurance, not evidence — **a wrong second oracle is worse than an honest single one.**
+
+**What was built instead.** A hand-written table of the 1.1 productions and the 1.2-core ones, in the
+library so the **emitter** consults it, and asserted in `verify()`.
+
+**The property is differential, and that is the design point.** It does **not** require the corpus to hold
+zero ambiguous plain scalars — real espanso files legitimately contain `on` and `off`, and a test
+demanding their absence would be wrong and would have to be deleted the first time it met a real config.
+Instead: pre-existing ambiguity is **reported as data** (31 synthetic, 65 real plain scalars are non-`str`
+under 1.1), and an edit that **introduces** a new ambiguous plain scalar or **changes** an existing
+classification **fails** with `VerificationFailure::AmbiguousPlainScalarIntroduced`.
+
+**The table is hand-maintained, and the first attempt to prove it was circular.** The generated sweep
+compared `plain_scalar_is_ambiguous` against a predicate that itself called `plain_scalar_is_ambiguous`,
+so "3 M values, 0 gaps" only measured that the emitter is a conservative superset of **its own table**.
+The review caught that. There is now a **second, independently written transcription** of the 1.1 half,
+swept differentially over 500 000 generated values (43 773 non-string resolutions, zero disagreements)
+plus a 77-case hand table on both sides of every family. Four concrete errors the review named are fixed:
+a date-only timestamp now admits one- or two-digit month and day (`2001-1-1`), an oversized sexagesimal
+classifies by **shape** rather than returning nothing when `i128` overflows, the 1.2-core integer strips
+the sign before the radix prefix (`+0o17`), and the `012` documentation was corrected after the *code* was
+verified correct. **The 1.2-core half still has no second implementation** — see R16's row.
+
+### D2t — the removal envelope needed a bound derived independently of itself
+
+Phase 0c-3b-2b's blocking finding, and **R24's second occurrence in two phases**.
+
+A removal whose deletion run swallowed one **following blank line the entry does not own** was accepted by
+every production check: no node is crossed, the mapping loses exactly one entry, the sibling digests are
+unchanged, nothing decodes differently — and `bytes_outside_the_replacements_match` **positively
+authorises** the deleted byte, *because the envelope declared it*. Only the test-side sweep saw it.
+
+That is circular authorisation: the envelope is checked against a permission the envelope itself granted.
+`RemovalCarriesMoreThanTheEntry` is the sixth verification property (D2q's five plus this). It derives the
+entry's allowed physical-line runs from the **key/value frontier**, the textual leading-trivia rule and
+D2o's blank-run rule, and **consults nothing `removal_envelope` produced**. A move's source half keeps its
+own two bounds via `EnvelopeKind`, so the earlier experiments still fail under their own names.
+
+**The general rule, now twice-learned:** a bound that reads its own declaration proves nothing.
+*"Deleting a user's blank line is not acceptable collateral. The distinction is ownership, not whether the
+byte decodes to YAML data."*
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -1036,7 +1123,7 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R1 | `saphyr-parser` is **pre-1.0 (0.0.11)**; the API can break between patch releases | Confined to `crate::syntax` — no other module imports it. 31 pinned tests fail loudly on any behaviour change. Deliberately **not** vendored: vendoring creates ownership without removing upgrade risk. |
 | R2 | If a future saphyr release "fixes" `index()` to genuinely return bytes, the `CharToByte` adapter silently becomes wrong | Desired failure mode already wired: `all_three_crates_report_character_offsets_not_byte_offsets` and `saphyr_offsets_count_unicode_scalar_values_not_bytes_utf16_units_or_graphemes` both fail immediately. |
 | R3 | **Block-scalar** and block **collection** end offsets overshoot into trailing trivia | **Closed in 0c-3a (D2n).** The block-scalar half was trimmed in 0b. The collection half was *measured* before a rule was chosen — the end marker overshot 223 of the 235 synthetic block collections then in the corpus and 228 of 240 real ones (246 of 273 synthetic is what the suite pins today), never undershoots, and lands at EOF, on a node or mid-trivia (111/42/298), so it is neither usable nor reconstructible. The published span therefore stays child-derived on purpose, and `CollectionExtent::owned_end()` is a second, fallible derivation cross-checked against `TriviaIndex::subtree_extent` over both corpora, with 0 unaccountable extents. |
-| R4 | Phase 0 gate is **not yet cleared** — the round-trip property test does not exist yet | Lands in 0c. No UI work until it passes. |
+| R4 | Phase 0 gate is **not yet cleared** — the round-trip property test does not exist yet | **CLOSED in 0c-3b-2b. The gate is PASSED**, with four qualifications, and the verdict with its evidence is `docs/decisions/0c-3b-2b-notes.md` §8. "Passes on the full corpus" is discharged in the strong reading: **every eligible target in every file of both corpora**, no stride and no thinning — 2 080 synthetic attempts (1 696 applied) and 1 998 real (1 851 applied), zero verification failures. **UI work is unblocked**, but only for the operations that exist: editing a scalar, adding and removing a field, and reordering matches **inside one sequence**. It does **not** license presenting a plain scalar's *type* to the user (R16), moving a match between files or sequences (D2r), or combining a move with any other edit in one batch (R25). |
 | R5 | An empty block scalar (`replace: \|` mid-keystroke) reports a span that **includes** its header — the one exception to "the header is outside the span" | Phase 0b: the backwards header lexer must refuse to run when the span itself starts with `\|` or `>`. Pinned by `a_truncated_block_scalar_header_produces_a_span_that_swallows_the_header`. The content span now starts past the header *line*, never past the indicator alone, so rewriting it cannot splice a value onto the header line. |
 | R6 | **Flow-collection comment ownership** is undefined: in `items: [one, # why` / `two]` the comment belongs to no obvious node | **Closed in 0b-2 (D2d).** The comment attaches to the innermost enclosing flow collection and raises `HazardKind::CommentInFlowCollection`; the collection is then refused **outright**, whole-collection replacement included. Pinned by `a_comment_inside_a_flow_collection_belongs_to_the_collection_and_flags_it`. |
 | R7 | **Empty and implicit nodes** (`empty:`, bare `- `, `? key` / `: value`, compact `- key: value`) create zero-width or shared boundaries with no unique owner | **Closed in 0b-2 (D2d).** One documented, tested policy each — see the D2d table. The explicit `?`/`:` form additionally raises `HazardKind::ExplicitKeyMapping`; the other three are safely editable once their punctuation and comments are attributed. |
@@ -1046,17 +1133,17 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R9 | The missing evaluation criterion is **replacement-envelope correctness**, not endpoint accuracy | Phase 0c. Mutate real documents and assert: the span matches the requested structural path despite duplicate keys, nested sequence mappings, merge keys, aliases, explicit keys and empty values; the replacement reparses to the intended value and stays valid YAML; every byte outside the envelope is identical (CRLF/LF, BOM, missing final newline, trailing spaces, comments, block-scalar terminal newlines). This is the Phase 0 gate's round-trip property test. |
 | R14 | **A Markdown table inside `replace: \|` rejected the whole document.** `locate_header` treated any block whose first body line opens with `\|` or `>` as a truncated R5 header | **Fixed in 0c-1.** The backwards lexer runs first and the forward R5 path is the fallback; a genuinely truncated header has nothing but its key on the preceding line, so backwards finds nothing and forwards still fires. Reviewer-approved. Pinned by `a_body_line_opening_with_a_block_indicator_is_not_a_truncated_header`. This was a latent **Phase 0b** bug that the codec work surfaced — a real espanso config with a Markdown table would have been entirely unopenable. |
 | R15 | **`NonCanonicalEscaping` is deliberately over-broad**: it refuses every double-quoted source containing any backslash, including already-canonical `\\`, `\"`, `\n`, `\t` | Accepted for now, and safe — it only costs the ability to re-encode such a scalar byte-identically, never correctness. Carries a `TODO(0c-2)` in its doc comment. Narrow it only if 0c-2 finds real files where editing an escaped double-quoted value matters. |
-| R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | Partly mitigated in 0c-1 (D2h): the three known divergent character classes are escaped or refused, and the plain predicate rejects every YAML 1.1 boolean/null/sexagesimal spelling. **Not** fully closed — there is still no second parser in the test suite. Revisit in 0c-3: the cheapest real mitigation is to reparse the round-trip corpus with a 1.1 implementation as a second oracle. |
+| R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | **Partly closed in 0c-3b-2b (D2s), and the open half is stated so it cannot be mistaken for mitigated.** *R16 stays open: byte preservation and conservative emission prevent edits from changing untouched bytes or introducing known YAML 1.1-ambiguous plain scalars, but the UI projection of pre-existing plain scalars is not yet proven to match espanso's resolver.* **Closed half:** an in-house 1.1/1.2-core tag table in the library, consulted by the emitter and asserted in `verify()` as a differential property, so an edit can neither introduce a new ambiguity nor change an existing classification. Building it found D2h's predicate writing **34 distinct 1.1-ambiguous values plain** — a real corruption path, now fixed. **Open half:** the *projection*. 31 synthetic and 65 real plain scalars resolve non-`str` under 1.1 today; the app would display them as strings. That is a Phase 1 question about how the UI shows such a scalar. **Residual risk:** a pre-existing or explicitly tagged scalar may be displayed or used by the typed projection with a different type/value than espanso assigns, and an incomplete hand-maintained resolver table or an espanso-specific schema change could leave that disagreement undetected. **Two named weaknesses:** explicit tags are outside the table entirely, and the **1.2-core half has no second implementation** (the 1.1 half has one, differentially swept over 500 000 values with zero disagreements). Deliberately **no second parser crate** — see D2s for why, and do not add one without re-reading it. |
 | R17 | **A flow collection is not refused by the hazard gate.** `HazardKind` has only `CommentInFlowCollection`, so `matches: [{trigger: ":a", replace: old}]` both resolves *and* passes `is_safely_editable`. A block scalar is illegal inside `{…}`/`[…]`, so an edit that turns a short value into a multi-line one would emit invalid YAML | **Closed in 0c-2b (D2k)**, by the second of the two answers R17 named: flow context is threaded into rendering, so a multi-line value inside a flow collection becomes a double-quoted one-liner and a block scalar is never emitted there. Flow-interior edits are **not** refused, because refusing them would cost the visual editor the ability to change a trigger list. The one collateral effect is that a plain scalar in flow context is requoted on edit. Pinned in both directions; a flow collection carrying a comment is still refused outright. |
 | R18 | **A node in key position cannot be verified by the path that found it.** Renaming the `replace` of `replace: old` makes the path `replace` resolve to `NoSuchKey` in the reparsed document, so the verify step fails on a *correct* edit | Accepted and bounded. A scalar edit targets `Resolved::value` only; `resolve_key` exists for the **spans** a structural edit needs (where an entry begins, so removing it takes its key too), not as an edit target. Documented on `resolve_key` itself. A key-rename operation needs its own protocol — verify against the **intended new** path, not the old one — and is 0c-3's problem if it is wanted at all. Editing an ordinary value that merely equals some other entry's key string is harmless. |
-| R19 | **`TriviaIndex::scan` is quadratic** — `ownership.rs`'s primitives (`ending_before`, `starting_after`, `enclosing_flow`, `innermost_containing`) each scan **every node** and are called **once per trivia item**, so the cost is O(items × nodes). Measured: the largest real file (17.8 KB, 477 nodes) takes **2.6 ms to parse and 20 ms to scan** | Open, correctness-neutral, and **pre-existing since Phase 0b-2** — deliberately not changed in 0c-2b, which is a mutation phase, not an optimisation one. It has one testing consequence today: the safe entry point re-scans on every call by design, so the real-corpus sweep gives each scalar 4 of the 12 replacement values, rotated by node index, keeping every value exercised at a quarter of the cost; the synthetic corpus keeps the full cross product. **0c-3's gate test will be larger again**, so if its runtime bites, memoising the ownership primitives by position is the cheapest fix and is confined to `ownership.rs`. It also matters for the UI: 20 ms per keystroke-triggered rescan is not viable, so Phase 1 will need either memoisation or a cached index. |
+| R19 | **`TriviaIndex::scan` is quadratic** — `ownership.rs`'s primitives each scan **every node** and are called **once per trivia item**, so the cost is O(items × nodes) | **Largely closed in 0c-3b-2b's fix round, by memoisation rather than by thinning any sweep** — which is what the 0c-3b-2a checkpoint instructed and what the first draft of the gate did *not* do (it strided the real corpus instead; the review caught it). The primitives now answer from precomputed orders, with a differential test asserting they agree with the linear scans they replaced. Measured: the gate binary went **34.3 s → 16.9 s while becoming exhaustive** (real attempts 1 373 → 1 998), `patch_edit` 23.6 s → 7.5 s, `patch_move` 16.4 s → 5.7 s, `patch_structure` 19.6 s → 5.9 s, and the whole suite **87.9 s → 39.4 s**. **Not fully closed:** the safe entry point still re-scans on every call by design, which is a Phase 1 concern — 20 ms per keystroke-triggered rescan is not viable, so the UI needs either a cached index or an incremental one. |
 | R20 | **A quoted scalar's reported end overshoots trailing spaces and a following comment**, exactly as a block scalar's does (R3) — the same class of latent silent-corruption bug, in a layer everything else rests on | **Fixed in 0c-2b, in the span layer rather than worked around in the edit engine.** `SyntaxIndex::quoted_span()` trims the reported end back to the closing delimiter, lexing forwards from the opening one (`''` and `\"` are data, not terminators; the scan crosses line breaks so multi-line quoted scalars trim correctly). Unlike `block_layout` it falls back to the reported span rather than rejecting the index, because a quoted scalar with no closing quote inside its own reported span cannot come from a document the substrate accepted, and making a file unopenable for an unreachable case is the R14 mistake. **The residual risk is the corpus, not the code:** this was invisible for three phases because no fixture exercised the shape. `trimmed_block_scalars()` is now restricted to the two block styles so the two overshoots can never again be folded into one figure — which is precisely how this one hid. **Standing instruction, and the 0c-3b-1 review added its second half:** a new hazard gets a *fixture*, not only a unit test — and **a new refusal gets a fixture on each side of its condition**, not one inside it. R23 was pinned as correct for a whole phase with only the refused shape in the corpus, and its over-breadth was invisible until a reviewer constructed the safe one. **Seven occurrences now, and the seventh was closed rather than carried.** 0c-3b-2a's move fixture originally spelled an inline comment after a **single-quoted** scalar, which made the Phase 0a tripwire `saphyr_flow_scalar_end_offsets_are_exact_across_the_whole_valid_corpus` fail — revealing that **no synthetic fixture had ever held a quoted scalar carrying an inline comment**, so that test's claim of exactness was "exact in this corpus" rather than exact. The phase's first response was to change the fixture to a plain scalar and record the hole; **its review overruled that**, on the ground that deleting discovered evidence to preserve a claim is backwards. The quoted shape is now back in `move-a-match.yml` and `parser_evaluation.rs` classifies quoted overshoots in a separately counted, separately asserted bucket, so the tripwire states what is actually true. |
 | R10 | A block scalar whose header cannot be located has **no correct span**: the reported one runs into trailing blank lines and the next node's indentation | The index is **rejected** with `InvariantViolation::BlockHeaderNotFound` rather than publishing the known-bad span. There is deliberately no fallback. From the Phase 0b-1 review, ranked failure mode 3. |
 | R11 | **Terminal spaces or tabs at end-of-source** are scalar content, not the next token's indentation — there is no next token | `block::content_len` takes `at_end_of_source` and keeps a trailing run that sits on a content line. Pinned by `terminal_spaces_at_end_of_source_stay_inside_the_block_scalar` and the `block-scalar-terminal-spaces.yml` fixture. |
 | R21 | **A removal envelope is a contiguous hull, so it cannot express "remove this entry but keep the file-owned comment inside it."** Such a removal was refused rather than performed | **Closed in 0c-3b-1 (D2o).** The envelope is now an ordered, disjoint set of **runs** — the hull with every file-owned comment's whole line, and the blank runs touching it, punched out — spliced as several replacements. The refusal became an *assertion* on the derived run set, argued unreachable and pinned at 0, and the three-layer visibility discipline was re-confirmed by disabling each layer in turn (`docs/decisions/0c-3b-1-notes.md` §6). The change made the invariant **stronger**: `VerificationFailure::EnvelopeMissesTheEntry` states what a hull made unstatable. Measured gain: **1** synthetic removal, **0** real ones — exactly the cost the refusal had — and the real value is that a move is impossible on a hull. Cost: one new refusal, `RemovalWouldExtendABlockScalar`, for the one shape a run set cannot express (a kept comment directly under a block scalar's content, **at or past that block's body column** — the column comparison came from this phase's own review, finding 2), 1 synthetic attempt and 0 real ones. **Re-confirmed after that review**, which changed layer 3: every experiment of §6 was re-run, and two more break the *engine* rather than a layer, which is what shows the sweep can disagree with it. |
 | R23 | **A comment a removal *keeps* can be absorbed by a block scalar above it**, changing that block's decoded value although nothing about it was edited — the shape neither D2o nor the 0c-3a review named | Accepted and refused by name (`EditError::RemovalWouldExtendABlockScalar`), the twin of `RemovalWouldExtendAKeptBlock`. **Narrowed by the 0c-3b-1 review's finding 2, which found the first form over-broad.** It now fires on three clauses, not two: the removal has something to preserve, *and* some block scalar's content ends at or before the envelope's first run with nothing but blank lines in between, *and* **the first non-blank line the removal preserves sits at that block's own body column or deeper**. A shallower line ends the block instead of extending it, exactly as the removed entry's key already did, so the reviewer's `>` block above a column-zero comment is a legal removal and is pinned byte-exactly. The body column is `ScalarPresentation::indent`, **read off the span layer and never re-lexed** (D2/D2d); the earlier "only reconstructible" objection was about a block's *end*, not its body column. One case still refuses unconditionally: a block whose content span is **empty** (`replace: \|` with the next sibling under it, the R5 shape), where `indent` holds the header's column rather than any observed body's. Costs the synthetic corpus **1** attempt, in `run-based-removal-envelope.yml`, and the real corpus **0** — unchanged by the narrowing, which let one attempt through and turned none away. `run-based-removal-boundaries.yml` pins the safe side. |
 | R22 | **`InconsistentEntryIndentation` is pinned at 0 and is argued to be *unreachable*, not merely unreached** — a coverage hole and a proof look identical in a count | Accepted, with the argument recorded in `docs/decisions/0c-3a-notes.md` §3: a valid block mapping cannot have its keys at two columns, and the two shapes that can are refused earlier by other variants. No fixture was invented to reach it, because an impossible fixture would prove nothing. This is the one refusal family whose pinned zero rests on an argument rather than on a construction — treat it as the weakest pin in the table, and revisit if a real file ever trips it. |
-| R24 | **A safety property that lives only in the test suite is not a safety property** — 0c-3b-2a shipped `the_arrival_is_the_departure` in the sweep but not in `verify()`, so a defective planner that permuted the bytes it carried could still mint a `PatchedDocument` | **Closed in 0c-3b-2a's fix round (D2q)**, and recorded as a *class* rather than an incident: the check is now a production property, plus `comment_ownership_survives` for the re-attribution variant no byte comparison can see. **Standing instruction for every later phase: when a sweep proves something the engine relies on, ask whether the engine asserts it too.** The pattern to watch for is a property whose only home is a test file whose name ends in the thing it protects. Pinned by `every_other_move_property_certifies_the_permuted_candidate`, which asserts the other four properties **accept** the corrupted candidate. |
+| R24 | **A safety property that lives only in the test suite is not a safety property** — 0c-3b-2a shipped `the_arrival_is_the_departure` in the sweep but not in `verify()`, so a defective planner that permuted the bytes it carried could still mint a `PatchedDocument` | **Closed in 0c-3b-2a's fix round (D2q)**, and recorded as a *class* rather than an incident: the check is now a production property, plus `comment_ownership_survives` for the re-attribution variant no byte comparison can see. **Standing instruction for every later phase: when a sweep proves something the engine relies on, ask whether the engine asserts it too.** The pattern to watch for is a property whose only home is a test file whose name ends in the thing it protects. Pinned by `every_other_move_property_certifies_the_permuted_candidate`, which asserts the other four properties **accept** the corrupted candidate. **It recurred immediately in 0c-3b-2b** — a removal envelope swallowing an unowned blank line was caught by nothing in production, because `bytes_outside_the_replacements_match` authorised it from the envelope's own declaration. Closed by `RemovalCarriesMoreThanTheEntry` (D2t). **The gate now rests on no property whose only home is a test file**, and that sentence is the closure condition: check it again whenever a sweep gains a property. |
 | R25 | **Move verification is not compositional** — `MoveMustBeTheOnlyEditInItsBatch` refuses a batch pairing a move with any other edit, including the safe and obvious "move this match and change its `replace`" | Accepted as a **deliberate phase-scope limit, not an invariant**, and relabelled as such after the 0c-3b-2a review found the original circularity argument unconvincing. It conceals no demonstrated splice-order bug — a single move still exercises descending application of its own runs. Two costs, both recorded: the safe combined request above is refused, and **`OverlappingEdits` is consequently never tested against a move-versus-edit conflict**, because the restriction rejects such batches before overlap analysis runs. Closing it means applying the permutation to a combined expectation and exempting precisely the independently verified rewritten node, which is how field batching already works. Revisit when the UI needs it or when cross-file move lands. |
 | R26 | **`shares_a_line` and the move sweep's second derivation of `comment_ownership_survives` are pinned or covered more weakly than the rest** | Accepted and named rather than papered over. `shares_a_line` is **reachable** — via a compact nested sequence such as `outer[0][1]` in `- - first` — and is driven by a hand-written unit test rather than a corpus fixture, because neither corpus holds that shape; it is weaker than corpus coverage and R20's rule would prefer a fixture. `comment_ownership_survives` has a production derivation but **no independent second derivation in the sweep**, deferred on R19 cost grounds (`docs/decisions/0c-3b-2a-notes.md` §3.4). Both are the weakest pins added by 0c-3b-2a; R22 remains the weakest in the table overall. |
 
@@ -1256,6 +1343,58 @@ The reviewer's strongest failed attack is worth keeping: changing a neighbouring
 value at any of the three external joins **is** caught independently by the lockstep tree walk. The
 failures were all in presentation-only corruption, terminator ownership, internal run joins and trivia
 re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
+
+---
+
+## Phase 0c-3b-2b review disposition
+
+Review of record: [`docs/reviews/phase-0c-3b-2b-the-gate.md`](docs/reviews/phase-0c-3b-2b-the-gate.md).
+Its verdict: **"The gate is not genuinely passed."** It was right, and the phase was held open.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High — E5 is a production safety hole and blocks the gate.** A removal swallowing an unowned following blank line passes every production check, and `bytes_outside_the_replacements_match` *authorises* it from the envelope's own declaration; only the test sweep saw it | **Adopted in full — this is D2t.** `RemovalCarriesMoreThanTheEntry` derives the entry's allowed line runs from the key/value frontier, the leading-trivia rule and D2o's blank-run rule, consulting nothing `removal_envelope` produced. E5 re-run is now rejected **by production**; E5b shows the sweep's bound still fires independently. |
+| 2 | **Medium — the tag oracle has concrete false negatives, and "0 gaps" is circular** (the test compared the function against a predicate calling it) | **Adopted in full.** All four named errors fixed — `2001-1-1`, oversized sexagesimals, `+0o17`, and the `012` documentation (the *code* was verified correct, so the docs were corrected instead). A second independent transcription of the 1.1 half now sweeps 500 000 generated values with **zero disagreements**, plus 77 hand cases. §4.1's overstatement withdrawn. |
+| 3 | **Medium — the matrix proves document co-occurrence, not operation × construct interaction**; `RefusedOnly` is 8 not 5; and the real sweep is *sampled* (`REAL_CORPUS_STRIDE`) | **Adopted in full.** Attribution is operation-local for structural axes; four rows moved `Applied` → `RefusedOnly`; the true count is **18**, enumerated cell by cell and asserted against the measurement. **The stride is gone** — the sweep is exhaustive, bought by the memoisation R19's row records. |
+
+The third finding is the one worth remembering: the checkpoint had explicitly instructed *"memoise rather
+than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
+weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
+the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 0c-3b-2b
+
+All four run by the orchestrator against the working tree, **after** the review fix round:
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | exit 0 — **439 passed, 0 failed, 0 ignored**, across 13 binaries |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+
+Test count moved 423 (baseline `d40ec0e`) → 434 (implementation) → **439** (fix round). No test was
+ignored, weakened or deleted at any point. The suite also passes with `tests/corpus/real/` absent.
+
+**Privacy re-verified**: `git status --short --untracked-files=all` shows no path under
+`tests/corpus/real/`, and every real-corpus figure is computed rather than hard-coded.
+
+**The gate sweep**, exhaustive over both corpora:
+
+| | Synthetic | Real |
+|---|---|---|
+| Attempts | 2 080 | 1 998 |
+| Applied | 1 696 | 1 851 |
+| Verification failures | 0 | 0 |
+
+48-cell axis×operation matrix, **no `Absent` cell**, 18 `RefusedOnly` each enumerated. Refusals per hazard
+family, attempts / applications: merge keys 23/0, aliases 9/0, anchors 31/0, explicit keys 11/0, tags 9/0,
+duplicate keys 15/0, multi-document 33/0, flow comments 18/0.
+
+**Runtime, after memoising `ownership.rs` (R19):** gate binary **34.3 s → 16.9 s** while becoming
+exhaustive; whole suite **87.9 s → 39.4 s**.
 
 ---
 
@@ -1462,82 +1601,72 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Start Phase 0c-3b-2b — the round-trip property test of R9 over both corpora, and R16. This is the
-Phase 0 architectural gate (R4). No UI work begins until it passes.**
+**Phase 0 is complete and its gate is PASSED. Start Phase 1 — the read-only browser.**
 
-Every operation the gate has to exercise now exists and is independently tested: 0b gives byte-exact
-spans, trivia classification, comment ownership and the hazard gate; 0c-1 the scalar codec; 0c-2a the
-path that survives a reparse; 0c-2b the mutation entry point and the splice-and-verify cycle; 0c-3a
-insert and remove, the removal envelope and a measured answer to the collection extent; 0c-3b-1 the
-run-based envelope; **0c-3b-2a the move — the only operation that relocates bytes — and D2q's
-five-property whole-document invariant.** What remains is not a new operation. It is the proof, over the
-whole corpus, that the plan's exit criterion is met.
+Plan §12's exit for Phase 1: *"the owner can browse their entire real config and every snippet renders
+correctly."* Scope, from the plan:
 
-The exact scope of 0c-3b-2b, in dependency order:
+- config directory discovery and picker (`discovery.rs` already does the resolution — reuse it);
+- file enumeration and classification (match / profile / package / `_`-disabled) — also already done;
+- parse with diagnostics;
+- three-pane navigation · search · raw YAML viewer;
+- **i18n infrastructure with both languages wired from the start** (CLAUDE.md §2 — a locked decision:
+  English and Spanish, via `src/lib/i18n/{en,es}.json`, and **never a hardcoded user-facing string**);
+- detection and flagging of constructs the visual editor cannot preserve — `TriviaIndex::is_safely_editable`
+  and `HazardKind` already answer this; the work is surfacing it.
 
-1. **The full round-trip property test of R9, over both corpora.** Mutate real documents and assert:
-   the span matches the requested structural path **despite duplicate keys, nested sequence mappings,
-   merge keys, aliases, explicit keys and empty values**; the result reparses to the intended value and
-   stays valid YAML; and every byte outside the envelope is identical — across **CRLF/LF, BOM, missing
-   final newline, trailing spaces, comments and block-scalar terminal newlines**. Each of those axes has
-   a fixture already; the work is the sweep that crosses them with every operation, not new fixtures.
-   Note that three of the named constructs (merge keys, aliases, explicit keys) are **refused** by the
-   hazard gate, so for those the property is that the refusal is typed and total, not that the edit
-   succeeds — state that explicitly rather than letting a refusal count as a pass.
-2. **Close R16, or state plainly that it stays open.** The verify step reparses with saphyr, which is
-   YAML 1.2, while espanso consumes with a 1.1-ish stack. Cross-checking our decoder against the
-   substrate's catches a disagreement between **our two implementations** and still proves nothing about
-   espanso. The cheapest real mitigation named so far is to reparse the round-trip corpus with a 1.1
-   implementation as a second oracle. **This is the last phase where deferring it is cheap**, because the
-   gate is what the UI is allowed to trust. If it stays open, R16's row must say so in one sentence a
-   reader cannot mistake for "mitigated".
-   - Constraint in tension: the crate has **no external dependency** and D1/R1 keep the substrate
-     confined to `crate::syntax`. A second parser is a dev-dependency at most, and must not leak into
-     the library. If no suitable YAML 1.1 crate exists, say so with evidence rather than adopting a bad
-     one — a wrong second oracle is worse than an honest single one.
-3. **Decide and record whether the gate is passed.** The plan's wording is *"the round-trip property test
-   passes on the full corpus"*. Write the verdict down explicitly in this file, with the evidence, and
-   move R4 to closed or state what blocks it. Phase 1 is gated on this sentence existing.
+**Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
+the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and proven.
 
-What 0c-3b-2b inherits and must not undo:
+### What the gate licenses, and what it does not
 
-- **D2q — the five production properties.** Byte identity is still asserted but is **no longer
-  sufficient**; the other four carry the weight. Do not simplify them back, and in particular do not
-  drop `the_arrival_is_the_departure` or `comment_ownership_survives` as redundant: R24 records that
-  they exist precisely because properties 1–3 jointly certify presentation corruption, and
-  `every_other_move_property_certifies_the_permuted_candidate` pins that fact as a test.
-- **R24 is a standing instruction, not a closed incident.** When a sweep proves something the engine
-  relies on, **ask whether the engine asserts it too.** The gate's sweep will be the largest yet and is
-  the most likely place to repeat the mistake.
-- **An oracle must be able to disagree** (0c-3b-1 finding 1, re-confirmed by 0c-3b-2a). Break the
-  **engine** and check the oracle fires, not only the reverse. The retained mutation tests in
-  `tests/patch_move.rs` are the pattern to copy.
-- **D2r — "no re-indentation" is scoped to same-sequence moves.** Do not generalise it in the gate's
-  prose, and do not let the gate imply cross-sequence or cross-file move is proven. It is not
-  implemented.
-- **D2p — line endings are copied from local evidence, never voted on**, and the EOF case is
-  **refused**, not rotated. `block-scalar-terminal-spaces.yml` offering no applied move is the measured
-  cost and is pinned; do not "fix" it.
-- **The envelope is a set of runs (D2o)**, and both directions of `StructuralGuard::Removal` are
-  load-bearing. `RemovalWouldDeleteAFileComment` is an assertion pinned at 0 — not dead code.
-- **The collection end marker is unusable (D2n, R3).** The published span stays child-derived; do not
-  extend it to the measured end.
-- **The gate is consulted inside `plan_one`, and the entry point takes source text (D2j).** Do not add a
-  second, checkable-by-convention entry point.
-- **`PatchedDocument` has no public constructor and no public field.** After R24 this is the crate's
-  central safety claim: it means candidate bytes cannot exist without having passed every property in
-  `verify()`. Adding a constructor would silently void D2q.
-- **R20 — the corpus is the weak link, seven occurrences.** New refusals get a fixture on **each side**
-  of their condition. Never fold two distinct overshoots into one measured figure.
-- **R19 — `TriviaIndex::scan` is quadratic.** The gate sweep is the largest yet; if it bites, memoise
-  `ownership.rs`'s primitives by position rather than thinning the sweep.
-- **Corpus privacy (D1) is absolute.** Real-corpus counts are computed, never hard-coded; its tests skip
-  cleanly when absent; no real content in any committed file, ever.
+**Licensed:** UI work on the operations that exist — editing a scalar, adding and removing a field,
+reordering matches **inside one sequence**.
 
-Known weak pins to tighten if the gate work touches them anyway: **R22** (`InconsistentEntryIndentation`
-pinned at 0 by argument, the weakest in the table), **R26** (`shares_a_line` is a unit test rather than a
-fixture, and `comment_ownership_survives` has no second derivation in the sweep), and **R25** (move
-verification is not compositional, so `OverlappingEdits` is untested against move-versus-edit conflicts).
+**Not licensed, and each has a reason on file:**
+
+- **Presenting a plain scalar's *type*** to the user. R16's open half: 31 synthetic and 65 real plain
+  scalars resolve non-`str` under YAML 1.1, and the projection is not proven to match espanso's resolver.
+  A UI that renders `on` as a boolean is making a claim this project has not earned. **This becomes a
+  Phase 1 design question the moment the browser shows a value** — decide it deliberately, and prefer
+  showing the source text over showing an inferred type.
+- **Moving a match between files or between sequences** (D2r). `ItemMove` is same-sequence only, and its
+  "no re-indentation" proof does not transfer. Plan §8.4's drag-between-files needs its own operation.
+- **Combining a move with any other edit in one batch** (R25).
+
+### Before starting Phase 1, note two things that are now the first UI concerns
+
+1. **R19's remaining half is a Phase 1 problem.** The safe entry point re-scans on every call by design.
+   The gate's memoisation made the *sweep* fast, but 20 ms per keystroke-triggered rescan is not viable
+   for an editor. Phase 1 needs a cached or incremental index. Decide this early — it shapes the Tauri
+   command surface.
+2. **Architecture rule (CLAUDE.md §3):** `crates/espansoconfig-core` must never depend on `tauri`,
+   directly or transitively. Tauri lives in `src-tauri/`, whose commands are **thin wrappers** over the
+   core. Verify with `rg -c tauri Cargo.lock` that nothing has crept in.
+
+### Standing rules that outlive Phase 0
+
+- **R24 — a safety property that lives only in the test suite is not a safety property.** It has now
+  occurred twice, in consecutive phases. Whenever a sweep proves something the engine relies on, ask
+  whether the engine asserts it too. The closure condition is the sentence in
+  `docs/decisions/0c-3b-2b-notes.md` §8.1: *the gate rests on no property whose only home is a test file.*
+- **R20 — the corpus is the weak link, eight occurrences.** A new refusal gets a fixture on **each side**
+  of its condition, never one inside it. The eighth was `ExplicitKeyMapping`, which had no fixture at all
+  for five phases while being counted as covered.
+- **An oracle must be able to disagree.** Break the **engine** and check the oracle fires, not only the
+  reverse.
+- **Corpus privacy (D1) is absolute**, and matters more as the UI grows: no real config content in any
+  committed file, screenshot, test name or report. Real-corpus counts computed, never hard-coded; its
+  tests skip cleanly when absent.
+- **Never hardcode a user-facing string** (CLAUDE.md §2). This is the rule Phase 1 is most likely to
+  break, because a browser is almost entirely user-facing strings.
+
+### The weakest pins, if a later phase touches them anyway
+
+**R22** (`InconsistentEntryIndentation` pinned at 0 by argument, not construction — the weakest in the
+table), **R25** (move verification is not compositional, so `OverlappingEdits` is never tested against a
+move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than a fixture), and R16's
+1.2-core half, which has no second implementation where the 1.1 half now has one.
 
 ---
 
@@ -1545,6 +1674,10 @@ verification is not compositional, so `OverlappingEdits` is untested against mov
 
 | Path | Why it matters next |
 |---|---|
+| [`crates/espansoconfig-core/tests/gate_roundtrip.rs`](crates/espansoconfig-core/tests/gate_roundtrip.rs) | **The Phase 0 gate itself** — the R9 sweep over every eligible target of both corpora, the 48-cell axis×operation matrix with `REFUSAL_ONLY_CELLS` enumerated, and `independent_yaml_1_1`, the second transcription of the 1.1 productions that makes the tag table's proof non-circular |
+| [`crates/espansoconfig-core/src/emit/tags.rs`](crates/espansoconfig-core/src/emit/tags.rs) | The YAML 1.1 / 1.2-core resolution table (D2s). **Load-bearing in production**: the emitter consults it and `verify()` asserts on it. Hand-maintained — its 1.1 half has an independent second transcription in the gate test, its 1.2-core half does not |
+| [`docs/decisions/0c-3b-2b-notes.md`](docs/decisions/0c-3b-2b-notes.md) | Phase 0c-3b-2b's decision record: what the sweep is and is not (§1), what it measured (§2), the tag oracle and D2h's failure (§3), R16's exact open wording (§4), R24 answered (§5), the twelve disabling experiments (§6), and **the gate verdict, re-derived (§8)** |
+| [`docs/reviews/phase-0c-3b-2b-the-gate.md`](docs/reviews/phase-0c-3b-2b-the-gate.md) | The review that refused the first verdict. D2s, D2t and the R4 closure all trace to it; its E5 finding is why the removal envelope has a bound derived independently of itself |
 | [`crates/espansoconfig-core/tests/patch_move.rs`](crates/espansoconfig-core/tests/patch_move.rs) | **Phase 0c-3b-2a acceptance, and the closest model for the gate's own sweep.** The per-fixture move table, the independently re-derived refusals, `check_the_arrival_is_the_departure` (the test-side second derivation of D2q's property 4), and the **retained mutation tests** — `a_planner_that_permutes_the_carried_lines_is_rejected`, `every_other_move_property_certifies_the_permuted_candidate`, C1/C2/C2b/C4/C5, M1/M3/M4 — which are the pattern for "break the engine, not the oracle" |
 | [`docs/decisions/0c-3b-2a-notes.md`](docs/decisions/0c-3b-2a-notes.md) | Phase 0c-3b-2a's decision record: what byte identity stopped being able to say (§1), how the envelope and destination are derived (§2), the five-property invariant and what a hostile reader says it misses (§3), the seam model and the blank-run rule at the destination (§4), every measurement per fixture with deltas attributed (§5), the disabling experiments and the four engine breaks (§6), the claims this phase proved false including the withdrawn EOF argument (§7), what is owed to 0c-3b-2b (§8), and **the review disposition (§9)** |
 | [`docs/reviews/phase-0c-3b-2a-move-and-invariant.md`](docs/reviews/phase-0c-3b-2a-move-and-invariant.md) | The Phase 0c-3b-2a review; D2q, D2r and R24–R26 come from the phase and this review, dispositioned above. Its first High finding is why a safety property must live in `verify()` and not only in a sweep; its second is why the EOF rotation is refused |
@@ -1601,6 +1734,7 @@ _Updated at each phase boundary._
 | 0c-3a | `8989c16` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
+| 0c-3b-2b | `PENDING` | pending | pending |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b

@@ -52,10 +52,10 @@ use espansoconfig_core::ByteSpan;
 // constants rather than something a comparison quietly absorbs.
 
 /// Valid fixtures in `corpus/synthetic/`. Must agree with `syntax_index.rs`.
-const SYNTHETIC_FIXTURES: usize = 32;
+const SYNTHETIC_FIXTURES: usize = 33;
 
 /// Trivia items across the valid synthetic corpus.
-const SYNTHETIC_TRIVIA_ITEMS: usize = 3458;
+const SYNTHETIC_TRIVIA_ITEMS: usize = 3520;
 
 /// Comments the scanner finds in the gaps of the valid synthetic corpus.
 ///
@@ -89,7 +89,11 @@ const SYNTHETIC_TRIVIA_ITEMS: usize = 3458;
 /// The two fixtures the Phase 0c-3b-2a **review** added carry 22 and 20 whole-line
 /// comments and no inline one, so both conventions gained exactly 42 between them
 /// and the documented gap of 5 between the two counts is unchanged.
-const SYNTHETIC_COMMENTS: usize = 321;
+///
+/// Phase 0c-3b-2b's `explicit-key-mappings.yml` is the cross-check once more: 10
+/// whole-line comments and **no** inline one, so both conventions gained exactly
+/// 10 and the gap of 5 is unchanged again.
+const SYNTHETIC_COMMENTS: usize = 331;
 
 /// Blank lines — whole physical lines holding nothing but spaces and tabs.
 ///
@@ -121,14 +125,19 @@ const SYNTHETIC_COMMENTS: usize = 321;
 /// comment the rules must give to the file, which is what splits an envelope into
 /// two runs and is the whole reason both fixtures exist. Their loose line-scan
 /// figure gained 39.
-const SYNTHETIC_BLANK_LINES: usize = 118;
+///
+/// The 1 Phase 0c-3b-2b added is `explicit-key-mappings.yml`'s single blank line,
+/// which separates its `matches:` sequence from `global_vars:` and is ordinary
+/// layout rather than ownership.
+const SYNTHETIC_BLANK_LINES: usize = 119;
 
 /// Maximal runs of consecutive blank lines.
 ///
 /// Still one run per blank line: the three the Phase 0c-3a review's fix round
-/// added, the three Phase 0c-3b-1 added, the two its review's fix round added and
-/// the eight the Phase 0c-3b-2a review's fix round added are each isolated.
-const SYNTHETIC_BLANK_RUNS: usize = 114;
+/// added, the three Phase 0c-3b-1 added, the two its review's fix round added,
+/// the eight the Phase 0c-3b-2a review's fix round added and the one Phase
+/// 0c-3b-2b added are each isolated.
+const SYNTHETIC_BLANK_RUNS: usize = 115;
 
 /// Bytes the scanner could not name. **Zero, and pinned at zero**: the whole
 /// point of the category is that it stays empty and says so loudly if it does
@@ -137,14 +146,17 @@ const SYNTHETIC_UNCLASSIFIED: usize = 0;
 
 /// Constructs flagged as unsafe to edit visually.
 ///
-/// **Was 1, is now 18.** The old figure counted only the comment inside the
+/// **Was 1, then 18, and is now 19.** The old figure counted only the comment inside the
 /// multi-line flow sequence of `flow-collections.yml`, which was the review's
 /// evidence that the gate was not pessimistic: the corpus contains three
 /// fixtures full of constructs plan section 7 (rows 7 and 8) and section 13 say
 /// must be refused, and none of them was flagged. The new figure is the sum of
 /// [`HAZARDS_BY_KIND`], each entry of which is asserted separately, so a drift
-/// in any single family cannot hide inside the total.
-const SYNTHETIC_HAZARDS: usize = 18;
+/// in any single family cannot hide inside the total. The nineteenth is
+/// `ExplicitKeyMapping`, whose count was **0 for five phases** because no fixture
+/// held the `? key` / `: value` form — a coverage hole Phase 0c-3b-2b's gate
+/// sweep found and `explicit-key-mappings.yml` closed (R20).
+const SYNTHETIC_HAZARDS: usize = 19;
 
 /// Every hazard kind and how many times the valid synthetic corpus raises it.
 ///
@@ -160,10 +172,11 @@ const SYNTHETIC_HAZARDS: usize = 18;
 /// | `ExplicitTag` | its two `!!str` values |
 /// | `DuplicateMappingKey` | the repeated `replace` and `label` of `duplicate-keys.yml` |
 /// | `MultiDocumentStream` | the three documents of `multi-document.yml` |
-/// | `ExplicitKeyMapping`, `TruncatedBlockScalarHeader`, `UnclassifiedTrivia` | nothing valid — they need the explicit `?` form, incomplete input, or bytes we cannot name |
+/// | `ExplicitKeyMapping` | the `? key` / `: value` mapping of `explicit-key-mappings.yml`, added by Phase 0c-3b-2b |
+/// | `TruncatedBlockScalarHeader`, `UnclassifiedTrivia` | nothing valid — they need incomplete input, or bytes we cannot name |
 const HAZARDS_BY_KIND: [(HazardKind, usize); 10] = [
     (HazardKind::CommentInFlowCollection, 1),
-    (HazardKind::ExplicitKeyMapping, 0),
+    (HazardKind::ExplicitKeyMapping, 1),
     (HazardKind::TruncatedBlockScalarHeader, 0),
     (HazardKind::UnclassifiedTrivia, 0),
     (HazardKind::AnchorDefinition, 3),

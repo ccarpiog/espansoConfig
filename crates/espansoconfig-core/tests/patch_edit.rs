@@ -144,7 +144,7 @@ type OutcomeRow = (&'static str, usize, usize, usize, usize, usize);
 /// disappearing into a total.
 ///
 /// Each row is `addressable scalars × 12` replacement values, split by outcome.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 33] = [
     ("anchors-aliases-tags-merge.yml", 60, 144, 0, 0, 0),
     ("blank-lines.yml", 106, 0, 0, 2, 0),
     // Every one of its 72 attempts applies, header comment and header spaces
@@ -164,6 +164,11 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
     // of `EmptyTarget` refusals in the whole sweep — a category that was pinned
     // at 0 for two phases because no fixture exercised it (R20).
     ("empty-entries-and-extents.yml", 120, 0, 60, 0, 0),
+    // Added by Phase 0c-3b-2b: `HazardKind::ExplicitKeyMapping` had no corpus
+    // fixture at all, only a unit test (R20). Its `matches:` subtree is refused
+    // whole; its `global_vars:` sibling is editable, which is R12's
+    // "refused by scope, not by file" once more.
+    ("explicit-key-mappings.yml", 60, 12, 0, 0, 0),
     // Added by the Phase 0c-3a review's fix round. Every one of its 9
     // addressable scalars × 12 values applies: a mixed-ending document is only a
     // structural problem, and a scalar edit never writes a line break of its own
@@ -668,8 +673,9 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
     // Phase 0c-3b-2a's two move fixtures — 8 in `move-a-match.yml` and 12 in
     // `move-block-scalar-seams.yml` — and finally the two its **review's** fix
     // round added, 10 apiece: `move-kept-comment-joins-a-block.yml` and
-    // `move-run-joins.yml`.
-    assert_eq!(total.total(), 5700);
+    // `move-run-joins.yml`. Phase 0c-3b-2b added the last 6, in
+    // `explicit-key-mappings.yml`.
+    assert_eq!(total.total(), 5772);
     assert_eq!(
         total.total(),
         SYNTHETIC_OUTCOMES
@@ -678,16 +684,18 @@ fn every_addressable_synthetic_scalar_is_edited_or_refused_for_a_derivable_reaso
             .sum::<usize>(),
         "the pinned rows must add up to the pinned total"
     );
-    assert_eq!(total.applied, 5359);
+    assert_eq!(total.applied, 5419);
     // 3, all in `single-line-no-line-ending.yml`: the three multi-line values of
     // `REPLACEMENTS` render as a `|` block, and a block writes line breaks into
     // a document that holds none to copy. Added by the Phase 0c-3a review's fix
     // round — before it, those three edits *applied* and gave a file with no
     // final newline one.
     assert_eq!(total.no_line_ending, 3);
-    // 23 scalars × 12: everything an anchor, alias, tag, merge key, duplicate
-    // key, multi-document marker or flow-interior comment reaches.
-    assert_eq!(total.refused_by_the_gate, 276);
+    // 24 scalars × 12: everything an anchor, alias, tag, merge key, duplicate
+    // key, multi-document marker, flow-interior comment or **explicit key**
+    // reaches. The last of those is Phase 0c-3b-2b's fixture: one scalar, the
+    // explicit mapping's value, and 12 values.
+    assert_eq!(total.refused_by_the_gate, 288);
     // An empty entry (`label:`) is a zero-width scalar with no bytes to replace,
     // so giving it a value is a structural edit rather than a span replacement.
     // **60, not 0**: this was pinned at zero for two phases with a note saying no

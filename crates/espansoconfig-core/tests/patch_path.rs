@@ -298,11 +298,25 @@ fn every_addressable_node_of_the_synthetic_corpus_round_trips_through_its_path()
     // 28 nodes = 1 document + 6 collections (the root mapping, the `matches`
     // sequence and 4 item mappings) + 21 scalars, 11 keys and 10 values, so +1
     // document, +11 mapping keys and +16 addressable. Neither adds an ambiguity.
-    assert_eq!(total.total(), 1355);
-    assert_eq!(total.addressable, 780);
-    // 31 single-document fixtures plus multi-document.yml's three.
-    assert_eq!(total.documents, 34);
-    assert_eq!(total.mapping_keys, 537);
+    //
+    // Phase 0c-3b-2b added `explicit-key-mappings.yml`: 23 nodes = 1 document +
+    // **7** collections (the root mapping, the `matches` sequence, 2 item
+    // mappings, the `global_vars` sequence, its item mapping and the nested
+    // `params` mapping) + **15** scalars, 9 keys and 6 values, so +1 document,
+    // +9 mapping keys and +13 addressable. It adds no ambiguity either.
+    //
+    // The arithmetic in this paragraph said "6 collections" and "16 scalars"
+    // until Phase 0c-3b-2b's review counted the enumeration it lists and found
+    // seven and fifteen — which is also what `tests/syntax_index.rs` pins
+    // independently (307 collections, 1 031 scalars). The asserted total of 23
+    // was right throughout, so this is documentation drift and not an absorbed
+    // regression; it is corrected here rather than left for the next reader to
+    // rediscover.
+    assert_eq!(total.total(), 1378);
+    assert_eq!(total.addressable, 793);
+    // 32 single-document fixtures plus multi-document.yml's three.
+    assert_eq!(total.documents, 35);
+    assert_eq!(total.mapping_keys, 546);
     // Exactly the four values under a duplicated key in duplicate-keys.yml:
     // `replace` twice in `matches[0]` and `label` twice in `matches[2]`.
     assert_eq!(total.ambiguous, 4);

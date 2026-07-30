@@ -207,7 +207,7 @@ type OutcomeRow = (&'static str, [usize; CATEGORIES]);
 /// A fixture with no block sequence at all still gets a row of zeroes —
 /// `single-line-no-line-ending.yml` is the one — because "this file offers no
 /// move" is a fact worth pinning too.
-const SYNTHETIC_MOVE_OUTCOMES: [OutcomeRow; 32] = [
+const SYNTHETIC_MOVE_OUTCOMES: [OutcomeRow; 33] = [
     // Every move refused by the gate, consulted on the sequence: an anchor, an
     // alias, a tag or a merge key anywhere inside makes reordering a question
     // that cannot be answered locally.
@@ -264,6 +264,13 @@ const SYNTHETIC_MOVE_OUTCOMES: [OutcomeRow; 32] = [
     (
         "empty-entries-and-extents.yml",
         [14, 0, 0, 12, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ),
+    // Phase 0c-3b-2b's fixture: the explicit-key hazard sits on a mapping
+    // inside `matches:`, so the whole sequence is refused, and `global_vars:`
+    // has a single item and therefore offers no relocation at all.
+    (
+        "explicit-key-mappings.yml",
+        [0, 8, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ),
     // Four of its moves are refused, in two pairs: its last match ends the
     // document with no terminator, so relocating it would invent one, and the two

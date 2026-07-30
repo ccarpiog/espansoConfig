@@ -21,6 +21,7 @@ use crate::emit::decode::{block_synthesises_a_final_break, decode, DecodeError};
 use crate::emit::plan::{
     requires_double_quoted_escape, LiteralBlockPlan, ScalarContext, ScalarPlan,
 };
+use crate::emit::tags::plain_scalar_is_ambiguous;
 #[cfg(test)]
 use crate::syntax::Chomping;
 use crate::syntax::{ScalarPresentation, ScalarStyle};
@@ -239,7 +240,29 @@ fn requires_double_quotes(value: &str) -> bool {
 /// - anything [`requires_double_quoted_escape`] names: control characters,
 ///   `U+2028`/`U+2029` and the Unicode noncharacters;
 /// - anything that resembles a bool, null, number, timestamp, infinity or NaN
-///   under YAML 1.1's generous resolver.
+///   under YAML 1.1's generous resolver — a **shape** test, deliberately broader
+///   than any resolver;
+/// - anything the tag-resolution oracle calls ambiguous
+///   ([`crate::emit::plain_scalar_is_ambiguous`]) — the **exact** YAML 1.1
+///   productions, which catch what a shape test cannot.
+///
+/// # Why both, and what the second one caught
+///
+/// The shape test asks "does this open like a number and continue in the numeric
+/// alphabet"; the oracle asks "what does YAML 1.1 actually resolve this to".
+/// Neither contains the other. Phase 0c-3b-2b built the oracle and swept three
+/// million generated values through both: the shape test alone let **33 distinct
+/// 1.1-ambiguous values through**, in two families — `=`, which YAML 1.1 resolves
+/// to `tag:yaml.org,2002:value`, and the `._7` / `.__2` / `._78E-8` family, whose
+/// mantissa opens `.` then `_` so the shape test's "opens numerically" clause is
+/// false while 1.1's `\.[0-9_]+` float production matches. A hand-built
+/// counterexample added a **34th** in a third family: `2001-1-1 10:00:00`, a
+/// timestamp with single-digit fields and a space where a `T` would be, whose
+/// space is outside the numeric alphabet. **No scalar in either corpus exhibits
+/// any of them**,
+/// which is why three phases of corpus sweeps never saw it (`PROGRESS.md`, R20).
+/// Pinned by `the_emitters_predicate_never_disagrees_with_the_oracle` in
+/// `tests/gate_roundtrip.rs`.
 ///
 /// A line feed is not listed because a multi-line value never reaches here:
 /// [`choose_scalar`] sends it to a literal block or to double quotes first.
@@ -272,6 +295,9 @@ pub fn is_conservatively_safe_plain_scalar(value: &str) -> bool {
         return false;
     }
     if resembles_a_typed_scalar(value) {
+        return false;
+    }
+    if plain_scalar_is_ambiguous(value) {
         return false;
     }
     true

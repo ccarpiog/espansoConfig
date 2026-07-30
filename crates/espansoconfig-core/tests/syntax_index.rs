@@ -89,19 +89,27 @@ use espansoconfig_core::{
 /// whole-line comments and 4 real blank lines.
 /// `docs/decisions/0c-3b-2a-notes.md` section 5.2 tabulates every count they
 /// moved.
-const SYNTHETIC_FIXTURES: usize = 32;
+///
+/// The thirty-third is Phase 0c-3b-2b's `explicit-key-mappings.yml`: 23 nodes —
+/// 1 document, 7 collections (the root mapping, the `matches` sequence, its 2
+/// item mappings, the `global_vars` sequence, its item mapping and the nested
+/// `params` mapping) and 15 scalars, none zero width — carrying 10 whole-line
+/// comments and 1 real blank line. It exists because the gate sweep of that
+/// phase found `HazardKind::ExplicitKeyMapping` had **no corpus fixture at
+/// all**, five phases after the hazard was implemented (R20).
+const SYNTHETIC_FIXTURES: usize = 33;
 
 /// Scalar nodes across the valid synthetic corpus.
-const SYNTHETIC_SCALARS: usize = 1016;
+const SYNTHETIC_SCALARS: usize = 1031;
 
 /// Collection nodes across the valid synthetic corpus.
-const SYNTHETIC_COLLECTIONS: usize = 300;
+const SYNTHETIC_COLLECTIONS: usize = 307;
 
 /// Alias nodes across the valid synthetic corpus.
 const SYNTHETIC_ALIASES: usize = 5;
 
 /// Frontier members across the valid synthetic corpus.
-const SYNTHETIC_FRONTIER_MEMBERS: usize = 1016;
+const SYNTHETIC_FRONTIER_MEMBERS: usize = 1031;
 
 /// Block scalars across the valid synthetic corpus.
 const SYNTHETIC_BLOCK_SCALARS: usize = 53;
@@ -118,7 +126,11 @@ const SYNTHETIC_BLOCK_SCALARS: usize = 53;
 const SYNTHETIC_OVERSHOOTING_BLOCKS: usize = 50;
 
 /// Comment lines recoverable from the gaps of the valid synthetic corpus.
-const SYNTHETIC_GAP_COMMENTS: usize = 316;
+///
+/// `explicit-key-mappings.yml` moved this by exactly its 10 whole-line comments,
+/// and the trivia scanner's token-accurate figure by the same 10, because it
+/// carries no inline comment — the cross-check every new fixture pays.
+const SYNTHETIC_GAP_COMMENTS: usize = 326;
 
 /// Flow collections across the valid synthetic corpus.
 ///
@@ -145,7 +157,9 @@ const SYNTHETIC_FLOW_COLLECTIONS: usize = 11;
 /// `run-based-removal-boundaries.yml` adds all 6 of its own for the same reason.
 /// The two fixtures the Phase 0c-3b-2a review added contribute **all 13** of
 /// theirs, 7 and 6, on the same terms: both end with a line break.
-const SYNTHETIC_OVERSHOOTING_COLLECTIONS: usize = 273;
+/// `explicit-key-mappings.yml` contributes **all 7** of its own, again because it
+/// ends with a line break.
+const SYNTHETIC_OVERSHOOTING_COLLECTIONS: usize = 280;
 
 /// Block collections that own bytes past their published span end.
 ///
@@ -184,7 +198,10 @@ const SYNTHETIC_ZERO_WIDTH_LEAVES: usize = 5;
 /// the scanner's by its **two**. The two fixtures the Phase 0c-3b-2a review added
 /// move this loose figure by 39 between them while carrying **four real blank
 /// lines each**, and `tests/trivia_scanner.rs` is what says so.
-const SYNTHETIC_GAP_BLANK_LINES: usize = 843;
+/// `explicit-key-mappings.yml` moves this loose figure by 12 while carrying
+/// **one** real blank line, and the scanner's count moving by exactly 1 is what
+/// proves it.
+const SYNTHETIC_GAP_BLANK_LINES: usize = 855;
 
 // ===========================================================================
 // 1. Slice fidelity

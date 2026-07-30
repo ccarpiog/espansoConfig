@@ -132,9 +132,11 @@ fn our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar() {
     // Phase 0c-3b-2a's two move fixtures added 20 and 23, none zero width and all
     // in agreement. 1 011 since that phase's review added two more: the 23 scalars
     // of `move-run-joins.yml` and the 21 of `move-kept-comment-joins-a-block.yml`,
-    // on the same terms.
+    // on the same terms. 1 026 since Phase 0c-3b-2b's `explicit-key-mappings.yml`
+    // added its 15, again none zero width and all in agreement — the explicit
+    // `?`/`:` punctuation is trivia, so it changes no scalar's own bytes.
     assert_eq!(
-        total, 1011,
+        total, 1026,
         "the synthetic corpus scalar count is pinned; update it deliberately"
     );
 } // End of function our_decoder_agrees_with_the_substrate_on_every_synthetic_scalar()
@@ -289,7 +291,9 @@ fn every_synthetic_scalar_reencodes_to_its_own_bytes() {
     // **all** of their scalars: 23 in `move-run-joins.yml`, whose two `|` blocks
     // re-encode identically, and 21 in `move-kept-comment-joins-a-block.yml`,
     // whose two do as well.
-    assert_eq!(tally.identical, 997, "pinned; update deliberately");
+    // 1 012 since Phase 0c-3b-2b's `explicit-key-mappings.yml`, all 15 of whose
+    // scalars are plain or single-quoted and re-encode identically.
+    assert_eq!(tally.identical, 1012, "pinned; update deliberately");
     assert_eq!(
         tally.refused,
         BTreeMap::from([

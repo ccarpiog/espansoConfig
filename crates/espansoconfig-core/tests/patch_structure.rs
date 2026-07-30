@@ -233,7 +233,7 @@ type OutcomeRow = (&'static str, [usize; CATEGORIES]);
 /// mapping, so every row's total grows; a removal whose envelope crosses a
 /// file-owned comment is now refused rather than applied; and two fixtures
 /// joined the corpus.
-const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
+const SYNTHETIC_OUTCOMES: [OutcomeRow; 33] = [
     (
         "anchors-aliases-tags-merge.yml",
         [0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -275,6 +275,13 @@ const SYNTHETIC_OUTCOMES: [OutcomeRow; 32] = [
     (
         "empty-entries-and-extents.yml",
         [52, 11, 0, 0, 0, 5, 6, 0, 0, 0, 6, 0, 0],
+    ),
+    // Phase 0c-3b-2b's fixture for `HazardKind::ExplicitKeyMapping`, which had
+    // no corpus fixture at all before it (R20). The `matches:` subtree is
+    // refused whole and `global_vars:` is not.
+    (
+        "explicit-key-mappings.yml",
+        [24, 3, 22, 0, 1, 2, 3, 0, 0, 0, 3, 0, 0],
     ),
     // The fixture the Phase 0c-3a review's fix round added for finding 1. Its
     // `vars` entry holds a comment the ownership rules give to the file, so its

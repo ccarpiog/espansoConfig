@@ -114,19 +114,65 @@ pub(crate) fn attribute(
     (comments, hazards)
 } // End of function attribute()
 
+/// One candidate node, ranked by the key one of the primitives orders on.
+///
+/// `arena` is the node's position in [`SyntaxIndex::nodes`], and it is carried
+/// so the precomputed orders break ties **exactly** as the linear scans they
+/// replaced did: `max_by_key` returns the last maximum in iteration order and
+/// `min_by_key` the first minimum, and iteration order was arena order.
+#[derive(Clone, Copy)]
+struct Ranked {
+    /// The endpoint the order is on — `span.end` in `by_end`, `span.start` in
+    /// `by_start`.
+    at: usize,
+    /// The node's depth, which is the primitives' second key.
+    depth: usize,
+    /// Its arena position, the tie-breaker.
+    arena: usize,
+    /// The node itself.
+    node: NodeId,
+}
+
 /// Precomputed facts about the tree that every rule consults.
+///
+/// # R19 — the primitives are answered from an order, not from a scan
+///
+/// [`Context::ending_before`], [`Context::starting_after`] and
+/// [`Context::enclosing_flow`] used to scan **every** node of the document, and
+/// each is called once per trivia item, so `TriviaIndex::scan` cost
+/// O(items × nodes) — `PROGRESS.md`, R19, measured at 20 ms for the largest real
+/// file. The answers are now read out of orders built once per scan:
+///
+/// - `by_end`, candidates with a non-empty span sorted by `(end, depth, arena)`;
+/// - `by_start`, every candidate sorted by `(start, depth, arena)`;
+/// - `flows`, the flow collections alone, which are a handful per document.
+///
+/// **No answer changes.** Each order's key is exactly the key the scan it
+/// replaced maximised or minimised, tie-breaker included, so the same node wins
+/// on the same input; the whole corpus's pinned attribution counts, ownership
+/// rules and hazard tallies are the differential that says so.
+///
+/// [`Context::innermost_containing`] is deliberately left a scan: it is asked
+/// only about [`TriviaKind::Unclassified`] bytes, which raise a hazard that
+/// disqualifies the whole document, so it is never on a hot path.
 struct Context<'index> {
     /// The index the trivia belongs to.
     index: &'index SyntaxIndex,
     /// Depth of every node, by arena position. A document is depth 0.
     depth: Vec<usize>,
+    /// Candidates with a non-empty span, by `(end, depth, arena)` ascending.
+    by_end: Vec<Ranked>,
+    /// Every candidate, by `(start, depth, arena)` ascending.
+    by_start: Vec<Ranked>,
+    /// The flow collections, in arena order, with their spans.
+    flows: Vec<(ByteSpan, Ranked)>,
 }
 
 impl<'index> Context<'index> {
-    /// Precomputes node depths.
+    /// Precomputes node depths and the three primitive orders.
     ///
     /// The arena is filled in event order, so a node's parent always precedes
-    /// it and one forward pass suffices.
+    /// it and one forward pass suffices for the depths.
     fn new(index: &'index SyntaxIndex) -> Context<'index> {
         let mut depth = vec![0usize; index.nodes().len()];
         for node in index.nodes() {
@@ -134,8 +180,44 @@ impl<'index> Context<'index> {
                 depth[node.id.get()] = depth[parent.get()] + 1;
             }
         }
-        Context { index, depth }
-    }
+
+        let mut by_end: Vec<Ranked> = Vec::new();
+        let mut by_start: Vec<Ranked> = Vec::new();
+        let mut flows: Vec<(ByteSpan, Ranked)> = Vec::new();
+        for (arena, node) in index.nodes().iter().enumerate() {
+            // The same filter `candidates()` applies: a document node is the
+            // stream's structure rather than a construct a user edits.
+            if node.kind == NodeKind::Document {
+                continue;
+            }
+            let ranked = Ranked {
+                at: node.span.start,
+                depth: depth[node.id.get()],
+                arena,
+                node: node.id,
+            };
+            by_start.push(ranked);
+            if !node.span.is_empty() {
+                by_end.push(Ranked {
+                    at: node.span.end,
+                    ..ranked
+                });
+            }
+            if node.collection_style == Some(CollectionStyle::Flow) {
+                flows.push((node.span, ranked));
+            }
+        } // End of the loop that ranks every candidate node
+
+        by_end.sort_by_key(|ranked| (ranked.at, ranked.depth, ranked.arena));
+        by_start.sort_by_key(|ranked| (ranked.at, ranked.depth, ranked.arena));
+        Context {
+            index,
+            depth,
+            by_end,
+            by_start,
+            flows,
+        }
+    } // End of function new()
 
     /// Every node that may own trivia: everything except the document nodes,
     /// which are the stream's structure rather than a construct a user edits.
@@ -159,12 +241,17 @@ impl<'index> Context<'index> {
     /// including it would hand the colon and the comment to a node that is
     /// written nowhere and that sits on the wrong side of the punctuation. The
     /// key is the entry's visible identity and takes both.
+    ///
+    /// Answered from `by_end`: the last entry whose end is at or before
+    /// `position` is the maximum by `(end, depth, arena)` among the candidates
+    /// the scan considered. The same-line test is applied to that one alone
+    /// because it is **monotone** — if a break lies between the largest such end
+    /// and `position`, it lies between every smaller end and `position` too — so
+    /// a failure there is a failure for all of them.
     fn ending_before(&self, source: &str, position: usize) -> Option<NodeId> {
-        self.candidates()
-            .filter(|node| !node.span.is_empty())
-            .filter(|node| node.span.end <= position && same_line(source, node.span.end, position))
-            .max_by_key(|node| (node.span.end, self.depth[node.id.get()]))
-            .map(|node| node.id)
+        let upto = self.by_end.partition_point(|ranked| ranked.at <= position);
+        let best = self.by_end.get(upto.checked_sub(1)?)?;
+        same_line(source, best.at, position).then_some(best.node)
     } // End of function ending_before()
 
     /// The outermost node whose span begins at or after `position`.
@@ -172,20 +259,21 @@ impl<'index> Context<'index> {
     /// This is what a leading comment introduces and what a `-`, `?`, `&` or
     /// `!` decorates. Outermost wins because a comment above `- trigger: :a`
     /// introduces the whole item, not merely its first key.
+    ///
+    /// Answered from `by_start`: the first entry whose start is at or after
+    /// `position` is the minimum by `(start, depth, arena)`.
     fn starting_after(&self, position: usize) -> Option<NodeId> {
-        self.candidates()
-            .filter(|node| node.span.start >= position)
-            .min_by_key(|node| (node.span.start, self.depth[node.id.get()]))
-            .map(|node| node.id)
+        let from = self.by_start.partition_point(|ranked| ranked.at < position);
+        self.by_start.get(from).map(|ranked| ranked.node)
     }
 
     /// The innermost flow collection whose span contains `span`.
     fn enclosing_flow(&self, span: ByteSpan) -> Option<NodeId> {
-        self.candidates()
-            .filter(|node| node.collection_style == Some(CollectionStyle::Flow))
-            .filter(|node| node.span.contains(span))
-            .max_by_key(|node| self.depth[node.id.get()])
-            .map(|node| node.id)
+        self.flows
+            .iter()
+            .filter(|(flow, _)| flow.contains(span))
+            .max_by_key(|(_, ranked)| (ranked.depth, ranked.arena))
+            .map(|(_, ranked)| ranked.node)
     }
 
     /// The innermost node of any kind whose span contains `span`.
@@ -749,6 +837,85 @@ fn multi_document_hazards(context: &Context<'_>, hazards: &mut Vec<Hazard>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`Context::ending_before`] as it was written before R19's precomputation:
+    /// a scan of every candidate node.
+    fn ending_before_by_scan(
+        context: &Context<'_>,
+        source: &str,
+        position: usize,
+    ) -> Option<NodeId> {
+        context
+            .candidates()
+            .filter(|node| !node.span.is_empty())
+            .filter(|node| node.span.end <= position && same_line(source, node.span.end, position))
+            .max_by_key(|node| (node.span.end, context.depth[node.id.get()]))
+            .map(|node| node.id)
+    } // End of function ending_before_by_scan()
+
+    /// [`Context::starting_after`] as it was written before R19's precomputation.
+    fn starting_after_by_scan(context: &Context<'_>, position: usize) -> Option<NodeId> {
+        context
+            .candidates()
+            .filter(|node| node.span.start >= position)
+            .min_by_key(|node| (node.span.start, context.depth[node.id.get()]))
+            .map(|node| node.id)
+    }
+
+    /// [`Context::enclosing_flow`] as it was written before R19's precomputation.
+    fn enclosing_flow_by_scan(context: &Context<'_>, span: ByteSpan) -> Option<NodeId> {
+        context
+            .candidates()
+            .filter(|node| node.collection_style == Some(CollectionStyle::Flow))
+            .filter(|node| node.span.contains(span))
+            .max_by_key(|node| context.depth[node.id.get()])
+            .map(|node| node.id)
+    }
+
+    #[test]
+    fn the_precomputed_primitives_answer_exactly_as_the_scans_they_replaced() {
+        // **R19's fix, checked against the code it replaced rather than against
+        // the corpus counts alone.** Three primitives, every byte offset of six
+        // documents, and — for `enclosing_flow` — every span between two offsets
+        // of the flow-bearing ones. The documents are chosen for the shapes that
+        // make the tie-breaking observable: nested collections that end at the
+        // same byte, a compact `- key: value` whose item and first key start
+        // together, an empty value that owns no bytes, and flow collections
+        // nested inside one another.
+        for source in [
+            "matches:\n  - trigger: ':a'\n    replace: x\n  - trigger: ':b'\n",
+            "a:\n  b:\n    c: 1\n",
+            "outer:\n  - - first\n    - second\n",
+            "empty:\n  key:\n  other: 1\n",
+            "flow: [1, [2, 3], {k: v}]\nafter: 1\n",
+            "# header\n\n# leading\nmatches:\n  - trigger: ':a'  # inline\n",
+        ] {
+            let index = SyntaxIndex::parse(source).expect("the fixture parses");
+            let context = Context::new(&index);
+            for position in 0..=source.len() {
+                assert_eq!(
+                    context.ending_before(source, position),
+                    ending_before_by_scan(&context, source, position),
+                    "ending_before disagrees at {position} of {source:?}"
+                );
+                assert_eq!(
+                    context.starting_after(position),
+                    starting_after_by_scan(&context, position),
+                    "starting_after disagrees at {position} of {source:?}"
+                );
+            } // End of the loop over every byte offset of one document
+            for start in 0..=source.len() {
+                for end in start..=source.len() {
+                    let span = ByteSpan::new(start, end);
+                    assert_eq!(
+                        context.enclosing_flow(span),
+                        enclosing_flow_by_scan(&context, span),
+                        "enclosing_flow disagrees on {start}..{end} of {source:?}"
+                    );
+                } // End of the loop over the spans ending at or after `start`
+            } // End of the loop over every span of one document
+        } // End of the loop over the documents the primitives are compared on
+    } // End of function the_precomputed_primitives_answer_exactly_as_the_scans_they_replaced()
 
     #[test]
     fn trivia_outside_every_node_names_no_node_at_all() {
