@@ -2847,7 +2847,7 @@ _Updated at each phase boundary._
 | 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
 | 1b-2b | `065a516` | ✅ pushed to `origin/main` | clean |
 | 1c-1 | `59d4207` | ✅ pushed to `origin/main` | clean |
-| 1c-2a | `PENDING` | see below | see below |
+| 1c-2a | `5c830d0` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2921,6 +2921,19 @@ guard (`src/lib/ipc/errors.ts`, `scripts/lint/ipc-detail.ts`), three new `Comman
 `docs/decisions/1b-2b-notes.md`, `docs/reviews/phase-1b-2b-dictionaries-and-menu.md`, `CLAUDE.md` §6
 and this checkpoint. **This commit closes Phase 1b. A fresh session starting Phase 1c should start from
 it or later.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command will run.
+
+`5c830d0` is Phase 1c-2a **including its review fix round** — the phase was held open until all four
+findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated defects:
+neither the pane that claimed an unmodelled entry was "shown as written" while showing only its key,
+nor the sequence item whose boundary was modelled and rendered by nothing, nor the coverage test that
+audited what the implementation chose to emit. It contains the pane's model
+(`src/lib/browser/detail.ts` and `detail.test.ts`), the rendered pane
+(`src/lib/components/DetailPane.svelte`), 50 new dictionary keys and three new accessors
+(`src/lib/i18n/{en.json,es.json,codes.ts,index.ts,plural.ts}`), the extended synthetic builders
+(`src/lib/browser/fixtures.ts`), `docs/decisions/1c-2a-notes.md`,
+`docs/reviews/phase-1c-2a-detail-pane.md` and this checkpoint. **A fresh session starting Phase 1c-2b
+should start from `5c830d0` or later.** As at 1b-1, `npm install` (or `npm ci`) is required before any
+frontend command will run.
 
 `185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were
