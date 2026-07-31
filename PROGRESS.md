@@ -2219,6 +2219,7 @@ _Updated at each phase boundary._
 | 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2b | `912cb89` | ✅ pushed to `origin/main` | clean |
 | 1a | `185c9a6` | ✅ pushed to `origin/main` | clean |
+| 1b-1 | `94aa6c9` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2256,6 +2257,17 @@ or later.**
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
 `.claude/`. Benign and left in place.
+
+`94aa6c9` is Phase 1b-1 **including its review fix round** — the phase was held open until all nine
+findings were dispositioned, so, as with every phase since `8989c16`, no commit holds the demonstrated
+defects: neither the over-broad `core:default` capability, nor the production CSP allowing inline styles,
+nor the macOS floor that would have thrown on first render, nor the missing `custom-protocol` feature
+that made every binary load a dead dev URL. It is the first commit to add `src-tauri/` and `src/`, so it
+contains the Tauri v2 shell, the Svelte 5 + TypeScript + Vite frontend, the i18n layer in both
+languages, three lint scripts, `docs/decisions/1b-1-notes.md`, `docs/reviews/phase-1b-1-shell-and-i18n.md`,
+`CLAUDE.md` §6 and this checkpoint. **A fresh session starting Phase 1b-2 should start from `94aa6c9`
+or later.** Note that `npm install` is required before any frontend command will run — `node_modules/`
+is gitignored and `package-lock.json` is committed, so `npm ci` reproduces the pinned tree exactly.
 
 `185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were
