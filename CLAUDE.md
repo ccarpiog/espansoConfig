@@ -119,9 +119,19 @@ character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex`
 codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
 a mapping field, and move a match within one sequence.
 
-**Phase 1 — the read-only browser — is under way.** 1a (the core-side read model) and 1b-1 (the Tauri
-shell, the Svelte scaffold and the i18n layer) are complete; **1b-2 — the read-only IPC surface and the
-Rust-code→string dictionaries — is next**, then 1c, the browser itself.
+**Phase 1 — the read-only browser — is under way, and Phase 1b is complete.** 1a (the core-side read
+model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the read-only IPC
+surface) and 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized
+macOS menu) are all done. **1c — the browser itself — is next**, and Phase 1's stated exit lands
+there: *the owner can browse their entire real config and every snippet renders correctly.*
+
+**A component renders a code by calling an accessor, never by building a key.**
+`src/lib/i18n/codes.ts` gives twelve typed `describe*` functions over sixteen enum namespaces, and
+`index.ts` wraps each in a reactive `t*`. The builders' return types make a **missing key a compile
+error in that file**; building a key by hand opts out of the only check that catches it. On the Rust
+side, a variant with no string — or a whole new enum — is a `cargo test` failure
+(`src-tauri/src/dictionary_contract.rs`). The one construct that still escapes is an enum a
+`macro_rules!` expands to; that is written down rather than hoped about.
 
 **The architecture-rule check changed at 1b-1 (D2x).** §3 above is unchanged and absolute, but
 `rg -c tauri Cargo.lock` is no longer evidence for it — `src-tauri/` exists, so the lockfile contains

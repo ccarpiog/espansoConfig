@@ -41,7 +41,10 @@ export const COMMAND_ERROR_CODES = [
   'unknownDocument',
   'identityWrongDocument',
   'identityStaleRevision',
-  'identityNoSuchMatch'
+  'identityNoSuchMatch',
+  'menuUnavailable',
+  'invalidMenuLabels',
+  'menuBuildFailed'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -149,7 +152,60 @@ export interface IdentityNoSuchMatchError {
   readonly node: number;
 }
 
-/** Everything a read-only command may reject with. */
+/**
+ * The macOS menu could not be rebuilt because the main thread refused the work.
+ *
+ * The only failure `setMenuLabels` can produce, and the one code on this
+ * boundary that says nothing about any file: menu construction is AppKit work
+ * Rust posts to the main thread, so what the command reports is whether the post
+ * was **accepted**. A refusal means the event loop is gone.
+ */
+export interface MenuUnavailableError {
+  /** The discriminant. */
+  readonly code: 'menuUnavailable';
+}
+
+/**
+ * The label set sent is not the label set the Rust side declares.
+ *
+ * **A version-skew refusal, and it exists because the alternative was untyped
+ * prose.** Phase 1b-2b's `set_menu_labels` took a typed `MenuLabels` argument,
+ * so a frontend one release behind was refused inside Tauri's own command macro
+ * — in English, with no `code` — and {@link classifyFailure} could only file it
+ * under `unexpected`. The command now takes an untyped envelope and validates it
+ * itself, so a skew arrives here.
+ *
+ * Both operands are **wire field names**, the same identifiers `MENU_LABEL_FIELDS`
+ * and the `menu.` dictionary namespace are spelled with. Neither is interpolated
+ * into the message: they are for a console, exactly as `IoError.kind` is.
+ *
+ * Both are empty when every field is present and one of them is not a string.
+ * The code still says what a caller can act on.
+ */
+export interface InvalidMenuLabelsError {
+  /** The discriminant. */
+  readonly code: 'invalidMenuLabels';
+  /** Fields the Rust side declares that the label set did not carry. */
+  readonly missing: readonly string[];
+  /** Fields the label set carried that the Rust side does not declare. */
+  readonly unexpected: readonly string[];
+}
+
+/**
+ * The main thread accepted the menu rebuild and the rebuild failed there.
+ *
+ * Kept apart from {@link MenuUnavailableError} because the two say different
+ * things: that one means the event loop is gone, this one means it is alive and
+ * AppKit refused. Phase 1b-2b could not tell them apart at all — the command
+ * answered as soon as the work was *posted*, so a failure inside the closure
+ * left Tauri's English default menu up and reported success.
+ */
+export interface MenuBuildFailedError {
+  /** The discriminant. */
+  readonly code: 'menuBuildFailed';
+}
+
+/** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
   | ConfigDirNotFoundError
@@ -159,7 +215,33 @@ export type CommandError =
   | UnknownDocumentError
   | IdentityWrongDocumentError
   | IdentityStaleRevisionError
-  | IdentityNoSuchMatchError;
+  | IdentityNoSuchMatchError
+  | MenuUnavailableError
+  | InvalidMenuLabelsError
+  | MenuBuildFailedError;
+
+/**
+ * Where the developer string of an unexpected failure is kept.
+ *
+ * **Not a property name — a module-private symbol**, and that is the whole
+ * point. Phase 1b-2b guarded the old `detail` property with a name scanner, and
+ * its review showed the guard failing on one line:
+ * `JSON.stringify(classifyFailure(x))` names no guarded identifier and renders
+ * the string anyway. A scanner cannot decide what reaches a screen; a *type* and
+ * a property descriptor can, so the value is now unreachable rather than
+ * discouraged. It is defined non-enumerable **and** under a symbol key, either
+ * of which alone would keep it out of `JSON.stringify`, `Object.keys`,
+ * `Object.values`, a spread and a `for…in`.
+ *
+ * Read it with {@link developerDetail}, and only in a console.
+ */
+const DEVELOPER_DETAIL = Symbol('espansoconfig.ipc.developerDetail');
+
+/** A rejection this build does not recognise, carrying nothing renderable. */
+export interface UnexpectedFailure {
+  /** The discriminant. */
+  readonly kind: 'unexpected';
+}
 
 /**
  * What a rejected command turned out to be.
@@ -170,10 +252,80 @@ export type CommandError =
  * those their own arm keeps them from being mistaken for a {@link CommandError}
  * — and keeps {@link CommandError}'s code list honest, because nothing invents
  * a code the Rust side cannot produce.
+ *
+ * **The unexpected arm carries no renderable field at all.** Everything a
+ * component can reach on it is the word `unexpected`, which is what
+ * `describeIpcFailure` turns into one generic sentence.
  */
 export type IpcFailure =
   | { readonly kind: 'command'; readonly error: CommandError }
-  | { readonly kind: 'unexpected'; readonly detail: string };
+  | UnexpectedFailure;
+
+/**
+ * Builds an unexpected failure carrying a developer string nothing can render.
+ *
+ * @param detail - The developer string, for a console and for nowhere else.
+ * @returns The failure, with the string hidden behind {@link DEVELOPER_DETAIL}.
+ */
+function unexpectedFailure(detail: string): UnexpectedFailure {
+  const failure: UnexpectedFailure = { kind: 'unexpected' };
+  Object.defineProperty(failure, DEVELOPER_DETAIL, {
+    value: detail,
+    enumerable: false,
+    writable: false,
+    configurable: false
+  });
+  return failure;
+} // End of function unexpectedFailure()
+
+/**
+ * The developer string an unexpected failure was built from, for the console.
+ *
+ * **Never render this.** It is Tauri's own English sentence, a thrown `Error`'s
+ * message, or `JSON.stringify` of a value nobody designed — prose in a language
+ * nobody chose, which is exactly what plan section 9 keeps off this boundary.
+ * The rule is no longer only a sentence in a doc comment: the value is not a
+ * property of the failure, so a component cannot reach it by serializing,
+ * spreading, enumerating or indexing the object, and would have to import this
+ * function by name to see it at all. `scripts/lint/ipc-detail.ts` fails the
+ * build if any module outside this file and its test so much as names it.
+ *
+ * @param failure - A classified IPC failure.
+ * @returns The developer string, or `null` for a typed command error.
+ */
+export function developerDetail(failure: IpcFailure): string | null {
+  const carried: unknown = (failure as Record<symbol, unknown>)[DEVELOPER_DETAIL];
+  return typeof carried === 'string' ? carried : null;
+} // End of function developerDetail()
+
+/**
+ * The console prefix every report below carries.
+ *
+ * Developer-facing and therefore deliberately not translated, on the same
+ * grounds as `main.rs`'s `expect` message: a console line is read by whoever is
+ * debugging, not by whoever is using the application, and routing it through the
+ * i18n layer would put translator-visible strings in front of a `JSON` dump.
+ */
+const CONSOLE_PREFIX = '[espansoConfig] a command failed';
+
+/**
+ * Reports a failed command to the developer console.
+ *
+ * **The channel the `detail` belongs to**, and the reason the review's fix works
+ * rather than merely forbidding things: a diagnostic string has to go somewhere,
+ * and giving it a destination is what makes "not on a screen" a design instead
+ * of a prohibition. A typed error is logged as its code and operands; an
+ * unexpected one as the developer string {@link developerDetail} holds.
+ *
+ * @param failure - A classified IPC failure.
+ */
+export function reportIpcFailure(failure: IpcFailure): void {
+  if (failure.kind === 'command') {
+    console.warn(CONSOLE_PREFIX, failure.error.code, failure.error);
+    return;
+  }
+  console.warn(CONSOLE_PREFIX, failure.kind, developerDetail(failure));
+} // End of function reportIpcFailure()
 
 /** The three JSON shapes an operand of a {@link CommandError} can take. */
 export type OperandShape = 'string' | 'number' | 'stringArray';
@@ -203,7 +355,10 @@ export const COMMAND_ERROR_OPERANDS = {
   unknownDocument: { document: 'number' },
   identityWrongDocument: { expected: 'number', found: 'number' },
   identityStaleRevision: { expected: 'string', found: 'string' },
-  identityNoSuchMatch: { node: 'number' }
+  identityNoSuchMatch: { node: 'number' },
+  menuUnavailable: {},
+  invalidMenuLabels: { missing: 'stringArray', unexpected: 'stringArray' },
+  menuBuildFailed: {}
 } as const;
 
 /**
@@ -263,8 +418,9 @@ export function isCommandError(value: unknown): value is CommandError {
  * answer with its own arm rather than a `null` every call site would have to
  * remember to handle.
  *
- * The `detail` of an unexpected failure is a **developer** string for the
- * console. It must not be rendered: 1b-2b gives the unexpected arm one generic
+ * The developer string of an unexpected failure is **not a property of the
+ * value this returns**: it is kept behind a non-enumerable symbol and read only
+ * by {@link developerDetail}. 1b-2b gives the unexpected arm one generic
  * dictionary key, exactly as it does for every other message.
  *
  * @param raw - The value a rejected `invoke` produced.
@@ -275,17 +431,17 @@ export function classifyFailure(raw: unknown): IpcFailure {
     return { kind: 'command', error: raw };
   }
   if (typeof raw === 'string') {
-    return { kind: 'unexpected', detail: raw };
+    return unexpectedFailure(raw);
   }
   if (raw instanceof Error) {
-    return { kind: 'unexpected', detail: raw.message };
+    return unexpectedFailure(raw.message);
   }
   // `JSON.stringify` can return `undefined` (for a function, say) and can throw
   // on a cycle, so neither of its failure modes is allowed to reach the caller.
   try {
-    return { kind: 'unexpected', detail: JSON.stringify(raw) ?? String(raw) };
+    return unexpectedFailure(JSON.stringify(raw) ?? String(raw));
   } catch {
-    return { kind: 'unexpected', detail: String(raw) };
+    return unexpectedFailure(String(raw));
   }
 } // End of function classifyFailure()
 
@@ -366,6 +522,9 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'notADirectory':
     case 'io':
     case 'notUtf8':
+    case 'menuUnavailable':
+    case 'invalidMenuLabels':
+    case 'menuBuildFailed':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.

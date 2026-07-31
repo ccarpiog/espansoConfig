@@ -29,9 +29,9 @@
 //!   in `errors.ts` and the operand table `isCommandError` validates against**,
 //!   names *and* JSON kinds.
 //! - **The registered command list**, parsed independently out of
-//!   `generate_handler!` and compared with `COMMAND_NAMES` in both directions,
-//!   plus an assertion that none of the six forbidden mutating names appears in
-//!   either.
+//!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
+//!   `MENU_COMMAND_NAMES` in both directions, plus an assertion that none of the
+//!   six forbidden mutating names appears in either.
 //!
 //! What it still cannot check is the **type text of the read model's own
 //! properties**: `readonly byte_len: string` in `types.ts` would pass, because
@@ -151,7 +151,7 @@ fn frontend_file(relative: &str) -> PathBuf {
 /// Comments are stripped so that a property name mentioned in a doc comment
 /// cannot be mistaken for a declaration, and so a declaration commented out
 /// cannot be mistaken for a live one.
-fn read_without_comments(relative: &str) -> String {
+pub(crate) fn read_without_comments(relative: &str) -> String {
     let path = frontend_file(relative);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
@@ -321,9 +321,34 @@ fn union_body<'a>(source: &'a str, name: &str) -> &'a str {
 } // End of function union_body()
 
 /// The single-quoted literals of `export type {name} = … ;`.
-fn union_members(source: &str, name: &str) -> BTreeSet<String> {
+pub(crate) fn union_members(source: &str, name: &str) -> BTreeSet<String> {
     quoted_literals(union_body(source, name))
 }
+
+/// Every name declared by an `export type {name} =` in a TypeScript file.
+///
+/// `crate::dictionary_contract` uses it to ask its third question — *is every
+/// wire enum registered at all* — from the frontend's side, without a list of
+/// enums anywhere. Returned in declaration order, deduplicated by the caller's
+/// use of it.
+pub(crate) fn declared_type_names(source: &str) -> Vec<String> {
+    let header = "export type ";
+    let mut names = Vec::new();
+    let mut rest = source;
+    while let Some(at) = rest.find(header) {
+        rest = &rest[at + header.len()..];
+        let name: String = rest
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect();
+        // A generic or a type this scan cannot address by name is skipped
+        // rather than guessed at; every wire enum is a plain identifier.
+        if !name.is_empty() && rest[name.len()..].trim_start().starts_with('=') {
+            names.push(name);
+        }
+    } // End of the loop over the file's type declarations
+    names
+} // End of function declared_type_names()
 
 /// The property names of one externally tagged variant of a union.
 ///
@@ -460,7 +485,11 @@ const FORBIDDEN_COMMANDS: [&str; 6] = [
 ];
 
 /// The single-quoted literals of `export const {name} = [ … ]`.
-fn const_array_members(source: &str, name: &str) -> BTreeSet<String> {
+///
+/// `crate::menu_contract` calls this too, for `MENU_LABEL_FIELDS`, so there is
+/// one parser of a TypeScript constant array in the crate rather than two that
+/// could disagree about what one looks like.
+pub(crate) fn const_array_members(source: &str, name: &str) -> BTreeSet<String> {
     let header = format!("export const {name} = [");
     let start = source
         .find(&header)
@@ -1028,16 +1057,33 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// compared in both directions, and the six mutating names Phase 2 owns are
 /// asserted absent from both sets — because "no mutating command is registered"
 /// is the claim this check exists to keep true, and it was not being checked.
+///
+/// Phase 1b-2b adds the sixth name, and it is deliberately read from a
+/// **different** frontend file: `MENU_COMMAND_NAMES` in `src/lib/ipc/menu.ts`.
+/// The menu command is not a workspace command and does not belong in
+/// `COMMAND_NAMES`, but it is registered in the same macro, so the union of the
+/// two declarations is what the registered set has to equal.
 #[test]
-fn the_registered_commands_are_exactly_the_five_read_only_names() {
+fn the_registered_commands_are_the_read_only_five_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
-    let declared = const_array_members(&frontend, "COMMAND_NAMES");
+    let read_only = const_array_members(&frontend, "COMMAND_NAMES");
+    let menu = const_array_members(
+        &read_without_comments("src/lib/ipc/menu.ts"),
+        "MENU_COMMAND_NAMES",
+    );
+    assert_eq!(
+        read_only.len(),
+        5,
+        "the read-only surface is five commands: {read_only:?}"
+    );
+    assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
+    let declared: BTreeSet<String> = read_only.union(&menu).cloned().collect();
     let registered = registered_commands();
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        5,
-        "Phase 1b-2a registers five read-only commands and no more: {registered:?}"
+        6,
+        "Phase 1b-2b registers five read-only commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1045,7 +1091,7 @@ fn the_registered_commands_are_exactly_the_five_read_only_names() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_exactly_the_five_read_only_names()
+} // End of function the_registered_commands_are_the_read_only_five_and_the_menu_command()
 
 /// A scalar arrives as text, never as a parsed value (D2u).
 ///

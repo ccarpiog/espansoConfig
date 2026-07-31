@@ -24,3 +24,17 @@ marked-yaml = "0.8"
 # be inherited by `espansoconfig-core` (CLAUDE.md section 3).
 tauri = "2"
 tauri-build = "2"
+# The application shell's TEST code only, and for one purpose: the contract
+# checks in `src-tauri` parse Rust instead of scanning it line by line. Phase
+# 1b-2b's review found three ways a line scanner fails open — an attribute and a
+# variant on one line, two variants on one line, and a block comment that closes
+# mid-line — and all three are properties of scanning text rather than bugs in
+# any one scanner. Declared here with every other pinned version, and a
+# dev-dependency of `src-tauri` alone: `crates/espansoconfig-core/Cargo.toml`
+# names neither of these in any section, and never names tauri (CLAUDE.md
+# section 3). The architecture check is unchanged and is
+#   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
+# `rg syn` over that tree is NOT a check: `serde_derive` is a proc-macro crate
+# built on `syn`, so `syn` has been in the core's graph since Phase 0.
+syn = { version = "2", features = ["full"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }

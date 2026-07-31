@@ -36,6 +36,17 @@ tempfile = { workspace = true }
 # block an application command is an argument; running one through it is
 # evidence, and Phase 1b-1's review is on file about the difference.
 tauri = { workspace = true, features = ["test"] }
+# Phase 1b-2b's review, findings 2 and 6. `crate::rust_source` parses the Rust
+# these contract checks read instead of scanning it line by line, because every
+# false negative the review demonstrated — `#[cfg(…)] Variant,` on one line,
+# `A, B,` on one line, `*/ let title = "Edit";` — is a property of reading text
+# rather than a bug in one scanner. Test-only, and confined to this crate:
+# `crates/espansoconfig-core/Cargo.toml` names neither, and
+# `cargo tree -p espansoconfig-core | rg tauri` still finds nothing. (`rg syn`
+# over that tree finds `serde_derive`'s own proc-macro dependency and always
+# did, so it is not evidence about anything.)
+syn = { workspace = true }
+proc-macro2 = { workspace = true }
 
 # ---------------------------------------------------------------------------
 # `tauri::is_dev()` is literally `!cfg!(feature = "custom-protocol")`, and this

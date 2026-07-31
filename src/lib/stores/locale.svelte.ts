@@ -63,6 +63,13 @@ export interface LanguageChangeTarget {
   removeEventListener(type: 'languagechange', listener: () => void): void;
 }
 
+/**
+ * Notified when {@link LocaleState.current} changes.
+ *
+ * @param current - The locale the interface has just moved to.
+ */
+export type LocaleListener = (current: Locale) => void;
+
 /** Reactive interface-language state. */
 export interface LocaleState {
   /** The locale the interface is actually rendering in. */
@@ -85,7 +92,24 @@ export interface LocaleState {
    */
   refreshSystem(): void;
   /**
-   * Detaches the platform listener.
+   * Calls `listener` whenever {@link LocaleState.current} changes.
+   *
+   * The escape hatch for consumers that are **not** components. Everything
+   * inside the interface reads `current` in markup, where Svelte's own
+   * reactivity re-renders it; the macOS application menu is not in the component
+   * tree at all — it belongs to the application rather than to a view — so it
+   * needs a plain subscription. `src/lib/menu.ts` is the one caller.
+   *
+   * Listeners fire only on a **real** change: a `languagechange` event that
+   * re-negotiates the same locale, or one that changes the system language while
+   * a manual override is in force, notifies nobody.
+   *
+   * @param listener - Called with the new locale, after the state has moved.
+   * @returns A function that removes this listener. Idempotent.
+   */
+  subscribe(listener: LocaleListener): () => void;
+  /**
+   * Detaches the platform listener and drops every subscriber.
    *
    * Idempotent. The application-wide instance below never needs this — its
    * lifetime is the document's — but any scoped instance, and every test that
@@ -107,9 +131,38 @@ export function createLocaleState(
   storage: LocaleStorage,
   platform?: LanguageChangeTarget
 ): LocaleState {
-  let system = $state<Locale>(negotiateLocale(readSystemTags()));
   const stored = storage.read();
-  let override = $state<Locale | null>(isLocale(stored) ? stored : null);
+  // Both initial values are computed as plain locals before the state is
+  // created, so that `announced` below can be seeded without reading a rune
+  // outside a closure — which is a real Svelte warning and not a style point.
+  const initialSystem = negotiateLocale(readSystemTags());
+  const initialOverride: Locale | null = isLocale(stored) ? stored : null;
+  let system = $state<Locale>(initialSystem);
+  let override = $state<Locale | null>(initialOverride);
+
+  const listeners = new Set<LocaleListener>();
+  // The last value the listeners were told about, so that a write which leaves
+  // `current` where it was notifies nobody. Without it, changing the system
+  // language while an override is in force would announce a change that did not
+  // happen — and the menu would be rebuilt in the language it already had.
+  let announced: Locale = initialOverride ?? initialSystem;
+
+  /**
+   * Tells every subscriber about a change, if there was one.
+   *
+   * Called after each write to `system` or `override`, which are the only two
+   * fields `current` is derived from and the only two this module writes.
+   */
+  function announce(): void {
+    const current = override ?? system;
+    if (current === announced) {
+      return;
+    }
+    announced = current;
+    for (const listener of [...listeners]) {
+      listener(current);
+    }
+  } // End of function announce()
 
   /**
    * Re-negotiates the system locale from a fresh reading of the platform.
@@ -119,6 +172,7 @@ export function createLocaleState(
    */
   function refreshSystem(): void {
     system = negotiateLocale(readSystemTags());
+    announce();
   } // End of function refreshSystem()
 
   platform?.addEventListener('languagechange', refreshSystem);
@@ -136,10 +190,18 @@ export function createLocaleState(
     setOverride(locale: Locale | null): void {
       override = locale;
       storage.write(locale);
+      announce();
     },
     refreshSystem,
+    subscribe(listener: LocaleListener): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     dispose(): void {
       platform?.removeEventListener('languagechange', refreshSystem);
+      listeners.clear();
     }
   };
 } // End of function createLocaleState()

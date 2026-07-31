@@ -25,8 +25,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1a** | The core-side read model: the semantic projection · the workspace and its per-revision cache | ✅ complete — after the review fix round below |
 | **1b-1** | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite scaffold · the i18n infrastructure in both languages | ✅ complete |
 | **1b-2a** | The read-only IPC surface · the wire error type · the typed frontend boundary · R27 corrected | ✅ complete — after the review fix round below |
-| 1b-2b | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ⬜️ **next** |
-| 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ not started |
+| **1b-2b** | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ✅ complete — after the review fix round below |
+| 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ **next** |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
@@ -633,6 +633,82 @@ the review required: `commands::save_match` added to `generate_handler!`, the te
 that owns it named.
 
 **Ten review findings, all closed, and two of them were real defects** — see the disposition below.
+
+### Phase 1b-2b — the prose, the exhaustiveness check, and the menu
+
+The **prose**. 1b-2a made the boundary carry codes and structured data with no rendering anywhere;
+1b-2b is what turns those codes into sentences a user can read, in both languages, and what makes a
+code without a sentence a **build failure** rather than an empty label. The decision record is
+[`docs/decisions/1b-2b-notes.md`](docs/decisions/1b-2b-notes.md).
+
+**Sixteen namespaces, 111 code keys, 138 keys per dictionary.** Every enum that can reach the UI —
+`DiagnosticCode` (23), `MatchBadge` (10), `HazardKind` (10), `CommandError` (12), `UnknownReason` (4),
+`WorkspaceError` (5), `IdentityError` (3), `ValueKind` (5), `DocumentShape` (3), `DiscoveryError` (3),
+plus `ScalarStyle`, `LineEnding`, `FileKind`, `TriggerKind`, `ContentKind`, `VariableKind` — has an
+`en` and an `es` entry under `code.<enum>.<variant>`. The scheme is an **identity formula** from the
+Rust variant name, which is what lets the check below compute the expected key set instead of reading
+a list. `src/lib/i18n/codes.ts` gives typed key builders whose template-literal return types make a
+missing key a **compile error**, and the operands ride the existing `{placeholder}` interpolation, so
+the placeholder-parity test covers them for free.
+
+**The last six were deferred to 1c and the review took the deferral away.** `ScalarStyle`,
+`LineEnding`, `FileKind`, `TriggerKind`, `ContentKind` and `VariableKind` already cross the wire in
+the read projection; a 1c component meeting `trigger.kind = "Single"` with no string could only render
+a raw Rust identifier or invent an unchecked mapping. They are in, and the phase's own argument for
+deferring them is withdrawn rather than softened.
+
+**The exhaustiveness check parses Rust properly, because scanning lines failed open three ways.**
+`src-tauri/src/rust_source.rs` uses `syn` and `proc-macro2` — **dev-dependencies of `src-tauri` only**,
+never of the core — and `dictionary_contract.rs` compares the derived variant set against both
+dictionaries **bidirectionally**: a variant with no key fails, and a stale key with no variant fails
+too. The registry it checks is no longer trusted either: `every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code`
+walks both source trees for `Serialize`-carrying enums and
+`every_typescript_wire_union_has_a_namespace` walks `types.ts`'s unions, so a **brand-new enum** is
+caught by derivation rather than by someone remembering to add a row. Four enums are excluded by name,
+each with a reason.
+
+**What still escapes is written down with a worked example.** A parser cannot expand a macro, so an
+enum produced by `macro_rules!` is invisible to both derived checks — planted, all eight
+`dictionary_contract` tests observed **passing**, recorded as experiment 12E and as a coverage hole.
+The limit is stated because the alternative is a check whose name outruns what its body can see.
+
+**The developer string left the type, because a name scanner could never enforce "never rendered".**
+`classifyFailure()`'s `detail` was guarded by a lint forbidding the identifier — and
+`JSON.stringify(classifyFailure(x))` names no identifier at all. It is now non-enumerable and
+symbol-keyed, readable only through `developerDetail()`, with `reportIpcFailure()` as its console
+destination. `JSON.stringify` of a failure is pinned at `{"kind":"unexpected"}`, spread and
+`structuredClone` included, so putting it back under any name fails. The notes' claim that "a component
+that renders it fails `npm test`" was **false when written** and is withdrawn.
+
+**The macOS menu is localized and no Rust file holds a label.** Tauri v2 builds the menu in Rust, so the
+three submenus' 16 labels are translated on the frontend and handed across a sixth command,
+`set_menu_labels`; `menu.rs` contains **zero user-facing string literals**, and a check that *lexes* the
+file — rather than masking comment lines, which let `*/ let title = "Edit";` through — pins that. The
+locale link is `LocaleState.subscribe`, not an `$effect`, because an effect is a no-op under vitest's
+node environment and would have been untestable.
+
+**`"permissions": []` survived the phase 1b-1 expected would need the first entry.** A capability governs
+**plugin** commands; `set_menu_labels` is this application's own command, and `core:menu` is what a
+renderer driving `@tauri-apps/api/menu` itself would need — granting it would let a compromised renderer
+replace the application menu. `dispatch_check.rs` drives all **six** commands through the real dispatcher
+with the shipped config, so this is measured rather than argued, and `core:default` stays gone.
+
+**Two failure paths were invisible and both are now typed.** A version skew was refused *inside Tauri's
+command macro*, producing English prose with no `code`, and `main.ts` dropped the promise — so an English
+default menu could stay up forever with nothing reported. The command now takes an untyped envelope and
+validates it itself, answering `invalidMenuLabels { missing, unexpected }`. Separately, `{ ok: true }` was
+returned before `build_menu()`/`set_menu()` ran; `menu::on_main_thread` now waits on a one-shot channel and
+answers `menuBuildFailed`. Waiting cannot deadlock, and the reason is read from the runtime source rather
+than assumed: a main-thread post runs **inline** when the caller is already on the main thread.
+
+**What is proven.** **544 Rust tests and 214 frontend tests pass** (from 514 and 104). Sixteen disabling
+experiments are recorded verbatim across the two halves and the fix round, and the load-bearing ones break
+the *engine* rather than a layer: adding a real `MatchBadge` variant to the core fired both new Rust tests
+while all ten `wire_contract` tests passed, which is 1b-2a's hole 4 demonstrated rather than argued.
+
+**Seven review findings, two of them High, all dispositioned** — see the disposition below. Eleven coverage
+holes remain, each with the phase that owns it named, and the largest is the honest one: **nothing renders
+any of these 111 strings yet**, and nothing establishes that any of the Spanish values is Spanish.
 
 ---
 
@@ -1665,6 +1741,29 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1b-2b review disposition
+
+The review is
+[`docs/reviews/phase-1b-2b-dictionaries-and-menu.md`](docs/reviews/phase-1b-2b-dictionaries-and-menu.md).
+Seven findings, **two High**, and the phase was held open until every one was dispositioned — so no
+commit holds a demonstrated defect. The full disposition, with the disabling experiment for each fix
+and the one escape that is **narrowed rather than closed**, is `1b-2b-notes.md` §12.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| 1 | High | Six wire-visible enums — `ScalarStyle`, `LineEnding`, `FileKind`, `TriggerKind`, `ContentKind`, `VariableKind` — crossed the boundary with no dictionary entry and no accessor, deferred to 1c as "hole 3". A 1c component meeting `trigger.kind = "Single"` could only render a raw Rust identifier or invent an unchecked mapping | **Fixed, deferral withdrawn.** Six `CODE_ENUMS`/`VARIANT_COUNTS` rows, 33 keys per dictionary, six key builders, six `describe` functions, six reactive wrappers, six sample tables. Sixteen namespaces, 111 code keys. Hole 3 closed |
+| 2 | High | The exhaustiveness check failed open three ways: `#[cfg(…)] Variant,` on one line, `A, B,` on one line, and a brand-new enum never added to `CODE_ENUMS` | **Fixed for the first two, narrowed for the third.** `crate::rust_source` parses with `syn` and lexes with `proc-macro2` (dev-dependencies of `src-tauri` only). Two new checks derive the expected enum set from source — every `Serialize`-carrying enum in both trees, every string-literal union in `types.ts`. **An enum a `macro_rules!` expands to still escapes**, demonstrated in notes §12.3 experiment 12E and recorded as hole 2 |
+| 3 | Med | A version skew was refused *inside Tauri's command macro* — English prose, no `code` — and `main.ts` discarded the result, so the English default menu stayed up with nothing reported | **Fixed both halves.** The command takes an untyped envelope and validates it itself, answering `invalidMenuLabels` with `missing`/`unexpected` field names; `startMenuLocalization` consumes the result and `main.ts` holds no logic, which is what makes the path testable |
+| 4 | Med | The `detail` guard was a name scanner, and `JSON.stringify(classifyFailure(x))` renders the string while naming no guarded identifier | **Fixed in the type, not the scanner.** The developer string left `IpcFailure`: non-enumerable, symbol-keyed, read only by `developerDetail()`, with `reportIpcFailure()` as its destination. `errors.test.ts` pins enumerability, so putting it back under any name fails. Notes §10's "a component that renders it fails `npm test`" was **withdrawn and rewritten** |
+| 5 | Med | `{ ok: true }` was returned before `build_menu`/`set_menu` ran, so a failure inside the closure was unobservable | **Fixed.** `menu::on_main_thread` waits on a one-shot channel and answers the new `menuBuildFailed`. Waiting cannot deadlock — `tauri_runtime_wry::send_user_message` runs a main-thread post inline when already on the main thread, quoted in the notes. Hole 3 of §11.8 closed |
+| 6 | Med | The menu literal scanner blanked a whole line when a block comment *began* on it, so `*/ let title = "Edit";` slipped a hardcoded English label past every check | **Fixed.** Check 1 lexes instead of masking; the masker survives only for the two checks where over-masking is a loud false positive, with a test pinning that direction |
+| 7 | Low | `COMMAND_ERRORS` pinned nine samples against ten variants, so a code could have rendered `""` and "renders every command error" would still pass | **Fixed, and generalised.** All twelve codes are covered and asserted bidirectionally against `COMMAND_ERROR_CODES`; every sample table in `codes.test.ts` is now checked for completeness against its wire union **at compile time** |
+
+The review additionally **confirmed as non-findings**: the capability decision (`"permissions": []`
+is correct for an application command from a local origin with no ACL manifest); the architecture
+rule; `identityWrongDocument`'s dictionary entries; and the source scanner failing loudly on a
+rename.
+
 ## Phase 1b-2a review disposition
 
 The review is [`docs/reviews/phase-1b-2a-ipc-surface.md`](docs/reviews/phase-1b-2a-ipc-surface.md).
@@ -1771,6 +1870,75 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1b-2b
+
+Every command below was run by the **orchestrator** against the working tree, **after** the review
+fix round, not reported by the worker. All exit 0.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | **544 passed, 0 failed** (was 514) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** — the architecture rule holds (D2x's check, not the withdrawn `rg -c tauri Cargo.lock`) |
+| `npm run check` | 344 files, **0 errors, 0 warnings** (`--fail-on-warnings`) |
+| `npm test` | **214 passed** (was 104) |
+| `npm run build` | ok — 60.79 kB JS, 1.59 kB CSS |
+
+**Six claims were checked by hand rather than taken from a worker's report**, each because it is a
+rule a phase can quietly undo:
+
+- `src-tauri/capabilities/default.json` is still **`"permissions": []`**, and its `description` now
+  carries the reasoning so the next phase cannot re-open it by accident.
+- **Six** `#[tauri::command]` attributes exist — five in `commands.rs`, one in `menu.rs` — and the
+  `generate_handler!` list holds exactly those six. None mutates a file.
+- `CommandError` still has **no `Display` impl** anywhere in the crate.
+- `syn` and `proc-macro2` are **`[dev-dependencies]` of `src-tauri` only**. `cargo tree -p
+  espansoconfig-core -e normal,build,dev -i syn` shows the core reaches `syn` **only** through
+  `serde_derive` and `thiserror-impl`, which are proc-macros and were already there before this
+  phase. The core's own `Cargo.toml` names neither `syn` nor `tauri`.
+- The dictionaries hold **138 keys each**, 111 under `code.` and 16 under `menu.`, with **8 values
+  identical across the two files** — matching the exception list exactly, no silent growth.
+- **Corpus privacy (D1) intact**: no `corpus/real` path appears anywhere in the tree status, and
+  `git check-ignore -v` still resolves the real corpus to `.gitignore:107`.
+
+**The Spanish was read, by a reader, and it is Spanish.** Hole 9 correctly says nothing automated
+establishes this — the untranslated-value check establishes only non-identity. A sample of the
+`menu.*` block and the first `code.diagnosticCode.*` entries was read in full: the register is right,
+the quotation marks are Spanish (`«…»`, not `"…"`), the phrasing is idiomatic rather than calqued
+(*"No se ha podido indexar este archivo"*, *"así que"*), and the menu labels are **Apple's own**
+Spanish strings — `Edición`, `Ocultar los demás`, `Mostrar todo`, `Seleccionar todo` — rather than
+literal translations of the English. This is a **sample read by one reader, not a review of all 111
+values**, and hole 9 stays open on those terms.
+
+**R32 was discharged for the menu, and re-run after the fix round changed the thing it measured.**
+The fix round altered `set_menu_labels`' signature and the main-thread step, which made the first
+reading a description of a slightly different program — so it was taken again against the current
+binary rather than carried forward:
+
+- **Spanish** (`-AppleLanguages '(es-ES)'`): the real macOS menu bar read out of the accessibility
+  tree gives `Apple, espansoconfig, Edición, Ventana`, with `Acerca de espansoConfig` … `Salir de
+  espansoConfig` in the app submenu and `Deshacer, Rehacer, Cortar, Copiar, Pegar, Seleccionar todo`
+  under `Edición`.
+- **English** (`(en-US)`): `Apple, espansoconfig, Edit, Window`, likewise complete.
+- **Every answer is byte-identical to the pre-review reading**, which is what makes it a regression
+  check rather than a fresh anecdote.
+- **The one-shot channel does not deadlock**: the menu is installed, so the closure ran and the
+  channel delivered, and `sample <pid>` shows the main thread idle in `__CFRunLoopServiceMachPort`
+  rather than parked in `recv`. `Ok(())` now genuinely means *installed*.
+- **The untyped envelope parsed** — a refusal would have left Tauri's `File, Edit, View, Window,
+  Help` default standing, which is exactly the failure the first reading could not have
+  distinguished.
+
+**Two things were not verified at runtime, and both are recorded as holes rather than assumed.** The
+**live** locale switch did not reproduce this time: `System Events` reports 0 windows for the process,
+so there is no `window 1` to find the picker in, while `CGWindowListCopyWindowInfo` shows the window
+on screen at 1063×685. That is not a code fault, and the discriminating test says so — the
+**development-mode** binary, which never runs the frontend and never calls `set_menu_labels` at all,
+reports the same 0 windows. Closing it needs a bundled `.app`, which is Phase 5. And
+`invalidMenuLabels` cannot be reached without a skewed frontend or a webview console; it is covered by
+three `dispatch_check` tests through the real dispatcher instead. `1b-2b-notes.md` §12.5 states both.
 
 ## Verification — Phase 1b-2a
 
@@ -2124,56 +2292,65 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1b-2a is complete. Start Phase 1b-2b — the code dictionaries, the exhaustiveness check and
-the localized macOS menu.**
+**Phase 1b-2b is complete, and with it Phase 1b. Start Phase 1c — the three-pane browser.**
 
-The boundary exists and is typed: five read-only commands, a wire error of codes and operands, and a
-hand-written frontend mirror checked against what serde actually writes. What 1b-2b adds is the
-**prose** — every code the boundary can emit needs a string in both languages, and nothing yet
-guarantees that a code without one is noticed. Concretely, and in this order:
+Everything below the screen now exists and is proven: the fidelity engine (Phase 0), the read model
+and its cache (1a), the shell and i18n layer (1b-1), the typed IPC boundary (1b-2a) and the prose for
+every code that can cross it (1b-2b). **1c is the first phase whose deliverable is something a person
+looks at**, and the plan's stated exit for Phase 1 lands at the end of it: *the owner can browse their
+entire real config and every snippet renders correctly.*
 
-1. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
-   never prose: `DiagnosticCode` (22 variants plus operands), `UnknownReason` (4), `WorkspaceError`
-   (4), `IdentityError`, `MatchBadge` (10), plus **`CommandError`'s nine codes**, which 1b-2a added
-   and which have no strings at all today. Every one needs an `en` and an `es` entry in
-   `src/lib/i18n/{en,es}.json`; both compile-time directions and all four runtime checks then apply
-   for free. Codes with operands use the existing `{placeholder}` interpolation, already covered by
-   the placeholder-parity test. The `Display` impls in the **core** are developer renderings for logs
-   and must not be used as the IPC representation — note `CommandError` has no `Display` at all, by
-   design, so there is nothing to be tempted by on the wire side.
-2. **Add the exhaustiveness check** — a Rust-side enumeration of every variant compared against the
-   dictionary's key set — or a new `DiagnosticCode` variant reaches the UI with no string and nothing
-   notices. **1b-2a built the mechanism you should extend**: `src-tauri/src/wire_contract.rs` already
-   reads the `.ts`/`.json` files as text and compares them against Rust-side sets, and its
-   `every_declared_variant_has_an_instance_in_the_enumeration` reads `error.rs`'s own enum block
-   rather than a hand-written list. Do the same for the other enums — `1b-2a-notes.md` §9 hole 4
-   names this as 1b-2b's, and it is the reason the hand-written variant lists were left in place.
-3. **Give the "unexpected failure" arm its one generic dictionary key.** `classifyFailure()` in
-   `src/lib/ipc/errors.ts` returns a `detail` string that is documented as **developer-only and never
-   to be rendered** — but nothing enforces it. That is R31's blind spot in its purest form (a `.ts`
-   string the markup lint cannot see). Add a check, not a comment.
-4. **Localize the macOS app menu** (1b-1 notes §9 hole 1, the one hole 1b-1 explicitly owed here).
-   Tauri v2 builds the default menu in Rust, so the labels must come from the frontend across IPC —
-   hardcoding Spanish in Rust is what plan §9 forbids. `CFBundleLocalizations = [en, es]` is already
-   set in `src-tauri/Info.plist`. **This will need a capability**, and `"permissions": []` is a
-   defended position: add exactly what the menu needs, one permission at a time, with the reason
-   recorded. Do not restore `core:default` — the 1b-1 review showed it was a real grant.
-5. **`identityWrongDocument` still owes a string in both languages** even though no command can
-   currently produce it (1b-2a notes §9 hole 3). A code with no string is worse than a code with no
-   caller.
+Concretely, and in roughly this order:
 
-**Three rules this phase is most likely to break.** R31, as above — the hardcoded-string check sees
-`.svelte` markup only, and a message assembled in a `.ts` store is exactly what it cannot see, so a
-clean run is not evidence. R28: `Deserialize` is derived on a named list only; do not widen it without
-reading `docs/decisions/1a-notes.md` §9 hole 6 first. And the standing rule 1b-2a added: **a property
-asserted in a doc comment needs a test that could fail if it were false** — the reviewer found three
-files claiming `DocumentPath` survived a reparse, with nothing anywhere surviving a reparse.
+1. **Three-pane navigation.** Files → matches → detail. `list_documents` and `get_document` already
+   return everything the first two panes need; `MatchView` carries all 22 of plan §3.3's fields for
+   the third. Nothing about the layout is decided yet — that is 1c's to choose.
+2. **Search over trigger, label, content, comment and `search_terms`** (plan §8.1). The read model
+   already exposes each of those; the pins in `tests/model_projection.rs` say which.
+3. **The raw YAML viewer.** `document_text` returns the file's own bytes. Phase 3 owns CodeMirror;
+   1c needs only to display text faithfully.
+4. **Surface `HazardKind`** where the visual editor cannot preserve a construct. The strings exist
+   (`tHazard`, ten of them) and the core computes the hazards; nothing shows them.
+5. **Render a scalar as source text, never as an inferred type** — D2u, and it is a decision rather
+   than a preference. A badge comes from a key's presence or a `type` field's text, never from a
+   value; `badges_come_from_key_presence_and_type_text_never_from_a_scalar_value` pins the absence of
+   the shortcut. Flagging a scalar as 1.1-ambiguous *is* allowed; `ScalarView.ambiguous_yaml_1_1`
+   carries it.
 
-**Then 1c** is the browser itself: three-pane navigation, search over trigger/label/content/comment/
-`search_terms` (plan §8.1), the raw YAML viewer, and surfacing `HazardKind` where the visual editor
-cannot preserve a construct. **1c owes R32's first half** — nothing in the running application calls
-`invoke` yet, so `vite build` tree-shakes the whole IPC layer out of `dist`, and the boundary is
-proven by tests and a mock dispatcher rather than by a launched window (1b-2a notes §9 hole 1).
+**What 1c inherits, and should not rebuild.** Twelve reactive typed accessors — `tDiagnostic`,
+`tUnknownReason`, `tMatchBadge`, `tHazard`, `tCommandError`, `tIpcFailure`, `tScalarStyle`,
+`tLineEnding`, `tFileKind`, `tTriggerKind`, `tContentKind`, `tVariableKind`. **A component calls one
+of those and never builds a key**; a key that does not exist is a compile error in `codes.ts` rather
+than a blank label at the call site. A failed command has a console destination, `reportIpcFailure`,
+and **no screen** — if 1c grows somewhere to show a non-blocking failure, `menuUnavailable`,
+`menuBuildFailed` and `invalidMenuLabels` are the three codes waiting for it. Full list in
+`docs/decisions/1b-2b-notes.md` §10.
+
+**1c owes R32's first half, and it is the oldest debt in the project.** Nothing in the running
+application calls `invoke` for a *document*, so `vite build` still tree-shakes most of the IPC layer
+out of `dist`; the read boundary is proven by tests and a mock dispatcher rather than by a window
+someone looked at. 1b-2b discharged this for the **menu** only — `set_menu_labels` and the Spanish
+labels are in the bundle, and the menu bar was read out of the macOS accessibility tree in both
+languages. Do the same for the browser: a claim about a screen needs something that looked at the
+screen. *A process that stays up is not a screen that renders* — 1b-1 reported a window that "launched
+and stayed up" and it was blank.
+
+**Four rules 1c is most likely to break.**
+
+- **Never hardcode a user-facing string** (CLAUDE.md §2). A browser is almost entirely user-facing
+  strings, and this is the phase with the most surface to slip on.
+- **R31 — a clean lint run is not evidence.** `scripts/lint/hardcoded-strings.ts` sees `.svelte`
+  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props. 1b-2b's
+  work lives in `.ts`, which is exactly what it cannot see.
+- **Nothing establishes that any of the 111 Spanish strings is Spanish.** The untranslated-value check
+  establishes non-identity, and eight keys are on its exception list. A bilingual reader is the only
+  thing that closes this; 1c is the phase where it starts to matter, because the strings become
+  visible.
+- **A held identity can go stale, and the UI is what holds identities** — R27. `match_by_id` returns
+  `Result<_, IdentityError>`; a lookup crossing a `refresh()` may get `StaleRevision`, which means the
+  **document moved on**, not that the match survived. Recovery is re-resolution, with three possible
+  answers, and `identityRecovery()` returns them as data so a caller cannot skip one. `DocumentPath`
+  is **not** a fallback identity — a sequence step is a position.
 
 **Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
 the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and
@@ -2274,21 +2451,26 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | **Where 1b-2b's work lands.** The two dictionaries. `en.json` **is the schema** — the key set is derived from it, never declared separately |
-| [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | **The mechanism 1b-2b should extend for its exhaustiveness check.** Reads the `.ts` files as text and compares interface properties, union members, error codes and the `generate_handler!` list against what Rust actually writes — bidirectionally, with the six forbidden Phase 2 command names asserted absent from both sets. `every_declared_variant_has_an_instance_in_the_enumeration` reads `error.rs`'s own enum block rather than a hand-written list; that is the pattern to copy |
-| [`src-tauri/src/error.rs`](src-tauri/src/error.rs) | The wire error: nine flat codes with structured operands, a hand-written `Serialize` giving each code **one** spelling, exhaustive `From` impls over the core's three error enums, and **no `Display` impl at all** so there is no developer rendering to leak onto the wire |
-| [`src/lib/ipc/`](src/lib/ipc/) | The frontend boundary: `types.ts` (the hand-written wire mirror), `errors.ts` (`isCommandError`'s operand validation, `classifyFailure`, `identityRecovery` and its three answers), `commands.ts` (the typed `invoke` wrapper returning `CommandResult<T>` rather than throwing). **`classifyFailure`'s `detail` is a developer string nothing yet stops a component rendering** — 1b-2b owes it a check and a generic key |
+| [`src/lib/i18n/codes.ts`](src/lib/i18n/codes.ts) | **What a 1c component calls, and the one file it should not work around.** Twelve typed key builders and twelve `describe*` functions over the sixteen namespaces; the reactive `t*` wrappers are in [`index.ts`](src/lib/i18n/index.ts). The builders' template-literal return types make a **missing key a compile error here** rather than a blank label at the call site. Build a key by hand and you have opted out of that |
+| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries — **138 keys each**, of which 111 are `code.*` and 16 are `menu.*`. `en.json` **is the schema**: the key set is derived from it, never declared separately. Eight values are identical across the two files and each is on the untranslated-value exception list **by name** |
+| [`src-tauri/src/dictionary_contract.rs`](src-tauri/src/dictionary_contract.rs) · [`rust_source.rs`](src-tauri/src/rust_source.rs) | **Why a code cannot reach the UI without a string.** `rust_source` parses with `syn` and lexes with `proc-macro2` (dev-dependencies of `src-tauri` **only**); `dictionary_contract` compares the derived variant set against both dictionaries bidirectionally, and two further checks derive the *registry* from source — every `Serialize` enum in both trees, every union in `types.ts` — so a **new enum** is caught without anyone adding a row. What still escapes: an enum a `macro_rules!` expands to, demonstrated in `1b-2b-notes.md` §12.3 experiment 12E |
+| [`src-tauri/src/menu.rs`](src-tauri/src/menu.rs) · [`menu_contract.rs`](src-tauri/src/menu_contract.rs) | The localized menu: three submenus, 16 labels, **zero user-facing string literals in the Rust**, pinned by a check that *lexes* the file rather than masking comment lines. `set_menu_labels` takes an **untyped envelope** and validates it itself so a version skew is `invalidMenuLabels` rather than serde's prose; `on_main_thread` waits on a one-shot channel so a build failure is `menuBuildFailed` rather than a silent `{ ok: true }` |
+| [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | Reads the `.ts` files as text and compares interface properties, union members, error codes and the `generate_handler!` list against what Rust actually writes — bidirectionally, with the six forbidden Phase 2 command names asserted absent from both sets. **Six commands are registered now**, the sixth being `menu::set_menu_labels`; none mutates a file and the test enforces it |
+| [`src-tauri/src/error.rs`](src-tauri/src/error.rs) | The wire error: **twelve** flat codes with structured operands (`invalidMenuLabels`, `menuBuildFailed` and `menuUnavailable` joined the original nine), a hand-written `Serialize` giving each code **one** spelling, exhaustive `From` impls over the core's three error enums, and **no `Display` impl at all** so there is no developer rendering to leak onto the wire |
+| [`src/lib/ipc/`](src/lib/ipc/) | The frontend boundary: `types.ts` (the hand-written wire mirror), `errors.ts` (`isCommandError`'s operand validation, `classifyFailure`, `identityRecovery` and its three answers, `developerDetail`, `reportIpcFailure`), `commands.ts` (the typed `invoke` wrapper returning `CommandResult<T>` rather than throwing), `menu.ts`. **The developer string is no longer a property of `IpcFailure`** — non-enumerable and symbol-keyed, so no spread, serialization, enumeration or index reaches it; `JSON.stringify` of a failure is pinned at `{"kind":"unexpected"}` |
 | [`crates/espansoconfig-core/src/wire.rs`](crates/espansoconfig-core/src/wire.rs) | `WirePath` — why a non-UTF-8 filename can no longer turn a typed failure into serde's untyped English *after* the command already returned `Ok` |
-| [`src-tauri/src/dispatch_check.rs`](src-tauri/src/dispatch_check.rs) | Why `"permissions": []` is evidence rather than argument: all five commands driven through the real Tauri dispatcher with the **shipped** config and capability file, plus `a_remote_origin_is_refused` pinning the other side |
+| [`src-tauri/src/dispatch_check.rs`](src-tauri/src/dispatch_check.rs) | Why `"permissions": []` is evidence rather than argument: all **six** commands driven through the real Tauri dispatcher with the **shipped** config and capability file, plus `a_remote_origin_is_refused` pinning the other side. 1b-2b added the three menu paths, `the_main_thread_step_reports_what_the_work_answered` among them |
+| [`docs/decisions/1b-2b-notes.md`](docs/decisions/1b-2b-notes.md) | Phase 1b-2b's decision record: the key scheme and the sixteen namespaces (§1), the dictionaries and the five new exceptions (§2), the typed accessor (§3), **the exhaustiveness check and what it cannot see (§4)**, the developer-string guard (§5), the experiments (§6), what the phase got wrong (§7), **the eleven coverage holes stated as holes (§9)**, **what 1c inherits (§10)**, the menu in full (§11, with R32's evidence in §11.5 and the capability argument in §11.3) and **the review disposition (§12)** |
+| [`docs/reviews/phase-1b-2b-dictionaries-and-menu.md`](docs/reviews/phase-1b-2b-dictionaries-and-menu.md) | The Phase 1b-2b review, dispositioned above. Its two High findings were both real: six wire-visible enums deferred to 1c with no strings at all, and an "exhaustiveness" check that failed open on two valid Rust syntaxes and on any new enum. Its finding 4 is the sharpest — the `detail` guard was a name scanner, and `JSON.stringify` names no identifier |
 | [`docs/decisions/1b-2a-notes.md`](docs/decisions/1b-2a-notes.md) | Phase 1b-2a's decision record: what crosses and what does not (§1), the synchronous-command/mutex trade (§2), the error representation (§3), **R27 corrected** (§4), the capability argument then its execution (§5), the hand-written mirror and the check that guards it (§6), **why the lint proves nothing here** (§7), what the phase got wrong on the way (§8), **the four remaining coverage holes with owners named** (§9), the thirteen disabling experiments and which six are reproducible (§11), what 1b-2b inherits (§12), the JSDoc exemption decided rather than left open (§14), the review disposition (§15) and the numeric-field audit (§16) |
 | [`docs/reviews/phase-1b-2a-ipc-surface.md`](docs/reviews/phase-1b-2a-ipc-surface.md) | The Phase 1b-2a review, dispositioned above. Its two High findings were both real: a **false identity claim** repeated in three files and in this checkpoint, and a serialization failure that could deliver prose to the webview. Its finding 5 is the sharpest — a scope-creep oracle that could not detect the scope creep it was named for |
-| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | The five read-only commands over a `WorkspaceSession` holding `Workspace` behind a std `Mutex`, **synchronous** so no guard can cross an `.await`. Registered in [`src-tauri/src/main.rs`](src-tauri/src/main.rs)'s `generate_handler!`. **No mutating command exists and a test enforces it** |
-| [`src/lib/i18n/dictionaries.ts`](src/lib/i18n/dictionaries.ts) | **The i18n enforcement point.** `TranslationKey = keyof typeof en`, and `const spanish: ExactDictionary<typeof es> = es` is the binding that makes a missing *or* surplus Spanish key a compile error. `translate()` interpolates `{placeholder}` and leaves an unknown one verbatim on purpose. Add the Rust-code dictionaries here and both compile-time directions apply for free |
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | The five read-only document commands over a `WorkspaceSession` holding `Workspace` behind a std `Mutex`, **synchronous** so no guard can cross an `.await`. Registered in [`src-tauri/src/main.rs`](src-tauri/src/main.rs)'s `generate_handler!` alongside `menu::set_menu_labels`. **No mutating command exists and a test enforces it** |
+| [`src/lib/i18n/dictionaries.ts`](src/lib/i18n/dictionaries.ts) | **The i18n enforcement point.** `TranslationKey = keyof typeof en`, and `const spanish: ExactDictionary<typeof es> = es` is the binding that makes a missing *or* surplus Spanish key a compile error. `translate()` interpolates `{placeholder}` and leaves an unknown one verbatim on purpose |
 | [`docs/decisions/1b-1-notes.md`](docs/decisions/1b-1-notes.md) | Phase 1b-1's decision record: the pinned versions and why each is exact (§1), what the typed key union enforces and the four disabling experiments that verify both directions (§2), what the types cannot see (§2 end), the runtime checks and the **exception list by key** (§3), locale detection and the override policy (§4), the architecture rule's new check (§5), what the Tauri shell deliberately does not contain (§6), **what the hardcoded-string check cannot see (§7)**, the strings deliberately left untranslated (§8), **the eight coverage holes stated as holes (§9)**, and what 1b-2 inherits (§10) |
 | [`scripts/lint/hardcoded-strings.ts`](scripts/lint/hardcoded-strings.ts) | The markup scan behind R31. Read §7 of the notes before trusting a clean run: it sees `.svelte` markup and **not** `<script>` bodies, `{'literal'}`, `.ts` constants or props. Its blind spots are why the review found an English sentence in `Info.plist` that no check could ever have seen |
 | [`docs/reviews/phase-1b-1-shell-and-i18n.md`](docs/reviews/phase-1b-1-shell-and-i18n.md) | The Phase 1b-1 review, dispositioned above. Its two High findings were both **real grants** — an over-broad capability set and a production CSP allowing inline styles — and its finding 1 was a crash on the declared minimum macOS. R34 and R35 come from it |
 | [`src/lib/stores/locale.svelte.ts`](src/lib/stores/locale.svelte.ts) · [`src/lib/bootstrap.ts`](src/lib/bootstrap.ts) | The locale state and the pre-mount bootstrap. `createLocaleState` takes a tag *reader* and re-negotiates on `languagechange` **without ever touching an explicit override**; `bootstrap()` sets `documentElement.lang` before mount. Both directions are pinned by disabling experiments |
-| [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) · [`Info.plist`](src-tauri/Info.plist) · [`capabilities/default.json`](src-tauri/capabilities/default.json) | Identifier `cc.carpio.espansoConfig`, strict CSP, **`"permissions": []`** — measured sufficient for the five commands by `dispatch_check.rs`, not merely argued — and `CFBundleLocalizations = [en, es]`. The **menu** is not yet localized: **1b-2b owes it**, and it is the thing most likely to need the first permission |
+| [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) · [`Info.plist`](src-tauri/Info.plist) · [`capabilities/default.json`](src-tauri/capabilities/default.json) | Identifier `cc.carpio.espansoConfig`, strict CSP, **`"permissions": []`** — measured sufficient for all **six** commands by `dispatch_check.rs`, not merely argued — and `CFBundleLocalizations = [en, es]`. The menu **is** localized as of 1b-2b, and it needed no permission: a capability governs *plugin* commands, and `set_menu_labels` is this application's own. The reasoning is written into the file's `description` field so the next phase cannot re-open it by accident |
 | [`crates/espansoconfig-core/src/workspace/mod.rs`](crates/espansoconfig-core/src/workspace/mod.rs) | **What Phase 1b wraps, one command per method.** `discover`, `summary`, `list_documents`, `get_document`, `get_match`, `document_view`, `document_text`, `refresh`, `load_all`, `evict` — plus the per-`ContentRevision` cache that answers R19's remaining half, and the monotonic path-keyed `DocumentId` allocation that D2v's identity fix rests on |
 | [`crates/espansoconfig-core/src/model/`](crates/espansoconfig-core/src/model/) | **The read model itself.** `document.rs` (`DocumentView`, `match_by_id`, `unaccounted_keys`, `coverage_is_complete`), `match_view.rs` (plan §3.3's 22 fields, `MatchId`, badges), `variable.rs` (the nine §3.4 types), `scalar.rs` (`ScalarView` — D2u in a type), `unknown.rs` (`UnknownEntry`, the undescended spans of D2w), `diagnostic.rs` (22 codes, no prose), `project.rs` (the walk), `profile.rs`, `value.rs` |
 | [`docs/decisions/1a-notes.md`](docs/decisions/1a-notes.md) | Phase 1a's decision record: what the projection is and is not (§1), D2u as a type (§2), the key accounting stated so it can be false (§3), where the schema stops (§4), identity and the design rejected (§5), the workspace and R19 (§6), the disabling experiments (§7 and §12), what the phase got wrong on the way (§8), **the eleven coverage holes stated as holes (§9)**, the dependencies added (§10), what 1b inherits (§11) and the review disposition (§12) |
@@ -2359,6 +2541,7 @@ _Updated at each phase boundary._
 | 1a | `185c9a6` | ✅ pushed to `origin/main` | clean |
 | 1b-1 | `94aa6c9` | ✅ pushed to `origin/main` | clean |
 | 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
+| 1b-2b | `PENDING` | — | — |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2418,6 +2601,20 @@ the new `crates/espansoconfig-core/src/wire.rs` and its four callers in the core
 in `src/lib/ipc/`, `docs/decisions/1b-2a-notes.md`, `docs/reviews/phase-1b-2a-ipc-surface.md` and this
 checkpoint. **A fresh session starting Phase 1b-2b should start from `d876eb6` or later.** As at 1b-1,
 `npm install` (or `npm ci`) is required before any frontend command will run.
+
+`PENDING` is Phase 1b-2b **including its review fix round** — the phase was held open until all seven
+findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated defects:
+neither the six wire-visible enums deferred with no strings at all, nor the exhaustiveness check that
+failed open on two valid Rust syntaxes and on any new enum, nor the `detail` guard that
+`JSON.stringify` walked straight past, nor the menu command that answered `{ ok: true }` before it had
+built anything. It contains the dictionaries and the typed accessor
+(`src/lib/i18n/{codes.ts,en.json,es.json,index.ts}`), the exhaustiveness check and its parser
+(`src-tauri/src/{dictionary_contract.rs,rust_source.rs}`), the menu and its checks
+(`src-tauri/src/{menu.rs,menu_contract.rs}`, `src/lib/{menu.ts,ipc/menu.ts}`), the developer-string
+guard (`src/lib/ipc/errors.ts`, `scripts/lint/ipc-detail.ts`), three new `CommandError` codes,
+`docs/decisions/1b-2b-notes.md`, `docs/reviews/phase-1b-2b-dictionaries-and-menu.md`, `CLAUDE.md` §6
+and this checkpoint. **This commit closes Phase 1b. A fresh session starting Phase 1c should start from
+it or later.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command will run.
 
 `185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were

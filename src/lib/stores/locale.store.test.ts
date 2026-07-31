@@ -213,3 +213,69 @@ describe('the languagechange listener', () => {
     state.dispose();
   });
 }); // End of the "languagechange listener" suite
+
+describe('subscribe()', () => {
+  it('reports the language the user picked', () => {
+    const state = createLocaleState(() => ['en'], memoryStorage());
+    const seen: string[] = [];
+    state.subscribe((current) => seen.push(current));
+    state.setOverride('es');
+    expect(seen).toEqual(['es']);
+    state.dispose();
+  });
+
+  it('reports the language the platform moved to', () => {
+    const source = mutableTags('en');
+    const platform = fakePlatform();
+    const state = createLocaleState(source.read, memoryStorage(), platform);
+    const seen: string[] = [];
+    state.subscribe((current) => seen.push(current));
+
+    source.tags = ['es-ES'];
+    platform.dispatch();
+    expect(seen).toEqual(['es']);
+    state.dispose();
+  }); // End of the "language the platform moved to" case
+
+  it('stays silent when a write leaves the language where it was', () => {
+    // Two writes that change a field without changing `current`: the platform
+    // moving under an override, and an override set to the language already
+    // showing. Both would otherwise rebuild the menu in the language it had.
+    const source = mutableTags('en');
+    const platform = fakePlatform();
+    const state = createLocaleState(source.read, memoryStorage('en'), platform);
+    const seen: string[] = [];
+    state.subscribe((current) => seen.push(current));
+
+    source.tags = ['es-ES'];
+    platform.dispatch();
+    state.setOverride('en');
+    expect(seen).toEqual([]);
+
+    // And the store is not simply mute: clearing the override reveals the
+    // system language it has been tracking all along.
+    state.setOverride(null);
+    expect(seen).toEqual(['es']);
+    state.dispose();
+  }); // End of the "silent when nothing changed" case
+
+  it('stops reporting once its unsubscribe is called', () => {
+    const state = createLocaleState(() => ['en'], memoryStorage());
+    const seen: string[] = [];
+    const stop = state.subscribe((current) => seen.push(current));
+    state.setOverride('es');
+    stop();
+    state.setOverride('en');
+    expect(seen).toEqual(['es']);
+    state.dispose();
+  }); // End of the "stops reporting" case
+
+  it('drops every subscriber on dispose()', () => {
+    const state = createLocaleState(() => ['en'], memoryStorage());
+    const seen: string[] = [];
+    state.subscribe((current) => seen.push(current));
+    state.dispose();
+    state.setOverride('es');
+    expect(seen).toEqual([]);
+  }); // End of the "drops every subscriber" case
+}); // End of the "subscribe()" suite

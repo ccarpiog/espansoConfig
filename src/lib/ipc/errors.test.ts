@@ -21,6 +21,7 @@ import {
   COMMAND_ERROR_CODES,
   COMMAND_ERROR_OPERANDS,
   classifyFailure,
+  developerDetail,
   identityRecovery,
   isCommandError,
   type CommandError,
@@ -142,10 +143,8 @@ describe('classifyFailure()', () => {
 
   it('gives a rejection it does not recognise its own arm', () => {
     const failure = classifyFailure('Command get_match not allowed by ACL');
-    expect(failure).toEqual({
-      kind: 'unexpected',
-      detail: 'Command get_match not allowed by ACL'
-    });
+    expect(failure).toEqual({ kind: 'unexpected' });
+    expect(developerDetail(failure)).toBe('Command get_match not allowed by ACL');
   });
 
   it('gives a malformed command rejection the unexpected arm, not a typed one', () => {
@@ -158,10 +157,9 @@ describe('classifyFailure()', () => {
   });
 
   it('reads the message of a thrown Error', () => {
-    expect(classifyFailure(new Error('the webview died'))).toEqual({
-      kind: 'unexpected',
-      detail: 'the webview died'
-    });
+    const failure = classifyFailure(new Error('the webview died'));
+    expect(failure).toEqual({ kind: 'unexpected' });
+    expect(developerDetail(failure)).toBe('the webview died');
   });
 
   it('survives a value that cannot be serialized', () => {
@@ -169,8 +167,67 @@ describe('classifyFailure()', () => {
     cyclic.self = cyclic;
     const failure = classifyFailure(cyclic);
     expect(failure.kind).toBe('unexpected');
+    expect(developerDetail(failure)).not.toBe(null);
+  });
+
+  it('answers null for a typed command error, which carries no developer string', () => {
+    expect(developerDetail(classifyFailure(STALE))).toBe(null);
   });
 });
+
+describe('the developer string of an unexpected failure', () => {
+  /**
+   * The one rejection whose developer string is the thing under test.
+   *
+   * A sentence a real webview produces, chosen so that every assertion below
+   * can look for a substring of it rather than for a shape.
+   */
+  const LEAKY = 'Command get_match not allowed by ACL';
+
+  it('is not in JSON.stringify of the failure', () => {
+    // **The review's fourth finding, in one assertion.** A component writing
+    // `JSON.stringify(classifyFailure(x))` names no guarded identifier, so
+    // `scripts/lint/ipc-detail.ts` passed it — and it rendered the string
+    // anyway. A name scanner cannot decide this; a property descriptor can.
+    expect(JSON.stringify(classifyFailure(LEAKY))).toBe('{"kind":"unexpected"}');
+  }); // End of the "JSON.stringify" case
+
+  it('is not an enumerable property, now or after a refactor', () => {
+    // The property this pins is *enumerability*, not the current key: the
+    // failure is asserted to have exactly one own enumerable key, so putting the
+    // string back on the object under any name fails here.
+    const failure = classifyFailure(LEAKY);
+    expect(Object.keys(failure)).toEqual(['kind']);
+    expect(Object.values(failure)).toEqual(['unexpected']);
+    expect(Object.entries(failure)).toEqual([['kind', 'unexpected']]);
+    const own = Object.getOwnPropertyNames(failure);
+    expect(own).toEqual(['kind']);
+    for (const key of Object.getOwnPropertySymbols(failure)) {
+      expect(Object.getOwnPropertyDescriptor(failure, key)?.enumerable).toBe(false);
+    }
+  }); // End of the "not an enumerable property" case
+
+  it('does not survive a spread, a clone or a for-in', () => {
+    const failure = classifyFailure(LEAKY);
+    expect(JSON.stringify({ ...failure })).toBe('{"kind":"unexpected"}');
+    const seen: string[] = [];
+    for (const key in failure) {
+      seen.push(key);
+    }
+    expect(seen).toEqual(['kind']);
+    expect(JSON.stringify(structuredClone({ ...failure }))).toBe('{"kind":"unexpected"}');
+  }); // End of the "spread, clone or for-in" case
+
+  it('is not reachable positionally, which the name scanner never could close', () => {
+    // Hole 6 of `1b-2b-notes.md`: `Object.values(failure)[1]` reached the string
+    // without writing the name. There is no index 1 any more.
+    expect(Object.values(classifyFailure(LEAKY))[1]).toBe(undefined);
+  }); // End of the "positional" case
+
+  it('is still reachable through the accessor, so this is a design and not a deletion', () => {
+    expect(developerDetail(classifyFailure(LEAKY))).toBe(LEAKY);
+  });
+}); // End of the "developer string" suite
 
 describe('identityRecovery()', () => {
   it('asks for re-resolution when the identity is stale', () => {

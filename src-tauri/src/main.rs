@@ -10,6 +10,11 @@
 //! of plan section 6.4 and the one piece of state they share. There is still no
 //! event and no mutating command; see `commands` and `events` for what each
 //! will hold and why neither could honestly be written first.
+//!
+//! Phase 1b-2b adds one more command, and it is not a workspace command:
+//! `menu::set_menu_labels` carries the macOS menu's labels **from** the
+//! frontend, because Tauri builds that menu in Rust and the single source of
+//! truth for a user-facing string is `src/lib/i18n/{en,es}.json`.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
@@ -17,9 +22,16 @@
 
 mod commands;
 #[cfg(test)]
+mod dictionary_contract;
+#[cfg(test)]
 mod dispatch_check;
 mod error;
 mod events;
+mod menu;
+#[cfg(test)]
+mod menu_contract;
+#[cfg(test)]
+mod rust_source;
 #[cfg(test)]
 mod wire_contract;
 
@@ -35,27 +47,34 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the five read-only commands and the state they share.
+/// Registers the five read-only commands, the menu command, and the state they
+/// share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
 /// application: a command registered in `main` and absent from the test's
 /// builder would make the test's evidence a statement about a different
 /// program.
 ///
-/// They are the whole IPC surface — read a workspace, list its files, project
-/// one, project one match, re-read one — and nothing in the list can write to
-/// the disk.
+/// The first five are the read-only workspace surface — read a workspace, list
+/// its files, project one, project one match, re-read one — and nothing in the
+/// list can write to the disk. The sixth, `set_menu_labels`, writes nothing
+/// either: it hands the macOS menu the strings the frontend translated, because
+/// Tauri builds that menu in Rust and hardcoding either language here is what
+/// plan section 9 forbids. See `crate::menu`.
 ///
-/// `capabilities/default.json` stays at `"permissions": []`. A capability
-/// grants access to **plugin** commands — everything spelled `plugin:…`,
-/// `core:…` included — and an application's own commands are dispatched without
-/// consulting the access-control list unless the application publishes an ACL
-/// manifest of its own (`tauri::webview`'s dispatcher checks
-/// `plugin_command.is_some() || has_app_acl_manifest || !is_local`). This crate
-/// publishes none, the webview's origin is local, and none of the five is a
-/// plugin command — so the empty permission list that Phase 1b-1's review
-/// narrowed to stays exactly as narrow, and `core:default` stays gone. That
-/// paragraph is an argument; `dispatch_check.rs` is the evidence.
+/// `capabilities/default.json` stays at `"permissions": []`, **including for
+/// the menu**. A capability grants access to **plugin** commands — everything
+/// spelled `plugin:…`, `core:…` included — and an application's own commands
+/// are dispatched without consulting the access-control list unless the
+/// application publishes an ACL manifest of its own (`tauri::webview`'s
+/// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
+/// !is_local`). This crate publishes none, the webview's origin is local, and
+/// none of the six is a plugin command. `core:menu`'s permissions exist for a
+/// frontend that builds menus through `@tauri-apps/api/menu`; this one does
+/// not, and asks Rust for a rebuild instead, so the empty permission list that
+/// Phase 1b-1's review narrowed to stays exactly as narrow and `core:default`
+/// stays gone. That paragraph is an argument; `dispatch_check.rs` is the
+/// evidence.
 fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(commands::WorkspaceSession::new())
@@ -65,6 +84,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::get_document,
             commands::get_match,
             commands::reload_document,
+            menu::set_menu_labels,
         ])
 } // End of function register()
 

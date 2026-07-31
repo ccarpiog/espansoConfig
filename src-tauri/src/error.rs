@@ -132,6 +132,57 @@ pub enum CommandError {
         /// The node the identity names.
         node: usize,
     },
+    /// The application menu could not be rebuilt because the main thread would
+    /// not accept the work.
+    ///
+    /// The only failure `crate::menu::set_menu_labels` can answer with: menu
+    /// construction is AppKit work that has to be posted to the main thread, so
+    /// what the command reports is whether the post was **accepted**. A refusal
+    /// means the event loop is gone, which in practice means the application is
+    /// shutting down. It carries no operand, because the only thing that failed
+    /// is the delivery.
+    MenuUnavailable,
+    /// The label set the frontend sent is not the label set this build
+    /// declares.
+    ///
+    /// **A version-skew refusal, and it exists because the alternative was
+    /// untyped prose.** Phase 1b-2b took the labels as a typed `MenuLabels`
+    /// argument, so a frontend one release behind was refused *inside Tauri's
+    /// command macro*, which answers with an English sentence — ``invalid args
+    /// `labels` for command `set_menu_labels`: missing field `quit` `` — and no
+    /// `code` at all. That is prose crossing the boundary, which plan section 9
+    /// forbids, and `classifyFailure` could only file it under `unexpected`.
+    /// The command now takes an untyped envelope and does the deserialization
+    /// itself, so the refusal is this code and these two operands.
+    ///
+    /// Both operands are **wire field names**, not prose: they are the same
+    /// identifiers `MenuLabels`, `MENU_LABEL_FIELDS` and the `menu.` dictionary
+    /// namespace are spelled with. Neither is interpolated into a message —
+    /// `docs/decisions/1b-2b-notes.md` section 2 lists the operands that are
+    /// deliberately not rendered, and these join it.
+    ///
+    /// Both lists are empty when every field is present and one of them is not
+    /// a string. That is a real case and not a degenerate one: the code still
+    /// says *these labels are not the label set this build expects*, which is
+    /// the whole of what the caller can act on.
+    InvalidMenuLabels {
+        /// Fields this build declares that the label set did not carry.
+        missing: Vec<String>,
+        /// Fields the label set carried that this build does not declare.
+        unexpected: Vec<String>,
+    },
+    /// The main thread accepted the menu rebuild and the rebuild failed there.
+    ///
+    /// Kept apart from [`CommandError::MenuUnavailable`] because the two say
+    /// different things about the application: that one means the event loop is
+    /// gone, this one means the event loop is alive and AppKit refused. Phase
+    /// 1b-2b could not tell them apart at all — `set_menu_labels` returned as
+    /// soon as the work was *posted*, so a failure inside the closure left
+    /// Tauri's English default menu up and reported success. muda's macOS
+    /// implementation does not return an error on these paths today, which is
+    /// why this code exists to stop tomorrow's failure being silent rather than
+    /// to describe one that happens.
+    MenuBuildFailed,
 } // End of enum CommandError
 
 impl CommandError {
@@ -153,6 +204,9 @@ impl CommandError {
             CommandError::IdentityWrongDocument { .. } => "identityWrongDocument",
             CommandError::IdentityStaleRevision { .. } => "identityStaleRevision",
             CommandError::IdentityNoSuchMatch { .. } => "identityNoSuchMatch",
+            CommandError::MenuUnavailable => "menuUnavailable",
+            CommandError::InvalidMenuLabels { .. } => "invalidMenuLabels",
+            CommandError::MenuBuildFailed => "menuBuildFailed",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -197,6 +251,15 @@ impl Serialize for CommandError {
             CommandError::IdentityNoSuchMatch { node } => {
                 out.serialize_field("node", node)?;
             }
+            CommandError::MenuUnavailable => {}
+            CommandError::InvalidMenuLabels {
+                missing,
+                unexpected,
+            } => {
+                out.serialize_field("missing", missing)?;
+                out.serialize_field("unexpected", unexpected)?;
+            }
+            CommandError::MenuBuildFailed => {}
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -206,7 +269,9 @@ impl CommandError {
     /// How many operand fields this variant writes, beside its code.
     fn operand_count(&self) -> usize {
         match self {
-            CommandError::NoWorkspaceOpen => 0,
+            CommandError::NoWorkspaceOpen
+            | CommandError::MenuUnavailable
+            | CommandError::MenuBuildFailed => 0,
             CommandError::ConfigDirNotFound { .. }
             | CommandError::NotADirectory { .. }
             | CommandError::UnknownDocument { .. }
@@ -214,7 +279,8 @@ impl CommandError {
             CommandError::Io { .. }
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
-            | CommandError::IdentityStaleRevision { .. } => 2,
+            | CommandError::IdentityStaleRevision { .. }
+            | CommandError::InvalidMenuLabels { .. } => 2,
         }
     } // End of function operand_count()
 }
@@ -266,6 +332,12 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
             found: ContentRevision::of_bytes(b"b").to_hex(),
         },
         CommandError::IdentityNoSuchMatch { node: 3 },
+        CommandError::MenuUnavailable,
+        CommandError::InvalidMenuLabels {
+            missing: vec!["quit".to_owned()],
+            unexpected: vec!["renamed_last_week".to_owned()],
+        },
+        CommandError::MenuBuildFailed,
     ]
 } // End of function every_command_error()
 
@@ -287,43 +359,19 @@ fn variant_name(error: &CommandError) -> String {
 ///
 /// Reads the source rather than any list a maintainer keeps in step, because a
 /// list kept in step is exactly what the review found could fall out of step.
-/// Doc comments and attributes are skipped, so only real variant declarations
-/// at the enum's top level are collected.
+///
+/// The reader itself lives in `crate::rust_source`, where fifteen other enum
+/// declarations are read the same way to check the Rust-code dictionaries. One
+/// reader rather than two: a second copy could disagree with this one about what
+/// a variant declaration looks like, and only one of the two would be wrong in a
+/// way anybody noticed. Phase 1b-2b's review is why it parses rather than scans
+/// lines — `#[cfg(…)] Variant,` and `A, B,` are both valid declarations a line
+/// scanner missed.
 #[cfg(test)]
 fn declared_variants() -> std::collections::BTreeSet<String> {
     let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/error.rs"))
         .expect("error.rs can read itself");
-    let header = "pub enum CommandError {";
-    let start = source
-        .find(header)
-        .expect("this file declares pub enum CommandError")
-        + header.len();
-    let mut names = std::collections::BTreeSet::new();
-    let mut depth = 1usize;
-    for line in source[start..].lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") || trimmed.starts_with('#') {
-            continue;
-        }
-        if depth == 1 {
-            let name: String = trimmed
-                .chars()
-                .take_while(char::is_ascii_alphanumeric)
-                .collect();
-            let declares_variant = !name.is_empty()
-                && name.starts_with(|first: char| first.is_ascii_uppercase())
-                && trimmed[name.len()..].starts_with([',', ' ', '(', '{']);
-            if declares_variant {
-                names.insert(name);
-            }
-        }
-        depth += line.matches('{').count();
-        depth = depth.saturating_sub(line.matches('}').count());
-        if depth == 0 {
-            break;
-        }
-    } // End of the loop over the enum's declaration lines
-    names
+    crate::rust_source::declared_variants(&source, "CommandError")
 } // End of function declared_variants()
 
 /// The [`std::io::ErrorKind`] variant name of an I/O error.
@@ -542,6 +590,9 @@ mod tests {
             ("identityWrongDocument", vec!["expected", "found"]),
             ("identityStaleRevision", vec!["expected", "found"]),
             ("identityNoSuchMatch", vec!["node"]),
+            ("menuUnavailable", vec![]),
+            ("invalidMenuLabels", vec!["missing", "unexpected"]),
+            ("menuBuildFailed", vec![]),
         ];
         for (error, (code, operands)) in every_command_error().iter().zip(expected) {
             let value = serde_json::to_value(error).expect("a command error must serialize");

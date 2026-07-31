@@ -35,7 +35,12 @@ import { LOCALES } from './locale';
 const IDENTICAL_BY_DESIGN: ReadonlyMap<TranslationKey, string> = new Map([
   ['app.name', 'the product name, a proper noun'],
   ['language.english', 'an endonym: a language is offered under its own name'],
-  ['language.spanish', 'an endonym: a language is offered under its own name']
+  ['language.spanish', 'an endonym: a language is offered under its own name'],
+  ['code.matchBadge.html', 'the name of a markup format, an acronym in both languages'],
+  ['code.matchBadge.markdown', 'the name of a markup format, a proper noun in both languages'],
+  ['code.matchBadge.variables', 'the same word, spelled the same way, in both languages'],
+  ['code.matchBadge.shell', 'espanso’s own term for the variable type, kept untranslated in Spanish technical usage'],
+  ['code.matchBadge.script', 'the ordinary Spanish word for this is the same loanword']
 ] as const);
 
 const englishKeys = Object.keys(en) as TranslationKey[];
