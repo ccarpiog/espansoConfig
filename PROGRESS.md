@@ -3262,7 +3262,7 @@ _Updated at each phase boundary._
 | 1c-2a cleanup | `82ad7c5` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-1 | `41b5e40` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-2a | `16f9a0d` | ✅ pushed to `origin/main` | clean |
-| 1c-2b-2b-1 | `PENDING` | pending | clean |
+| 1c-2b-2b-1 | `20ec090` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -3313,7 +3313,7 @@ contract wording across five files, `documentText()` in `src/lib/ipc/commands.ts
 `docs/decisions/1c-2b-2a-notes.md`, `CLAUDE.md` §6 and this checkpoint. **A fresh session should start
 from `16f9a0d` or later.**
 
-`PENDING` is Phase 1c-2b-2b-1 **including its review fix round** — the phase was held open until all
+`20ec090` is Phase 1c-2b-2b-1 **including its review fix round** — the phase was held open until all
 four findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
 defects: neither the caption claiming bytes were shown as written above the arm that says it could not
 read them, nor the scope sentence describing a `-` marker that a flow item does not have, nor the
@@ -3325,7 +3325,7 @@ the unmodelled value in `src/lib/browser/detail.ts` and `src/lib/components/Deta
 dictionary keys in each language with one reworded, the two committed measurements in
 `crates/espansoconfig-core/tests/model_projection.rs`, the corrected `PARSEABLE_HAZARDS` in
 `src/lib/browser/fixtures.ts`, the review, `docs/decisions/1c-2b-2b-1-notes.md` and this checkpoint.
-**A fresh session should start from `PENDING` or later.** As at 1b-1, `npm install` (or `npm ci`) is
+**A fresh session should start from `20ec090` or later.** As at 1b-1, `npm install` (or `npm ci`) is
 required before any frontend command will run.
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
