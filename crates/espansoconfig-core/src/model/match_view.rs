@@ -244,7 +244,13 @@ pub struct ContentSpec {
 }
 
 impl ContentSpec {
-    /// The content the editor shows first, and the search indexes.
+    /// The content the editor shows first.
+    ///
+    /// **Not what search covers.** A malformed match holding `replace` *and*
+    /// `html` has two pieces of content in the file, and a search that indexed
+    /// only the first would refuse to find text the user can see;
+    /// [`MatchView::search_text`] therefore takes every present field through
+    /// [`ContentSpec::collect_scalars`] instead.
     pub fn primary(&self) -> Option<&ScalarView> {
         self.replace
             .as_ref()
@@ -253,6 +259,18 @@ impl ContentSpec {
             .or(self.form.as_ref())
             .or(self.image_path.as_ref())
     }
+
+    /// Appends every content scalar this side holds, in declaration order.
+    ///
+    /// One place decides what "every content field" means, so the search
+    /// haystack and the type-inference oracle cannot come to disagree about it.
+    pub fn collect_scalars<'a>(&'a self, out: &mut Vec<&'a ScalarView>) {
+        out.extend(self.replace.iter());
+        out.extend(self.markdown.iter());
+        out.extend(self.html.iter());
+        out.extend(self.image_path.iter());
+        out.extend(self.form.iter());
+    } // End of function collect_scalars()
 
     /// Recomputes [`ContentSpec::kind`] from which fields are present.
     fn classify(&mut self, present: usize) {
@@ -363,6 +381,24 @@ pub struct MatchView {
     pub path: Option<DocumentPath>,
     /// The match's byte span.
     pub span: ByteSpan,
+    /// The bytes [`MatchView::span`] names, exactly as the file writes them.
+    ///
+    /// **A fact about how the file is written, never a resolved value (D2u).**
+    /// It is the source slice and nothing else: no field is decoded, reordered
+    /// or normalised on the way in.
+    ///
+    /// It exists because the projection above is *lossy as a comparison*. Two
+    /// matches differing only in `word: true` / `word: false` produce the same
+    /// [`MatchView::search_text`], the same badges and the same two kinds, so a
+    /// frontend comparing those would call them equal; comparing this slice
+    /// calls them different, because the file does. `selection.ts` in the
+    /// frontend uses it for exactly that, and
+    /// `two_matches_that_differ_only_in_an_option_have_different_source_text`
+    /// is the test that fails if this stops being the whole slice.
+    ///
+    /// The slice is the match's own node — its mapping — so trivia *outside*
+    /// it (a comment on the line above, for instance) is not part of it.
+    pub source_text: String,
     /// The trigger side.
     pub trigger: TriggerSpec,
     /// The content side.
@@ -396,6 +432,10 @@ pub struct MatchView {
     ///
     /// Precomputed here rather than assembled per keystroke in the frontend, so
     /// that what the search covers is one fact stated once and testable.
+    ///
+    /// *Content* means **every** content field the match holds, not the one
+    /// [`ContentSpec::primary`] would show first: a malformed match writing both
+    /// `replace` and `html` puts both into the file, and both are findable.
     pub search_text: String,
 }
 
@@ -417,6 +457,14 @@ impl MatchView {
             .map(|n| n.span)
             .unwrap_or_default();
         let mut view = MatchView::empty(document, revision, node, path.clone(), span);
+        // The whole slice, copied once per match at projection time. `get`
+        // rather than an index: a node the index does not know has a default
+        // span, and an empty slice is the honest answer for it.
+        view.source_text = projector
+            .source
+            .get(span.start..span.end)
+            .unwrap_or_default()
+            .to_owned();
         view.safely_editable = projector.safely_editable(node);
         view.blocking_hazard = projector
             .trivia
@@ -643,6 +691,7 @@ impl MatchView {
             source_node: node,
             path,
             span,
+            source_text: String::new(),
             trigger: TriggerSpec::default(),
             content: ContentSpec::default(),
             label: None,
@@ -679,9 +728,12 @@ impl MatchView {
         if let Some(label) = &self.label {
             parts.push(&label.text);
         }
-        if let Some(content) = self.content.primary() {
-            parts.push(&content.text);
-        }
+        // **Every** content field, not `primary()`: a match holding `replace`
+        // and `html` holds two pieces of content, and indexing only the first
+        // makes text the user can read in the file unfindable in the browser.
+        let mut content: Vec<&ScalarView> = Vec::new();
+        self.content.collect_scalars(&mut content);
+        parts.extend(content.into_iter().map(|scalar| scalar.text.as_str()));
         if let Some(comment) = &self.comment {
             parts.push(&comment.text);
         }
@@ -706,11 +758,7 @@ impl MatchView {
             item.collect_scalars(out);
         }
         out.extend(self.trigger.regex.iter());
-        out.extend(self.content.replace.iter());
-        out.extend(self.content.markdown.iter());
-        out.extend(self.content.html.iter());
-        out.extend(self.content.image_path.iter());
-        out.extend(self.content.form.iter());
+        self.content.collect_scalars(out);
         out.extend(self.label.iter());
         out.extend(self.comment.iter());
         for item in &self.search_terms {

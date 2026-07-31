@@ -478,6 +478,19 @@ export interface MatchView {
   readonly path: DocumentPath | null;
   /** The match's byte span. */
   readonly span: ByteSpan;
+  /**
+   * The bytes {@link MatchView.span} names, exactly as the file writes them.
+   *
+   * A fact about how the file is written, never a resolved value (D2u). It is
+   * the only field on this view that is *complete*: everything else is a
+   * projection, and two matches differing only in an option the projection does
+   * not surface look identical through it. `selection.ts` compares this and
+   * nothing else.
+   *
+   * The slice is the match's own mapping, so a comment on the line above it is
+   * not part of it.
+   */
+  readonly source_text: string;
   /** The trigger side. */
   readonly trigger: TriggerSpec;
   /** The content side. */

@@ -26,7 +26,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1b-1** | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite scaffold · the i18n infrastructure in both languages | ✅ complete |
 | **1b-2a** | The read-only IPC surface · the wire error type · the typed frontend boundary · R27 corrected | ✅ complete — after the review fix round below |
 | **1b-2b** | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ✅ complete — after the review fix round below |
-| 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ **next** |
+| **1c-1** | The three-pane shell and the data path: sidebar, snippet list, search, the selection | ✅ complete — after the review fix round below |
+| 1c-2 | The detail pane: plan §3.3's fields, the hazards, the diagnostics, the raw YAML viewer | ⬜️ **next** |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
@@ -44,6 +45,13 @@ established while the surface is small enough to audit. 1b-2 is the **boundary**
 commands over `crate::workspace`, and the dictionaries that turn Rust's codes into prose. The cut
 matters because the two halves fail differently — a scaffold defect is loud and immediate, an IPC
 defect is a data-format decision that later phases inherit.
+
+**1c is split into 1c-1 / 1c-2**, cut by failure mode, which is the test every split in this project
+has used. **1c-1 is the shell and the data path** — the layout, the sidebar, the snippet list, search
+and the selection — and it fails **loudly**: wrong data, or nothing on screen at all. **1c-2 is the
+detail pane** — plan §3.3's 22 fields, the hazards, the diagnostics and the raw YAML viewer — and it
+fails **quietly**: a rendering that looks finished and states something the project has not earned.
+Phase 1's stated exit lands at the end of **1c-2**.
 
 **1b-2 was split into 1b-2a / 1b-2b** along the same cut: 1b-2a is the **boundary** — the five
 read-only commands, the wire error type and the typed frontend mirror — and 1b-2b is the **prose**,
@@ -709,6 +717,54 @@ while all ten `wire_contract` tests passed, which is 1b-2a's hole 4 demonstrated
 **Seven review findings, two of them High, all dispositioned** — see the disposition below. Eleven coverage
 holes remain, each with the phase that owns it named, and the largest is the honest one: **nothing renders
 any of these 111 strings yet**, and nothing establishes that any of the Spanish values is Spanish.
+
+### Phase 1c-1 — the three-pane shell, and the first screen that shows a configuration
+
+The first phase in this project whose deliverable is something a person looks at. `AppShell.svelte` no
+longer holds a placeholder: it calls the read-only IPC boundary on mount and renders plan §8.1's three
+panes over the result. The decision record is
+[`docs/decisions/1c-1-notes.md`](docs/decisions/1c-1-notes.md).
+
+**Four states before there are three of anything**, each localized: reading, read-and-empty, failed, and
+ready. The failure arm has two headings and one message — `configDirNotFound` is separated from
+everything else, because "espanso is not installed on this machine" is an ordinary state a first-run user
+is in and "something went wrong" is not. Every failure sentence is `tIpcFailure`, so no code can reach the
+screen without prose.
+
+**Search reads one field, and that is the point.** The core precomputes `MatchView.search_text` from the
+five fields plan §8.1 names; the frontend owns only the *matching rule* — case folding via
+`toLocaleLowerCase`, and the decision that several words must all appear. Re-deriving the haystack in
+TypeScript would make the plan's list two facts in two languages with nothing comparing them.
+**The review found the core's own join was short**: it took `ContentSpec::primary()`, so a match holding
+`replace` **and** `html` was unsearchable by its `html`. `collect_scalars` replaced it.
+
+**Badges come from badge data.** `MatchView.badges`, rendered verbatim through `tMatchBadge`; nothing in
+the frontend derives a badge from a value, and `shows no badge for a field the core did not badge` fires
+if anything starts to.
+
+**R32's first half is discharged, and this is the oldest debt in the project.** `open_workspace`,
+`list_documents`, `get_document` and `get_match` all survive tree-shaking into `dist` — verified against
+the built bundle, not argued. Five readings were taken from a **running window** against a synthetic
+config: the populated screen in both languages, a count-of-one tooltip, the partial-total block, and the
+no-configuration state; the detail pane was clicked and rendered in both languages. The readings were
+**re-taken after the review fix round**, because that round edited two of the components and this project
+has already reported a window that "launched and stayed up" while being blank. What the technique
+establishes is **layout and text, not pixels** — colour, contrast and paint are unverified, and that
+stays a stated hole.
+
+**The review's two High findings were both real, and the first was the serious one.** The selection's
+fingerprint compared `search_text`, the badge list and two shape codes — so `word`, `propagate_case`,
+variables, form fields, unmodelled entries and every non-primary content field were **invisible to it**.
+Two matches differing only in `word: true` / `word: false` fingerprinted identically, and re-resolution
+answered `sameMatch` for the wrong snippet. That is the R27 class of defect exactly. It is closed by
+**`MatchView.source_text`**, the match's own bytes, which is a fact about how the file is written and so
+is D2u-safe. The second: recovery installed the re-resolved identity but never replaced the stale
+`DocumentView`, so `selectedMatch` kept resolving the old node behind a fresh id.
+
+**What is proven.** **354 frontend tests across 23 files** (from 318 and 21) and the Rust suite unchanged
+in verdict, with `search_text`'s widening pinned in `model_projection.rs`. **Twenty-two disabling
+experiments** across the phase and its fix round, each run, recorded and reverted; all fired. One did
+**not** fire until its test was strengthened, and that is recorded in the notes rather than tidied away.
 
 ---
 
@@ -1741,6 +1797,71 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-1 review disposition
+
+The review is
+[`docs/reviews/phase-1c-1-shell-and-data-path.md`](docs/reviews/phase-1c-1-shell-and-data-path.md).
+**Eleven items — two High, five Medium, three Low, plus one defect found outside the review — and every
+one is closed. Nothing was rejected.** The phase was held open until the fix round finished, so the
+commit contains no intermediate state holding a demonstrated defect. The full disposition, with what
+each fix cost, is `docs/decisions/1c-1-notes.md` §13.
+
+- **High 1 — the fingerprint could silently confirm a different match.** Real, and the most serious
+  finding in the phase. `matchFingerprint` compared `search_text`, the badges and two shape codes, which
+  between them carry **no** `word`, `propagate_case`, variable, form field, unmodelled entry or
+  non-primary content field. The reviewer's counterexample is two matches differing only in
+  `word: true` / `word: false`: identical fingerprints, so `reresolve()` answered `sameMatch` and the
+  browser selected the wrong snippet. The notes had admitted only the *identical-twins* limit, which is
+  far narrower. Closed by route (a) — a new read-only `MatchView.source_text`, the bytes the match's
+  span names, compared alone. Bytes out of the file are a fact about how the file is written, never a
+  resolved value, so D2u is untouched. Hole 3 of the notes is rewritten to the true statement: two
+  **byte-identical** matches remain indistinguishable, and nothing in the file distinguishes them either.
+- **High 2 — recovery installed a fresh identity over a stale document.** Real. `applyRepair()` stored
+  the re-resolved id but never replaced the old `DocumentView` in `views`, so `selectedMatch` resolved
+  the old node behind the new id, the list kept old rows and the counts stayed stale; deleted snippets
+  also stayed visible after `differentMatch` and `gone`. Closed: `repairSelection` returns the projection
+  it read and `installView` replaces the document **before** the selection outcome is applied, on both
+  the kept and the cleared paths.
+- **Medium 1 — an overlapping selection could overwrite a newer choice.** Real. Closed with a generation
+  token checked after every `await`. Its experiment is the one that **did not fire** until the test also
+  asserted that a superseded selection issues no reload; recorded in the notes rather than tidied away.
+- **Medium 2 — reopening kept an invalid file filter and query.** Real. `open()` now resets selection,
+  query, documents, summary, views and failures, under an open-generation token.
+- **Medium 3 — search omitted secondary content forms.** Real, and it was a **core** defect rather than a
+  frontend one: `build_search_text()` took `ContentSpec::primary()`, so `replace: alpha` + `html: needle`
+  could not be found by `needle`. Closed by `ContentSpec::collect_scalars`. The notes' claim that
+  `fixtures.ts` re-transcribes the core's join faithfully was false — it added both forms where the core
+  added one — and both the fixture and the sentence are corrected.
+- **Medium 4 — an unreadable file gave a misleading total with no visible failure.** Real, and it
+  contradicted the notes' own justification for computing `pending`, which was then never rendered. The
+  browser reached `ready` showing "All 2" while a 100-match file had failed to the console alone. Closed
+  with `BrowserState.loadFailures` and a localized partial-total block, and **read out of a running
+  window** in both languages.
+- **Medium 5 — a notice code was turned into a key rather than going through an accessor.** Real, and it
+  is the rule CLAUDE.md §2 and this checkpoint both state. Closed with a `tSelectionNotice` accessor —
+  and with a **new lint**, `scripts/lint/built-translation-keys.ts`, which refuses any `t(` whose key is
+  not written literally. It immediately found a **second, older** instance in `LanguagePicker.svelte`
+  that had survived two phases; that is now `tLocaleName`.
+- **Low 1** — `buildSidebar()` added a `ConfigProfile`'s count to the total although `holdsMatches` is
+  false for one. Closed by guarding the addition.
+- **Low 2 — eight test names promised more than their bodies established.** All eight strengthened, one
+  narrowed. **This is R24's corollary and its fifth occurrence**, and the sharpest instance is the
+  reviewer's own: `does not wait for a profile, which holds no matches` never supplied a profile count,
+  so it passed while `buildSidebar()` counted one — the same test the notes had cited as the reason
+  experiment E was unnecessary. That claim is corrected too.
+- **Low 3** — the "stub" detail pane already rendered `trigger` and `label` through list-oriented helpers
+  that collapse several trigger forms, which 1c-2 would have had to undo. Reduced to notice, file and
+  placeholder; its two field keys are gone.
+- **The plural defect, found outside the review.** `browser.sidebar.snippetCount` was `"{count} snippets"`
+  / `"{count} fragmentos"` with no singular, so a one-match file's tooltip read **"1 snippets"** and
+  **"1 fragmentos"** — and the phase's own R32 evidence shows one-match files, so it was on screen.
+  Closed with a `.one` / `.other` key pair selected on `count === 1`, which is correct for both languages
+  and adds no dependency. Confirmed from a running window: `"1 snippet"` and `"1 fragmento"`.
+
+**One defect was found by the re-run readings and deliberately left for 1c-2**: a file that could not be
+read shows the same `–` / "Not read yet" marker as a profile nobody has projected, which conflates
+*could not* with *have not*. Recorded in `1c-1-notes.md` §10.4.
+
 ## Phase 1b-2b review disposition
 
 The review is
@@ -1870,6 +1991,38 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-1
+
+Every command below was run by the **orchestrator** against the working tree, **after** the review fix
+round and after the R32 readings were re-taken, not reported by a worker. All exit 0.
+
+| Command | Result |
+|---|---|
+| `npm run check` | 364 files, **0 errors, 0 warnings** (`--fail-on-warnings`) |
+| `npm test` | **354 passed** across 23 files (from 318 across 21) |
+| `npm run build` | ok — `dist/assets/index-*.js` 81.30 kB |
+| `cargo test --workspace` | 16 suites, **0 failed** anywhere |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **no output** — the architecture rule holds (D2x) |
+
+Two things were checked by the orchestrator **independently of any worker's claim**, because both are
+claims a passing test cannot make:
+
+- **The IPC layer really is in the shipped bundle.** `rg -o` over `dist/assets/*.js` finds
+  `open_workspace`, `list_documents`, `get_document`, `get_match` and `set_menu_labels`. `document_text`
+  is **absent**, which is correct — the raw YAML viewer is 1c-2 and nothing calls it yet. This is R32's
+  first half, the oldest debt in the project, discharged by measurement.
+- **The core's search haystack really does cover plan §8.1's five fields.** Read out of
+  `build_search_text()` directly rather than taken from the phase's summary: trigger, `triggers`, `regex`,
+  label, content, comment and `search_terms`.
+
+The R32 window readings are `docs/decisions/1c-1-notes.md` §10, and they were **re-taken after the fix
+round** on the orchestrator's instruction, because that round edited `Sidebar.svelte` and
+`DetailPane.svelte` and **nothing in this project renders a Svelte component in an automated test**. A
+runtime error in either would have produced an empty pane that all 354 tests pass straight through.
+`git status --short` after the readings is byte-identical to before them: the temporary probe is gone.
 
 ## Verification — Phase 1b-2b
 
@@ -2292,65 +2445,73 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1b-2b is complete, and with it Phase 1b. Start Phase 1c — the three-pane browser.**
+**Phase 1c-1 is complete. Start Phase 1c-2 — the detail pane, and Phase 1's exit.**
 
-Everything below the screen now exists and is proven: the fidelity engine (Phase 0), the read model
-and its cache (1a), the shell and i18n layer (1b-1), the typed IPC boundary (1b-2a) and the prose for
-every code that can cross it (1b-2b). **1c is the first phase whose deliverable is something a person
-looks at**, and the plan's stated exit for Phase 1 lands at the end of it: *the owner can browse their
-entire real config and every snippet renders correctly.*
+The shell, the data path and the selection all work and have been seen working in a window: a sidebar
+that groups files, profiles and packages, a snippet list with badges, search over the five fields plan
+§8.1 names, and a selection that survives — or correctly refuses to survive — a document changing
+underneath it. **What the third pane shows is a localized placeholder.** 1c-2 fills it, and the plan's
+stated exit for Phase 1 lands there: *the owner can browse their entire real config and every snippet
+renders correctly.*
 
 Concretely, and in roughly this order:
 
-1. **Three-pane navigation.** Files → matches → detail. `list_documents` and `get_document` already
-   return everything the first two panes need; `MatchView` carries all 22 of plan §3.3's fields for
-   the third. Nothing about the layout is decided yet — that is 1c's to choose.
-2. **Search over trigger, label, content, comment and `search_terms`** (plan §8.1). The read model
-   already exposes each of those; the pins in `tests/model_projection.rs` say which.
-3. **The raw YAML viewer.** `document_text` returns the file's own bytes. Phase 3 owns CodeMirror;
-   1c needs only to display text faithfully.
-4. **Surface `HazardKind`** where the visual editor cannot preserve a construct. The strings exist
-   (`tHazard`, ten of them) and the core computes the hazards; nothing shows them.
-5. **Render a scalar as source text, never as an inferred type** — D2u, and it is a decision rather
-   than a preference. A badge comes from a key's presence or a `type` field's text, never from a
-   value; `badges_come_from_key_presence_and_type_text_never_from_a_scalar_value` pins the absence of
-   the shortcut. Flagging a scalar as 1.1-ambiguous *is* allowed; `ScalarView.ambiguous_yaml_1_1`
-   carries it.
+1. **Render `browser.selectedMatch`** — all 22 of plan §3.3's fields. `MatchView` already carries every
+   one, and 1c-1 leaves the value **live in the store**: 1c-2 renders it and does not need to fetch
+   anything. `DetailPane.svelte` is a stub by design and its two field keys were deliberately removed,
+   so there is nothing to undo.
+2. **The nine variable types** of plan §3.4 (`VariableView`, `params` shallow), and the forms of §3.5.
+3. **Surface `HazardKind`** where the visual editor cannot preserve a construct. Ten strings exist
+   (`tHazard`) and **have no caller at all**; the core computes the hazards.
+4. **Surface the diagnostics.** `tDiagnostic` is 22 strings with **no caller**. The four deliberately
+   invalid fixtures yield typed diagnostics and still expose their raw text.
+5. **The raw YAML viewer.** `document_text` returns the file's own bytes and is the one command with
+   **no frontend caller** — it is therefore the one command still tree-shaken out of `dist`. Phase 3
+   owns CodeMirror; 1c-2 needs only to display text faithfully.
+6. **Render a scalar as source text, never as an inferred type** — D2u, a decision rather than a
+   preference. A badge comes from a key's presence or a `type` field's text, never from a value.
+   Flagging a scalar as 1.1-ambiguous *is* allowed, and `ScalarView.ambiguous_yaml_1_1` is carried on
+   every scalar with nothing yet showing it — the detail pane is where it would go.
 
-**What 1c inherits, and should not rebuild.** Twelve reactive typed accessors — `tDiagnostic`,
-`tUnknownReason`, `tMatchBadge`, `tHazard`, `tCommandError`, `tIpcFailure`, `tScalarStyle`,
-`tLineEnding`, `tFileKind`, `tTriggerKind`, `tContentKind`, `tVariableKind`. **A component calls one
-of those and never builds a key**; a key that does not exist is a compile error in `codes.ts` rather
-than a blank label at the call site. A failed command has a console destination, `reportIpcFailure`,
-and **no screen** — if 1c grows somewhere to show a non-blocking failure, `menuUnavailable`,
-`menuBuildFailed` and `invalidMenuLabels` are the three codes waiting for it. Full list in
-`docs/decisions/1b-2b-notes.md` §10.
+**What 1c-2 inherits, and should not rebuild.**
 
-**1c owes R32's first half, and it is the oldest debt in the project.** Nothing in the running
-application calls `invoke` for a *document*, so `vite build` still tree-shakes most of the IPC layer
-out of `dist`; the read boundary is proven by tests and a mock dispatcher rather than by a window
-someone looked at. 1b-2b discharged this for the **menu** only — `set_menu_labels` and the Spanish
-labels are in the bundle, and the menu bar was read out of the macOS accessibility tree in both
-languages. Do the same for the browser: a claim about a screen needs something that looked at the
-screen. *A process that stays up is not a screen that renders* — 1b-1 reported a window that "launched
-and stayed up" and it was blank.
+- **Fourteen reactive typed accessors** — the twelve of 1b-2b plus `tSelectionNotice` and `tLocaleName`.
+  **A component calls one and never builds a key.** As of 1c-1 that is enforced rather than trusted:
+  `scripts/lint/built-translation-keys.ts` refuses any `t(` whose key is not written literally, and it
+  found a two-phase-old instance the moment it was written.
+- **A working data path.** `browser.status`, `browser.documents`, `browser.sidebar`,
+  `browser.scopedMatches`, `browser.visibleMatches`, `browser.selected`, `browser.selectedMatch` and
+  `browser.loadFailures` are all live, and the selection is already R27-correct.
+- **A plural helper.** `src/lib/i18n/plural.ts` selects a `.one` / `.other` key pair on `count === 1`.
+  Any new counted string uses it; `"1 snippets"` was a real defect on a real screen.
+- **A notice area, selection-scoped.** If 1c-2 needs somewhere for a non-blocking failure,
+  `1c-1-notes.md` hole 5 is the shape of the work: `menuUnavailable`, `menuBuildFailed` and
+  `invalidMenuLabels` still have a string and no screen.
 
-**Four rules 1c is most likely to break.**
+**One defect is left over for 1c-2 by name.** A file that could not be read shows the same `–` /
+"Not read yet" marker as a profile nobody has projected, conflating *could not* with *have not*.
+`browser.loadFailures` already holds what is needed to tell them apart.
 
-- **Never hardcode a user-facing string** (CLAUDE.md §2). A browser is almost entirely user-facing
-  strings, and this is the phase with the most surface to slip on.
+**Four rules 1c-2 is most likely to break.**
+
+- **Never hardcode a user-facing string** (CLAUDE.md §2). The detail pane is 22 fields of labels.
 - **R31 — a clean lint run is not evidence.** `scripts/lint/hardcoded-strings.ts` sees `.svelte`
-  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props. 1b-2b's
-  work lives in `.ts`, which is exactly what it cannot see.
-- **Nothing establishes that any of the 111 Spanish strings is Spanish.** The untranslated-value check
-  establishes non-identity, and eight keys are on its exception list. A bilingual reader is the only
-  thing that closes this; 1c is the phase where it starts to matter, because the strings become
-  visible.
+  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props.
+- **Nothing establishes that any of the Spanish strings is Spanish.** The untranslated-value check
+  establishes non-identity. This now matters more than it ever has: the strings are on a screen, and
+  1c-1 added 35 more. A bilingual reader is the only thing that closes it.
+- **Nothing renders a Svelte component in an automated test** — `1c-1-notes.md` hole 1, and the reason
+  the R32 readings had to be re-taken after the fix round. A component that throws produces an empty
+  pane that the whole suite passes straight through. Either adopt a DOM and a component-testing library
+  as a deliberate decision with its own costs, or read the window again. **Do not skip both.**
 - **A held identity can go stale, and the UI is what holds identities** — R27. `match_by_id` returns
   `Result<_, IdentityError>`; a lookup crossing a `refresh()` may get `StaleRevision`, which means the
   **document moved on**, not that the match survived. Recovery is re-resolution, with three possible
   answers, and `identityRecovery()` returns them as data so a caller cannot skip one. `DocumentPath`
-  is **not** a fallback identity — a sequence step is a position.
+  is **not** a fallback identity — a sequence step is a position. **1c-1 got this wrong once already**
+  and a reviewer caught it: the comparison that decided `sameMatch` was blind to `word`, to variables
+  and to every non-primary content field. It compares `MatchView.source_text` now — the match's own
+  bytes — and **must not be narrowed back to a display projection.**
 
 **Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
 the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and
@@ -2426,6 +2587,16 @@ reordering matches **inside one sequence**.
   by corpus fixtures — and both are recorded as deviations in `1a-notes.md` §9 holes 4 and 10.
 - **An oracle must be able to disagree.** Break the **engine** and check the oracle fires, not only the
   reverse.
+- **A comparison that decides identity must see everything that distinguishes two things.** New in 1c-1,
+  and it is R24's corollary aimed at a *predicate* rather than at a test. The selection's fingerprint was
+  assembled from what the **list pane displays** — search text, badges, two shape codes — and was then
+  asked to answer a question about **identity**. Two matches differing only in `word: true` / `word: false`
+  were identical to it. The lesson generalises: when a comparison is built from a projection, write down
+  what the projection drops, then ask whether the question being asked can survive those omissions.
+- **A component that no test renders is a component nobody has run.** New in 1c-1. The whole frontend
+  suite — 354 tests — passes without instantiating a single Svelte component, so a runtime error in one
+  produces a blank pane the suite cannot see. Until that changes, **a claim about a screen needs a
+  reading of a screen**, re-taken after any change to a component. 1b-1's blank window is the precedent.
 - **An identity that is "designed to survive" something has to be shown surviving it.** New in 1b-2a,
   and the fourth occurrence of the pattern R24's corollary names. The phase wrote that `DocumentPath`
   was the identity designed to survive a reparse, **in three files and in this checkpoint**, without a
@@ -2451,6 +2622,11 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/`](src/lib/browser/) | **The data path 1c-2 renders from.** `workspace.svelte.ts` (`createBrowserState` — the four states, the two generation tokens, `installView`, `loadFailures`), `selection.ts` (**R27 in code**: a position to look at and `MatchView.source_text` to check with, never a display projection), `search.ts` (the matching rule; the haystack is the core's), `sidebar.ts` (grouping, `holdsMatches`, the pending count), `labels.ts`, `notices.ts`, `fixtures.ts` (neutral synthetic builders) |
+| [`src/lib/components/DetailPane.svelte`](src/lib/components/DetailPane.svelte) | **What 1c-2 replaces.** A deliberate stub — notice, file, placeholder — reduced to that after the review found it had started 1c-2's field rendering with helpers that collapse several trigger forms into one. There is nothing here to undo |
+| [`scripts/lint/built-translation-keys.ts`](scripts/lint/built-translation-keys.ts) | **Why a code cannot reach the screen through a built key.** Refuses any `t(` whose key is not written literally — the rule CLAUDE.md §2 states and that 1c-1 broke twice. It found the second, two-phase-old instance the moment it existed. Note what it does **not** replace: R31 still applies to `hardcoded-strings.ts` |
+| [`docs/decisions/1c-1-notes.md`](docs/decisions/1c-1-notes.md) | Phase 1c-1's decision record: the data path (§2), the four states (§3), search and whose rule is whose (§4), badges as D2u seen from the list (§5), **R27 in the selection (§6)**, the strings and where the lint cannot see them (§7), the **twenty-two disabling experiments including the one that did not fire (§8)**, what the phase got wrong (§9), **R32's five window readings and exactly what they do and do not establish (§10)**, **the coverage holes stated as holes (§11)**, what 1c-2 inherits (§12) and **the review disposition (§13)** |
+| [`docs/reviews/phase-1c-1-shell-and-data-path.md`](docs/reviews/phase-1c-1-shell-and-data-path.md) | The Phase 1c-1 review, dispositioned above. Its High 1 is the sharpest finding in the project so far: a fingerprint that decided `sameMatch` while being blind to `word`, to variables, to form fields and to every non-primary content field. Its Low 2 is **R24's corollary for the fifth time**, and one of the eight tests it names was the very test the notes had cited as making an experiment unnecessary |
 | [`src/lib/i18n/codes.ts`](src/lib/i18n/codes.ts) | **What a 1c component calls, and the one file it should not work around.** Twelve typed key builders and twelve `describe*` functions over the sixteen namespaces; the reactive `t*` wrappers are in [`index.ts`](src/lib/i18n/index.ts). The builders' template-literal return types make a **missing key a compile error here** rather than a blank label at the call site. Build a key by hand and you have opted out of that |
 | [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries — **138 keys each**, of which 111 are `code.*` and 16 are `menu.*`. `en.json` **is the schema**: the key set is derived from it, never declared separately. Eight values are identical across the two files and each is on the untranslated-value exception list **by name** |
 | [`src-tauri/src/dictionary_contract.rs`](src-tauri/src/dictionary_contract.rs) · [`rust_source.rs`](src-tauri/src/rust_source.rs) | **Why a code cannot reach the UI without a string.** `rust_source` parses with `syn` and lexes with `proc-macro2` (dev-dependencies of `src-tauri` **only**); `dictionary_contract` compares the derived variant set against both dictionaries bidirectionally, and two further checks derive the *registry* from source — every `Serialize` enum in both trees, every union in `types.ts` — so a **new enum** is caught without anyone adding a row. What still escapes: an enum a `macro_rules!` expands to, demonstrated in `1b-2b-notes.md` §12.3 experiment 12E |

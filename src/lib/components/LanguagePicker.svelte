@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LOCALES, isLocale, localeNameKey, t } from '../i18n';
+  import { LOCALES, isLocale, t, tLocaleName } from '../i18n';
   import { locale } from '../stores/locale.svelte';
 
   /**
@@ -29,12 +29,12 @@
   >
     <option value={FOLLOW_SYSTEM}>{t('language.followSystem')}</option>
     {#each LOCALES as candidate (candidate)}
-      <option value={candidate}>{t(localeNameKey(candidate))}</option>
+      <option value={candidate}>{tLocaleName(candidate)}</option>
     {/each}
   </select>
   {#if locale.override === null}
     <span class="hint">
-      {t('language.systemDetected', { language: t(localeNameKey(locale.system)) })}
+      {t('language.systemDetected', { language: tLocaleName(locale.system) })}
     </span>
   {/if}
 </div>

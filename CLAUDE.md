@@ -119,11 +119,17 @@ character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex`
 codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
 a mapping field, and move a match within one sequence.
 
-**Phase 1 — the read-only browser — is under way, and Phase 1b is complete.** 1a (the core-side read
+**Phase 1 — the read-only browser — is under way, and Phase 1c-1 is complete.** 1a (the core-side read
 model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the read-only IPC
-surface) and 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized
-macOS menu) are all done. **1c — the browser itself — is next**, and Phase 1's stated exit lands
-there: *the owner can browse their entire real config and every snippet renders correctly.*
+surface), 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized
+macOS menu) and 1c-1 (the three-pane shell, the sidebar, the snippet list, search and the selection)
+are all done. **1c-2 — the detail pane — is next**, and Phase 1's stated exit lands there: *the owner
+can browse their entire real config and every snippet renders correctly.*
+
+**Nothing in this project renders a Svelte component in an automated test.** The frontend suite passes
+without instantiating one, so a component that throws produces a blank pane the suite cannot see. A
+claim about a screen therefore needs a **reading of a screen**, re-taken after any change to a
+component — `docs/decisions/1c-1-notes.md` §10 records the technique.
 
 **A component renders a code by calling an accessor, never by building a key.**
 `src/lib/i18n/codes.ts` gives twelve typed `describe*` functions over sixteen enum namespaces, and

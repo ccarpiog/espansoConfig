@@ -1436,6 +1436,97 @@ fn search_text_covers_the_five_fields_plan_section_eight_names() {
 } // End of function search_text_covers_the_five_fields_plan_section_eight_names()
 
 #[test]
+fn search_text_covers_every_content_form_and_not_only_the_primary_one() {
+    // A match espanso itself would reject — two content fields — is still a
+    // match the browser lists, and both strings are in the file. Indexing only
+    // `ContentSpec::primary()` made the second one unfindable.
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: :both\n",
+        "    replace: alpha\n",
+        "    html: needle\n",
+    );
+    let document = project("two-contents.yml", source);
+    let entry = &document.view.matches[0];
+    for expected in ["alpha", "needle"] {
+        assert!(
+            entry.search_text.contains(expected),
+            "search text omits {expected:?}"
+        );
+    }
+} // End of function search_text_covers_every_content_form_and_not_only_the_primary_one()
+
+#[test]
+fn two_matches_that_differ_only_in_an_option_have_different_source_text() {
+    // The counterexample the 1c-1 review found. `word` is invisible to
+    // `search_text`, earns no badge and changes neither kind, so a frontend
+    // comparing the *display* projection calls these two matches equal and
+    // silently confirms one when the other was selected. The source slice is
+    // what the file says, and the file says they are different.
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: :same\n",
+        "    replace: body\n",
+        "    word: true\n",
+        "  - trigger: :same\n",
+        "    replace: body\n",
+        "    word: false\n",
+    );
+    let document = project("twins.yml", source);
+    let first = &document.view.matches[0];
+    let second = &document.view.matches[1];
+
+    // The premise: everything the display projection carries agrees.
+    assert_eq!(
+        first.search_text, second.search_text,
+        "the premise is that the haystacks agree"
+    );
+    assert_eq!(
+        first.badges, second.badges,
+        "the premise is that the badges agree"
+    );
+    assert_eq!(first.trigger.kind, second.trigger.kind);
+    assert_eq!(first.content.kind, second.content.kind);
+
+    // The property: the slices do not.
+    assert_ne!(
+        first.source_text, second.source_text,
+        "two matches the file writes differently must have different source text"
+    );
+    assert!(first.source_text.contains("word: true"));
+    assert!(second.source_text.contains("word: false"));
+} // End of function two_matches_that_differ_only_in_an_option_have_different_source_text()
+
+#[test]
+fn every_projected_match_carries_exactly_the_bytes_its_span_names() {
+    // The invariant the frontend's selection rests on, checked over the whole
+    // synthetic corpus rather than over one hand-written file: `source_text` is
+    // the slice and nothing else — not a re-rendering, not a normalisation.
+    let files = synthetic_valid();
+    assert!(!files.is_empty(), "the synthetic corpus must be present");
+    let mut checked = 0usize;
+    for file in &files {
+        let document = project(&file.name, &file.source);
+        for entry in &document.view.matches {
+            let slice = &file.source[entry.span.start..entry.span.end];
+            assert_eq!(
+                entry.source_text, slice,
+                "{}: a match's source text is not its own bytes",
+                file.name
+            );
+            assert!(
+                !entry.source_text.is_empty(),
+                "{}: a projected match has no bytes at all",
+                file.name
+            );
+            checked += 1;
+        } // End of the loop over one fixture's matches
+    } // End of the loop over the valid fixtures
+    println!("checked the source slice of {checked} matches");
+    assert!(checked > 20, "the sweep barely ran");
+} // End of function every_projected_match_carries_exactly_the_bytes_its_span_names()
+
+#[test]
 fn the_read_model_serializes() {
     // A `derive` that compiles is not proof that the shape crosses a boundary:
     // `serde` is here for Phase 1b's Tauri commands, so the model has to reach

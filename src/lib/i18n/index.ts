@@ -5,6 +5,11 @@
  * writing a literal into markup, is the one habit CLAUDE.md section 2 forbids.
  */
 
+// The *code* belongs to the browser, which raises it; the *prose* belongs here,
+// where both languages are checked against each other. The accessor lives with
+// the other twelve because CLAUDE.md section 2 is about where a component may
+// get a string from, and the answer is only ever this module.
+import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   ContentKind,
@@ -34,8 +39,10 @@ import {
   describeVariableKind
 } from './codes';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
+import { describeSnippetCount } from './plural';
 
 export { DICTIONARIES, placeholdersOf, translate } from './dictionaries';
+export { describeSnippetCount, pluralKey, snippetCountKey } from './plural';
 export type { TranslationKey, TranslationParams } from './dictionaries';
 export { DEFAULT_LOCALE, LOCALES, isLocale, matchLocaleTag, negotiateLocale } from './locale';
 export type { Locale } from './locale';
@@ -95,6 +102,21 @@ export function t(key: TranslationKey, params?: TranslationParams): string {
 export function localeNameKey(value: 'en' | 'es'): TranslationKey {
   return value === 'en' ? 'language.english' : 'language.spanish';
 } // End of function localeNameKey()
+
+/**
+ * Renders a locale's own name for the language picker.
+ *
+ * The reactive twin of {@link localeNameKey}, and the function a component
+ * calls. `LanguagePicker` wrote `t(localeNameKey(candidate))` until the 1c-1
+ * review; that is a component building a key, which is what
+ * `scripts/lint/built-translation-keys.ts` now refuses on every component.
+ *
+ * @param value - The locale to name.
+ * @returns That locale's endonym, which is deliberately *not* translated.
+ */
+export function tLocaleName(value: 'en' | 'es'): string {
+  return translate(locale.current, localeNameKey(value));
+} // End of function tLocaleName()
 
 /**
  * Renders a diagnostic in the language the interface is currently showing.
@@ -226,3 +248,28 @@ export function tContentKind(kind: ContentKind): string {
 export function tVariableKind(kind: VariableKind): string {
   return describeVariableKind(locale.current, kind);
 } // End of function tVariableKind()
+
+/**
+ * Renders what became of a selection whose document moved on.
+ *
+ * The thirteenth accessor, and the reason it exists: `DetailPane` used to call
+ * `t(selectionNoticeKey(notice))`, which is a component turning a code into a
+ * key — the one thing CLAUDE.md section 2 tells components not to do, however
+ * exhaustive the `switch` behind it is. A component calls this instead.
+ *
+ * @param notice - What happened to the selection.
+ * @returns The translated sentence.
+ */
+export function tSelectionNotice(notice: SelectionNotice): string {
+  return translate(locale.current, selectionNoticeKey(notice));
+} // End of function tSelectionNotice()
+
+/**
+ * Renders "N snippets" in the current language, in the right number.
+ *
+ * @param count - How many snippets a sidebar row stands for.
+ * @returns The translated phrase, with the count substituted.
+ */
+export function tSnippetCount(count: number): string {
+  return describeSnippetCount(locale.current, count);
+} // End of function tSnippetCount()
