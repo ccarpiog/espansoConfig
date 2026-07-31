@@ -2718,6 +2718,7 @@ _Updated at each phase boundary._
 | 1b-1 | `94aa6c9` | ✅ pushed to `origin/main` | clean |
 | 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
 | 1b-2b | `065a516` | ✅ pushed to `origin/main` | clean |
+| 1c-1 | `59d4207` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
