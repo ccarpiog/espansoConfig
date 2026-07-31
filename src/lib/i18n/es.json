@@ -49,6 +49,7 @@
   "browser.detail.section.formFields": "Campos del formulario",
   "browser.detail.section.unknown": "Entradas que esta aplicación no modela",
   "browser.detail.section.source": "Texto de origen",
+  "browser.detail.section.fileText": "Texto del archivo",
 
   "browser.detail.options.matching": "Límites de palabra",
   "browser.detail.options.case": "Mayúsculas",
@@ -73,6 +74,14 @@
   "browser.detail.valueAsWritten": "se muestra aquí tal y como lo escribe el archivo",
   "browser.detail.valueUnavailable": "Esta aplicación no ha podido leer estos bytes.",
   "browser.detail.sourceScope": "La parte del archivo que esta aplicación considera el fragmento en sí. Lo que lo rodea en la lista, la sangría que lo precede y cualquier comentario anterior o posterior quedan fuera.",
+
+  "browser.detail.fileTextShow": "Mostrar el texto de este archivo",
+  "browser.detail.fileTextHide": "Ocultar el texto de este archivo",
+  "browser.detail.fileTextScope": "Esto es el archivo en sí, no los fragmentos que se leen de él.",
+  "browser.detail.fileTextAsWritten": "se muestra aquí desde el primer carácter del archivo hasta el último: los caracteres que no dibujan nada se nombran y cada final de línea se dibuja como un solo salto de línea",
+  "browser.detail.fileTextLoading": "Leyendo este archivo…",
+  "browser.detail.fileTextEmpty": "Este archivo no contiene ningún carácter.",
+  "browser.detail.fileTextUnavailable": "Esta aplicación no puede mostrar el texto de este archivo.",
 
   "browser.detail.field.trigger": "Disparador",
   "browser.detail.field.triggers": "Disparadores",

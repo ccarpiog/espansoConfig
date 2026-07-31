@@ -119,14 +119,29 @@ character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex`
 codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
 a mapping field, and move a match within one sequence.
 
-**Phase 1 — the read-only browser — is under way, and Phase 1c-2b-2a is complete.** 1a (the core-side
-read model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the read-only IPC
-surface), 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized macOS
-menu), 1c-1 (the three-pane shell, the sidebar, the snippet list, search and the selection), 1c-2a (the
-detail pane's match), 1c-2b-1 (the hazards and diagnostics) and 1c-2b-2a (the raw-text boundary:
-`document_text` as a command, `UnknownEntry.value_text`) are all done. **1c-2b-2b — the raw YAML viewer,
-`MatchView.source_text` and the unmodelled value on screen — is next**, and Phase 1's stated exit lands
-there: *the owner can browse their entire real config and every snippet renders correctly.*
+**Phase 1 — the read-only browser — is complete through 1c-2b-2b-2, and its stated exit is met.** 1a
+(the core-side read model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the
+read-only IPC surface), 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the
+localized macOS menu), 1c-1 (the three-pane shell, the sidebar, the snippet list, search and the
+selection), 1c-2a (the detail pane's match), 1c-2b-1 (the hazards and diagnostics), 1c-2b-2a (the
+raw-text boundary) and 1c-2b-2b (source text on screen, then the whole document) are all done.
+
+**Plan §12's Phase 1 exit — *the owner can browse their entire real config and every snippet renders
+correctly* — was checked in a running window over the real corpus, not assumed**: 13 files, zero load
+failures, zero findings, every file's text rendered and all 65 snippets rendered.
+`docs/decisions/1c-2b-2b-2-notes.md` §8 is the verdict, recorded as counts and file names only (D1).
+It names three things it does not cover; the sharpest is that the real configuration produces **zero**
+unmodelled entries, so synthetic fixtures are that surface's only coverage, permanently.
+
+**The raw YAML viewer is a mode of the third pane**, and `documentStart` has **exactly one caller** —
+it is the only way a `bom` segment is produced, and a slice must never pass it. `src/lib/browser/`
+holds what a test can reach (`rawDocument.ts`); the component gets the walk.
+
+**A window reading must be a short, single-purpose run.** A WKWebView whose window is occluded stops
+running `setTimeout` about six seconds after launch — `open -a` does not restart it and
+`-NSAppSleepDisabled` does not prevent it — and LaunchServices silently drops `--env` for a bundle path
+it thinks is already running. One plan per launch, into a fresh bundle path
+(`docs/decisions/1c-2b-2b-2-notes.md` §6.1).
 
 **A raw-text command answers valid UTF-8 or refuses.** `document_text` returns
 `CommandResult<string>`; a file that is not valid UTF-8 becomes a typed `NotUtf8 { path, offset }` and

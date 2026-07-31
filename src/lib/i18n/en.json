@@ -49,6 +49,7 @@
   "browser.detail.section.formFields": "Form fields",
   "browser.detail.section.unknown": "Entries this app does not model",
   "browser.detail.section.source": "Source text",
+  "browser.detail.section.fileText": "File text",
 
   "browser.detail.options.matching": "Word boundary",
   "browser.detail.options.case": "Capital letters",
@@ -73,6 +74,14 @@
   "browser.detail.valueAsWritten": "shown here as the file writes it",
   "browser.detail.valueUnavailable": "This app could not read these bytes.",
   "browser.detail.sourceScope": "The part of the file this app reads as the snippet itself. What surrounds it in the list, the indentation in front of it and any comment before or after it are outside it.",
+
+  "browser.detail.fileTextShow": "Show this file’s text",
+  "browser.detail.fileTextHide": "Hide this file’s text",
+  "browser.detail.fileTextScope": "This is the file itself, not the snippets read out of it.",
+  "browser.detail.fileTextAsWritten": "shown here from the file’s first character to its last: characters that draw nothing are named, and every line ending is drawn as one line break",
+  "browser.detail.fileTextLoading": "Reading this file…",
+  "browser.detail.fileTextEmpty": "This file holds no characters at all.",
+  "browser.detail.fileTextUnavailable": "This app cannot show this file’s text.",
 
   "browser.detail.field.trigger": "Trigger",
   "browser.detail.field.triggers": "Triggers",

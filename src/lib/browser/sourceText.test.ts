@@ -16,7 +16,7 @@
  * one.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { tInvisible } from '../i18n';
@@ -441,3 +441,145 @@ describe('the source of the component that renders these segments', () => {
     expect(source).not.toContain('@html');
   });
 }); // End of the component-source suite
+
+describe('a whole document, which is what only the raw viewer hands this module', () => {
+  /*
+   * **The committed byte-exact fixtures, run through the primitive.** Every
+   * other suite in this file uses a hand-written string; these are the files
+   * `CLAUDE.md` section 4 forbids anyone to reformat, and they carry the four
+   * hazards a *slice* structurally cannot: a real byte order mark at byte 0, no
+   * final newline, a document whose only line break is missing, and mixed line
+   * endings in one file.
+   *
+   * **The synthetic corpus only.** `tests/corpus/real/` is the owner's own
+   * configuration, is gitignored, and no test in this repository may read it
+   * (D1). The directory named below is the committed, hand-authored one.
+   *
+   * What this establishes is what the **model** holds for a real file on disk.
+   * It still says nothing about WebKit; that is the window reading's half, and
+   * `docs/decisions/1c-2b-2b-2-notes.md` section 6 is where it is recorded.
+   */
+  const CORPUS = fileURLToPath(
+    new URL('../../../crates/espansoconfig-core/tests/corpus/synthetic/', import.meta.url)
+  );
+
+  /**
+   * One committed fixture's text, decoded as the command decodes it.
+   *
+   * @param name - The fixture's file name.
+   * @returns Its text, with nothing normalised and no BOM stripped.
+   */
+  function fixture(name: string): string {
+    return readFileSync(`${CORPUS}${name}`, 'utf8');
+  } // End of function fixture()
+
+  const NAMES = readdirSync(CORPUS).filter((name) => name.endsWith('.yml'));
+
+  it('has fixtures to read at all, so the sweep below cannot be vacuous', () => {
+    // The failure this guards against is a wrong path silently producing an
+    // empty list and a green sweep. The corpus has 32 committed fixtures; the
+    // bound is loose on purpose, because the count is not this file's business.
+    expect(NAMES.length).toBeGreaterThan(20);
+  });
+
+  it.each(NAMES)('rebuilds %s character for character', (name) => {
+    const text = fixture(name);
+    expect(sourceCharacters(sourceSegments(text, true))).toBe(text);
+  });
+
+  it('names the byte order mark of the fixture that has one', () => {
+    // `bom-utf8.yml` exists to keep the `ef bb bf` at byte 0 alive through
+    // every editor that has ever opened this repository. Read as UTF-8 it is a
+    // leading U+FEFF, and `documentStart` is the only thing that can tell it
+    // apart from a zero-width no-break space anywhere else.
+    const text = fixture('bom-utf8.yml');
+    expect(text.startsWith('\u{feff}')).toBe(true);
+    expect(invisibleNames(sourceSegments(text, true))[0]).toBe('bom');
+    expect(invisibleNames(sourceSegments(text))[0]).toBe('zeroWidth');
+  });
+
+  it('draws no break after the last line of a file that ends without one', () => {
+    // A match slice can never exhibit this: it ends at the match's last value,
+    // so it carries no final newline either way. A whole document can.
+    const text = fixture('no-trailing-newline.yml');
+    expect(text.endsWith('\n')).toBe(false);
+    const segments = sourceSegments(text, true);
+    expect(segments[segments.length - 1]?.kind).toBe('text');
+    expect(breakCount(segments)).toBe([...text].filter((c) => c === '\n').length);
+  });
+
+  it('draws no break at all for the file that has no line break at all', () => {
+    const text = fixture('single-line-no-line-ending.yml');
+    expect(breakCount(sourceSegments(text, true))).toBe(0);
+  });
+
+  it('draws one break per line ending in the file that mixes them', () => {
+    // `file-comments-and-mixed-endings.yml` holds exactly two CRLF lines among
+    // bare-LF ones. Both are one break, which is the point; **which** ending
+    // each was is carried on the segment and nothing renders it (hole 3).
+    const text = fixture('file-comments-and-mixed-endings.yml');
+    const segments = sourceSegments(text, true);
+    const crlf = segments.filter((s) => s.kind === 'break' && s.ending === 'crlf');
+    const lf = segments.filter((s) => s.kind === 'break' && s.ending === 'lf');
+    expect(crlf).toHaveLength(2);
+    expect(lf.length).toBeGreaterThan(0);
+    // And no carriage return survives into anything drawn.
+    expect(drawnText(segments)).not.toContain('\r');
+  });
+
+  it('draws one break per CRLF in the file written entirely with them', () => {
+    const text = fixture('crlf-line-endings.yml');
+    const segments = sourceSegments(text, true);
+    expect(breakCount(segments)).toBe(text.split('\r\n').length - 1);
+    expect(invisibleNames(segments)).toEqual([]);
+  });
+}); // End of the whole-document suite
+
+describe('what a whole document costs this primitive', () => {
+  /*
+   * **Hole 9 of `docs/decisions/1c-2b-2b-1-notes.md`, measured rather than
+   * assumed.** One segment per line and one `<br>` per break is obviously fine
+   * for a five-line match slice and was an open question for a whole file. What
+   * is asserted here is the **cost model** — how many segments a document of a
+   * given shape produces — because that is what decides how many DOM nodes the
+   * component creates. The wall-clock figures are in
+   * `docs/decisions/1c-2b-2b-2-notes.md` section 7; a timing assertion in a test
+   * suite is a flake, not a measurement.
+   */
+
+  it('produces two segments per line of an ordinary document, and no more', () => {
+    // The shape a real espanso configuration has: ordinary characters, one LF
+    // per line. Each line is one text segment and one break, except the last,
+    // which has no break after it. Anything worse than linear would show here.
+    const lines = 2000;
+    const text = `${Array.from({ length: lines }, (_, i) => `  - trigger: ':t${i}'`).join('\n')}\n`;
+    const segments = sourceSegments(text, true);
+    expect(breakCount(segments)).toBe(lines);
+    expect(segments).toHaveLength(lines * 2);
+    expect(sourceCharacters(segments)).toBe(text);
+  });
+
+  it('adds two segments for each named character, and only for those', () => {
+    // The other half of the cost model, and the one that could in principle be
+    // pathological: a named character splits the run it is in, so it costs its
+    // own segment plus the split. A document of nothing but named characters is
+    // the worst case and it is still linear.
+    const plain = sourceSegments('a'.repeat(1000));
+    expect(plain).toHaveLength(1);
+    const named = sourceSegments('a\u{200b}'.repeat(1000));
+    expect(named).toHaveLength(2000);
+    expect(sourceCharacters(named)).toBe('a\u{200b}'.repeat(1000));
+  });
+
+  it('holds a document far larger than any espanso configuration', () => {
+    // For scale: the largest committed fixture is 2 464 bytes, and the largest
+    // file in the owner's own configuration is 631 lines and 17 840 bytes
+    // (`docs/decisions/1c-2b-2b-2-notes.md` section 8 — a count, never
+    // content). The document below is 968 000 bytes, so it is more than fifty
+    // times the largest thing this application has ever been pointed at.
+    const text = `${'x'.repeat(120)}\n`.repeat(8000);
+    const segments = sourceSegments(text, true);
+    expect(segments).toHaveLength(16000);
+    expect(sourceCharacters(segments)).toBe(text);
+  });
+}); // End of the cost suite

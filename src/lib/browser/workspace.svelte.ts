@@ -36,7 +36,14 @@
  * cannot be applied to the one replacing it.
  */
 
-import { getDocument, getMatch, listDocuments, openWorkspace, reloadDocument } from '../ipc/commands';
+import {
+  documentText,
+  getDocument,
+  getMatch,
+  listDocuments,
+  openWorkspace,
+  reloadDocument
+} from '../ipc/commands';
 import type { CommandResult } from '../ipc/commands';
 import { reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
@@ -49,6 +56,7 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import type { SelectionNotice } from './notices';
+import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, selectMatch } from './selection';
@@ -97,6 +105,18 @@ export interface BrowserCommands {
    * @returns The projection of the bytes now on disk, or a failure.
    */
   reloadDocument(id: DocumentId): Promise<CommandResult<DocumentView>>;
+  /**
+   * Returns one document's whole text, when the file is valid UTF-8.
+   *
+   * The one command here that answers with a file's **own text** rather than a
+   * projection of it, and the contract is that narrow: exact preservation of
+   * valid UTF-8, and a typed refusal otherwise. A file that is not valid UTF-8
+   * cannot be shown at all and comes back as `notUtf8`.
+   *
+   * @param id - The document's session-local identity.
+   * @returns The file's text, or a failure.
+   */
+  documentText(id: DocumentId): Promise<CommandResult<string>>;
 }
 
 /** The real boundary, for the running application. */
@@ -105,7 +125,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   listDocuments,
   getDocument,
   getMatch,
-  reloadDocument
+  reloadDocument,
+  documentText
 };
 
 /** Where the workspace load has got to. */
@@ -189,6 +210,26 @@ export interface BrowserState {
   /** What to tell the user about the selection, or `null`. */
   readonly notice: SelectionNotice | null;
   /**
+   * The file the raw viewer would show, or `null` when there is none.
+   *
+   * `rawTarget`'s answer, which is the sidebar's file when the sidebar names
+   * one and the selected snippet's file otherwise. Rendered whether or not the
+   * viewer is showing, because it is what decides whether the toggle is drawn
+   * at all — and a file that does not **parse** has no matches, so this is what
+   * makes such a file's text reachable.
+   */
+  readonly fileTextTarget: DocumentSummary | null;
+  /** Whether the raw viewer is showing rather than the selected snippet. */
+  readonly fileTextShown: boolean;
+  /**
+   * What has happened to {@link BrowserState.fileTextTarget}'s text.
+   *
+   * `null` when the viewer is not showing or there is no file to show; one of
+   * {@link RawDocumentText}'s four arms otherwise. **A refusal is its own arm**,
+   * so a file this app cannot decode never draws as an empty one.
+   */
+  readonly fileText: RawDocumentText | null;
+  /**
    * Opens a configuration directory and loads every file that holds matches.
    *
    * @param root - A directory to open, or `null` to probe the standard ones.
@@ -216,6 +257,17 @@ export interface BrowserState {
   clearSelection(): void;
   /** Dismisses the notice without touching the selection. */
   dismissNotice(): void;
+  /**
+   * Shows or hides the raw viewer, reading the file's text when it is shown.
+   *
+   * Turning it **on** always re-reads, even for a file whose text was read a
+   * moment ago: the answer is a snapshot of a file on disk and this application
+   * has no watcher, so the only honest moment to take one is when the reader
+   * asks to see it.
+   *
+   * @param on - Whether the file's text should be showing.
+   */
+  showFileText(on: boolean): Promise<void>;
 }
 
 /**
@@ -240,13 +292,21 @@ export function createBrowserState(
   let query = $state('');
   let selected = $state<SelectedMatch | null>(null);
   let notice = $state<SelectionNotice | null>(null);
+  let fileTextShown = $state(false);
+  // What `document_text` answered, and which file it answered about. The two
+  // are kept apart so that an answer can never be drawn under the wrong file
+  // name: the getter below compares the identity before it reads the answer,
+  // and a mismatch is the `loading` arm rather than the previous file's text.
+  let fileTextAnswer = $state<CommandResult<string> | null>(null);
+  let fileTextDocument = $state<DocumentId | null>(null);
 
-  // The two generation counters. Neither is `$state`: nothing renders them, and
+  // The three generation counters. None is `$state`: nothing renders them, and
   // they are read only by the request that took one, immediately after its own
   // `await`. Making them reactive would add a dependency to every getter that
   // happens to run in the same effect.
   let openGeneration = 0;
   let selectGeneration = 0;
+  let fileTextGeneration = 0;
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -326,6 +386,89 @@ export function createBrowserState(
     // a document that was skipped at load and has now been read.
     views = index === -1 ? [...views, next] : views.map((view, at) => (at === index ? next : view));
   } // End of function installView()
+
+  /**
+   * The file the raw viewer would show right now.
+   *
+   * A function rather than a copy of the same call at every use: the getter, the
+   * read and every entry point that can move the target — a sidebar click, a
+   * snippet click, a cleared selection and a repair that clears one — all need
+   * the same answer, and the decision itself is `rawTarget`'s in
+   * `./rawDocument.ts`.
+   *
+   * @returns The file, or `null` when nothing names one.
+   */
+  function fileTextTarget(): DocumentSummary | null {
+    return rawTarget(selection, documents, selected);
+  } // End of function fileTextTarget()
+
+  /**
+   * Drops the held file text, and any read still in flight for it.
+   *
+   * **One helper rather than three lines repeated at four call sites**, which is
+   * the 1c-2b-2b-2 review's sixth finding: the snapshot has to be forgotten
+   * wherever the viewer's target goes away, and a call site that forgets to
+   * forget leaves a stale snapshot behind that the next read of that same file
+   * would be served from its identity. Bumping the generation is part of it —
+   * an answer already in flight for the file that was the target must not land
+   * and re-install itself as the snapshot after the target has gone.
+   */
+  function forgetFileText(): void {
+    fileTextGeneration += 1;
+    fileTextAnswer = null;
+    fileTextDocument = null;
+  } // End of function forgetFileText()
+
+  /**
+   * Reads the target file's text, if the viewer is showing a different file.
+   *
+   * Called from the toggle and from every place the target can move — a sidebar
+   * click, a snippet click, a cleared selection and a repair that clears one.
+   * **The identity comparison is the whole policy**, and it decides two things
+   * at once: a walk through the snippets of one file does not re-read that file
+   * once per click, and *closing* the viewer, which sets the held identity to
+   * `null`, guarantees that re-opening it re-reads. There is no `force` flag,
+   * and there was one until experiment E showed it could not change any outcome
+   * (`docs/decisions/1c-2b-2b-2-notes.md`).
+   *
+   * **The no-target case is handled here rather than at each caller**, so that
+   * every path which can remove the target is covered by calling this one
+   * function. That is what closes the review's sixth finding.
+   */
+  async function readFileText(): Promise<void> {
+    const target = fileTextTarget();
+    if (target === null) {
+      // Nothing names a file any more — clearing a selection in the "All" scope
+      // is how a reader reaches this. The held snapshot is about a file the
+      // viewer is no longer pointed at, so it is dropped: keeping it would let
+      // a later selection of that same file match on identity, skip the read
+      // and redraw bytes taken at some earlier moment, which contradicts the
+      // policy above that every re-opening re-reads.
+      forgetFileText();
+      return;
+    }
+    if (!fileTextShown) {
+      return;
+    }
+    if (target.id === fileTextDocument) {
+      return;
+    }
+    const generation = ++fileTextGeneration;
+    fileTextDocument = target.id;
+    fileTextAnswer = null;
+    const answer = await commands.documentText(target.id);
+    if (generation !== fileTextGeneration) {
+      // A later toggle, click or workspace load has moved the viewer on. This
+      // answer is about a file the reader is no longer looking at.
+      return;
+    }
+    fileTextAnswer = answer;
+    if (!answer.ok) {
+      // The user sees the typed refusal in the pane; the developer sees it in
+      // the console, on the one channel every other failure of this state uses.
+      report(answer.failure);
+    }
+  } // End of function readFileText()
 
   /**
    * Applies what {@link repairSelection} decided.
@@ -427,6 +570,31 @@ export function createBrowserState(
     get notice(): SelectionNotice | null {
       return notice;
     },
+    get fileTextTarget(): DocumentSummary | null {
+      return fileTextTarget();
+    },
+    get fileTextShown(): boolean {
+      return fileTextShown;
+    },
+    get fileText(): RawDocumentText | null {
+      if (!fileTextShown) {
+        return null;
+      }
+      const target = fileTextTarget();
+      if (target === null) {
+        return null;
+      }
+      // The identity guard, and what it is worth is stated rather than
+      // implied. **No call site today can produce the mismatch**: every path
+      // that moves the target calls `readFileText`, which sets the new identity
+      // and nulls the answer *synchronously*, before any getter can run.
+      // Removing this line therefore fails nothing — experiment C in
+      // `docs/decisions/1c-2b-2b-2-notes.md`, recorded as one that did not fire.
+      // It is kept because the failure it forecloses is the worst this pane
+      // could have, one file's bytes drawn under another file's name, and
+      // because the invariant it depends on lives in a different function.
+      return documentTextState(target.id === fileTextDocument ? fileTextAnswer : null);
+    },
 
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
@@ -449,6 +617,12 @@ export function createBrowserState(
       query = '';
       selected = null;
       notice = null;
+      // The viewer closes with the workspace: it is showing one file's text,
+      // and every identity in the workspace being replaced is about to be
+      // reallocated. `forgetFileText` also invalidates the read in flight,
+      // which describes a file this state is about to stop knowing about.
+      fileTextShown = false;
+      forgetFileText();
 
       const opened = await commands.openWorkspace(root);
       if (generation !== openGeneration) {
@@ -519,6 +693,10 @@ export function createBrowserState(
         return;
       }
       selection = next;
+      // A sidebar click can move the raw viewer's target, and when it does the
+      // new file's text has to be read. `readFileText` returns immediately when
+      // the viewer is closed or the target did not move.
+      void readFileText();
     },
 
     search(next: string): void {
@@ -545,6 +723,9 @@ export function createBrowserState(
       }
       selected = next;
       notice = null;
+      // In the "All" scope the selected snippet's file *is* the raw viewer's
+      // target, so a click on a snippet in another file moves it.
+      void readFileText();
 
       // The identity is checked across the boundary rather than assumed live.
       // In a browser with no watcher this almost always succeeds; when it does
@@ -568,6 +749,11 @@ export function createBrowserState(
         return;
       }
       applyRepair(repair);
+      // A repair that clears the selection can take the viewer's target with
+      // it, because in the "All" scope the selected snippet's file *is* the
+      // target. `readFileText` forgets the held snapshot when nothing names a
+      // file, so the next selection of that file reads it again.
+      void readFileText();
     }, // End of function select()
 
     clearSelection(): void {
@@ -576,10 +762,26 @@ export function createBrowserState(
       selectGeneration += 1;
       selected = null;
       notice = null;
+      // And in the "All" scope the selection *was* the raw viewer's target, so
+      // dropping it leaves nothing named. Same call, same reason as above.
+      void readFileText();
     },
 
     dismissNotice(): void {
       notice = null;
-    }
+    },
+
+    async showFileText(on: boolean): Promise<void> {
+      fileTextShown = on;
+      if (!on) {
+        // Closing the viewer drops the text it was showing rather than keeping
+        // it for a re-open: a snapshot taken minutes ago and redrawn without a
+        // re-read would be this application showing bytes that may no longer be
+        // on disk, which is the one thing it exists not to do.
+        forgetFileText();
+        return;
+      }
+      await readFileText();
+    } // End of function showFileText()
   };
 } // End of function createBrowserState()

@@ -10,6 +10,7 @@
     type UnknownRow,
     type ValueLine
   } from '../browser/detail';
+  import type { RawDocumentText } from '../browser/rawDocument';
   import type { BrowserState } from '../browser/workspace.svelte';
   import SourceText from './SourceText.svelte';
   import {
@@ -17,6 +18,7 @@
     tContentKind,
     tDetailField,
     tHazard,
+    tIpcFailure,
     tOptionGroup,
     tScalarStyle,
     tSelectionNotice,
@@ -28,7 +30,8 @@
   } from '../i18n';
 
   /*
-   * The third pane of plan section 8.1: the selected snippet, field by field.
+   * The third pane of plan section 8.1: the selected snippet, field by field —
+   * or, since Phase 1c-2b-2b-2, the whole text of one file instead.
    *
    * **This file is presentation.** Everything that decides what appears —
    * which rows exist, how a projected value flattens into lines, which option
@@ -97,6 +100,24 @@
    * zero-width — measured, and recorded in
    * `docs/decisions/1c-2b-2b-1-notes.md` section 3.
    *
+   * **The raw viewer is a mode of this pane, and the toggle is drawn from
+   * `browser.fileTextTarget` rather than from the selection.** That is what
+   * makes a file which does not *parse* reachable: it has no matches, so
+   * nothing in it can be selected, and a viewer keyed on the selected snippet
+   * could never show it. Why the third pane rather than the second is written
+   * down in `../browser/rawDocument.ts`, with the cost — this pane now has two
+   * subjects, and the toggle says which one it is about to show.
+   *
+   * **The four arms of the file's text are four different facts and are drawn
+   * as four.** A file this app cannot decode must not look like an empty one:
+   * `notUtf8` is a typed refusal carrying the byte offset of the first invalid
+   * sequence, and `RawDocumentText`'s `refused` arm renders it through
+   * `tIpcFailure` under a sentence saying the text cannot be shown. `empty`
+   * says the file holds no characters, which is a fact about the file;
+   * `loading` says the read is still running. Only the `text` arm claims the
+   * bytes are the file's own, and it claims it **inside** that arm — the
+   * 1c-2b-2b-1 review's first finding, applied to a second surface.
+   *
    * **The one judgement in this pane is a refusal, never a permission.**
    * `matchEditability` answers `unrestricted` for most matches and this file
    * draws **nothing** for that arm on purpose: Phase 1 is read-only, so "this
@@ -135,6 +156,22 @@
     <span class="marker">{t('browser.detail.emptyText')}</span>
   {:else}
     <span class="marker warn">{t('browser.detail.valueUnavailable')}</span>
+  {/if}
+{/snippet}
+
+{#snippet fileText(view: RawDocumentText)}
+  {#if view.kind === 'text'}
+    <span class="marker">{t('browser.detail.fileTextAsWritten')}</span>
+    <SourceText text={view.text} documentStart />
+  {:else if view.kind === 'empty'}
+    <span class="marker">{t('browser.detail.fileTextEmpty')}</span>
+  {:else if view.kind === 'loading'}
+    <p class="kind">{t('browser.detail.fileTextLoading')}</p>
+  {:else}
+    <div class="refused">
+      <p>{t('browser.detail.fileTextUnavailable')}</p>
+      <p>{tIpcFailure(view.failure)}</p>
+    </div>
   {/if}
 {/snippet}
 
@@ -223,7 +260,31 @@
     </div>
   {/if}
 
-  {#if browser.selectedMatch !== null}
+  {#if browser.fileTextTarget !== null}
+    <p class="toggle">
+      <button type="button" onclick={() => void browser.showFileText(!browser.fileTextShown)}>
+        {browser.fileTextShown
+          ? t('browser.detail.fileTextHide')
+          : t('browser.detail.fileTextShow')}
+      </button>
+    </p>
+  {/if}
+
+  {#if browser.fileText !== null && browser.fileTextTarget !== null}
+    {@const view = browser.fileText}
+    {@const file = browser.fileTextTarget}
+
+    <dl>
+      <dt>{t('browser.detail.file')}</dt>
+      <dd class="source">{file.relative_path}</dd>
+    </dl>
+
+    <section>
+      <h2>{t('browser.detail.section.fileText')}</h2>
+      <p class="kind">{t('browser.detail.fileTextScope')}</p>
+      {@render fileText(view)}
+    </section>
+  {:else if browser.selectedMatch !== null}
     {@const detail = describeMatch(browser.selectedMatch)}
 
     {#if browser.selectedDocument !== null}
@@ -469,6 +530,34 @@
     padding: 0 0.25rem;
     border: 1px solid var(--border);
     border-radius: 4px;
+  }
+
+  /* The switch between the two things this pane can be about. It sits at the
+     top because it changes everything under it, and it is a plain button
+     rather than a tab strip because there are two states and the label says
+     which one it will produce. */
+  .toggle {
+    margin: 0;
+  }
+
+  /* This app declining to show a file's text at all — a `notUtf8` refusal, or a
+     file that stopped being readable. Bordered like `.blocked` because it is
+     the same kind of statement, and two paragraphs because they are two
+     different facts: that the text cannot be shown, and the typed reason. */
+  .refused {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-raised);
+    font-size: 0.8125rem;
+  }
+
+  .refused p {
+    margin: 0;
   }
 
   /* The pane's one judgement. Bordered like `.warn` because it is the same

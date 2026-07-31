@@ -108,6 +108,8 @@ interface Script {
   readonly match?: CommandResult<MatchView>;
   /** What `reload_document` answers. */
   readonly reload?: CommandResult<DocumentView>;
+  /** What `document_text` answers, keyed by identity. */
+  readonly texts?: ReadonlyMap<number, CommandResult<string>>;
 }
 
 /**
@@ -148,7 +150,14 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
       return answer;
     }),
     getMatch: vi.fn(async () => matched),
-    reloadDocument: vi.fn(async () => reloaded)
+    reloadDocument: vi.fn(async () => reloaded),
+    documentText: vi.fn(async (id: number) => {
+      const answer: CommandResult<string> = script.texts?.get(id) ?? {
+        ok: true,
+        value: `# text of document ${id}\n`
+      };
+      return answer;
+    })
   };
 } // End of function scriptedCommands()
 
@@ -849,3 +858,305 @@ describe('opening a second workspace', () => {
     expect(state.status).toBe('ready');
   });
 }); // End of the "opening a second workspace" suite
+
+describe('the raw viewer', () => {
+  /*
+   * What this suite establishes is the **state machine**, not the screen. It can
+   * say which file the viewer would show, which of the four arms its text is in
+   * and how many times `document_text` was called; it cannot say that anything
+   * was drawn, because nothing in this repository renders a Svelte component in
+   * an automated test (`docs/decisions/1c-1-notes.md` hole 1). The evidence that
+   * the pane renders is the window reading in
+   * `docs/decisions/1c-2b-2b-2-notes.md`, taken by hand.
+   */
+
+  it('offers no file to show until something names one', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+
+    // The "All" scope names no file and nothing is selected, so there is
+    // nothing for the toggle to be about.
+    expect(state.fileTextTarget).toBeNull();
+    expect(state.fileTextShown).toBe(false);
+    expect(state.fileText).toBeNull();
+  });
+
+  it('takes the sidebar’s file, including one that holds no snippets', async () => {
+    // The reachability property the placement decision rests on: a file with no
+    // matches can never be selected into this pane through a snippet, so if the
+    // viewer's target came from the selection such a file would have no way of
+    // ever being shown. It comes from the sidebar instead.
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 1 });
+
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.fileTextTarget?.relative_path).toBe('config/default.yml');
+  });
+
+  it('falls back to the selected snippet’s file in the “All” scope', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    await state.select(otherDocument().matches[0]!);
+
+    expect(state.selection.kind).toBe('all');
+    expect(state.fileTextTarget?.id).toBe(3);
+  });
+
+  it('reads the file’s text when it is shown, and answers the text arm', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    expect(commands.documentText).toHaveBeenCalledWith(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+  });
+
+  it('calls nothing while it is closed', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    // The viewer is a mode the reader turns on. A workspace load that read
+    // every file's text as well as every projection would double the cost of
+    // opening a configuration for a pane nobody has asked for.
+    expect(commands.documentText).not.toHaveBeenCalled();
+    expect(state.fileText).toBeNull();
+  });
+
+  it('holds a file it cannot decode in the refused arm, never in the empty one', async () => {
+    // 1c-2b-2a hole 8, as state. `notUtf8` is the refusal this arm exists for:
+    // the file cannot be represented as a string at all, and the reader must
+    // not be shown an empty box that says the file holds nothing. That the two
+    // arms *draw* differently is the window reading's claim, not this one's.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'notUtf8', path: '/tmp/espanso/match/base.yml', offset: 41 }
+    };
+    const state = createBrowserState(
+      scriptedCommands({ texts: new Map([[2, { ok: false, failure }]]) }),
+      () => undefined
+    );
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    expect(state.fileText).toEqual({ kind: 'refused', failure });
+  });
+
+  it('tells a file of no characters apart from one it could not read', async () => {
+    // **Both inputs are supplied**, which is the review's fifth finding: a body
+    // that offered only the empty file would still pass if an unreadable one
+    // were classified as empty too, and telling the two apart is the entire
+    // reason `RawDocumentText` has four arms rather than a string.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'notUtf8', path: '/tmp/espanso/match/other.yml', offset: 41 }
+    };
+    const state = createBrowserState(
+      scriptedCommands({
+        texts: new Map<number, CommandResult<string>>([
+          [2, { ok: true, value: '' }],
+          [3, { ok: false, failure }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    expect(state.fileText).toEqual({ kind: 'empty' });
+
+    state.show({ kind: 'document', id: 3 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(state.fileText).toEqual({ kind: 'refused', failure });
+  }); // End of the "empty apart from unreadable" case
+
+  it('reports a refusal to the developer as well as holding it on the state', async () => {
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/base.yml', kind: 'PermissionDenied' }
+    };
+    const report = vi.fn();
+    const state = createBrowserState(
+      scriptedCommands({ texts: new Map([[2, { ok: false, failure }]]) }),
+      report
+    );
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    expect(report).toHaveBeenCalledWith(failure);
+    // Both channels, so the name is true of both halves: the console for the
+    // developer, and the state the pane reads for the user.
+    expect(state.fileText).toEqual({ kind: 'refused', failure });
+  });
+
+  it('reads the new file when a sidebar click moves the target', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    state.show({ kind: 'document', id: 3 });
+    // The click starts the read, and what the pane holds until it settles is
+    // `loading` rather than the previous file's text. **What makes that true is
+    // `readFileText` nulling the answer synchronously**, not the identity guard
+    // in the getter: experiment C removes that guard and nothing here fails.
+    expect(state.fileText).toEqual({ kind: 'loading' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(state.fileTextTarget?.id).toBe(3);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 3\n' });
+  });
+
+  it('does not re-read one file because the reader clicked another snippet in it', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    await state.select(baseDocument().matches[0]!);
+    await state.select(baseDocument().matches[1]!);
+
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads on every re-opening, because the file may have changed', async () => {
+    // There is no watcher, so the only moment this application can honestly
+    // take a snapshot of a file is the moment the reader asks to see it. What
+    // makes that happen is `showFileText(false)` clearing the *identity* of the
+    // file whose text is held: `readFileText` then sees a target it is not
+    // already showing. Experiment F puts that identity back and this fails.
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    await state.showFileText(false);
+    await state.showFileText(true);
+
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops the text it was showing when it is closed', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    await state.showFileText(false);
+
+    expect(state.fileTextShown).toBe(false);
+    expect(state.fileText).toBeNull();
+  });
+
+  it('discards an answer whose file the reader has already moved off', async () => {
+    // The same race the two generation counters exist for, on a third channel.
+    // Without it, a slow read of file 2 lands after a click on file 3 and the
+    // pane shows one file's bytes under the other file's name.
+    const slow = deferred<CommandResult<string>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      documentText: vi.fn((id: number) =>
+        id === 2 ? slow.promise : Promise.resolve<CommandResult<string>>({ ok: true, value: 'b' })
+      )
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    const pending = state.showFileText(true);
+
+    state.show({ kind: 'document', id: 3 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(state.fileText).toEqual({ kind: 'text', text: 'b' });
+
+    slow.resolve({ ok: true, value: 'a' });
+    await pending;
+
+    // File 2's answer arrived last and is discarded whole.
+    expect(state.fileText).toEqual({ kind: 'text', text: 'b' });
+  });
+
+  it('re-reads a file whose target was cleared, rather than redrawing the old snapshot', async () => {
+    // **The review's sixth finding, second half.** In the "All" scope the
+    // selected snippet's file *is* the viewer's target, so dropping the
+    // selection drops the target — and the held snapshot with it. Without that,
+    // selecting a snippet in the same file again matches the identity
+    // `readFileText` still holds, returns early, and redraws bytes read before
+    // the clear, which contradicts this module's own policy that a file is
+    // re-read whenever the viewer is pointed at it afresh.
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    state.clearSelection();
+    expect(state.fileTextTarget).toBeNull();
+    expect(state.fileText).toBeNull();
+
+    await state.select(baseDocument().matches[0]!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+  }); // End of the "re-reads a cleared target's file" case
+
+  it('drops an answer in flight when the target is cleared, so no later selection reuses it', async () => {
+    // **The same finding's first half**, and the harder one: the read was
+    // already on its way when the target went. If it lands and installs itself
+    // as the snapshot, the next selection of that file is served bytes the
+    // reader never asked for again — with nothing on screen saying when they
+    // were read.
+    const slow = deferred<CommandResult<string>>();
+    let calls = 0;
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      documentText: vi.fn(() => {
+        calls += 1;
+        return calls === 1
+          ? slow.promise
+          : Promise.resolve<CommandResult<string>>({ ok: true, value: 'read again' });
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.select(baseDocument().matches[0]!);
+    const pending = state.showFileText(true);
+
+    state.clearSelection();
+    slow.resolve({ ok: true, value: 'read before the clear' });
+    await pending;
+    expect(state.fileTextTarget).toBeNull();
+
+    await state.select(baseDocument().matches[0]!);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: 'read again' });
+  }); // End of the "answer in flight when the target is cleared" case
+
+  it('closes with the workspace, because every identity is about to be reused', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    await state.open(null);
+
+    expect(state.fileTextShown).toBe(false);
+    expect(state.fileText).toBeNull();
+  });
+}); // End of the "raw viewer" suite

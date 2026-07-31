@@ -31,8 +31,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1c-2b-1** | The typed judgements: `HazardKind` on a screen, the diagnostics, the load-failure conflation closed | ✅ complete — after the review fix round below |
 | **1c-2b-2a** | The boundary: `document_text` as a command, `UnknownEntry.value_text`, the fidelity rules pinned through the real dispatcher | ✅ complete — after the review fix round below |
 | **1c-2b-2b-1** | Source text on a screen: the shared rendering primitive, `MatchView.source_text` and the unmodelled value **drawn** | ✅ complete — after the review fix round below |
-| 1c-2b-2b-2 | The raw YAML viewer over `document_text`, the `notUtf8` refusal on a screen, and the **real-corpus browse** | ⬜️ **next** — **Phase 1's exit lands here** |
-| 2–5 | See plan §12 | ⬜️ not started |
+| **1c-2b-2b-2** | The raw YAML viewer over `document_text`, the `notUtf8` refusal on a screen, and the **real-corpus browse** | ✅ complete — after the review fix round below. **Phase 1's exit lands here, and is met** |
+| **Phase 1** | **The read-only browser** | ✅ complete — plan §12's exit checked in a running window over the real configuration |
+| 2–5 | See plan §12 | ⬜️ **2 is next** |
 
 **1c-2b-2b was split into 1c-2b-2b-1 / 1c-2b-2b-2**, by the same cut every earlier split used — a
 dependency order rather than a convenience. **-1 is the rendering primitive proved on a small
@@ -2015,6 +2016,40 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-2b-2b-2 review disposition
+
+The review is
+[`docs/reviews/phase-1c-2b-2b-2-whole-document.md`](docs/reviews/phase-1c-2b-2b-2-whole-document.md):
+**eight findings — two blocking, five follow-up and one confirmation.** **Seven are closed** before the
+commit, so no commit holds a demonstrated defect; the eighth is a statement about **Phase 2** and is
+recorded with an owner rather than fixed. The reviewer found **no** architecture, privacy, i18n-hardcoding,
+corpus-fixture or D2u regression, and confirmed the generation check, the identity-guarded getter and
+the settled `loading` arm as otherwise sound.
+
+**Five of the eight are one defect.** A sentence claiming more than the thing beneath it establishes —
+once on a **screen**, four times in a **test name**. This project has now caught that pattern in eight
+consecutive sub-phases, and the corollary is unchanged: read the name, then the body, and ask whether
+the body could fail if the name's claim were false.
+
+| # | Kind | Finding | Disposition |
+|---|---|---|---|
+| 1 | **Blocking** | `browser.detail.fileTextAsWritten` says a document is shown "as the file writes them", which is **false for line endings**: `sourceText.ts` folds a CRLF into one `break` carrying `ending: 'crlf'` and `SourceText.svelte` never reads that field, so CRLF and LF draw as identical unlabelled `<br>` elements — while a **lone** CR is named as a marker. The phase's own measurement (`c-crlf.yml`, `markers=0`, no `0d`) proves it | **Real, and the string changed rather than the renderer.** The "announced on the same screen by the thing that performs it" defence holds for the **prose markers** and does not reach line endings, which nothing on the screen announces at all. Both languages now say: shown from the file's first character to its last, **characters that draw nothing are named**, and **every line ending is drawn as one line break**. Notes §4.2 is the argument, §4's row and §5's rows agree with it, hole 5 says what changed and what did not, and `no longer claims the file's own line endings reach the screen` holds both withdrawn phrases and asserts them gone. **Read on a screen in both languages** (notes §6.5) over a file with two CRLF endings among four LF ones and one soft hyphen: `br=6 markers=1` |
+| 2–5 | Follow-up | Ten test names claim more than their bodies establish: two about `rawTarget`/`documentTextState`, two about dictionary strings, four source scans promising that something **"draws"** when they read substrings of `DetailPane.svelte`, and three in `workspace.test.ts` establishing **state** while naming a screen | **All ten renamed to what the body checks, and three bodies strengthened so a name could stay.** No test in this project may promise rendering — nothing here renders a Svelte component (hole 1) — so the four scans now say they check source wiring and placement. `carries the failure whole…` now supplies **all four** refusal codes; `tells a file of no characters apart from one it could not read` now supplies **both** an empty file and an unreadable one, so it can no longer pass if the two were conflated; `reports a refusal to the developer…` now asserts the state as well as the console. Experiments A and Q each fire one more test as a result, and both counts are corrected in the notes' §7 |
+| 6 | **Blocking** | `clearSelection()` and the `cleared`/`unresolved` arms of `applyRepair()` can move an "All"-scope target to `null` **without invalidating the held file-text read**, so a later selection of that same file matches the held identity, returns early and **redraws the old snapshot** — and an answer in flight when the target went still lands and populates the cache | **Real, and fixed with one helper rather than three patched call sites.** `forgetFileText()` bumps the generation and nulls the answer and the identity; `readFileText()` calls it whenever the target is `null`, which makes the invalidation **total** instead of a list of remembered places. `clearSelection()` and `select()` (after `applyRepair`) now call `readFileText()`, as `show()` already did; `open()` and `showFileText(false)` use the helper. Notes §2.3. Two new tests cover the re-read and the race, and **experiment T** fires exactly those two. **The sticky `fileTextShown` is deliberately unchanged** — notes §2.2 decided it, the review raises it as an observation, and the defect was the staleness |
+| 7 | Confirmation | Apart from the path above, the generation check and the identity-guarded getter prevent a stale answer appearing beneath another file's name, and typed failures settle the `loading` arm | **No action, and nothing weakened.** The getter keeps the comment experiment C earned, which says in the code that no call site can reach the guard. Closing finding 6 removed a way for a stale answer to be reused rather than adding one |
+| 8 | Follow-up | **Phase 2 cannot refresh the displayed file after a write**: identity dedup suppresses a re-read and the deliberately-removed `force` path leaves close/re-open as the only refresh. Separately, `RawDocumentText.text` **carries no revision** and must not be treated as sufficient authority for a write | **Recorded, not fixed — deliberately, and with an owner.** Writing an invalidation for a write that does not exist could not be tested. It is **hole 14** of the notes' §9, it is in the notes' §11 inheritance list, and it is in "What Phase 2 inherits" below, so the next phase meets it in the file it will read |
+
+**What the round changed:** two dictionary strings, one module (`workspace.svelte.ts`) and three test
+files. **No Rust, no wire change, no new dependency, no dictionary key added or removed**, and the
+corpus untouched.
+
+**One thing the round found and deliberately did not fix.** `browser.detail.valueAsWritten` — *"shown
+here as the file writes it"*, 1c-2b-2b-1's caption over a **slice** — goes through the same primitive
+and inherits the same line-ending overclaim finding 1 is about. It is another sub-phase's string, and
+rewording it after this round's window reading would mean re-taking that reading for a surface the
+round did not otherwise touch. Named in notes §4.1 so it is not rediscovered; the natural companion to
+closing hole 5.
+
 ## Phase 1c-2b-2b-1 review disposition
 
 The review is
@@ -2285,6 +2320,36 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-2b-2b-2
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | ✅ **561 tests**, 0 failed — unchanged, because this sub-phase adds no Rust |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt --check` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `npm test` | ✅ **662 tests across 27 files**, 0 failed (**+77**: 19 in a new `rawDocument.test.ts`, 16 in `workspace.test.ts`, 42 in `sourceText.test.ts`) |
+| `npm run check` | ✅ 374 files, **0 errors, 0 warnings** (`--fail-on-warnings`) |
+| `npm run build` | ✅ built; `dist/assets/index-CgRncva7.js` 113.30 kB |
+| dictionary keys | ✅ **248 and 248** (240 before — **+8**, one of the eight reworded at the review; no pre-existing key touched) |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| A whole document is on a screen, through the **existing** primitive | ✅ | `documentText()` has a caller at last; `<SourceText text={view.text} documentStart />` is the one call entitled to that flag, and no second renderer for file text exists |
+| The `notUtf8` refusal has a screen and does not look like an empty file | ✅ | 1c-2b-2a hole 8, closed. Read in both languages: *This app cannot show this file's text.* above the typed sentence naming byte offset 49. An empty file says something else again |
+| The five open fidelity rows are filled by a **window reading** | ✅ | A real BOM, a NUL, five other C0/C1 controls, a lone CR and a file with no final newline, each seen in WKWebView. Notes §5 and §6 |
+| Hole 9 — what a large document costs — is measured | ✅ | `2n` segments for *n* lines, asserted to 968 000 bytes; **45 ms and 4 409 DOM nodes** for the largest real file (631 lines, 17 840 bytes) in a window. Nothing is capped, and the reason is written down |
+| **Phase 1's exit, checked over the real corpus** | ✅ | 13 files, 0 load failures, 0 findings, every file's whole text rendered, **all 65 snippets clicked and rendered** with 3–6 sections and exactly one source box each. Notes §8, counts only |
+| No user-facing string is hardcoded | ✅ | 8 new keys in both languages through typed accessors; R31's blind spots enumerated by name in notes §10.1 |
+| Every experiment fires, or the code changes | ✅ | **20** experiments (A–T); **three did not fire**, and two of them changed the code — a dead `force` flag deleted, a too-weak markup scan strengthened until it fired, and an unreachable guard kept with its status written on it. T is the review round's, and thirteen of the twenty were re-run there |
+| Every sentence on a screen is true of every case under it | ✅ **after the review** | The as-written caption was **false for line endings** — a CRLF and an LF draw as identical unlabelled breaks — and was reworded in both languages. Notes §4.2, read on a screen in §6.5 |
+| No path removes the viewer's target while keeping its snapshot | ✅ **after the review** | `forgetFileText()`, called from `readFileText()` whenever the target is `null`, so every clearing path is covered by one call. Notes §2.3, experiment T |
+| The Spanish strings are Spanish | ➖ **unchanged gap** | 8 new Spanish strings read on screen by their author. A bilingual reviewer remains the only instrument that closes this |
+| Holes 5, 16 and 2 from earlier sub-phases | ❌ **left open, named, with reasons** | Notes §9 items 2, 4 and 3. Hole 2 is now **seen** rather than argued: a parse-failed file and an empty one show the same `0` on adjacent sidebar rows |
 
 ## Verification — Phase 1c-2b-2b-1
 
@@ -2868,95 +2933,69 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-2b-2b-1 is complete. Start Phase 1c-2b-2b-2 — the whole document, and Phase 1's exit.**
+**Phase 1c-2b-2b-2 is complete and its review is closed, and with it Phase 1c-2b-2b, Phase 1c and
+Phase 1.** `docs/decisions/1c-2b-2b-2-notes.md` is the record; §8 is the exit verdict and §12 is the
+review disposition.
 
-Source text is now **on a screen and proven faithful there**: one shared rendering primitive
-(`src/lib/browser/sourceText.ts`) turns a run of the file's text into segments, `SourceText.svelte`
-draws them, and a match's own bytes and an unmodelled entry's own bytes both go through it. The
-project's **first WKWebView-level evidence** was taken in that window — 1c-2b-2a §4.3's named gap, now
-narrowed rather than open.
+The application can now show **one whole file's text**, drawn through the same primitive the detail
+pane uses, with a toggle in the third pane. `documentText()` has a caller at last, so it is in `dist`.
+**All five fidelity rows that only a whole document could exhibit are closed by a window reading** — a
+real BOM, a NUL, five other C0/C1 controls, a lone CR and a file with no final newline — and a file
+that is **not valid UTF-8** draws a typed refusal with its byte offset instead of an empty box, which
+closes 1c-2b-2a hole 8.
 
-**What is left is the surface that only a whole document has.** Five fidelity rows are open **not
-because they are untested but because a slice cannot exhibit them**: a real BOM, a NUL, the other C0/C1
-controls, a lone CR and "no final newline". `document_text` is a registered command whose frontend
-wrapper `documentText()` still **has no caller**, so it is tree-shaken out of `dist` today. And Phase
-1's stated exit lands here: *the owner can browse their entire real config and every snippet renders
-correctly.*
+**Phase 1's stated exit was checked rather than assumed, and it is met.** In a running window over the
+owner's real configuration: 13 files, **zero** load failures, **zero** findings, every file's whole
+text rendered, and **all 65 snippets clicked and rendered** with 3–6 sections and exactly one
+source-text box each. Recorded as counts and file names only (D1). Three things that verdict does
+**not** cover are named in notes §8 — the sharpest being that the real configuration produces **zero**
+unmodelled entries, so it exercises that surface not at all and synthetic fixtures are its only
+coverage, permanently.
 
-Concretely, and in roughly this order:
+**The review round is done: eight findings, two of them blocking, seven closed and the eighth recorded
+with Phase 2 as its owner.** See "Phase 1c-2b-2b-2 review disposition" above. The two blocking fixes
+were a **user-facing string that was false for line endings** — reworded in both languages and read on
+a screen — and a **cleared target that left a stale file-text snapshot**, now invalidated by one
+helper called from every path that can remove the target.
 
-1. **The raw YAML viewer.** Phase 3 owns CodeMirror; -2 needs only to display a document faithfully.
-   Call `documentText()` and pass the result to `SourceText` with **`documentStart` set** — that flag is
-   the *only* way a `bom` segment is ever produced, and the detail pane never sets it because a slice
-   cannot know where byte 0 is. **Do not write a second renderer for file text.**
-2. **The `notUtf8` refusal needs a screen and it has no string.** `documentText()` returns
-   `CommandResult<string>`; a file that is not valid UTF-8 yields `{code: "notUtf8", path, offset}` and
-   **cannot be displayed at all**. A file the pane cannot show **must not look like an empty one**.
-   `browser.detail.valueUnavailable` is the nearest existing sentence to model it on. This is
-   1c-2b-2a hole 8.
-3. **Fill the five open rows of the fidelity table** — §5 of `1c-2b-2b-1-notes.md` marks each one
-   "whole document". A window reading is the instrument; a unit test on the primitive is not, because
-   the question is what **WKWebView** does.
-4. **Then check Phase 1's exit, rather than assuming it.** The real corpus is gitignored and present
-   locally (`./scripts/sync-real-corpus.sh`; verified present at this checkpoint). **Nothing in this
-   project has yet run the UI over it end to end.** Do that, and record it as every other claim here is
-   recorded — counts and error positions, **never content** (D1 is absolute; the repository is public).
-   One measurement bears on it: the real corpus produces **zero** unmodelled entries (13 files, 566
-   keys, all modelled), so it will not exercise the unmodelled-value surface at all — synthetic
-   fixtures are that surface's only coverage, permanently.
+**The next step is Phase 2.**
 
-**Four things 1c-2b-2b-2 should look at before it starts.**
+**What Phase 2 inherits, and should not rebuild.**
 
-- **Hole 9 (from -1) — nothing measures what a large document costs the primitive.** One segment per
-  invisible character and one `<br>` per line is fine for a five-line match slice and is an open
-  question for a whole file. **1c-2b-2a hole 10 lands here too**: `value_text` is uncapped, disjoint
-  spans bound duplication rather than size, and a raw viewer is the first thing to hold a large
-  document *and* its slices in one frame.
-- **Hole 5 (from -1) — the pane now renders file text two different ways.** The source and value
-  surfaces go through the primitive; the **scalar rows do not** — they still print `ScalarView.text`
-  into a `pre-wrap` `<pre>`. So a U+2028 inside a `replace:` value is *named* in the source section and
-  drawn as *nothing* in the replacement row, on the same screen. An inconsistency, not a false claim,
-  and routing the rows through `SourceText` would touch every row in the pane.
-- **Hole 16 (from 1c-2b-1) — the empty snippet list and the sentence explaining it come from unrelated
-  code.** A match-shaped profile yields "0 of 0" plus a "folder and content disagree" diagnostic, tied
-  together by nothing; a change to either silently leaves the other.
-- **Hole 2 (from 1c-2b-1) — the conflation one level down.** A file that failed to *parse* shows `0`
-  exactly like a file that is genuinely empty. `parsed` is already on the wire for this.
-
-**What 1c-2b-2b-2 inherits, and should not rebuild.**
-
-- **`sourceSegments(text, atDocumentStart)` and `SourceText.svelte`.** A whole document is the same call
-  with `documentStart` set. The primitive names the C0/C1 controls, NUL, the two separators, a lone CR,
-  the soft hyphen, the zero-width set and the bidi controls; it deliberately does **not** name joiners,
-  variation selectors, tag characters or combining marks, because those modify a neighbour rather than
-  draw nothing (hole 7). `sourceCharacters()` is the round-trip oracle.
-- **`SourceSlice` and its three arms** — `text`, `empty`, `unavailable`. `document_text` has a **fourth**
-  case the detail pane does not: the typed `notUtf8` refusal. The `unavailable` arm's string has still
-  never been read in place (hole 8).
-- **`documentText(id)`** in `src/lib/ipc/commands.ts`, contract stated narrowly: **exact preservation of
-  valid UTF-8, typed refusal otherwise.**
-- **Never re-slice by a wire span in JavaScript.** A JS string index is a UTF-16 code unit and a
-  `ByteSpan` counts bytes, so `text.slice(span.start, span.end)` is wrong for any document with a
-  non-ASCII character before the span, and wrong by a different amount again for an astral one.
-  Experiment J in `1c-2b-2a-notes.md` is the demonstration.
-- **The fidelity table in two halves** — §4 of `1c-2b-2a-notes.md` (the wire) and §5 of
-  `1c-2b-2b-1-notes.md` (the rendering, with its "detail pane / whole document" split).
-- **`EVERY_TEXT_HAZARD` and `PARSEABLE_HAZARDS`** in `src/lib/browser/fixtures.ts`. The first is every
-  hazard in one run of text; the second is the subset a document that **parses** can carry — corrected
-  at -1's review, because the original was wrong about which controls parse.
-- **The two-halves guard in `detail.test.ts`.** Its shape generalises: when a string on screen is a
-  claim about what the app does *not* do, the assertion that it is gone belongs beside the change that
-  makes it false.
-- **A dispatcher-level test harness** in `src-tauri/src/dispatch_check.rs` that copies the corpus into a
-  workspace and invokes real commands, with a remote-origin table asserted equal in both directions to
-  the names in `generate_handler!`. **Add a command and that test fails until its row exists.**
-
-**One lesson -1 paid for, worth carrying into -2.** Three of its four review findings were *a sentence
-attached to the wrong scope* — a caption over three branches that was true of one, a description of
-syntax that only some shapes have, and a headline wider than the classifier under it. The fourth was a
-note asserting something never measured, and measuring it **inverted** the claim. The pattern is not
-carelessness; it is that a sentence is written once and the data underneath it has cases. **Before
-writing a string, enumerate the cases it will sit above.**
+- **`rawDocument.ts` and its four arms.** `loading`, `text`, `empty`, `refused` — a file this
+  application cannot show must not look like an empty one, and that rule now has two instances
+  (`SourceSlice` over a span, `RawDocumentText` over a file).
+- **`documentStart` has exactly one caller and must keep exactly one.** It is the only way a `bom`
+  segment is produced; a slice that passed it would claim to know where byte 0 is.
+- **`sourceSegments(text, atDocumentStart)` and `SourceText.svelte`, unchanged.** Still the one place
+  file text becomes something a screen can draw. **Do not write a second renderer**, and do not
+  re-slice by a wire span in JavaScript (`1c-2b-2a-notes.md` §4.2).
+- **The corpus sweep in `sourceText.test.ts`.** All 33 committed fixtures now go through the primitive
+  and are rebuilt character for character; experiment J shows it catching a normaliser on a real file.
+- **The cost model, measured** (notes §8.1): `2n` segments for *n* lines, to 968 000 bytes in a test
+  and 17 840 bytes / 45 ms / 4 409 DOM nodes in a window. **Nothing is capped**, deliberately.
+- **One plan per launch** (notes §6.1). A WKWebView whose window is occluded stops running `setTimeout`
+  about six seconds after launch; `open -a` does not restart it and `-NSAppSleepDisabled` does not
+  prevent it. Every window reading from here on must be a short, single-purpose run, relaunched into a
+  **fresh bundle path** — LaunchServices silently drops `--env` for a path it thinks is already
+  running.
+- **Fourteen holes** (notes §9). Three are now holes with **measurements**: the pane still renders file
+  text two ways (hole 2, with the reason it was not fixed — the primitive has no inline presentation),
+  a parse-failed file still shows `0` like an empty one (hole 3, **seen** on adjacent sidebar rows),
+  and mixed line endings are still invisible (hole 5, seen on a 19-break document, and the caption
+  above the document now says so rather than implying otherwise).
+- **Hole 14 is addressed to Phase 2 by name, and is the one item here a phase can fail by ignoring.**
+  It is the review's eighth finding, recorded rather than fixed. Two halves:
+  - **There is no way to refresh the file the viewer is showing after a write.** `readFileText()`
+    returns early when the target is the file it already holds, and the `force` flag that could have
+    overridden that was deleted at experiment E because nothing read-only could reach it. So after a
+    successful write the viewer keeps the bytes it read **before** it, and close-and-re-open is the only
+    refresh. Phase 2 must call **`forgetFileText()`** (`src/lib/browser/workspace.svelte.ts`) after a
+    successful write — deliberately, because **nothing fails without it**.
+  - **`RawDocumentText.text` carries no revision and is not authority for a write.** It is a `string`;
+    the `ContentRevision` saying which bytes it came from is not on it. Basing an edit on it would be
+    writing over whatever is on disk *now* with what was read at some earlier moment. **The viewer's
+    text is for reading.**
 
 **What earlier sub-phases leave, and 1c-2b-2b should also not rebuild.**
 
@@ -3147,6 +3186,8 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/rawDocument.ts`](src/lib/browser/rawDocument.ts) | **What the raw YAML viewer shows, and where it lives.** `rawTarget(selection, documents, selected)` — **the sidebar first, the selection second**, which is what keeps a file that does not *parse* reachable — and `documentTextState(answer)`, whose **four** arms are `loading`, `text`, `empty` and `refused`. The module header carries the placement argument (why the third pane, not the second, not a fourth) and its cost: the pane now has two subjects |
+| [`docs/decisions/1c-2b-2b-2-notes.md`](docs/decisions/1c-2b-2b-2-notes.md) | Phase 1c-2b-2b-2's decision record: the placement decision with its four constraints (§2), the four arms and why a refusal is not an empty file (§3), the strings with **the cases each one sits above** (§4), **the fidelity table's five open rows now closed by a window reading (§5)**, the readings themselves and what the instrument cost (§6, §6.1), the **twenty** experiments **including the three that did not fire and the two that changed the code** (§7, §7.1), **Phase 1's exit verdict with its evidence and its three named gaps (§8)**, what a large document costs, measured (§8.1), the **fourteen** holes (§9) — hole 14 is addressed to Phase 2 by name — R31's blind spots (§10.1) and **the review disposition (§12)** |
 | [`src/lib/browser/sourceText.ts`](src/lib/browser/sourceText.ts) | **The one place file text becomes something a screen can draw**, and 1c-2b-2b-2 uses it unchanged. `sourceSegments(text, atDocumentStart)` returns `text` / `break` (carrying `lf` or `crlf`) / `invisible` (carrying a **code** and the character itself); `sourceCharacters()` rebuilds the input and **is the module's oracle**. `atDocumentStart` is the *only* way a `bom` segment is produced — a slice must never pass it. The classifier names the C0/C1 controls, NUL, U+2028/9, a lone CR, the soft hyphen, the zero-width set and the bidi controls, and deliberately does **not** name joiners, variation selectors, tag characters or combining marks, because those modify a neighbour rather than draw nothing |
 | [`src/lib/components/SourceText.svelte`](src/lib/components/SourceText.svelte) | **The only component that draws file text.** A break is a `<br>` (never a newline in a text node), an invisible character is a bordered marker in the *interface's* face, everything else is a text node inside a `white-space: pre` container that scrolls sideways — a soft wrap is indistinguishable from a line break the file does not have. **The markup is one line on purpose**: whitespace written for legibility would be whitespace the file does not have, and a test asserts the exact opening sequence. **No `{@html}`, ever** |
 | [`docs/decisions/1c-2b-2b-1-notes.md`](docs/decisions/1c-2b-2b-1-notes.md) | Phase 1c-2b-2b-1's decision record: the primitive instead of a `<pre>` (§2), **the scope sentence written from a committed measurement rather than the field's name (§3)**, the two halves that had to travel together (§4), **the fidelity table's rendering column with its "detail pane / whole document" split — five rows still open and each says why (§5)**, the window readings and what WKWebView evidence they do and do not give (§6, §5.1), the disabling experiments, **R31's blind spots by name (§8.1)**, the coverage holes as holes (§9) and what -2 inherits (§10) |
