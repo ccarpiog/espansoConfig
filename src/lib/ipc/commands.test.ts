@@ -1,5 +1,5 @@
 /**
- * The five command wrappers, against a stubbed `invoke`.
+ * The six command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -39,8 +39,15 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 const commands = await import('./commands');
-const { COMMAND_NAMES, getDocument, getMatch, listDocuments, openWorkspace, reloadDocument } =
-  commands;
+const {
+  COMMAND_NAMES,
+  documentText,
+  getDocument,
+  getMatch,
+  listDocuments,
+  openWorkspace,
+  reloadDocument
+} = commands;
 
 /** Every function this module exports, sorted. */
 const EXPORTED_FUNCTIONS = Object.entries(commands)
@@ -57,26 +64,28 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the five wire names, in order, and export no sixth wrapper', async () => {
+  it('call the six wire names, in order, and export no seventh wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
-    // objected to: calling five known wrappers says nothing about whether a
-    // sixth exists. The second reads the module's exports rather than the five
+    // objected to: calling six known wrappers says nothing about whether a
+    // seventh exists. The second reads the module's exports rather than the six
     // names this file already knows, so a wrapper added for a mutating command
     // fails here even though nothing calls it.
     await openWorkspace(null);
     await listDocuments();
     await getDocument(1);
     await getMatch(IDENTITY);
+    await documentText(1);
     await reloadDocument(1);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
+      'documentText',
       'getDocument',
       'getMatch',
       'listDocuments',
       'openWorkspace',
       'reloadDocument'
     ]);
-  }); // End of the "call the five wire names" case
+  }); // End of the "call the six wire names" case
 
   it('exports no wrapper for any of the six Phase 2 mutating commands', () => {
     // `save_match` and its five siblings need the save transaction, which does
@@ -102,10 +111,45 @@ describe('the command wrappers', () => {
     await openWorkspace('/Users/somebody/.config/espanso');
     await getDocument(4);
     await getMatch(IDENTITY);
+    await documentText(4);
     expect(calls[0]?.args).toEqual({ root: '/Users/somebody/.config/espanso' });
     expect(calls[1]?.args).toEqual({ id: 4 });
     expect(calls[2]?.args).toEqual({ id: IDENTITY });
+    expect(calls[3]?.args).toEqual({ id: 4 });
   });
+
+  it('hand a document text back as the string Rust sent, unchanged', async () => {
+    // The wrapper must not touch the text. The sample carries, in order: a
+    // CRLF pair, a leading UTF-8 BOM, a precomposed and a decomposed `e`-acute
+    // written as escapes so no editor can normalise this file, an astral
+    // character, a NUL, the two Unicode line separators, two real trailing
+    // spaces and no final newline — the set the byte-exact corpus fixtures pin
+    // plus the three no fixture holds, and the same set `dispatch_check.rs`
+    // drives through the real dispatcher. `toBe` compares the string identity
+    // of the code points, so a normalising wrapper fails here.
+    //
+    // This says nothing about the platform webview: `invoke` is mocked here and
+    // Tauri's mock runtime swaps WKWebView out on the Rust side, so U+2028
+    // surviving this case is a fact about the wrapper, not about postMessage.
+    const bytes =
+      '\u{feff}a: 1\r\nb: \u{e9} e\u{301} \u{1f600}\nc: "nul\u{0} ls\u{2028} ps\u{2029}"\nd: |\n  kept  ';
+    outcome = { resolve: bytes };
+    const result = await documentText(7);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error('unreachable');
+    }
+    expect(result.value).toBe(bytes);
+    // Stated separately from the equality above, because a comparison that
+    // normalised both sides would pass it: these are the individual characters.
+    expect(result.value.startsWith('\u{feff}')).toBe(true);
+    expect(result.value).toContain('\r\n');
+    expect(result.value).toContain('\u{65}\u{301}');
+    expect(result.value).toContain('\u{0}');
+    expect(result.value).toContain('\u{2028}');
+    expect(result.value).toContain('\u{2029}');
+    expect(result.value.endsWith('  ')).toBe(true);
+  }); // End of the "document text back unchanged" case
 
   it('send an explicit null rather than an absent root', async () => {
     // `Option<PathBuf>` reads `null` as `None`; omitting the key would leave

@@ -31,7 +31,8 @@
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
 //!   `MENU_COMMAND_NAMES` in both directions, plus an assertion that none of the
-//!   six forbidden mutating names appears in either.
+//!   six forbidden mutating names appears in either. Seven commands are
+//!   registered as of Phase 1c-2b-2a, the newest being `commands::document_text`.
 //!
 //! What it still cannot check is the **type text of the read model's own
 //! properties**: `readonly byte_len: string` in `types.ts` would pass, because
@@ -446,7 +447,10 @@ fn error_interface_name(code: &str) -> String {
 /// names the frontend already knew about: adding `commands::save_match` to the
 /// macro and nothing else left every declared name found and the test green,
 /// which is exactly the scope creep the test claimed to catch.
-fn registered_commands() -> BTreeSet<String> {
+///
+/// `crate::dispatch_check` calls it too, so the remote-origin sweep attempts
+/// the registered commands rather than a list somebody kept in step by hand.
+pub(crate) fn registered_commands() -> BTreeSet<String> {
     let main = read_without_comments("src-tauri/src/main.rs");
     let header = "generate_handler![";
     let start = main
@@ -1058,13 +1062,18 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// asserted absent from both sets — because "no mutating command is registered"
 /// is the claim this check exists to keep true, and it was not being checked.
 ///
-/// Phase 1b-2b adds the sixth name, and it is deliberately read from a
+/// Phase 1b-2b added the menu name, and it is deliberately read from a
 /// **different** frontend file: `MENU_COMMAND_NAMES` in `src/lib/ipc/menu.ts`.
 /// The menu command is not a workspace command and does not belong in
 /// `COMMAND_NAMES`, but it is registered in the same macro, so the union of the
 /// two declarations is what the registered set has to equal.
+///
+/// Phase 1c-2b-2a adds `document_text` to the read-only list, taking it to six
+/// and the whole surface to seven. It reads a file and writes nothing, so the
+/// forbidden-name assertion below is unaffected — and is checked all the same,
+/// because that is the point of writing it as a check.
 #[test]
-fn the_registered_commands_are_the_read_only_five_and_the_menu_command() {
+fn the_registered_commands_are_the_read_only_six_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let read_only = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1073,8 +1082,8 @@ fn the_registered_commands_are_the_read_only_five_and_the_menu_command() {
     );
     assert_eq!(
         read_only.len(),
-        5,
-        "the read-only surface is five commands: {read_only:?}"
+        6,
+        "the read-only surface is six commands: {read_only:?}"
     );
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
     let declared: BTreeSet<String> = read_only.union(&menu).cloned().collect();
@@ -1082,8 +1091,8 @@ fn the_registered_commands_are_the_read_only_five_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        6,
-        "Phase 1b-2b registers five read-only commands and one menu command, and no more: {registered:?}"
+        7,
+        "Phase 1c-2b-2a registers six read-only commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1091,7 +1100,7 @@ fn the_registered_commands_are_the_read_only_five_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_read_only_five_and_the_menu_command()
+} // End of function the_registered_commands_are_the_read_only_six_and_the_menu_command()
 
 /// A scalar arrives as text, never as a parsed value (D2u).
 ///
@@ -1115,6 +1124,47 @@ fn a_schema_boolean_crosses_as_text_not_as_a_boolean() {
         "a plain `true` is exactly the risk this flag exists to report"
     );
 } // End of function a_schema_boolean_crosses_as_text_not_as_a_boolean()
+
+/// An unmodelled entry's value crosses as its own bytes, `serde` included.
+///
+/// Phase 1c-2b-2a's wire-field addition, pinned where `serde` is the thing under
+/// test rather than the projection. The value below is written with `\u{…}`
+/// escapes so that this source file cannot be normalised into agreeing with a
+/// normalising boundary, and it carries the three properties JSON encoding, a
+/// Unicode normaliser and a truncation would each break.
+#[test]
+fn an_unmodelled_entrys_value_crosses_as_its_own_bytes() {
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    invented_by_a_later_espanso: \"caf\u{e9} cafe\u{301} \u{1f600}\"\n",
+    );
+    let view = project("match/unmodelled.yml", source);
+    let entry = view
+        .all_unknown_entries()
+        .into_iter()
+        .next()
+        .expect("the fixture holds an unrecognised key")
+        .clone();
+    let json = json_of(&entry);
+    let text = json["value_text"].as_str().expect("a source slice");
+
+    // The bytes the span names, re-derived here from the document rather than
+    // taken from the entry that is under test.
+    let expected = &source[entry.value_span.start..entry.value_span.end];
+    assert_eq!(text, expected, "the wire must carry the slice, uncut");
+    assert!(text.contains('\u{e9}'), "the precomposed e-acute was lost");
+    assert!(
+        text.contains("\u{65}\u{301}"),
+        "the decomposed e-acute was composed"
+    );
+    assert!(text.contains('\u{1f600}'), "the astral character was lost");
+    assert_eq!(
+        text.len(),
+        entry.value_span.len(),
+        "a value text shorter than its span is a truncation nothing on this wire announces"
+    );
+} // End of function an_unmodelled_entrys_value_crosses_as_its_own_bytes()
 
 /// A revision crosses as an opaque 64-character string, not as 32 numbers.
 #[test]

@@ -36,7 +36,8 @@ use common::{real_corpus, skip_without_real_corpus, synthetic_invalid, synthetic
 use espansoconfig_core::emit::decode;
 use espansoconfig_core::model::{
     DiagnosticCode, DocumentContext, DocumentShape, DocumentView, IdentityError, MappingCoverage,
-    MatchBadge, ScalarView, UnknownReason, ValueKind, ValueView, VariableKind, MAX_VALUE_DEPTH,
+    MatchBadge, ScalarView, UnknownEntry, UnknownReason, ValueKind, ValueView, VariableKind,
+    MAX_VALUE_DEPTH,
 };
 use espansoconfig_core::syntax::{NodeId, NodeKind, SyntaxIndex};
 use espansoconfig_core::workspace::project_source;
@@ -288,6 +289,44 @@ fn scalar_disagreement(source: &str, index: &SyntaxIndex, scalar: &ScalarView) -
     }
 } // End of function scalar_disagreement()
 
+/// Why one unmodelled entry's value text disagreed with its own source bytes.
+///
+/// Returned rather than asserted, so
+/// [`a_truncated_unknown_value_is_caught_by_the_oracle`] can hand the same
+/// function a deliberately wrong entry and require it to object. An oracle that
+/// cannot disagree is not an oracle (`PROGRESS.md`).
+///
+/// The two claims are stated separately on purpose. Equal **byte length** is
+/// what a truncation or a cap breaks, and it is also what a Unicode
+/// normalisation breaks — composing `e` + U+0301 into U+00E9 turns three bytes
+/// into two. Starting at the span's **start offset** is what a slice taken from
+/// the wrong place breaks. Together they are equality; apart they say which
+/// failure occurred.
+fn unknown_value_disagreement(source: &str, entry: &UnknownEntry) -> Option<String> {
+    let span = entry.value_span;
+    if entry.value_text.len() != span.len() {
+        return Some(format!(
+            "value_text is {} bytes for a {} byte span",
+            entry.value_text.len(),
+            span.len()
+        ));
+    }
+    let Some(tail) = source.get(span.start..) else {
+        return Some(format!(
+            "the value span starts at byte {}, which this document does not have",
+            span.start
+        ));
+    };
+    if !tail.starts_with(&entry.value_text) {
+        return Some(format!(
+            "value_text is not the {} bytes at offset {}",
+            span.len(),
+            span.start
+        ));
+    }
+    None
+} // End of function unknown_value_disagreement()
+
 /// The key nodes of the mapping `id` names, re-derived from the index.
 ///
 /// A second transcription of the flat alternating key/value layout, written
@@ -476,6 +515,13 @@ fn audit(name: &str, document: &SourceDocument) {
                 "{name}: a scalar-keyed unknown entry has no name"
             );
         }
+        // …and its value must be the bytes its span names, uncut and unaltered.
+        // Added at Phase 1c-2b-2a, when that text started crossing the wire: a
+        // truncation, a cap or a normalisation would each be invisible in every
+        // other check in this file.
+        if let Some(problem) = unknown_value_disagreement(&document.source, entry) {
+            panic!("{name}: an unmodelled entry's {problem}");
+        }
     } // End of the loop over the document's unknown entries
 } // End of function audit()
 
@@ -613,6 +659,171 @@ fn every_real_corpus_file_projects_without_losing_a_key_or_inferring_a_type() {
 // ---------------------------------------------------------------------------
 // The oracles must be able to disagree
 // ---------------------------------------------------------------------------
+
+/// The synthetic corpus really exercises the value-text oracle.
+///
+/// The sweep in [`audit`] checks every unmodelled entry it is given; a corpus
+/// that produced none, or produced only empty values, would satisfy it without
+/// measuring anything. This counts what was actually compared and prints it —
+/// names and counts only, never content (`CLAUDE.md` section 1).
+#[test]
+fn every_synthetic_unmodelled_entry_carries_the_bytes_of_its_span() {
+    let files = synthetic_valid();
+    assert!(!files.is_empty(), "the synthetic corpus must be present");
+    let mut entries = 0usize;
+    let mut non_empty = 0usize;
+    let mut bytes = 0usize;
+    let mut widest = 0usize;
+    for file in &files {
+        let document = project(&file.name, &file.source);
+        for entry in document.view.all_unknown_entries() {
+            if let Some(problem) = unknown_value_disagreement(&document.source, entry) {
+                panic!("{}: an unmodelled entry's {problem}", file.name);
+            }
+            entries += 1;
+            bytes += entry.value_text.len();
+            widest = widest.max(entry.value_text.len());
+            if !entry.value_text.is_empty() {
+                non_empty += 1;
+            }
+        } // End of the loop over one fixture's unmodelled entries
+    } // End of the loop over the synthetic corpus
+    println!(
+        "unmodelled values: {entries} entries, {non_empty} non-empty, \
+         {bytes} bytes carried, widest {widest}"
+    );
+    assert!(
+        entries > 10,
+        "the corpus produced {entries} unmodelled entries, so this sweep measures almost nothing"
+    );
+    assert!(
+        non_empty > 5,
+        "only {non_empty} unmodelled values have any text, so an implementation \
+         that answered the empty string would pass this sweep"
+    );
+    // A multi-line value is the case where a cap or a line-based transformation
+    // would show, and a corpus of one-token values could not reach it.
+    assert!(
+        widest > 20,
+        "the widest unmodelled value is {widest} bytes, so no multi-line value was compared"
+    );
+} // End of function every_synthetic_unmodelled_entry_carries_the_bytes_of_its_span()
+
+/// An unmodelled value keeps the bytes an editor would want to change.
+///
+/// The hand-written companion to the sweep above, and it exists because **no
+/// byte-exact corpus fixture happens to put an unmodelled key over its own
+/// distinguishing bytes**: the four fixtures that produce unmodelled entries are
+/// not the ones that pin CRLF, the BOM, decomposed Unicode or terminal spaces.
+/// That gap is recorded in `docs/decisions/1c-2b-2a-notes.md` as a deviation
+/// from `PROGRESS.md` R20 rather than left implied.
+///
+/// The characters are `\u{…}` escapes so that no editor can normalise this file
+/// into agreeing with a normalising projection.
+#[test]
+fn an_unmodelled_value_keeps_its_line_endings_indentation_and_unicode() {
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "    invented_block: |\n",
+        "      caf\u{e9} and cafe\u{301}\r\n",
+        "      \u{1f600} then two spaces  \n",
+        "    invented_map:\n",
+        "      nested: value\n",
+    );
+    let document = project("unmodelled.yml", source);
+    let entries: Vec<&UnknownEntry> = document.view.matches[0].unknown_entries.iter().collect();
+    assert_eq!(entries.len(), 2, "the fixture has two unrecognised keys");
+
+    let block = entries
+        .iter()
+        .find(|entry| entry.key.as_deref() == Some("invented_block"))
+        .expect("the block-scalar entry");
+    assert!(
+        unknown_value_disagreement(source, block).is_none(),
+        "the honest projection must satisfy the oracle"
+    );
+    assert!(
+        block.value_text.contains('\u{e9}'),
+        "the precomposed e-acute was lost"
+    );
+    assert!(
+        block.value_text.contains("\u{65}\u{301}"),
+        "the decomposed e-acute was composed"
+    );
+    assert!(
+        block.value_text.contains('\u{1f600}'),
+        "the astral character was lost"
+    );
+    assert!(
+        block.value_text.contains("\r\n"),
+        "the CRLF inside the value was converted"
+    );
+    assert!(
+        block.value_text.contains("spaces  "),
+        "the two spaces before the line break were trimmed"
+    );
+
+    // A mapping under an unrecognised key is undescended, so its whole text is
+    // what crosses — the case the 1c-2a review found the pane unable to show.
+    let mapping = entries
+        .iter()
+        .find(|entry| entry.key.as_deref() == Some("invented_map"))
+        .expect("the mapping entry");
+    assert_eq!(mapping.value_kind, ValueKind::Mapping);
+    assert!(
+        unknown_value_disagreement(source, mapping).is_none(),
+        "the honest projection must satisfy the oracle"
+    );
+    assert!(mapping.value_text.contains("nested: value"));
+} // End of function an_unmodelled_value_keeps_its_line_endings_indentation_and_unicode()
+
+/// A truncated, moved or normalised value text is caught by the oracle.
+///
+/// The disabling experiment for [`unknown_value_disagreement`]. Without it,
+/// every "the value is the bytes of its span" pass above is a statement about
+/// nothing — and a cap on the value text, which is the decision this sub-phase
+/// had to make explicitly, is exactly a truncation.
+#[test]
+fn a_truncated_unknown_value_is_caught_by_the_oracle() {
+    let source = "matches:\n  - trigger: ':one'\n    invented: 'a longer value'\n";
+    let document = project("truncated.yml", source);
+    let honest = document.view.matches[0]
+        .unknown_entries
+        .first()
+        .expect("the fixture has one unrecognised key")
+        .clone();
+    assert!(
+        unknown_value_disagreement(source, &honest).is_none(),
+        "the honest projection must satisfy the oracle"
+    );
+
+    let mut truncated = honest.clone();
+    truncated.value_text.truncate(4);
+    assert!(
+        unknown_value_disagreement(source, &truncated).is_some(),
+        "the oracle failed to notice a truncated value"
+    );
+
+    // A cap that pads its answer back to the right length would defeat a
+    // length-only check, so the position claim is exercised too.
+    let mut padded = honest.clone();
+    padded.value_text = "x".repeat(honest.value_text.len());
+    assert!(
+        unknown_value_disagreement(source, &padded).is_some(),
+        "the oracle failed to notice a value that is not the bytes at its offset"
+    );
+
+    // And the span moved under an honest text, which is the same defect seen
+    // from the other side.
+    let mut moved = honest;
+    moved.value_span.start += 1;
+    assert!(
+        unknown_value_disagreement(source, &moved).is_some(),
+        "the oracle failed to notice a moved span"
+    );
+} // End of function a_truncated_unknown_value_is_caught_by_the_oracle()
 
 #[test]
 fn an_inferred_scalar_is_caught_by_the_oracle() {

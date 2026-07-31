@@ -10,6 +10,7 @@
 
 export {
   COMMAND_NAMES,
+  documentText,
   getDocument,
   getMatch,
   listDocuments,

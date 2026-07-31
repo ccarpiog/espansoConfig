@@ -119,12 +119,21 @@ character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex`
 codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
 a mapping field, and move a match within one sequence.
 
-**Phase 1 — the read-only browser — is under way, and Phase 1c-1 is complete.** 1a (the core-side read
-model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the read-only IPC
-surface), 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized
-macOS menu) and 1c-1 (the three-pane shell, the sidebar, the snippet list, search and the selection)
-are all done. **1c-2 — the detail pane — is next**, and Phase 1's stated exit lands there: *the owner
-can browse their entire real config and every snippet renders correctly.*
+**Phase 1 — the read-only browser — is under way, and Phase 1c-2b-2a is complete.** 1a (the core-side
+read model), 1b-1 (the Tauri shell, the Svelte scaffold and the i18n layer), 1b-2a (the read-only IPC
+surface), 1b-2b (the Rust-code→string dictionaries, the exhaustiveness check and the localized macOS
+menu), 1c-1 (the three-pane shell, the sidebar, the snippet list, search and the selection), 1c-2a (the
+detail pane's match), 1c-2b-1 (the hazards and diagnostics) and 1c-2b-2a (the raw-text boundary:
+`document_text` as a command, `UnknownEntry.value_text`) are all done. **1c-2b-2b — the raw YAML viewer,
+`MatchView.source_text` and the unmodelled value on screen — is next**, and Phase 1's stated exit lands
+there: *the owner can browse their entire real config and every snippet renders correctly.*
+
+**A raw-text command answers valid UTF-8 or refuses.** `document_text` returns
+`CommandResult<string>`; a file that is not valid UTF-8 becomes a typed `NotUtf8 { path, offset }` and
+**cannot be displayed at all**. That is exact preservation of valid UTF-8 plus a typed refusal — never
+"the raw file bytes", and widening it later is a wire-format change Phases 2–5 inherit. Byte spans are
+sliced **in Rust**: a JavaScript string index is a UTF-16 code unit and a `ByteSpan` counts bytes, so
+`text.slice(span.start, span.end)` is wrong for any document with a non-ASCII character before the span.
 
 **Nothing in this project renders a Svelte component in an automated test.** The frontend suite passes
 without instantiating one, so a component that throws produces a blank pane the suite cannot see. A

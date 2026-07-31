@@ -1,9 +1,18 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
 //! Plan section 6.4's **read-only** set, and nothing else: `open_workspace`,
-//! `list_documents`, `get_document`, `get_match` and `reload_document`. Each is
-//! one line over a [`WorkspaceSession`] method, and each of those is one call
-//! into `crate::workspace`, which Phase 1a built to be wrapped this way.
+//! `list_documents`, `get_document`, `get_match`, `document_text` and
+//! `reload_document`. Each is one line over a [`WorkspaceSession`] method, and
+//! each of those is one call into `crate::workspace`, which Phase 1a built to be
+//! wrapped this way.
+//!
+//! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
+//! one that puts a file's **own text** on the wire rather than a projection of
+//! it. Its contract is **exact preservation of valid UTF-8, and a typed refusal
+//! otherwise** — the wire type is a JSON string, so a file that is not valid
+//! UTF-8 is refused with `notUtf8` rather than carried. What survives the
+//! crossing, and what cannot cross at all, is written down on
+//! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
 //! # Three constraints this module inherits and does not drop
 //!
@@ -125,6 +134,59 @@ impl WorkspaceSession {
         self.with_workspace(|workspace| Ok(workspace.get_match(id)?.clone()))
     }
 
+    /// The whole text of one document, unchanged, for a file that is valid
+    /// UTF-8.
+    ///
+    /// Available **including for a document that failed to parse** — that is the
+    /// one file whose bytes a reader most needs, and refusing it would make the
+    /// application useless at the moment it matters.
+    ///
+    /// The text is cloned out of the cache for the same reason a
+    /// [`DocumentView`] is: it has to be serialized after the lock is released.
+    ///
+    /// # The contract: exact preservation of valid UTF-8, typed refusal
+    /// otherwise
+    ///
+    /// **This is not a byte-fidelity API for arbitrary disk bytes**, and the
+    /// wire type is why: the value is a JSON string, and a `String` cannot hold
+    /// a byte sequence that is not valid UTF-8. A file containing, say, a lone
+    /// `0x80` never reaches this command — `read_utf8` in
+    /// `espansoconfig_core::workspace` refuses it with
+    /// `WorkspaceError::NotUtf8 { path, offset }`, which crosses as
+    /// [`CommandError::NotUtf8`] carrying the offset of the first invalid
+    /// sequence. Nothing decodes lossily and no U+FFFD is substituted, so the
+    /// caller is told the file cannot be represented rather than shown a
+    /// mangled version of it — but the caller also cannot display that file at
+    /// all. Changing that is a **wire-format** change, not a change here;
+    /// `docs/decisions/1c-2b-2a-notes.md` section 3.1 records the cost Phases
+    /// 2–5 inherit.
+    ///
+    /// For a file that *is* valid UTF-8, nothing on this path re-encodes it: no
+    /// line ending is converted, no leading BOM is stripped, no final newline is
+    /// added, and no Unicode normalisation runs. `serde_json` escapes what JSON
+    /// requires — `"`, `\`, and the C0 controls, `\r`, `\n` and NUL among them —
+    /// and a JSON parser reverses every one of those escapes exactly, so the
+    /// response body Tauri builds decodes back to the file. The claim is
+    /// measured rather than argued: `dispatch_check.rs` drives this command
+    /// through the real IPC dispatcher over the byte-exact corpus fixtures and
+    /// compares the response against `std::fs::read` of the same file.
+    ///
+    /// **The measurement stops at that response body.** `mock_builder()` swaps
+    /// the platform webview out, so no test in this repository says anything
+    /// about what WKWebView or `postMessage` then does with the string. That is
+    /// a named hole (`docs/decisions/1c-2b-2a-notes.md` section 4.3), not an
+    /// implication.
+    ///
+    /// One thing genuinely changes coordinate system, and it is not the text: a
+    /// **byte** offset into this string is not a JavaScript **string index**,
+    /// because a JavaScript string is indexed in UTF-16 code units. Every span
+    /// on this wire is a byte span, so a caller must never cut one out of this
+    /// text; that is why an unmodelled entry's value is sliced in Rust
+    /// (`espansoconfig_core::model::UnknownEntry::value_text`).
+    pub fn text(&self, id: DocumentId) -> Result<String, CommandError> {
+        self.with_workspace(|workspace| Ok(workspace.document_text(id)?.to_owned()))
+    }
+
     /// Re-reads one document from disk, reparsing only if its bytes changed.
     pub fn reload(&self, id: DocumentId) -> Result<DocumentView, CommandError> {
         self.with_workspace(|workspace| Ok(workspace.refresh(id)?.view.clone()))
@@ -187,6 +249,19 @@ pub fn get_match(
     id: MatchId,
 ) -> Result<MatchView, CommandError> {
     session.match_view(id)
+}
+
+/// Returns the whole text of one document (plan section 6.4).
+///
+/// Reads nothing from disk that [`get_document`] would not: the text comes from
+/// the same cache entry, so asking for a projection and then for its bytes costs
+/// one read and one parse between them.
+#[tauri::command]
+pub fn document_text(
+    session: State<'_, WorkspaceSession>,
+    id: DocumentId,
+) -> Result<String, CommandError> {
+    session.text(id)
 }
 
 /// Re-reads one document from disk (plan section 6.4).
@@ -303,6 +378,19 @@ mod tests {
         assert_eq!(error.code(), "notADirectory");
     }
 
+    /// Every session method that needs a workspace refuses before one is open.
+    ///
+    /// "Every" is the claim, so the body holds every one of them: `documents`,
+    /// `document`, `text`, `reload` and `match_view` — the five that route
+    /// through [`WorkspaceSession::with_workspace`]. `open` is excluded because
+    /// it is the method that opens one, and `set_menu_labels` is not a
+    /// workspace command at all.
+    ///
+    /// `text` was missing until the review of Phase 1c-2b-2a found the name
+    /// outrunning the body. The defect it exists to catch is a method that
+    /// opens a workspace implicitly, or answers an empty string for a document
+    /// no workspace holds; on a screen an empty string is indistinguishable
+    /// from an empty file.
     #[test]
     fn every_command_refuses_before_a_workspace_is_open() {
         let session = WorkspaceSession::new();
@@ -313,6 +401,10 @@ mod tests {
         );
         assert_eq!(
             session.document(id).expect_err("nothing is open"),
+            CommandError::NoWorkspaceOpen
+        );
+        assert_eq!(
+            session.text(id).expect_err("nothing is open"),
             CommandError::NoWorkspaceOpen
         );
         assert_eq!(
@@ -523,6 +615,146 @@ mod tests {
         assert_ne!(before, after.revision);
         assert_eq!(after.matches.len(), 1);
     } // End of function reload_document_reprojects_only_when_the_bytes_changed()
+
+    /// Every byte of a file survives the command and its serialization.
+    ///
+    /// The hand-written half of the fidelity evidence, and it is deliberately
+    /// hostile: the source below carries a leading UTF-8 BOM, a CRLF line
+    /// ending among bare LFs, a precomposed and a decomposed `é`, an astral
+    /// character, a block scalar whose last line ends in two real spaces, and no
+    /// final newline — the six properties the byte-exact corpus fixtures pin,
+    /// gathered into one document so that a single normalisation anywhere on the
+    /// path fails here.
+    ///
+    /// It carries **three more that no fixture holds**: a NUL, and the two
+    /// Unicode line separators U+2028 and U+2029. All three are valid UTF-8 and
+    /// valid content for a Rust `String` and a JavaScript string, and they are
+    /// exactly where the two encoders on this path disagree — `serde_json`
+    /// escapes NUL as a six-character escape and leaves U+2028/U+2029 as raw
+    /// bytes, which is legal JSON and was for years illegal inside a JavaScript
+    /// source string literal. That
+    /// they are hand-written rather than pinned by a fixture is an R20 deviation
+    /// and is recorded as such (`docs/decisions/1c-2b-2a-notes.md` section 9).
+    ///
+    /// The characters are written as `\u{…}` escapes on purpose. A literal `é`
+    /// in this file could be normalised by an editor into agreeing with a
+    /// normalising boundary; an escape cannot.
+    ///
+    /// The `serde_json` round trip is asserted separately from the command's
+    /// own answer, because they can fail independently: the command could hand
+    /// back the right `String` and the encoding could still lose a byte, which
+    /// is exactly the failure a caller would see and a direct call would not.
+    /// `dispatch_check.rs` closes the remaining gap by driving the real
+    /// dispatcher over the corpus itself.
+    #[test]
+    fn document_text_hands_back_the_file_byte_for_byte() {
+        const HOSTILE: &str = concat!(
+            "\u{feff}",
+            "matches:\r\n",
+            "  - trigger: ':caf\u{e9}'\n",
+            "    replace: 'cafe\u{301} \u{1f600}'\n",
+            "  - trigger: ':controls'\n",
+            "    replace: \"nul\u{0} ls\u{2028} ps\u{2029}\"\n",
+            "  - trigger: ':block'\n",
+            "    replace: |\n",
+            "      two real spaces end this line  "
+        );
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(dir.path().join("match").join("hostile.yml"), HOSTILE).unwrap();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/hostile.yml");
+
+        let text = session.text(id).expect("the file reads");
+        assert_eq!(
+            text.as_bytes(),
+            HOSTILE.as_bytes(),
+            "the command must answer the file's bytes"
+        );
+
+        // Each property named, so that a failure says which one was lost rather
+        // than only that something was.
+        assert!(text.starts_with('\u{feff}'), "the BOM was stripped");
+        assert_eq!(text.matches("\r\n").count(), 1, "the CRLF was converted");
+        assert!(text.contains('\u{e9}'), "the precomposed e-acute was lost");
+        assert!(
+            text.contains("\u{65}\u{301}"),
+            "the decomposed e-acute was composed"
+        );
+        assert!(text.contains('\u{1f600}'), "the astral character was lost");
+        assert!(text.ends_with("  "), "the terminal spaces were trimmed");
+        assert!(!text.ends_with('\n'), "a final newline was added");
+        // The three no corpus fixture holds.
+        assert!(
+            text.contains('\u{0}'),
+            "the NUL was dropped or terminated the string"
+        );
+        assert!(
+            text.contains('\u{2028}'),
+            "the line separator U+2028 was lost"
+        );
+        assert!(
+            text.contains('\u{2029}'),
+            "the paragraph separator U+2029 was lost"
+        );
+
+        // …and the encoding the wire actually uses, which is a second place the
+        // same bytes could be lost.
+        let encoded = serde_json::to_string(&text).expect("a string serializes");
+        let decoded: String = serde_json::from_str(&encoded).expect("and deserializes");
+        assert_eq!(decoded.as_bytes(), HOSTILE.as_bytes());
+    } // End of function document_text_hands_back_the_file_byte_for_byte()
+
+    /// The bytes come back even when the projection refused them.
+    #[test]
+    fn document_text_answers_a_document_that_did_not_parse() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/broken.yml");
+        assert!(
+            !session.document(id).expect("the file reads").parsed,
+            "this fixture must not parse, or the test proves nothing"
+        );
+        assert_eq!(
+            session.text(id).expect("the bytes read"),
+            "matches:\n  - trigger: ':unclosed\n"
+        );
+    } // End of function document_text_answers_a_document_that_did_not_parse()
+
+    /// An unmodelled entry's value crosses as the exact bytes of its span.
+    ///
+    /// The other half of Phase 1c-2b-2a's wire widening, checked at this layer
+    /// too: the slice is taken in the core, and what this pins is that nothing
+    /// between the core and the wire re-encodes it. The oracle is the span
+    /// applied to the file's own bytes, which is a different expression from the
+    /// one the projection evaluates.
+    #[test]
+    fn an_unmodelled_entrys_value_text_is_the_bytes_its_span_names() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let entries: Vec<_> = view
+            .matches
+            .iter()
+            .flat_map(|match_view| match_view.unknown_entries.iter())
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "the synthetic tree has exactly one unrecognised key"
+        );
+        let entry = entries[0];
+        let span = entry.value_span;
+        assert_eq!(
+            entry.value_text,
+            BASE_YML[span.start..span.end],
+            "the value text must be the slice its span names"
+        );
+        assert_eq!(entry.value_text, "yes");
+        let json = serde_json::to_value(entry).expect("an entry serializes");
+        assert_eq!(json["value_text"], "yes");
+    } // End of function an_unmodelled_entrys_value_text_is_the_bytes_its_span_names()
 
     /// A read failure is a typed code, not a panic.
     #[test]

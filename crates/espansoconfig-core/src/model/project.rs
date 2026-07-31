@@ -220,6 +220,7 @@ impl<'a> Projector<'a> {
                 Some(key) => out.push((key_node, key.text, value_node)),
                 None => {
                     scan.skip(
+                        self.source,
                         self.index,
                         key_node,
                         None,
@@ -259,7 +260,14 @@ impl<'a> Projector<'a> {
         } else {
             UnknownReason::NotModelled
         };
-        scan.skip(self.index, key_node, Some(key), value_node, reason);
+        scan.skip(
+            self.source,
+            self.index,
+            key_node,
+            Some(key),
+            value_node,
+            reason,
+        );
     } // End of function skip_entry()
 
     /// Records an entry whose key is modelled but whose value has the wrong
@@ -280,6 +288,7 @@ impl<'a> Projector<'a> {
             value_node,
         );
         scan.skip(
+            self.source,
             self.index,
             key_node,
             Some(key),

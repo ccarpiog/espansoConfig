@@ -533,10 +533,15 @@ export type UnknownKeyLabel =
 /**
  * One entry the projection did not model, as the pane shows it.
  *
- * The entry's **value** is deliberately not here: `UnknownEntry` carries no
- * value text at all, only a span and a shape, so the pane names the shape and
- * says plainly that the value is not on screen. See
- * `docs/decisions/1c-2a-notes.md` section 12, hole 13.
+ * The entry's **value** is deliberately not here, and the reason changed at
+ * Phase 1c-2b-2a. Until then `UnknownEntry` carried no value text at all;
+ * `UnknownEntry.value_text` now crosses the wire, and **this model still does
+ * not read it**, so the pane continues to name the shape and to say plainly
+ * that the value is not on screen. Rendering it is 1c-2b-2b's work, and adding
+ * it here without also changing what the pane says would make
+ * `browser.detail.unknownValue` false in the other direction. See
+ * `docs/decisions/1c-2a-notes.md` section 12, hole 13, and
+ * `docs/decisions/1c-2b-2a-notes.md`.
  */
 export interface UnknownRow {
   /** The key node, which is what keys the row in a list and addresses it. */

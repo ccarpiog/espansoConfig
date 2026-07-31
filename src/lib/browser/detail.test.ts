@@ -727,14 +727,22 @@ describe('the source of the pane that renders this model', () => {
     expect(source).toContain('.bullet {');
   });
 
-  it('says what shape an unmodelled entry holds, because it cannot show the value', () => {
-    // `UnknownEntry` carries `value_span` and `value_kind` and no value text at
-    // all, so the pane cannot print the value and must not claim to. What it
-    // can do is name the shape; the strings say the entry was recorded and left
-    // untouched, which is a claim about the file rather than about the screen.
+  it('says what shape an unmodelled entry holds, and does not print the value', () => {
+    // The pane names the shape and says the value is not on screen. Since Phase
+    // 1c-2b-2a `UnknownEntry.value_text` is on the wire, so "cannot" became
+    // "does not": `UnknownRow` does not carry it and this pane does not read
+    // it, which is what keeps `browser.detail.unknownValue` true. A version
+    // that started printing the value while those strings still said it did not
+    // would be the 1c-2a review's first finding in reverse.
     expect(source).toContain('browser.detail.unknownValue');
     expect(source).toContain('tValueKind(entry.valueKind)');
-  });
+    // The scan is over the whole file, comments included, so it also fires on a
+    // comment that merely names the field. That is the safe direction — it can
+    // only ever be too strict — and it is why the doc block above talks about
+    // "the value's own text" rather than spelling the wire field.
+    expect(source).not.toContain('value_text');
+    expect(source).not.toContain('valueText');
+  }); // End of the "shape of an unmodelled entry" case
 }); // End of the "source of the pane that renders this model" suite
 
 describe('the global stylesheet', () => {

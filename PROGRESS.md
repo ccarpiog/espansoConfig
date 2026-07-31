@@ -29,7 +29,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1c-1** | The three-pane shell and the data path: sidebar, snippet list, search, the selection | ✅ complete — after the review fix round below |
 | **1c-2a** | The detail pane's match: plan §3.3's fields, §3.4's variables, §3.5's forms, D2u on a screen | ✅ complete — after the review fix round below |
 | **1c-2b-1** | The typed judgements: `HazardKind` on a screen, the diagnostics, the load-failure conflation closed | ✅ complete — after the review fix round below |
-| 1c-2b-2 | The raw text surfaces: the `document_text` command, the raw YAML viewer, `MatchView.source_text`, the unmodelled entry's value | ⬜️ **next** — **Phase 1's exit lands here** |
+| **1c-2b-2a** | The boundary: `document_text` as a command, `UnknownEntry.value_text`, the fidelity rules pinned through the real dispatcher | ✅ complete — after the review fix round below |
+| 1c-2b-2b | The screens: the raw YAML viewer, `MatchView.source_text` and the unmodelled value **on screen**, and the real-corpus browse | ⬜️ **next** — **Phase 1's exit lands here** |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
@@ -75,6 +76,18 @@ data-format decision fails: later phases inherit it. The cut proved itself the s
 interpreted" when nothing shows it and the viewer that would is in 1c-2b-2 — 1c-2b-1's own failure
 mode, produced by reaching for 1c-2b-2's subject. Phase 1's stated exit now lands at the end of
 **1c-2b-2**.
+
+**1c-2b-2 was split once more into 1c-2b-2a / 1c-2b-2b**, and for once not by failure mode alone but by
+the cut 1b-2 used, because its four items are of two kinds. **1c-2b-2a is the boundary** — registering
+`document_text` as a command and putting the unmodelled entry's value text on the wire — and **every one
+of its items widens the wire**, so it fails the way a data-format decision fails: Phases 2–5 inherit it.
+**1c-2b-2b is the screens** — the raw YAML viewer, `MatchView.source_text` and that value actually
+rendered, plus the real-corpus browse Phase 1's exit is stated in terms of — and it fails as a viewer
+that says "as written" with a transformation sitting between the file and the screen. The cut earned
+itself the same way the two before it did: 1c-2b-2a's review found **six** claims outrunning their
+evidence, four of them in test names and doc comments about *what crosses the boundary* — precisely the
+question that has no screen in it, and precisely what would have been buried under a viewer had both
+halves shipped together. **Phase 1's stated exit now lands at the end of 1c-2b-2b.**
 
 **1b-2 was split into 1b-2a / 1b-2b** along the same cut: 1b-2a is the **boundary** — the five
 read-only commands, the wire error type and the typed frontend mirror — and 1b-2b is the **prose**,
@@ -902,6 +915,64 @@ sidebar total of 7 where it had read nine rows before.
 **One instrument lesson, recorded because it silently invalidated a reading.** `custom-protocol`
 embeds `dist` into the binary, so **`cargo build` must follow every `npm run build`** — one reading was
 taken against the previous bundle and looked entirely normal.
+
+### Phase 1c-2b-2a — the boundary, and what a byte-fidelity API can actually promise
+
+**`document_text` is a command now, and it never was one.** The claim carried in this file for two
+sub-phases — that it was "the one command with no frontend caller, tree-shaken out of `dist`" — was
+false: it was a `Workspace` method that `main.rs` had never registered. It is the **seventh** registered
+command (six read-only plus `set_menu_labels`), wrapped as `documentText()` in `src/lib/ipc/commands.ts`,
+and `dispatch_check.rs` proves seven reachable with `"permissions": []` by invoking each one, not by
+arguing from the handler list.
+
+**`UnknownEntry.value_text` closes the known lie-by-omission**, and it is the one wire-field addition of
+the sub-phase. An unmodelled entry carried `value_kind` and `value_span` and no text, so the pane could
+only say the entry was *recorded and left untouched*. The value's source text is now sliced **in Rust**
+and carried, because a JavaScript string index is a UTF-16 code unit and a `ByteSpan` is not — the same
+confusion the core's `CharToByte` adapter exists to prevent, prevented once more at the boundary.
+**Nothing renders it yet**: `detail.ts` and `DetailPane.svelte` deliberately do not read it, so the
+existing "the value is not on screen" strings stay true. Rendering it and changing those strings happen
+together in 1c-2b-2b, or not at all.
+
+**The fidelity claim is measured, not argued.** The whole synthetic corpus is copied into a workspace and
+asked for over the **real IPC dispatcher**, each answer compared byte for byte with `std::fs::read` —
+**33 fixtures, 37 406 bytes, identical**. CRLF, the UTF-8 BOM, a missing final newline, precomposed *and*
+decomposed `é`, astral `😀`, block-scalar terminal spaces, NUL and U+2028 / U+2029 all survive. Every
+Unicode assertion is written as a `\u{…}` escape, because a literal `é` in a test file can be normalised
+by an editor, at which point the test would agree with a normalising boundary instead of catching it.
+
+**What a `CommandResult<string>` can promise, stated narrowly after the review made it say so.** The
+contract is **exact preservation of valid UTF-8, and a typed refusal otherwise** — not "the raw file
+bytes". A file containing byte `0x80` reads fine with `std::fs::read` and then becomes
+`WorkspaceError::NotUtf8 { path, offset }`; it does not panic and is never decoded lossily, but the raw
+pane cannot show it at all. That is the sub-phase's most consequential inheritance: widening the wire to
+carry arbitrary disk bytes later is a **format change Phases 2–5 would pay for**, and it is recorded as a
+decision with its cost rather than discovered in Phase 3.
+
+**Two limits are named rather than implied.** `mock_builder()` swaps out the platform webview, so every
+measurement stops at Tauri's own response-body encoder and decoder and says **nothing** about WKWebView,
+`postMessage`, or a lone surrogate — closing that needs a reading of a running window, which is 1c-2b-2b's
+because it is the sub-phase that will have something on screen to read. And `value_text` is **uncapped**:
+disjoint spans bound *duplication* to about one extra document, which is not a bound on *size*, so one
+unknown block scalar spanning a very large file is owned by the cache, cloned by `get_document` and
+encoded again, on the main thread.
+
+**The review found six claims outrunning their evidence, and four were test names.** A test called
+`an_unmodelled_entrys_value_crosses_as_its_own_bytes` never built an app; `a_remote_origin_is_refused`
+said "any of the seven commands" and attempted three; `every_command_refuses_before_a_workspace_is_open`
+never called `text`; and `capabilities/default.json` said the harness drives "all six commands". All are
+closed **in production** — the remote-origin table is now asserted equal in both directions to the names
+parsed out of `generate_handler!`, so a command added without an entry fails the test rather than sliding
+past it.
+
+**What is proven.** **559 Rust tests across 16 binaries**, 0 failed (547 at 1c-2b-1's close), the frontend
+suite unchanged in verdict at **480 across 25 files**, and **fifteen disabling experiments** — ten in the
+phase, five in the fix round — each run, recorded and reverted. One (field reordering) correctly fired
+nothing, two fired less than they should have and are recorded as such, and one could not be constructed
+at all: **this application publishes no per-command ACL manifest**, so no per-command remote break exists
+to make; a vacuity check was run in its place and the impossibility is written down as hole 11 rather
+than as coverage. **226 dictionary keys, unchanged** — the sub-phase adds no user-facing string, which is
+the one thing that makes its "no hardcoded string" claim cheap to believe.
 
 ---
 
@@ -1934,6 +2005,27 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-2b-2a review disposition
+
+The review is
+[`docs/reviews/phase-1c-2b-2a-raw-text-boundary.md`](docs/reviews/phase-1c-2b-2a-raw-text-boundary.md):
+six findings, no Critical, and **every one of them the same defect** — a doc comment, a test name or a
+manifest asserting something its body cannot check. All six were closed before the commit, so no commit
+holds a demonstrated defect. The reviewer found **no** architecture, privacy, i18n, corpus-fixture or
+D2u regression.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | **High** | `document_text` is documented as returning "raw file bytes" / the file "exactly as it is on disk", but its wire type is `String` and the core rejects invalid UTF-8 first | **Real, and the wording was the defect — the behaviour is right.** A file containing `0x80` becomes a typed `{code: "notUtf8", path, offset}`; it does not panic and is not decoded lossily, but it cannot be shown. Every such claim in `commands.rs`, `dispatch_check.rs`, `workspace/mod.rs`, `commands.ts` and the notes is narrowed to **exact preservation of valid UTF-8, typed refusal otherwise**. Notes §3.1 records the `CommandResult<string>` decision, its user cost, and the fact that widening it later is a **wire-format change Phases 2–5 inherit** — the sub-phase's most consequential inheritance, now written down rather than discovered in Phase 3 |
+| 2 | **High** | `value_text` has never crossed the Tauri IPC dispatcher in any fidelity test | **Real, and it is the sub-phase's own headline claim not holding for half its subject.** `an_unmodelled_entrys_value_crosses_as_its_own_bytes` projected in-process and called `serde_json::to_value`; the dispatcher sweep invoked only `document_text`. A regression dropping `value_text` in `DocumentView` serialisation alone would have left every test green. New `dispatch_check::an_unmodelled_entrys_value_text_crosses_the_dispatcher_byte_for_byte`: `get_document` over the real dispatcher, entries found **by shape**, each `value_text` compared against `std::fs::read` sliced by the `value_span` that arrived beside it — a different source, so the oracle can disagree |
+| 3 | Medium | The tests stop before WKWebView while the public comments claim what the webview receives; NUL and U+2028 / U+2029 are untested | Real on both halves. The three hazards are asserted at command, dispatcher and wrapper level (new `document_text_carries_a_nul_and_the_two_unicode_line_separators`), and the webview claims are removed — `mock_builder()` swaps the platform webview out, so nothing here says anything about `postMessage` or a lone surrogate. **Measured rather than assumed: U+2028/9 *can* reach a `value_text`, a NUL cannot** — a source holding one does not parse. Recorded as hole 9, an **R20 deviation**: all three are pinned by hand-written sources, not corpus fixtures |
+| 4 | Medium | The "spans are provably disjoint" argument does not make an uncapped payload safe | Real, and the distinction is exact: disjointness bounds **duplication** at roughly one extra document, not **size**. §3 rewritten — the pathological input is spelled out with its three main-thread copies, and the corpus's 342-byte maximum is labelled a fact about this corpus rather than a bound. **The uncapped decision is kept** — right for a bounded read-only phase — but the saving it does not demonstrate is no longer claimed. Cost recorded as hole 10 |
+| 5 | Medium | `a_remote_origin_is_refused` claims all seven commands and attempts three | Real, and a **security** claim with a false body: remote access accidentally permitted for `get_document` left the test green. Extended to all seven with well-formed arguments, and the attempt table is now asserted equal **in both directions** to the names parsed from `generate_handler!` — so a command added without an entry fails the test instead of sliding past it |
+| 6 | Low | `every_command_refuses_before_a_workspace_is_open` never calls `text` | Real, and the **seventh** occurrence of "read the test's name, then its body, and ask whether the body could fail if the name's claim were false". `session.text(id)` added, with the test's scope written down |
+
+One change outside the six, found while closing them: `src-tauri/capabilities/default.json` asserted the
+harness "drives all six commands", which this sub-phase falsified the moment it registered a seventh.
+
 ## Phase 1c-2b-1 review disposition
 
 The review is
@@ -2161,6 +2253,37 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-2b-2a
+
+Every command below was run by the orchestrator **after** the review fix round, not taken on the
+worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | ✅ **559 tests across 16 binaries**, 0 failed (547 at 1c-2b-1's close; `src-tauri` 73 → 75) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt --check` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `npm test` | ✅ **480 tests across 25 files**, 0 failed |
+| `npm run check` | ✅ 369 files, **0 errors, 0 warnings** (run with `--fail-on-warnings`) |
+| `npm run build` | ✅ built; `dist/assets/index-*.js` 103.17 kB |
+| `rg -c '^\s*"' src/lib/i18n/{en,es}.json` | ✅ **226 and 226** — unchanged, re-derived not quoted; the sub-phase adds no string |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| `document_text` is a registered, reachable command | ✅ | Seventh in `generate_handler!`; `dispatch_check.rs` **invokes** all seven with `"permissions": []` rather than arguing from the handler list. `wire_contract.rs` still asserts the six forbidden Phase 2 names absent from both sets |
+| The unmodelled entry's value text is on the wire, sliced in Rust | ✅ | `UnknownEntry.value_text`, mirrored in `src/lib/ipc/types.ts`. Experiment J — slicing by `chars()` instead of bytes — fails four tests |
+| Every byte hazard survives the crossing | ✅ **for valid UTF-8** | 33 fixtures / 37 406 bytes byte-identical through the **real dispatcher**, plus NUL and U+2028/9 asserted at three levels. The qualification is the point: see the next row |
+| The contract is stated no wider than it holds | ✅ **after the review** | Narrowed to *exact preservation of valid UTF-8, typed refusal otherwise*. Invalid UTF-8 is `NotUtf8 { path, offset }` — verified independently in `crates/espansoconfig-core/src/workspace/mod.rs:634`, `String::from_utf8`, never `from_utf8_lossy` |
+| Both new values are proven **through the dispatcher** | ✅ **after the review** | This was false at first submission for `value_text` and is review finding 2 |
+| No user-facing string is hardcoded | ✅ **and cheaply** | The sub-phase adds **no** user-facing string — 226 keys before and after. R31's blind spots still hold in general and are enumerated by name in the notes |
+| No screen changed | ✅ | `detail.ts` and `DetailPane.svelte` are comment-only edits; `value_text` is deliberately unread, so the existing "value not shown" strings stay true |
+| WKWebView is covered | ❌ **not established, and said so** | `mock_builder()` swaps it out. Named as a limitation in notes §4.3; closing it needs a window reading, which is 1c-2b-2b's |
+| The Spanish strings are Spanish | ➖ **not applicable** | No new Spanish prose this sub-phase. The standing gap is unchanged |
 
 ## Verification — Phase 1c-2b-1
 
@@ -2679,56 +2802,80 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-2b-1 is complete. Start Phase 1c-2b-2 — the raw text surfaces, and Phase 1's exit.**
+**Phase 1c-2b-2a is complete. Start Phase 1c-2b-2b — the screens, and Phase 1's exit.**
 
-The app now says things *about* a snippet and the file behind it: hazards, diagnostics, and a file that
-*could not* be read distinguishable from one nobody *has* read. **What it cannot do is show any of the
-bytes those judgements are about.** 1c-2b-2 does, and the plan's stated exit for Phase 1 lands there:
-*the owner can browse their entire real config and every snippet renders correctly.*
+The bytes are now **on the wire and proven to arrive intact**: `document_text` is a registered command,
+`UnknownEntry.value_text` carries an unmodelled entry's own source text, and both were measured through
+the real IPC dispatcher rather than argued about. **What nothing does yet is put any of them on a
+screen.** 1c-2b-2b does, and the plan's stated exit for Phase 1 lands there: *the owner can browse their
+entire real config and every snippet renders correctly.*
 
-Unlike 1c-2b-1, **every item here widens the wire**, which is why they were cut into their own
-sub-phase. A data-format decision made here is inherited by Phases 2–5.
+Unlike 1c-2b-2a, **nothing here widens the wire** — every value 1c-2b-2b needs already crosses it. The
+failure mode is the opposite one: a viewer that says "as written" with a transformation sitting between
+the file and the screen.
 
 Concretely, and in roughly this order:
 
-1. **Register `document_text` as a Tauri command — and note the correction already recorded.** The
-   claim that it was "the one command with no frontend caller, tree-shaken out of `dist`" was **wrong**:
-   `document_text` is a `Workspace` method and **not a registered command at all**. `main.rs` registers
-   six and it is not among them. So this is a command, a `types.ts` mirror entry, and updates to
-   `src-tauri/src/wire_contract.rs` and `src-tauri/src/dispatch_check.rs` — meaningfully more than
-   "add a caller". **`dispatch_check.rs` currently proves six commands reachable with
-   `"permissions": []`; a seventh must be proven the same way, not argued.** `wire_contract.rs`
-   asserts the six forbidden Phase 2 command names absent from both sets — keep that true.
-2. **The raw YAML viewer.** Phase 3 owns CodeMirror; 1c-2b-2 needs only to display text faithfully.
-   Faithfully is the whole difficulty: this project's premise is byte fidelity, and the corpus contains
-   CRLF, a BOM, files with no final newline, decomposed and astral Unicode, and block scalars with
-   deliberate trailing spaces. **A viewer that normalises any of that is showing the owner a file they
-   do not have.** Decide explicitly what happens to each and write it down.
-3. **Show `MatchView.source_text`** — the match's own bytes, already on the wire and D2u-safe because
+1. **The raw YAML viewer.** Phase 3 owns CodeMirror; 1c-2b-2b needs only to display text faithfully, and
+   faithfully is the whole difficulty. Call `documentText()` — the wrapper exists in
+   `src/lib/ipc/commands.ts` and **has no caller yet**, so it is currently tree-shaken out of `dist`.
+   **The Rust side of fidelity is settled and measured; the browser side is not.** The corpus contains
+   CRLF, a BOM, files with no final newline, decomposed and astral Unicode, block scalars with real
+   trailing spaces, NUL and U+2028 / U+2029 — and how each of those survives *HTML rendering* is a
+   different question from how it survived serde. `white-space`, a BOM rendered as a zero-width
+   character, and a NUL in a text node are the three to check first. **Read notes §4 of
+   `1c-2b-2a-notes.md` before deciding anything here — the table is already written for the wire half.**
+2. **Show `MatchView.source_text`** — the match's own bytes, already on the wire and D2u-safe because
    it *is* source text. Note its boundary: it stops at the match's mapping, so the comment above a
    snippet is **not** in it. Say what it is rather than implying it is the snippet's whole text.
-4. **The unmodelled entry's value — the known lie-by-omission, and the reason it is a Rust task.**
-   `UnknownEntry` carries `value_kind` and `value_span` but **no value text**, so the pane claims only
-   that the entry is *recorded and left untouched*. Displaying it needs an exact **Rust-sliced** source
-   span: byte slicing stays in Rust, because JavaScript string indices are UTF-16 units and that
-   confusion is exactly what the core's `CharToByte` adapter exists to prevent. See `1c-2a-notes.md`
-   hole 13. **This is a wire-field addition — the only one on this list.**
+3. **Render `UnknownEntry.value_text`, and change its strings in the same commit.** The field is on the
+   wire and `src/lib/browser/detail.ts` **deliberately does not read it** — `UnknownRow` omits it on
+   purpose, so `browser.detail.unknownValue` ("the value is not on screen") is still true. Reading it
+   without rewording that string makes it false in the other direction. **The two go together or
+   neither goes.**
+4. **Close the WKWebView gap, which is the one thing 1c-2b-2a could not.** `mock_builder()` swaps the
+   platform webview out, so every fidelity measurement stops at Tauri's encoder. 1c-2b-2b is the first
+   sub-phase with something on screen to read, so a **window reading** is the instrument — and it is the
+   only one that can answer what WKWebView does with a BOM, a NUL, or U+2028.
 
 **Then Phase 1's exit must actually be checked, not assumed.** "The owner can browse their entire real
 config and every snippet renders correctly" is a claim about the **real** corpus, which is gitignored
 and present locally (`./scripts/sync-real-corpus.sh`). Nothing in this project has yet run the UI over
 it end to end. Do that, and record it the way every other claim here is recorded — with counts and
-error positions, **never with content** (D1 is absolute; the repository is public).
+error positions, **never with content** (D1 is absolute; the repository is public). Note one thing
+1c-2b-2a measured that bears on it: the real corpus produces **zero** unmodelled entries (13 files, 566
+keys, all modelled), so it will not exercise item 3 at all — synthetic fixtures are the only coverage
+that item has.
 
-**Two things 1c-2b-2 should look at before it starts, both left open by 1c-2b-1.**
+**Three things 1c-2b-2b should look at before it starts.**
 
-- **Hole 16 — the empty snippet list and the sentence explaining it are produced by unrelated code.**
-  A match-shaped profile now yields "0 of 0" plus a "folder and content disagree" diagnostic, and
-  nothing ties the two together; a change to either leaves the other in place, silently.
-- **Hole 2 — the conflation one level down.** A file that failed to *parse* still shows `0` exactly
-  like a file that is genuinely empty. `parsed` is already carried on the wire for this.
+- **Hole 16 (from 1c-2b-1) — the empty snippet list and the sentence explaining it are produced by
+  unrelated code.** A match-shaped profile now yields "0 of 0" plus a "folder and content disagree"
+  diagnostic, and nothing ties the two together; a change to either leaves the other in place, silently.
+- **Hole 2 (from 1c-2b-1) — the conflation one level down.** A file that failed to *parse* still shows
+  `0` exactly like a file that is genuinely empty. `parsed` is already carried on the wire for this.
+- **Hole 10 (from 1c-2b-2a) — `value_text` is uncapped and the viewer is where that lands.** Disjoint
+  spans bound duplication, not size. A raw viewer is the first thing that will hold a very large
+  document *and* its unmodelled slices in the same frame.
 
-**What 1c-2b-2 inherits, and should not rebuild.**
+**What 1c-2b-2b inherits from 1c-2b-2a, and should not rebuild.**
+
+- **`documentText(id)`** in `src/lib/ipc/commands.ts`, returning `CommandResult<string>`, with the
+  contract stated narrowly: **exact preservation of valid UTF-8, typed refusal otherwise.** A non-UTF-8
+  file yields `{code: "notUtf8", path, offset}` and **cannot be displayed at all** — the viewer needs a
+  branch for that, and the dictionary has no string for it yet.
+- **`UnknownEntry.value_text`**, sliced in Rust from `value_span`. **Never re-slice by span in
+  JavaScript**: a JS string index is a UTF-16 code unit and a `ByteSpan` counts bytes, so
+  `text.slice(span.start, span.end)` is wrong for any document with a non-ASCII character before the
+  span and wrong by a different amount again for an astral one. Experiment J in `1c-2b-2a-notes.md` is
+  the demonstration.
+- **The fidelity table, §4 of `1c-2b-2a-notes.md`** — every byte hazard, what it does at the wire, and
+  what pins it. 1c-2b-2b's job is the *rendering* column, which is empty.
+- **A dispatcher-level test harness** in `src-tauri/src/dispatch_check.rs` that copies the corpus into a
+  workspace and invokes real commands, and a remote-origin table now asserted equal in both directions
+  to the names in `generate_handler!`. **Add a command and that test fails until its row exists.**
+
+**What earlier sub-phases leave, and 1c-2b-2b should also not rebuild.**
 
 - **A detail pane, and the rule that keeps it thin.** New work deciding *what* appears goes in
   `src/lib/browser/detail.ts` beside `describeMatch()`; the component gets the walk. The text scan at
@@ -2762,16 +2909,23 @@ error positions, **never with content** (D1 is absolute; the repository is publi
   `1c-1-notes.md` hole 5 is the shape of the work: `menuUnavailable`, `menuBuildFailed` and
   `invalidMenuLabels` still have a string and no screen.
 
-**Five rules 1c-2b-2 is most likely to break.**
+**Five rules 1c-2b-2b is most likely to break** — and 1c-2b-2a broke the first of them six times, in
+doc comments and test names rather than on a screen, which is the same defect in the one place the
+markup scan can never see.
 
 - **Do not claim on screen what the app does not do.** New in 1c-2a, and **1c-2b-1 broke it three
   times in one sub-phase** — a string saying a second YAML document "is shown" when nothing showed it,
   a string saying the *snippet* held a hazard that `disqualifying_hazard` also finds on ancestors, and
   two sentences in its own notes asserting profiles stayed out of `scopedMatches` while they did not.
   The pattern is identical every time: **the sentence was written from the intent, not from the data.**
-  1c-2b-2 is more exposed than either predecessor, because its entire subject is *showing bytes* and
-  its most likely failure is a viewer that says "as written" while a transformation sits between the
-  file and the screen. **Before writing a string, check the data behind it exists and says that.**
+  1c-2b-2a made it six more, all in doc comments and test names — a test called *…crosses as its own
+  bytes* that never built an app, one called *a remote origin is refused* that attempted three of seven,
+  one called *every command…* that omitted the new one, and a capability manifest that said "all six"
+  the day a seventh was registered. **1c-2b-2b is more exposed than any of them**, because its entire
+  subject is *showing bytes* and its most likely failure is a viewer that says "as written" while a
+  transformation sits between the file and the screen. **Before writing a string, check the data behind
+  it exists and says that** — and before writing a test *name*, read the body and ask whether it could
+  fail if the name were false.
 - **Never hardcode a user-facing string** (CLAUDE.md §2). Every namespace now has a caller, so a new
   string here is genuinely new prose in **both** dictionaries.
 - **R31 — a clean lint run is not evidence.** `scripts/lint/hardcoded-strings.ts` sees `.svelte`
@@ -2910,6 +3064,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The seven typed wrappers, and `documentText(id)` is the one with no caller.** Its contract is stated narrowly and must stay that way: **exact preservation of valid UTF-8, typed refusal otherwise** — a non-UTF-8 file answers `{code: "notUtf8", path, offset}` and cannot be displayed at all, which is a branch the raw viewer needs and the dictionary has no string for yet |
+| [`src-tauri/src/dispatch_check.rs`](src-tauri/src/dispatch_check.rs) | **Where reachability and wire fidelity are *measured* rather than argued.** Seven commands invoked with `"permissions": []`; the corpus copied into a workspace and answered byte-for-byte through the real dispatcher (33 fixtures, 37 406 bytes); `value_text` fetched through `get_document` and checked against `std::fs::read` sliced by the span that arrived beside it. The remote-origin table is asserted equal **in both directions** to the names in `generate_handler!` — **add a command and this test fails until its row exists.** What it does *not* cover is WKWebView: `mock_builder()` swaps it out |
+| [`docs/decisions/1c-2b-2a-notes.md`](docs/decisions/1c-2b-2a-notes.md) | Phase 1c-2b-2a's decision record: why `document_text` is a command and never was one (§2), the uncapped `value_text` decision with its cost rather than a saving it cannot prove (§3), **the `CommandResult<string>` inheritance Phases 2–5 would pay to widen (§3.1)**, **the fidelity table hazard by hazard — the wire column is done, the *rendering* column is 1c-2b-2b's (§4)**, the WKWebView limitation named rather than implied (§4.3), the fifteen disabling experiments including the one that could not be constructed at all (§6, §6.0), the holes stated as holes (§9) and what 1c-2b-2b inherits (§10) |
+| [`docs/reviews/phase-1c-2b-2a-raw-text-boundary.md`](docs/reviews/phase-1c-2b-2a-raw-text-boundary.md) | The Phase 1c-2b-2a review, dispositioned above. **Six findings, and every one the same defect**: a doc comment, a test name or a manifest asserting what its body cannot check. Worth re-reading before writing any test name in 1c-2b-2b — four of the six were names |
 | [`src/lib/browser/`](src/lib/browser/) | **The data path 1c-2 renders from.** `workspace.svelte.ts` (`createBrowserState` — the four states, the two generation tokens, `installView`, `loadFailures`), `selection.ts` (**R27 in code**: a position to look at and `MatchView.source_text` to check with, never a display projection), `search.ts` (the matching rule; the haystack is the core's), `sidebar.ts` (grouping, `holdsMatches`, the pending count), `labels.ts`, `notices.ts`, `fixtures.ts` (neutral synthetic builders) |
 | [`src/lib/browser/findings.ts`](src/lib/browser/findings.ts) | **What the app says about a *file*, and the home for any new judgement.** Unions `DocumentView.hazards` with the kinds named by `Hazard` diagnostics, filters those out of the sentence list, and carries **two identities over one data type**: `diagnosticIdentity` (code only) decides which sentence appears, `occurrenceIdentity` (code + span + node + path) decides how many times it is counted, rendered "in N places". Rendered by `SnippetList.svelte` — **the middle pane, because a file that fails to parse has no matches and so can never be selected into the third one** |
 | [`docs/decisions/1c-2b-1-notes.md`](docs/decisions/1c-2b-1-notes.md) | Phase 1c-2b-1's decision record: where a hazard belongs and why the permissive arm draws nothing, the two diagnostic identities, the profile projection and the `kind`-not-`shape` guard, the display-index mapped type, **the strings and R31's blind spots by name (§6.2 holds the string-versus-data sweep that found a second false claim)**, the twenty-five disabling experiments **including the three that did not fire** (§7), what the phase got wrong (§10.1 — the third occurrence of *a written claim ahead of its data*), the two window readings and the `cargo build`/`npm run build` lesson (§7.7), the coverage holes stated as holes (§11) and the two review dispositions (§13, §13.1) |
@@ -3016,6 +3174,7 @@ _Updated at each phase boundary._
 | 1c-2a | `5c830d0` | ✅ pushed to `origin/main` | clean |
 | 1c-2a cleanup | `82ad7c5` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-1 | `41b5e40` | ✅ pushed to `origin/main` | clean |
+| 1c-2b-2a | `PENDING` | pending | pending |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b

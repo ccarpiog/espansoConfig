@@ -59,14 +59,17 @@
    * things goes in the `dt` — a name, the empty marker, or "not a plain name" —
    * is `describeUnknown`'s decision, not this file's: an entry whose key is the
    * empty string used to reach here as a bare string and draw a blank `dt`.
-   * `UnknownEntry`
-   * carries `value_span` and `value_kind` and **no value text at all**, so the
-   * text is not available here; slicing the file by that span is a Rust job,
+   * The value's own text is not shown, and as of Phase 1c-2b-2a that is a
+   * choice rather than a limit: the wire now carries it — sliced in Rust,
    * because a JavaScript string index is a UTF-16 offset and a `ByteSpan` is
-   * not. The strings therefore say the entry was *recorded and left untouched*
-   * — a claim about what the app does to the file — and `unknownValue` says in
-   * so many words that the value is not on screen. See
-   * `docs/decisions/1c-2a-notes.md` section 12, hole 13.
+   * not — and `UnknownRow` deliberately does not, so nothing this file walks
+   * holds it. The strings therefore still say the entry was *recorded and left
+   * untouched* — a claim about what the app does to the file — and
+   * `unknownValue` still says in so many words that the value is not on screen,
+   * and both remain true. Showing it is 1c-2b-2b's, and it changes those
+   * strings at the same time or not at all. See
+   * `docs/decisions/1c-2a-notes.md` section 12, hole 13, and
+   * `docs/decisions/1c-2b-2a-notes.md`.
    *
    * **The one judgement in this pane is a refusal, never a permission.**
    * `matchEditability` answers `unrestricted` for most matches and this file

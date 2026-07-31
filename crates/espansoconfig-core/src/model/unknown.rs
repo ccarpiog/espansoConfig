@@ -62,6 +62,35 @@ pub struct UnknownEntry {
     pub value_span: ByteSpan,
     /// What the value is, unprojected.
     pub value_kind: ValueKind,
+    /// The bytes [`UnknownEntry::value_span`] names, exactly as the file writes
+    /// them.
+    ///
+    /// **Sliced here, in Rust, and never reconstructed by a caller.** A
+    /// [`ByteSpan`] is a pair of *byte* offsets and a JavaScript string index is
+    /// a UTF-16 code-unit offset, so a frontend holding the document text and
+    /// this span cannot cut the same slice: an astral character makes the two
+    /// coordinate systems disagree by one unit each time it is passed. That
+    /// confusion is what [`crate::syntax::CharToByte`] exists to prevent inside
+    /// the parser, and carrying the finished slice is what prevents it across
+    /// the wire.
+    ///
+    /// **Never truncated.** The whole slice crosses however long it is, so a
+    /// reader is never shown a prefix that does not say it is one. The total is
+    /// bounded by the document: the projection does not descend into an
+    /// unmodelled value, so no unknown entry's value span can contain another
+    /// one, and the spans of one document are disjoint.
+    ///
+    /// Empty when the span does not slice — an out-of-bounds or non-boundary
+    /// span, which only a defect in the index could produce. An empty string is
+    /// the honest answer for "these bytes could not be cut"; it is not
+    /// distinguishable from a genuinely empty value, and
+    /// [`UnknownEntry::value_span`] is what tells the two apart.
+    ///
+    /// It is **source text and nothing else** (D2u): not decoded, not
+    /// unescaped, not re-indented, not normalised. A block scalar's trailing
+    /// spaces, a CRLF line ending inside it and a decomposed `é` all cross as
+    /// they are written.
+    pub value_text: String,
     /// The path that names this entry, or `None` when **no path can**.
     ///
     /// A named limit rather than an omission, and it has exactly two causes:
@@ -188,8 +217,15 @@ impl MappingScan {
     }
 
     /// Records that `key_node` was not modelled, and why.
+    ///
+    /// `source` is the document's bytes, and the only thing this reads out of
+    /// them is the slice [`UnknownEntry::value_span`] names. The slice is taken
+    /// here rather than by whoever displays the entry, for the reason that
+    /// field's documentation gives: a byte span cannot be applied to a
+    /// JavaScript string.
     pub(crate) fn skip(
         &mut self,
+        source: &str,
         index: &SyntaxIndex,
         key_node: NodeId,
         key: Option<&str>,
@@ -205,6 +241,10 @@ impl MappingScan {
             .node(value_node)
             .map(|node| node.span)
             .unwrap_or_default();
+        // `slice` rather than an index: a span the index cannot honour is a
+        // defect, and answering with an empty string beats panicking inside a
+        // read-only projection.
+        let value_text = value_span.slice(source).unwrap_or_default().to_owned();
         let path = match (key, &self.path, reason) {
             (Some(name), Some(base), UnknownReason::NotModelled)
             | (Some(name), Some(base), UnknownReason::UnexpectedShape { .. }) => {
@@ -218,6 +258,7 @@ impl MappingScan {
             key_span,
             value_span,
             value_kind: ValueKind::of_node(index, value_node),
+            value_text,
             path,
             reason,
         });

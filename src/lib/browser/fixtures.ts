@@ -154,12 +154,14 @@ export function elidedValue(kind: ValueKind, node = 0): ValueView {
  * @param key - The key's decoded text, or `null` for a non-scalar key.
  * @param reason - Why it was not modelled.
  * @param keyNode - The key node the coverage accounting balances on.
+ * @param valueText - The value's source text, as Rust sliced it.
  * @returns An unknown entry.
  */
 export function unknownEntry(
   key: string | null,
   reason: UnknownReason = 'NotModelled',
-  keyNode = 0
+  keyNode = 0,
+  valueText = 'x'
 ): UnknownEntry {
   return {
     key,
@@ -167,6 +169,11 @@ export function unknownEntry(
     key_span: { start: 0, end: 1 },
     value_span: { start: 1, end: 2 },
     value_kind: 'Scalar',
+    // Carried since Phase 1c-2b-2a. It is deliberately **not** derived from
+    // `value_span` here: the wire's spans count bytes and this is a JavaScript
+    // string, so a fixture that cut one out of the other would model the exact
+    // confusion the field exists to avoid.
+    value_text: valueText,
     path: null,
     reason
   };

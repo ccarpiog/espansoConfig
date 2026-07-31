@@ -210,6 +210,26 @@ export interface UnknownEntry {
   readonly value_span: ByteSpan;
   /** What the value is, unprojected. */
   readonly value_kind: ValueKind;
+  /**
+   * The bytes {@link UnknownEntry.value_span} names, exactly as the file writes
+   * them — **sliced in Rust**, never here.
+   *
+   * A `ByteSpan` counts bytes and a JavaScript string index counts UTF-16 code
+   * units, so `text.slice(span.start, span.end)` is wrong the moment a document
+   * holds one character outside the Basic Multilingual Plane, and wrong by a
+   * different amount for every non-ASCII character before the span. Rust cuts
+   * the slice where the two agree, and this field carries the result.
+   *
+   * Never truncated: the whole value crosses however long it is, so nothing on
+   * this wire is a prefix pretending to be a value. Empty when the span could
+   * not be cut at all, which only a defect could produce — `value_span` is what
+   * distinguishes that from a genuinely empty value.
+   *
+   * Source text, never a resolved value (D2u). As of Phase 1c-2b-2a it is on
+   * the wire and **no screen reads it**; showing it is 1c-2b-2b's, and until
+   * then the detail pane's strings correctly say the value is not displayed.
+   */
+  readonly value_text: string;
   /** The path naming this entry, or `null` when no path can. */
   readonly path: DocumentPath | null;
   /** Why it was not modelled. */

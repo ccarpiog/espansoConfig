@@ -1,5 +1,5 @@
 /**
- * The five read-only commands, typed.
+ * The six read-only commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -55,6 +55,7 @@ export const COMMAND_NAMES = [
   'list_documents',
   'get_document',
   'get_match',
+  'document_text',
   'reload_document'
 ] as const;
 
@@ -136,6 +137,51 @@ export async function getDocument(id: DocumentId): Promise<CommandResult<Documen
 export async function getMatch(id: MatchId): Promise<CommandResult<MatchView>> {
   return call<MatchView>('get_match', { id });
 } // End of function getMatch()
+
+/**
+ * Returns the whole text of one document, unchanged, when the file is valid
+ * UTF-8.
+ *
+ * The one command on this boundary that answers with a file's **own text**
+ * rather than a projection of it, and the contract is exactly that narrow:
+ * **exact preservation of valid UTF-8, and a typed refusal otherwise.**
+ *
+ * This is *not* a byte-fidelity API for arbitrary disk bytes, and the return
+ * type is why — `CommandResult<string>` cannot represent a byte sequence that is
+ * not valid UTF-8. A file containing one is refused in Rust before this command
+ * runs, and arrives here as `notUtf8` carrying the byte offset of the first
+ * invalid sequence. Nothing is decoded lossily and no U+FFFD is substituted: the
+ * caller is told the file cannot be represented rather than shown a mangled
+ * version of it, and the raw pane consequently cannot display that file at all.
+ *
+ * For a file that *is* valid UTF-8, nothing between `std::fs::read` and this
+ * promise re-encodes the text: CRLF endings, a leading UTF-8 BOM, a missing
+ * final newline, a decomposed `é`, an astral character, a NUL, U+2028/U+2029 and
+ * a block scalar's trailing spaces all arrive as written, because JSON escaping
+ * is exactly reversible. `src-tauri/src/dispatch_check.rs` measures that over
+ * the byte-exact corpus fixtures rather than asserting it here.
+ *
+ * **The measurement stops at the response body Tauri builds.** Tauri's mock
+ * runtime swaps the platform webview out, so no test in this repository says
+ * anything about what WKWebView or `postMessage` then does with the string. That
+ * is a named hole (`docs/decisions/1c-2b-2a-notes.md` section 4.3), not an
+ * implication.
+ *
+ * **Do not cut a `ByteSpan` out of this string.** Every span on this wire counts
+ * bytes; a JavaScript string index counts UTF-16 code units, and the two agree
+ * only for ASCII. A value that needs slicing is sliced in Rust and carried —
+ * `UnknownEntry.value_text` is the one that exists today.
+ *
+ * A file that does not *parse* still has text, and this is what returns it. Only
+ * a file that cannot be *read* — or cannot be decoded — rejects.
+ *
+ * @param id - The document's session-local identity.
+ * @returns The document's text, or `noWorkspaceOpen` / `unknownDocument` / `io`
+ *   / `notUtf8`.
+ */
+export async function documentText(id: DocumentId): Promise<CommandResult<string>> {
+  return call<string>('document_text', { id });
+} // End of function documentText()
 
 /**
  * Re-reads one document from disk, reparsing only if its bytes changed.

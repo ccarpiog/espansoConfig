@@ -468,7 +468,13 @@ impl Workspace {
         self.get_document(id).map(|document| &document.view)
     }
 
-    /// The raw bytes of a document, parsing it on first use.
+    /// The whole text of a document, parsing it on first use.
+    ///
+    /// A `&str`, not bytes: a document only exists here once [`read_utf8`] has
+    /// accepted it, so a file that is not valid UTF-8 was already refused with
+    /// [`WorkspaceError::NotUtf8`] and never reaches this method. What this
+    /// returns is the file unchanged — no line ending converted, no BOM
+    /// stripped, no normalisation — for every document there is.
     ///
     /// Always available, **including for a document that failed to parse** —
     /// that is what the raw YAML pane shows, and refusing to hand back the text

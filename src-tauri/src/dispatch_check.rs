@@ -1,4 +1,4 @@
-//! The six commands, invoked through the real dispatcher.
+//! The seven commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -64,6 +64,44 @@
 //!
 //! **Nothing here claims a menu exists.** `docs/decisions/1b-2b-notes.md`
 //! section 11 records that as a hole, with what closes it.
+//!
+//! # The seventh command, and the fourth thing only the dispatcher decides
+//!
+//! Phase 1c-2b-2a adds `document_text`, the first command whose answer is a
+//! file's **own text** rather than a projection of it, and one wire field,
+//! `UnknownEntry.value_text`, which is a slice of that text. That makes a
+//! fourth question this harness is the right place to ask: *does a file's text
+//! survive the crossing?*
+//!
+//! **The contract being measured is narrower than "bytes".** The wire type is a
+//! JSON string, so what is pinned here is *exact preservation of valid UTF-8*. A
+//! file that is not valid UTF-8 is refused in the core, before either value can
+//! be built, and crosses as the typed `notUtf8` code; it cannot be carried and
+//! is not decoded lossily. See [`crate::commands::WorkspaceSession::text`].
+//!
+//! Everything else on this wire is a model, so a normalisation would show up as
+//! a wrong field. A document's text has no fields, and the corpus deliberately
+//! contains bytes that editors, formatters, Unicode normalisers and JSON
+//! encoders each have an opinion about — CRLF endings, a leading UTF-8 BOM, a
+//! missing final newline, precomposed **and** decomposed `é`, an astral
+//! character and a block scalar's real trailing spaces. Reasoning that
+//! `serde_json` escapes `\r` and `\n` and that a parser reverses those escapes
+//! is an *argument*; copying the fifteen byte-exact fixtures of `CLAUDE.md`
+//! section 4 into a workspace, asking for each one over IPC and comparing the
+//! answer with `std::fs::read` of the same file is *evidence*, and that is what
+//! `document_text_answers_every_synthetic_fixture_byte_for_byte` does.
+//! `an_unmodelled_entrys_value_text_crosses_the_dispatcher_byte_for_byte` asks
+//! the same question of the second value, through `get_document`, because a
+//! regression confined to serializing a `DocumentView` would leave the bare
+//! string of `document_text` perfectly correct.
+//!
+//! What this still cannot see is the webview: `mock_builder()` swaps the
+//! platform webview out, so what is measured is the response body Tauri
+//! produces, up to and including its JSON encoding and decoding. A defect in
+//! WKWebView's own string handling, or in `postMessage`, would be invisible
+//! here, and `docs/decisions/1c-2b-2a-notes.md` section 4.3 records that as a
+//! named limitation rather than an implication. **No doc comment, test name or
+//! assertion message in this repository may say what "the webview receives".**
 
 use std::fs;
 
@@ -178,15 +216,21 @@ fn synthetic_tree() -> TempDir {
     dir
 }
 
-/// All five commands are reachable, in order, with `"permissions": []`.
+/// All six read-only commands are reachable, in order, with `"permissions": []`.
 ///
 /// Half of the answer to the capability question — the menu command is the
 /// other half, below. If the empty capability set blocked an application
 /// command, the very first `invoke` would
 /// come back as a **string** — the dispatcher's rejection message — instead of
 /// the object below, and every assertion after it would fail.
+///
+/// `document_text` is the sixth, added at Phase 1c-2b-2a, and it is driven here
+/// for the same reason as the other five rather than argued to be like them: a
+/// command absent from `generate_handler!` is a runtime failure and nothing in a
+/// direct call to [`WorkspaceSession::text`] would notice. What its answer
+/// *contains* is a separate question, asked over the byte-exact corpus below.
 #[test]
-fn the_five_commands_are_reachable_with_an_empty_capability_set() {
+fn the_six_read_only_commands_are_reachable_with_an_empty_capability_set() {
     let dir = synthetic_tree();
     let app = mock_app();
     let webview = main_window(&app);
@@ -240,11 +284,536 @@ fn the_five_commands_are_reachable_with_an_empty_capability_set() {
         .expect("the identity is from this parse");
     assert_eq!(found["trigger"]["trigger"]["text"], ":one");
 
-    // 6. reload_document.
+    // 6. document_text, whose answer is a bare JSON string rather than an
+    //    object — the one shape on this surface that is not a model.
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some("matches:\n  - trigger: ':one'\n    replace: first\n"),
+        "document_text must answer the file, not a projection of it: {text}"
+    );
+
+    // 7. reload_document.
     let reloaded =
         invoke(&webview, "reload_document", json!({ "id": document_id })).expect("the file reads");
     assert_eq!(reloaded["revision"], view["revision"]);
-} // End of function the_five_commands_are_reachable_with_an_empty_capability_set()
+} // End of function the_six_read_only_commands_are_reachable_with_an_empty_capability_set()
+
+/// The directory holding the committed, hand-authored corpus.
+///
+/// The **synthetic** corpus only. `crates/espansoconfig-core/tests/corpus/real/`
+/// is the owner's private configuration and no test in this repository reads it
+/// (CLAUDE.md section 1).
+fn synthetic_corpus() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("crates")
+        .join("espansoconfig-core")
+        .join("tests")
+        .join("corpus")
+        .join("synthetic")
+}
+
+/// The fifteen fixtures whose whitespace and encoding *are* the test data.
+///
+/// `CLAUDE.md` section 4's table, transcribed so that a fixture renamed or
+/// deleted fails here as well as in `tests/corpus_integrity.rs`. Listing them by
+/// name rather than sweeping the directory alone is what makes the sweep below
+/// able to say *these* files crossed intact, not merely *some* files did.
+const BYTE_EXACT_FIXTURES: [&str; 15] = [
+    "crlf-line-endings.yml",
+    "bom-utf8.yml",
+    "no-trailing-newline.yml",
+    "unicode-offsets.yml",
+    "block-scalars.yml",
+    "block-scalar-terminal-spaces.yml",
+    "block-scalar-leading-blank-lines.yml",
+    "folded-more-indented.yml",
+    "block-scalar-header-tails.yml",
+    "file-comments-and-mixed-endings.yml",
+    "single-line-no-line-ending.yml",
+    "run-based-removal-boundaries.yml",
+    "move-block-scalar-seams.yml",
+    "move-run-joins.yml",
+    "move-kept-comment-joins-a-block.yml",
+];
+
+/// Builds a workspace whose `match/` directory is the whole synthetic corpus.
+///
+/// `fs::copy` moves bytes, so every fixture arrives with the CRLF pairs, BOM,
+/// missing final newline and trailing spaces it was committed with. Returns the
+/// directory and the file names copied into it, sorted.
+fn corpus_workspace() -> (TempDir, Vec<String>) {
+    let dir = TempDir::new().expect("temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("config")).unwrap();
+    fs::create_dir_all(root.join("match")).unwrap();
+    fs::write(root.join("config").join("default.yml"), "backend: auto\n").unwrap();
+
+    let corpus = synthetic_corpus();
+    let mut copied = Vec::new();
+    let entries = fs::read_dir(&corpus)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", corpus.display()));
+    for entry in entries {
+        let path = entry.expect("a corpus directory entry").path();
+        let is_yaml = path.extension().and_then(|ext| ext.to_str()) == Some("yml");
+        if !path.is_file() || !is_yaml {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .expect("a file has a name")
+            .to_string_lossy()
+            .into_owned();
+        fs::copy(&path, root.join("match").join(&name))
+            .unwrap_or_else(|error| panic!("cannot copy {name}: {error}"));
+        copied.push(name);
+    } // End of the loop over the synthetic corpus directory
+    copied.sort();
+    (dir, copied)
+} // End of function corpus_workspace()
+
+/// The offset of the first byte at which two slices differ, or `None`.
+///
+/// Reported instead of an `assert_eq!` on the two slices: a mismatch anywhere in
+/// a 2 kB fixture would otherwise print both files, and an offset plus two
+/// lengths says everything a reader needs without the noise.
+fn first_difference(left: &[u8], right: &[u8]) -> Option<usize> {
+    let common = left.len().min(right.len());
+    for offset in 0..common {
+        if left[offset] != right[offset] {
+            return Some(offset);
+        }
+    }
+    (left.len() != right.len()).then_some(common)
+} // End of function first_difference()
+
+/// `document_text` answers every synthetic fixture byte for byte.
+///
+/// The whole committed corpus is copied into a workspace and asked for over IPC,
+/// and each answer is compared against `std::fs::read` of the file that was
+/// copied. That comparison covers the whole path a document takes to the
+/// webview: the read, the cache, the command, `serde`'s encoding of a `String`
+/// into the response body, and the decoding of that body back into a value.
+///
+/// The fifteen fixtures of `CLAUDE.md` section 4 are asserted present, so a
+/// renamed one cannot quietly leave the sweep, and the five properties they
+/// exist for are asserted **on what came back** rather than on the file — which
+/// is the half that could fail if something on this path normalised anything.
+#[test]
+fn document_text_answers_every_synthetic_fixture_byte_for_byte() {
+    let (dir, copied) = corpus_workspace();
+    for fixture in BYTE_EXACT_FIXTURES {
+        assert!(
+            copied.iter().any(|name| name == fixture),
+            "{fixture} is named in CLAUDE.md section 4 and is not in the synthetic corpus"
+        );
+    }
+
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the corpus workspace opens");
+    let documents = invoke(&webview, "list_documents", json!({})).expect("the workspace is open");
+
+    let mut checked = 0usize;
+    let mut bytes_compared = 0usize;
+    for row in documents.as_array().expect("a list of summaries") {
+        let relative = row["relative_path"].as_str().unwrap_or_default();
+        let Some(name) = relative.strip_prefix("match/") else {
+            continue;
+        };
+        let answer = invoke(
+            &webview,
+            "document_text",
+            json!({ "id": row["id"].clone() }),
+        )
+        .unwrap_or_else(|error| panic!("{name}: document_text refused: {error}"));
+        let text = answer
+            .as_str()
+            .unwrap_or_else(|| panic!("{name}: document_text must answer a JSON string"));
+        let on_disk = fs::read(dir.path().join("match").join(name)).expect("the copy is readable");
+        if let Some(offset) = first_difference(text.as_bytes(), &on_disk) {
+            panic!(
+                "{name}: the answer differs from the file at byte {offset} \
+                 ({} bytes answered, {} bytes on disk)",
+                text.len(),
+                on_disk.len()
+            );
+        }
+        bytes_compared += on_disk.len();
+        checked += 1;
+    } // End of the loop over the copied corpus
+
+    assert_eq!(
+        checked,
+        copied.len(),
+        "every copied fixture must have been asked for"
+    );
+    println!("document_text: {checked} fixtures, {bytes_compared} bytes, all identical");
+
+    // The five properties the byte-exact fixtures exist for, re-asserted on what
+    // crossed the boundary. A comparison against the file could in principle
+    // pass while both sides were wrong — if the *copy* had been normalised, say
+    // — and these cannot.
+    let answer = |name: &str| -> String {
+        let row = documents
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|row| row["relative_path"].as_str() == Some(&format!("match/{name}")))
+            .unwrap_or_else(|| panic!("{name} is not listed"));
+        invoke(
+            &webview,
+            "document_text",
+            json!({ "id": row["id"].clone() }),
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error}"))
+        .as_str()
+        .expect("a JSON string")
+        .to_owned()
+    };
+
+    let crlf = answer("crlf-line-endings.yml");
+    let pairs = crlf.matches("\r\n").count();
+    assert!(
+        pairs > 5,
+        "the CRLF fixture crossed with {pairs} CRLF pairs"
+    );
+    assert_eq!(
+        pairs,
+        crlf.matches('\n').count(),
+        "a bare LF arrived, so a line ending was converted on the way"
+    );
+
+    let bom = answer("bom-utf8.yml");
+    assert!(
+        bom.starts_with('\u{feff}'),
+        "the leading UTF-8 BOM was stripped in transit"
+    );
+
+    assert!(
+        !answer("no-trailing-newline.yml").ends_with('\n'),
+        "a final newline was added in transit"
+    );
+
+    // Written as escapes so that no editor can normalise this source file into
+    // agreeing with a normalising boundary.
+    let unicode = answer("unicode-offsets.yml");
+    assert!(
+        unicode.contains('\u{e9}'),
+        "the precomposed e-acute did not survive"
+    );
+    assert!(
+        unicode.contains("\u{65}\u{301}"),
+        "the decomposed e-acute was composed in transit"
+    );
+    assert!(
+        unicode.contains('\u{1f600}'),
+        "the astral character did not survive"
+    );
+
+    let spaces = answer("block-scalar-terminal-spaces.yml");
+    assert!(
+        spaces.ends_with("  ") && !spaces.ends_with('\n'),
+        "the block scalar's two terminal spaces were trimmed in transit"
+    );
+} // End of function document_text_answers_every_synthetic_fixture_byte_for_byte()
+
+/// A document that does not parse still has bytes, and they still cross.
+///
+/// The case the raw text surface exists for: the file a reader most needs to see
+/// is the one the parser refused. `get_document` answers a view with
+/// `parsed: false`, and `document_text` must answer the file rather than
+/// inheriting that refusal.
+#[test]
+fn document_text_answers_a_file_that_does_not_parse() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    let broken = "matches:\n  - trigger: ':unclosed\n";
+    fs::write(dir.path().join("match").join("broken.yml"), broken).unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let documents = invoke(&webview, "list_documents", json!({})).expect("the workspace is open");
+    let id = documents.as_array().expect("a list")[0]["id"].clone();
+
+    let view =
+        invoke(&webview, "get_document", json!({ "id": id.clone() })).expect("the file reads");
+    assert_eq!(
+        view["parsed"], false,
+        "this fixture must not parse, or the test proves nothing"
+    );
+    let text = invoke(&webview, "document_text", json!({ "id": id })).expect("the bytes read");
+    assert_eq!(text.as_str(), Some(broken));
+} // End of function document_text_answers_a_file_that_does_not_parse()
+
+/// An unknown identity is refused with a code rather than an empty string.
+///
+/// The failure arm of the newest command, because "answers the file" needs the
+/// other side: a command that answered `""` for a document it does not hold
+/// would look, on a screen, exactly like an empty file.
+#[test]
+fn document_text_refuses_an_unknown_document_with_a_code() {
+    let dir = synthetic_tree();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the synthetic tree opens");
+    let error = invoke(&webview, "document_text", json!({ "id": 9_999_999 }))
+        .expect_err("no such document");
+    assert_eq!(
+        error.get("code").and_then(Value::as_str),
+        Some("unknownDocument"),
+        "a missing document must be a code, never an empty file: {error}"
+    );
+} // End of function document_text_refuses_an_unknown_document_with_a_code()
+
+/// Every `UnknownEntry` object anywhere in a `get_document` response.
+///
+/// Found **by shape** — an object carrying both `value_span` and `value_text` —
+/// rather than by walking `matches[i].unknown_entries[j]` by name, so that the
+/// search does not depend on the field layout it is checking. An unknown entry
+/// never contains another (the projection does not descend into an unmodelled
+/// value), so nothing is counted twice.
+fn unknown_entries_in(value: &Value, out: &mut Vec<Value>) {
+    match value {
+        Value::Object(map) => {
+            if map.contains_key("value_span") && map.contains_key("value_text") {
+                out.push(value.clone());
+            }
+            for nested in map.values() {
+                unknown_entries_in(nested, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                unknown_entries_in(item, out);
+            }
+        }
+        _ => {}
+    } // End of the match over the response's JSON shape
+} // End of function unknown_entries_in()
+
+/// A file whose unmodelled values carry the bytes a boundary would change.
+///
+/// Hand-authored and neutral (CLAUDE.md section 1). Four unrecognised keys — one
+/// at the top level, three inside matches — so that the sweep below reaches both
+/// places the projection records them. The characters are `\u{…}` escapes so
+/// that no editor can normalise this source file into agreeing with a
+/// normalising boundary.
+///
+/// **A NUL is deliberately absent, and that was measured rather than assumed.**
+/// This document has to *parse* or it produces no unmodelled entry at all, and
+/// `SyntaxIndex::parse` refuses a source containing U+0000: adding one here made
+/// `parsed` come back `false`. U+2028 and U+2029 are accepted and are therefore
+/// here. `document_text` needs no parse and carries all three
+/// (`document_text_carries_a_nul_and_the_two_unicode_line_separators`), so the
+/// gap is `value_text` and a NUL alone — `1c-2b-2a-notes.md` hole 9.
+const UNMODELLED_HAZARDS: &str = concat!(
+    "invented_at_the_top_level: \"caf\u{e9} cafe\u{301} \u{1f600}\"\n",
+    "matches:\n",
+    "  - trigger: ':one'\n",
+    "    replace: first\n",
+    "    invented_by_a_later_espanso: |\n",
+    "      two real spaces end this line  \n",
+    "      and this one ends with a CRLF pair\r\n",
+    "  - trigger: ':two'\n",
+    "    replace: second\n",
+    "    another_key_this_build_does_not_know: \"caf\u{e9} \u{1f600}\"\n",
+    "    a_third_key_from_a_later_espanso: \"ls\u{2028} ps\u{2029} end\"\n",
+);
+
+/// An unmodelled entry's `value_text` crosses the dispatcher byte for byte.
+///
+/// **The review of Phase 1c-2b-2a's first high finding, made falsifiable.** The
+/// only fidelity test `value_text` had projected in-process and called
+/// `serde_json::to_value`; it never built an app, never invoked `get_document`
+/// and never decoded a Tauri response body. So a regression confined to
+/// serializing a [`espansoconfig_core::model::DocumentView`] — dropping the
+/// field, truncating it, normalising it — would have left the bare-string
+/// `document_text` sweep, the model oracle and the mocked frontend tests all
+/// green.
+///
+/// This asks for the document over the **real IPC dispatcher** and compares each
+/// answered `value_text` against a Rust-side slice of the file's own bytes by
+/// the `value_span` that arrived beside it. The oracle is therefore a different
+/// expression from the one the projection evaluated, taken from a different
+/// source: `std::fs::read` of the file on disk.
+#[test]
+fn an_unmodelled_entrys_value_text_crosses_the_dispatcher_byte_for_byte() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    let path = dir.path().join("match").join("unmodelled.yml");
+    fs::write(&path, UNMODELLED_HAZARDS).unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let documents = invoke(&webview, "list_documents", json!({})).expect("the workspace is open");
+    let id = documents.as_array().expect("a list")[0]["id"].clone();
+
+    let view = invoke(&webview, "get_document", json!({ "id": id })).expect("the file reads");
+    assert_eq!(
+        view["parsed"], true,
+        "this fixture must parse, or it produces no unmodelled entry at all"
+    );
+
+    let mut entries = Vec::new();
+    unknown_entries_in(&view, &mut entries);
+    assert_eq!(
+        entries.len(),
+        4,
+        "the fixture holds four unrecognised keys, and a dropped value_text \
+         would leave none of them findable by shape"
+    );
+
+    let on_disk = fs::read(&path).expect("the file is readable");
+    let mut carried = 0usize;
+    for entry in &entries {
+        let start = entry["value_span"]["start"]
+            .as_u64()
+            .expect("a span start is a number") as usize;
+        let end = entry["value_span"]["end"]
+            .as_u64()
+            .expect("a span end is a number") as usize;
+        let text = entry["value_text"]
+            .as_str()
+            .expect("a value text is a JSON string");
+        let expected = on_disk
+            .get(start..end)
+            .unwrap_or_else(|| panic!("the answered span {start}..{end} is not in the file"));
+        assert_eq!(
+            text.as_bytes(),
+            expected,
+            "the value text is not the slice its span names (bytes {start}..{end})"
+        );
+        carried += text.len();
+    } // End of the loop over the entries the dispatcher answered
+
+    println!(
+        "value_text over IPC: {} entries, {carried} bytes",
+        entries.len()
+    );
+
+    // The hazards, named individually on what crossed, so that a failure says
+    // which one was lost rather than only that something was.
+    let all: String = entries
+        .iter()
+        .filter_map(|entry| entry["value_text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(all.contains('\u{e9}'), "the precomposed e-acute was lost");
+    assert!(
+        all.contains("\u{65}\u{301}"),
+        "the decomposed e-acute was composed in transit"
+    );
+    assert!(all.contains('\u{1f600}'), "the astral character was lost");
+    assert!(
+        all.contains("\r\n"),
+        "a CRLF inside a block scalar was converted in transit"
+    );
+    assert!(
+        all.contains("line  \n"),
+        "a block scalar's two real trailing spaces were trimmed in transit"
+    );
+    assert!(
+        all.contains('\u{2028}'),
+        "the line separator U+2028 was lost in transit"
+    );
+    assert!(
+        all.contains('\u{2029}'),
+        "the paragraph separator U+2029 was lost in transit"
+    );
+} // End of function an_unmodelled_entrys_value_text_crosses_the_dispatcher_byte_for_byte()
+
+/// A NUL and the two Unicode line separators cross the dispatcher unchanged.
+///
+/// **The review's first medium finding.** All three are valid UTF-8, valid
+/// content for a Rust `String` and valid content for a JavaScript string, and
+/// none of the fifteen byte-exact fixtures contains one — so the corpus sweep
+/// above said nothing about them. They are where the encoders on this path have
+/// opinions: `serde_json` writes NUL as a six-character escape, and leaves
+/// U+2028 and U+2029 as raw bytes, which is legal JSON and was for years illegal
+/// inside a JavaScript source string literal.
+///
+/// The source is **hand-written rather than a fixture**, which is an R20
+/// deviation of the same shape as `1c-2b-2a-notes.md` hole 1 and is recorded
+/// beside it as hole 9. Closing it means a sixteenth row in `CLAUDE.md`
+/// section 4, and no existing fixture may be edited to hold these bytes.
+///
+/// The file deliberately does not have to parse: `document_text` answers a
+/// document's bytes whether or not the substrate accepted them, which is the
+/// property `document_text_answers_a_file_that_does_not_parse` pins.
+#[test]
+fn document_text_carries_a_nul_and_the_two_unicode_line_separators() {
+    const CONTROLS: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':controls'\n",
+        "    replace: \"nul\u{0} ls\u{2028} ps\u{2029} end\"\n",
+    );
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    let path = dir.path().join("match").join("controls.yml");
+    fs::write(&path, CONTROLS).unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let documents = invoke(&webview, "list_documents", json!({})).expect("the workspace is open");
+    let id = documents.as_array().expect("a list")[0]["id"].clone();
+
+    let answer = invoke(&webview, "document_text", json!({ "id": id })).expect("the bytes read");
+    let text = answer
+        .as_str()
+        .expect("document_text answers a JSON string");
+    let on_disk = fs::read(&path).expect("the file is readable");
+    assert_eq!(
+        text.as_bytes(),
+        on_disk.as_slice(),
+        "the answer must be the file, byte for byte"
+    );
+
+    // Named individually, on what came back rather than on the file.
+    assert!(
+        text.contains('\u{0}'),
+        "the NUL was dropped, or something treated it as a terminator"
+    );
+    assert!(
+        text.contains('\u{2028}'),
+        "the line separator U+2028 was lost"
+    );
+    assert!(
+        text.contains('\u{2029}'),
+        "the paragraph separator U+2029 was lost"
+    );
+    assert!(
+        text.ends_with("end\"\n"),
+        "the text was cut short at one of the three"
+    );
+} // End of function document_text_carries_a_nul_and_the_two_unicode_line_separators()
 
 /// The dispatcher's rejection when the access-control list refuses a command.
 ///
@@ -385,7 +954,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the six commands.
+/// A page that is not this application cannot reach any of the seven commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -396,18 +965,57 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// **string**, not one of our codes, which is exactly why `classifyFailure` in
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
+///
+/// **All seven are attempted, and the count is asserted against the registered
+/// set.** The review of Phase 1c-2b-2a found this test claiming seven while
+/// invoking three, which is a real security claim carried by a body that could
+/// not falsify it: remote access accidentally permitted for `get_document`
+/// would have left it green. The attempt table is now compared with the names
+/// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
+/// added to the application and forgotten here fails this test rather than
+/// silently leaving the sweep.
 #[test]
 fn a_remote_origin_is_refused() {
     let dir = synthetic_tree();
     let app = mock_app();
     let webview = main_window(&app);
+    // The arguments are deliberately well formed. A malformed one would be
+    // refused by the command macro, and a macro refusal would look like a
+    // successful denial while proving nothing about access control.
+    let identity = json!({
+        "document": 0,
+        "revision": "0".repeat(64),
+        "node": 0,
+    });
     let attempts: Vec<(&str, Value)> = vec![
         (
             "open_workspace",
             json!({ "root": dir.path().to_string_lossy() }),
         ),
+        ("list_documents", json!({})),
+        ("get_document", json!({ "id": 0 })),
+        ("get_match", json!({ "id": identity })),
+        // The command that hands out a file's contents, and so the one whose
+        // refusal matters most: a navigated webview must not be able to read the
+        // user's configuration back out of the application.
+        ("document_text", json!({ "id": 0 })),
+        ("reload_document", json!({ "id": 0 })),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
+
+    // Non-vacuity, and the check the old three-entry table would have failed:
+    // the attempts are exactly the registered commands, in both directions.
+    let attempted: std::collections::BTreeSet<String> = attempts
+        .iter()
+        .map(|(command, _)| (*command).to_owned())
+        .collect();
+    assert_eq!(
+        attempted,
+        crate::wire_contract::registered_commands(),
+        "every registered command must be attempted from the remote origin"
+    );
+    assert_eq!(attempted.len(), 7, "the surface is seven commands");
+
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)
             .expect_err("a remote origin must not reach an application command");
