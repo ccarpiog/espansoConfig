@@ -2541,7 +2541,7 @@ _Updated at each phase boundary._
 | 1a | `185c9a6` | ✅ pushed to `origin/main` | clean |
 | 1b-1 | `94aa6c9` | ✅ pushed to `origin/main` | clean |
 | 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
-| 1b-2b | `PENDING` | — | — |
+| 1b-2b | `065a516` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2602,7 +2602,7 @@ in `src/lib/ipc/`, `docs/decisions/1b-2a-notes.md`, `docs/reviews/phase-1b-2a-ip
 checkpoint. **A fresh session starting Phase 1b-2b should start from `d876eb6` or later.** As at 1b-1,
 `npm install` (or `npm ci`) is required before any frontend command will run.
 
-`PENDING` is Phase 1b-2b **including its review fix round** — the phase was held open until all seven
+`065a516` is Phase 1b-2b **including its review fix round** — the phase was held open until all seven
 findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated defects:
 neither the six wire-visible enums deferred with no strings at all, nor the exhaustiveness check that
 failed open on two valid Rust syntaxes and on any new enum, nor the `detail` guard that
