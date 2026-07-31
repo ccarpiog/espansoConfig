@@ -32,6 +32,8 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::wire::{WirePathRef, WirePaths};
+
 /// What a discovered file is, from espanso's point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum FileKind {
@@ -169,19 +171,19 @@ impl Serialize for DiscoveryError {
             DiscoveryError::ConfigDirNotFound { candidates } => {
                 let mut out = serializer.serialize_struct("DiscoveryError", 2)?;
                 out.serialize_field("code", "configDirNotFound")?;
-                out.serialize_field("candidates", candidates)?;
+                out.serialize_field("candidates", &WirePaths(candidates))?;
                 out.end()
             }
             DiscoveryError::NotADirectory(path) => {
                 let mut out = serializer.serialize_struct("DiscoveryError", 2)?;
                 out.serialize_field("code", "notADirectory")?;
-                out.serialize_field("path", path)?;
+                out.serialize_field("path", &WirePathRef(path))?;
                 out.end()
             }
             DiscoveryError::Io { path, source } => {
                 let mut out = serializer.serialize_struct("DiscoveryError", 3)?;
                 out.serialize_field("code", "io")?;
-                out.serialize_field("path", path)?;
+                out.serialize_field("path", &WirePathRef(path))?;
                 out.serialize_field("kind", &format!("{:?}", source.kind()))?;
                 out.end()
             }

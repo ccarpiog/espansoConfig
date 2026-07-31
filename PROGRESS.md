@@ -24,7 +24,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **Phase 0** | **⛔️ architectural gate (R4)** | ✅ **PASSED**, with four named qualifications — see the verdict below |
 | **1a** | The core-side read model: the semantic projection · the workspace and its per-revision cache | ✅ complete — after the review fix round below |
 | **1b-1** | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite scaffold · the i18n infrastructure in both languages | ✅ complete |
-| 1b-2 | The read-only IPC surface · the Rust-code→string dictionaries · the localized macOS menu | ⬜️ **next** |
+| **1b-2a** | The read-only IPC surface · the wire error type · the typed frontend boundary · R27 corrected | ✅ complete — after the review fix round below |
+| 1b-2b | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ⬜️ **next** |
 | 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ not started |
 | 2–5 | See plan §12 | ⬜️ not started |
 
@@ -43,6 +44,13 @@ established while the surface is small enough to audit. 1b-2 is the **boundary**
 commands over `crate::workspace`, and the dictionaries that turn Rust's codes into prose. The cut
 matters because the two halves fail differently — a scaffold defect is loud and immediate, an IPC
 defect is a data-format decision that later phases inherit.
+
+**1b-2 was split into 1b-2a / 1b-2b** along the same cut: 1b-2a is the **boundary** — the five
+read-only commands, the wire error type and the typed frontend mirror — and 1b-2b is the **prose**,
+the code→string dictionaries and the localized menu that need a boundary to exist before they have
+anything to translate. The two fail differently, which is the test every split in this project has
+used: a boundary defect is a data-format decision later phases inherit, a dictionary defect is a
+missing string.
 
 Phase 0 as written in the plan was split into **0a / 0b / 0c** because it was too large for one
 coherent unit of work, and **0c** was split again into **0c-1 / 0c-2 / 0c-3** for the same reason:
@@ -573,6 +581,58 @@ the pixels can tell the two apart.
 The reviewer argued the phase should not close while it is open; the rebuttal is that localizing it
 needs either Spanish strings in Rust (plan §9 forbids) or an IPC command (1b-2 by design). **Both the
 objection and the rebuttal are recorded in the notes as a live disagreement**, not resolved by silence.
+
+### Phase 1b-2a — the read-only IPC surface, and the identity claim it had to withdraw
+
+The **boundary**. 1b-1 shipped no command on purpose, so that `t()` was the only route any string
+could take to a screen; 1b-2a is the first code that carries data across it. The decision record is
+[`docs/decisions/1b-2a-notes.md`](docs/decisions/1b-2a-notes.md).
+
+**Five read-only commands, and nothing else.** `open_workspace`, `list_documents`, `get_document`,
+`get_match`, `reload_document` are one-line wrappers over a `WorkspaceSession` holding `Workspace`
+behind a std `Mutex`. They are **synchronous**, which is the whole reason no guard can cross an
+`.await` — the deadlock class is designed out rather than reviewed for. **No mutating command
+exists**, and that is now enforced rather than asserted: `wire_contract.rs` parses the complete
+`generate_handler!` list independently and compares it bidirectionally against the frontend's names,
+then asserts that none of the six Phase 2 names appears in either set. Before the review that test
+compared only one direction, so registering `commands::save_match` and changing nothing else left it
+**green** — the oracle could not disagree with the thing it was named for.
+
+**The wire error carries codes and operands, and has no `Display` impl at all.** Nine flat codes with
+structured operands, a hand-written `Serialize` that writes `code()` so each code has exactly **one**
+spelling in the crate, and `From` impls that match the core's three error enums exhaustively — a new
+core variant fails the build. Plan §9's "codes and structured data, never prose" is a property of the
+type rather than a habit: there is no developer rendering to leak, because none was written.
+
+**`"permissions": []` is now evidence rather than argument.** `dispatch_check.rs` drives all five
+commands through the real Tauri dispatcher (`MockRuntime` plus the **shipped** `tauri.conf.json` and
+capability file), so the claim that the empty capability set suffices is measured. A first attempt
+used `http://tauri.localhost`, which macOS does not treat as local, and every command was refused;
+that accident became `a_remote_origin_is_refused`, pinning **both** sides of the access check. The
+1b-1 review's High finding — that `core:default` was a real grant, not a theoretical one — stays
+closed.
+
+**R27 was stated falsely in three files and in this checkpoint, and the review caught it.** See the
+correction below. `identityRecovery()` now returns
+`{action: 'reresolve', mayFind: ['sameMatch', 'differentMatch', 'gone']}` — the three answers as
+**data**, so a caller cannot skip one — and `a_document_path_is_positional_so_a_deletion_repoints_it`
+is the counterexample in test form.
+
+**A non-UTF-8 path could turn a typed failure into untyped prose, and that is fixed in the core.**
+serde's `PathBuf` serializer rejects non-UTF-8 paths, so `list_documents` could return `Ok(...)` and
+then fail *during response serialization* — and an `Io` error carrying the same path could fail to
+serialize too, delivering serde's generic English to the webview. `crate::wire`'s `WirePath` now
+backs all five wire path fields and all four `CommandError` path operands. macOS APFS refuses to
+create such a filename (`EILSEQ`, confirmed by trying), so the tests drive the serialization path
+directly rather than through the filesystem, and **say so** instead of skipping.
+
+**What is proven.** **514 tests pass** (core 478, up from 471; shell 36, up from 1). Thirteen
+disabling experiments are recorded — six of them run against the committed code, including the one
+the review required: `commands::save_match` added to `generate_handler!`, the test observed
+**failing**, reverted, tree verified clean. Four coverage holes remain, each numbered with the phase
+that owns it named.
+
+**Ten review findings, all closed, and two of them were real defects** — see the disposition below.
 
 ---
 
@@ -1605,6 +1665,30 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1b-2a review disposition
+
+The review is [`docs/reviews/phase-1b-2a-ipc-surface.md`](docs/reviews/phase-1b-2a-ipc-surface.md).
+Ten findings; **all ten closed before the phase was recorded complete**, so no commit holds a
+demonstrated defect. The full disposition with the fix for each is `1b-2a-notes.md` §15.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| 1 | High | `identityRecovery()` treated every stale revision as recoverable, and the claim that `DocumentPath` "survives a reparse" and keeps the selection was **false** — a sequence step is `PathSegment::Index(usize)`, so deleting an earlier match silently re-points the selection at a different one | **Fixed.** The three answers are returned as data; the false sentences are gone from `errors.ts`, `types.ts`, `error.rs`, `commands.rs`, the notes **and this file**; `a_document_path_is_positional_so_a_deletion_repoints_it` fails if the claim is reinstated |
+| 2 | High | A non-UTF-8 path made serde's `PathBuf` serializer reject the response *after* the command returned `Ok`, so the webview got serde's prose instead of `{code, operands}` — falsifying `commands.rs`'s own module claim | **Fixed** in the core: `crate::wire::WirePath` backs all five wire path fields and all four path operands. Four tests, each asserting the premise (bare `PathBuf` **does** fail) before the fix |
+| 3 | Med | `isCommandError()` narrowed to full operand types after checking only `code`, so `{code: 'identityStaleRevision'}` yielded guaranteed-`string` fields that were `undefined` | **Fixed.** A `COMMAND_ERROR_OPERANDS` table validates required operands and primitive shapes; surplus allowed for forward compatibility. The test that licensed the unsoundness was rewritten |
+| 4 | Med | `wire_contract.rs` silently passed three concrete divergences: required→optional (`?` was stripped), nested operand names and types, and every frontend *error* interface | **Fixed** all three; hole 2 rewritten to the one thing left (the type text of read-model properties), with its owner named |
+| 5 | Med | The no-mutating-command oracle was **one-directional** — registering `commands::save_match` and changing nothing else left the test green, though its name claims to check registrations | **Fixed.** `generate_handler!` parsed independently, compared both ways, six forbidden names asserted absent from both sets. The disabling experiment was run: the test failed, then reverted |
+| 6 | Med | `CommandError`'s own enumeration was not mechanically exhaustive, and the notes claimed it was; `identityRecovery()`'s `default` absorbed new variants | **Fixed.** The enumeration test reads `error.rs`'s enum block; `default` → `const unhandled: never`; both false sentences corrected |
+| 7 | Med | `DocumentId` is `u64` typed as TS `number`, so values above 2⁵³−1 collide | **Fixed** by stating and **asserting** the invariant: `MAX_EXACT_WIRE_INTEGER` checked at `mint()`, with a `#[should_panic]` test and a full numeric-field audit in notes §16 |
+| 8 | Low | Three test names overclaimed what their bodies established — the project's own standing rule | **Fixed**: names narrowed, bodies strengthened (the exports set is now read from the module) |
+| 9 | Low | The disabling-experiment table presented historical runs as evidence that the committed state cannot reproduce | **Fixed by honest relabelling.** A–G are marked unreproducible; H–M are new and were run against committed code |
+| 10 | Low | Vitest callbacks breached the literal reading of CLAUDE.md's JSDoc / closing-comment rule | **Decided both ways** and recorded (notes §14): closing-bracket comments applied, per-callback JSDoc explicitly exempted with reasoning and an escalation path |
+
+Codex additionally **confirmed as non-findings**: the core has no tauri edge; no mutating command
+leaked in; `dispatch_check.rs`'s ACL claim is sound for Tauri 2.11.5 because `get_ipc_response` runs
+the same `Webview::on_message` branch as production; the session mutex has no re-entrancy path; no
+real-corpus content appears anywhere; and no user-facing prose escapes via `Display`.
+
 ## Phase 1b-1 review disposition
 
 The mandatory once-per-phase adversarial review is
@@ -1687,6 +1771,33 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1b-2a
+
+Every command below was run by the orchestrator **after** the review fix round, not reported by the
+worker. All exit 0.
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | ok |
+| `cargo test --workspace` | **514 passed, 0 failed** (core 478, was 471; shell 36, was 1) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** — the architecture rule holds (D2x's check, not the withdrawn `rg -c tauri Cargo.lock`) |
+| `npm run check` | 336 files, **0 errors, 0 warnings** (`--fail-on-warnings`) |
+| `npm test` | **104 passed** (was 97) |
+| `npm run build` | ok — 38.87 kB JS, 1.59 kB CSS |
+
+Three claims were checked by hand rather than taken from the worker's report, because each is a rule
+a phase can quietly undo: `src-tauri/capabilities/default.json` is still `"permissions": []`; exactly
+five `#[tauri::command]` attributes exist and `rg` finds no forbidden name in `main.rs` or
+`commands.rs` outside a comment; and `CommandError` has no `Display` impl anywhere in the crate.
+
+**R31 was honoured explicitly, and a clean lint run is not the evidence.** `scripts/lint/hardcoded-strings.ts`
+scans `.svelte` markup only, and this phase's user-facing strings would live in `.ts` — exactly the class
+it cannot see. The check was done by hand; `classifyFailure()`'s `detail` field is documented as a
+**developer** string that must never be rendered, and giving the unexpected arm its one generic
+dictionary key is 1b-2b's job.
 
 ## Verification — Phase 1b-1
 
@@ -2013,46 +2124,56 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1b-1 is complete. Start Phase 1b-2 — the read-only IPC surface and the code dictionaries.**
+**Phase 1b-2a is complete. Start Phase 1b-2b — the code dictionaries, the exhaustiveness check and
+the localized macOS menu.**
 
-`src-tauri/` and `src/` now exist, the workspace has two crates, and every user-facing string already
-goes through `t()`. What 1b-2 adds is the **boundary**. Concretely, and in this order:
+The boundary exists and is typed: five read-only commands, a wire error of codes and operands, and a
+hand-written frontend mirror checked against what serde actually writes. What 1b-2b adds is the
+**prose** — every code the boundary can emit needs a string in both languages, and nothing yet
+guarantees that a code without one is noticed. Concretely, and in this order:
 
-1. **Wire the read-only IPC surface** as **thin wrappers** over `crate::workspace`, which was built to
-   be wrapped one-to-one: `open_workspace`, `list_documents`, `get_document`, `get_match`,
-   `reload_document` (plan §6.4). `src-tauri/src/commands.rs` is the only Rust file that needs to
-   change, plus one `invoke_handler` line in `main.rs`. `Workspace` takes `&mut self` where it
-   populates the cache, so the Tauri layer holds it behind a `Mutex`. Do **not** add the mutating
-   commands — they are Phase 2, and the save transaction they need does not exist.
-2. **Type the boundary on the frontend side.** `DocumentView` is what crosses; `SourceDocument` is
-   deliberately not serializable. Note that `exactOptionalPropertyTypes` and
-   `noUncheckedIndexedAccess` are on (1b-1 notes §9 hole 7), so the generated types will be more
-   verbose than the obvious version — that is intended.
-3. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
+1. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
    never prose: `DiagnosticCode` (22 variants plus operands), `UnknownReason` (4), `WorkspaceError`
-   (4), `IdentityError`, `MatchBadge` (10). Every one of those needs an `en` and an `es` entry, and
-   both compile-time directions plus all four runtime checks then apply to them for free. Codes with
-   operands use the existing `{placeholder}` interpolation, which the placeholder-parity test already
-   covers. The `Display` impls in Rust are developer renderings for logs and **must not** be used as
-   the IPC error representation. **Add an exhaustiveness check** — a Rust-side enumeration of every
-   variant compared against the dictionary's key set — or a new `DiagnosticCode` variant will reach
-   the UI with no string at all and nothing will notice.
+   (4), `IdentityError`, `MatchBadge` (10), plus **`CommandError`'s nine codes**, which 1b-2a added
+   and which have no strings at all today. Every one needs an `en` and an `es` entry in
+   `src/lib/i18n/{en,es}.json`; both compile-time directions and all four runtime checks then apply
+   for free. Codes with operands use the existing `{placeholder}` interpolation, already covered by
+   the placeholder-parity test. The `Display` impls in the **core** are developer renderings for logs
+   and must not be used as the IPC representation — note `CommandError` has no `Display` at all, by
+   design, so there is nothing to be tempted by on the wire side.
+2. **Add the exhaustiveness check** — a Rust-side enumeration of every variant compared against the
+   dictionary's key set — or a new `DiagnosticCode` variant reaches the UI with no string and nothing
+   notices. **1b-2a built the mechanism you should extend**: `src-tauri/src/wire_contract.rs` already
+   reads the `.ts`/`.json` files as text and compares them against Rust-side sets, and its
+   `every_declared_variant_has_an_instance_in_the_enumeration` reads `error.rs`'s own enum block
+   rather than a hand-written list. Do the same for the other enums — `1b-2a-notes.md` §9 hole 4
+   names this as 1b-2b's, and it is the reason the hand-written variant lists were left in place.
+3. **Give the "unexpected failure" arm its one generic dictionary key.** `classifyFailure()` in
+   `src/lib/ipc/errors.ts` returns a `detail` string that is documented as **developer-only and never
+   to be rendered** — but nothing enforces it. That is R31's blind spot in its purest form (a `.ts`
+   string the markup lint cannot see). Add a check, not a comment.
 4. **Localize the macOS app menu** (1b-1 notes §9 hole 1, the one hole 1b-1 explicitly owed here).
    Tauri v2 builds the default menu in Rust, so the labels must come from the frontend across IPC —
    hardcoding Spanish in Rust is what plan §9 forbids. `CFBundleLocalizations = [en, es]` is already
-   set in `src-tauri/Info.plist`.
-5. **Handle `IdentityError` rather than unwrapping it** — R27. A `get_match` crossing a `refresh()`
-   may return `StaleRevision`. The likely re-selection policy is to re-resolve by `DocumentPath` —
-   the thing designed to survive a reparse — then fall back to clearing the selection.
+   set in `src-tauri/Info.plist`. **This will need a capability**, and `"permissions": []` is a
+   defended position: add exactly what the menu needs, one permission at a time, with the reason
+   recorded. Do not restore `core:default` — the 1b-1 review showed it was a real grant.
+5. **`identityWrongDocument` still owes a string in both languages** even though no command can
+   currently produce it (1b-2a notes §9 hole 3). A code with no string is worse than a code with no
+   caller.
 
-**Two rules this phase is most likely to break.** R31: the hardcoded-string check sees markup only, and
-an error message assembled in a `.ts` store is exactly the class it cannot see — which is exactly what
-this phase produces. R28: `Deserialize` is derived on a named list only, and 1b-2 must not widen it
-without reading `docs/decisions/1a-notes.md` §9 hole 6 first.
+**Three rules this phase is most likely to break.** R31, as above — the hardcoded-string check sees
+`.svelte` markup only, and a message assembled in a `.ts` store is exactly what it cannot see, so a
+clean run is not evidence. R28: `Deserialize` is derived on a named list only; do not widen it without
+reading `docs/decisions/1a-notes.md` §9 hole 6 first. And the standing rule 1b-2a added: **a property
+asserted in a doc comment needs a test that could fail if it were false** — the reviewer found three
+files claiming `DocumentPath` survived a reparse, with nothing anywhere surviving a reparse.
 
 **Then 1c** is the browser itself: three-pane navigation, search over trigger/label/content/comment/
 `search_terms` (plan §8.1), the raw YAML viewer, and surfacing `HazardKind` where the visual editor
-cannot preserve a construct. 1c also owes R32's first half — the first test that renders anything.
+cannot preserve a construct. **1c owes R32's first half** — nothing in the running application calls
+`invoke` yet, so `vite build` tree-shakes the whole IPC layer out of `dist`, and the boundary is
+proven by tests and a mock dispatcher rather than by a launched window (1b-2a notes §9 hole 1).
 
 **Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
 the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and
@@ -2064,10 +2185,14 @@ proven, and since 1a the read model is too.
   get_document, get_match, document_view, document_text, refresh, load_all, evict}` maps onto plan
   §6.4's read-only commands. `DocumentView` is what crosses the boundary; `SourceDocument` is
   deliberately not serializable.
-- **A held identity can go stale, and the UI is what holds identities** — R27. `match_by_id` returns
-  `Result<_, IdentityError>` and a lookup crossing a `refresh()` may get `StaleRevision`. Handle it;
-  do not unwrap it. The likely re-selection policy is to re-resolve by `DocumentPath` — the thing
-  designed to survive a reparse — then fall back to clearing the selection.
+- **A held identity can go stale, and the UI is what holds identities** — R27, **corrected at
+  1b-2a**. `match_by_id` returns `Result<_, IdentityError>` and a lookup crossing a `refresh()` may
+  get `StaleRevision`. Handle it; do not unwrap it. That code means **the document moved on** — not
+  that the match survived. Recovery is *re-resolution*, and re-resolution has three possible answers:
+  the same match, a **different** match, or nothing. `DocumentPath` is **not** a fallback identity: a
+  sequence step is `PathSegment::Index(usize)`, a position, so an external edit that deletes an
+  earlier match leaves the path resolving to a different one. The earlier wording here — "re-resolve
+  by `DocumentPath`, the thing designed to survive a reparse" — was **false and is withdrawn**.
 - **Scalars arrive as source text**, per D2u. There is no type to render, and no badge derives from a
   value.
 - **`Deserialize` is derived on a named list only** — R28. Do not widen it without reading
@@ -2124,6 +2249,12 @@ reordering matches **inside one sequence**.
   by corpus fixtures — and both are recorded as deviations in `1a-notes.md` §9 holes 4 and 10.
 - **An oracle must be able to disagree.** Break the **engine** and check the oracle fires, not only the
   reverse.
+- **An identity that is "designed to survive" something has to be shown surviving it.** New in 1b-2a,
+  and the fourth occurrence of the pattern R24's corollary names. The phase wrote that `DocumentPath`
+  was the identity designed to survive a reparse, **in three files and in this checkpoint**, without a
+  test in which anything survived a reparse. The reviewer wrote the counterexample in four lines. Read
+  the *name* of the property, then look for the test that could fail if it were false — the same check
+  as R24's corollary, applied to a doc comment instead of to a test name.
 - **Corpus privacy (D1) is absolute**, and matters more as the UI grows: no real config content in any
   committed file, screenshot, test name or report. Real-corpus counts computed, never hard-coded; its
   tests skip cleanly when absent.
@@ -2143,14 +2274,21 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The only Rust file 1b-2 needs to change**, plus one `invoke_handler` line in [`src-tauri/src/main.rs`](src-tauri/src/main.rs). Documented-but-empty today, deliberately: 1b-1 shipped no command so that `t()` was the only route any string could take to a screen |
+| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | **Where 1b-2b's work lands.** The two dictionaries. `en.json` **is the schema** — the key set is derived from it, never declared separately |
+| [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | **The mechanism 1b-2b should extend for its exhaustiveness check.** Reads the `.ts` files as text and compares interface properties, union members, error codes and the `generate_handler!` list against what Rust actually writes — bidirectionally, with the six forbidden Phase 2 command names asserted absent from both sets. `every_declared_variant_has_an_instance_in_the_enumeration` reads `error.rs`'s own enum block rather than a hand-written list; that is the pattern to copy |
+| [`src-tauri/src/error.rs`](src-tauri/src/error.rs) | The wire error: nine flat codes with structured operands, a hand-written `Serialize` giving each code **one** spelling, exhaustive `From` impls over the core's three error enums, and **no `Display` impl at all** so there is no developer rendering to leak onto the wire |
+| [`src/lib/ipc/`](src/lib/ipc/) | The frontend boundary: `types.ts` (the hand-written wire mirror), `errors.ts` (`isCommandError`'s operand validation, `classifyFailure`, `identityRecovery` and its three answers), `commands.ts` (the typed `invoke` wrapper returning `CommandResult<T>` rather than throwing). **`classifyFailure`'s `detail` is a developer string nothing yet stops a component rendering** — 1b-2b owes it a check and a generic key |
+| [`crates/espansoconfig-core/src/wire.rs`](crates/espansoconfig-core/src/wire.rs) | `WirePath` — why a non-UTF-8 filename can no longer turn a typed failure into serde's untyped English *after* the command already returned `Ok` |
+| [`src-tauri/src/dispatch_check.rs`](src-tauri/src/dispatch_check.rs) | Why `"permissions": []` is evidence rather than argument: all five commands driven through the real Tauri dispatcher with the **shipped** config and capability file, plus `a_remote_origin_is_refused` pinning the other side |
+| [`docs/decisions/1b-2a-notes.md`](docs/decisions/1b-2a-notes.md) | Phase 1b-2a's decision record: what crosses and what does not (§1), the synchronous-command/mutex trade (§2), the error representation (§3), **R27 corrected** (§4), the capability argument then its execution (§5), the hand-written mirror and the check that guards it (§6), **why the lint proves nothing here** (§7), what the phase got wrong on the way (§8), **the four remaining coverage holes with owners named** (§9), the thirteen disabling experiments and which six are reproducible (§11), what 1b-2b inherits (§12), the JSDoc exemption decided rather than left open (§14), the review disposition (§15) and the numeric-field audit (§16) |
+| [`docs/reviews/phase-1b-2a-ipc-surface.md`](docs/reviews/phase-1b-2a-ipc-surface.md) | The Phase 1b-2a review, dispositioned above. Its two High findings were both real: a **false identity claim** repeated in three files and in this checkpoint, and a serialization failure that could deliver prose to the webview. Its finding 5 is the sharpest — a scope-creep oracle that could not detect the scope creep it was named for |
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | The five read-only commands over a `WorkspaceSession` holding `Workspace` behind a std `Mutex`, **synchronous** so no guard can cross an `.await`. Registered in [`src-tauri/src/main.rs`](src-tauri/src/main.rs)'s `generate_handler!`. **No mutating command exists and a test enforces it** |
 | [`src/lib/i18n/dictionaries.ts`](src/lib/i18n/dictionaries.ts) | **The i18n enforcement point.** `TranslationKey = keyof typeof en`, and `const spanish: ExactDictionary<typeof es> = es` is the binding that makes a missing *or* surplus Spanish key a compile error. `translate()` interpolates `{placeholder}` and leaves an unknown one verbatim on purpose. Add the Rust-code dictionaries here and both compile-time directions apply for free |
-| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries. `en.json` **is the schema** — the key set is derived from it, never declared separately |
 | [`docs/decisions/1b-1-notes.md`](docs/decisions/1b-1-notes.md) | Phase 1b-1's decision record: the pinned versions and why each is exact (§1), what the typed key union enforces and the four disabling experiments that verify both directions (§2), what the types cannot see (§2 end), the runtime checks and the **exception list by key** (§3), locale detection and the override policy (§4), the architecture rule's new check (§5), what the Tauri shell deliberately does not contain (§6), **what the hardcoded-string check cannot see (§7)**, the strings deliberately left untranslated (§8), **the eight coverage holes stated as holes (§9)**, and what 1b-2 inherits (§10) |
 | [`scripts/lint/hardcoded-strings.ts`](scripts/lint/hardcoded-strings.ts) | The markup scan behind R31. Read §7 of the notes before trusting a clean run: it sees `.svelte` markup and **not** `<script>` bodies, `{'literal'}`, `.ts` constants or props. Its blind spots are why the review found an English sentence in `Info.plist` that no check could ever have seen |
 | [`docs/reviews/phase-1b-1-shell-and-i18n.md`](docs/reviews/phase-1b-1-shell-and-i18n.md) | The Phase 1b-1 review, dispositioned above. Its two High findings were both **real grants** — an over-broad capability set and a production CSP allowing inline styles — and its finding 1 was a crash on the declared minimum macOS. R34 and R35 come from it |
 | [`src/lib/stores/locale.svelte.ts`](src/lib/stores/locale.svelte.ts) · [`src/lib/bootstrap.ts`](src/lib/bootstrap.ts) | The locale state and the pre-mount bootstrap. `createLocaleState` takes a tag *reader* and re-negotiates on `languagechange` **without ever touching an explicit override**; `bootstrap()` sets `documentElement.lang` before mount. Both directions are pinned by disabling experiments |
-| [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) · [`Info.plist`](src-tauri/Info.plist) | Identifier `cc.carpio.espansoConfig`, strict CSP, `core:default` capability only, `CFBundleLocalizations = [en, es]`. The **menu** is not yet localized — 1b-2 owes it |
+| [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) · [`Info.plist`](src-tauri/Info.plist) · [`capabilities/default.json`](src-tauri/capabilities/default.json) | Identifier `cc.carpio.espansoConfig`, strict CSP, **`"permissions": []`** — measured sufficient for the five commands by `dispatch_check.rs`, not merely argued — and `CFBundleLocalizations = [en, es]`. The **menu** is not yet localized: **1b-2b owes it**, and it is the thing most likely to need the first permission |
 | [`crates/espansoconfig-core/src/workspace/mod.rs`](crates/espansoconfig-core/src/workspace/mod.rs) | **What Phase 1b wraps, one command per method.** `discover`, `summary`, `list_documents`, `get_document`, `get_match`, `document_view`, `document_text`, `refresh`, `load_all`, `evict` — plus the per-`ContentRevision` cache that answers R19's remaining half, and the monotonic path-keyed `DocumentId` allocation that D2v's identity fix rests on |
 | [`crates/espansoconfig-core/src/model/`](crates/espansoconfig-core/src/model/) | **The read model itself.** `document.rs` (`DocumentView`, `match_by_id`, `unaccounted_keys`, `coverage_is_complete`), `match_view.rs` (plan §3.3's 22 fields, `MatchId`, badges), `variable.rs` (the nine §3.4 types), `scalar.rs` (`ScalarView` — D2u in a type), `unknown.rs` (`UnknownEntry`, the undescended spans of D2w), `diagnostic.rs` (22 codes, no prose), `project.rs` (the walk), `profile.rs`, `value.rs` |
 | [`docs/decisions/1a-notes.md`](docs/decisions/1a-notes.md) | Phase 1a's decision record: what the projection is and is not (§1), D2u as a type (§2), the key accounting stated so it can be false (§3), where the schema stops (§4), identity and the design rejected (§5), the workspace and R19 (§6), the disabling experiments (§7 and §12), what the phase got wrong on the way (§8), **the eleven coverage holes stated as holes (§9)**, the dependencies added (§10), what 1b inherits (§11) and the review disposition (§12) |

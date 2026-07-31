@@ -6,25 +6,75 @@
 //! `cargo tree -p espansoconfig-core | rg tauri` finding nothing is the check
 //! that says so.
 //!
-//! Phase 1b-1 scaffolds this crate and stops. There is no command and no event
-//! yet; see `commands` and `events` for what each will hold and why neither
-//! could honestly be written first.
+//! Phase 1b-2a adds the **read-only** half of the boundary: the five commands
+//! of plan section 6.4 and the one piece of state they share. There is still no
+//! event and no mutating command; see `commands` and `events` for what each
+//! will hold and why neither could honestly be written first.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
 // attribute is set here. Add one before the first Windows build, not before.
 
 mod commands;
+#[cfg(test)]
+mod dispatch_check;
+mod error;
 mod events;
+#[cfg(test)]
+mod wire_contract;
+
+/// The compiled configuration: `tauri.conf.json`, the icons and the resolved
+/// capability set.
+///
+/// `generate_context!` may be expanded **once per crate** — it defines the
+/// `_EMBED_INFO_PLIST` symbol — so it lives in one function that both `main`
+/// and `dispatch_check.rs` call. That is not merely a workaround: it is what
+/// makes the dispatcher test exercise the shipped configuration and the shipped
+/// capability file rather than a fixture that could disagree with them.
+fn context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
+/// Registers the five read-only commands and the state they share.
+///
+/// Shared with `dispatch_check.rs` so that the tested application is the built
+/// application: a command registered in `main` and absent from the test's
+/// builder would make the test's evidence a statement about a different
+/// program.
+///
+/// They are the whole IPC surface — read a workspace, list its files, project
+/// one, project one match, re-read one — and nothing in the list can write to
+/// the disk.
+///
+/// `capabilities/default.json` stays at `"permissions": []`. A capability
+/// grants access to **plugin** commands — everything spelled `plugin:…`,
+/// `core:…` included — and an application's own commands are dispatched without
+/// consulting the access-control list unless the application publishes an ACL
+/// manifest of its own (`tauri::webview`'s dispatcher checks
+/// `plugin_command.is_some() || has_app_acl_manifest || !is_local`). This crate
+/// publishes none, the webview's origin is local, and none of the five is a
+/// plugin command — so the empty permission list that Phase 1b-1's review
+/// narrowed to stays exactly as narrow, and `core:default` stays gone. That
+/// paragraph is an argument; `dispatch_check.rs` is the evidence.
+fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .manage(commands::WorkspaceSession::new())
+        .invoke_handler(tauri::generate_handler![
+            commands::open_workspace,
+            commands::list_documents,
+            commands::get_document,
+            commands::get_match,
+            commands::reload_document,
+        ])
+} // End of function register()
 
 /// Starts the application.
 ///
-/// `generate_context!` expands the configuration the build script read, so a
-/// bad `tauri.conf.json` or an unknown capability fails the build rather than
-/// the launch.
+/// A bad `tauri.conf.json` or an unknown capability fails the build rather than
+/// the launch, because [`context`] expands at compile time.
 fn main() {
-    tauri::Builder::default()
-        .run(tauri::generate_context!())
+    register(tauri::Builder::default())
+        .run(context())
         // Developer-facing, and therefore not translated: this fires only when
         // the webview itself cannot be created, before any interface — and so
         // any translation — exists to show a message in.

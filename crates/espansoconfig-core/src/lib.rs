@@ -23,6 +23,7 @@
 //! | [`validate`] | structural + espanso-semantic validation |
 //! | [`persist`] | atomic save transaction, backups |
 //! | [`watch`] | debounced fs watching, revision hashing |
+//! | [`wire`] | the representation a path takes when it crosses the boundary |
 //! | [`workspace`] | the session: discovery + the per-revision document cache |
 //!
 //! # Phase status
@@ -57,6 +58,7 @@ pub mod persist;
 pub mod syntax;
 pub mod validate;
 pub mod watch;
+pub mod wire;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};
@@ -68,6 +70,25 @@ pub use syntax::{
     ScalarStyle, SyntaxError, SyntaxIndex, TriviaIndex,
 };
 pub use watch::ContentRevision;
+pub use wire::WirePath;
+
+/// The largest integer a JavaScript `number` holds exactly: `2^53 - 1`.
+///
+/// Every numeric field of the wire model is a Rust `u64` or `usize` and arrives
+/// in the webview as an IEEE-754 double. Above this value two distinct Rust
+/// integers become **the same** JavaScript number, so an identity above it
+/// could be handed back and address a different thing. Nothing in this crate
+/// may put a larger number on the wire; where a counter could in principle
+/// reach it, the allocation site asserts rather than assumes — see
+/// `crate::workspace`'s identity table.
+///
+/// The audit of every other numeric wire field is in
+/// `docs/decisions/1b-2a-notes.md`: byte offsets and lengths are bounded by the
+/// size of a file that was read into memory, node identities by the number of
+/// nodes in one parse of that file, and the counts by the number of files in a
+/// directory — all of them many orders of magnitude below this bound, and each
+/// of them bounded by something the process already holds in RAM.
+pub const MAX_EXACT_WIRE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Session-local identity of a **file**, for the life of the process.
 ///

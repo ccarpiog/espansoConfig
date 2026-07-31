@@ -23,6 +23,20 @@ tauri = { workspace = true }
 [build-dependencies]
 tauri-build = { workspace = true }
 
+# Phase 1b-2a. The command tests build a synthetic espanso tree on disk and read
+# it back through the real `Workspace`, because the thing under test is the
+# boundary and a boundary over an in-memory fake is a boundary over nothing. No
+# test here ever reads the owner's real configuration (CLAUDE.md section 1).
+[dev-dependencies]
+tempfile = { workspace = true }
+# `tauri/test` gives a `MockRuntime` and `get_ipc_response`, which is how
+# `dispatch_check.rs` invokes the five commands through the **real** dispatcher
+# with the **real** `tauri.conf.json` and the **real** `capabilities/default.json`.
+# Reading the dispatcher's source to argue that an empty permission list does not
+# block an application command is an argument; running one through it is
+# evidence, and Phase 1b-1's review is on file about the difference.
+tauri = { workspace = true, features = ["test"] }
+
 # ---------------------------------------------------------------------------
 # `tauri::is_dev()` is literally `!cfg!(feature = "custom-protocol")`, and this
 # feature is how the Tauri CLI turns a development build into a production one:

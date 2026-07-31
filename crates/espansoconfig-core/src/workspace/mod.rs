@@ -62,6 +62,7 @@ use serde::{Serialize, Serializer};
 use crate::discovery::{self, ConfigTree, DiscoveredFile, DiscoveryError, FileKind};
 use crate::model::{context_of, DocumentContext, DocumentView, IdentityError, MatchId, MatchView};
 use crate::syntax::{SyntaxIndex, TriviaIndex};
+use crate::wire::{WirePath, WirePathRef};
 use crate::{ContentRevision, DocumentId, LineEnding, ParseOutcome, SourceDocument};
 
 /// Everything that can go wrong in this module.
@@ -170,14 +171,14 @@ impl Serialize for WorkspaceError {
             WorkspaceError::Io { path, source } => {
                 let mut out = serializer.serialize_struct("WorkspaceError", 3)?;
                 out.serialize_field("code", "io")?;
-                out.serialize_field("path", path)?;
+                out.serialize_field("path", &WirePathRef(path))?;
                 out.serialize_field("kind", &format!("{:?}", source.kind()))?;
                 out.end()
             }
             WorkspaceError::NotUtf8 { path, offset } => {
                 let mut out = serializer.serialize_struct("WorkspaceError", 3)?;
                 out.serialize_field("code", "notUtf8")?;
-                out.serialize_field("path", path)?;
+                out.serialize_field("path", &WirePathRef(path))?;
                 out.serialize_field("offset", offset)?;
                 out.end()
             }
@@ -243,11 +244,34 @@ fn identity_of(path: &Path) -> DocumentId {
     if let Some(id) = table.by_path.get(path) {
         return *id;
     }
-    let id = DocumentId(table.next);
+    let id = mint(table.next);
     table.next += 1;
     table.by_path.insert(path.to_path_buf(), id);
     id
 } // End of function identity_of()
+
+/// Turns the counter's next value into an identity, or refuses.
+///
+/// A [`DocumentId`] is a `u64` and crosses the boundary as a JSON number, which
+/// the webview reads as an IEEE-754 double. Above
+/// [`crate::MAX_EXACT_WIRE_INTEGER`] two distinct identities become the same
+/// JavaScript number, and an identity that cannot be told from another is not
+/// an identity. **The invariant is stated and checked here rather than assumed
+/// in a comment**: the counter is monotonic and one file costs one increment,
+/// so reaching the bound would take nine quadrillion distinct paths in one
+/// process — but "unreachable" is a claim, and a claim about a wire type
+/// belongs at the site that mints the value.
+///
+/// A panic is the right refusal because there is no honest alternative: handing
+/// out an ambiguous identity is worse, and no caller could act on an error here
+/// that it could not act on by not having asked.
+fn mint(next: u64) -> DocumentId {
+    assert!(
+        next <= crate::MAX_EXACT_WIRE_INTEGER,
+        "a DocumentId above 2^53-1 cannot be told from its neighbour once it reaches JavaScript"
+    );
+    DocumentId(next)
+} // End of function mint()
 
 /// What `list_documents` returns: one row per file, with no parse behind it.
 ///
@@ -259,9 +283,13 @@ pub struct DocumentSummary {
     /// Session-local identity.
     pub id: DocumentId,
     /// Absolute path on disk.
-    pub path: PathBuf,
+    ///
+    /// A [`WirePath`]: it renders lossily on the wire so that no path can make
+    /// this row fail to serialize, and [`DocumentSummary::id`] — not this — is
+    /// what a caller hands back. See `crate::wire`.
+    pub path: WirePath,
     /// Path relative to the configuration root, for display.
-    pub relative_path: PathBuf,
+    pub relative_path: WirePath,
     /// What espanso treats the file as.
     pub kind: FileKind,
     /// Whether espanso's default include glob skips the file (a leading `_`).
@@ -275,8 +303,8 @@ pub struct DocumentSummary {
 /// What `open_workspace` returns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceSummary {
-    /// The configuration root.
-    pub root: PathBuf,
+    /// The configuration root, as a lossily rendered [`WirePath`].
+    pub root: WirePath,
     /// How many YAML files were found.
     pub documents: usize,
     /// How many are match files.
@@ -372,7 +400,7 @@ impl Workspace {
                 .count()
         };
         WorkspaceSummary {
-            root: self.root.clone(),
+            root: WirePath::from(self.root.clone()),
             documents: self.entries.len(),
             match_files: count(FileKind::MatchFile),
             config_profiles: count(FileKind::ConfigProfile),
@@ -588,8 +616,8 @@ impl Workspace {
 fn summary_of(id: DocumentId, file: &DiscoveredFile) -> DocumentSummary {
     DocumentSummary {
         id,
-        path: file.path.clone(),
-        relative_path: file.relative_path.clone(),
+        path: WirePath::from(file.path.clone()),
+        relative_path: WirePath::from(file.relative_path.clone()),
         kind: file.kind,
         disabled: file.disabled,
         read_only: file.kind.is_read_only(),
@@ -644,3 +672,103 @@ pub fn project_source(context: &DocumentContext, source: &str) -> SourceDocument
         view,
     }
 } // End of function project_source()
+
+#[cfg(test)]
+mod tests {
+    use super::{mint, project_source, DocumentSummary, WorkspaceSummary};
+    use crate::discovery::FileKind;
+    use crate::model::DocumentContext;
+    use crate::wire::WirePath;
+    use crate::DocumentId;
+    use std::path::PathBuf;
+
+    /// The identity counter refuses to leave the range JavaScript can carry.
+    ///
+    /// The bound itself is asserted, not merely documented: `PROGRESS.md` R24
+    /// says a safety property whose only home is a comment is not a safety
+    /// property, and "the counter never gets that high" is exactly such a
+    /// comment until something checks it.
+    #[test]
+    fn the_last_exactly_representable_identity_is_still_minted() {
+        assert_eq!(
+            mint(crate::MAX_EXACT_WIRE_INTEGER),
+            DocumentId(crate::MAX_EXACT_WIRE_INTEGER)
+        );
+    }
+
+    /// One past the bound is refused rather than handed out.
+    #[test]
+    #[should_panic(expected = "cannot be told from its neighbour")]
+    fn an_identity_javascript_could_not_tell_apart_is_refused() {
+        let _ = mint(crate::MAX_EXACT_WIRE_INTEGER + 1);
+    }
+
+    /// A path whose basename is not valid UTF-8.
+    ///
+    /// Constructed from bytes: macOS refuses to *create* such a name
+    /// (`EILSEQ`), and the property under test is that the wire types are total
+    /// for every value their fields admit.
+    #[cfg(unix)]
+    fn non_utf8_path() -> PathBuf {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let mut path = PathBuf::from("/nowhere/match");
+        path.push(OsStr::from_bytes(b"ba\xffse.yml"));
+        path
+    }
+
+    /// Every wire type carrying a path serializes whatever that path's bytes
+    /// are.
+    ///
+    /// The failure this pins is the one that cannot be caught downstream: a
+    /// command returns `Ok`, and *then* the response fails to serialize, so the
+    /// webview receives the serializer's English prose where `{ code, operands }`
+    /// was promised. The premise — that a bare `PathBuf` really does fail — is
+    /// asserted in `crate::wire`'s own tests, so this cannot pass vacuously.
+    #[test]
+    #[cfg(unix)]
+    fn every_wire_type_carrying_a_path_serializes_a_non_utf8_path() {
+        let path = non_utf8_path();
+
+        let summary = DocumentSummary {
+            id: DocumentId(0),
+            path: WirePath::from(path.clone()),
+            relative_path: WirePath::from(path.clone()),
+            kind: FileKind::MatchFile,
+            disabled: false,
+            read_only: false,
+            loaded: false,
+        };
+        let json = serde_json::to_value(&summary).expect("a document summary must serialize");
+        assert!(json["path"]
+            .as_str()
+            .expect("a string")
+            .contains('\u{fffd}'));
+
+        let workspace = WorkspaceSummary {
+            root: WirePath::from(path.clone()),
+            documents: 1,
+            match_files: 1,
+            config_profiles: 0,
+            packages: 0,
+            disabled: 0,
+        };
+        serde_json::to_value(&workspace).expect("a workspace summary must serialize");
+
+        // The projection is the real one, driven through the real entry point:
+        // only the context's path is unusual, and that is the field under test.
+        let context = DocumentContext {
+            id: DocumentId(0),
+            path: path.clone(),
+            relative_path: path,
+            kind: FileKind::MatchFile,
+            disabled: false,
+        };
+        let view = project_source(&context, "matches:\n  - trigger: ':one'\n").view;
+        let json = serde_json::to_value(&view).expect("a document view must serialize");
+        assert!(json["relative_path"]
+            .as_str()
+            .expect("a string")
+            .contains('\u{fffd}'));
+    } // End of function every_wire_type_carrying_a_path_serializes_a_non_utf8_path()
+}

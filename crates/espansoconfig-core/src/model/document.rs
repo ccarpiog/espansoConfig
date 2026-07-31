@@ -27,6 +27,7 @@ use crate::patch::DocumentPath;
 use crate::syntax::{
     ByteSpan, HazardKind, NodeId, NodeKind, SyntaxError, SyntaxIndex, TriviaIndex,
 };
+use crate::wire::WirePath;
 use crate::{ContentRevision, DocumentId, LineEnding};
 use std::path::PathBuf;
 
@@ -103,9 +104,13 @@ pub struct DocumentView {
     /// Session-local identity.
     pub id: DocumentId,
     /// Absolute path on disk.
-    pub path: PathBuf,
+    ///
+    /// A [`WirePath`]: it renders lossily on the wire so that no path can make
+    /// this projection fail to serialize, and [`DocumentView::id`] — not this —
+    /// is what a caller hands back. See `crate::wire`.
+    pub path: WirePath,
     /// Path relative to the configuration root, for display.
-    pub relative_path: PathBuf,
+    pub relative_path: WirePath,
     /// What espanso treats the file as.
     pub kind: FileKind,
     /// Whether espanso's default include glob skips the file.
@@ -429,8 +434,8 @@ impl DocumentView {
     fn shell(context: &DocumentContext, source: &str, revision: ContentRevision) -> DocumentView {
         DocumentView {
             id: context.id,
-            path: context.path.clone(),
-            relative_path: context.relative_path.clone(),
+            path: WirePath::from(context.path.clone()),
+            relative_path: WirePath::from(context.relative_path.clone()),
             kind: context.kind,
             disabled: context.disabled,
             read_only: context.kind.is_read_only(),
