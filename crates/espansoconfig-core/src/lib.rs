@@ -43,9 +43,19 @@
 //! - **1a** — [`model`]: the read-only semantic projection the browser renders,
 //!   and [`workspace`]: discovery plus a per-[`ContentRevision`] document cache,
 //!   shaped like the IPC surface the Tauri commands wrap (plan section 6.4).
+//! - **2a-1** — [`persist::write`]: the atomic file-replacement primitive.
+//!   Steps 1, 2 and 6 to 11 of plan section 6.6 — per-path write lock keyed by
+//!   the **resolved** path, base-revision verification, a temp file espanso's
+//!   glob cannot match, mode-bit copy, fsync, a pre-commit re-check, atomic
+//!   rename, directory sync and read-back verification. It is the only code in
+//!   this crate that writes a file. What it promises is **atomic replacement
+//!   with optimistic conflict detection**, not a compare-and-swap on file
+//!   contents — no POSIX operation offers one, and the residual race against a
+//!   non-cooperating writer is stated in that module's own documentation.
 //!
-//! [`validate`] and [`persist`] are still deliberate stubs carrying only the
-//! types the plan already specifies, and [`watch`] holds only
+//! [`validate`] is still a deliberate stub carrying only the types the plan
+//! already specifies, [`persist`] holds the write primitive and none of the
+//! patch, validation or backup steps around it, and [`watch`] holds only
 //! [`ContentRevision`].
 
 #![deny(missing_docs)]

@@ -33,7 +33,27 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1c-2b-2b-1** | Source text on a screen: the shared rendering primitive, `MatchView.source_text` and the unmodelled value **drawn** | ✅ complete — after the review fix round below |
 | **1c-2b-2b-2** | The raw YAML viewer over `document_text`, the `notUtf8` refusal on a screen, and the **real-corpus browse** | ✅ complete — after the review fix round below. **Phase 1's exit lands here, and is met** |
 | **Phase 1** | **The read-only browser** | ✅ complete — plan §12's exit checked in a running window over the real configuration |
-| 2–5 | See plan §12 | ⬜️ **2 is next** |
+| **2a-1** | The durable atomic write primitive: plan §6.6 steps 1, 2, 6–11 · the first code that modifies a user's file | ✅ complete — after the review fix round below |
+| 2a-2 … 2d | See the Phase 2 split below | ⬜️ **2a-2 is next** |
+| 3–5 | See plan §12 | ⬜️ not started |
+
+**Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
+larger than any Phase 0 or Phase 1 sub-phase — it is the whole save transaction, four mutating
+operations, the conflict UI, undo and backup restore. The cut is the same dependency order every
+earlier split used, and it is **by medium first**: 2a is Rust with no UI and no IPC at all, so the code
+that can destroy a file is finished and proven before anything can call it.
+
+| Sub-phase | Scope |
+|---|---|
+| **2a-1** | The **durable atomic write primitive** — plan §6.6 steps 1, 2, 6–11. Takes finished bytes; builds none |
+| **2a-2** | The **save transaction** around it — steps 3–5 and 12: apply patches in memory, reparse the whole candidate (the syntax gate), structural validation (the semantic gate), update the snapshot |
+| **2a-3** | **Backups and rotation** — step 13, into a location outside every auto-loaded glob |
+| **2b** | The **Tauri mutation surface** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document`, and `SaveResult::Conflict` on the wire |
+| **2c** | The **editing UI** — the draft model, the small editor (literal trigger · `replace` · label · word boundary), new / duplicate / delete / move, the conflict UI, draft-level undo, restore from backup |
+| **2d** | **External change reconciliation** — plan §6.5's debounced watcher, self-write suppression, and the clean-draft reload |
+
+Plan §12's Phase 2 exit — *the owner uses it for a week on their real config with zero data loss* —
+lands after **2d**, and is the first exit in this project that cannot be checked in a single session.
 
 **1c-2b-2b was split into 1c-2b-2b-1 / 1c-2b-2b-2**, by the same cut every earlier split used — a
 dependency order rather than a convenience. **-1 is the rendering primitive proved on a small
@@ -985,6 +1005,73 @@ to make; a vacuity check was run in its place and the impossibility is written d
 than as coverage. **226 dictionary keys, unchanged** — the sub-phase adds no user-facing string, which is
 the one thing that makes its "no hardcoded string" claim cheap to believe.
 
+### Phase 2a-1 — the first code that modifies a user's file, and the promise it had to withdraw
+
+**`crates/espansoconfig-core/src/persist/write.rs` is the only code in the crate that opens a file for
+writing.** It implements plan §6.6 steps **1, 2 and 6–11** and nothing else: an app-level per-path write
+lock, a base-revision re-check, a uniquely named temp file in the target's own directory, a mode-bit
+copy, an fsync, an atomic rename, a directory sync, and a read-back-and-hash verification. It takes
+**finished bytes** — it does not build them, parse them, validate them, or write a backup. Steps 3–5 and
+12–13 are 2a-2's and 2a-3's. Nothing crosses the IPC boundary: no command, no wire type, no dictionary
+key, no screen. `WriteError` deliberately does **not** derive `Serialize`, because a wire-visible enum
+needs strings in both dictionaries and the save command that will need them does not exist yet.
+
+**The sub-phase's defining sentence was wrong, and the review is what made it right.** It began as *it
+replaces the bytes of an existing regular file, atomically and durably, only if the file still holds what
+the caller believed it held.* No POSIX or macOS operation can deliver that "only if" against a
+non-cooperating writer — the process-wide mutex excludes this app's own threads and nothing else, so vim,
+espanso, Dropbox or iCloud Drive can replace the target between the hash and the rename and lose an edit
+while the save reports success. **What is built is atomic replacement plus optimistic conflict
+detection**, and every doc comment now says so. **D4 records it.**
+
+**The window is narrowed rather than papered over.** `recheck_target()` runs immediately before the
+rename — three lines above it — and re-resolves the caller's path, compares device and inode and type
+against the object whose bytes were hashed, and re-hashes. A mismatch is `TargetChangedDuringWrite`, a
+**refusal that has written nothing to the target**, with a four-arm `TargetDifference`
+(`Retargeted` · `Vanished` · `Identity` · `Contents`). It is a separate variant from `RevisionMismatch`
+on purpose: the `Identity` arm has an *equal* hash and a different meaning for the user. The residual
+race is now **one rename wide**, and is stated as narrowed and not closed.
+
+**`inspect_target()` does one `open` + `fstat` + `read` on a single descriptor**, with `O_NOFOLLOW`, so
+the mode bits, the bytes and the `(dev, ino)` identity provably come from one inode. The flag's value is
+spelled out per target family rather than pulled from `libc` — this crate still has **no new
+dependency** — and a test pins its *meaning* by asserting `ELOOP`, so a wrong constant fails rather than
+silently opening a weaker file.
+
+**Two claims were weakened and one reviewer premise was rebutted from the toolchain source.** The
+reviewer held that macOS `sync_all()` is plain `fsync`; reading the local `rust-src`
+(`library/std/src/sys/fs/unix.rs`) shows `std` issues `fcntl(fd, F_FULLFSYNC)` on Apple targets, which
+the 4 ms measurement corroborates. But `ENOTSUP` has no fallback and the **directory** sync measurably
+does not do the same work (<0.1 ms), so every durability claim was weakened anyway and the directory sync
+is called best effort in the code and in the notes. **The saved bytes are power-cut durable; the rename
+that publishes them is not.**
+
+**The guarantee is mode bits, not permissions**, and §4 of the notes enumerates the eight classes a
+temp-file-and-rename drops that a truncate-in-place would have kept — owner and group, POSIX ACLs,
+extended attributes including Finder tags, resource forks, creation time, BSD flags such as `uchg`, and
+hard-link relationships. The consequence that is not cosmetic is called out: **dropping a denying ACL
+broadens access.** Implementing any of it needs `libc`; it is recorded as a hole addressed to a later
+phase rather than silently accepted.
+
+**The review's sharpest half was the test audit, and it was right.** Four of the ten stated guarantees
+were pinned by tests that would have passed against a weaker implementation. The byte-exact fixture
+sweep seeded each temp copy with **the fixture's own bytes**, so a writer that did nothing at all passed
+it; it now seeds a `PLACEHOLDER` that contradicts all five properties under test, and a companion test
+asserts both that the fixtures really contain the hazards and that the placeholder really contradicts
+them. The concurrency test had each writer *replace* the file, which passes with no mutex at all, since
+any single winner leaves a complete file; it is replaced by
+`concurrent_read_modify_write_never_loses_an_update`, where each writer **appends** a unique line under
+read-then-write-with-retry so a lost update is a missing line — and it fails with the lock removed. The
+`chflags uchg` test could print a skip and pass when `chflags` could not be run; that path is gone.
+
+**What is proven.** **600 Rust tests across 17 binaries**, 0 failed (559 at 1c-2b-2a's close), of which
+25 integration and 14 unit tests are new. Six disabling experiments in the phase and more in the fix
+round, each run, recorded and reverted. **Two coverage holes are stated in the reviewer's own terms
+rather than presented as covered**: no test would fail if either `sync_all` or the read-back
+verification were removed, and no test involves a second process. The frontend was not touched and its
+suite was not run — this sub-phase adds **no user-facing string and no dictionary key**, which is what
+makes its CLAUDE.md §2 compliance cheap to believe.
+
 ---
 
 ## Decisions (and why — this is what a fresh session cannot re-derive)
@@ -1775,6 +1862,36 @@ zero-width spans.
 No parser strips it, and a BOM preceding a comment makes the parse fail outright. `SourceDocument`
 carries a `bom` flag so the byte is restored verbatim on write.
 
+### D4 — the write is optimistic conflict detection, not a compare-and-swap, and every doc says so
+
+`replace_file_atomically()` reads the target, compares its `ContentRevision` against what the caller
+believed, writes a temp file, and renames. The per-path lock in step 1 is a **process-wide mutex**: it
+serialises this application's own threads and has no effect on any other process. So between the hash
+and the rename, vim, espanso, Dropbox or iCloud Drive can replace the target, and the rename will
+overwrite that change and report success.
+
+**This is not fixable.** There is no ordinary POSIX or macOS pathname operation that means *replace this
+name only if its contents hash to X*. Advisory locks, lock files and `flock` bind only cooperating
+writers. So the decision is: **build the honest thing and name it honestly.**
+
+- The primitive promises **atomic replacement plus optimistic conflict detection**, and the module doc
+  has a `# The residual race` section naming vim, espanso and sync agents by name. It does **not**
+  promise "only if the file still holds what you believed".
+- `recheck_target()` runs immediately before the rename and refuses on a changed path, a changed
+  `(dev, ino)`, a changed type or a changed hash, so the window is **one rename wide** rather than as
+  wide as writing and syncing a whole candidate file. Narrowed, and said to be narrowed.
+- `TargetChangedDuringWrite` is a **separate variant** from `RevisionMismatch`, because the two mean
+  different things to a user: one is *someone else had already changed it before you started*, the other
+  is *someone else changed it while you were saving*. The `Identity` arm exists because a file can be
+  replaced by different bytes that hash the same only if it is the same content — an inode change with
+  an equal hash still means the object is not the one that was inspected.
+- `WriteError::may_have_written()` answers *whether **this call's** rename may have completed* — not
+  whether the target currently holds anything. Under external writers the target must be re-read.
+
+**What this obliges later phases to do.** 2a-3's backups and 2d's watcher are not conveniences: they are
+the recovery path for the race this decision leaves open. A conflict UI that assumes the app's last
+write is what is on disk would be wrong for the same reason.
+
 ---
 
 ## Open risks and deviations
@@ -2013,6 +2130,47 @@ The reviewer's strongest failed attack is worth keeping: changing a neighbouring
 value at any of the three external joins **is** caught independently by the lockstep tree walk. The
 failures were all in presentation-only corruption, terminator ownership, internal run joins and trivia
 re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
+
+---
+
+## Phase 2a-1 review disposition
+
+The review is
+[`docs/reviews/phase-2a-1-atomic-write.md`](docs/reviews/phase-2a-1-atomic-write.md), an adversarial
+correctness review by Codex over `persist/write.rs` and `tests/persist_write.rs`: **fifteen findings —
+two critical, three high, two medium, one low, and six in a test audit.** **Every one is closed or
+recorded before the commit**, so no commit holds a demonstrated defect. Section 11 of
+`docs/decisions/2a-1-notes.md` is the finding-by-finding table; the summary is below.
+
+**The two critical findings are one thing: the code promised a compare-and-swap it cannot perform.** The
+mutex binds only this process, so an external writer can be lost between the hash and the rename. Fixed
+by narrowing the window to one rename (`recheck_target()`, a new `TargetChangedDuringWrite` variant with
+four arms) **and** by correcting every doc comment that claimed otherwise. **D4** records the decision.
+
+**One reviewer premise was rebutted with evidence, not with an opinion.** The reviewer held that macOS
+`sync_all()` is plain `fsync` and that `libc` was needed for `F_FULLFSYNC`. Reading the local `rust-src`
+shows `std` already issues `fcntl(fd, F_FULLFSYNC)` on Apple targets. The wording was weakened anyway,
+because `ENOTSUP` has no fallback and the directory sync measurably does not do the same work — so the
+finding produced a better doc comment and **no new dependency**.
+
+**Two findings were narrowed rather than implemented, both for the same reason.** Full metadata
+preservation (ACLs, xattrs, ownership, BSD flags) and `F_FULLFSYNC` on the directory both need `libc`.
+Each is renamed to what the code actually guarantees — **mode bits**, and fsync-grade durability for the
+bytes with best-effort publication — and enumerated as a hole with an owner. The one consequence that is
+not cosmetic is written down: **dropping a denying ACL broadens access.**
+
+**Six of the fifteen were about the tests, and four of those were theatre.** The byte-exact fixture sweep
+seeded each copy with the fixture's own bytes, so a no-op writer passed it. The concurrency test had each
+writer replace the file, which passes with no mutex at all. The `chflags` test could print a skip and
+pass. Two count claims said "three" above five-element lists. All fixed, each verified by a disabling
+experiment that now fires. **This is the ninth consecutive sub-phase in which the review's most valuable
+finding was a claim outrunning its evidence** — and the first in which most of them were in test bodies
+rather than in prose.
+
+**Two holes are stated in the reviewer's own words rather than presented as covered**: no test would fail
+if either `sync_all` or the read-back verification were removed, and no test involves a second process.
+One incidental narrowing was found while running the experiments — with the lock removed, the read-back
+verification *does* fire — so that hole is smaller than stated, not absent.
 
 ---
 
@@ -2320,6 +2478,44 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 2a-1
+
+Every command below was run by the orchestrator **after** the review fix round, each as its own
+invocation, not taken on the worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo build --workspace` | ✅ clean |
+| `cargo test --workspace` | ✅ **600 tests across 17 binaries**, 0 failed (**+41**: 25 integration in the new `persist_write.rs`, 14 unit in `write.rs`, and the pre-existing binaries unchanged) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `git diff --stat -- crates/espansoconfig-core/tests/corpus/` | ✅ **empty** — no fixture's bytes changed |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+The frontend suite was **not** run and is unchanged: this sub-phase touches no file under `src/` or
+`src-tauri/`, adds no user-facing string and no dictionary key.
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| Plan §6.6 steps 1, 2, 6–11 implemented, and no more | ✅ | `write.rs` is the only code in the crate that opens a file for writing. Steps 3–5 and 12–13 are absent by design and named in the module doc as 2a-2's and 2a-3's |
+| A stale base revision refuses and leaves the file byte-identical | ✅ | `RevisionMismatch` carries both the expected and the found revision; pinned by test |
+| A missing target refuses and creates nothing | ✅ | `TargetMissing`; the directory is enumerated afterwards and holds only what it held |
+| The temp file cannot be matched by espanso's `[!_]*.yml` | ✅ | Asserted against the name `temp_file_name()` actually mints, not a hard-coded string. Two independent reasons: the leading `_` and the non-`.yml` suffix |
+| No temp file survives success, refusal or an I/O error | ✅ | RAII guard disarmed only after a successful rename; a test unwinds the stack and checks. **Crash and abort are excluded and said to be** — a leftover is harmless *because of the name* |
+| Mode bits are preserved | ✅ **renamed at the review** | The temp file is created `0o600` and widened, never briefly wider than the target. It is **mode bits**, not "permissions" — eight dropped metadata classes are enumerated |
+| Symlink behaviour is decided, documented and pinned | ✅ | The target is `canonicalize`d before it is locked, hashed or written, so the real file receives the bytes and the symlink survives. A dangling symlink is `TargetMissing`. A retarget mid-call is refused by `recheck_target()` |
+| Concurrent writers cannot lose an update | ✅ **after the review** | The original test would have passed with no mutex at all. `concurrent_read_modify_write_never_loses_an_update` has each writer append a unique line; it **fails with the lock removed** |
+| A byte-exact fixture survives a round trip through the writer | ✅ **after the review** | The original sweep seeded each copy with the fixture's own bytes and a no-op writer passed it. Each copy is now seeded with a contradicting placeholder, and a companion test asserts both that the fixtures hold the hazards and that the placeholder contradicts them |
+| No new production dependency | ✅ | `std` only; `O_NOFOLLOW` spelled out per target family with its **meaning** pinned by an `ELOOP` assertion |
+| The primitive promises only what it can deliver | ✅ **after the review** | The "only if" claim was false against non-cooperating writers and is gone. D4 |
+| Durability is not overclaimed | ✅ **after the review** | `std` does issue `F_FULLFSYNC` on Apple targets (verified in `rust-src`), so the bytes are power-cut durable — but `ENOTSUP` has no fallback and the **directory** sync is best effort, so the rename that publishes them is not |
+| The residual external-writer race | ❌ **narrowed to one rename, not closed** | Unclosable without cooperating writers. D4, and 2a-3's backups plus 2d's watcher are its recovery path |
+| `sync_all` and the read-back have a disabling experiment | ❌ **stated as a hole in the reviewer's terms** | No test would fail if either were removed; neither is reproducible from user space. One narrowing found: with the lock removed, the read-back verification *does* fire |
+| A second process is exercised | ❌ **no test involves one** | Every test is in-process. The class of defect D4 describes is therefore reasoned about, not measured |
 
 ## Verification — Phase 1c-2b-2b-2
 
@@ -2933,8 +3129,68 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-2b-2b-2 is complete and its review is closed, and with it Phase 1c-2b-2b, Phase 1c and
-Phase 1.** `docs/decisions/1c-2b-2b-2-notes.md` is the record; §8 is the exit verdict and §12 is the
+**Phase 2a-1 is complete and its review is closed.** `docs/decisions/2a-1-notes.md` is the record; §11
+is the finding-by-finding review disposition and §12 is what 2a-2 inherits.
+
+**The next step is Phase 2a-2 — the save transaction around the primitive**: plan §6.6 steps **3, 4, 5
+and 12**. Apply patches in memory, **parse the entire candidate document** (the syntax gate), run
+structural validation (the semantic gate), and update the in-memory snapshot. It is Rust with no UI and
+no IPC, exactly like 2a-1. Backups (step 13) are **2a-3**, not this one.
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 600 tests across 17 binaries, 0 failed
+```
+
+**What 2a-2 inherits from 2a-1, and must not rebuild.**
+
+- **`replace_file_atomically(path, expected, bytes)`** in
+  `crates/espansoconfig-core/src/persist/write.rs`. It takes **finished bytes**. Do not add
+  patch-building, parsing or validation to it — that is the whole point of the split.
+- **`lock_path()` and `replace_locked_file()` exist for 2a-2 specifically.** The transaction must hold
+  the lock across steps 2 to 11, or the revision check and the rename are not one operation. Take the
+  lock once with `lock_path()`, do steps 3–5 inside it, then call `replace_locked_file()` — calling
+  `replace_file_atomically()` while holding the lock **deadlocks**.
+- **`WriteError` / `WriteStep` / `TargetDifference`, and the fact that none of them derive
+  `Serialize`.** That is deliberate: a wire-visible enum needs strings in **both** dictionaries and the
+  `dictionary_contract` test in `src-tauri/` fails without them. When 2b puts a save command on the
+  wire, the dictionary keys and the derive land together, or neither lands.
+- **D4 — the write is optimistic conflict detection, not a compare-and-swap.** Do not write a doc
+  comment, a test name or a user-facing string that says the app cannot lose an external writer's edit.
+  It can. The window is one rename wide.
+- **The guarantee is mode bits**, not permissions. Eight metadata classes are dropped by every save;
+  they are enumerated in notes §4 and are not 2a-2's to fix.
+
+**Three things 2a-2 is most likely to get wrong.**
+
+- **Reparsing the candidate is the point of step 4, and it must reparse the *whole* document**, not the
+  edited region. Phase 0's gate rests on exactly this. `patch/edit.rs` already does a reparse-verify at
+  the mutation entry point — establish what that covers **before** writing a second one, and if it is
+  the same check, call it rather than duplicating it.
+- **Structural validation is plan §6.6's list**: exactly one content field, a valid trigger combination
+  (`trigger` xor `triggers` xor `regex`), valid variable types with required params, unique variable
+  names, statically-knowable `{{references}}`, and a regex that compiles. `src/validate/mod.rs` is
+  still a 14-line placeholder. **Note the last item needs the `regex` crate** — the first production
+  dependency this crate would gain since Phase 0a. Decide it explicitly and record it; do not add it in
+  passing.
+- **Diagnostics are phrased as risk, not as prophecy** (plan §6.6): *"this looks wrong"*, never
+  *"espanso will reject this"*. The app does not control the daemon and cannot prove acceptance. This
+  is the same rule D2u applies to scalar types, in a new place.
+
+**What the earlier phases leave, and Phase 2 as a whole should not rebuild** — the Phase 1 inheritance
+below is still current for 2b and 2c, and the two items addressed to Phase 2 by name are:
+
+- **`forgetFileText()`** in `src/lib/browser/workspace.svelte.ts` must be called after a successful
+  write, or the raw viewer keeps the bytes it read **before** it. Nothing fails without it; that is why
+  it is written here.
+- **`RawDocumentText.text` carries no revision and is not authority for a write.** The viewer's text is
+  for reading.
+
+---
+
+**Phase 1c-2b-2b-2 completed Phase 1c-2b-2b, Phase 1c and Phase 1.**
+`docs/decisions/1c-2b-2b-2-notes.md` is the record; §8 is the exit verdict and §12 is the
 review disposition.
 
 The application can now show **one whole file's text**, drawn through the same primitive the detail
@@ -2958,9 +3214,8 @@ were a **user-facing string that was false for line endings** — reworded in bo
 a screen — and a **cleared target that left a stale file-text snapshot**, now invalidated by one
 helper called from every path that can remove the target.
 
-**The next step is Phase 2.**
-
-**What Phase 2 inherits, and should not rebuild.**
+**What Phase 2 inherits from Phase 1, and should not rebuild.** (Still current for 2b and 2c; the
+authoritative next step is at the top of this section.)
 
 - **`rawDocument.ts` and its four arms.** `loading`, `text`, `empty`, `refused` — a file this
   application cannot show must not look like an empty one, and that rule now has two instances
@@ -3186,6 +3441,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with `O_NOFOLLOW`, so mode bits, bytes and `(dev, ino)` come from one inode. `WriteError` / `WriteStep` / `TargetDifference` **do not derive `Serialize`**, deliberately — see the Next action |
+| [`docs/decisions/2a-1-notes.md`](docs/decisions/2a-1-notes.md) | Phase 2a-1's decision record: what the primitive actually promises and the residual race (§2), why the new variant is not a reused one (§2.3), resolving the target before locking (§3), **mode bits and the eight metadata classes a rename drops (§4)**, the two independent reasons espanso cannot load the temp file (§5), **the fsync question settled from the toolchain source (§6)**, steps-not-sentences in the error type (§7), the disabling experiments (§9), **the coverage holes stated as holes including the two nothing can test (§10)**, the finding-by-finding **review disposition (§11)** and what 2a-2 inherits (§12) |
+| [`docs/reviews/phase-2a-1-atomic-write.md`](docs/reviews/phase-2a-1-atomic-write.md) | The Phase 2a-1 review, dispositioned above. **Read the test audit before writing a test in 2a-2.** Four of the ten stated guarantees were pinned by tests that would have passed against a weaker implementation — a byte-exact sweep seeded with the bytes it wrote back, a concurrency test that passes with no mutex, a `chflags` test that could skip and pass, and two counts that said "three" above five-element lists. **The critical finding is the one to carry forward**: the code promised a compare-and-swap that no POSIX operation can perform |
+| [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **Still a 14-line placeholder, and 2a-2 fills it.** Plan §6.6's list: exactly one content field, `trigger` xor `triggers` xor `regex`, valid variable types with required params, unique variable names, statically-knowable `{{references}}`, and a regex that compiles — that last one needs the `regex` crate, which would be this crate's first new production dependency since Phase 0a. Diagnostics are phrased as *"this looks wrong"*, never *"espanso will reject this"* |
 | [`src/lib/browser/rawDocument.ts`](src/lib/browser/rawDocument.ts) | **What the raw YAML viewer shows, and where it lives.** `rawTarget(selection, documents, selected)` — **the sidebar first, the selection second**, which is what keeps a file that does not *parse* reachable — and `documentTextState(answer)`, whose **four** arms are `loading`, `text`, `empty` and `refused`. The module header carries the placement argument (why the third pane, not the second, not a fourth) and its cost: the pane now has two subjects |
 | [`docs/decisions/1c-2b-2b-2-notes.md`](docs/decisions/1c-2b-2b-2-notes.md) | Phase 1c-2b-2b-2's decision record: the placement decision with its four constraints (§2), the four arms and why a refusal is not an empty file (§3), the strings with **the cases each one sits above** (§4), **the fidelity table's five open rows now closed by a window reading (§5)**, the readings themselves and what the instrument cost (§6, §6.1), the **twenty** experiments **including the three that did not fire and the two that changed the code** (§7, §7.1), **Phase 1's exit verdict with its evidence and its three named gaps (§8)**, what a large document costs, measured (§8.1), the **fourteen** holes (§9) — hole 14 is addressed to Phase 2 by name — R31's blind spots (§10.1) and **the review disposition (§12)** |
 | [`src/lib/browser/sourceText.ts`](src/lib/browser/sourceText.ts) | **The one place file text becomes something a screen can draw**, and 1c-2b-2b-2 uses it unchanged. `sourceSegments(text, atDocumentStart)` returns `text` / `break` (carrying `lf` or `crlf`) / `invisible` (carrying a **code** and the character itself); `sourceCharacters()` rebuilds the input and **is the module's oracle**. `atDocumentStart` is the *only* way a `bom` segment is produced — a slice must never pass it. The classifier names the C0/C1 controls, NUL, U+2028/9, a lone CR, the soft hyphen, the zero-width set and the bidi controls, and deliberately does **not** name joiners, variation selectors, tag characters or combining marks, because those modify a neighbour rather than draw nothing |
