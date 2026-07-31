@@ -14,6 +14,7 @@
     t,
     tContentKind,
     tDetailField,
+    tHazard,
     tOptionGroup,
     tScalarStyle,
     tSelectionNotice,
@@ -66,6 +67,14 @@
    * — a claim about what the app does to the file — and `unknownValue` says in
    * so many words that the value is not on screen. See
    * `docs/decisions/1c-2a-notes.md` section 12, hole 13.
+   *
+   * **The one judgement in this pane is a refusal, never a permission.**
+   * `matchEditability` answers `unrestricted` for most matches and this file
+   * draws **nothing** for that arm on purpose: Phase 1 is read-only, so "this
+   * snippet can be edited safely" is a promise about an editor the reader
+   * cannot reach. A refusal is different — the mutation entry point really does
+   * refuse (`EditError::Refused`), and the snippet list already carries the
+   * `Not editable` badge for the same fact. What this pane adds is the *reason*.
    */
 
   const { browser }: { browser: BrowserState } = $props();
@@ -179,6 +188,14 @@
         <dt>{t('browser.detail.file')}</dt>
         <dd class="source">{browser.selectedDocument.relative_path}</dd>
       </dl>
+    {/if}
+
+    {#if detail.editability.kind === 'blocked'}
+      <p class="blocked">
+        {t('browser.detail.notEditable', { kind: tHazard(detail.editability.hazard) })}
+      </p>
+    {:else if detail.editability.kind === 'blockedUnnamed'}
+      <p class="blocked">{t('browser.detail.notEditableUnnamed')}</p>
     {/if}
 
     <section>
@@ -394,6 +411,19 @@
     padding: 0 0.25rem;
     border: 1px solid var(--border);
     border-radius: 4px;
+  }
+
+  /* The pane's one judgement. Bordered like `.warn` because it is the same
+     kind of statement — this app declining to touch something — and set in the
+     body face rather than the marker face because it is a sentence the reader
+     is meant to read, not a label beside a value. */
+  .blocked {
+    margin: 0;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-raised);
+    font-size: 0.8125rem;
   }
 
   .kind,

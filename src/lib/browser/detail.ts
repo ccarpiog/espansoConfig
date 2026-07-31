@@ -44,6 +44,7 @@ import type {
   ContentKind,
   ElidedValue,
   FieldView,
+  HazardKind,
   MatchOptions,
   MatchView,
   NodeId,
@@ -600,8 +601,77 @@ export interface VariableDetail {
   readonly unknown: readonly UnknownRow[];
 }
 
+/**
+ * What this application says about editing one match, and nothing more.
+ *
+ * **The one thing the pane says that is not a fact about the file.** Everything
+ * else here is source text or a shape; this is a *judgement*, so its three arms
+ * are exactly the three answers the wire can support and no fourth is invented.
+ *
+ * `unrestricted` deliberately renders **nothing at all**. Phase 1 is read-only,
+ * so "this snippet can be edited safely" would be a promise about an editor the
+ * user cannot reach — the same class of over-claim as presenting a plain
+ * scalar's type (D2u) or 1c-2a's "shown as written" beside a value that was not
+ * shown. A refusal is a claim this project has earned, because the mutation
+ * entry point really does refuse: `EditError::Refused` in
+ * `crates/espansoconfig-core/src/patch/edit.rs`.
+ */
+export type MatchEditability =
+  /** Nothing on this match blocks the visual editor. Drawn as nothing. */
+  | { readonly kind: 'unrestricted' }
+  /**
+   * The editor refuses this match, and the wire named the construct.
+   *
+   * The construct is **in the file**, not necessarily in the match:
+   * `TriviaIndex::disqualifying_hazard` returns a hazard flagged on the match's
+   * node, on an **ancestor** of it, on a descendant of it, or — first of all —
+   * one with no node at all, which disqualifies the whole document. So the
+   * string this arm renders says *this file contains* and not *this snippet
+   * contains*; the first wording was true only of the descendant case.
+   */
+  | { readonly kind: 'blocked'; readonly hazard: HazardKind }
+  /**
+   * The editor refuses this match and the wire gave no reason.
+   *
+   * The string this arm renders says only that, and deliberately does not say
+   * *why* — the 1c-2b-1 review's Low 1. The only fact in evidence is the
+   * verdict; "some part of the file blocks it" was an explanation this model
+   * invented, and a refusal that is one day not about a hazard at all would
+   * make it false.
+   */
+  | { readonly kind: 'blockedUnnamed' };
+
+/**
+ * Reads the two editability fields of a match into one answer.
+ *
+ * **`safely_editable` is the verdict and `blocking_hazard` is the reason**, in
+ * that order of authority. In Rust the two come from one call —
+ * `TriviaIndex::is_safely_editable` is defined as
+ * `disqualifying_hazard(...).is_none()` — so they cannot disagree there. They
+ * are two independent fields on the wire, though, and if they ever did
+ * disagree, this order is the one that keeps the pane agreeing with the snippet
+ * list: `MatchBadge::NotEditable` is derived from `safely_editable` alone, so a
+ * pane that refused on the strength of `blocking_hazard` could contradict a row
+ * two panes to the left. A hazard named on a match the wire calls editable is
+ * not lost either — it is in `DocumentView.hazards`, which the snippet list
+ * shows for the file.
+ *
+ * @param match - The selected match as it crossed the boundary.
+ * @returns What, if anything, the pane says about editing it.
+ */
+export function matchEditability(match: MatchView): MatchEditability {
+  if (match.safely_editable) {
+    return { kind: 'unrestricted' };
+  }
+  return match.blocking_hazard === null
+    ? { kind: 'blockedUnnamed' }
+    : { kind: 'blocked', hazard: match.blocking_hazard };
+} // End of function matchEditability()
+
 /** Everything the detail pane draws for one selected match. */
 export interface MatchDetail {
+  /** What this app says about editing the match; often "nothing". */
+  readonly editability: MatchEditability;
   /** The trigger side. */
   readonly trigger: TriggerDetail;
   /** The content side. */
@@ -717,6 +787,7 @@ function describeOptions(options: MatchOptions): readonly OptionGroup[] {
  */
 export function describeMatch(match: MatchView): MatchDetail {
   return {
+    editability: matchEditability(match),
     trigger: {
       kind: match.trigger.kind,
       rows: collectRows([

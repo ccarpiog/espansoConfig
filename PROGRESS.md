@@ -28,7 +28,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1b-2b** | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ✅ complete — after the review fix round below |
 | **1c-1** | The three-pane shell and the data path: sidebar, snippet list, search, the selection | ✅ complete — after the review fix round below |
 | **1c-2a** | The detail pane's match: plan §3.3's fields, §3.4's variables, §3.5's forms, D2u on a screen | ✅ complete — after the review fix round below |
-| 1c-2b | The app's judgements: the hazards, the diagnostics, the raw YAML viewer, the load-failure marker | ⬜️ **next** — **Phase 1's exit lands here** |
+| **1c-2b-1** | The typed judgements: `HazardKind` on a screen, the diagnostics, the load-failure conflation closed | ✅ complete — after the review fix round below |
+| 1c-2b-2 | The raw text surfaces: the `document_text` command, the raw YAML viewer, `MatchView.source_text`, the unmodelled entry's value | ⬜️ **next** — **Phase 1's exit lands here** |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
@@ -61,7 +62,19 @@ says *about* that snippet and the file behind it** — the hazards, the diagnost
 and the load-failure marker — and it fails by **making a claim the project has not earned**. The cut
 proved itself immediately: 1c-2a's own review found the pane telling the reader that an unmodelled
 entry was "shown as written" while showing only its key, which is exactly 1c-2b's failure mode
-appearing inside 1c-2a. Phase 1's stated exit now lands at the end of **1c-2b**.
+appearing inside 1c-2a.
+
+**1c-2b was split once more into 1c-2b-1 / 1c-2b-2**, by the same test, because its five items are of
+two different kinds. **1c-2b-1 is the typed judgements** — the hazards, the diagnostics and the
+load-failure conflation — all of it read from data **already on the wire**, adding no command and no
+wire field, and it fails by **making a claim the app has not earned**. **1c-2b-2 is the raw text
+surfaces** — the `document_text` command, the raw YAML viewer, `MatchView.source_text` and the
+unmodelled entry's value text — every one of which **widens the boundary**, and it fails the way a
+data-format decision fails: later phases inherit it. The cut proved itself the same way 1c-2's did:
+1c-2b-1's review found a new string telling the reader that a second YAML document "is shown but not
+interpreted" when nothing shows it and the viewer that would is in 1c-2b-2 — 1c-2b-1's own failure
+mode, produced by reaching for 1c-2b-2's subject. Phase 1's stated exit now lands at the end of
+**1c-2b-2**.
 
 **1b-2 was split into 1b-2a / 1b-2b** along the same cut: 1b-2a is the **boundary** — the five
 read-only commands, the wire error type and the typed frontend mirror — and 1b-2b is the **prose**,
@@ -823,6 +836,72 @@ the Rust suite unchanged in verdict, and **eighteen disabling experiments** — 
 in the fix round — each run, recorded and reverted. **Two deliberately did not fire**, and they retire a
 claim it would have been easy to make: neither `svelte-check` nor `vite build` reports an unused CSS
 selector, so a `depth-*` rule's presence in `dist` is *not* evidence that it is used.
+
+---
+
+### Phase 1c-2b-1 — the typed judgements, and the third time a written claim ran ahead of its data
+
+The app now says things *about* a snippet and the file behind it. Thirty-two strings that had existed
+since 1b-2b with **no caller at all** — ten `tHazard`, twenty-two `tDiagnostic` — reach a screen, and
+the load-failure conflation 1c-1 named for 1c-2 is closed. The decision record is
+[`docs/decisions/1c-2b-1-notes.md`](docs/decisions/1c-2b-1-notes.md). **No command and no wire field
+were added**; every judgement here is read from data that was already on the wire and unread.
+
+**Editability is a verdict plus a reason, and the permissive arm draws nothing.**
+`matchEditability()` reads `safely_editable` (the verdict) and `blocking_hazard` (the reason) into
+three arms. The pane draws the two refusals and **nothing at all** for the permission — Phase 1 is
+read-only, so "this snippet can be edited safely" would be a promise the app cannot keep.
+
+**The findings live in the middle pane, not the detail pane, and the reason is reachability.** A file
+that fails to parse has no matches, so it can never be selected into the third pane; a diagnostic
+rendered there would be unreachable in exactly the case it exists for.
+[`src/lib/browser/findings.ts`](src/lib/browser/findings.ts) unions `DocumentView.hazards` with the
+kinds named by `Hazard` diagnostics, filters those diagnostics out of the sentence list, and
+deduplicates the rest.
+
+**Could not is now distinguishable from have not.** `loadFailures` carries the `DocumentId` rather
+than the path — path matching is unsound because `WirePath` renders unencodable bytes as U+FFFD — so
+a refused file's row says "Could not be read" where a never-projected profile shows `–`, and a
+refused file is no longer counted as *pending*.
+
+**The review's High finding was this sub-phase's own failure mode, and it recurred twice more.** The
+sub-phase existed to avoid claiming on screen what the app does not do, and shipped
+`AdditionalDocumentNotProjected` saying a second YAML document "is shown but not interpreted" — while
+nothing shows it and the viewer that would is in 1c-2b-2. The string-versus-data sweep that fix forced
+then found a **second**: `notEditable` said the *snippet* contains the hazard, but
+`disqualifying_hazard` ranges over node-less, same-node, ancestor **and** descendant hazards, so it now
+says *this file contains*. A second review pass found the **third**: the notes asserted that profiles
+contribute "no snippet-list row" and "stay out of `scopedMatches`" — both false at the time they were
+written, because the fix that projected profiles had not guarded the list.
+
+**Projecting profiles was a fix, and it introduced the regression above.** Profiles were skipped at
+`open()` on the grounds that they hold no matches — true, and the wrong test: a profile has
+*diagnostics*, and a profile with broken YAML was silent in every pane. They are projected now, and
+`holdsMatches` governs *counting* only. The leak was that `scopedMatches()` consulted neither. It
+consults it in both branches now, **on `kind` (where the file lives — espanso does not load snippets
+from `config/`) rather than on `shape` (what its content looks like)**, which is exactly the
+distinction a match-shaped profile turns on.
+
+**A displayed index is one-based, and the conversion is a mapped type.** `document_index` is a
+zero-based wire operand that was reaching the screen as "Document 0". The conversion happens at the
+display boundary and emits under a *display* operand name, so a stale dictionary leaves a visible
+`{document_index}` rather than a wrong number. Keyed on the operand spelling it would have let a future
+`match_index` render zero-based in silence, so it is now `DIAGNOSTIC_DISPLAY_INDICES`, **a mapped type
+over `DiagnosticCodeName` with a row per variant** — a new code without a row is a `svelte-check`
+failure naming the variant.
+
+**What is proven.** **479 frontend tests across 25 files** (from 412 at 1c-2a's close), the Rust suite
+unchanged in verdict at 547, and **twenty-five disabling experiments** — twenty-two in the phase, three
+in the two fix rounds — each run, recorded and reverted. **Three deliberately did not fire**, and the
+third is the sharpest the project has recorded: `tHazard(` left in a comment while the markup renders
+the raw identifier passes every test, which is the reviewer's own Low 3 scenario demonstrated rather
+than asserted. Two window readings were taken across the phase and its fix rounds, in **both
+languages**, and the second showed the profile fix on screen: the "All" list reading 7 of 7 against a
+sidebar total of 7 where it had read nine rows before.
+
+**One instrument lesson, recorded because it silently invalidated a reading.** `custom-protocol`
+embeds `dist` into the binary, so **`cargo build` must follow every `npm run build`** — one reading was
+taken against the previous bundle and looked entirely normal.
 
 ---
 
@@ -1855,6 +1934,26 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-2b-1 review disposition
+
+The review is
+[`docs/reviews/phase-1c-2b-1-typed-judgements.md`](docs/reviews/phase-1c-2b-1-typed-judgements.md),
+and it was taken in **two passes**: seven findings, then a narrow verification pass over the fix round
+that confirmed all seven closed and found **two more the fix round had introduced**. All nine were
+closed before the commit, so no commit holds a demonstrated defect.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | **High** | `AdditionalDocumentNotProjected` says the additional document "is shown" | **Real, and it is this sub-phase's own stated failure mode landing inside the sub-phase built to avoid it.** The projection records later documents by span only; the viewer that would show one is deferred to 1c-2b-2. Reworded in both languages to claim only that espanso reads the first document and the later one was not interpreted. The fix forced a sweep of the other five new strings against their data, and **that sweep found a second false claim** — see finding 8 |
+| 2 | Medium | Diagnostic identity is the code alone, so distinct occurrences collapse | Real. Twenty `KeyNotAccountedFor` diagnostics rendered as one sentence saying "one key". `occurrenceIdentity()` (code + span + node + path) now sits beside `diagnosticIdentity()` (code only); lines aggregate and carry `occurrences` / `repeated`, rendered "in N places" through a third `plural.ts` pair. **The test was the other half of the finding**: a hand-written `OWED` list that omitted the second input could not disagree with a policy that drops a real finding — R24's corollary again. It is a conservation count derived from the input now |
+| 3 | Medium | Findings are unreachable for config profiles | Real, and **completed rather than deferred**. `holdsMatches` refused a profile before `getDocument()`, so a profile with broken YAML was silent in every pane of the application. `open()` projects every listed document now and `holdsMatches` governs counting only. Phase 1's exit is "the owner can browse their **entire** real config". **This fix introduced finding 8** |
+| 4 | Medium | Zero-based wire indices displayed as human document numbers | Real — an empty first document displayed as "Document 0". Converted at the display boundary under a *display* operand name, so a stale dictionary leaves a visible placeholder rather than a wrong number. Indices 0 and 1 tested. **Strengthened by finding 9** |
+| 5 | Low | The unnamed refusal invents a file-level cause | Real. `safely_editable: false` with `blocking_hazard: null` establishes only that the verdict refuses; "part of the file blocks it" was not in evidence. Now "and no reason was given" |
+| 6 | Low | The union does not deduplicate its first input | Real but defensive — the core currently promises a distinct list. Seeded from a `Set` and given a duplicated-summary fixture, because the implementation and its test both claimed "each distinct kind once" while testing only an already-distinct input |
+| 7 | Low | Two test names claim more than their bodies can check | Real, and the **sixth** occurrence of "read the test's name, then its body, and ask whether the body could fail if the name's claim were false". Renamed to claim only source occurrence. **Deliberately not closed by adopting a component-rendering library** — that is a decision with its own costs, recorded as one below, not a side effect of a fix round. Experiment Y demonstrates the gap rather than asserting it: `tHazard(` in a comment while the markup renders the raw identifier passes every test |
+| 8 | Medium | Match-shaped profiles leak into `scopedMatches` | **Real, and finding 3's own regression** — before that fix such a profile was never projected. A `ConfigProfile` whose content holds match-file keys is deliberately projected as `DocumentShape::MatchFile`, so `view.matches` is populated, while the sidebar count still excluded it: the list showed rows the total did not count. Both branches of `scopedMatches()` consult `holdsMatches` now, **on `kind` rather than `shape`** — where the file lives, not what its content looks like. Experiment Z shows the disagreement (`[90, 91, 10, 11, 20]` against a sidebar total of 3). It also falsified **two sentences the notes already asserted**, which is why it is filed as the third occurrence of *a written claim ahead of its data* rather than as a bug |
+| 9 | Low | A future differently-named index operand would silently stay zero-based | Real. The conversion was keyed on the operand spelling `document_index`, so a later `match_index` would render `0` with no placeholder and no failing test. Now `DIAGNOSTIC_DISPLAY_INDICES`, **a mapped type over `DiagnosticCodeName`**: experiment AA deletes the `EmptyDocument` row and `npm run check` fails naming the variant, before any test runs. Placed beside `ENUM_OPERAND_NAMESPACES` and nowhere near the key builders, so `codes.ts`'s existing guarantees are untouched |
+
 ## Phase 1c-2a review disposition
 
 The review is [`docs/reviews/phase-1c-2a-detail-pane.md`](docs/reviews/phase-1c-2a-detail-pane.md).
@@ -2062,6 +2161,36 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-2b-1
+
+Every command below was run by the orchestrator after the **second** fix round, not taken on the
+worker's report.
+
+| Command | Result |
+|---|---|
+| `npm test` | ✅ **479 tests across 25 files**, 0 failed (412 at 1c-2a's close) |
+| `npm run check` | ✅ 369 files, **0 errors, 0 warnings** (run with `--fail-on-warnings`) |
+| `npm run build` | ✅ built; `dist/assets/index-*.js` 103.17 kB |
+| `cargo test --workspace` | ✅ 16 binaries, **0 failed** across every suite |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt --check` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `rg render_probe src src-tauri/src scripts` | ✅ **no match** — the temporary R32 probe is fully reverted |
+| `rg -c '^\s*"' src/lib/i18n/{en,es}.json` | ✅ **226 and 226** — re-derived, not quoted (218 at 1c-2a's close) |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| `HazardKind` reaches a screen | ✅ | `matchEditability()` and `findings.ts`; the window reading shows a refusal on one snippet and its absence on a sibling one click later, in both languages |
+| The diagnostics reach a screen | ✅ | `DocumentView.diagnostics` rendered in the middle pane; the reading shows a parse error with line and column for a zero-match file, and `RootIsNotAMapping` for a profile |
+| *Could not be read* is distinguishable from *not read yet* | ✅ | `loadFailures` keyed on `DocumentId`; the reading shows "Could not be read" beside a `–` on two sidebar rows. The reviewer independently confirmed every production read site is updated and a refused document is excluded from `pending` |
+| No user-facing string is hardcoded | ⚠️ **partially checkable** | The markup scan and `built-translation-keys.ts` pass, but **R31 still holds**: `hardcoded-strings.ts` sees `.svelte` markup only. The four blind spots are enumerated by name in the notes rather than assumed clean, and experiment Y shows a raw identifier reaching the markup while every test passes |
+| Every new string is backed by data that exists | ✅ **after three failures** | Findings 1, 8 and the self-found `notEditable` claim were all this defect. The reviewer verified the corrected `notEditable` against `disqualifying_hazard`'s actual range in `crates/espansoconfig-core/src/syntax/trivia.rs:601` |
+| A claim about a screen rests on a reading of a screen | ✅ | Two readings, both languages, probe removed and files byte-restored each time. The stale 1c-2a evidence was re-taken too, and `getComputedStyle` proved `.depth-0` / `.depth-1` in the unscoped `src/app.css` are **applied** (0px / 14px), which no earlier evidence established |
+| The Spanish strings are Spanish | ❌ **not established** | Unchanged and unchangeable by any check here — the untranslated-value test establishes non-identity, not meaning. Eight new Spanish values this sub-phase, unreviewed prose. Only a bilingual reader closes this |
 
 ## Verification — Phase 1c-2a
 
@@ -2550,56 +2679,56 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-2a is complete. Start Phase 1c-2b — the app's judgements, and Phase 1's exit.**
+**Phase 1c-2b-1 is complete. Start Phase 1c-2b-2 — the raw text surfaces, and Phase 1's exit.**
 
-> ### ⚠️ Do this first: the pane's screen evidence is stale
->
-> `82ad7c5`, a post-review cleanup pass, **changed `DetailPane.svelte`'s markup and moved its
-> indentation CSS into `src/app.css`** — and **no window reading was re-taken**. By this project's own
-> standing rule (*a component that no test renders is a component nobody has run*), the readings in
-> `1c-2a-notes.md` §11 describe the pane as it was at `5c830d0`, not as it is now. Three things are
-> therefore unverified on a screen: the option groups now render through one `{#each}` instead of four
-> `{#if}` blocks, an unmodelled entry's key renders through a three-arm label, and **the six `.depth-*`
-> rules now live in an unscoped stylesheet** — they are confirmed present and un-suffixed in
-> `dist/assets/*.css`, but experiments N and P established that presence in the bundle is *not* evidence
-> a rule is used. **1c-2b must re-take a reading before claiming anything about this pane**, and it gets
-> that for free since it will be editing the same component anyway.
+The app now says things *about* a snippet and the file behind it: hazards, diagnostics, and a file that
+*could not* be read distinguishable from one nobody *has* read. **What it cannot do is show any of the
+bytes those judgements are about.** 1c-2b-2 does, and the plan's stated exit for Phase 1 lands there:
+*the owner can browse their entire real config and every snippet renders correctly.*
 
-The detail pane now renders the match itself: §3.3's fields, §3.4's nine variable types, §3.5's forms
-and the entries the projection did not model, all as source text, all seen in a running window in both
-languages. **What it does not yet do is say anything *about* that snippet or the file behind it.**
-1c-2b does, and the plan's stated exit for Phase 1 lands there: *the owner can browse their entire real
-config and every snippet renders correctly.*
+Unlike 1c-2b-1, **every item here widens the wire**, which is why they were cut into their own
+sub-phase. A data-format decision made here is inherited by Phases 2–5.
 
 Concretely, and in roughly this order:
 
-1. **Surface `HazardKind`** where the visual editor cannot preserve a construct. Ten strings exist
-   (`tHazard`) and **have no caller at all**. `MatchView.blocking_hazard`, `MatchView.safely_editable`
-   and `DocumentView.hazards` are all live on the wire and nothing reads any of them. This is where a
-   read-only browser starts making claims about *editability*, so it is the sub-phase's real risk.
-2. **Surface the diagnostics.** `tDiagnostic` is 22 strings with **no caller**, and
-   `DocumentView.diagnostics` is live. The four deliberately invalid fixtures yield typed diagnostics
-   and still expose their raw text.
-3. **The raw YAML viewer — and note the correction.** The earlier claim here, that `document_text` is
-   "the one command with no frontend caller, tree-shaken out of `dist`", was **wrong**. `document_text`
-   is a `Workspace` method and **not a registered Tauri command at all**: `main.rs` registers six and it
-   is not among them. So this is a command, a `types.ts` mirror entry and updates to
-   `wire_contract.rs` and `dispatch_check.rs` — meaningfully more than "add a caller". Phase 3 owns
-   CodeMirror; 1c-2b needs only to display text faithfully.
-4. **Fix the load-failure conflation**, named for 1c-2 by 1c-1 and still open. A file that could not be
-   read shows the same `–` / "Not read yet" marker as a profile nobody has projected, conflating *could
-   not* with *have not*. `browser.loadFailures` already holds what is needed to tell them apart.
-5. **Consider showing `MatchView.source_text`** — the match's own bytes, D2u-safe because it is source
-   text. It stops at the match's mapping, so the comment above a snippet is not in it.
+1. **Register `document_text` as a Tauri command — and note the correction already recorded.** The
+   claim that it was "the one command with no frontend caller, tree-shaken out of `dist`" was **wrong**:
+   `document_text` is a `Workspace` method and **not a registered command at all**. `main.rs` registers
+   six and it is not among them. So this is a command, a `types.ts` mirror entry, and updates to
+   `src-tauri/src/wire_contract.rs` and `src-tauri/src/dispatch_check.rs` — meaningfully more than
+   "add a caller". **`dispatch_check.rs` currently proves six commands reachable with
+   `"permissions": []`; a seventh must be proven the same way, not argued.** `wire_contract.rs`
+   asserts the six forbidden Phase 2 command names absent from both sets — keep that true.
+2. **The raw YAML viewer.** Phase 3 owns CodeMirror; 1c-2b-2 needs only to display text faithfully.
+   Faithfully is the whole difficulty: this project's premise is byte fidelity, and the corpus contains
+   CRLF, a BOM, files with no final newline, decomposed and astral Unicode, and block scalars with
+   deliberate trailing spaces. **A viewer that normalises any of that is showing the owner a file they
+   do not have.** Decide explicitly what happens to each and write it down.
+3. **Show `MatchView.source_text`** — the match's own bytes, already on the wire and D2u-safe because
+   it *is* source text. Note its boundary: it stops at the match's mapping, so the comment above a
+   snippet is **not** in it. Say what it is rather than implying it is the snippet's whole text.
+4. **The unmodelled entry's value — the known lie-by-omission, and the reason it is a Rust task.**
+   `UnknownEntry` carries `value_kind` and `value_span` but **no value text**, so the pane claims only
+   that the entry is *recorded and left untouched*. Displaying it needs an exact **Rust-sliced** source
+   span: byte slicing stays in Rust, because JavaScript string indices are UTF-16 units and that
+   confusion is exactly what the core's `CharToByte` adapter exists to prevent. See `1c-2a-notes.md`
+   hole 13. **This is a wire-field addition — the only one on this list.**
 
-**One thing 1c-2b inherits as a known lie-by-omission, and it is the shape of this sub-phase's whole
-risk.** An unmodelled entry's **value is not on the wire**: `UnknownEntry` carries `value_kind` and
-`value_span` but no text. 1c-2a's review caught the pane claiming it was "shown as written" and the
-strings now claim only that the entry is *recorded and left untouched*. Displaying it needs an exact
-**Rust-sliced** source span — byte slicing stays in Rust, because JavaScript string indices are UTF-16
-units and this project's premise is byte fidelity. See `1c-2a-notes.md` hole 13.
+**Then Phase 1's exit must actually be checked, not assumed.** "The owner can browse their entire real
+config and every snippet renders correctly" is a claim about the **real** corpus, which is gitignored
+and present locally (`./scripts/sync-real-corpus.sh`). Nothing in this project has yet run the UI over
+it end to end. Do that, and record it the way every other claim here is recorded — with counts and
+error positions, **never with content** (D1 is absolute; the repository is public).
 
-**What 1c-2b inherits, and should not rebuild.**
+**Two things 1c-2b-2 should look at before it starts, both left open by 1c-2b-1.**
+
+- **Hole 16 — the empty snippet list and the sentence explaining it are produced by unrelated code.**
+  A match-shaped profile now yields "0 of 0" plus a "folder and content disagree" diagnostic, and
+  nothing ties the two together; a change to either leaves the other in place, silently.
+- **Hole 2 — the conflation one level down.** A file that failed to *parse* still shows `0` exactly
+  like a file that is genuinely empty. `parsed` is already carried on the wire for this.
+
+**What 1c-2b-2 inherits, and should not rebuild.**
 
 - **A detail pane, and the rule that keeps it thin.** New work deciding *what* appears goes in
   `src/lib/browser/detail.ts` beside `describeMatch()`; the component gets the walk. The text scan at
@@ -2608,36 +2737,57 @@ units and this project's premise is byte fidelity. See `1c-2a-notes.md` hole 13.
   `tUnknownCount`. **A component calls one and never builds a key.** As of 1c-1 that is enforced rather
   than trusted: `scripts/lint/built-translation-keys.ts` refuses any `t(` whose key is not written
   literally, and it found a two-phase-old instance the moment it was written.
-- **218 dictionary keys**, `en.json` still the schema, and the untranslated-value exception list now
+- **226 dictionary keys**, `en.json` still the schema, and the untranslated-value exception list now
   carries `browser.detail.section.variables` by name.
-- **A working data path.** `browser.status`, `browser.documents`, `browser.sidebar`,
-  `browser.scopedMatches`, `browser.visibleMatches`, `browser.selected`, `browser.selectedMatch` and
-  `browser.loadFailures` are all live, and the selection is already R27-correct.
+- **`DIAGNOSTIC_DISPLAY_INDICES`, and the pattern it establishes.** New in 1c-2b-1: a **mapped type
+  over `DiagnosticCodeName`** that converts a zero-based wire operand into a one-based display number,
+  emitting it under a *display* operand name so a stale dictionary leaves a visible placeholder rather
+  than a wrong number. A new code without a row is a `svelte-check` failure naming the variant. **Any
+  further wire-value-to-display-value conversion belongs here**, beside `ENUM_OPERAND_NAMESPACES` and
+  nowhere near the key builders.
+- **A working data path, and every file now projected at `open()`.** `browser.status`,
+  `browser.documents`, `browser.sidebar`, `browser.scopedMatches`, `browser.visibleMatches`,
+  `browser.selected`, `browser.selectedMatch` and `browser.loadFailures` are all live, the selection is
+  R27-correct, and **config profiles project too** as of 1c-2b-1. `holdsMatches` governs *counting and
+  list membership* only — and it is asked on **`kind`, not `shape`**, because a match-shaped profile is
+  still a profile. Both branches of `scopedMatches()` ask it; removing either guard reintroduces a real
+  leak (experiment Z).
 - **A plural helper.** `src/lib/i18n/plural.ts` selects a `.one` / `.other` key pair on `count === 1`.
   Any new counted string uses it; `"1 snippets"` was a real defect on a real screen.
-- **A notice area, selection-scoped.** If 1c-2 needs somewhere for a non-blocking failure,
+- **A findings surface in the middle pane**, `src/lib/browser/findings.ts`, with two identities over
+  one data type: `diagnosticIdentity` (code only) decides which sentence appears,
+  `occurrenceIdentity` (code + span + node + path) decides how many times it is counted. **If a new
+  judgement needs a home, it goes here, not into the component.**
+- **A notice area, selection-scoped.** If 1c-2b-2 needs somewhere for a non-blocking failure,
   `1c-1-notes.md` hole 5 is the shape of the work: `menuUnavailable`, `menuBuildFailed` and
   `invalidMenuLabels` still have a string and no screen.
 
-**Five rules 1c-2b is most likely to break.**
+**Five rules 1c-2b-2 is most likely to break.**
 
-- **Do not claim on screen what the app does not do.** New in 1c-2a and it is this sub-phase's central
-  risk, because 1c-2b's entire content *is* claims: a hazard says a construct cannot be edited safely, a
-  diagnostic says a file is wrong. 1c-2a's own Medium 1 was a sentence saying an entry was "shown as
-  written" beside a rendering that showed only its key. **Before writing a string, check that the data
-  behind it exists** — `UnknownEntry` had no value text at all, and no amount of careful wording in the
-  component would have found that.
-- **Never hardcode a user-facing string** (CLAUDE.md §2). `tHazard` and `tDiagnostic` are 32 strings
-  between them, and they are the last two namespaces with no caller.
+- **Do not claim on screen what the app does not do.** New in 1c-2a, and **1c-2b-1 broke it three
+  times in one sub-phase** — a string saying a second YAML document "is shown" when nothing showed it,
+  a string saying the *snippet* held a hazard that `disqualifying_hazard` also finds on ancestors, and
+  two sentences in its own notes asserting profiles stayed out of `scopedMatches` while they did not.
+  The pattern is identical every time: **the sentence was written from the intent, not from the data.**
+  1c-2b-2 is more exposed than either predecessor, because its entire subject is *showing bytes* and
+  its most likely failure is a viewer that says "as written" while a transformation sits between the
+  file and the screen. **Before writing a string, check the data behind it exists and says that.**
+- **Never hardcode a user-facing string** (CLAUDE.md §2). Every namespace now has a caller, so a new
+  string here is genuinely new prose in **both** dictionaries.
 - **R31 — a clean lint run is not evidence.** `scripts/lint/hardcoded-strings.ts` sees `.svelte`
-  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props. 1c-2a
-  enumerated its four blind spots by name in `1c-2a-notes.md` §8 rather than assuming them clean; do the
-  same.
+  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props. 1c-2a and
+  1c-2b-1 both enumerated their blind spots by name rather than assuming them clean; do the same.
+  **Experiment Y is the demonstration**: `tHazard(` left in a comment while the markup renders the raw
+  identifier passes the entire suite.
 - **Nothing establishes that any of the Spanish strings is Spanish.** The untranslated-value check
   establishes non-identity. This now matters more than it ever has: the strings are on a screen, 1c-1
-  added 35 and 1c-2a added 50. A bilingual reader is the only thing that closes it. The one defect found
-  here so far — two different Spanish words for one concept, one above the other on screen — was found
-  **by reading a screen**, which remains the only instrument that has ever caught anything in this area.
+  added 35, 1c-2a added 50 and 1c-2b-1 added 8. A bilingual reader is the only thing that closes it.
+  The one defect found here so far — two different Spanish words for one concept, one above the other
+  on screen — was found **by reading a screen**, which remains the only instrument that has ever caught
+  anything in this area.
+- **`cargo build` must follow every `npm run build` before a window reading.** New in 1c-2b-1 and it
+  silently invalidated one reading: `custom-protocol` embeds `dist` into the binary, so a window opened
+  after only a `vite build` shows the **previous** bundle and looks entirely normal.
 - **Nothing renders a Svelte component in an automated test** — `1c-1-notes.md` hole 1, and the reason
   the R32 readings had to be re-taken after the fix round. A component that throws produces an empty
   pane that the whole suite passes straight through. Either adopt a DOM and a component-testing library
@@ -2761,6 +2911,9 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | Path | Why it matters next |
 |---|---|
 | [`src/lib/browser/`](src/lib/browser/) | **The data path 1c-2 renders from.** `workspace.svelte.ts` (`createBrowserState` — the four states, the two generation tokens, `installView`, `loadFailures`), `selection.ts` (**R27 in code**: a position to look at and `MatchView.source_text` to check with, never a display projection), `search.ts` (the matching rule; the haystack is the core's), `sidebar.ts` (grouping, `holdsMatches`, the pending count), `labels.ts`, `notices.ts`, `fixtures.ts` (neutral synthetic builders) |
+| [`src/lib/browser/findings.ts`](src/lib/browser/findings.ts) | **What the app says about a *file*, and the home for any new judgement.** Unions `DocumentView.hazards` with the kinds named by `Hazard` diagnostics, filters those out of the sentence list, and carries **two identities over one data type**: `diagnosticIdentity` (code only) decides which sentence appears, `occurrenceIdentity` (code + span + node + path) decides how many times it is counted, rendered "in N places". Rendered by `SnippetList.svelte` — **the middle pane, because a file that fails to parse has no matches and so can never be selected into the third one** |
+| [`docs/decisions/1c-2b-1-notes.md`](docs/decisions/1c-2b-1-notes.md) | Phase 1c-2b-1's decision record: where a hazard belongs and why the permissive arm draws nothing, the two diagnostic identities, the profile projection and the `kind`-not-`shape` guard, the display-index mapped type, **the strings and R31's blind spots by name (§6.2 holds the string-versus-data sweep that found a second false claim)**, the twenty-five disabling experiments **including the three that did not fire** (§7), what the phase got wrong (§10.1 — the third occurrence of *a written claim ahead of its data*), the two window readings and the `cargo build`/`npm run build` lesson (§7.7), the coverage holes stated as holes (§11) and the two review dispositions (§13, §13.1) |
+| [`docs/reviews/phase-1c-2b-1-typed-judgements.md`](docs/reviews/phase-1c-2b-1-typed-judgements.md) | The Phase 1c-2b-1 review, in **two passes**, dispositioned above. Its High 1 is the sub-phase's own failure mode landing inside the sub-phase built to avoid it. Its second pass is the one to remember structurally: **the fix for Medium 2 introduced Medium 8**, and Medium 8 falsified two sentences the notes had already written — a reviewer checking a fix round is not ceremony |
 | [`src/lib/browser/detail.ts`](src/lib/browser/detail.ts) | **The pane's model, and where 1c-2b's new logic goes.** `describeMatch()` (the trigger and content sides kept independent, options grouped by intent per plan §8.5), `flattenValue()` (all five `ValueView` arms, `Elided` included — a node the projection stopped at still gets a line), `scalarDisplay()` (D2u: `empty`, `ambiguous` and `style` are the only three things said about a scalar, and none of them is its meaning), `detailFieldKey()` (a template literal typed as `TranslationKey`, so a field with no string is a compile error **here**) |
 | [`src/lib/components/DetailPane.svelte`](src/lib/components/DetailPane.svelte) | **Presentation only, deliberately.** Five snippets and one walk over `describeMatch()`'s output. Nothing in this repository renders a Svelte component in a test, so logic placed here is logic nothing can check — the phase caught itself doing it once and moved it out. The `•` for a sequence item is **markup, not a CSS `content:` rule**, so a window reading's `innerText` can see it |
 | [`docs/decisions/1c-2a-notes.md`](docs/decisions/1c-2a-notes.md) | Phase 1c-2a's decision record: why the logic is not in the component (§2), absent vs empty and the one place the wire cannot tell them apart (§3), D2u in the pane (§4), the two sides never collapsed (§5), options by intent (§6), variables and forms (§7), **the strings and R31's four blind spots by name (§8)**, **the eighteen experiments including the two that did not fire (§9)**, what the phase got wrong (§10), **R32's readings and what they do and do not establish (§11)**, **the thirteen coverage holes stated as holes (§12)** and what 1c-2b inherits (§13) |
@@ -2862,6 +3015,7 @@ _Updated at each phase boundary._
 | 1c-1 | `59d4207` | ✅ pushed to `origin/main` | clean |
 | 1c-2a | `5c830d0` | ✅ pushed to `origin/main` | clean |
 | 1c-2a cleanup | `82ad7c5` | ✅ pushed to `origin/main` | clean |
+| 1c-2b-1 | `PENDING` | pending | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b

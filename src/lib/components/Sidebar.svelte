@@ -18,6 +18,14 @@
    * 1c-1 review that number stood alone and the reason was in the developer
    * console: "All 2" for a configuration holding 102 snippets.
    *
+   * **And the file itself says so too.** Three count states, not two: a number,
+   * "not read yet" for a file nobody projected, and "could not be read" for one
+   * whose read was attempted and refused. The 1c-1 window reading found the last
+   * two drawn identically — the same `–`, the same tooltip — one row apart, and
+   * named the conflation for this sub-phase. `SidebarRow.unreadable` is where
+   * the two are told apart, and `LoadFailure` carries the identity that makes it
+   * possible.
+   *
    * Counts go through `tSnippetCount`, which picks the singular or the plural
    * key. `"{count} snippets"` on its own renders "1 snippets", and a file with
    * one snippet in it is the common case rather than the edge one.
@@ -47,8 +55,8 @@
     <div class="partial" role="status">
       <p>{t('browser.sidebar.partialTotal')}</p>
       <ul>
-        {#each browser.loadFailures as failure, index (index)}
-          <li>{tIpcFailure(failure)}</li>
+        {#each browser.loadFailures as refusal (refusal.document)}
+          <li>{tIpcFailure(refusal.failure)}</li>
         {/each}
       </ul>
     </div>
@@ -81,7 +89,14 @@
               {#if row.document.disabled}
                 <span class="mark">{t('browser.sidebar.notAutoLoaded')}</span>
               {/if}
-              {#if row.matches === null}
+              {#if row.unreadable}
+                <!-- A word rather than a glyph with a tooltip: "could not read
+                     this" is a different fact from "have not read this", and a
+                     second dash distinguished by a `title` alone is invisible
+                     to a reader who never hovers and to a screen reader that
+                     skips an `aria-hidden` span. -->
+                <span class="mark warn">{t('browser.sidebar.unreadable')}</span>
+              {:else if row.matches === null}
                 <span class="count" title={t('browser.sidebar.unread')} aria-hidden="true">–</span>
               {:else}
                 <span class="count" title={tSnippetCount(row.matches)}>
@@ -200,5 +215,12 @@
     border-radius: 4px;
     font-size: 0.6875rem;
     color: var(--muted);
+  }
+
+  /* A refusal, not an attribute of the file: it reads in the body colour so it
+     does not sit at the same weight as "Not loaded automatically", which is a
+     fact about espanso's own include glob rather than about this app failing. */
+  .warn {
+    color: inherit;
   }
 </style>

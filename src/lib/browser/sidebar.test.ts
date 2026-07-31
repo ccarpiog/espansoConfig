@@ -12,6 +12,9 @@
  *    not opened is empty.
  * 3. **A config profile holds no matches**, so it is neither counted in the
  *    "All" total nor waited for.
+ * 4. **"Could not read" is not "have not read".** Both leave a row with no
+ *    count, and before 1c-2b-1 both drew the same `–`. A refused file is also
+ *    not *pending*: nothing is coming for it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -129,6 +132,46 @@ describe('counts', () => {
     expect(complete.pending).toBe(0);
   });
 }); // End of the "counts" suite
+
+describe('a file that could not be read', () => {
+  /** The counts of a workspace where document 3 was refused. */
+  const counts = new Map<DocumentId, number>([
+    [2, 3],
+    [4, 7]
+  ]);
+  const model = buildSidebar(DOCUMENTS, counts, new Set<DocumentId>([3]));
+
+  it('is marked on its own row, not only in the block above the groups', () => {
+    // The conflation the 1c-1 reading found: `match/_drafts.yml` here was
+    // refused and `config/default.yml` was never asked for, and both drew `–`
+    // with the tooltip "Not read yet". One is this app failing; the other is
+    // this app not having looked.
+    expect(model.files[1]?.unreadable).toBe(true);
+    expect(model.profiles[0]?.unreadable).toBe(false);
+  });
+
+  it('still has no count, because a refused read produced no projection', () => {
+    expect(model.files[1]?.matches).toBeNull();
+  });
+
+  it('is not waited for: nothing is coming', () => {
+    // The whole point of `pending` is "this total is about to grow". A refused
+    // file makes that false, and the old code counted it.
+    expect(model.pending).toBe(0);
+  });
+
+  it('leaves every other row unmarked and every other count alone', () => {
+    expect(model.files[0]?.unreadable).toBe(false);
+    expect(model.packages[0]?.unreadable).toBe(false);
+    expect(model.total).toBe(10);
+  });
+
+  it('marks nothing when nothing was refused', () => {
+    const clean = buildSidebar(DOCUMENTS, counts);
+    expect(clean.files.map((row) => row.unreadable)).toEqual([false, false]);
+    expect(clean.pending).toBe(1);
+  });
+}); // End of the "file that could not be read" suite
 
 describe('which documents can hold matches', () => {
   it.each([

@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
 import type { CommandResult } from '../ipc/commands';
 import type { DocumentSummary, DocumentView, MatchView, WorkspaceSummary } from '../ipc/types';
-import { makeDocument, makeMatch, makeSummary } from './fixtures';
+import { diagnostic, makeDocument, makeMatch, makeSummary } from './fixtures';
 import { createBrowserState, type BrowserCommands } from './workspace.svelte';
 
 /** A workspace summary of a two-file configuration. */
@@ -56,6 +56,46 @@ function otherDocument(): DocumentView {
   });
 } // End of function otherDocument()
 
+/**
+ * The projection of `config/default.yml`.
+ *
+ * A profile is projected as of the 1c-2b-1 review: it holds no matches and it
+ * does hold diagnostics, and skipping it made a profile with broken YAML silent
+ * in every pane of the application.
+ */
+function profileDocument(): DocumentView {
+  return makeDocument({
+    id: 1,
+    relativePath: 'config/default.yml',
+    kind: 'ConfigProfile',
+    diagnostics: [diagnostic({ RootIsNotAMapping: { found: 'Sequence' } })]
+  });
+} // End of function profileDocument()
+
+/**
+ * The projection of a `config/*.yml` whose **content** looks like a match file.
+ *
+ * Not a contrivance: the core projects a profile carrying match-file keys as
+ * `DocumentShape::MatchFile` **on purpose**
+ * (`crates/espansoconfig-core/src/model/document.rs`), so `matches` really can
+ * be non-empty on a document whose `kind` is `ConfigProfile`. Its `kind` is what
+ * espanso goes by — a fact about **where the file lives** — and espanso does not
+ * load matches out of `config/`.
+ *
+ * @returns A profile with two matches in it.
+ */
+function matchShapedProfile(): DocumentView {
+  return makeDocument({
+    id: 1,
+    relativePath: 'config/default.yml',
+    kind: 'ConfigProfile',
+    matches: [
+      makeMatch({ node: 90, document: 1, trigger: ':inprofile', label: 'In a profile' }),
+      makeMatch({ node: 91, document: 1, trigger: ':also', label: 'Also in a profile' })
+    ]
+  });
+} // End of function matchShapedProfile()
+
 /** What {@link scriptedCommands} may be told to do differently. */
 interface Script {
   /** What `open_workspace` answers. */
@@ -80,6 +120,7 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   const documents =
     script.documents ??
     new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
       [2, { ok: true, value: baseDocument() }],
       [3, { ok: true, value: otherDocument() }]
     ]);
@@ -138,7 +179,7 @@ describe('the load', () => {
     expect(state.documents).toEqual([]);
   });
 
-  it('ends ready, with every match-bearing file projected', async () => {
+  it('ends ready, with every file projected — profiles included', async () => {
     const commands = scriptedCommands();
     const state = createBrowserState(commands, () => undefined);
     await state.open(null);
@@ -146,12 +187,73 @@ describe('the load', () => {
     expect(state.status).toBe('ready');
     expect(state.summary?.root).toBe('/tmp/espanso');
     expect(state.documents).toHaveLength(3);
-    // The profile is listed and not projected: it holds no matches, and asking
-    // for it would parse a file nothing on screen reads.
-    expect(commands.getDocument).toHaveBeenCalledTimes(2);
+    // All three, the profile among them. It was skipped until the 1c-2b-1
+    // review on the grounds that it holds no matches — true, and the wrong
+    // test: it holds diagnostics, and nothing else in the application would
+    // ever ask for them.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
     expect(state.sidebar.total).toBe(3);
     expect(state.sidebar.pending).toBe(0);
     expect(state.scopedMatches).toHaveLength(3);
+  });
+
+  it('projects a profile without letting it into a count or the snippet list', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+
+    // Read, and still showing "not read yet" rather than a count of 0: a `0`
+    // would say the file was read and holds no snippets, which invites the
+    // reader to expect that it could hold some.
+    expect(state.sidebar.profiles[0]?.matches).toBeNull();
+    expect(state.sidebar.total).toBe(3);
+    expect(state.sidebar.pending).toBe(0);
+    // …and it contributes nothing to the "All" list either.
+    expect(state.scopedMatches).toHaveLength(3);
+    state.show({ kind: 'document', id: 1 });
+    expect(state.scopedMatches).toEqual([]);
+  });
+
+  it('keeps a match-shaped profile’s matches out of the list the total counts', async () => {
+    /*
+     * The second review pass's finding, and it is the profile fix regressing
+     * itself: before profiles were projected there was no such view to leak.
+     * `holdsMatches` guards the sidebar's counts, so a list built without the
+     * same guard shows rows the total does not count — and the disagreement is
+     * the assertion, not either number alone.
+     */
+    const state = createBrowserState(
+      scriptedCommands({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: matchShapedProfile() }],
+          [2, { ok: true, value: baseDocument() }],
+          [3, { ok: true, value: otherDocument() }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+
+    // The "All" scope: three real snippets, and the total says three.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(state.sidebar.total).toBe(state.scopedMatches.length);
+
+    // The profile's own scope: still nothing, although `view.matches` has two.
+    state.show({ kind: 'document', id: 1 });
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.sidebar.profiles[0]?.matches).toBeNull();
+    // …and its diagnostics stay reachable, which is why it is projected at all.
+    expect(state.scopedDocument?.id).toBe(1);
+  });
+
+  it('makes a profile’s diagnostics reachable, which they were not before', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 1 });
+
+    // The review's Medium 2, in one assertion: `scopedDocument` used to be
+    // `null` here, so a profile with broken YAML said nothing anywhere.
+    expect(state.scopedDocument?.id).toBe(1);
+    expect(state.scopedDocument?.diagnostics).toHaveLength(1);
   });
 
   it('reports a failed open and shows it, rather than an empty window', async () => {
@@ -190,6 +292,7 @@ describe('the load', () => {
     const state = createBrowserState(
       scriptedCommands({
         documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
           [2, { ok: true, value: baseDocument() }],
           [3, { ok: false, failure }]
         ])
@@ -201,12 +304,46 @@ describe('the load', () => {
     // One unreadable file must not blank a window that can show the rest.
     expect(state.status).toBe('ready');
     expect(state.scopedMatches).toHaveLength(2);
-    expect(state.sidebar.pending).toBe(1);
+    // Not *pending*: a refused read is not a count on its way. It is on the
+    // row, as `unreadable`.
+    expect(state.sidebar.pending).toBe(0);
     expect(reported).toEqual([failure]);
     // …and it must not do it silently. The console is for the developer; the
     // user is looking at a total that omits a whole file, and `loadFailures` is
     // what the sidebar renders to say so.
-    expect(state.loadFailures).toEqual([failure]);
+    expect(state.loadFailures).toEqual([{ document: 3, failure }]);
+  });
+
+  it('says which file could not be read, so its own row can say so too', async () => {
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/other.yml', kind: 'PermissionDenied' }
+    };
+    const state = createBrowserState(
+      scriptedCommands({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
+          [2, { ok: true, value: baseDocument() }],
+          [3, { ok: false, failure }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+
+    // The identity is carried rather than recovered from the failure's `path`:
+    // a `WirePath` renders un-encodable bytes as U+FFFD, so two different files
+    // can produce one display path, and several codes carry no path at all.
+    expect(state.loadFailures.map((entry) => entry.document)).toEqual([3]);
+    const refused = state.sidebar.files.find((row) => row.document.id === 3);
+    const untouched = state.sidebar.files.find((row) => row.document.id === 2);
+    expect(refused?.unreadable).toBe(true);
+    expect(refused?.matches).toBeNull();
+    expect(untouched?.unreadable).toBe(false);
+    // A profile nobody projected is the other side of the conflation: no count
+    // either, and it is *not* a file this app failed to read.
+    expect(state.sidebar.profiles[0]?.unreadable).toBe(false);
+    expect(state.sidebar.pending).toBe(0);
   });
 
   it('starts each open with no failures held over from the last one', async () => {
@@ -233,12 +370,16 @@ describe('the load', () => {
     };
     const state = createBrowserState(commands, () => undefined);
     await state.open(null);
-    expect(state.loadFailures).toEqual([failure]);
+    expect(state.loadFailures).toEqual([{ document: 3, failure }]);
+    expect(state.sidebar.files.some((row) => row.unreadable)).toBe(true);
 
     round = 1;
     await state.open(null);
     expect(state.loadFailures).toEqual([]);
     expect(state.sidebar.pending).toBe(0);
+    // The mark has to clear with the list. A row still saying "could not be
+    // read" for a file that has just been read is the same lie as the total.
+    expect(state.sidebar.files.some((row) => row.unreadable)).toBe(false);
   });
 
   it('is ready and empty for a configuration with no files at all', async () => {
@@ -276,6 +417,71 @@ describe('the list the middle pane shows', () => {
     expect(state.visibleMatches).toEqual([]);
   });
 }); // End of the "list" suite
+
+describe('the file the middle pane is showing', () => {
+  /*
+   * `scopedDocument` is what the middle pane draws a file's diagnostics and
+   * hazards from. It has to answer for a file with **no matches**, because a
+   * file that does not parse is exactly that and is the one that most needs a
+   * sentence.
+   */
+  it('is nothing while the list is showing every file', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    expect(state.scopedDocument).toBeNull();
+  });
+
+  it('is the projection of the file the sidebar selected', async () => {
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 3 });
+    expect(state.scopedDocument?.id).toBe(3);
+  });
+
+  it('is the projection even when that file holds no matches at all', async () => {
+    // The four invalid fixtures' shape: a view with `parsed: false`, an empty
+    // `matches` and a diagnostic. Nothing in it can be selected, so the detail
+    // pane is unreachable and this is the only surface left.
+    const broken = makeDocument({ id: 3, relativePath: 'match/other.yml', parsed: false });
+    const state = createBrowserState(
+      scriptedCommands({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
+          [2, { ok: true, value: baseDocument() }],
+          [3, { ok: true, value: broken }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+    state.show({ kind: 'document', id: 3 });
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.scopedDocument?.parsed).toBe(false);
+  });
+
+  it('is nothing for a file whose read was refused', async () => {
+    // The only remaining reason a listed file has no projection. There is no
+    // view to answer with and the pane must not be handed a half-built one;
+    // what the reader gets instead is the sidebar's "Could not be read".
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/other.yml', kind: 'PermissionDenied' }
+    };
+    const state = createBrowserState(
+      scriptedCommands({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
+          [2, { ok: true, value: baseDocument() }],
+          [3, { ok: false, failure }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+    state.show({ kind: 'document', id: 3 });
+    expect(state.scopedDocument).toBeNull();
+  });
+}); // End of the "file the middle pane is showing" suite
 
 describe('selecting a snippet', () => {
   it('holds the identity and checks it across the boundary', async () => {

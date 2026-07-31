@@ -37,12 +37,15 @@ import type {
   AliasView,
   ContentKind,
   ContentSpec,
+  Diagnostic,
+  DiagnosticCode,
   DocumentId,
   DocumentSummary,
   DocumentView,
   ElidedValue,
   FieldView,
   FileKind,
+  HazardKind,
   MatchBadge,
   MatchOptions,
   MatchView,
@@ -169,6 +172,23 @@ export function unknownEntry(
   };
 } // End of function unknownEntry()
 
+/**
+ * One diagnostic of the shape the boundary delivers.
+ *
+ * The span and the node are what distinguish two diagnostics carrying the same
+ * code, so they are parameters rather than constants: a test of the
+ * deduplication rule in `findings.ts` needs two records that differ **only**
+ * there, which is precisely the pair the rule collapses.
+ *
+ * @param code - The code and its operands.
+ * @param node - The node the diagnostic is about, or `null`.
+ * @param start - The first byte of its span; the span is one byte long.
+ * @returns A diagnostic.
+ */
+export function diagnostic(code: DiagnosticCode, node: number | null = null, start = 0): Diagnostic {
+  return { code, span: { start, end: start + 1 }, node, path: null };
+} // End of function diagnostic()
+
 /** What {@link makeVariable} needs, all of it optional. */
 export interface VariableOverrides {
   /** The mapping node this variable projects. */
@@ -281,6 +301,17 @@ export interface MatchOverrides {
   readonly unknownEntries?: readonly UnknownEntry[];
   /** The badges the core computed. Never derived from the fields above. */
   readonly badges?: readonly MatchBadge[];
+  /**
+   * Whether the visual editor may edit this match.
+   *
+   * Independent of {@link MatchOverrides.blockingHazard} on purpose. In Rust
+   * the two come from one call and cannot disagree; here they can, which is
+   * what lets a test drive the contradiction `matchEditability` has a defined
+   * answer for.
+   */
+  readonly safelyEditable?: boolean;
+  /** The hazard the core says blocks editing this match. */
+  readonly blockingHazard?: HazardKind | null;
   /** `search_text`, when a test needs one the join below would not produce. */
   readonly searchText?: string;
   /**
@@ -407,8 +438,8 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
     vars: overrides.vars ?? [],
     form_fields: overrides.formFields ?? [],
     badges: overrides.badges ?? [],
-    blocking_hazard: null,
-    safely_editable: true,
+    blocking_hazard: overrides.blockingHazard ?? null,
+    safely_editable: overrides.safelyEditable ?? true,
     unknown_entries: overrides.unknownEntries ?? [],
     search_text: overrides.searchText ?? parts.join('\n')
   };
@@ -430,6 +461,12 @@ export interface DocumentOverrides {
   readonly revision?: string;
   /** The matches the document holds. */
   readonly matches?: readonly MatchView[];
+  /** Whether the substrate accepted the file. */
+  readonly parsed?: boolean;
+  /** Everything the projection noticed, in source order. */
+  readonly diagnostics?: readonly Diagnostic[];
+  /** The distinct hazard kinds the core found anywhere in the file. */
+  readonly hazards?: readonly HazardKind[];
 }
 
 /**
@@ -471,9 +508,13 @@ export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
     byte_len: 0,
     line_ending: 'Lf',
     bom: false,
-    parsed: true,
+    parsed: overrides.parsed ?? true,
     stream_documents: 1,
-    shape: 'MatchFile',
+    // Follows the kind rather than being pinned to `MatchFile`: a profile is
+    // projected as of the 1c-2b-1 review, so a fixture profile whose *shape*
+    // still said "snippet file" would be the kind of self-contradicting fixture
+    // the next reader trusts.
+    shape: summary.kind === 'ConfigProfile' ? 'ConfigProfile' : 'MatchFile',
     top_level_keys: [],
     matches: overrides.matches ?? [],
     global_vars: [],
@@ -482,8 +523,15 @@ export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
     unknown_entries: [],
     coverage: [],
     undescended: [],
-    diagnostics: [],
-    hazards: [],
-    safely_editable: true
+    diagnostics: overrides.diagnostics ?? [],
+    hazards: overrides.hazards ?? [],
+    // The one derived field, and it is derived because the alternative is a
+    // fixture that contradicts itself. Rust computes the root's answer with
+    // `disqualifying_hazard`, which fires when the flagged node is the node, an
+    // ancestor of it **or a descendant of it** — and the root is an ancestor of
+    // everything — so any hazard anywhere makes the root un-editable. Nothing
+    // in the frontend reads this field yet; it is here so that when something
+    // does, the fixture is not the thing that is wrong.
+    safely_editable: (overrides.hazards ?? []).length === 0
   };
 } // End of function makeDocument()

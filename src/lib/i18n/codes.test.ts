@@ -467,6 +467,49 @@ describe('the descriptions', () => {
     expect(describeDiagnostic(locale, { ValueTooDeep: { depth: 64 } })).toContain('64');
   });
 
+  it.each(LOCALES)('count documents from one rather than from zero in %s', (locale) => {
+    // `document_index` indexes `SyntaxIndex::documents()`, so it is zero-based
+    // — and a person counting the documents in a file starts at one. Both
+    // indices are tested because the defect was invisible at index 1: "document
+    // 1" reads perfectly well while naming the *second* document.
+    const first = describeDiagnostic(locale, { EmptyDocument: { document_index: 0 } });
+    const second = describeDiagnostic(locale, {
+      AdditionalDocumentNotProjected: { document_index: 1 }
+    });
+    expect(first).toContain('1');
+    expect(first).not.toContain('0');
+    expect(second).toContain('2');
+  });
+
+  it.each(LOCALES)('leave every other numeric operand exactly as the wire sends it in %s', (locale) => {
+    // The conversion is per variant and per operand, not a rule about numbers.
+    // A depth of 64 is a depth of 64 and a count of 2 is a count of 2.
+    expect(describeDiagnostic(locale, { ValueTooDeep: { depth: 64 } })).not.toContain('65');
+    expect(
+      describeDiagnostic(locale, { MatchHasSeveralContentForms: { count: 2 } })
+    ).toContain('2');
+  });
+
+  it.each(LOCALES)('render every diagnostic sample without a stray index in %s', (locale) => {
+    /*
+     * The second review pass's Low, from the other side. The display-index
+     * table is a **mapped type over `DiagnosticCodeName`**, so a variant added
+     * to the union and forgotten there is a compile error in `codes.ts` — but a
+     * compile-time guarantee leaves no trace at run time, and a weakened
+     * annotation would leave none either. This is the cheap runtime companion:
+     * every sample renders, and no sample renders an operand the table would
+     * have had to name. It is not a substitute for the type; it is a tripwire
+     * for the type being taken away.
+     */
+    for (const code of DIAGNOSTIC_CODES) {
+      const rendered = describeDiagnostic(locale, code);
+      expect(rendered, `${locale}:${nameOf(code)}`).not.toMatch(/\{[A-Za-z]/);
+    }
+    // And the one pair the table does name, at the boundary value that made the
+    // defect invisible: index 0 must never reach a sentence.
+    expect(describeDiagnostic(locale, { EmptyDocument: { document_index: 0 } })).not.toContain('0');
+  });
+
   it.each(LOCALES)('translate an enum-valued operand rather than interpolate it in %s', (locale) => {
     const rendered = describeDiagnostic(locale, {
       FieldHasUnexpectedShape: { key: 'trigger', found: 'Sequence' }

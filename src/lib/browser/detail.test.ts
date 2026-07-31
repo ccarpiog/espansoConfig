@@ -29,6 +29,7 @@ import {
   flattenValue,
   hasDiscovery,
   indentClass,
+  matchEditability,
   MAX_INDENT_DEPTH,
   optionGroupKey,
   scalarDisplay,
@@ -500,6 +501,48 @@ describe('a whole match', () => {
   });
 }); // End of the "a whole match" suite
 
+describe('what the pane says about editing a match', () => {
+  /*
+   * The pane's one *judgement*, and therefore the one thing in it that can be
+   * an over-claim rather than a rendering bug. Four cases, and the fourth is
+   * the one Rust cannot produce: `safely_editable` and `blocking_hazard` come
+   * from one call there, and are two independent fields here.
+   */
+  it('says nothing at all about a match nothing blocks', () => {
+    // Phase 1 is read-only. "This snippet can be edited safely" would be a
+    // promise about an editor the reader cannot reach, which is the same class
+    // of claim as presenting a plain scalar's type (D2u).
+    expect(matchEditability(makeMatch())).toEqual({ kind: 'unrestricted' });
+  });
+
+  it('names the construct that blocks a match the editor refuses', () => {
+    const match = makeMatch({ safelyEditable: false, blockingHazard: 'MergeKey' });
+    expect(matchEditability(match)).toEqual({ kind: 'blocked', hazard: 'MergeKey' });
+  });
+
+  it('still refuses when the wire names no construct', () => {
+    // A refusal with no reason is worse than a reason with no refusal, so the
+    // arm exists rather than the pane silently saying nothing.
+    const match = makeMatch({ safelyEditable: false, blockingHazard: null });
+    expect(matchEditability(match)).toEqual({ kind: 'blockedUnnamed' });
+  });
+
+  it('lets the verdict field decide when the two fields disagree', () => {
+    // Impossible in today's Rust — `is_safely_editable` *is*
+    // `disqualifying_hazard(...).is_none()` — and therefore exactly the case an
+    // implementation would get wrong without noticing. `MatchBadge::NotEditable`
+    // is derived from `safely_editable` alone, so a pane that refused on the
+    // strength of `blocking_hazard` would contradict the row two panes left.
+    const match = makeMatch({ safelyEditable: true, blockingHazard: 'ExplicitTag' });
+    expect(matchEditability(match)).toEqual({ kind: 'unrestricted' });
+  });
+
+  it('is part of the model the pane walks, not a second question it asks', () => {
+    const detail = describeMatch(makeMatch({ safelyEditable: false, blockingHazard: 'AliasReference' }));
+    expect(detail.editability).toEqual({ kind: 'blocked', hazard: 'AliasReference' });
+  });
+}); // End of the "what the pane says about editing a match" suite
+
 describe('the discovery section', () => {
   // A compound predicate — two lists feeding one heading — which is the shape
   // that has to stay out of markup, because markup is where nothing can reach
@@ -620,17 +663,21 @@ describe('the indentation class', () => {
   });
 }); // End of the "indentation class" suite
 
-describe('the pane that renders this model', () => {
+describe('the source of the pane that renders this model', () => {
   /*
-   * A **text scan**, and worth being exact about what it is: nothing in this
-   * repository renders a Svelte component in an automated test, so this cannot
-   * say the pane draws anything. What it can say is that the component still
-   * *names* the accessor for every code it has to turn into words — a code with
-   * no accessor call is a Rust identifier on screen or a blank space, and a
-   * refactor that drops one leaves no other trace in this repository.
+   * A **text scan over source**, and the names below now say only that. The
+   * 1c-2b-1 review was right that "calls X, so that code reaches the screen as
+   * words" claimed more than a substring search can establish: an accessor left
+   * in a comment, or a predicate left in dead script, satisfies every assertion
+   * here while the markup renders a raw Rust identifier. R24's corollary, for
+   * the sixth time in this project — read the test's name, then its body, and
+   * ask whether the body could fail if the name's claim were false.
    *
-   * The evidence that the pane renders is the window reading in
-   * `docs/decisions/1c-2a-notes.md`, taken by a human, not by this file.
+   * Rendering a component in a test is the real fix and is a deliberate
+   * decision with its own costs; a review fix round is not where it gets taken.
+   * Until then these are a tripwire for a refactor that drops an accessor, and
+   * the evidence that the pane renders is the window reading in
+   * `docs/decisions/1c-2b-1-notes.md`, taken by a human, not by this file.
    */
   const source = readFileSync(
     fileURLToPath(new URL('../components/DetailPane.svelte', import.meta.url)),
@@ -646,9 +693,19 @@ describe('the pane that renders this model', () => {
     'tValueKind',
     'tDetailField',
     'tOptionGroup',
-    'tUnknownCount'
-  ])('calls %s, so that code reaches the screen as words', (accessor) => {
+    'tUnknownCount',
+    'tHazard'
+  ])('contains a call to %s somewhere in its source', (accessor) => {
     expect(source).toContain(`${accessor}(`);
+  });
+
+  it('contains the refusal arms in its source and the permission arm nowhere', () => {
+    // Both halves. The first is the point of the feature; the second is the
+    // constraint on it, and it is the half a later edit would break by
+    // "improving" the pane with a reassuring green line.
+    expect(source).toContain("detail.editability.kind === 'blocked'");
+    expect(source).toContain("detail.editability.kind === 'blockedUnnamed'");
+    expect(source).not.toContain("'unrestricted'");
   });
 
   // There is no "holds no built `t(` key" case here. `built-translation-keys.test.ts`
@@ -678,7 +735,7 @@ describe('the pane that renders this model', () => {
     expect(source).toContain('browser.detail.unknownValue');
     expect(source).toContain('tValueKind(entry.valueKind)');
   });
-}); // End of the "pane that renders this model" suite
+}); // End of the "source of the pane that renders this model" suite
 
 describe('the global stylesheet', () => {
   /*

@@ -254,6 +254,82 @@ const ENUM_OPERAND_NAMESPACES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Wire operands that are **zero-based indices**, and the name each displays
+ * under — **per diagnostic variant, and exhaustively**.
+ *
+ * `DiagnosticCode::EmptyDocument` and `AdditionalDocumentNotProjected` carry a
+ * `document_index` counted from 0, because it indexes
+ * `SyntaxIndex::documents()`. A person counting the documents in a file starts
+ * at one, so rendering the wire number produced *"Document 0 of this file has no
+ * content"* for the first document and called the second one "document 1" — a
+ * sentence that is not wrong so much as about a different numbering than the
+ * reader's.
+ *
+ * The conversion happens **here and not in Rust**: the index is an offset into a
+ * data structure everywhere else it is used (the patch engine addresses
+ * documents by it), so making it one-based on the wire would corrupt an
+ * identifier to improve a sentence. It is one-based only at the moment it
+ * becomes prose.
+ *
+ * The operand is emitted under its **display** name and not under its wire name,
+ * deliberately: a dictionary value still spelling `{document_index}` then leaves
+ * an unsubstituted placeholder, which `translate` keeps visible and
+ * `codes.test.ts` fails on. Emitting both names would let a stale sentence go on
+ * quietly printing the zero-based number.
+ *
+ * ## Why a full table over every variant, and not a list of operand names
+ *
+ * The first version was keyed on the operand *spelling* alone — one entry,
+ * `document_index` — so every number the table did not name passed through
+ * unchanged. A future zero-based `match_index` would then have rendered `0`
+ * with no missing placeholder and no failing test: silence, which is the one
+ * outcome this project treats as worse than a loud wrong answer. The second
+ * review pass named it, and the fix is the shape `COMMAND_ERROR_OPERANDS` in
+ * `src/lib/ipc/errors.ts` already uses — **a row per variant, mapped over the
+ * union**, so that a variant added to {@link DiagnosticCodeName} and forgotten
+ * here is a `npm run check` failure in this file rather than a wrong number on
+ * a screen. Most rows are empty, and an empty row is a statement: *this
+ * variant's numbers are counts, not indices.*
+ *
+ * The mapped type touches nothing else. In particular it does not go near the
+ * key builders above, whose template-literal return types are the guarantee
+ * this file exists for.
+ */
+const DIAGNOSTIC_DISPLAY_INDICES: {
+  readonly [K in DiagnosticCodeName]: Readonly<Record<string, string>>;
+} = {
+  ParseFailed: {},
+  IndexRejected: {},
+  NoDocument: {},
+  // The two that carry one. Both index `SyntaxIndex::documents()`.
+  EmptyDocument: { document_index: 'document' },
+  AdditionalDocumentNotProjected: { document_index: 'document' },
+  RootIsNotAMapping: {},
+  FieldHasUnexpectedShape: {},
+  RepeatedKey: {},
+  NonScalarKey: {},
+  ShapeDisagreesWithLocation: {},
+  MatchHasNoTrigger: {},
+  // `count` is how many, not which. A count is already one-based.
+  MatchHasSeveralTriggerForms: {},
+  MatchHasNoContent: {},
+  MatchHasSeveralContentForms: {},
+  MatchIsNotAMapping: {},
+  VariableIsNotAMapping: {},
+  VariableHasNoName: {},
+  VariableHasNoType: {},
+  ScalarNotDecodable: {},
+  // `depth` is a number of levels, not a position in a list.
+  ValueTooDeep: {},
+  CoverageIsIncomplete: {},
+  KeyNotAccountedFor: {},
+  Hazard: {}
+};
+
+/** No operand of this message is a zero-based index. */
+const NO_DISPLAY_INDICES: Readonly<Record<string, string>> = {};
+
+/**
  * The key for one member of an enum namespace, when the dictionary has one.
  *
  * The untyped twin of the builders above, for a value that arrived as JSON and
@@ -283,11 +359,15 @@ function memberKey(namespace: string, member: string): TranslationKey | null {
  *
  * @param locale - The dictionary to read from.
  * @param operands - The operand object as it crossed the boundary.
+ * @param displayIndices - Which of this variant's numeric operands are
+ *   zero-based indices, and the name each displays under. Defaults to none,
+ *   which is the right answer for every message that is not a diagnostic.
  * @returns Substitutions for the message's `{placeholder}` tokens.
  */
 function localizedOperands(
   locale: Locale,
-  operands: Readonly<Record<string, unknown>>
+  operands: Readonly<Record<string, unknown>>,
+  displayIndices: Readonly<Record<string, string>> = NO_DISPLAY_INDICES
 ): TranslationParams {
   const params: Record<string, string | number> = {};
   for (const [name, value] of Object.entries(operands)) {
@@ -295,7 +375,12 @@ function localizedOperands(
       continue;
     }
     if (typeof value === 'number') {
-      params[name] = value;
+      const displayName = displayIndices[name];
+      if (displayName === undefined) {
+        params[name] = value;
+      } else {
+        params[displayName] = value + 1;
+      }
       continue;
     }
     const namespace = typeof value === 'string' ? ENUM_OPERAND_NAMESPACES[name] : undefined;
@@ -313,9 +398,13 @@ function localizedOperands(
  * @returns The translated message, with its operands substituted.
  */
 export function describeDiagnostic(locale: Locale, code: DiagnosticCode): string {
-  const key = diagnosticCodeKey(diagnosticCodeName(code));
+  const name = diagnosticCodeName(code);
+  const key = diagnosticCodeKey(name);
   const operands = diagnosticCodeOperands(code);
-  return translate(locale, key, operands === null ? undefined : localizedOperands(locale, operands));
+  if (operands === null) {
+    return translate(locale, key);
+  }
+  return translate(locale, key, localizedOperands(locale, operands, DIAGNOSTIC_DISPLAY_INDICES[name]));
 } // End of function describeDiagnostic()
 
 /**

@@ -62,6 +62,35 @@ export function unknownCountKey(count: number): TranslationKey {
 } // End of function unknownCountKey()
 
 /**
+ * The key holding "in N places", in the right number.
+ *
+ * The **third** counted noun, and the reason this module is a pair selector
+ * rather than two one-offs: adding one is two dictionary keys and one function,
+ * and no call site builds a key.
+ *
+ * @param count - How many distinct places one diagnostic was raised in.
+ * @returns The singular or the plural key.
+ */
+export function occurrenceCountKey(count: number): TranslationKey {
+  return pluralKey(
+    'browser.list.notes.occurrences.one',
+    'browser.list.notes.occurrences.other',
+    count
+  );
+} // End of function occurrenceCountKey()
+
+/**
+ * The phrase "in N places" reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param count - How many distinct places one diagnostic was raised in.
+ * @returns The translated phrase, with the count substituted.
+ */
+export function describeOccurrenceCount(locale: Locale, count: number): string {
+  return translate(locale, occurrenceCountKey(count), { count });
+} // End of function describeOccurrenceCount()
+
+/**
  * The sentence the unmodelled-entry count reads as, in one language.
  *
  * @param locale - The dictionary to read from.

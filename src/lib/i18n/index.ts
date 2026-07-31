@@ -47,12 +47,14 @@ import {
   describeVariableKind
 } from './codes';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
-import { describeSnippetCount, describeUnknownCount } from './plural';
+import { describeOccurrenceCount, describeSnippetCount, describeUnknownCount } from './plural';
 
 export { DICTIONARIES, placeholdersOf, translate } from './dictionaries';
 export {
+  describeOccurrenceCount,
   describeSnippetCount,
   describeUnknownCount,
+  occurrenceCountKey,
   pluralKey,
   snippetCountKey,
   unknownCountKey
@@ -345,3 +347,13 @@ export function tSnippetCount(count: number): string {
 export function tUnknownCount(count: number): string {
   return describeUnknownCount(locale.current, count);
 } // End of function tUnknownCount()
+
+/**
+ * Renders "in N places" in the current language, in the right number.
+ *
+ * @param count - How many distinct places one diagnostic was raised in.
+ * @returns The translated phrase, with the count substituted.
+ */
+export function tOccurrenceCount(count: number): string {
+  return describeOccurrenceCount(locale.current, count);
+} // End of function tOccurrenceCount()

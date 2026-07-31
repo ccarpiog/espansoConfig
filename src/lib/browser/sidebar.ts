@@ -21,7 +21,7 @@
  * a package a package. Nothing here parses a path or looks at a file name.
  */
 
-import type { DocumentId, DocumentSummary } from '../ipc/types';
+import type { DocumentId, DocumentSummary, FileKind } from '../ipc/types';
 
 /** One row of the sidebar. */
 export interface SidebarRow {
@@ -35,6 +35,20 @@ export interface SidebarRow {
    * whereas a file with zero matches has been read and is empty.
    */
   readonly matches: number | null;
+  /**
+   * `true` when reading this file was **attempted and refused**.
+   *
+   * The third state of a count, and the reason it exists: *could not read* and
+   * *have not read* are different facts about a file and both used to draw the
+   * same `–`. A config profile nobody projected and a `match/` file whose
+   * `get_document` came back `io / PermissionDenied` were one row apart and
+   * indistinguishable. The 1c-1 window reading found it on a screen and named
+   * it for 1c-2 (`docs/decisions/1c-1-notes.md` section 10.4, reading 4).
+   *
+   * Always paired with a `null` {@link SidebarRow.matches}: a refused read
+   * produces no projection, so there is no count to have.
+   */
+  readonly unreadable: boolean;
 }
 
 /**
@@ -54,7 +68,13 @@ export interface SidebarModel {
    * is handed.
    */
   readonly total: number;
-  /** How many documents have no count yet. */
+  /**
+   * How many match-bearing documents are still expected to produce a count.
+   *
+   * A file whose read was **refused** is not pending: nothing is coming for it,
+   * and counting it as waited-for would say the total is about to grow when it
+   * is not. It is on {@link SidebarRow.unreadable} instead.
+   */
   readonly pending: number;
   /** `match/` files espanso loads, in path order. */
   readonly files: readonly SidebarRow[];
@@ -89,13 +109,24 @@ export function sameSelection(a: SidebarSelection, b: SidebarSelection): boolean
 /**
  * Whether a document holds matches at all.
  *
- * A config profile does not, which is why the "All" total and the snippet list
- * both ignore them rather than showing an empty row per profile.
+ * A config profile does not, which is why the "All" total ignores them and why
+ * their rows show "not read yet" rather than a count of zero.
  *
- * @param document - A document summary as it crossed the boundary.
+ * **What this no longer governs, since the 1c-2b-1 review: whether a document is
+ * projected.** It used to, and that was the wrong test — a profile has no
+ * matches and it does have *diagnostics*, so skipping the projection made a
+ * profile with broken YAML silent everywhere in the application. It governs
+ * counting only.
+ *
+ * Widened to `{ kind }` for the same review: the caller that decides which
+ * projections contribute a count holds a `DocumentView`, which carries the same
+ * `kind` the summary does, and looking the summary back up by identity to ask
+ * one question would be a scan per document per render.
+ *
+ * @param document - Anything carrying a document's {@link FileKind}.
  * @returns Whether the document is one the snippet list can draw from.
  */
-export function holdsMatches(document: DocumentSummary): boolean {
+export function holdsMatches(document: { readonly kind: FileKind }): boolean {
   return document.kind === 'MatchFile' || document.kind === 'Package';
 } // End of function holdsMatches()
 
@@ -106,11 +137,14 @@ export function holdsMatches(document: DocumentSummary): boolean {
  *   returned them.
  * @param counts - How many matches each loaded document holds, keyed by
  *   document identity. A document absent from this map has not been read yet.
+ * @param unreadable - The documents whose read was attempted and refused.
+ *   Defaults to none, so a caller with nothing to report writes nothing.
  * @returns The three groups and the totals.
  */
 export function buildSidebar(
   documents: readonly DocumentSummary[],
-  counts: ReadonlyMap<DocumentId, number>
+  counts: ReadonlyMap<DocumentId, number>,
+  unreadable: ReadonlySet<DocumentId> = new Set()
 ): SidebarModel {
   const files: SidebarRow[] = [];
   const profiles: SidebarRow[] = [];
@@ -121,10 +155,12 @@ export function buildSidebar(
   for (const document of documents) {
     const known = counts.get(document.id);
     const matches = known === undefined ? null : known;
-    const row: SidebarRow = { document, matches };
+    const refused = unreadable.has(document.id);
+    const row: SidebarRow = { document, matches, unreadable: refused };
     if (holdsMatches(document)) {
       if (matches === null) {
-        pending += 1;
+        // A refused read is not a pending one: no count is on its way.
+        pending += refused ? 0 : 1;
       } else {
         // `holdsMatches` guards the total as well as the wait. A count handed
         // in for a config profile is a caller error, and adding it would make
