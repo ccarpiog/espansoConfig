@@ -2358,6 +2358,7 @@ _Updated at each phase boundary._
 | 0c-3b-2b | `912cb89` | ✅ pushed to `origin/main` | clean |
 | 1a | `185c9a6` | ✅ pushed to `origin/main` | clean |
 | 1b-1 | `94aa6c9` | ✅ pushed to `origin/main` | clean |
+| 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2406,6 +2407,17 @@ languages, three lint scripts, `docs/decisions/1b-1-notes.md`, `docs/reviews/pha
 `CLAUDE.md` §6 and this checkpoint. **A fresh session starting Phase 1b-2 should start from `94aa6c9`
 or later.** Note that `npm install` is required before any frontend command will run — `node_modules/`
 is gitignored and `package-lock.json` is committed, so `npm ci` reproduces the pinned tree exactly.
+
+`d876eb6` is Phase 1b-2a **including its review fix round** — the phase was held open until all ten
+findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated defects:
+neither the false `DocumentPath`-survives-a-reparse claim, nor the non-UTF-8 path that could deliver
+serde's prose to the webview, nor the scope-creep oracle that could not detect a registered
+`save_match`. It contains the five commands in `src-tauri/src/commands.rs`, the wire error in
+`src-tauri/src/error.rs`, the contract and dispatcher checks in `src-tauri/src/{wire_contract,dispatch_check}.rs`,
+the new `crates/espansoconfig-core/src/wire.rs` and its four callers in the core, the frontend boundary
+in `src/lib/ipc/`, `docs/decisions/1b-2a-notes.md`, `docs/reviews/phase-1b-2a-ipc-surface.md` and this
+checkpoint. **A fresh session starting Phase 1b-2b should start from `d876eb6` or later.** As at 1b-1,
+`npm install` (or `npm ci`) is required before any frontend command will run.
 
 `185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were
