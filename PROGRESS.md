@@ -23,7 +23,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **0c-3b-2b** | The round-trip property test over both corpora (R9) · R16 · the gate verdict | ✅ complete — after the review fix round below |
 | **Phase 0** | **⛔️ architectural gate (R4)** | ✅ **PASSED**, with four named qualifications — see the verdict below |
 | **1a** | The core-side read model: the semantic projection · the workspace and its per-revision cache | ✅ complete — after the review fix round below |
-| 1b | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite frontend scaffold · i18n in both languages | ⬜️ **next** |
+| **1b-1** | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite scaffold · the i18n infrastructure in both languages | ✅ complete |
+| 1b-2 | The read-only IPC surface · the Rust-code→string dictionaries · the localized macOS menu | ⬜️ **next** |
 | 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ not started |
 | 2–5 | See plan §12 | ⬜️ not started |
 
@@ -33,6 +34,15 @@ what makes "every snippet renders correctly" a checkable claim before a single p
 shell and the boundary, where nothing is yet rendered from real data; 1c is the browser itself. The
 plan's stated exit for Phase 1 — *the owner can browse their entire real config and every snippet
 renders correctly* — lands at the end of **1c**.
+
+**1b was split once more into 1b-1 / 1b-2**, along the same cut every Phase 0 split used: a
+dependency order, not a convenience. 1b-1 is *everything that must exist before a string can be
+displayed at all* — the two scaffolds and the i18n layer — and it deliberately ships **no command**,
+so a `t()` call is the only way any of its text reaches a screen and the CLAUDE.md §2 habit is
+established while the surface is small enough to audit. 1b-2 is the **boundary**: the five read-only
+commands over `crate::workspace`, and the dictionaries that turn Rust's codes into prose. The cut
+matters because the two halves fail differently — a scaffold defect is loud and immediate, an IPC
+defect is a data-format decision that later phases inherit.
 
 Phase 0 as written in the plan was split into **0a / 0b / 0c** because it was too large for one
 coherent unit of work, and **0c** was split again into **0c-1 / 0c-2 / 0c-3** for the same reason:
@@ -482,6 +492,87 @@ yield typed diagnostics and still expose their raw text; a document that is not 
 projects rather than failing. **471 tests pass**, up from Phase 0's 465.
 
 **Five review findings, all closed, and two of them were real defects** — see the disposition below.
+
+### Phase 1b-1 — the shell, the scaffold, and the i18n layer
+
+The first code in this repository that a user could ever see. `src-tauri/` and `src/` both exist for
+the first time; the workspace is no longer a single crate. The decision record is
+[`docs/decisions/1b-1-notes.md`](docs/decisions/1b-1-notes.md).
+
+**The architecture rule survived the phase that could break it, and its check changed** (D2x). `src-tauri`
+depends on `espansoconfig-core` by path and the arrow points one way only: `cargo tree -p
+espansoconfig-core` lists `saphyr-parser`, `serde` and `sha2` and nothing else. **`rg -c tauri Cargo.lock`
+is no longer a check** and must not be quoted as one — the lockfile now legitimately contains tauri, so
+the old one-liner passes vacuously exactly when it would matter most.
+
+**A missing translation is a compile error in both directions, and that is a type rather than a
+convention.** `TranslationKey = keyof typeof en` makes `en.json` the schema, and the binding
+`const spanish: ExactDictionary<typeof es> = es` makes a key **missing from** *or* **surplus in**
+`es.json` fail `svelte-check`. The second direction is the one a plain `Record<TranslationKey, string>`
+would have missed, because excess-property checking does not apply to a non-literal assignment — so
+`ExactDictionary` maps every surplus key to `never`. Both directions were verified by disabling
+experiments rather than asserted (notes §2).
+
+**Four runtime checks cover what the types cannot see**, because a type says nothing about what a string
+*contains*: key-set parity read from the two files rather than from a list, `{placeholder}`-set parity
+per key (a translator who drops `{language}` produces a string that type-checks and renders), a
+**untranslated-value** heuristic with its exceptions **listed by key** so the exception set is
+auditable, and the markup scan below. 71 frontend tests across 8 files.
+
+**That fourth check is a heuristic and its name now says so** — the review's finding 5. It establishes
+**non-identity**, not that a value is Spanish: renaming `language.label` to `"Sprache"` leaves it
+non-blank, trimmed, unequal to the English and placeholder-clean, so every check passes. The notes said
+the runtime tests covered "whether a Spanish value is actually Spanish". They did not, and both the
+assertion and every sentence claiming it have been corrected. *An oracle must be able to disagree* (R24)
+applies to a test's **name** as much as to its body.
+
+**The hardcoded-string check is stated with its blind spots, not with its result.** It scans
+`src/**/*.svelte` markup for literal text that did not come through `t()`, and it **cannot see**
+`<script>` bodies, `{'literal'}` expressions, `.ts` string constants or props. A clean run therefore
+means *"no literal sits in markup"*, which is weaker than *"no hardcoded string exists"* — the notes say
+so in those words (§7). Its blind spots are themselves pinned as tests, and it was proven able to fire
+against the real tree rather than only to pass.
+
+**Locale follows the first *servable* tag of `navigator.languages`, not the head of the list.** A user
+whose preferences read `[fr, es, en]` gets Spanish, where reading only the head would have given them
+English via the fallback. The override lives behind a storage port and is stored as **absence of an
+override** rather than as a snapshot of the detected locale, so a user who never chose keeps following
+their system.
+
+**What is not there, on purpose:** no IPC command (1b-2), no router, no CodeMirror (Phase 3), no
+three-pane layout (1c). **The Tauri capability set is empty** — `"permissions": []` — because the 1b-1
+frontend calls no Tauri API at all, and the production CSP has no `'unsafe-inline'`.
+
+**Both of those are the review's High findings, and both were real grants rather than theoretical ones.**
+The capability set was `core:default`, which the phase described as "nothing else — no filesystem
+permission": it expands to the path, event, window, webview, image, menu and tray defaults, and
+`image:allow-from-path` + `image:allow-rgba` alone let a compromised renderer read the pixels of any
+local image. The production CSP allowed `'unsafe-inline'` styles although the production bundle emits an
+**external** CSS asset and only Vite's dev server ever needed it — so injected markup could hide the
+interface and paint its own text. The relaxed policy now lives in `devCsp`, where it is true.
+
+**The declared macOS floor and the compile target now state the same thing, which they did not.**
+`vite.config.ts` targets `safari16` while `tauri.conf.json` declared `minimumSystemVersion: "11.0"`,
+whose WKWebView predates `Object.hasOwn` (Safari 15.4+) — and `translate()` calls it on the first render,
+so a macOS 11 user would have met `TypeError: Object.hasOwn is not a function` and a blank window. The
+floor is **13.0** (the release that ships Safari 16), the call is now
+`Object.prototype.hasOwnProperty.call`, and `webview-floor.test.ts` fails if the two ever disagree
+again. Widening the floor later means lowering the esbuild target, not editing the plist — that is a
+Phase 5 packaging decision, recorded so it cannot be taken by accident.
+
+**The fix round found a defect neither the phase nor the review reached, and it invalidated the phase's
+own smoke test.** `src-tauri/Cargo.toml` declared no `custom-protocol` feature, so
+`tauri::is_dev()` — literally `!cfg!(feature = "custom-protocol")` — was true in every build, and every
+binary loaded the dead `devUrl`. The window that 1b-1 reported as "launched and stayed up" was
+**blank**. It was separated from a frontend exception by planting a static `<h1>` in `dist/index.html`
+and watching that fail to render too. The feature is now declared and off by default. This is R32 in its
+sharpest form: *a process that stays up is not a screen that renders*, and only something that looks at
+the pixels can tell the two apart.
+
+**Twelve coverage holes are stated as holes** (notes §9) — the unlocalized macOS menu chief among them.
+The reviewer argued the phase should not close while it is open; the rebuttal is that localizing it
+needs either Spanish strings in Rust (plan §9 forbids) or an IPC command (1b-2 by design). **Both the
+objection and the rebuttal are recorded in the notes as a live disagreement**, not resolved by silence.
 
 ---
 
@@ -1238,6 +1329,28 @@ render such a subtree must decide how rather than assume the projection already 
 **containment**, so an over-wide recorded span would over-account — unreachable today, and weaker than
 per-key attribution would be.
 
+### D2x — the architecture-rule check changed in 1b-1, and the old one must not be quoted again
+
+CLAUDE.md §3 — *`crates/espansoconfig-core` must never depend on `tauri`* — is unchanged and absolute.
+**Its check is not.** Until 1b-1 the evidence was `rg -c tauri Cargo.lock` finding nothing. The moment
+`src-tauri/` joined the workspace the lockfile gained tauri **legitimately**, so that command now finds
+matches whether or not the rule holds — and, worse, a version of it that still passed would be passing
+vacuously.
+
+The check is now:
+
+```sh
+cargo tree -p espansoconfig-core | rg tauri     # must find nothing
+```
+
+It asks the resolver about **one crate's** dependency closure rather than about the workspace's, which is
+the question the rule actually poses. Measured at 1b-1: `espansoconfig-core` resolves to `saphyr-parser`,
+`serde` and `sha2` (plus four dev-dependencies), and the grep is empty.
+
+The general lesson is the one R24 keeps teaching from a different angle: **a check can stop meaning
+anything without ever starting to fail.** When the thing being checked gains a legitimate second source,
+re-derive the check rather than keep running it.
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -1286,6 +1399,11 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R27 | **A held identity goes stale on every reparse, and the UI is what holds identities.** `MatchId` is refused across a revision change (D2v), which is correct and is not free: a selection, a scroll position or an open editor pane held across an external file change now meets `IdentityError::StaleRevision` | Accepted, and it is the specified behaviour — refusing beats resolving to the wrong match, which is what the code did before the Phase 1a review. **The cost lands squarely on Phase 1b/1c**: every lookup that can cross a `refresh()` must handle the error rather than unwrap it, and the UI needs a re-selection policy (most likely: re-resolve by `DocumentPath`, which is the thing designed to survive a reparse, then fall back to clearing the selection). Plan §6.5's reconciliation already requires that conversation, so this adds a case to it rather than a new mechanism. Pinned in both directions by `an_identity_from_before_a_reordering_is_refused_rather_than_resolved`, which also asserts that reprojecting *identical* bytes mints the *same* identity. |
 | R28 | **`Deserialize` on `ByteSpan` bypasses `ByteSpan::new`'s inverted-span assertion.** A frontend-supplied span is currently only ever echoed back, but nothing in the type system says so | Accepted **for a read-only phase, and dangerous the moment a mutation trusts a span that crossed the IPC boundary.** `serde` is `Serialize`-only except for a named list — `DocumentId`, `NodeId`, `DocumentPath`, `PathSegment`, `ByteSpan`, `MatchId` — which are exactly plan §6.4's command *arguments*. `ContentRevision`'s hand-written `Deserialize` accepts only the 64-character hex string its `Serialize` writes, so a malformed concurrency token is a typed rejection rather than a digest that quietly matches nothing. **Phase 2 must not let a deserialized `ByteSpan` reach the patch engine without revalidating it**, and must not widen the `Deserialize` list without re-reading `docs/decisions/1a-notes.md` §9 hole 6. |
 | R29 | **An unmodelled subtree is accounted for by span, not by name** (D2w): a key nested under an unrecognised option is proven present but is not addressable, searchable or displayable | Accepted as the deliberate trade, and recorded as a hole rather than folded into the "no key is dropped" claim — which is how the Phase 1a review found it. Measured cost: **28 of 546 synthetic keys** are span-accounted rather than named, and **0 of 566 real ones**, so the live config loses nothing today. Two second-order weaknesses named with it: accounting is by *containment*, so an over-wide recorded span would over-account (unreachable today, since every span comes from a published node), and two `UnknownEntry` reasons carry no path by construction — `NonScalarKey` (no `PathSegment` can spell such a key) and `RepeatedKey` (a path would name the *first* entry, not this one). A later phase that wants to render such a subtree must decide how, not assume the projection already did. |
+| R31 | **The hardcoded-string check sees markup only.** It scans `src/**/*.svelte` for literal text outside `t()`, and is blind to `<script>` bodies, `{'literal'}` expressions, `.ts` string constants and props — so a clean run means *"no literal sits in markup"*, not *"no hardcoded string exists"* | Accepted and **stated in those words** rather than as a passing check (`docs/decisions/1b-1-notes.md` §7). Its blind spots are pinned as tests, so the boundary is asserted rather than remembered, and it was proven able to fire against the real tree rather than only to pass. The residual exposure grows with every phase: 1c is almost entirely user-facing strings, and the class of string this check cannot see — an error message assembled in a `.ts` store — is exactly what 1b-2's code dictionaries produce. **Re-read this row before adding any string outside markup.** |
+| R32 | **Nothing renders, and "the process stayed up" is not evidence that anything did.** No test mounts `AppShell` or asserts that switching the picker re-renders; `npm run tauri build` has never been run, so the bundler, the `.app` layout, the `Info.plist` merge and the production CSP are untested end to end | Accepted for 1b-1 and **owed by 1c**, which is the first phase with a screen worth asserting about. **This risk stopped being hypothetical inside the phase itself.** 1b-1 first reported the shell "smoke-launched and stayed up"; the fix round found a missing `custom-protocol` feature meant every binary loaded the dead `devUrl`, so that window was **blank** and `npm run tauri build` could not have succeeded. A launched process proved the window and webview were created and **nothing whatever** about what was painted in them — which is precisely what the risk says, demonstrated. It was separated from a frontend exception only by planting a static `<h1>` in `dist/index.html` and watching that fail too. A DOM environment (`jsdom` / `@testing-library/svelte`) is a deliberate future decision rather than a default, and `vite.config.ts` says so at its `environment: 'node'` line; the `$effect` half of the document-language sync is untested for the same reason. The bundler half is Phase 5's subject (plan §10, `SIGN_AND_NOTARIZE.md`). **Standing instruction: never again record a hand launch as evidence about rendering.** |
+| R34 | **The macOS application menu is unlocalized**, so a Spanish user meets an English menu bar — a live exception to CLAUDE.md §2, which is non-negotiable | **Open, owed by 1b-2, and it is a recorded disagreement rather than a settled hole.** The Phase 1b-1 reviewer's position is that the phase should not have closed while it stands. The rebuttal on file: Tauri v2 builds the default menu in Rust, so localizing it needs either Spanish strings in Rust — which plan §9 forbids in as many words — or menu labels handed across IPC, which needs a command, and 1b-2 is the phase that has one. `CFBundleLocalizations = [en, es]` and `CFBundleDevelopmentRegion = en` are already declared. Both halves of the argument are in `docs/decisions/1b-1-notes.md` §9 hole 1 so a later session can overrule this one **on the evidence** rather than rediscover the question. |
+| R35 | **Nothing establishes that a Spanish string is Spanish.** The dictionary suite checks key parity, placeholder parity and non-identity with the English value — a translation reading `"Sprache"` passes every one | Accepted, and the *claim* was corrected rather than the code: the suite is named for the untranslated-value heuristic it is, per the review's finding 5, and the `"Sprache"` counterexample is written into the notes and the module doc comments so the boundary cannot be forgotten. Closing this needs reviewed expected translations or a bilingual review gate — a process, not a test — and the cost grows with every phase, since 1c is almost entirely user-facing strings. Two smaller relatives named with it: the duplicate-key scanner compares **key text** rather than decoded escapes, and `webview-floor.test.ts` pins the esbuild target against the plist floor for *consistency* only — esbuild constrains syntax, not library APIs, so a newly used API with a higher baseline than the target would still slip through. `Object.hasOwn` was exactly that shape. |
+| R33 | **TypeScript is pinned to 6.0.3, one major behind 7.0.2**, because `svelte-check@4.7.4` declares `typescript: ^5 \|\| ^6` | Accepted and dated. The whole i18n guarantee is a *compile-time* one, so the version that compiles it is load-bearing: an upgrade that changes how `Record<Exclude<keyof T, TranslationKey>, never>` behaves would weaken `ExactDictionary` silently. The four disabling experiments of `1b-1-notes.md` §2 are the tripwire — **re-run them after any TypeScript or `svelte-check` upgrade**, because they are the only thing that would notice. |
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
 
 ---
@@ -1487,6 +1605,41 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1b-1 review disposition
+
+The mandatory once-per-phase adversarial review is
+[`docs/reviews/phase-1b-1-shell-and-i18n.md`](docs/reviews/phase-1b-1-shell-and-i18n.md). Nine
+findings, **two High**, and the phase was held open until every one was dispositioned — so, as with
+every phase since `8989c16`, no commit holds a demonstrated defect.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High** — the bundle declares macOS 11.0 but targets `safari16` and calls `Object.hasOwn` (Safari 15.4+), so the first render throws and the window is blank | **Closed, both sides.** The floor is now `13.0`, the release that ships Safari 16, because the *target* is the deliberate value and the plist was the mistake — `vite.config.ts`'s own comment already said the build "may assume a current macOS". `Object.hasOwn` → `Object.prototype.hasOwnProperty.call`, which costs nothing in the one function that runs before anything can report an error. `webview-floor.test.ts` fails if the two ever disagree again. |
+| 2 | **High** — `core:default` is not minimal; it grants `image:allow-from-path` and `image:allow-rgba`, so a compromised renderer can read local image pixels, against the phase's claim of "no filesystem permission" | **Closed.** `"permissions": []` — provably sufficient, because the 1b-1 frontend calls no Tauri API. **Verified empirically by launching a production-mode binary**, not by argument. The notes §6 sentence that described `core:default` as minimal is corrected. 1b-2 adds back permissions one at a time, never a `*:default` set. |
+| 3 | **Medium** — five hardcoded user-facing strings against CLAUDE.md §2 | **Split, and the split is on file.** *Fixed:* `NSHumanReadableCopyright` was the English sentence "MIT licensed. See LICENSE.", which Finder shows under a Spanish locale — it is now `© 2026 ccarpiog · MIT`, and it was never on the §8 exception list, so no argument had ever been made for it. `index.html`'s hardcoded `lang="en"` is now set from the detected locale by `bootstrap()` **before** mount, with an ordering test. *Upheld:* the two developer-facing messages (a missing `#app`, a webview that cannot be created) — both fire only where no interface exists to render a message **in**, and neither is user-triggerable. *Open:* the macOS menu — see the disagreement below. |
+| 4 | **Medium** — the production CSP allows `'unsafe-inline'` styles, so injected markup can hide the interface and paint its own | **Closed.** Production `style-src 'self'`; the relaxed policy moved to `devCsp`, which is where it was ever true. The production bundle emits an **external** CSS asset, so it renders fully styled without it — checked, not assumed. |
+| 5 | **Medium** — "the runtime tests cover whether a Spanish value is actually Spanish" is false; they establish only non-identity | **Closed as a correction to the claim, not to the code.** Renaming `language.label` to `"Sprache"` passes every check. The suite is renamed to the untranslated-value heuristic it is, and §2, §3 and two module doc comments are corrected with that counterexample written into them. Establishing that a value is *Spanish* needs a bilingual review gate and is recorded as a hole. |
+| 6 | **Medium** — "follows the system" stops following: `system` is computed once, so a platform language change is ignored until restart | **Closed.** `createLocaleState` takes a tag *reader* and re-negotiates on `languagechange`; `dispose()` detaches the listener. Two directions are pinned, and the second matters more: a user who **chose** a language is never overridden by their OS. Experiment F breaks exactly that and fires. |
+| 7 | **Low** — duplicate JSON keys bypass every compile-time and runtime check; a translator editing the first occurrence is silently discarded | **Closed.** `scripts/lint/duplicate-json-keys.ts` reads the **raw file text**, because a JSON parse cannot see it by construction. Proven on `es.json`: the compiler stayed silent, the other 22 dictionary tests passed, and only the scanner named the line. |
+| 8 | **Low** — `the_core_crate_is_linked_and_callable` names a stronger property than it checks; the only core reference is inside `#[cfg(test)]` | **Closed by renaming**, which is the honest fix: `the_core_dependency_is_callable_from_the_test_target`, with a doc comment saying a production build does not yet reference the core. The notes already admitted this at §6; now the **name** admits it too. This is R24 reaching a test's name rather than its body. |
+| 9 | **Low** — the required Node runtime is neither pinned nor declared; Vite 8 needs `^20.19.0 \|\| >=22.12.0` | **Closed.** `engines.node` declared, `.nvmrc` pins 26.5.0, and the notes record which runtime the suite was verified on. `engine-strict` deliberately not set — reason in notes §1. |
+
+**One defect the review did not reach, found by the fix round, and it invalidated the phase's own
+evidence.** `src-tauri/Cargo.toml` declared no `custom-protocol` feature, and `tauri::is_dev()` is
+literally `!cfg!(feature = "custom-protocol")` — so every build loaded the dead `devUrl` and the window
+1b-1 reported as "launched and stayed up" was **blank**. `npm run tauri build` could not have succeeded.
+Separated from a frontend exception by planting a static `<h1>` in `dist/index.html` and watching that
+fail too. **The lesson is R32's:** a process that stays up is not a screen that renders.
+
+**One live disagreement, recorded rather than resolved by silence.** The reviewer's position is that the
+phase should not close while the macOS menu is unlocalized, since CLAUDE.md §2 is non-negotiable. The
+rebuttal is that Tauri v2 builds the default menu in Rust, so localizing it means either Spanish strings
+in Rust — which plan §9 forbids in as many words — or handing labels across IPC, which needs a command,
+which is 1b-2 by design. **1b-2 owes it**, it is hole 1 of notes §9, and both halves of the argument are
+written there so a later session can overrule this one on the evidence.
+
+---
+
 ## Phase 1a review disposition
 
 Review of record: [`docs/reviews/phase-1a-core-read-model.md`](docs/reviews/phase-1a-core-read-model.md).
@@ -1532,6 +1685,55 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 1b-1
+
+Every command below was run by the **orchestrator** against the working tree, **after** the review fix
+round, not reported by the worker:
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | exit 0 — **472 passed, 0 failed, 0 ignored**, across 16 binaries |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **no output** — the rule holds (D2x) |
+| `npm run check` | exit 0 — svelte-check, **0 errors 0 warnings** over 328 files, run with `--fail-on-warnings` |
+| `npm run build` | exit 0 — 38.87 kB JS / 1.59 kB CSS, the CSS **external** (which is what makes the production CSP tightenable) |
+| `npm test` | exit 0 — **71 passed** across 8 files (45 across 5 before the fix round) |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | exit 0 — 17 passed, the fixtures are untouched |
+
+Test count moved 471 → **472**: one Rust test, and it is named for exactly what it can fail on —
+`the_core_dependency_is_callable_from_the_test_target`. It is **not** evidence that a production build
+references the core, because that reference lives inside `#[cfg(test)]` and no production one exists
+yet; the review's finding 8 is that the earlier name (`the_core_crate_is_linked_and_callable`) claimed
+otherwise. **No Phase 0 or 1a test was ignored, weakened or deleted**, and the only tracked files the
+phase modified are
+`Cargo.toml` (one workspace member, two workspace dependencies) and `Cargo.lock`. Nothing under
+`crates/espansoconfig-core/src/` or `tests/` changed at all, which is why the 471 carry over unexamined.
+
+**Architecture rule re-verified by the new check** (D2x): `cargo tree -p espansoconfig-core --depth 1`
+lists `saphyr-parser`, `serde`, `sha2` and four dev-dependencies. No tauri, direct or transitive.
+
+**Privacy re-verified**: `git status --short --untracked-files=all` shows no path under
+`tests/corpus/real/`, and no `node_modules/` or `dist/` path — the pre-existing ignore rules already
+covered the frontend.
+
+**Independently spot-checked by the orchestrator**, because the type-level i18n guarantee is the one
+claim in this phase that a passing test suite could not establish on its own:
+`src/lib/i18n/dictionaries.ts` really does bind `es.json` to `ExactDictionary<typeof es>`, and the
+`Record<Exclude<keyof T, TranslationKey>, never>` half really is what rejects a surplus key. The
+`identifier` in `src-tauri/tauri.conf.json` is `cc.carpio.espansoConfig`, and `Info.plist` declares
+`CFBundleLocalizations`. **The four review fixes were checked in the files rather than taken from the
+report**: `"permissions": []`, `minimumSystemVersion: "13.0"`, `'unsafe-inline'` present **only** in
+`devCsp`, and `custom-protocol` declared in `src-tauri/Cargo.toml`.
+
+**Seven disabling experiments, each broken, fired and reverted** (A–G in the notes): the macOS floor
+dropped to 11.0; a duplicate `app.name` in `es.json`; the document language set after mount rather than
+before; `index.html` shipping `lang="es"`; `refreshSystem()` emptied (four tests fired); `refreshSystem()`
+also clearing the override; and a no-op `dispose()`. Every new test in this round was shown able to fail.
 
 ---
 
@@ -1811,39 +2013,46 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1a is complete. Start Phase 1b — the Tauri shell, the frontend scaffold and i18n.**
+**Phase 1b-1 is complete. Start Phase 1b-2 — the read-only IPC surface and the code dictionaries.**
 
-There is **no `src-tauri/` and no `src/` yet**; the repository is still a single-crate Cargo workspace.
-1b is where both appear. Concretely, and in this order:
+`src-tauri/` and `src/` now exist, the workspace has two crates, and every user-facing string already
+goes through `t()`. What 1b-2 adds is the **boundary**. Concretely, and in this order:
 
-1. **Scaffold `src-tauri/`** — Tauri **v2**, bundle identifier `cc.carpio.espansoConfig` (plan §10),
-   depending on `espansoconfig-core` by path. Add it to the workspace `members`. **The one rule that
-   cannot bend: `crates/espansoconfig-core` must never depend on `tauri`** (CLAUDE.md §3) — the
-   dependency points one way only. Verify with `cargo tree -p espansoconfig-core | rg tauri` finding
-   nothing, which is now the better check than `rg -c tauri Cargo.lock` (the lockfile *will* contain
-   tauri once `src-tauri` exists, so the old one-liner stops meaning anything the moment 1b starts).
-2. **Scaffold `src/`** — Svelte 5 + TypeScript + Vite (plan §6.1). No CodeMirror yet; that is the
-   content editor and belongs to Phase 3.
-3. **Wire the read-only IPC surface** as **thin wrappers** over `crate::workspace`, which was built to
+1. **Wire the read-only IPC surface** as **thin wrappers** over `crate::workspace`, which was built to
    be wrapped one-to-one: `open_workspace`, `list_documents`, `get_document`, `get_match`,
-   `reload_document` (plan §6.4). `Workspace` takes `&mut self` where it populates the cache, so the
-   Tauri layer holds it behind a `Mutex`. Do **not** add the mutating commands — they are Phase 2, and
-   the save transaction they need does not exist.
-4. **i18n infrastructure, both languages, from the first commit** (CLAUDE.md §2, plan §9 — a locked
-   decision): `src/lib/i18n/{en,es}.json` with a **typed key union so a missing key is a compile
-   error**, language following the system locale with a manual override. Localize the macOS app menu
-   and `Info.plist` (`CFBundleLocalizations = [en, es]`). **Never a hardcoded user-facing string** —
-   this is the rule Phase 1 is most likely to break, and 1b is where the habit is either established or
-   lost.
-5. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
+   `reload_document` (plan §6.4). `src-tauri/src/commands.rs` is the only Rust file that needs to
+   change, plus one `invoke_handler` line in `main.rs`. `Workspace` takes `&mut self` where it
+   populates the cache, so the Tauri layer holds it behind a `Mutex`. Do **not** add the mutating
+   commands — they are Phase 2, and the save transaction they need does not exist.
+2. **Type the boundary on the frontend side.** `DocumentView` is what crosses; `SourceDocument` is
+   deliberately not serializable. Note that `exactOptionalPropertyTypes` and
+   `noUncheckedIndexedAccess` are on (1b-1 notes §9 hole 7), so the generated types will be more
+   verbose than the obvious version — that is intended.
+3. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
    never prose: `DiagnosticCode` (22 variants plus operands), `UnknownReason` (4), `WorkspaceError`
-   (4), `IdentityError`, `MatchBadge` (10). Every one of those needs an `en` and an `es` entry. The
-   `Display` impls in Rust are developer renderings for logs and **must not** be used as the IPC error
-   representation.
+   (4), `IdentityError`, `MatchBadge` (10). Every one of those needs an `en` and an `es` entry, and
+   both compile-time directions plus all four runtime checks then apply to them for free. Codes with
+   operands use the existing `{placeholder}` interpolation, which the placeholder-parity test already
+   covers. The `Display` impls in Rust are developer renderings for logs and **must not** be used as
+   the IPC error representation. **Add an exhaustiveness check** — a Rust-side enumeration of every
+   variant compared against the dictionary's key set — or a new `DiagnosticCode` variant will reach
+   the UI with no string at all and nothing will notice.
+4. **Localize the macOS app menu** (1b-1 notes §9 hole 1, the one hole 1b-1 explicitly owed here).
+   Tauri v2 builds the default menu in Rust, so the labels must come from the frontend across IPC —
+   hardcoding Spanish in Rust is what plan §9 forbids. `CFBundleLocalizations = [en, es]` is already
+   set in `src-tauri/Info.plist`.
+5. **Handle `IdentityError` rather than unwrapping it** — R27. A `get_match` crossing a `refresh()`
+   may return `StaleRevision`. The likely re-selection policy is to re-resolve by `DocumentPath` —
+   the thing designed to survive a reparse — then fall back to clearing the selection.
+
+**Two rules this phase is most likely to break.** R31: the hardcoded-string check sees markup only, and
+an error message assembled in a `.ts` store is exactly the class it cannot see — which is exactly what
+this phase produces. R28: `Deserialize` is derived on a named list only, and 1b-2 must not widen it
+without reading `docs/decisions/1a-notes.md` §9 hole 6 first.
 
 **Then 1c** is the browser itself: three-pane navigation, search over trigger/label/content/comment/
 `search_terms` (plan §8.1), the raw YAML viewer, and surfacing `HazardKind` where the visual editor
-cannot preserve a construct.
+cannot preserve a construct. 1c also owes R32's first half — the first test that renders anything.
 
 **Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
 the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and
@@ -1888,12 +2097,12 @@ reordering matches **inside one sequence**.
    against an instrumented parse counter. What is *not* answered is incrementality: a document that
    changes is reparsed whole. That is fine for a browser and will need revisiting when Phase 2 edits on
    a debounce.
-2. **Architecture rule (CLAUDE.md §3) — still absolute, and the check changes in 1b.**
-   `crates/espansoconfig-core` must never depend on `tauri`, directly or transitively. Until now
-   `rg -c tauri Cargo.lock` was a sufficient check; **the moment `src-tauri/` exists the lockfile will
-   legitimately contain tauri**, so from Phase 1b the check is
-   `cargo tree -p espansoconfig-core | rg tauri` finding nothing. Do not keep quoting the old one-liner
-   as evidence after 1b lands.
+2. **Architecture rule (CLAUDE.md §3) — still absolute, and the check changed in 1b-1 (D2x).**
+   `crates/espansoconfig-core` must never depend on `tauri`, directly or transitively.
+   `rg -c tauri Cargo.lock` **is no longer a check** — `src-tauri/` exists, so the lockfile contains
+   tauri legitimately and that command now finds matches whether or not the rule holds. The check is
+   `cargo tree -p espansoconfig-core | rg tauri` finding nothing, and it was run and empty at 1b-1.
+   Do not quote the old one-liner as evidence again.
 
 ### Standing rules that outlive Phase 0
 
@@ -1934,6 +2143,14 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The only Rust file 1b-2 needs to change**, plus one `invoke_handler` line in [`src-tauri/src/main.rs`](src-tauri/src/main.rs). Documented-but-empty today, deliberately: 1b-1 shipped no command so that `t()` was the only route any string could take to a screen |
+| [`src/lib/i18n/dictionaries.ts`](src/lib/i18n/dictionaries.ts) | **The i18n enforcement point.** `TranslationKey = keyof typeof en`, and `const spanish: ExactDictionary<typeof es> = es` is the binding that makes a missing *or* surplus Spanish key a compile error. `translate()` interpolates `{placeholder}` and leaves an unknown one verbatim on purpose. Add the Rust-code dictionaries here and both compile-time directions apply for free |
+| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries. `en.json` **is the schema** — the key set is derived from it, never declared separately |
+| [`docs/decisions/1b-1-notes.md`](docs/decisions/1b-1-notes.md) | Phase 1b-1's decision record: the pinned versions and why each is exact (§1), what the typed key union enforces and the four disabling experiments that verify both directions (§2), what the types cannot see (§2 end), the runtime checks and the **exception list by key** (§3), locale detection and the override policy (§4), the architecture rule's new check (§5), what the Tauri shell deliberately does not contain (§6), **what the hardcoded-string check cannot see (§7)**, the strings deliberately left untranslated (§8), **the eight coverage holes stated as holes (§9)**, and what 1b-2 inherits (§10) |
+| [`scripts/lint/hardcoded-strings.ts`](scripts/lint/hardcoded-strings.ts) | The markup scan behind R31. Read §7 of the notes before trusting a clean run: it sees `.svelte` markup and **not** `<script>` bodies, `{'literal'}`, `.ts` constants or props. Its blind spots are why the review found an English sentence in `Info.plist` that no check could ever have seen |
+| [`docs/reviews/phase-1b-1-shell-and-i18n.md`](docs/reviews/phase-1b-1-shell-and-i18n.md) | The Phase 1b-1 review, dispositioned above. Its two High findings were both **real grants** — an over-broad capability set and a production CSP allowing inline styles — and its finding 1 was a crash on the declared minimum macOS. R34 and R35 come from it |
+| [`src/lib/stores/locale.svelte.ts`](src/lib/stores/locale.svelte.ts) · [`src/lib/bootstrap.ts`](src/lib/bootstrap.ts) | The locale state and the pre-mount bootstrap. `createLocaleState` takes a tag *reader* and re-negotiates on `languagechange` **without ever touching an explicit override**; `bootstrap()` sets `documentElement.lang` before mount. Both directions are pinned by disabling experiments |
+| [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) · [`Info.plist`](src-tauri/Info.plist) | Identifier `cc.carpio.espansoConfig`, strict CSP, `core:default` capability only, `CFBundleLocalizations = [en, es]`. The **menu** is not yet localized — 1b-2 owes it |
 | [`crates/espansoconfig-core/src/workspace/mod.rs`](crates/espansoconfig-core/src/workspace/mod.rs) | **What Phase 1b wraps, one command per method.** `discover`, `summary`, `list_documents`, `get_document`, `get_match`, `document_view`, `document_text`, `refresh`, `load_all`, `evict` — plus the per-`ContentRevision` cache that answers R19's remaining half, and the monotonic path-keyed `DocumentId` allocation that D2v's identity fix rests on |
 | [`crates/espansoconfig-core/src/model/`](crates/espansoconfig-core/src/model/) | **The read model itself.** `document.rs` (`DocumentView`, `match_by_id`, `unaccounted_keys`, `coverage_is_complete`), `match_view.rs` (plan §3.3's 22 fields, `MatchId`, badges), `variable.rs` (the nine §3.4 types), `scalar.rs` (`ScalarView` — D2u in a type), `unknown.rs` (`UnknownEntry`, the undescended spans of D2w), `diagnostic.rs` (22 codes, no prose), `project.rs` (the walk), `profile.rs`, `value.rs` |
 | [`docs/decisions/1a-notes.md`](docs/decisions/1a-notes.md) | Phase 1a's decision record: what the projection is and is not (§1), D2u as a type (§2), the key accounting stated so it can be false (§3), where the schema stops (§4), identity and the design rejected (§5), the workspace and R19 (§6), the disabling experiments (§7 and §12), what the phase got wrong on the way (§8), **the eleven coverage holes stated as holes (§9)**, the dependencies added (§10), what 1b inherits (§11) and the review disposition (§12) |

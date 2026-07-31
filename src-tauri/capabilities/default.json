@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Baseline permissions for the main window. Phase 1b-1 grants NOTHING: the permission list is deliberately empty, because the 1b-1 frontend calls no Tauri API at all. The previous value, `core:default`, was not minimal — it expands to the path, event, window, webview, image, menu and tray defaults, and the image defaults alone (`image:allow-from-path`, `image:allow-rgba`) would let a compromised renderer read the pixels of any local image. Phase 1b-2 adds back exactly the permissions its five read-only commands need, enumerated one by one, never a wildcard and never a `*:default` set.",
+  "windows": ["main"],
+  "permissions": []
+}

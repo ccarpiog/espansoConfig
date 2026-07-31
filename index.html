@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Two deliberately static values, both recorded in `1b-1-notes.md` §8.
+
+      The title is the product name, a proper noun, and is replaced on mount by
+      `App.svelte`'s <svelte:head> anyway.
+
+      The `lang` attribute above is `en` because it must equal `DEFAULT_LOCALE`
+      in `src/lib/i18n/locale.ts`: before any script runs there is no
+      `navigator` reading to negotiate against, so the only honest static answer
+      is the one the negotiator itself falls back to. `bootstrap()` in
+      `src/lib/bootstrap.ts` overwrites it with the negotiated locale before the
+      first frame is painted, and `src/lib/bootstrap.test.ts` fails if this
+      attribute and `DEFAULT_LOCALE` ever disagree.
+    -->
+    <title>espansoConfig</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

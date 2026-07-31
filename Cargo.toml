@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/espansoconfig-core"]
+members = ["crates/espansoconfig-core", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,3 +19,8 @@ tempfile = "3"
 yaml-rust2 = "0.11"
 saphyr-parser = "0.0.11"
 marked-yaml = "0.8"
+# The application shell only. Declared here, not in `src-tauri/Cargo.toml`,
+# purely so the version lives with every other pinned version — it must never
+# be inherited by `espansoconfig-core` (CLAUDE.md section 3).
+tauri = "2"
+tauri-build = "2"

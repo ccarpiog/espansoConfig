@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated bundle's Info.plist by the Tauri macOS bundler.
+  Only keys Tauri does not derive from tauri.conf.json belong here.
+
+  CFBundleLocalizations is the declaration plan section 9 asks for: it is what
+  makes macOS treat the app as available in English and Spanish, which in turn
+  is what makes the system offer it in the user's language and what
+  NSLocalizedString-style lookups negotiate against. The interface strings
+  themselves are not here — they live in src/lib/i18n/{en,es}.json, because the
+  interface is a webview.
+-->
+<plist version="1.0">
+  <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+      <string>en</string>
+      <string>es</string>
+    </array>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <!--
+      Locale-neutral on purpose. Finder's Get Info panel renders this string
+      verbatim under whatever language the user runs macOS in, and this plist
+      has exactly one value for every locale, so anything resembling an English
+      sentence here is an untranslated user-facing string (CLAUDE.md section 2).
+      The previous value, "MIT licensed. See LICENSE.", was one.
+
+      What is left is a copyright symbol, a year, a name and an SPDX license
+      identifier — no prose in any language. Per-locale InfoPlist.strings
+      resources would be the richer answer, but placing them inside the bundle
+      is Phase 5's bundling work (plan section 10), and this key does not need
+      prose badly enough to take a dependency on it.
+    -->
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 ccarpiog · MIT</string>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+  </dict>
+</plist>

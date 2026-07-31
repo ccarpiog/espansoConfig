@@ -1,0 +1,14 @@
+{
+  "app.name": "espansoConfig",
+  "app.tagline": "Edita tu configuración de espanso sin reformatearla.",
+
+  "shell.placeholder.heading": "Todavía no hay nada abierto",
+  "shell.placeholder.body": "El explorador de configuración aún no está construido. Esta ventana es el armazón de la aplicación donde se montará.",
+
+  "language.label": "Idioma",
+  "language.followSystem": "Seguir el idioma del sistema",
+  "language.english": "English",
+  "language.spanish": "Español",
+  "language.active": "Idioma de la interfaz: {language}",
+  "language.systemDetected": "Idioma del sistema detectado: {language}."
+}

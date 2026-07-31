@@ -1,0 +1,14 @@
+{
+  "app.name": "espansoConfig",
+  "app.tagline": "Edit your espanso configuration without reformatting it.",
+
+  "shell.placeholder.heading": "Nothing is open yet",
+  "shell.placeholder.body": "The configuration browser is not built yet. This window is the application shell it will be mounted into.",
+
+  "language.label": "Language",
+  "language.followSystem": "Follow the system language",
+  "language.english": "English",
+  "language.spanish": "Español",
+  "language.active": "Interface language: {language}",
+  "language.systemDetected": "System language detected as {language}."
+}

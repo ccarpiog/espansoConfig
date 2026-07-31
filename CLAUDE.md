@@ -119,8 +119,27 @@ character-to-byte adapter and our own gap scanner**. On it sit the `SyntaxIndex`
 codec, path resolver and patch engine (0c), and four operations: edit a scalar, insert and remove
 a mapping field, and move a match within one sequence.
 
-**Phase 1 — the read-only browser — is next, and UI work is now unblocked.** Three things the gate
-deliberately does **not** license, each with a reason recorded in `PROGRESS.md`:
+**Phase 1 — the read-only browser — is under way.** 1a (the core-side read model) and 1b-1 (the Tauri
+shell, the Svelte scaffold and the i18n layer) are complete; **1b-2 — the read-only IPC surface and the
+Rust-code→string dictionaries — is next**, then 1c, the browser itself.
+
+**The architecture-rule check changed at 1b-1 (D2x).** §3 above is unchanged and absolute, but
+`rg -c tauri Cargo.lock` is no longer evidence for it — `src-tauri/` exists, so the lockfile contains
+tauri legitimately. The check is now:
+
+```sh
+cargo tree -p espansoconfig-core | rg tauri     # must find nothing
+```
+
+**Frontend build and test:**
+
+```sh
+npm run check      # svelte-check, run with --fail-on-warnings
+npm run build      # vite
+npm test           # vitest — i18n key parity, placeholder parity, the markup scan
+```
+
+Three things the gate deliberately does **not** license, each with a reason recorded in `PROGRESS.md`:
 
 - **presenting a plain scalar's *type*** to the user — R16's open half: the projection of a
   pre-existing plain scalar is not proven to match espanso's YAML 1.1 resolver. **Decided (D2u): the

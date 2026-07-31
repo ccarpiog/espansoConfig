@@ -1,0 +1,45 @@
+[package]
+name = "espansoconfig"
+description = "macOS application shell for espansoConfig. Wraps espansoconfig-core; owns no domain logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ---------------------------------------------------------------------------
+# The dependency edge points ONE WAY: this crate depends on the core, and the
+# core never depends on tauri (CLAUDE.md section 3). The check is
+#   cargo tree -p espansoconfig-core | rg tauri     # must find nothing
+# and NOT `rg tauri Cargo.lock`, which stopped meaning anything the moment this
+# file existed.
+# ---------------------------------------------------------------------------
+[dependencies]
+espansoconfig-core = { path = "../crates/espansoconfig-core" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { workspace = true }
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+# ---------------------------------------------------------------------------
+# `tauri::is_dev()` is literally `!cfg!(feature = "custom-protocol")`, and this
+# feature is how the Tauri CLI turns a development build into a production one:
+# with it off, the webview loads `build.devUrl` and expects a Vite dev server on
+# port 1420; with it on, the webview loads the assets embedded from
+# `build.frontendDist` and the production `app.security.csp` applies.
+#
+# It is DECLARED HERE and never enabled by default, because `cargo build` must
+# stay a development build. `npm run tauri build` passes it. To reproduce a
+# production run without invoking the bundler:
+#
+#   npm run build && cargo build -p espansoconfig --features custom-protocol
+#
+# Its absence was a latent Phase 1b-1 defect: the crate had no such feature, so
+# `npm run tauri build` could not have succeeded, and the hand smoke-launch that
+# the phase recorded was necessarily loading a dead `devUrl` — which is why it
+# proved a window existed and nothing about what was painted in it.
+# ---------------------------------------------------------------------------
+[features]
+custom-protocol = ["tauri/custom-protocol"]

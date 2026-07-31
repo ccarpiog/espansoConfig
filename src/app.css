@@ -1,0 +1,55 @@
+/*
+ * Global styling for the application shell.
+ *
+ * Two rules govern everything here and both come from plan section 9:
+ *   1. No fixed width on anything holding text. Spanish runs 20-25% longer
+ *      than English, so widths are content-derived or fluid, never absolute.
+ *   2. Nothing here contains user-facing text. `content:` is not used to put
+ *      words on screen, because a string in CSS cannot go through the i18n
+ *      layer.
+ */
+
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f5f5f7;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --border: #d2d2d7;
+
+  color-scheme: light dark;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1e1e1e;
+    --surface-raised: #2a2a2a;
+    --text: #f5f5f7;
+    --muted: #a1a1a6;
+    --border: #3a3a3c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Text selection is on by default in a webview; disabling it for chrome makes
+   the window feel native without touching anything that holds file content. */
+h1,
+h2,
+label {
+  user-select: none;
+}
