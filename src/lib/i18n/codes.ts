@@ -345,6 +345,22 @@ export function describeMatchBadge(locale: Locale, badge: MatchBadge): string {
 } // End of function describeMatchBadge()
 
 /**
+ * The noun phrase one value shape reads as.
+ *
+ * A claim about the *shape* of a node — "a list", "a set of keys" — and never
+ * about what it resolves to. The detail pane needs it for a node the projection
+ * stopped at: the node exists, and saying which kind of node it is is the whole
+ * difference between "the projection stopped here" and rendering nothing.
+ *
+ * @param locale - The dictionary to read from.
+ * @param kind - A value kind as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeValueKind(locale: Locale, kind: ValueKind): string {
+  return translate(locale, valueKindKey(kind));
+} // End of function describeValueKind()
+
+/**
  * The noun phrase one editing hazard reads as.
  *
  * A phrase rather than a sentence, because a hazard is named inside other

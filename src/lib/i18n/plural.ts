@@ -48,6 +48,31 @@ export function snippetCountKey(count: number): TranslationKey {
 } // End of function snippetCountKey()
 
 /**
+ * The key holding the unmodelled-entry sentence, in the right number.
+ *
+ * The second counted noun in the interface, and the reason this module is a
+ * *pair* selector rather than a one-off: adding one is two dictionary keys and
+ * one function, and no call site builds a key.
+ *
+ * @param count - How many entries of a snippet the projection did not model.
+ * @returns The singular or the plural key.
+ */
+export function unknownCountKey(count: number): TranslationKey {
+  return pluralKey('browser.detail.unknownCount.one', 'browser.detail.unknownCount.other', count);
+} // End of function unknownCountKey()
+
+/**
+ * The sentence the unmodelled-entry count reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param count - How many entries the projection did not model.
+ * @returns The translated sentence, with the count substituted.
+ */
+export function describeUnknownCount(locale: Locale, count: number): string {
+  return translate(locale, unknownCountKey(count), { count });
+} // End of function describeUnknownCount()
+
+/**
  * The sentence "N snippets" reads as, in one language.
  *
  * @param locale - The dictionary to read from.

@@ -17,10 +17,10 @@
  *
  * - `search_text` is joined here from the same field groups the core's
  *   `build_search_text` joins — **every** content field among them, which is
- *   what the core does since the 1c-1 review; this fixture models the subset of
- *   those fields {@link MatchOverrides} exposes (`trigger`, `triggers`,
- *   `regex`, `label`, `replace`, `html`, `comment`, `search_terms`) and no
- *   other. Rust pins the haystack in
+ *   what the core does since the 1c-1 review. As of 1c-2a the fixture models
+ *   every field of that join (`trigger`, `triggers`, `regex`, `label`, all five
+ *   content fields in `ContentSpec::collect_scalars` order, `comment` and
+ *   `search_terms`), and still nothing outside it. Rust pins the haystack in
  *   `search_text_covers_the_five_fields_plan_section_eight_names` and
  *   `search_text_covers_every_content_form_and_not_only_the_primary_one`;
  * - `source_text` is a *plausible* YAML rendering of the same fields, not the
@@ -34,19 +34,28 @@
  */
 
 import type {
+  AliasView,
   ContentKind,
   ContentSpec,
   DocumentId,
   DocumentSummary,
   DocumentView,
+  ElidedValue,
+  FieldView,
   FileKind,
   MatchBadge,
   MatchOptions,
   MatchView,
+  ScalarStyle,
   ScalarView,
   TriggerKind,
   TriggerSpec,
-  ValueView
+  UnknownEntry,
+  UnknownReason,
+  ValueKind,
+  ValueView,
+  VariableKind,
+  VariableView
 } from '../ipc/types';
 
 /**
@@ -70,6 +79,28 @@ export function scalar(text: string, node = 0): ScalarView {
 } // End of function scalar()
 
 /**
+ * A scalar written in something other than the plain style, or flagged.
+ *
+ * The detail pane says two things about a scalar beyond its text — how the file
+ * spells it, and whether the two YAML versions read it differently — and neither
+ * is reachable through {@link scalar}, which is deliberately the ordinary case.
+ *
+ * @param text - The source text.
+ * @param style - How the file writes it.
+ * @param ambiguous - Whether YAML 1.1 and 1.2 core disagree about it.
+ * @param node - The arena node identifier to claim.
+ * @returns A scalar view.
+ */
+export function styledScalar(
+  text: string,
+  style: ScalarStyle,
+  ambiguous = false,
+  node = 0
+): ScalarView {
+  return { ...scalar(text, node), style, ambiguous_yaml_1_1: ambiguous };
+} // End of function styledScalar()
+
+/**
  * A sequence item holding a scalar.
  *
  * @param text - The item's source text.
@@ -79,18 +110,124 @@ export function scalarItem(text: string): ValueView {
   return { Scalar: scalar(text) };
 } // End of function scalarItem()
 
-/** Every option field absent, which is the common case. */
-const NO_OPTIONS: MatchOptions = {
-  word: null,
-  left_word: null,
-  right_word: null,
-  propagate_case: null,
-  uppercase_style: null,
-  force_mode: null,
-  force_clipboard: null,
-  paragraph: null,
-  anchor: null
-};
+/**
+ * One entry of a shallowly projected mapping.
+ *
+ * @param key - The key's source text, or `null` for a key that is not a scalar.
+ * @param value - The entry's value.
+ * @param keyNode - The key node, which exists whether or not the key is scalar.
+ * @returns A field view.
+ */
+export function field(key: string | null, value: ValueView, keyNode = 0): FieldView {
+  return { key: key === null ? null : scalar(key, keyNode), key_node: keyNode, value };
+} // End of function field()
+
+/**
+ * An alias reference, projected without being followed.
+ *
+ * @param node - The arena node identifier to claim.
+ * @returns A projected value.
+ */
+export function aliasValue(node = 0): ValueView {
+  const alias: AliasView = { span: { start: 0, end: 1 }, node };
+  return { Alias: alias };
+} // End of function aliasValue()
+
+/**
+ * A node the projection recorded without descending into it.
+ *
+ * @param kind - What the elided node is.
+ * @param node - The arena node identifier to claim.
+ * @returns A projected value.
+ */
+export function elidedValue(kind: ValueKind, node = 0): ValueView {
+  const elided: ElidedValue = { kind, span: { start: 0, end: 1 }, node };
+  return { Elided: elided };
+} // End of function elidedValue()
+
+/**
+ * One mapping entry the projection did not model.
+ *
+ * @param key - The key's decoded text, or `null` for a non-scalar key.
+ * @param reason - Why it was not modelled.
+ * @param keyNode - The key node the coverage accounting balances on.
+ * @returns An unknown entry.
+ */
+export function unknownEntry(
+  key: string | null,
+  reason: UnknownReason = 'NotModelled',
+  keyNode = 0
+): UnknownEntry {
+  return {
+    key,
+    key_node: keyNode,
+    key_span: { start: 0, end: 1 },
+    value_span: { start: 1, end: 2 },
+    value_kind: 'Scalar',
+    path: null,
+    reason
+  };
+} // End of function unknownEntry()
+
+/** What {@link makeVariable} needs, all of it optional. */
+export interface VariableOverrides {
+  /** The mapping node this variable projects. */
+  readonly node?: number;
+  /** `name`, as source text. */
+  readonly name?: string | null;
+  /** `type`, as source text — the authoritative value. */
+  readonly declaredType?: string | null;
+  /** Which of the nine types the core read that as. */
+  readonly kind?: VariableKind;
+  /** `params`, shallowly projected, in source order. */
+  readonly params?: readonly FieldView[];
+  /** `depends_on`, one item per source entry. */
+  readonly dependsOn?: readonly ValueView[];
+  /** `inject_vars`, as source text. */
+  readonly injectVars?: string | null;
+  /** Entries the projection did not model. */
+  readonly unknownEntries?: readonly UnknownEntry[];
+}
+
+/**
+ * Builds a `VariableView` of the shape the boundary delivers.
+ *
+ * @param overrides - Whatever the test cares about; everything else is absent.
+ * @returns A variable view.
+ */
+export function makeVariable(overrides: VariableOverrides = {}): VariableView {
+  const declared = overrides.declaredType;
+  return {
+    node: overrides.node ?? 10,
+    path: null,
+    span: { start: 0, end: 1 },
+    name: overrides.name === undefined || overrides.name === null ? null : scalar(overrides.name),
+    declared_type: declared === undefined || declared === null ? null : scalar(declared),
+    kind: overrides.kind ?? 'Absent',
+    params: overrides.params ?? [],
+    depends_on: overrides.dependsOn ?? [],
+    inject_vars:
+      overrides.injectVars === undefined || overrides.injectVars === null
+        ? null
+        : scalar(overrides.injectVars),
+    unknown_entries: overrides.unknownEntries ?? []
+  };
+} // End of function makeVariable()
+
+/**
+ * A scalar for a field a test supplied, and `null` for one it did not.
+ *
+ * The overrides below use `undefined` for "the test said nothing" and `null` for
+ * "the file does not have this key", and the wire has only the second. Both
+ * become `null` here, which is what a projection of a file without the key
+ * carries.
+ *
+ * @param text - The source text, or nothing.
+ * @returns A scalar view, or `null`.
+ */
+function optionalScalar(text: string | null | undefined): ScalarView | null {
+  return text === undefined || text === null ? null : scalar(text);
+} // End of function optionalScalar()
 
 /** What {@link makeMatch} needs, all of it optional. */
 export interface MatchOverrides {
@@ -110,8 +247,14 @@ export interface MatchOverrides {
   readonly triggerKind?: TriggerKind;
   /** `replace`, as source text. */
   readonly replace?: string | null;
+  /** `markdown`, as source text. */
+  readonly markdown?: string | null;
   /** `html`, as source text. */
   readonly html?: string | null;
+  /** `image_path`, as source text. */
+  readonly imagePath?: string | null;
+  /** `form`, as source text — the shorthand layout, not the form fields. */
+  readonly form?: string | null;
   /** Which content shape the core decided this is. */
   readonly contentKind?: ContentKind;
   /** `label`, as source text. */
@@ -122,6 +265,19 @@ export interface MatchOverrides {
   readonly searchTerms?: readonly string[];
   /** `word`, as source text — a field search must **not** cover. */
   readonly word?: string | null;
+  /**
+   * Any option, as source text, keyed by its wire name.
+   *
+   * `word` above stays because five test files already use it; anything given
+   * here is merged over it, so the two cannot disagree.
+   */
+  readonly options?: Readonly<Partial<Record<keyof MatchOptions, string>>>;
+  /** `vars`, in source order. */
+  readonly vars?: readonly VariableView[];
+  /** `form_fields`, shallowly projected, in source order. */
+  readonly formFields?: readonly FieldView[];
+  /** Top-level entries of the match the projection did not model. */
+  readonly unknownEntries?: readonly UnknownEntry[];
   /** The badges the core computed. Never derived from the fields above. */
   readonly badges?: readonly MatchBadge[];
   /** `search_text`, when a test needs one the join below would not produce. */
@@ -144,38 +300,35 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   const document = overrides.document ?? 1;
   const revision = overrides.revision ?? 'rev-a';
   const trigger: TriggerSpec = {
-    trigger: overrides.trigger === undefined || overrides.trigger === null
-      ? null
-      : scalar(overrides.trigger),
+    trigger: optionalScalar(overrides.trigger),
     triggers: (overrides.triggers ?? []).map(scalarItem),
-    regex: overrides.regex === undefined || overrides.regex === null
-      ? null
-      : scalar(overrides.regex),
+    regex: optionalScalar(overrides.regex),
     kind: overrides.triggerKind ?? 'Single'
   };
   const content: ContentSpec = {
-    replace: overrides.replace === undefined || overrides.replace === null
-      ? null
-      : scalar(overrides.replace),
-    markdown: null,
-    html: overrides.html === undefined || overrides.html === null ? null : scalar(overrides.html),
-    image_path: null,
-    form: null,
+    replace: optionalScalar(overrides.replace),
+    markdown: optionalScalar(overrides.markdown),
+    html: optionalScalar(overrides.html),
+    image_path: optionalScalar(overrides.imagePath),
+    form: optionalScalar(overrides.form),
     kind: overrides.contentKind ?? 'Replace'
   };
-  const label = overrides.label === undefined || overrides.label === null
-    ? null
-    : scalar(overrides.label);
-  const comment = overrides.comment === undefined || overrides.comment === null
-    ? null
-    : scalar(overrides.comment);
+  const label = optionalScalar(overrides.label);
+  const comment = optionalScalar(overrides.comment);
   const searchTerms = overrides.searchTerms ?? [];
+  // `word` is merged in first so a test that sets both cannot make the two
+  // disagree, and so the five files that already pass `word` keep working.
+  const optionTexts: Partial<Record<keyof MatchOptions, string>> = {
+    ...(overrides.word === undefined || overrides.word === null ? {} : { word: overrides.word }),
+    ...(overrides.options ?? {})
+  };
 
   // The second transcription this module's header warns about: the same field
-  // groups the core joins, joined again here — `replace` *and* `html`, because
-  // the core indexes every content field rather than the primary one. A test
-  // asserting what the *predicate* does with such a haystack is sound; a test
-  // asserting what the core puts in one would be circular, and lives in Rust.
+  // groups the core joins, joined again here — every content field, in the
+  // order `ContentSpec::collect_scalars` walks them, because the core indexes
+  // every one rather than the primary one. A test asserting what the
+  // *predicate* does with such a haystack is sound; a test asserting what the
+  // core puts in one would be circular, and lives in Rust.
   const parts: string[] = [];
   if (trigger.trigger !== null) {
     parts.push(trigger.trigger.text);
@@ -187,12 +340,17 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   if (label !== null) {
     parts.push(label.text);
   }
-  if (content.replace !== null) {
-    parts.push(content.replace.text);
-  }
-  if (content.html !== null) {
-    parts.push(content.html.text);
-  }
+  for (const present of [
+    content.replace,
+    content.markdown,
+    content.html,
+    content.image_path,
+    content.form
+  ]) {
+    if (present !== null) {
+      parts.push(present.text);
+    }
+  } // End of the loop over the content fields the haystack covers
   if (comment !== null) {
     parts.push(comment.text);
   }
@@ -200,8 +358,9 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
 
   // The second transcription's other half: a YAML rendering of the same
   // fields, standing in for the byte slice the core takes out of the file. It
-  // covers `word`, which nothing else on the view does, because a comparison
-  // blind to `word` is exactly the defect this fixture has to be able to show.
+  // covers the options, which nothing else on the view does, because a
+  // comparison blind to `word` is exactly the defect this fixture has to be
+  // able to show.
   const lines: string[] = [`- trigger: ${overrides.trigger ?? ''}`];
   for (const entry of overrides.triggers ?? []) {
     lines.push(`  - ${entry}`);
@@ -209,15 +368,20 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   for (const [key, value] of [
     ['regex', overrides.regex],
     ['replace', overrides.replace],
+    ['markdown', overrides.markdown],
     ['html', overrides.html],
+    ['image_path', overrides.imagePath],
+    ['form', overrides.form],
     ['label', overrides.label],
-    ['comment', overrides.comment],
-    ['word', overrides.word]
+    ['comment', overrides.comment]
   ] as const) {
     if (value !== undefined && value !== null) {
       lines.push(`  ${key}: ${value}`);
     }
   } // End of the loop over the scalar fields the rendering shows
+  for (const [key, value] of Object.entries(optionTexts)) {
+    lines.push(`  ${key}: ${value}`);
+  }
   for (const term of searchTerms) {
     lines.push(`    - ${term}`);
   }
@@ -233,16 +397,23 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
     label,
     comment,
     search_terms: searchTerms.map(scalarItem),
-    options:
-      overrides.word === undefined || overrides.word === null
-        ? NO_OPTIONS
-        : { ...NO_OPTIONS, word: scalar(overrides.word) },
-    vars: [],
-    form_fields: [],
+    options: {
+      word: optionalScalar(optionTexts.word),
+      left_word: optionalScalar(optionTexts.left_word),
+      right_word: optionalScalar(optionTexts.right_word),
+      propagate_case: optionalScalar(optionTexts.propagate_case),
+      uppercase_style: optionalScalar(optionTexts.uppercase_style),
+      force_mode: optionalScalar(optionTexts.force_mode),
+      force_clipboard: optionalScalar(optionTexts.force_clipboard),
+      paragraph: optionalScalar(optionTexts.paragraph),
+      anchor: optionalScalar(optionTexts.anchor)
+    },
+    vars: overrides.vars ?? [],
+    form_fields: overrides.formFields ?? [],
     badges: overrides.badges ?? [],
     blocking_hazard: null,
     safely_editable: true,
-    unknown_entries: [],
+    unknown_entries: overrides.unknownEntries ?? [],
     search_text: overrides.searchText ?? parts.join('\n')
   };
 } // End of function makeMatch()

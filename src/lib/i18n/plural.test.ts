@@ -13,7 +13,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { describeSnippetCount, pluralKey, snippetCountKey } from './plural';
+import {
+  describeSnippetCount,
+  describeUnknownCount,
+  pluralKey,
+  snippetCountKey,
+  unknownCountKey
+} from './plural';
 import { LOCALES } from './locale';
 
 describe('the key a count picks', () => {
@@ -56,3 +62,28 @@ describe('the sentence a count renders as', () => {
     }
   });
 }); // End of the "sentence a count renders as" suite
+
+describe('the second counted noun, the unmodelled entries of a snippet', () => {
+  it('picks the singular for exactly one and the plural for everything else', () => {
+    expect(unknownCountKey(1)).toBe('browser.detail.unknownCount.one');
+    for (const count of [0, 2, 9]) {
+      expect(unknownCountKey(count), `${count}`).toBe('browser.detail.unknownCount.other');
+    }
+  });
+
+  it('agrees in number in both languages, which is the whole point of the pair', () => {
+    // The verb agrees too — "is shown" against "are shown", "se muestra"
+    // against "se muestran" — which a single value with `{count}` in it cannot
+    // do in either language.
+    expect(describeUnknownCount('en', 1)).toContain('1 entry');
+    expect(describeUnknownCount('en', 3)).toContain('3 entries');
+    expect(describeUnknownCount('es', 1)).toContain('1 entrada');
+    expect(describeUnknownCount('es', 3)).toContain('3 entradas');
+  });
+
+  it.each(LOCALES)('leaves no placeholder behind in %s', (locale) => {
+    for (const count of [0, 1, 42]) {
+      expect(describeUnknownCount(locale, count), `${locale}:${count}`).not.toContain('{count}');
+    }
+  });
+}); // End of the "second counted noun" suite

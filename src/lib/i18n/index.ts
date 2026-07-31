@@ -9,6 +9,7 @@
 // where both languages are checked against each other. The accessor lives with
 // the other twelve because CLAUDE.md section 2 is about where a component may
 // get a string from, and the answer is only ever this module.
+import { detailFieldKey, type DetailFieldName } from '../browser/detail';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
@@ -21,6 +22,7 @@ import type {
   ScalarStyle,
   TriggerKind,
   UnknownReason,
+  ValueKind,
   VariableKind
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
@@ -36,13 +38,20 @@ import {
   describeScalarStyle,
   describeTriggerKind,
   describeUnknownReason,
+  describeValueKind,
   describeVariableKind
 } from './codes';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
-import { describeSnippetCount } from './plural';
+import { describeSnippetCount, describeUnknownCount } from './plural';
 
 export { DICTIONARIES, placeholdersOf, translate } from './dictionaries';
-export { describeSnippetCount, pluralKey, snippetCountKey } from './plural';
+export {
+  describeSnippetCount,
+  describeUnknownCount,
+  pluralKey,
+  snippetCountKey,
+  unknownCountKey
+} from './plural';
 export type { TranslationKey, TranslationParams } from './dictionaries';
 export { DEFAULT_LOCALE, LOCALES, isLocale, matchLocaleTag, negotiateLocale } from './locale';
 export type { Locale } from './locale';
@@ -60,6 +69,7 @@ export {
   describeScalarStyle,
   describeTriggerKind,
   describeUnknownReason,
+  describeValueKind,
   describeVariableKind,
   diagnosticCodeKey,
   documentShapeKey,
@@ -265,6 +275,36 @@ export function tSelectionNotice(notice: SelectionNotice): string {
 } // End of function tSelectionNotice()
 
 /**
+ * Renders what kind of node a value is, in the current language.
+ *
+ * A claim about shape, never about meaning. The detail pane calls it for a node
+ * the projection stopped at, and for the header of a nested collection.
+ *
+ * @param kind - A value kind as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tValueKind(kind: ValueKind): string {
+  return describeValueKind(locale.current, kind);
+} // End of function tValueKind()
+
+/**
+ * Renders the label of one field of the detail pane, in the current language.
+ *
+ * The sixteenth accessor, and the reason it exists is the reason the other
+ * fifteen do: `DetailPane` renders a row whose field arrived as a **code**, and
+ * a component turns a code into text by calling this rather than by assembling
+ * `browser.detail.field.` + something. `detailFieldKey` is where the key is
+ * built, and its return type makes a field with no dictionary entry a compile
+ * error there.
+ *
+ * @param field - Which field a row stands for.
+ * @returns The translated label.
+ */
+export function tDetailField(field: DetailFieldName): string {
+  return translate(locale.current, detailFieldKey(field));
+} // End of function tDetailField()
+
+/**
  * Renders "N snippets" in the current language, in the right number.
  *
  * @param count - How many snippets a sidebar row stands for.
@@ -273,3 +313,13 @@ export function tSelectionNotice(notice: SelectionNotice): string {
 export function tSnippetCount(count: number): string {
   return describeSnippetCount(locale.current, count);
 } // End of function tSnippetCount()
+
+/**
+ * Renders the unmodelled-entry count in the current language and number.
+ *
+ * @param count - How many entries of a snippet the projection did not model.
+ * @returns The translated sentence, with the count substituted.
+ */
+export function tUnknownCount(count: number): string {
+  return describeUnknownCount(locale.current, count);
+} // End of function tUnknownCount()

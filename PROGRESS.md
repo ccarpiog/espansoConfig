@@ -27,7 +27,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1b-2a** | The read-only IPC surface · the wire error type · the typed frontend boundary · R27 corrected | ✅ complete — after the review fix round below |
 | **1b-2b** | The Rust-code→string dictionaries · the exhaustiveness check · the localized macOS menu | ✅ complete — after the review fix round below |
 | **1c-1** | The three-pane shell and the data path: sidebar, snippet list, search, the selection | ✅ complete — after the review fix round below |
-| 1c-2 | The detail pane: plan §3.3's fields, the hazards, the diagnostics, the raw YAML viewer | ⬜️ **next** |
+| **1c-2a** | The detail pane's match: plan §3.3's fields, §3.4's variables, §3.5's forms, D2u on a screen | ✅ complete — after the review fix round below |
+| 1c-2b | The app's judgements: the hazards, the diagnostics, the raw YAML viewer, the load-failure marker | ⬜️ **next** — **Phase 1's exit lands here** |
 | 2–5 | See plan §12 | ⬜️ not started |
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
@@ -52,6 +53,15 @@ and the selection — and it fails **loudly**: wrong data, or nothing on screen 
 detail pane** — plan §3.3's 22 fields, the hazards, the diagnostics and the raw YAML viewer — and it
 fails **quietly**: a rendering that looks finished and states something the project has not earned.
 Phase 1's stated exit lands at the end of **1c-2**.
+
+**1c-2 was split once more into 1c-2a / 1c-2b**, by the same test. **1c-2a is the match itself** —
+§3.3's fields, §3.4's nine variable types, §3.5's forms, the unmodelled entries and D2u's rule that a
+scalar renders as source text — and it fails by **misrepresenting a snippet**. **1c-2b is what the app
+says *about* that snippet and the file behind it** — the hazards, the diagnostics, the raw YAML viewer
+and the load-failure marker — and it fails by **making a claim the project has not earned**. The cut
+proved itself immediately: 1c-2a's own review found the pane telling the reader that an unmodelled
+entry was "shown as written" while showing only its key, which is exactly 1c-2b's failure mode
+appearing inside 1c-2a. Phase 1's stated exit now lands at the end of **1c-2b**.
 
 **1b-2 was split into 1b-2a / 1b-2b** along the same cut: 1b-2a is the **boundary** — the five
 read-only commands, the wire error type and the typed frontend mirror — and 1b-2b is the **prose**,
@@ -765,6 +775,54 @@ is D2u-safe. The second: recovery installed the re-resolved identity but never r
 in verdict, with `search_text`'s widening pinned in `model_projection.rs`. **Twenty-two disabling
 experiments** across the phase and its fix round, each run, recorded and reverted; all fired. One did
 **not** fire until its test was strengthened, and that is recorded in the notes rather than tidied away.
+
+### Phase 1c-2a — the detail pane's match, and D2u seen on a screen
+
+The third pane no longer holds a placeholder. `DetailPane.svelte` renders the selected match field by
+field: plan §3.3's trigger, content, metadata and option fields, §3.4's nine variable types with their
+parameters, §3.5's form fields, and the entries the projection did not model. The decision record is
+[`docs/decisions/1c-2a-notes.md`](docs/decisions/1c-2a-notes.md).
+
+**The logic is not in the component, and that is a structural decision rather than a style one.**
+Nothing in this repository renders a Svelte component in an automated test, so anything deciding *what*
+appears is logic no test can reach. `describeMatch()` and `flattenValue()` live in
+[`src/lib/browser/detail.ts`](src/lib/browser/detail.ts) with a suite of their own; the component is
+five snippets and one walk. The phase caught itself violating this once — a variable card filtering its
+own rows in markup — and moved it.
+
+**D2u was seen rather than asserted.** In a running window, `word: on` renders as the two characters
+`on`, the 1.1-ambiguity chip sits on `on`, `true`, `false` and `0` and *not* on `capitalize` or `UTC`,
+and a block scalar keeps its lines under the label "Written as a literal block". There is no checkbox
+anywhere in the pane and no badge derived from any value.
+
+**Absent is not empty, and both were on screen at once.** A present `comment:` with nothing after it
+shows "written as empty text"; a match with no `comment:` key shows no Comment row at all. The one place
+the wire cannot tell them apart is a sequence — `triggers: []` and no `triggers:` key both arrive as
+`[]` — and that is recorded as a hole whose fix belongs in the core, not guessed at in TypeScript.
+
+**The trigger and content sides are never collapsed.** A match holding both a `trigger` and a `regex`
+draws both rows, which is what the 1c-1 review's High finding was about.
+
+**The review found no High finding, and its two Mediums were both real.** The first is the one worth
+remembering: the pane told the reader an unmodelled entry was "shown as written" **and did not show
+it** — `UnknownEntry` carries `value_kind` and `value_span` but **no value text at all**, so the pane
+could not have. Reworded in both languages to claim only what is true (the entry was *recorded and left
+untouched* — a statement about the file, not about the screen), with `value_kind` now rendered and the
+missing value written down as hole 13 and as Rust-side work for a later phase. The second: a sequence
+item's bullet was modelled in `detail.ts` and rendered by nothing, so two `search_terms` whose first
+item spanned two lines were indistinguishable from three items.
+
+**D2w recurred, and was closed properly.** The field-coverage test built an input with every field, then
+audited only what `describeMatch()` chose to emit and asserted the count was 24 — so a field added to
+the union and never emitted would have passed. It is now an **equality** against `EVERY_DETAIL_FIELD`,
+pinned to `DetailFieldName` in both directions by two `assertNever<Exclude<…>>()` calls, so the same
+omission is a failing test and a new member is a compile error.
+
+**What is proven.** **412 frontend tests across 24 files** (from 410 and 24 at 1c-1's close, itself 354),
+the Rust suite unchanged in verdict, and **eighteen disabling experiments** — fourteen in the phase, four
+in the fix round — each run, recorded and reverted. **Two deliberately did not fire**, and they retire a
+claim it would have been easy to make: neither `svelte-check` nor `vite build` reports an unused CSS
+selector, so a `depth-*` rule's presence in `dist` is *not* evidence that it is used.
 
 ---
 
@@ -1797,6 +1855,19 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-2a review disposition
+
+The review is [`docs/reviews/phase-1c-2a-detail-pane.md`](docs/reviews/phase-1c-2a-detail-pane.md).
+**No High findings.** Two Medium and two Low, all four closed before the commit, so no commit holds a
+demonstrated defect.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | Medium | The pane says an unmodelled entry "is shown as written" and shows only its key | **Real, and the sharpest of the four** — it is a claim the project has not earned, the same class as D2u and R16. Verified against the wire first: `UnknownEntry` carries `key`, `key_node`, `key_span`, `value_span`, `value_kind`, `path` and `reason` — **no value text**, so the pane never could have shown it. Six strings reworded in both languages to claim only what is true (*recorded and left untouched*, *kept exactly as the file writes it* — about the file, not the screen), and a new `browser.detail.unknownValue` renders `value_kind` through `tValueKind`: "holds a set of keys, which this pane does not show". **Deliberately not fixed by reconstructing the value in TypeScript from `value_span`** — JS string indices are UTF-16 units, not bytes, and that confusion is exactly what the core's `CharToByte` adapter exists to prevent. Carrying an exact Rust-sliced source span is hole 13 and inherited work |
+| 2 | Medium | A sequence item's boundary is invisible | Real. `detail.ts` modelled the item label and the component rendered nothing for that arm, with `list-style: none` removing the native bullet too. Two `search_terms` whose first item held a two-line literal block rendered as three unmarked lines. A `•` in markup — **not a CSS `content:` rule**, so `innerText` can see it and a window reading can check it — plus a stylesheet rule and a text-scan guard |
+| 3 | Low | The field-coverage test audits what the implementation emitted | Real, and **D2w recurring**. Closed at the root rather than by rewording the comment: `EVERY_DETAIL_FIELD` is pinned to `DetailFieldName` in both directions by two `assertNever<Exclude<…>>()` calls, and the assertion is now set **equality** rather than a count. Experiment Q adds an unemitted 25th member: the new test fails, and the test it replaced passed |
+| 4 | Low | The notes' dictionary counts are wrong and disagree with each other | Real, and verified independently against `0507f6f` — 169 keys at the base. Corrected throughout; the figure is now **50 added, one removed, 218 each**, the extra over the review's arithmetic being `unknownValue`, which finding 1 added after the review was written |
+
 ## Phase 1c-1 review disposition
 
 The review is
@@ -1991,6 +2062,40 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-2a
+
+Every command below was run by the orchestrator after the fix round, not taken on the worker's report.
+
+| Command | Result |
+|---|---|
+| `npm test` | ✅ **412 tests across 24 files**, 0 failed |
+| `npm run check` | ✅ 366 files, **0 errors, 0 warnings** (run with `--fail-on-warnings`) |
+| `npm run build` | ✅ built; `dist/assets/index-*.js` 98.33 kB |
+| `cargo test --workspace` | ✅ all suites pass, 0 failed |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt --check` | ✅ clean |
+| `rg render_probe src src-tauri/src scripts` | ✅ **no match** — the temporary R32 probe is fully reverted |
+| `rg -c '^\s*"' src/lib/i18n/{en,es}.json` | ✅ **218 and 218** — the key parity finding 4 was about, re-derived rather than quoted |
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| Every §3.3 field renders when the source has it | ✅ | `describeMatch()` collects all 22; the equality test pins the emitted set against `DetailFieldName` |
+| §3.4's nine variable types and §3.5's forms render | ✅ | `describeVariable()`; the window reading shows three variable cards and a form's fields |
+| A scalar renders as source text, never an inferred type (D2u) | ✅ | **Seen on a screen**: `word: on` renders as `on`; no checkbox exists in the pane |
+| Absent is distinguished from empty | ✅ | Seen side by side on two screens; the one wire-level exception is stated as hole 2 |
+| No hardcoded user-facing string | ✅ | Both lints pass, **and** R31's four blind spots are enumerated by name in the notes §8 rather than assumed clean |
+| The five uncalled accessors get real callers | ✅ | `tTriggerKind`, `tContentKind`, `tVariableKind`, `tScalarStyle`, `tUnknownReason`, plus the new `tValueKind`, `tDetailField`, `tUnknownCount` |
+| A claim about a screen is backed by a reading of a screen (R32) | ✅ | Two readings, both languages, the second **re-taken after the fix round changed the component** |
+| No real config content anywhere | ✅ | The readings ran against a hand-written synthetic config with `XDG_CONFIG_HOME` **and** `HOME` overridden |
+
+**What the verification does *not* establish**, carried forward as stated holes: no component is
+rendered by any automated test; no pixels, so the indentation and the bullet are known to exist in the
+markup and the stylesheet but not known to *paint*; `Alias`, `Elided` and a non-scalar mapping key are
+unit-tested and were never on a screen; and nothing establishes that the 50 new Spanish values are
+Spanish beyond one bilingual reading.
 
 ## Verification — Phase 1c-1
 
@@ -2445,40 +2550,53 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-1 is complete. Start Phase 1c-2 — the detail pane, and Phase 1's exit.**
+**Phase 1c-2a is complete. Start Phase 1c-2b — the app's judgements, and Phase 1's exit.**
 
-The shell, the data path and the selection all work and have been seen working in a window: a sidebar
-that groups files, profiles and packages, a snippet list with badges, search over the five fields plan
-§8.1 names, and a selection that survives — or correctly refuses to survive — a document changing
-underneath it. **What the third pane shows is a localized placeholder.** 1c-2 fills it, and the plan's
-stated exit for Phase 1 lands there: *the owner can browse their entire real config and every snippet
-renders correctly.*
+The detail pane now renders the match itself: §3.3's fields, §3.4's nine variable types, §3.5's forms
+and the entries the projection did not model, all as source text, all seen in a running window in both
+languages. **What it does not yet do is say anything *about* that snippet or the file behind it.**
+1c-2b does, and the plan's stated exit for Phase 1 lands there: *the owner can browse their entire real
+config and every snippet renders correctly.*
 
 Concretely, and in roughly this order:
 
-1. **Render `browser.selectedMatch`** — all 22 of plan §3.3's fields. `MatchView` already carries every
-   one, and 1c-1 leaves the value **live in the store**: 1c-2 renders it and does not need to fetch
-   anything. `DetailPane.svelte` is a stub by design and its two field keys were deliberately removed,
-   so there is nothing to undo.
-2. **The nine variable types** of plan §3.4 (`VariableView`, `params` shallow), and the forms of §3.5.
-3. **Surface `HazardKind`** where the visual editor cannot preserve a construct. Ten strings exist
-   (`tHazard`) and **have no caller at all**; the core computes the hazards.
-4. **Surface the diagnostics.** `tDiagnostic` is 22 strings with **no caller**. The four deliberately
-   invalid fixtures yield typed diagnostics and still expose their raw text.
-5. **The raw YAML viewer.** `document_text` returns the file's own bytes and is the one command with
-   **no frontend caller** — it is therefore the one command still tree-shaken out of `dist`. Phase 3
-   owns CodeMirror; 1c-2 needs only to display text faithfully.
-6. **Render a scalar as source text, never as an inferred type** — D2u, a decision rather than a
-   preference. A badge comes from a key's presence or a `type` field's text, never from a value.
-   Flagging a scalar as 1.1-ambiguous *is* allowed, and `ScalarView.ambiguous_yaml_1_1` is carried on
-   every scalar with nothing yet showing it — the detail pane is where it would go.
+1. **Surface `HazardKind`** where the visual editor cannot preserve a construct. Ten strings exist
+   (`tHazard`) and **have no caller at all**. `MatchView.blocking_hazard`, `MatchView.safely_editable`
+   and `DocumentView.hazards` are all live on the wire and nothing reads any of them. This is where a
+   read-only browser starts making claims about *editability*, so it is the sub-phase's real risk.
+2. **Surface the diagnostics.** `tDiagnostic` is 22 strings with **no caller**, and
+   `DocumentView.diagnostics` is live. The four deliberately invalid fixtures yield typed diagnostics
+   and still expose their raw text.
+3. **The raw YAML viewer — and note the correction.** The earlier claim here, that `document_text` is
+   "the one command with no frontend caller, tree-shaken out of `dist`", was **wrong**. `document_text`
+   is a `Workspace` method and **not a registered Tauri command at all**: `main.rs` registers six and it
+   is not among them. So this is a command, a `types.ts` mirror entry and updates to
+   `wire_contract.rs` and `dispatch_check.rs` — meaningfully more than "add a caller". Phase 3 owns
+   CodeMirror; 1c-2b needs only to display text faithfully.
+4. **Fix the load-failure conflation**, named for 1c-2 by 1c-1 and still open. A file that could not be
+   read shows the same `–` / "Not read yet" marker as a profile nobody has projected, conflating *could
+   not* with *have not*. `browser.loadFailures` already holds what is needed to tell them apart.
+5. **Consider showing `MatchView.source_text`** — the match's own bytes, D2u-safe because it is source
+   text. It stops at the match's mapping, so the comment above a snippet is not in it.
 
-**What 1c-2 inherits, and should not rebuild.**
+**One thing 1c-2b inherits as a known lie-by-omission, and it is the shape of this sub-phase's whole
+risk.** An unmodelled entry's **value is not on the wire**: `UnknownEntry` carries `value_kind` and
+`value_span` but no text. 1c-2a's review caught the pane claiming it was "shown as written" and the
+strings now claim only that the entry is *recorded and left untouched*. Displaying it needs an exact
+**Rust-sliced** source span — byte slicing stays in Rust, because JavaScript string indices are UTF-16
+units and this project's premise is byte fidelity. See `1c-2a-notes.md` hole 13.
 
-- **Fourteen reactive typed accessors** — the twelve of 1b-2b plus `tSelectionNotice` and `tLocaleName`.
-  **A component calls one and never builds a key.** As of 1c-1 that is enforced rather than trusted:
-  `scripts/lint/built-translation-keys.ts` refuses any `t(` whose key is not written literally, and it
-  found a two-phase-old instance the moment it was written.
+**What 1c-2b inherits, and should not rebuild.**
+
+- **A detail pane, and the rule that keeps it thin.** New work deciding *what* appears goes in
+  `src/lib/browser/detail.ts` beside `describeMatch()`; the component gets the walk. The text scan at
+  the end of `detail.test.ts` is where a new accessor gets its cheap guard.
+- **Seventeen reactive typed accessors** — 1c-1's fourteen plus `tValueKind`, `tDetailField` and
+  `tUnknownCount`. **A component calls one and never builds a key.** As of 1c-1 that is enforced rather
+  than trusted: `scripts/lint/built-translation-keys.ts` refuses any `t(` whose key is not written
+  literally, and it found a two-phase-old instance the moment it was written.
+- **218 dictionary keys**, `en.json` still the schema, and the untranslated-value exception list now
+  carries `browser.detail.section.variables` by name.
 - **A working data path.** `browser.status`, `browser.documents`, `browser.sidebar`,
   `browser.scopedMatches`, `browser.visibleMatches`, `browser.selected`, `browser.selectedMatch` and
   `browser.loadFailures` are all live, and the selection is already R27-correct.
@@ -2488,18 +2606,25 @@ Concretely, and in roughly this order:
   `1c-1-notes.md` hole 5 is the shape of the work: `menuUnavailable`, `menuBuildFailed` and
   `invalidMenuLabels` still have a string and no screen.
 
-**One defect is left over for 1c-2 by name.** A file that could not be read shows the same `–` /
-"Not read yet" marker as a profile nobody has projected, conflating *could not* with *have not*.
-`browser.loadFailures` already holds what is needed to tell them apart.
+**Five rules 1c-2b is most likely to break.**
 
-**Four rules 1c-2 is most likely to break.**
-
-- **Never hardcode a user-facing string** (CLAUDE.md §2). The detail pane is 22 fields of labels.
+- **Do not claim on screen what the app does not do.** New in 1c-2a and it is this sub-phase's central
+  risk, because 1c-2b's entire content *is* claims: a hazard says a construct cannot be edited safely, a
+  diagnostic says a file is wrong. 1c-2a's own Medium 1 was a sentence saying an entry was "shown as
+  written" beside a rendering that showed only its key. **Before writing a string, check that the data
+  behind it exists** — `UnknownEntry` had no value text at all, and no amount of careful wording in the
+  component would have found that.
+- **Never hardcode a user-facing string** (CLAUDE.md §2). `tHazard` and `tDiagnostic` are 32 strings
+  between them, and they are the last two namespaces with no caller.
 - **R31 — a clean lint run is not evidence.** `scripts/lint/hardcoded-strings.ts` sees `.svelte`
-  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props.
+  **markup** only: not `<script>` bodies, not `{'literal'}`, not `.ts` constants, not props. 1c-2a
+  enumerated its four blind spots by name in `1c-2a-notes.md` §8 rather than assuming them clean; do the
+  same.
 - **Nothing establishes that any of the Spanish strings is Spanish.** The untranslated-value check
-  establishes non-identity. This now matters more than it ever has: the strings are on a screen, and
-  1c-1 added 35 more. A bilingual reader is the only thing that closes it.
+  establishes non-identity. This now matters more than it ever has: the strings are on a screen, 1c-1
+  added 35 and 1c-2a added 50. A bilingual reader is the only thing that closes it. The one defect found
+  here so far — two different Spanish words for one concept, one above the other on screen — was found
+  **by reading a screen**, which remains the only instrument that has ever caught anything in this area.
 - **Nothing renders a Svelte component in an automated test** — `1c-1-notes.md` hole 1, and the reason
   the R32 readings had to be re-taken after the fix round. A component that throws produces an empty
   pane that the whole suite passes straight through. Either adopt a DOM and a component-testing library
@@ -2623,7 +2748,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | Path | Why it matters next |
 |---|---|
 | [`src/lib/browser/`](src/lib/browser/) | **The data path 1c-2 renders from.** `workspace.svelte.ts` (`createBrowserState` — the four states, the two generation tokens, `installView`, `loadFailures`), `selection.ts` (**R27 in code**: a position to look at and `MatchView.source_text` to check with, never a display projection), `search.ts` (the matching rule; the haystack is the core's), `sidebar.ts` (grouping, `holdsMatches`, the pending count), `labels.ts`, `notices.ts`, `fixtures.ts` (neutral synthetic builders) |
-| [`src/lib/components/DetailPane.svelte`](src/lib/components/DetailPane.svelte) | **What 1c-2 replaces.** A deliberate stub — notice, file, placeholder — reduced to that after the review found it had started 1c-2's field rendering with helpers that collapse several trigger forms into one. There is nothing here to undo |
+| [`src/lib/browser/detail.ts`](src/lib/browser/detail.ts) | **The pane's model, and where 1c-2b's new logic goes.** `describeMatch()` (the trigger and content sides kept independent, options grouped by intent per plan §8.5), `flattenValue()` (all five `ValueView` arms, `Elided` included — a node the projection stopped at still gets a line), `scalarDisplay()` (D2u: `empty`, `ambiguous` and `style` are the only three things said about a scalar, and none of them is its meaning), `detailFieldKey()` (a template literal typed as `TranslationKey`, so a field with no string is a compile error **here**) |
+| [`src/lib/components/DetailPane.svelte`](src/lib/components/DetailPane.svelte) | **Presentation only, deliberately.** Five snippets and one walk over `describeMatch()`'s output. Nothing in this repository renders a Svelte component in a test, so logic placed here is logic nothing can check — the phase caught itself doing it once and moved it out. The `•` for a sequence item is **markup, not a CSS `content:` rule**, so a window reading's `innerText` can see it |
+| [`docs/decisions/1c-2a-notes.md`](docs/decisions/1c-2a-notes.md) | Phase 1c-2a's decision record: why the logic is not in the component (§2), absent vs empty and the one place the wire cannot tell them apart (§3), D2u in the pane (§4), the two sides never collapsed (§5), options by intent (§6), variables and forms (§7), **the strings and R31's four blind spots by name (§8)**, **the eighteen experiments including the two that did not fire (§9)**, what the phase got wrong (§10), **R32's readings and what they do and do not establish (§11)**, **the thirteen coverage holes stated as holes (§12)** and what 1c-2b inherits (§13) |
+| [`docs/reviews/phase-1c-2a-detail-pane.md`](docs/reviews/phase-1c-2a-detail-pane.md) | The Phase 1c-2a review, dispositioned above. **No High findings.** Its Medium 1 is the one to remember: a sentence claiming an unmodelled entry was "shown as written" beside a rendering that showed only its key — the data to honour that claim **does not exist on the wire**. Its Low 3 is D2w recurring, caught in a test whose own comment claimed the property it did not have |
 | [`scripts/lint/built-translation-keys.ts`](scripts/lint/built-translation-keys.ts) | **Why a code cannot reach the screen through a built key.** Refuses any `t(` whose key is not written literally — the rule CLAUDE.md §2 states and that 1c-1 broke twice. It found the second, two-phase-old instance the moment it existed. Note what it does **not** replace: R31 still applies to `hardcoded-strings.ts` |
 | [`docs/decisions/1c-1-notes.md`](docs/decisions/1c-1-notes.md) | Phase 1c-1's decision record: the data path (§2), the four states (§3), search and whose rule is whose (§4), badges as D2u seen from the list (§5), **R27 in the selection (§6)**, the strings and where the lint cannot see them (§7), the **twenty-two disabling experiments including the one that did not fire (§8)**, what the phase got wrong (§9), **R32's five window readings and exactly what they do and do not establish (§10)**, **the coverage holes stated as holes (§11)**, what 1c-2 inherits (§12) and **the review disposition (§13)** |
 | [`docs/reviews/phase-1c-1-shell-and-data-path.md`](docs/reviews/phase-1c-1-shell-and-data-path.md) | The Phase 1c-1 review, dispositioned above. Its High 1 is the sharpest finding in the project so far: a fingerprint that decided `sameMatch` while being blind to `word`, to variables, to form fields and to every non-primary content field. Its Low 2 is **R24's corollary for the fifth time**, and one of the eight tests it names was the very test the notes had cited as making an experiment unnecessary |
@@ -2719,6 +2847,7 @@ _Updated at each phase boundary._
 | 1b-2a | `d876eb6` | ✅ pushed to `origin/main` | clean |
 | 1b-2b | `065a516` | ✅ pushed to `origin/main` | clean |
 | 1c-1 | `59d4207` | ✅ pushed to `origin/main` | clean |
+| 1c-2a | `PENDING` | see below | see below |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b

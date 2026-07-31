@@ -39,6 +39,7 @@ import {
   describeScalarStyle,
   describeTriggerKind,
   describeUnknownReason,
+  describeValueKind,
   describeVariableKind,
   diagnosticCodeKey,
   documentShapeKey,
@@ -518,6 +519,17 @@ describe('the descriptions', () => {
       'Sequence'
     );
   }); // End of the "every unknown reason" case
+
+  it.each(LOCALES)('render every value kind in %s, never as a Rust identifier', (locale) => {
+    // The detail pane names one for a node the projection stopped at, which is
+    // the difference between "this app stopped reading here: a list" and an
+    // empty line the reader would read as "the file holds nothing".
+    for (const kind of VALUE_KINDS) {
+      const rendered = describeValueKind(locale, kind);
+      expect(rendered.trim(), `${locale}:${kind}`).not.toBe('');
+      expect(rendered, `${locale}:${kind}`).not.toContain(kind);
+    }
+  }); // End of the "every value kind" case
 
   it.each(LOCALES)('render every badge and every hazard in %s', (locale) => {
     for (const badge of MATCH_BADGES) {
