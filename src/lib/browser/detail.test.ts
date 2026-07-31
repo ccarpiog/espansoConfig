@@ -18,24 +18,26 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { findBuiltTranslationKeys } from '../../../scripts/lint/built-translation-keys';
 import {
   describeMatch,
+  describeUnknown,
   describeVariable,
   detailFieldKey,
   fieldLabel,
   flattenFields,
   flattenItems,
   flattenValue,
-  hasOptions,
+  hasDiscovery,
   indentClass,
   MAX_INDENT_DEPTH,
+  optionGroupKey,
   scalarDisplay,
   scalarRow,
   styleWorthShowing,
   type DetailFieldName,
   type LineBlock,
   type MatchDetail,
+  type OptionGroupName,
   type ScalarRow,
   type ValueLine
 } from './detail';
@@ -51,6 +53,7 @@ import {
   unknownEntry
 } from './fixtures';
 import { DICTIONARIES } from '../i18n/dictionaries';
+import type { ExpectNever, Missing } from '../i18n/exhaustive';
 
 /**
  * Every member of {@link DetailFieldName}, written out once.
@@ -60,8 +63,9 @@ import { DICTIONARIES } from '../i18n/dictionaries';
  * list exists to obey: an expectation derived from `describeMatch`'s output can
  * never notice a field `describeMatch` forgot, because the forgotten field is
  * absent from both sides of the comparison. The expectation therefore comes
- * from the *union*, and the two assertions below make the list agree with the
- * union at **compile time**, in both directions.
+ * from the *union*, and the list is made to agree with the union at **compile
+ * time**, in both directions: `satisfies` rejects a name that is not a member,
+ * and {@link _DetailFieldsAreComplete} below rejects a member the list omits.
  */
 const EVERY_DETAIL_FIELD = [
   'trigger',
@@ -88,27 +92,27 @@ const EVERY_DETAIL_FIELD = [
   'params',
   'dependsOn',
   'injectVars'
-] as const;
+] as const satisfies readonly DetailFieldName[];
 
-/**
- * A compile-time assertion that a type is empty.
- *
- * The constraint *is* the assertion: instantiating it with anything other than
- * `never` fails `npm run check` at the call site and names the type that was
- * not empty. It is the same device `detailFieldKey`'s return type uses, one
- * level up — a type error in this file rather than a stale number in it.
- *
- * @typeParam T - The type asserted to be `never`.
- * @param _value - Never passed; it exists so `T` appears in a value position.
- */
-function assertNever<T extends never>(_value?: T): void {
-  // Nothing happens at runtime. The check is the constraint on `T`.
-} // End of function assertNever()
+/** Every option group name, written out once for the same reason. */
+const EVERY_OPTION_GROUP = [
+  'matching',
+  'case',
+  'injection',
+  'other'
+] as const satisfies readonly OptionGroupName[];
 
-// Every member of the union is named in the list above...
-assertNever<Exclude<DetailFieldName, (typeof EVERY_DETAIL_FIELD)[number]>>();
-// ...and every name in the list above is a member of the union.
-assertNever<Exclude<(typeof EVERY_DETAIL_FIELD)[number], DetailFieldName>>();
+// `never` when the list above names every member of its union, and the member's
+// own name when it does not — an `npm run check` failure in this file, naming
+// what was forgotten, before any test runs. The other direction is the
+// `satisfies` on each list. `../i18n/exhaustive.ts` is where the pair lives and
+// says why a hand-written table needs it.
+export type _DetailFieldsAreComplete = ExpectNever<
+  Missing<DetailFieldName, typeof EVERY_DETAIL_FIELD>
+>;
+export type _OptionGroupsAreComplete = ExpectNever<
+  Missing<OptionGroupName, typeof EVERY_OPTION_GROUP>
+>;
 
 describe('a row exists only for a field the file has', () => {
   it('answers null for an absent key', () => {
@@ -195,7 +199,7 @@ describe('the content side is never collapsed', () => {
 describe('a scalar is source text, and what is said beside it', () => {
   it('never resolves a value that YAML 1.1 would read as a boolean (D2u)', () => {
     const detail = describeMatch(makeMatch({ options: { word: 'on' } }));
-    const row = detail.options.matching[0];
+    const row = groupRows(detail, 'matching')[0];
     expect(row?.field).toBe('word');
     expect(row?.scalar.text).toBe('on');
     // The row carries no boolean of any kind: only text, and three facts about
@@ -234,28 +238,43 @@ describe('options are grouped by intent, not dumped flat', () => {
         }
       })
     );
-    expect(detail.options.matching.map((row) => row.field)).toEqual([
+    expect(detail.options.map((group) => group.name)).toEqual([...EVERY_OPTION_GROUP]);
+    expect(groupRows(detail, 'matching').map((row) => row.field)).toEqual([
       'word',
       'leftWord',
       'rightWord'
     ]);
-    expect(detail.options.casing.map((row) => row.field)).toEqual([
+    expect(groupRows(detail, 'case').map((row) => row.field)).toEqual([
       'propagateCase',
       'uppercaseStyle'
     ]);
-    expect(detail.options.injection.map((row) => row.field)).toEqual([
+    expect(groupRows(detail, 'injection').map((row) => row.field)).toEqual([
       'forceMode',
       'forceClipboard'
     ]);
-    expect(detail.options.other.map((row) => row.field)).toEqual(['paragraph', 'anchor']);
-    expect(hasOptions(detail.options)).toBe(true);
-  });
+    expect(groupRows(detail, 'other').map((row) => row.field)).toEqual(['paragraph', 'anchor']);
+  }); // End of the "each of the nine in its group" case
 
   it('has no group at all for a match that sets no option', () => {
-    const detail = describeMatch(makeMatch());
-    expect(hasOptions(detail.options)).toBe(false);
-    expect(detail.options.matching).toEqual([]);
-    expect(detail.options.other).toEqual([]);
+    // The pane draws its options section when this list is non-empty, so an
+    // empty group left in it would be a heading over nothing.
+    expect(describeMatch(makeMatch()).options).toEqual([]);
+  });
+
+  it('drops the groups whose keys the file does not have, and keeps the rest in order', () => {
+    // The decision that used to be four `{#if group.length > 0}` blocks in
+    // markup, where nothing could reach it.
+    const detail = describeMatch(makeMatch({ options: { anchor: 'base', left_word: 'true' } }));
+    expect(detail.options.map((group) => group.name)).toEqual(['matching', 'other']);
+    expect(detail.options.every((group) => group.rows.length > 0)).toBe(true);
+  }); // End of the "drops the empty groups" case
+
+  it('names a key that exists in both dictionaries, for every group', () => {
+    for (const name of EVERY_OPTION_GROUP) {
+      const key = optionGroupKey(name);
+      expect(DICTIONARIES.en[key], key).toBeTruthy();
+      expect(DICTIONARIES.es[key], key).toBeTruthy();
+    } // End of the loop over every group the pane can head
   });
 
   it('keeps the two injection keys apart while grouping them together', () => {
@@ -264,7 +283,7 @@ describe('options are grouped by intent, not dumped flat', () => {
     const detail = describeMatch(
       makeMatch({ options: { force_mode: 'keys', force_clipboard: 'true' } })
     );
-    expect(detail.options.injection.map((row) => row.scalar.text)).toEqual(['keys', 'true']);
+    expect(groupRows(detail, 'injection').map((row) => row.scalar.text)).toEqual(['keys', 'true']);
   });
 }); // End of the "options grouped by intent" suite
 
@@ -288,8 +307,17 @@ describe('a projected value flattens into lines', () => {
     expect(lines).toHaveLength(1);
     const line = lines[0];
     expect(line?.kind).toBe('elided');
-    expect(line?.kind === 'elided' ? line.valueKind : null).toBe('Mapping');
+    expect(line?.kind === 'elided' ? line.elided.kind : null).toBe('Mapping');
   });
+
+  it('keeps the elided node itself, not only what kind it was', () => {
+    // The identity the wire carried. `AliasLine` keeps its whole `AliasView`;
+    // an editing phase addresses a line in order to change it, and a projection
+    // that dropped the node would have to go back to the wire for it.
+    const lines = flattenValue(elidedValue('Sequence', 7));
+    const line = lines[0];
+    expect(line?.kind === 'elided' ? line.elided.node : null).toBe(7);
+  }); // End of the "keeps the elided node" case
 
   it('opens a nested sequence and indents its items', () => {
     const lines = flattenValue({ Sequence: [scalarItem('a'), scalarItem('b')] });
@@ -335,6 +363,14 @@ describe('a projected value flattens into lines', () => {
     expect(lines[1]?.label.kind).toBe('unnamed');
     expect(fieldLabel(field(null, scalarItem('x'))).kind).toBe('unnamed');
   });
+
+  it('carries the key node of an entry it cannot name', () => {
+    // Nothing can address such an entry *by name*, but `FieldView.key_node`
+    // exists whether or not the key is a scalar, and dropping it would throw
+    // away the only handle an editing phase would have on the line.
+    const label = fieldLabel(field(null, scalarItem('x'), 12));
+    expect(label.kind === 'unnamed' ? label.keyNode : null).toBe(12);
+  }); // End of the "carries the key node" case
 }); // End of the "a projected value flattens into lines" suite
 
 describe('the sequence and mapping helpers', () => {
@@ -441,7 +477,10 @@ describe('a whole match', () => {
     expect(detail.variables).toHaveLength(1);
     expect(detail.variables[0]?.node).toBe(20);
     expect(detail.formFields.map((line) => line.kind)).toEqual(['branch', 'scalar']);
-    expect(detail.unknown.map((entry) => entry.key)).toEqual(['unknown_key', null]);
+    expect(detail.unknown.map((entry) => entry.key)).toEqual([
+      { kind: 'named', text: 'unknown_key' },
+      { kind: 'unnamed' }
+    ]);
   });
 
   it('shows nothing for the blocks a plain snippet does not have', () => {
@@ -461,6 +500,56 @@ describe('a whole match', () => {
   });
 }); // End of the "a whole match" suite
 
+describe('the discovery section', () => {
+  // A compound predicate — two lists feeding one heading — which is the shape
+  // that has to stay out of markup, because markup is where nothing can reach
+  // it.
+  it('is there when either of its two parts is', () => {
+    expect(hasDiscovery(describeMatch(makeMatch({ label: 'Signature' })))).toBe(true);
+    expect(hasDiscovery(describeMatch(makeMatch({ comment: 'the sign-off' })))).toBe(true);
+    expect(hasDiscovery(describeMatch(makeMatch({ searchTerms: ['sig'] })))).toBe(true);
+  });
+
+  it('is not there when neither is', () => {
+    expect(hasDiscovery(describeMatch(makeMatch({ trigger: ':sig', replace: 'body' })))).toBe(false);
+  });
+
+  it('counts a label that is present and empty, which is not the same as absent', () => {
+    expect(hasDiscovery(describeMatch(makeMatch({ label: '' })))).toBe(true);
+  });
+}); // End of the "discovery section" suite
+
+describe('an entry the projection did not model', () => {
+  it('carries a named key as a name', () => {
+    const row = describeUnknown(unknownEntry('custom_setting', 'NotModelled', 4));
+    expect(row.key).toEqual({ kind: 'named', text: 'custom_setting' });
+    expect(row.node).toBe(4);
+    expect(row.valueKind).toBe('Scalar');
+    expect(row.reason).toBe('NotModelled');
+  }); // End of the "named key" case
+
+  it('marks a key that is present and empty rather than drawing nothing', () => {
+    // The defect this arm closes: the pane printed `entry.key` raw, so an entry
+    // whose key is the empty string rendered a blank `dt` — a row with nothing
+    // in it, which is indistinguishable from a row that failed to render. It is
+    // the same distinction `ScalarDisplay.empty` draws everywhere else here.
+    expect(describeUnknown(unknownEntry('')).key).toEqual({ kind: 'empty' });
+  }); // End of the "empty key" case
+
+  it('says a key that is not a scalar cannot be named', () => {
+    expect(describeUnknown(unknownEntry(null, 'NonScalarKey')).key).toEqual({ kind: 'unnamed' });
+  });
+
+  it('is the shape a variable and a match both hand the pane', () => {
+    // Both used to hand it the raw wire entry, so the component reached into
+    // `key_node`, `value_kind` and a `key === null` test of its own.
+    const variable = describeVariable(makeVariable({ unknownEntries: [unknownEntry('')] }));
+    const match = describeMatch(makeMatch({ unknownEntries: [unknownEntry('')] }));
+    expect(variable.unknown[0]?.key).toEqual({ kind: 'empty' });
+    expect(match.unknown[0]?.key).toEqual({ kind: 'empty' });
+  }); // End of the "shape a variable and a match hand the pane" case
+}); // End of the "entry the projection did not model" suite
+
 describe('the field labels', () => {
   it('name a key that exists in both dictionaries, for every field', () => {
     // The compile-time half of this is `detailFieldKey`'s return type. This is
@@ -475,8 +564,9 @@ describe('the field labels', () => {
 
   it('are all of them emitted, for a match that sets every field there is', () => {
     // **This assertion is an equality, and that is the whole point.** The
-    // expected side is `EVERY_DETAIL_FIELD`, which the two `assertNever` calls
-    // above pin to `DetailFieldName` itself; the actual side is what
+    // expected side is `EVERY_DETAIL_FIELD`, which `satisfies` and
+    // `_DetailFieldsAreComplete` above pin to `DetailFieldName` itself in both
+    // directions at compile time; the actual side is what
     // `describeMatch` emitted. A member added to the union and never emitted
     // fails here, which is what an audit that merely counted the output could
     // not do (D2w: an audit that iterates what the implementation emitted is
@@ -555,14 +645,16 @@ describe('the pane that renders this model', () => {
     'tUnknownReason',
     'tValueKind',
     'tDetailField',
+    'tOptionGroup',
     'tUnknownCount'
   ])('calls %s, so that code reaches the screen as words', (accessor) => {
     expect(source).toContain(`${accessor}(`);
   });
 
-  it('holds no `t(` whose key is not written out', () => {
-    expect(findBuiltTranslationKeys(source, 'DetailPane.svelte')).toEqual([]);
-  });
+  // There is no "holds no built `t(` key" case here. `built-translation-keys.test.ts`
+  // runs that scan over **every** `.svelte` file under `src/`, with a
+  // non-vacuity guard on the file count and `formatBuiltKeyFindings` in the
+  // failure message; a copy naming this one file is strictly weaker.
 
   it('handles the item branch, so a sequence item is not just another line', () => {
     // `flattenValue` labels every item of a sequence `item`, and the pane draws
@@ -584,17 +676,35 @@ describe('the pane that renders this model', () => {
     // can do is name the shape; the strings say the entry was recorded and left
     // untouched, which is a claim about the file rather than about the screen.
     expect(source).toContain('browser.detail.unknownValue');
-    expect(source).toContain('tValueKind(entry.value_kind)');
+    expect(source).toContain('tValueKind(entry.valueKind)');
   });
+}); // End of the "pane that renders this model" suite
 
-  it('has a stylesheet rule for every indentation class the model can produce', () => {
+describe('the global stylesheet', () => {
+  /*
+   * The `.depth-N` ladder is in `src/app.css` rather than in the pane's own
+   * `<style>`, because Svelte scopes a component's rules: written there they
+   * compile to `.depth-3.svelte-<hash>` and no second pane could use them. The
+   * same blind spot as before applies and hole 6 says so — neither
+   * `svelte-check` nor `vite build` reports a deleted selector, so this can say
+   * the rule is written and never that it paints.
+   */
+  const stylesheet = readFileSync(fileURLToPath(new URL('../../app.css', import.meta.url)), 'utf8');
+
+  it('has a rule for every indentation class the model can produce', () => {
     // `indentClass` clamps, so the deepest rule is the last one needed. A class
     // with no rule is a nesting level that silently renders flat.
     for (let depth = 0; depth <= MAX_INDENT_DEPTH; depth += 1) {
-      expect(source, `depth ${depth}`).toContain(`.${indentClass(depth)} {`);
+      expect(stylesheet, `depth ${depth}`).toContain(`.${indentClass(depth)} {`);
     }
   });
-}); // End of the "pane that renders this model" suite
+
+  it('states the monospaced face once, where three components can share it', () => {
+    // The face carries meaning here — it is the "this is what the document
+    // holds" signal — so it is a token rather than three copies of a font list.
+    expect(stylesheet).toContain('--font-mono:');
+  });
+}); // End of the "global stylesheet" suite
 
 /**
  * The key text of each line's label, or `null` when it opens no key.
@@ -605,6 +715,17 @@ describe('the pane that renders this model', () => {
 function labelKeys(lines: readonly ValueLine[]): readonly (string | null)[] {
   return lines.map((line) => (line.label.kind === 'key' ? line.label.key.text : null));
 } // End of function labelKeys()
+
+/**
+ * The rows of one named option group, or none when the group was not built.
+ *
+ * @param detail - The model built for one match.
+ * @param name - Which group to look for.
+ * @returns Its rows, or an empty list.
+ */
+function groupRows(detail: MatchDetail, name: OptionGroupName): readonly ScalarRow[] {
+  return detail.options.find((group) => group.name === name)?.rows ?? [];
+} // End of function groupRows()
 
 /**
  * Every field name one built model actually put on a row or on a block.
@@ -620,10 +741,7 @@ function emittedFieldNames(detail: MatchDetail): readonly DetailFieldName[] {
     ...detail.trigger.rows,
     ...detail.content.rows,
     ...detail.discovery,
-    ...detail.options.matching,
-    ...detail.options.casing,
-    ...detail.options.injection,
-    ...detail.options.other,
+    ...detail.options.flatMap((group) => group.rows),
     ...detail.variables.flatMap((variable) => variable.rows)
   ];
   const blocks: readonly (LineBlock | null)[] = [

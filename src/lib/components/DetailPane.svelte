@@ -1,19 +1,20 @@
 <script lang="ts">
   import {
     describeMatch,
-    hasOptions,
+    hasDiscovery,
     indentClass,
     type LineBlock,
     type ScalarDisplay,
     type ScalarRow,
+    type UnknownRow,
     type ValueLine
   } from '../browser/detail';
-  import type { UnknownEntry } from '../ipc/types';
   import type { BrowserState } from '../browser/workspace.svelte';
   import {
     t,
     tContentKind,
     tDetailField,
+    tOptionGroup,
     tScalarStyle,
     tSelectionNotice,
     tTriggerKind,
@@ -53,7 +54,11 @@
    * never reaches this file.
    *
    * **An entry this app does not model shows its key, the *shape* of its value
-   * and why it was not modelled — never the value itself.** `UnknownEntry`
+   * and why it was not modelled — never the value itself.** Which of the three
+   * things goes in the `dt` — a name, the empty marker, or "not a plain name" —
+   * is `describeUnknown`'s decision, not this file's: an entry whose key is the
+   * empty string used to reach here as a bare string and draw a blank `dt`.
+   * `UnknownEntry`
    * carries `value_span` and `value_kind` and **no value text at all**, so the
    * text is not available here; slicing the file by that span is a Rust job,
    * because a JavaScript string index is a UTF-16 offset and a `ByteSpan` is
@@ -110,7 +115,7 @@
           <span class="marker">{t('browser.detail.alias')}</span>
         {:else if line.kind === 'elided'}
           <span class="marker">
-            {t('browser.detail.elided', { kind: tValueKind(line.valueKind) })}
+            {t('browser.detail.elided', { kind: tValueKind(line.elided.kind) })}
           </span>
         {:else if line.empty}
           <span class="marker">
@@ -133,20 +138,22 @@
   {@render lines(one.lines)}
 {/snippet}
 
-{#snippet unknownEntries(entries: readonly UnknownEntry[])}
+{#snippet unknownEntries(entries: readonly UnknownRow[])}
   <p class="count">{tUnknownCount(entries.length)}</p>
   <dl>
-    {#each entries as entry (entry.key_node)}
+    {#each entries as entry (entry.node)}
       <dt>
-        {#if entry.key === null}
-          <span class="marker">{t('browser.detail.unnamedKey')}</span>
+        {#if entry.key.kind === 'named'}
+          <span class="key">{entry.key.text}</span>
+        {:else if entry.key.kind === 'empty'}
+          <span class="marker">{t('browser.detail.emptyText')}</span>
         {:else}
-          <span class="key">{entry.key}</span>
+          <span class="marker">{t('browser.detail.unnamedKey')}</span>
         {/if}
       </dt>
       <dd class="unknown">
         <span class="marker"
-          >{t('browser.detail.unknownValue', { kind: tValueKind(entry.value_kind) })}</span
+          >{t('browser.detail.unknownValue', { kind: tValueKind(entry.valueKind) })}</span
         >
         <span>{tUnknownReason(entry.reason)}</span>
       </dd>
@@ -189,7 +196,7 @@
       {@render rows(detail.content.rows)}
     </section>
 
-    {#if detail.discovery.length > 0 || detail.searchTerms !== null}
+    {#if hasDiscovery(detail)}
       <section>
         <h2>{t('browser.detail.section.discovery')}</h2>
         {@render rows(detail.discovery)}
@@ -199,25 +206,13 @@
       </section>
     {/if}
 
-    {#if hasOptions(detail.options)}
+    {#if detail.options.length > 0}
       <section>
         <h2>{t('browser.detail.section.options')}</h2>
-        {#if detail.options.matching.length > 0}
-          <h3>{t('browser.detail.options.matching')}</h3>
-          {@render rows(detail.options.matching)}
-        {/if}
-        {#if detail.options.casing.length > 0}
-          <h3>{t('browser.detail.options.case')}</h3>
-          {@render rows(detail.options.casing)}
-        {/if}
-        {#if detail.options.injection.length > 0}
-          <h3>{t('browser.detail.options.injection')}</h3>
-          {@render rows(detail.options.injection)}
-        {/if}
-        {#if detail.options.other.length > 0}
-          <h3>{t('browser.detail.options.other')}</h3>
-          {@render rows(detail.options.other)}
-        {/if}
+        {#each detail.options as group (group.name)}
+          <h3>{tOptionGroup(group.name)}</h3>
+          {@render rows(group.rows)}
+        {/each}
       </section>
     {/if}
 
@@ -343,9 +338,11 @@
 
   /* Text taken from the file is shown as written (D2u), so it is set in the
      monospaced face that says "this is what the document holds" — and in a
-     `pre`, because a block scalar's newlines are part of what it holds. */
+     `pre`, because a block scalar's newlines are part of what it holds. The
+     face itself is `--font-mono` in `src/app.css`, stated once because it
+     carries that meaning wherever it appears. */
   .source {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
   }
 
   pre.source {
@@ -362,7 +359,7 @@
   }
 
   .key {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     overflow-wrap: anywhere;
   }
 
@@ -419,38 +416,17 @@
     padding: 0;
   }
 
+  /* The `.depth-N` ladder this line's indentation comes from is in
+     `src/app.css`, unscoped. A component's `<style>` is scoped by Svelte, so a
+     rule written here would compile to `.depth-3.svelte-<hash>` and no second
+     pane could ever reach it; indentation is not this pane's private idea.
+     `MAX_INDENT_DEPTH` in `../browser/detail.ts` is the contract with that
+     file, and `detail.test.ts` checks it there. */
   .line {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0.25rem 0.5rem;
-  }
-
-  /* Indentation by class rather than by an inline `style`: the production CSP
-     is `style-src 'self'` with no `unsafe-inline`, so a style attribute would
-     be refused and the nesting would silently disappear. */
-  .depth-0 {
-    padding-inline-start: 0;
-  }
-
-  .depth-1 {
-    padding-inline-start: 1rem;
-  }
-
-  .depth-2 {
-    padding-inline-start: 2rem;
-  }
-
-  .depth-3 {
-    padding-inline-start: 3rem;
-  }
-
-  .depth-4 {
-    padding-inline-start: 4rem;
-  }
-
-  .depth-5 {
-    padding-inline-start: 5rem;
   }
 
   .empty {

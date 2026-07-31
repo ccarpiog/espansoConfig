@@ -42,13 +42,16 @@ import type { TranslationKey } from '../i18n/dictionaries';
 import type {
   AliasView,
   ContentKind,
+  ElidedValue,
   FieldView,
+  MatchOptions,
   MatchView,
   NodeId,
   ScalarStyle,
   ScalarView,
   TriggerKind,
   UnknownEntry,
+  UnknownReason,
   ValueKind,
   ValueView,
   VariableKind,
@@ -60,9 +63,11 @@ import type {
  *
  * A **code**, exactly like a `TriggerKind` is: the pane renders it by calling
  * `tDetailField` in `../i18n`, never by building a key. The union is the
- * frontend's own — these are espanso's field names rather than Rust variants —
- * so it lives here and not in `../i18n/codes.ts`, whose `code.` namespace is
- * checked against the Rust enums by `src-tauri/src/dictionary_contract.rs`.
+ * frontend's own — these are espanso's field names rather than Rust variants,
+ * and no Rust enum has this shape — so it lives here rather than in
+ * `../i18n/codes.ts`, which exists to bridge **Rust** codes to sentences.
+ * `notices.ts`'s `selectionNoticeKey` is the precedent for a frontend-only code
+ * keeping its key builder beside the vocabulary it names.
  *
  * `name` is deliberately absent: a variable's name is the heading of its card
  * rather than a labelled row, so nothing ever asks for a label for it.
@@ -102,6 +107,14 @@ export type DetailFieldName =
  * `TranslationKey` is derived from `en.json`, so the assignment only holds when
  * every member has a key. It is the same device the twelve builders in
  * `../i18n/codes.ts` use.
+ *
+ * **Why it is not one of those twelve.** Not because of
+ * `src-tauri/src/dictionary_contract.rs` — that check filters on the key prefix
+ * `code.`, not on the file, so a builder in `codes.ts` returning
+ * `browser.detail.field.*` would pass `cargo test` unchanged. The reason is
+ * ownership: `codes.ts` bridges **Rust** codes to sentences, and
+ * {@link DetailFieldName} is the frontend's own vocabulary with no Rust twin.
+ * `notices.ts`'s `selectionNoticeKey` is the existing precedent.
  *
  * @param field - The field to label.
  * @returns The key holding that field's label.
@@ -177,9 +190,14 @@ export function scalarDisplay(scalar: ScalarView): ScalarDisplay {
 /**
  * A row for one field, or `null` when the file does not have that key.
  *
+ * `null` never reaches a component: {@link collectRows} drops it, so what the
+ * pane walks is a list of rows the file really has. The `null` is the seam this
+ * function is tested through — "absent produces no row" is the assertion — and
+ * the shape the caller filters on.
+ *
  * @param field - Which field the row would be.
  * @param scalar - The projected scalar, or `null` for an absent key.
- * @returns The row, or `null` so the caller renders nothing at all.
+ * @returns The row, or `null` when the key is absent.
  */
 export function scalarRow(field: DetailFieldName, scalar: ScalarView | null): ScalarRow | null {
   return scalar === null ? null : { field, ...scalarDisplay(scalar) };
@@ -194,14 +212,10 @@ export function scalarRow(field: DetailFieldName, scalar: ScalarView | null): Sc
 function collectRows(
   entries: readonly (readonly [DetailFieldName, ScalarView | null])[]
 ): readonly ScalarRow[] {
-  const rows: ScalarRow[] = [];
-  for (const [field, scalar] of entries) {
+  return entries.flatMap(([field, scalar]) => {
     const row = scalarRow(field, scalar);
-    if (row !== null) {
-      rows.push(row);
-    }
-  } // End of the loop over the field/scalar pairs
-  return rows;
+    return row === null ? [] : [row];
+  });
 } // End of function collectRows()
 
 // ---------------------------------------------------------------------------
@@ -213,56 +227,57 @@ function collectRows(
  * name at all.
  *
  * `unnamed` is `FieldView.key === null`, which is a mapping entry whose key is
- * an alias or a collection. Nothing can address such an entry, and the pane says
- * so rather than dropping the line.
+ * an alias or a collection. Nothing can address such an entry *by name*, and the
+ * pane says so rather than dropping the line — but the key **node** exists
+ * whether or not the key is a scalar, so it is carried: an editing phase
+ * addresses a line in order to change it, and a projection that dropped the one
+ * identity the wire handed it would have to go back to the wire for it.
  */
 export type LineLabel =
   | { readonly kind: 'item' }
   | { readonly kind: 'key'; readonly key: ScalarView }
-  | { readonly kind: 'unnamed' };
+  | { readonly kind: 'unnamed'; readonly keyNode: NodeId };
 
-/** A line holding a scalar. */
-export interface ScalarLine extends ScalarDisplay {
-  /** Discriminant. */
-  readonly kind: 'scalar';
+/** What every line of a projected value carries, whatever it holds. */
+export interface LineBase {
   /** How deep inside the value this line sits; 0 is the outermost. */
   readonly depth: number;
   /** What opens the line. */
   readonly label: LineLabel;
 }
 
+/** A line holding a scalar. */
+export interface ScalarLine extends ScalarDisplay, LineBase {
+  /** Discriminant. */
+  readonly kind: 'scalar';
+}
+
 /** A line holding an alias reference, which the projection never follows. */
-export interface AliasLine {
+export interface AliasLine extends LineBase {
   /** Discriminant. */
   readonly kind: 'alias';
-  /** How deep inside the value this line sits. */
-  readonly depth: number;
-  /** What opens the line. */
-  readonly label: LineLabel;
   /** The alias node, carried so a later phase can address it. */
   readonly alias: AliasView;
 }
 
 /** A line for a node the projection stopped at. */
-export interface ElidedLine {
+export interface ElidedLine extends LineBase {
   /** Discriminant. */
   readonly kind: 'elided';
-  /** How deep inside the value this line sits. */
-  readonly depth: number;
-  /** What opens the line. */
-  readonly label: LineLabel;
-  /** What the elided node is, so the pane can say what it stopped at. */
-  readonly valueKind: ValueKind;
+  /**
+   * The elided node, whole.
+   *
+   * Its `kind` is what the pane says it stopped at; its `node` and `span` are
+   * what a later phase addresses it by. The sibling {@link AliasLine} keeps its
+   * whole {@link AliasView} for the same reason.
+   */
+  readonly elided: ElidedValue;
 }
 
 /** A line opening a nested collection. */
-export interface BranchLine {
+export interface BranchLine extends LineBase {
   /** Discriminant. */
   readonly kind: 'branch';
-  /** How deep inside the value this line sits. */
-  readonly depth: number;
-  /** What opens the line. */
-  readonly label: LineLabel;
   /** Which collection it opens. */
   readonly shape: 'Sequence' | 'Mapping';
   /** `true` when the collection holds nothing, so no line follows it. */
@@ -298,7 +313,9 @@ const ITEM_LABEL: LineLabel = { kind: 'item' };
  * @returns Its key, or the marker for a key that is not a name.
  */
 export function fieldLabel(field: FieldView): LineLabel {
-  return field.key === null ? { kind: 'unnamed' } : { kind: 'key', key: field.key };
+  return field.key === null
+    ? { kind: 'unnamed', keyNode: field.key_node }
+    : { kind: 'key', key: field.key };
 } // End of function fieldLabel()
 
 /**
@@ -312,6 +329,11 @@ export function fieldLabel(field: FieldView): LineLabel {
  * Every arm of `ValueView` produces at least one line, `Elided` included: the
  * node exists, the projection simply stopped at it, and rendering nothing would
  * tell the reader that the file holds nothing.
+ *
+ * The two collection arms delegate to {@link flattenItems} and
+ * {@link flattenFields}, which is where "a sequence item carries a bullet, a
+ * mapping entry carries its key" is decided. Restating it here would put the
+ * same rule in three places, free to drift in two of them.
  *
  * @param value - A projected value as it crossed the boundary.
  * @param label - What opens the first line; a sequence bullet by default.
@@ -330,26 +352,20 @@ export function flattenValue(
     return [{ kind: 'alias', depth, label, alias: value.Alias }];
   }
   if ('Elided' in value) {
-    return [{ kind: 'elided', depth, label, valueKind: value.Elided.kind }];
+    return [{ kind: 'elided', depth, label, elided: value.Elided }];
   }
   if ('Sequence' in value) {
     const items = value.Sequence;
-    const lines: ValueLine[] = [
-      { kind: 'branch', depth, label, shape: 'Sequence', empty: items.length === 0 }
+    return [
+      { kind: 'branch', depth, label, shape: 'Sequence', empty: items.length === 0 },
+      ...flattenItems(items, depth + 1)
     ];
-    for (const item of items) {
-      lines.push(...flattenValue(item, ITEM_LABEL, depth + 1));
-    } // End of the loop over the sequence's items
-    return lines;
   }
   const entries = value.Mapping;
-  const lines: ValueLine[] = [
-    { kind: 'branch', depth, label, shape: 'Mapping', empty: entries.length === 0 }
+  return [
+    { kind: 'branch', depth, label, shape: 'Mapping', empty: entries.length === 0 },
+    ...flattenFields(entries, depth + 1)
   ];
-  for (const entry of entries) {
-    lines.push(...flattenValue(entry.value, fieldLabel(entry), depth + 1));
-  } // End of the loop over the mapping's entries
-  return lines;
 } // End of function flattenValue()
 
 /**
@@ -357,16 +373,15 @@ export function flattenValue(
  *
  * The sequence itself gets no branch line: the block already carries the field's
  * label, and a "a list" header above a list the reader can see would say nothing.
+ * {@link flattenValue}'s `Sequence` arm draws that header itself and then calls
+ * this at the next depth.
  *
  * @param items - The items as they crossed the boundary, in source order.
+ * @param depth - Nesting depth of the items; 0 by default.
  * @returns One line per item, plus whatever each item nests.
  */
-export function flattenItems(items: readonly ValueView[]): readonly ValueLine[] {
-  const lines: ValueLine[] = [];
-  for (const item of items) {
-    lines.push(...flattenValue(item, ITEM_LABEL, 0));
-  } // End of the loop over the sequence's items
-  return lines;
+export function flattenItems(items: readonly ValueView[], depth = 0): readonly ValueLine[] {
+  return items.flatMap((item) => flattenValue(item, ITEM_LABEL, depth));
 } // End of function flattenItems()
 
 /**
@@ -376,14 +391,11 @@ export function flattenItems(items: readonly ValueView[]): readonly ValueLine[] 
  * writes them.
  *
  * @param fields - The entries as they crossed the boundary, in source order.
+ * @param depth - Nesting depth of the entries; 0 by default.
  * @returns One line per entry, plus whatever each entry nests.
  */
-export function flattenFields(fields: readonly FieldView[]): readonly ValueLine[] {
-  const lines: ValueLine[] = [];
-  for (const field of fields) {
-    lines.push(...flattenValue(field.value, fieldLabel(field), 0));
-  } // End of the loop over the mapping's entries
-  return lines;
+export function flattenFields(fields: readonly FieldView[], depth = 0): readonly ValueLine[] {
+  return fields.flatMap((field) => flattenValue(field.value, fieldLabel(field), depth));
 } // End of function flattenFields()
 
 /**
@@ -397,7 +409,17 @@ function blockOf(field: DetailFieldName, lines: readonly ValueLine[]): LineBlock
   return lines.length === 0 ? null : { field, lines };
 } // End of function blockOf()
 
-/** How deep an indentation class the stylesheet has a rule for. */
+/**
+ * How deep an indentation class the stylesheet has a rule for.
+ *
+ * **The contract is with `src/app.css`**, which holds the `.depth-0` … `.depth-N`
+ * ladder unscoped so that any pane needing indentation uses the same one. A
+ * Svelte component's `<style>` is scoped — the rules would compile to
+ * `.depth-3.svelte-<hash>` and no second component could reach them — so the
+ * ladder cannot live in a component without becoming private to it.
+ * `detail.test.ts` reads `src/app.css` and fails if a class this constant
+ * promises has no rule there.
+ */
 export const MAX_INDENT_DEPTH = 5;
 
 /**
@@ -442,7 +464,31 @@ export interface ContentDetail {
 }
 
 /**
- * The match options, grouped by intent rather than dumped flat.
+ * Which of the four intents a group of options belongs to.
+ *
+ * A **code**, like {@link DetailFieldName}: the pane renders it by calling
+ * `tOptionGroup` in `../i18n`, never by building a key. The member is `case`
+ * rather than `casing` because the dictionary key it names is
+ * `browser.detail.options.case`, and the two must be the same word for
+ * {@link optionGroupKey}'s return type to check.
+ */
+export type OptionGroupName = 'matching' | 'case' | 'injection' | 'other';
+
+/**
+ * The dictionary key holding one option group's heading.
+ *
+ * The same device as {@link detailFieldKey}, for the same reason: the template
+ * literal makes a group with no dictionary entry a compile error in this file.
+ *
+ * @param name - The group to label.
+ * @returns The key holding that group's heading.
+ */
+export function optionGroupKey(name: OptionGroupName): TranslationKey {
+  return `browser.detail.options.${name}`;
+} // End of function optionGroupKey()
+
+/**
+ * One group of the match options, grouped by intent rather than dumped flat.
  *
  * Plan section 8.5: *"Not a flat dump of every schema field"*. The four groups
  * are the ones the plan names for a match — word boundary, case, injection
@@ -454,17 +500,81 @@ export interface ContentDetail {
  * one heading so they read as one decision, and still shows each one's own
  * source text, because collapsing two keys into one rendered value would be
  * exactly the inference D2u forbids.
+ *
+ * **A list rather than four named fields.** The four used to be four properties
+ * of one interface, which meant the pane wrote four near-identical `{#if}` +
+ * heading + rows blocks and four other places named the same four; a fifth group
+ * added to the model and forgotten in any of them was silent. A group with no row
+ * is not built at all, so `MatchDetail.options` holds only groups that have
+ * something in them and the pane walks it.
  */
-export interface OptionGroups {
-  /** `word`, `left_word`, `right_word`. */
-  readonly matching: readonly ScalarRow[];
-  /** `propagate_case`, `uppercase_style`. */
-  readonly casing: readonly ScalarRow[];
-  /** `force_mode`, `force_clipboard`. */
-  readonly injection: readonly ScalarRow[];
-  /** `paragraph`, `anchor`. */
-  readonly other: readonly ScalarRow[];
+export interface OptionGroup {
+  /** Which intent this group stands for. */
+  readonly name: OptionGroupName;
+  /** Its rows, in the order the plan names the fields. Never empty. */
+  readonly rows: readonly ScalarRow[];
 }
+
+/**
+ * One mapping key of an entry the projection did not model.
+ *
+ * Three arms rather than a `string | null`, because a key that is present and
+ * **empty** is a third case and the pane must not draw a blank `<dt>` for it: a
+ * row with nothing in it is indistinguishable from a row that failed to render,
+ * which is the failure {@link ScalarDisplay.empty} exists to prevent everywhere
+ * else in this pane.
+ */
+export type UnknownKeyLabel =
+  | { readonly kind: 'named'; readonly text: string }
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'unnamed' };
+
+/**
+ * One entry the projection did not model, as the pane shows it.
+ *
+ * The entry's **value** is deliberately not here: `UnknownEntry` carries no
+ * value text at all, only a span and a shape, so the pane names the shape and
+ * says plainly that the value is not on screen. See
+ * `docs/decisions/1c-2a-notes.md` section 12, hole 13.
+ */
+export interface UnknownRow {
+  /** The key node, which is what keys the row in a list and addresses it. */
+  readonly node: NodeId;
+  /** What the pane puts in the `dt`. */
+  readonly key: UnknownKeyLabel;
+  /** What the unshown value is, unprojected. */
+  readonly valueKind: ValueKind;
+  /** Why the entry was not modelled. */
+  readonly reason: UnknownReason;
+}
+
+/**
+ * Builds the model for one unmodelled entry.
+ *
+ * @param entry - An unmodelled entry as it crossed the boundary.
+ * @returns What the pane draws for it.
+ */
+export function describeUnknown(entry: UnknownEntry): UnknownRow {
+  return {
+    node: entry.key_node,
+    key: unknownKeyLabel(entry.key),
+    valueKind: entry.value_kind,
+    reason: entry.reason
+  };
+} // End of function describeUnknown()
+
+/**
+ * What the pane puts in the `dt` of one unmodelled entry.
+ *
+ * @param key - The key's decoded text, or `null` for a key that is not a scalar.
+ * @returns The named, empty or unnamed arm.
+ */
+function unknownKeyLabel(key: string | null): UnknownKeyLabel {
+  if (key === null) {
+    return { kind: 'unnamed' };
+  }
+  return key === '' ? { kind: 'empty' } : { kind: 'named', text: key };
+} // End of function unknownKeyLabel()
 
 /** One variable of a match's `vars`. */
 export interface VariableDetail {
@@ -487,7 +597,7 @@ export interface VariableDetail {
   /** `depends_on`, in source order. */
   readonly dependsOn: LineBlock | null;
   /** Entries the projection did not model, which it never discards. */
-  readonly unknown: readonly UnknownEntry[];
+  readonly unknown: readonly UnknownRow[];
 }
 
 /** Everything the detail pane draws for one selected match. */
@@ -500,8 +610,8 @@ export interface MatchDetail {
   readonly discovery: readonly ScalarRow[];
   /** `search_terms`, which belongs to the same group. */
   readonly searchTerms: LineBlock | null;
-  /** The options, grouped by intent. */
-  readonly options: OptionGroups;
+  /** The options, grouped by intent; a group with no row is not here at all. */
+  readonly options: readonly OptionGroup[];
   /** `vars`, in source order. */
   readonly variables: readonly VariableDetail[];
   /**
@@ -512,26 +622,23 @@ export interface MatchDetail {
    */
   readonly formFields: readonly ValueLine[];
   /** Entries the projection did not model, which it never discards. */
-  readonly unknown: readonly UnknownEntry[];
+  readonly unknown: readonly UnknownRow[];
 }
 
 /**
- * Whether any option group holds a row.
+ * Whether the discovery section has anything to show.
  *
- * Asked once here rather than four times in markup, so the pane's "is there an
- * options section at all" question has the same answer as its four headings.
+ * Two lists feed one heading — `label` and `comment` as rows, `search_terms` as
+ * a block — so the question is a compound one, and a compound predicate written
+ * in markup is a decision no test in this repository can reach. It is asked here
+ * for the same reason the option groups are built here.
  *
- * @param groups - The grouped options.
- * @returns `true` when at least one option is present in the file.
+ * @param detail - The model built for one match.
+ * @returns `true` when the section would hold at least one thing.
  */
-export function hasOptions(groups: OptionGroups): boolean {
-  return (
-    groups.matching.length > 0 ||
-    groups.casing.length > 0 ||
-    groups.injection.length > 0 ||
-    groups.other.length > 0
-  );
-} // End of function hasOptions()
+export function hasDiscovery(detail: MatchDetail): boolean {
+  return detail.discovery.length > 0 || detail.searchTerms !== null;
+} // End of function hasDiscovery()
 
 /**
  * Builds the model for one variable.
@@ -550,9 +657,50 @@ export function describeVariable(variable: VariableView): VariableDetail {
     ]),
     params: blockOf('params', flattenFields(variable.params)),
     dependsOn: blockOf('dependsOn', flattenItems(variable.depends_on)),
-    unknown: variable.unknown_entries
+    unknown: variable.unknown_entries.map(describeUnknown)
   };
 } // End of function describeVariable()
+
+/**
+ * Builds the four option groups, keeping only the ones the file has a key for.
+ *
+ * @param options - The match's options as they crossed the boundary.
+ * @returns The non-empty groups, in the order the plan names them.
+ */
+function describeOptions(options: MatchOptions): readonly OptionGroup[] {
+  const groups: readonly OptionGroup[] = [
+    {
+      name: 'matching',
+      rows: collectRows([
+        ['word', options.word],
+        ['leftWord', options.left_word],
+        ['rightWord', options.right_word]
+      ])
+    },
+    {
+      name: 'case',
+      rows: collectRows([
+        ['propagateCase', options.propagate_case],
+        ['uppercaseStyle', options.uppercase_style]
+      ])
+    },
+    {
+      name: 'injection',
+      rows: collectRows([
+        ['forceMode', options.force_mode],
+        ['forceClipboard', options.force_clipboard]
+      ])
+    },
+    {
+      name: 'other',
+      rows: collectRows([
+        ['paragraph', options.paragraph],
+        ['anchor', options.anchor]
+      ])
+    }
+  ];
+  return groups.filter((group) => group.rows.length > 0);
+} // End of function describeOptions()
 
 /**
  * Builds the model for one match.
@@ -568,7 +716,6 @@ export function describeVariable(variable: VariableView): VariableDetail {
  * @returns Everything the pane draws.
  */
 export function describeMatch(match: MatchView): MatchDetail {
-  const options = match.options;
   return {
     trigger: {
       kind: match.trigger.kind,
@@ -594,27 +741,9 @@ export function describeMatch(match: MatchView): MatchDetail {
       ['comment', match.comment]
     ]),
     searchTerms: blockOf('searchTerms', flattenItems(match.search_terms)),
-    options: {
-      matching: collectRows([
-        ['word', options.word],
-        ['leftWord', options.left_word],
-        ['rightWord', options.right_word]
-      ]),
-      casing: collectRows([
-        ['propagateCase', options.propagate_case],
-        ['uppercaseStyle', options.uppercase_style]
-      ]),
-      injection: collectRows([
-        ['forceMode', options.force_mode],
-        ['forceClipboard', options.force_clipboard]
-      ]),
-      other: collectRows([
-        ['paragraph', options.paragraph],
-        ['anchor', options.anchor]
-      ])
-    },
+    options: describeOptions(match.options),
     variables: match.vars.map(describeVariable),
     formFields: flattenFields(match.form_fields),
-    unknown: match.unknown_entries
+    unknown: match.unknown_entries.map(describeUnknown)
   };
 } // End of function describeMatch()

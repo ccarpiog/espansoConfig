@@ -142,8 +142,20 @@ describe('re-resolution', () => {
       id: 5,
       revision: 'rev-a',
       matches: [
-        makeMatch({ node: 10, document: 5, trigger: ':same', replace: 'body', word: 'true' }),
-        makeMatch({ node: 11, document: 5, trigger: ':same', replace: 'body', word: 'false' })
+        makeMatch({
+          node: 10,
+          document: 5,
+          trigger: ':same',
+          replace: 'body',
+          options: { word: 'true' }
+        }),
+        makeMatch({
+          node: 11,
+          document: 5,
+          trigger: ':same',
+          replace: 'body',
+          options: { word: 'false' }
+        })
       ]
     });
     const held = selectMatch(twins, 0);
@@ -157,7 +169,7 @@ describe('re-resolution', () => {
           revision: 'rev-b',
           trigger: ':same',
           replace: 'body',
-          word: 'false'
+          options: { word: 'false' }
         })
       ]
     });
@@ -197,8 +209,8 @@ describe('the fingerprint', () => {
     // property second. An implementation that goes back to the display
     // projection fails on the second assertion while passing every other test
     // in this file.
-    const on = makeMatch({ trigger: ':same', replace: 'body', word: 'true' });
-    const off = makeMatch({ trigger: ':same', replace: 'body', word: 'false' });
+    const on = makeMatch({ trigger: ':same', replace: 'body', options: { word: 'true' } });
+    const off = makeMatch({ trigger: ':same', replace: 'body', options: { word: 'false' } });
     expect(on.search_text).toBe(off.search_text);
     expect(on.badges).toEqual(off.badges);
     expect(on.trigger.kind).toBe(off.trigger.kind);

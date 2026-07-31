@@ -497,7 +497,11 @@ looks exactly like a probe that finished**, which is worth remembering the next 
 5. **A `FieldView` whose key is not a scalar was never seen on a screen.** Unit-tested only.
 6. **No pixels, and the indentation in particular is unverified.** Experiments N and P show that
    neither `svelte-check` nor `vite build` would notice a dead CSS rule, so nothing mechanical says
-   the `depth-*` padding paints. The layout is known from `getBoundingClientRect`, the text from
+   the `depth-*` padding paints. **The `depth-*` ladder moved to `src/app.css` in the cleanup pass
+   of section 15 and the move itself was not seen on a screen**, which widens this hole rather than
+   changing its kind: the rules are unscoped now, so a class the markup writes reaches them, and
+   `dist/assets/index-*.css` holds them un-suffixed — but "the selector exists and is not
+   hash-scoped" is still not "the padding paints". The layout is known from `getBoundingClientRect`, the text from
    `innerText`, and the machine's screen-recording permission is still what stands between this
    phase and a screenshot. **The sequence bullet is half inside this hole and half outside it**: the
    glyph is in the markup, so `innerText` sees it and section 11.3 did — but its `.bullet` rule is
@@ -643,10 +647,12 @@ the hole.
 
 **What changed.** The expectation now comes from the union rather than from the output.
 
-- `EVERY_DETAIL_FIELD` is written out once, and two `assertNever<Exclude<…>>()` calls pin it to
-  `DetailFieldName` **in both directions at compile time** — a member missing from the list and a
-  name in the list that is not a member are each a type error, which is the device
-  `detailFieldKey`'s return type already uses;
+- `EVERY_DETAIL_FIELD` is written out once and pinned to `DetailFieldName` **in both directions at
+  compile time** — a member missing from the list and a name in the list that is not a member are
+  each a type error, which is the device `detailFieldKey`'s return type already uses. (The spelling
+  of that pin changed in section 15: it was two `assertNever<Exclude<…>>()` calls, and it is now
+  `as const satisfies readonly DetailFieldName[]` plus one `ExpectNever<Missing<…>>` alias, which is
+  what `codes.test.ts` had been doing thirteen times all along.)
 - the test asserts the emitted set **equals** that list, so a member never emitted fails;
 - the dictionary-coverage test reads the same list, so there is one list in the file rather than two;
 - experiments Q and R are the two directions. **Q is the review's own failure scenario, and the test
@@ -664,3 +670,109 @@ removed, reaching 217.
 measured from the two files; the base figure is the review's, and no git command was run to
 re-derive it. Four `code.unknownReason.*` **values** also changed, which is not a key change and is
 stated separately in section 8 so that the next audit's key-set comparison is not surprised by it.
+
+---
+
+## 15. The code-quality pass after the review
+
+A second round over the same files, from four independent quality reviews. **Cleanup, not
+bug-fixing**: no intended behaviour changed, no dictionary key was added or removed (still 218 each),
+and the six commands pass. Frontend tests went **412 → 425**: fourteen added, one deleted.
+
+Three of the twelve items move a decision *out* of markup, which is the rule this phase was built
+under (section 2) and the only kind of change here that alters what is on screen.
+
+### 15.1 What changed, and why each one is more than tidying
+
+1. **The four option groups became a list.** `OptionGroups` had four named fields, so five places
+   named the same four — the interface, `hasOptions`, `describeMatch`, four near-identical
+   `{#if}` + `<h3>` + rows blocks in the component, and four spreads in the test's
+   `emittedFieldNames` — and **four of them failed silently** on drift. It is now
+   `readonly OptionGroup[]` with `describeMatch` dropping the empty groups, so the pane's condition
+   is `detail.options.length > 0` and its body is one `{#each}`. `OptionGroupName` is a code like
+   `DetailFieldName`, with `optionGroupKey` beside `detailFieldKey` and `tOptionGroup` beside
+   `tDetailField` — the seventeenth accessor. The union member is **`case`, not `casing`**, because
+   the dictionary key is `browser.detail.options.case` and the key builder's return type is what
+   makes a missing entry a compile error. `_OptionGroupsAreComplete` pins the name list.
+2. **`flattenValue` calls its own helpers.** Its `Sequence` arm re-implemented `flattenItems` and its
+   `Mapping` arm re-implemented `flattenFields`; both helpers took a `depth` and `flattenValue` now
+   calls them at `depth + 1`. "A sequence item carries a bullet, a mapping entry carries its key" is
+   stated once instead of three times, free to drift in two of them.
+3. **`collectRows` is a `flatMap`.** `scalarRow` stays — it is an exported, tested seam — and its
+   doc no longer implies a component ever consumes `ScalarRow | null`. None does.
+4. **`LineBase`.** The four line arms each redeclared `depth` and `label` with their own JSDoc.
+5. **Two pieces of node identity the wire carried are no longer discarded.** `ElidedLine` kept only
+   `valueKind` and threw away the `ElidedValue`, while its sibling `AliasLine` kept the whole
+   `AliasView`; it now carries the `ElidedValue` and the pane reads `line.elided.kind`.
+   `LineLabel`'s `unnamed` arm dropped `FieldView.key_node`, so a mapping entry with a non-scalar
+   key could not be addressed at all; it now carries `keyNode`. **Phase 2 addresses a line in order
+   to edit it**, so a projection that silently drops the identity it was handed is a real future
+   cost. Nothing else was added speculatively.
+6. **Unmodelled entries got a display type, and it closed a real blank `<dt>`.** `UnknownEntry` was
+   the one thing the pane passed through raw, so the component reached into wire fields and decided
+   `{#if entry.key === null}` in markup. Underneath that was a defect: `entry.key` was printed raw,
+   so an entry whose key is the **empty string** rendered a blank `<dt>` — the exact "a row with
+   nothing in it is indistinguishable from a row that failed to render" failure `ScalarDisplay.empty`
+   exists to prevent everywhere else in this pane. `describeUnknown` now answers an `UnknownRow`
+   whose `key` is `named` / `empty` / `unnamed`, the `empty` arm reuses `browser.detail.emptyText`,
+   and all three arms are tested. `MatchDetail.unknown` and `VariableDetail.unknown` are
+   `readonly UnknownRow[]`.
+7. **One spelling of the exhaustiveness idiom.** `detail.test.ts` had a runtime no-op
+   `assertNever<T extends never>()` — no-op calls emitted into the test bundle, and a name
+   overwhelmingly associated with the *throwing* `default:` idiom, so somebody would eventually call
+   it expecting a throw and get a silent fallthrough. `codes.test.ts`'s type-only
+   `Missing`/`ExpectNever` pair, used thirteen times, moved to `src/lib/i18n/exhaustive.ts` (types
+   only, zero runtime) and both files import it. The thirteen usages are untouched.
+8. **`hasDiscovery`.** The pane decided `detail.discovery.length > 0 || detail.searchTerms !== null`
+   in markup — a compound predicate of exactly the shape `hasOptions` existed to keep out. It is a
+   tested function now. The three single-list `{#if X.length > 0}` checks were left alone.
+9. **One built-key test deleted**, the only test removed. `scripts/lint/built-translation-keys.test.ts`
+   already runs that scan over **every** `.svelte` file under `src/` with a non-vacuity guard and
+   `formatBuiltKeyFindings` in its message; the copy named one file and asserted `toEqual([])`, so it
+   was strictly weaker. The accessor-name scan, the `item`-branch check and the `.depth-N` check
+   stayed — those have no precedent elsewhere.
+10. **Two CSS fixes.** `--font-mono` is a token in `src/app.css` instead of three byte-identical font
+    lists (`DetailPane`'s `.key` and `.source`, `SnippetList`'s `.trigger`); the typeface carries
+    meaning here — it is the "this is what the document holds" signal — so it is stated once. And the
+    `.depth-0` … `.depth-5` ladder moved out of `DetailPane.svelte`'s scoped `<style>` into
+    `src/app.css` unscoped: **Svelte scopes component styles**, so those rules compiled to
+    `.depth-3.svelte-<hash>` and no other component could use them; a second pane needing
+    indentation would have got a second private ladder and a second private constant.
+    `MAX_INDENT_DEPTH` is documented as `src/app.css`'s contract and the integrity test reads that
+    file. `dist/assets/index-*.css` was inspected and holds the six rules un-suffixed.
+11. **The legacy `word` fixture override is gone.** `MatchOverrides` offered `word?: string | null`
+    *and* the general `options?:`, plus a merge block reconciling them — two ways to set one field
+    with no type preventing a contradiction. Six call sites in `selection.test.ts` and
+    `search.test.ts` now write `options: { word: … }`.
+12. **One misleading JSDoc corrected.** `detailFieldKey`'s comment justified living outside
+    `codes.ts` by citing `src-tauri/src/dictionary_contract.rs`. That check filters on the **key
+    prefix** `code.`, not on the file: a builder in `codes.ts` returning `browser.detail.field.*`
+    would pass `cargo test` unchanged. The placement is right for a different reason — `codes.ts`
+    bridges **Rust** codes to sentences, `DetailFieldName` is the frontend's own vocabulary with no
+    Rust twin, and `browser/notices.ts`'s `selectionNoticeKey` is the precedent.
+
+### 15.2 A noted risk, deliberately not acted on
+
+**`src/lib/i18n/index.ts` imports values from `src/lib/browser/`.** It imports `detailFieldKey` and
+`optionGroupKey` from `browser/detail.ts` and `selectionNoticeKey` from `browser/notices.ts` as
+**values**, while those modules import from `i18n/` only with `import type`. There is therefore no
+module cycle today, and it is `import type` — erased at compile time — that is the only reason.
+**The first time a browser model needs a runtime value from the i18n layer, this becomes a real
+cycle**, and Vite will resolve it in whatever order it resolves it in.
+
+Restructuring it was considered and rejected for this pass: it is a layering decision about where a
+frontend-only code's key builder belongs, not a cleanup, and item 12 above has just written down the
+reasoning that any restructuring would have to argue against. It is recorded here so the next
+edit that adds a runtime import in the other direction is not surprised.
+
+### 15.3 What was not verified
+
+**No window reading was taken for this pass.** Items 1, 6 and 10 change markup, and section 11's
+technique needs a temporary probe compiled into `src-tauri/src/main.rs` and `src/main.ts`, a
+hand-assembled and ad-hoc-signed bundle, and a synthetic configuration tree — which is not a cheap
+reading, and the tree had to be left clean. What stands in for it is weaker and is named as such:
+`svelte-check` type-checks the markup, including the new `{#each detail.options …}` and the
+three-arm key choice; the emitted `dist/assets/index-*.css` was read and holds `--font-mono` and the
+six un-suffixed `.depth-N` rules; and 425 tests pass. **None of that is a screen.** The `.depth-*`
+move in particular is visually unverified — hole 6 now says so — and by this phase's own standard a
+claim about the pane needs a reading, which the **next** change to these components should take.

@@ -27,7 +27,7 @@
  *   real slice of a real file. What it faithfully reproduces is the one
  *   property the selection depends on: it changes whenever a field of the match
  *   changes, **including a field no other part of the view carries**, which is
- *   why the `word` override below moves it. Rust pins the real slice in
+ *   why an option given in `options` below moves it. Rust pins the real slice in
  *   `every_projected_match_carries_exactly_the_bytes_its_span_names`.
  *
  * Recorded as a hole in `docs/decisions/1c-1-notes.md`.
@@ -263,13 +263,14 @@ export interface MatchOverrides {
   readonly comment?: string | null;
   /** `search_terms`, as source text, one entry per item. */
   readonly searchTerms?: readonly string[];
-  /** `word`, as source text — a field search must **not** cover. */
-  readonly word?: string | null;
   /**
    * Any option, as source text, keyed by its wire name.
    *
-   * `word` above stays because five test files already use it; anything given
-   * here is merged over it, so the two cannot disagree.
+   * One way to set an option, not two. There was a second — a `word` override
+   * beside this one, with a merge block reconciling them — and nothing in the
+   * types stopped a test from writing both and meaning different things by
+   * them. `word` is the option a search must **not** cover, so it is the one
+   * tests reach for; it is `options: { word: … }` like every other.
    */
   readonly options?: Readonly<Partial<Record<keyof MatchOptions, string>>>;
   /** `vars`, in source order. */
@@ -316,12 +317,7 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   const label = optionalScalar(overrides.label);
   const comment = optionalScalar(overrides.comment);
   const searchTerms = overrides.searchTerms ?? [];
-  // `word` is merged in first so a test that sets both cannot make the two
-  // disagree, and so the five files that already pass `word` keep working.
-  const optionTexts: Partial<Record<keyof MatchOptions, string>> = {
-    ...(overrides.word === undefined || overrides.word === null ? {} : { word: overrides.word }),
-    ...(overrides.options ?? {})
-  };
+  const optionTexts: Partial<Record<keyof MatchOptions, string>> = overrides.options ?? {};
 
   // The second transcription this module's header warns about: the same field
   // groups the core joins, joined again here — every content field, in the

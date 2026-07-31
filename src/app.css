@@ -16,6 +16,12 @@
   --muted: #6e6e73;
   --border: #d2d2d7;
 
+  /* The face that means "this is what the document holds" — a trigger, a
+     mapping key, a scalar shown as written (D2u). Stated once, because it
+     carries that meaning in every pane that shows file text, and three copies
+     of a list of font names are three chances for one of them to drift. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
   color-scheme: light dark;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
@@ -52,4 +58,46 @@ h1,
 h2,
 label {
   user-select: none;
+}
+
+/* The indentation ladder for a projected value's nested lines.
+ *
+ * Here rather than in the component that draws them today, for two reasons:
+ *
+ *   1. **Indentation by class, never by an inline `style`.** The production CSP
+ *      is `style-src 'self'` with no `'unsafe-inline'`
+ *      (`src-tauri/tauri.conf.json`), so a `style` attribute is refused by the
+ *      webview and the nesting silently disappears. `indentClass()` in
+ *      `src/lib/browser/detail.ts` names one of these classes instead.
+ *   2. **Unscoped, so a second pane can use it.** Svelte scopes a component's
+ *      `<style>`; these rules would compile to `.depth-3.svelte-<hash>` and the
+ *      next pane needing indentation would get a private ladder of its own, and
+ *      a second private constant to go with it.
+ *
+ * `MAX_INDENT_DEPTH` in `src/lib/browser/detail.ts` is the contract: it says how
+ * deep the ladder goes, `indentClass()` clamps to it so a deeper value stays
+ * legible rather than jumping back to the margin, and `detail.test.ts` reads
+ * this file to check that every class the constant promises has a rule. */
+.depth-0 {
+  padding-inline-start: 0;
+}
+
+.depth-1 {
+  padding-inline-start: 1rem;
+}
+
+.depth-2 {
+  padding-inline-start: 2rem;
+}
+
+.depth-3 {
+  padding-inline-start: 3rem;
+}
+
+.depth-4 {
+  padding-inline-start: 4rem;
+}
+
+.depth-5 {
+  padding-inline-start: 5rem;
 }

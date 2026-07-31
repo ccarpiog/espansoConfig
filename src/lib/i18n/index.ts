@@ -9,7 +9,12 @@
 // where both languages are checked against each other. The accessor lives with
 // the other twelve because CLAUDE.md section 2 is about where a component may
 // get a string from, and the answer is only ever this module.
-import { detailFieldKey, type DetailFieldName } from '../browser/detail';
+import {
+  detailFieldKey,
+  optionGroupKey,
+  type DetailFieldName,
+  type OptionGroupName
+} from '../browser/detail';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
@@ -303,6 +308,23 @@ export function tValueKind(kind: ValueKind): string {
 export function tDetailField(field: DetailFieldName): string {
   return translate(locale.current, detailFieldKey(field));
 } // End of function tDetailField()
+
+/**
+ * Renders the heading of one group of match options, in the current language.
+ *
+ * The seventeenth accessor, and it exists for the reason the sixteenth does: the
+ * pane walks a list of groups whose name arrived as a **code**, and a component
+ * turns a code into text by calling this rather than by assembling
+ * `browser.detail.options.` + something. `optionGroupKey` is where the key is
+ * built, and its return type makes a group with no dictionary entry a compile
+ * error there.
+ *
+ * @param name - Which intent a group stands for.
+ * @returns The translated heading.
+ */
+export function tOptionGroup(name: OptionGroupName): string {
+  return translate(locale.current, optionGroupKey(name));
+} // End of function tOptionGroup()
 
 /**
  * Renders "N snippets" in the current language, in the right number.

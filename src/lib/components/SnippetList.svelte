@@ -161,7 +161,7 @@
   }
 
   .trigger {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     overflow-wrap: anywhere;
   }
 

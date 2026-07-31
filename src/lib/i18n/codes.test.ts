@@ -54,6 +54,7 @@ import {
   variableKindKey
 } from './codes';
 import { translate, type TranslationKey } from './dictionaries';
+import type { ExpectNever, Missing } from './exhaustive';
 import { LOCALES } from './locale';
 import { COMMAND_ERROR_CODES, classifyFailure } from '../ipc/errors';
 import type { CommandError, CommandErrorCode } from '../ipc/errors';
@@ -74,28 +75,10 @@ import type {
   VariableKind
 } from '../ipc/types';
 
-/**
- * Compile-time proof that a hand-written table names every member of a union.
- *
- * **The R24 corollary applied to a sample table.** Every list below is written
- * by hand on purpose — a list read out of `en.json` would agree with `en.json`
- * by construction — but a hand-written list can also be *short*, and a test
- * named "renders every badge" that iterates nine of ten badges is a test whose
- * body cannot fail if its name is false. That is exactly the shape Phase
- * 1b-2b's review found in `COMMAND_ERRORS`.
- *
- * `Missing<U, L>` is the union members `L` omits. `ExpectNever<T extends never>`
- * accepts it only when it is empty, so a member added to a wire union and not to
- * the table below is a **`npm run check` failure naming the member**, in this
- * file, before any test runs.
- */
-type Missing<Union extends string, Listed extends readonly string[]> = Exclude<
-  Union,
-  Listed[number]
->;
-
-/** Accepts only `never`; see {@link Missing}. */
-type ExpectNever<T extends never> = T;
+// Every list below is written by hand on purpose — a list read out of `en.json`
+// would agree with `en.json` by construction — and every one is pinned to its
+// union by `Missing`/`ExpectNever` from `./exhaustive`, whose doc comment says
+// why a hand-written table needs pinning at all.
 
 /** Every `DiagnosticCode` variant name, in declaration order. */
 const DIAGNOSTIC_CODE_NAMES = [

@@ -33,7 +33,7 @@ function fiveFieldMatch(): ReturnType<typeof makeMatch> {
     replace: 'charlie',
     comment: 'delta',
     searchTerms: ['echo', 'foxtrot'],
-    word: 'zulu'
+    options: { word: 'zulu' }
   });
 } // End of function fiveFieldMatch()
 
