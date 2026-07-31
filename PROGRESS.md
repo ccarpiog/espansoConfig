@@ -3564,6 +3564,7 @@ _Updated at each phase boundary._
 | 1c-2b-2a | `16f9a0d` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-2b-1 | `20ec090` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-2b-2 | `0552004` | ✅ pushed to `origin/main` | clean |
+| 2a-1 | `428a83f` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -3628,6 +3629,18 @@ dictionary keys in each language with one reworded, the two committed measuremen
 `src/lib/browser/fixtures.ts`, the review, `docs/decisions/1c-2b-2b-1-notes.md` and this checkpoint.
 **A fresh session should start from `20ec090` or later.** As at 1b-1, `npm install` (or `npm ci`) is
 required before any frontend command will run.
+
+`428a83f` is Phase 2a-1 **including its review fix round** — the phase was held open until all fifteen
+findings were closed or recorded, so, as with every phase since `8989c16`, no commit holds the
+demonstrated defects: neither the module doc promising a compare-and-swap that no POSIX operation can
+perform, nor the byte-exact fixture sweep that a writer doing nothing at all passed, nor the
+concurrency test that passes with no mutex, nor the `chflags` test that could print a skip and pass.
+It contains `crates/espansoconfig-core/src/persist/write.rs`, the filled-in
+`crates/espansoconfig-core/src/persist/mod.rs`, the `persist` re-exports in `lib.rs`, the new
+`crates/espansoconfig-core/tests/persist_write.rs`, `docs/decisions/2a-1-notes.md`,
+`docs/reviews/phase-2a-1-atomic-write.md` and this checkpoint. **This commit opens Phase 2. A fresh
+session starting Phase 2a-2 should start from `428a83f` or later.** It touches no file under `src/` or
+`src-tauri/`, so `npm install` is not needed to verify it — but it still is before any frontend command.
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
