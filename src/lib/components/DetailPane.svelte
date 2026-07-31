@@ -6,10 +6,12 @@
     type LineBlock,
     type ScalarDisplay,
     type ScalarRow,
+    type SourceSlice,
     type UnknownRow,
     type ValueLine
   } from '../browser/detail';
   import type { BrowserState } from '../browser/workspace.svelte';
+  import SourceText from './SourceText.svelte';
   import {
     t,
     tContentKind,
@@ -54,22 +56,46 @@
    * model answers `null` for a field the file does not have, so a row for it
    * never reaches this file.
    *
-   * **An entry this app does not model shows its key, the *shape* of its value
-   * and why it was not modelled — never the value itself.** Which of the three
-   * things goes in the `dt` — a name, the empty marker, or "not a plain name" —
-   * is `describeUnknown`'s decision, not this file's: an entry whose key is the
-   * empty string used to reach here as a bare string and draw a blank `dt`.
-   * The value's own text is not shown, and as of Phase 1c-2b-2a that is a
-   * choice rather than a limit: the wire now carries it — sliced in Rust,
-   * because a JavaScript string index is a UTF-16 offset and a `ByteSpan` is
-   * not — and `UnknownRow` deliberately does not, so nothing this file walks
-   * holds it. The strings therefore still say the entry was *recorded and left
-   * untouched* — a claim about what the app does to the file — and
-   * `unknownValue` still says in so many words that the value is not on screen,
-   * and both remain true. Showing it is 1c-2b-2b's, and it changes those
-   * strings at the same time or not at all. See
-   * `docs/decisions/1c-2a-notes.md` section 12, hole 13, and
-   * `docs/decisions/1c-2b-2a-notes.md`.
+   * **An entry this app does not model shows its key, the *shape* of its value,
+   * why it was not modelled — and, as of Phase 1c-2b-2b-1, the value's own
+   * bytes.** Which of the three things goes in the `dt` — a name, the empty
+   * marker, or "not a plain name" — is `describeUnknown`'s decision, not this
+   * file's: an entry whose key is the empty string used to reach here as a bare
+   * string and draw a blank `dt`. The value arrived on the wire at 1c-2b-2a,
+   * sliced in Rust because a JavaScript string index is a UTF-16 offset and a
+   * `ByteSpan` is not, and was deliberately left unread until the sentence
+   * saying it was not on screen could change in the same commit. It has. The
+   * four `code.unknownReason.*` sentences did **not** change and were checked
+   * rather than assumed: they say the entry was recorded and is kept exactly as
+   * the file writes it, which is a claim about what this app does to the file
+   * and is untouched by drawing it. See `docs/decisions/1c-2a-notes.md` section
+   * 12 hole 13, `docs/decisions/1c-2b-2a-notes.md` section 10, and
+   * `docs/decisions/1c-2b-2b-1-notes.md`.
+   *
+   * **A sentence sits above the arm it is true of, never above all three.**
+   * `SourceSlice` has three arms and `slice` below draws each one differently,
+   * so a caption written *outside* the `{#if}` is a caption that has to be true
+   * of an unreadable span as well as of a readable one. The 1c-2b-2b-1 review
+   * found exactly that: `browser.detail.unknownValue` claimed the bytes were
+   * "shown as the file writes it" while the `unavailable` arm underneath said
+   * this app could not read them. So `unknownValue` now says only what shape the
+   * value has, and the `valueAsWritten` claim — that the bytes below are the
+   * file's own — sits inside the `text` arm and nowhere else. `detail.test.ts`
+   * asserts that **position**, not merely that the string is used.
+   *
+   * **The match's own bytes are a section of their own, drawn through
+   * `SourceText`.** Not a `<pre>` written here: how a byte survives *rendering*
+   * — a line break counted once, a character with no glyph named rather than
+   * drawn as nothing, no soft wrap that could pass for a line break — is decided
+   * in `../browser/sourceText.ts`, which has a test suite, and is shared with
+   * the raw YAML viewer of 1c-2b-2b-2. The scope sentence beside the heading
+   * says which part of the file this is, because `source_text` stops at the
+   * match's own node and a reader would otherwise take it for the snippet's
+   * whole text. It describes **no syntax**: `MatchView::project` projects every
+   * item of a `matches` sequence, so the item may be a flow mapping with no `-`
+   * and no indentation in front of it, or an empty item whose span is
+   * zero-width — measured, and recorded in
+   * `docs/decisions/1c-2b-2b-1-notes.md` section 3.
    *
    * **The one judgement in this pane is a refusal, never a permission.**
    * `matchEditability` answers `unrestricted` for most matches and this file
@@ -99,6 +125,17 @@
       </span>
     {/if}
   </span>
+{/snippet}
+
+{#snippet slice(one: SourceSlice)}
+  {#if one.kind === 'text'}
+    <span class="marker">{t('browser.detail.valueAsWritten')}</span>
+    <SourceText text={one.text} />
+  {:else if one.kind === 'empty'}
+    <span class="marker">{t('browser.detail.emptyText')}</span>
+  {:else}
+    <span class="marker warn">{t('browser.detail.valueUnavailable')}</span>
+  {/if}
 {/snippet}
 
 {#snippet rows(list: readonly ScalarRow[])}
@@ -164,10 +201,13 @@
         {/if}
       </dt>
       <dd class="unknown">
-        <span class="marker"
-          >{t('browser.detail.unknownValue', { kind: tValueKind(entry.valueKind) })}</span
-        >
-        <span>{tUnknownReason(entry.reason)}</span>
+        <p class="says">
+          <span class="marker"
+            >{t('browser.detail.unknownValue', { kind: tValueKind(entry.valueKind) })}</span
+          >
+          <span>{tUnknownReason(entry.reason)}</span>
+        </p>
+        {@render slice(entry.value)}
       </dd>
     {/each}
   </dl>
@@ -279,6 +319,12 @@
         {@render unknownEntries(detail.unknown)}
       </section>
     {/if}
+
+    <section>
+      <h2>{t('browser.detail.section.source')}</h2>
+      <p class="kind">{t('browser.detail.sourceScope')}</p>
+      {@render slice(detail.source)}
+    </section>
   {:else}
     <p class="empty">{t('browser.detail.empty')}</p>
   {/if}
@@ -393,13 +439,22 @@
     color: var(--muted);
   }
 
-  /* What is said about an entry this app does not model: the shape of a value
-     that is *not* on screen, and why the entry was not modelled. */
+  /* What is said about an entry this app does not model — the shape of its
+     value and why it was not modelled — above the value's own bytes. A column,
+     because the bytes are a block and belong on their own lines; `.says` is the
+     sentence pair, which still reads as one line and wraps like one. */
   .unknown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .says {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0.25rem 0.5rem;
+    margin: 0;
   }
 
   /* Anything this app says *about* a value, rather than the value: the empty

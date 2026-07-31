@@ -48,6 +48,7 @@
   "browser.detail.section.variables": "Variables",
   "browser.detail.section.formFields": "Form fields",
   "browser.detail.section.unknown": "Entries this app does not model",
+  "browser.detail.section.source": "Source text",
 
   "browser.detail.options.matching": "Word boundary",
   "browser.detail.options.case": "Capital letters",
@@ -68,7 +69,10 @@
   "browser.detail.ambiguousDetail": "The two versions of YAML read this value differently, so it is shown exactly as the file writes it.",
   "browser.detail.unknownCount.one": "{count} entry was recorded and left untouched.",
   "browser.detail.unknownCount.other": "{count} entries were recorded and left untouched.",
-  "browser.detail.unknownValue": "holds {kind}, which this pane does not show",
+  "browser.detail.unknownValue": "holds {kind}",
+  "browser.detail.valueAsWritten": "shown here as the file writes it",
+  "browser.detail.valueUnavailable": "This app could not read these bytes.",
+  "browser.detail.sourceScope": "The part of the file this app reads as the snippet itself. What surrounds it in the list, the indentation in front of it and any comment before or after it are outside it.",
 
   "browser.detail.field.trigger": "Trigger",
   "browser.detail.field.triggers": "Triggers",
@@ -94,6 +98,17 @@
   "browser.detail.field.params": "Parameters",
   "browser.detail.field.dependsOn": "Depends on",
   "browser.detail.field.injectVars": "Inject variables",
+
+  "browser.source.invisibleDetail": "The file holds this character here. It draws nothing of its own, so this app names it rather than showing you nothing.",
+  "browser.source.invisible.bom": "byte order mark {code}",
+  "browser.source.invisible.nul": "null character {code}",
+  "browser.source.invisible.carriageReturn": "carriage return {code}",
+  "browser.source.invisible.lineSeparator": "line separator {code}",
+  "browser.source.invisible.paragraphSeparator": "paragraph separator {code}",
+  "browser.source.invisible.softHyphen": "soft hyphen {code}",
+  "browser.source.invisible.zeroWidth": "zero-width character {code}",
+  "browser.source.invisible.bidi": "text direction control {code}",
+  "browser.source.invisible.other": "invisible character {code}",
 
   "browser.notice.kept": "This file changed on disk, and the snippet you had selected was found again.",
   "browser.notice.differentMatch": "This file changed on disk, and what is now in that position is a different snippet, so the selection was cleared.",

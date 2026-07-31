@@ -22,9 +22,15 @@
      of a list of font names are three chances for one of them to drift. */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /* The interface's own face, stated once for the same reason: a marker drawn
+     *inside* a run of the document's text has to be able to say "this is the
+     app talking, not the file", and it can only do that by naming a face rather
+     than by inheriting the monospaced one. `SourceText.svelte` is the caller. */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui,
+    sans-serif;
+
   color-scheme: light dark;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;
 }

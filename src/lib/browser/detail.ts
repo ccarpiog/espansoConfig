@@ -41,6 +41,7 @@
 import type { TranslationKey } from '../i18n/dictionaries';
 import type {
   AliasView,
+  ByteSpan,
   ContentKind,
   ElidedValue,
   FieldView,
@@ -516,6 +517,55 @@ export interface OptionGroup {
   readonly rows: readonly ScalarRow[];
 }
 
+// ---------------------------------------------------------------------------
+// Text taken straight out of the file
+// ---------------------------------------------------------------------------
+
+/**
+ * A run of the file's own bytes, and the two things that are not one.
+ *
+ * Every source slice on this wire — `MatchView.source_text`,
+ * `UnknownEntry.value_text` — is a `string` beside the `ByteSpan` it was cut
+ * from, and an **empty string means two different things**: a span that is
+ * genuinely empty, and a span that could not be cut at all. The second is a
+ * defect rather than a fact about the file, and drawing both as nothing would
+ * tell the reader the file holds nothing in a case where this app simply failed.
+ * That is `docs/decisions/1c-2b-2a-notes.md` hole 7, decided here.
+ *
+ * How the text is *drawn* is not this type's business: `./sourceText.ts` owns
+ * that, and `SourceText.svelte` is the one component that renders it.
+ *
+ * **What may be said about a slice belongs to one arm, not to all three.** The
+ * 1c-2b-2b-1 review found a caption above every arm claiming the bytes were
+ * shown as the file writes them, over an `unavailable` arm saying they could not
+ * be read. `browser.detail.valueAsWritten` is therefore rendered inside the
+ * `text` arm alone, and `detail.test.ts` scans the pane for that placement.
+ */
+export type SourceSlice =
+  /** The file writes something here, and these are its characters. */
+  | { readonly kind: 'text'; readonly text: string }
+  /** The span is empty, so the file really does write nothing here. */
+  | { readonly kind: 'empty' }
+  /** The span is not empty and no text arrived, which only a defect produces. */
+  | { readonly kind: 'unavailable' };
+
+/**
+ * Reads one span-and-text pair into the three cases the pane draws.
+ *
+ * @param text - The slice as Rust cut it — **never re-sliced here**, because a
+ *   JavaScript string index counts UTF-16 code units and a `ByteSpan` counts
+ *   bytes (`docs/decisions/1c-2b-2a-notes.md` section 4.2).
+ * @param span - The span the text was cut from, which is what distinguishes an
+ *   empty value from a failure to read one.
+ * @returns Which of the three cases this is.
+ */
+export function sourceSlice(text: string, span: ByteSpan): SourceSlice {
+  if (text !== '') {
+    return { kind: 'text', text };
+  }
+  return span.start === span.end ? { kind: 'empty' } : { kind: 'unavailable' };
+} // End of function sourceSlice()
+
 /**
  * One mapping key of an entry the projection did not model.
  *
@@ -533,23 +583,31 @@ export type UnknownKeyLabel =
 /**
  * One entry the projection did not model, as the pane shows it.
  *
- * The entry's **value** is deliberately not here, and the reason changed at
- * Phase 1c-2b-2a. Until then `UnknownEntry` carried no value text at all;
- * `UnknownEntry.value_text` now crosses the wire, and **this model still does
- * not read it**, so the pane continues to name the shape and to say plainly
- * that the value is not on screen. Rendering it is 1c-2b-2b's work, and adding
- * it here without also changing what the pane says would make
- * `browser.detail.unknownValue` false in the other direction. See
- * `docs/decisions/1c-2a-notes.md` section 12, hole 13, and
- * `docs/decisions/1c-2b-2a-notes.md`.
+ * The entry's **value** is here as of Phase 1c-2b-2b-1, and the history is worth
+ * one paragraph because it is the shape of a rule rather than of a field. Until
+ * 1c-2b-2a `UnknownEntry` carried no value text at all; 1c-2b-2a put
+ * `UnknownEntry.value_text` on the wire and this model deliberately did **not**
+ * read it, so that `browser.detail.unknownValue` — which said in so many words
+ * that the value was not on screen — stayed true. Reading it here makes that
+ * string false in the other direction, so the string changed in the same commit.
+ * Neither half is allowed to travel alone; see `docs/decisions/1c-2a-notes.md`
+ * section 12 hole 13, `docs/decisions/1c-2b-2a-notes.md` section 10, and
+ * `docs/decisions/1c-2b-2b-1-notes.md`.
+ *
+ * What is *not* claimed by showing it: the entry is still unmodelled, and the
+ * four `code.unknownReason.*` sentences still say the app recorded it and keeps
+ * it exactly as the file writes it. Those are claims about what this app does to
+ * the file, which showing the bytes does not touch.
  */
 export interface UnknownRow {
   /** The key node, which is what keys the row in a list and addresses it. */
   readonly node: NodeId;
   /** What the pane puts in the `dt`. */
   readonly key: UnknownKeyLabel;
-  /** What the unshown value is, unprojected. */
+  /** What the value is, unprojected — its shape, not its meaning. */
   readonly valueKind: ValueKind;
+  /** The value's own bytes, as Rust sliced them. */
+  readonly value: SourceSlice;
   /** Why the entry was not modelled. */
   readonly reason: UnknownReason;
 }
@@ -565,6 +623,7 @@ export function describeUnknown(entry: UnknownEntry): UnknownRow {
     node: entry.key_node,
     key: unknownKeyLabel(entry.key),
     valueKind: entry.value_kind,
+    value: sourceSlice(entry.value_text, entry.value_span),
     reason: entry.reason
   };
 } // End of function describeUnknown()
@@ -677,6 +736,25 @@ export function matchEditability(match: MatchView): MatchEditability {
 export interface MatchDetail {
   /** What this app says about editing the match; often "nothing". */
   readonly editability: MatchEditability;
+  /**
+   * The match's own bytes, and **exactly** those.
+   *
+   * `MatchView.source_text` is the slice of `MatchView.span`, and that span is
+   * the match's own node: it begins at the node's first character — the first
+   * key of the mapping, *after* the `- ` that introduces the item in the
+   * sequence and after the indentation in front of that — and ends at its last
+   * value. So the first line of what is drawn carries no leading indentation
+   * while every later line carries its own, a comment written above or below the
+   * snippet is outside it, and a comment written *on* one of its lines is inside
+   * it because it lies between those two points. `browser.detail.sourceScope` is
+   * the sentence that says so on screen, and it was written from a measurement
+   * of `MatchView::project` in
+   * `crates/espansoconfig-core/src/model/match_view.rs` rather than from the
+   * field's name.
+   *
+   * D2u-safe: it *is* source text, so nothing here infers a type from it.
+   */
+  readonly source: SourceSlice;
   /** The trigger side. */
   readonly trigger: TriggerDetail;
   /** The content side. */
@@ -793,6 +871,7 @@ function describeOptions(options: MatchOptions): readonly OptionGroup[] {
 export function describeMatch(match: MatchView): MatchDetail {
   return {
     editability: matchEditability(match),
+    source: sourceSlice(match.source_text, match.span),
     trigger: {
       kind: match.trigger.kind,
       rows: collectRows([

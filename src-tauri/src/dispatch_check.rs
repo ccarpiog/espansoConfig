@@ -619,9 +619,14 @@ fn unknown_entries_in(value: &Value, out: &mut Vec<Value>) {
 ///
 /// **A NUL is deliberately absent, and that was measured rather than assumed.**
 /// This document has to *parse* or it produces no unmodelled entry at all, and
-/// `SyntaxIndex::parse` refuses a source containing U+0000: adding one here made
-/// `parsed` come back `false`. U+2028 and U+2029 are accepted and are therefore
-/// here. `document_text` needs no parse and carries all three
+/// adding a U+0000 to one of the quoted values here made `parsed` come back
+/// `false`. The 1c-2b-2b-1 review measured the shape that sentence used to
+/// generalise to: in a *plain* value the parse succeeds and the parser simply
+/// **stops** at the NUL, which leaves it and everything after it outside every
+/// node span — so a NUL reaches no `value_text` either way
+/// (`which_control_characters_can_reach_a_projected_slice` in
+/// `crates/espansoconfig-core/tests/model_projection.rs`). U+2028 and U+2029 are
+/// accepted and are therefore here. `document_text` needs no parse and carries all three
 /// (`document_text_carries_a_nul_and_the_two_unicode_line_separators`), so the
 /// gap is `value_text` and a NUL alone — `1c-2b-2a-notes.md` hole 9.
 const UNMODELLED_HAZARDS: &str = concat!(

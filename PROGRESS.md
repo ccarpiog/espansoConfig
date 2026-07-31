@@ -30,8 +30,18 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1c-2a** | The detail pane's match: plan §3.3's fields, §3.4's variables, §3.5's forms, D2u on a screen | ✅ complete — after the review fix round below |
 | **1c-2b-1** | The typed judgements: `HazardKind` on a screen, the diagnostics, the load-failure conflation closed | ✅ complete — after the review fix round below |
 | **1c-2b-2a** | The boundary: `document_text` as a command, `UnknownEntry.value_text`, the fidelity rules pinned through the real dispatcher | ✅ complete — after the review fix round below |
-| 1c-2b-2b | The screens: the raw YAML viewer, `MatchView.source_text` and the unmodelled value **on screen**, and the real-corpus browse | ⬜️ **next** — **Phase 1's exit lands here** |
+| **1c-2b-2b-1** | Source text on a screen: the shared rendering primitive, `MatchView.source_text` and the unmodelled value **drawn** | ✅ complete — after the review fix round below |
+| 1c-2b-2b-2 | The raw YAML viewer over `document_text`, the `notUtf8` refusal on a screen, and the **real-corpus browse** | ⬜️ **next** — **Phase 1's exit lands here** |
 | 2–5 | See plan §12 | ⬜️ not started |
+
+**1c-2b-2b was split into 1c-2b-2b-1 / 1c-2b-2b-2**, by the same cut every earlier split used — a
+dependency order rather than a convenience. **-1 is the rendering primitive proved on a small
+surface**: a *slice* of a file (a match's bytes, an unmodelled entry's value), where the fidelity
+question is answerable but a BOM, a NUL and "no final newline" are unreachable **by construction**,
+because a slice out of the middle of a file cannot exhibit them. **-2 is the same primitive over a
+whole document**, which is the only surface those rows have, and it carries Phase 1's exit. The split
+also isolates the one irreversible-looking piece: -1 changes a string that says the app does *not*
+show something, and that rewording had to travel with the code that makes it false or not at all.
 
 **Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
 it coherently. The cut is by *medium*, not by feature — **1a is Rust with no UI at all**, and it is
@@ -2005,6 +2015,28 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1c-2b-2b-1 review disposition
+
+The review is
+[`docs/reviews/phase-1c-2b-2b-1-source-text.md`](docs/reviews/phase-1c-2b-2b-1-source-text.md):
+**four findings — three Major, one Minor, no Blocking**, and three of the four are the same defect this
+project keeps catching, in the one sub-phase whose entire subject was not committing it. All four were
+closed before the commit, so no commit holds a demonstrated defect. The reviewer found **no**
+architecture, privacy, i18n-hardcoding, corpus-fixture, D2u or HTML-injection regression, and confirmed
+the round trip, the astral and lone-surrogate handling, the CRLF counting and the Svelte 5 reactivity.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | **Major** | `browser.detail.unknownValue` says the value is "shown here as the file writes it" above **all three** `SourceSlice` arms, so an unreadable non-empty span makes the pane say the bytes are shown *and*, on the next line, that it could not read them | **Real.** Trigger: `value_text: ""` with a non-empty `value_span`. The claim was attached to the wrong scope — a caption over three branches, true of one. `unknownValue` is now *holds {kind}* / *contiene {kind}* and nothing more; the as-written claim moved into the `text` arm alone as the new `browser.detail.valueAsWritten`. The two-halves guard in `detail.test.ts` gained the newly withdrawn sentence **and a position check on the claim**, so moving it back up fails (experiment N) |
+| 2 | **Major** | The scope sentence assumes every match has a block-sequence `-` and indentation before it. `MatchView::project` projects **every** item, so a flow item (`matches: [{trigger: x}]`) has neither, a bare empty item (`matches:\n  -`) has a **zero-width span** with no first or last character, and a terminal empty value stops the span before the final colon | **Real, and it is the rule broken nine times before this: a sentence written from the shape the author had in mind.** All three shapes were **measured** with a throwaway probe and the measurement then *committed* as `every_shape_a_matches_sequence_can_hold_is_projected_with_its_own_span` in `model_projection.rs`, so the next person changes the sentence against a test rather than against a memory. The new sentence names **no syntax at all**, in both languages: *"The part of the file this app reads as the snippet itself…"* |
+| 3 | **Major** | The headline claim — a character with no visible shape is *named rather than drawn as nothing* — is wider than the classifier, which covered only NUL, C0/C1, the two separators, a lone CR and U+FEFF. `a\u{200b}b` renders identically to `ab`, which is precisely what the claim denies. Notes hole 7 admitted it while the headline denied it | **Real, and both halves were fixed rather than one.** The classifier widened to the soft hyphen, the zero-width set (U+180E, U+200B, U+2060–U+2064, non-initial U+FEFF) and the bidi controls (U+061C, U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) under three new names. **Joiners, variation selectors, tag characters and combining marks are deliberately excluded** — they modify a neighbour rather than draw nothing, so naming them separately would misdescribe them — and that judgement is recorded as hole 7 rather than left implicit. Round-trip, ordering, exclusion and combining-mark-after-a-marker tests added; the module header, the notes' headline and `browser.source.invisibleDetail` all narrowed to what the classifier does |
+| 4 | Minor | Notes §9 hole 1 and the §5 table claim a lone CR and "the other C0/C1 controls" cannot reach the detail pane because a source holding one does not parse — but **only NUL was measured** | **Real, and measuring it inverted the claim.** BEL, ESC, DEL, U+009F and U+0085 **do** parse and land inside a match's span, and so does a lone CR when the next line is indented. **Only NUL is unreachable** — a quoted one fails the parse, a plain one stops it. Pinned by `which_control_characters_can_reach_a_projected_slice`; the §5 rows, hole 1, `PARSEABLE_HAZARDS` and one over-generalised doc comment in `dispatch_check.rs` were all corrected to match. The original note was not merely unproven; it was **wrong** |
+
+**What the review did not close, and it is named rather than papered over.** `SourceSlice`'s
+`unavailable` arm is reachable only through a defect, and **nothing in this project renders a Svelte
+component in an automated test**, so its string has still never been read in place. It stays hole 8.
+The worker was explicitly told not to fake this, and did not.
+
 ## Phase 1c-2b-2a review disposition
 
 The review is
@@ -2253,6 +2285,40 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 1c-2b-2b-1
+
+Every command below was run by the orchestrator **after** the review fix round, not taken on the
+worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | ✅ **561 tests**, 0 failed (559 at 1c-2b-2a's close; the two new ones are the measurements findings 2 and 4 demanded) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt --check` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `npm test` | ✅ **583 tests across 26 files**, 0 failed (480 at 1c-2b-2a's close — **+103**) |
+| `npm run check` | ✅ 372 files, **0 errors, 0 warnings** (`--fail-on-warnings`) |
+| `npm run build` | ✅ built; `dist/assets/index-*.js` 109.11 kB |
+| `rg -c '^\s*"' src/lib/i18n/{en,es}.json` | ✅ **240 and 240** (226 before — **+14**, one of them replacing a reworded key's claim) |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+**Acceptance criteria, and whether each was met:**
+
+| Criterion | Met | Evidence |
+|---|---|---|
+| A match's own bytes are on a screen | ✅ | A *Source text* section renders `MatchView.source_text` through the primitive. Read in a window in both languages |
+| The sentence describing them is true of **every** shape the projection produces | ✅ **after the review** | It was false for a flow item, a zero-width item and a terminal empty value. Now shape-neutral, and the three shapes are pinned by `every_shape_a_matches_sequence_can_hold_is_projected_with_its_own_span` |
+| An unmodelled entry's value is on a screen | ✅ | `UnknownRow.value: SourceSlice`, rendered by the same primitive |
+| The string saying it is **not** shown travelled in the same change | ✅ | `browser.detail.unknownValue` reworded in the same commit; `detail.test.ts` holds a suite asserting both withdrawn sentences are gone, and experiments F and G each fire it |
+| Each of the three `SourceSlice` arms says something true of that arm | ✅ **after the review** | Review finding 1. The as-written claim now sits in the `text` arm only, with a position check that fails if it moves back up |
+| Rendering is byte-faithful, and it is **measured** | ✅ | `sourceCharacters()` round trip is the oracle; the window reading holds `65 301` uncomposed beside `e9`, `1f600` whole, two trailing spaces as `20 20`, **no `0d` in the DOM**, `white-space` computed `pre`, and `scrollWidth > clientWidth` (it scrolls, it does not wrap) |
+| A character with no glyph is named, and the claim matches the classifier | ✅ **after the review** | Review finding 3. Widened to the zero-width, soft-hyphen and bidi sets; joiners and variation selectors excluded **with a stated reason**; every prose claim narrowed to the enumeration |
+| No user-facing string is hardcoded | ✅ | 14 new keys in both languages, all through typed accessors; `built-translation-keys.ts` covers the new component. R31's blind spots enumerated by name in notes §8.1 rather than assumed clean |
+| Source text cannot become markup | ✅ | No `{@html}` anywhere; file text reaches the DOM as text-node content only. Confirmed by the reviewer |
+| **WKWebView is covered** | ✅ **first evidence in this project** | 1c-2b-2a §4.3's named limitation. The reading is the first measurement past Tauri's encoder — narrow, and stated narrowly in notes §5.1 |
+| The `unavailable` arm has been seen | ❌ **no, and said so** | Reachable only through a defect, and nothing here instantiates a Svelte component. Hole 8 |
+| The Spanish strings are Spanish | ➖ **unchanged gap** | 14 new Spanish strings read on screen by their author. A bilingual reviewer remains the only instrument that closes this |
 
 ## Verification — Phase 1c-2b-2a
 
@@ -2802,78 +2868,95 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 1c-2b-2a is complete. Start Phase 1c-2b-2b — the screens, and Phase 1's exit.**
+**Phase 1c-2b-2b-1 is complete. Start Phase 1c-2b-2b-2 — the whole document, and Phase 1's exit.**
 
-The bytes are now **on the wire and proven to arrive intact**: `document_text` is a registered command,
-`UnknownEntry.value_text` carries an unmodelled entry's own source text, and both were measured through
-the real IPC dispatcher rather than argued about. **What nothing does yet is put any of them on a
-screen.** 1c-2b-2b does, and the plan's stated exit for Phase 1 lands there: *the owner can browse their
-entire real config and every snippet renders correctly.*
+Source text is now **on a screen and proven faithful there**: one shared rendering primitive
+(`src/lib/browser/sourceText.ts`) turns a run of the file's text into segments, `SourceText.svelte`
+draws them, and a match's own bytes and an unmodelled entry's own bytes both go through it. The
+project's **first WKWebView-level evidence** was taken in that window — 1c-2b-2a §4.3's named gap, now
+narrowed rather than open.
 
-Unlike 1c-2b-2a, **nothing here widens the wire** — every value 1c-2b-2b needs already crosses it. The
-failure mode is the opposite one: a viewer that says "as written" with a transformation sitting between
-the file and the screen.
+**What is left is the surface that only a whole document has.** Five fidelity rows are open **not
+because they are untested but because a slice cannot exhibit them**: a real BOM, a NUL, the other C0/C1
+controls, a lone CR and "no final newline". `document_text` is a registered command whose frontend
+wrapper `documentText()` still **has no caller**, so it is tree-shaken out of `dist` today. And Phase
+1's stated exit lands here: *the owner can browse their entire real config and every snippet renders
+correctly.*
 
 Concretely, and in roughly this order:
 
-1. **The raw YAML viewer.** Phase 3 owns CodeMirror; 1c-2b-2b needs only to display text faithfully, and
-   faithfully is the whole difficulty. Call `documentText()` — the wrapper exists in
-   `src/lib/ipc/commands.ts` and **has no caller yet**, so it is currently tree-shaken out of `dist`.
-   **The Rust side of fidelity is settled and measured; the browser side is not.** The corpus contains
-   CRLF, a BOM, files with no final newline, decomposed and astral Unicode, block scalars with real
-   trailing spaces, NUL and U+2028 / U+2029 — and how each of those survives *HTML rendering* is a
-   different question from how it survived serde. `white-space`, a BOM rendered as a zero-width
-   character, and a NUL in a text node are the three to check first. **Read notes §4 of
-   `1c-2b-2a-notes.md` before deciding anything here — the table is already written for the wire half.**
-2. **Show `MatchView.source_text`** — the match's own bytes, already on the wire and D2u-safe because
-   it *is* source text. Note its boundary: it stops at the match's mapping, so the comment above a
-   snippet is **not** in it. Say what it is rather than implying it is the snippet's whole text.
-3. **Render `UnknownEntry.value_text`, and change its strings in the same commit.** The field is on the
-   wire and `src/lib/browser/detail.ts` **deliberately does not read it** — `UnknownRow` omits it on
-   purpose, so `browser.detail.unknownValue` ("the value is not on screen") is still true. Reading it
-   without rewording that string makes it false in the other direction. **The two go together or
-   neither goes.**
-4. **Close the WKWebView gap, which is the one thing 1c-2b-2a could not.** `mock_builder()` swaps the
-   platform webview out, so every fidelity measurement stops at Tauri's encoder. 1c-2b-2b is the first
-   sub-phase with something on screen to read, so a **window reading** is the instrument — and it is the
-   only one that can answer what WKWebView does with a BOM, a NUL, or U+2028.
+1. **The raw YAML viewer.** Phase 3 owns CodeMirror; -2 needs only to display a document faithfully.
+   Call `documentText()` and pass the result to `SourceText` with **`documentStart` set** — that flag is
+   the *only* way a `bom` segment is ever produced, and the detail pane never sets it because a slice
+   cannot know where byte 0 is. **Do not write a second renderer for file text.**
+2. **The `notUtf8` refusal needs a screen and it has no string.** `documentText()` returns
+   `CommandResult<string>`; a file that is not valid UTF-8 yields `{code: "notUtf8", path, offset}` and
+   **cannot be displayed at all**. A file the pane cannot show **must not look like an empty one**.
+   `browser.detail.valueUnavailable` is the nearest existing sentence to model it on. This is
+   1c-2b-2a hole 8.
+3. **Fill the five open rows of the fidelity table** — §5 of `1c-2b-2b-1-notes.md` marks each one
+   "whole document". A window reading is the instrument; a unit test on the primitive is not, because
+   the question is what **WKWebView** does.
+4. **Then check Phase 1's exit, rather than assuming it.** The real corpus is gitignored and present
+   locally (`./scripts/sync-real-corpus.sh`; verified present at this checkpoint). **Nothing in this
+   project has yet run the UI over it end to end.** Do that, and record it as every other claim here is
+   recorded — counts and error positions, **never content** (D1 is absolute; the repository is public).
+   One measurement bears on it: the real corpus produces **zero** unmodelled entries (13 files, 566
+   keys, all modelled), so it will not exercise the unmodelled-value surface at all — synthetic
+   fixtures are that surface's only coverage, permanently.
 
-**Then Phase 1's exit must actually be checked, not assumed.** "The owner can browse their entire real
-config and every snippet renders correctly" is a claim about the **real** corpus, which is gitignored
-and present locally (`./scripts/sync-real-corpus.sh`). Nothing in this project has yet run the UI over
-it end to end. Do that, and record it the way every other claim here is recorded — with counts and
-error positions, **never with content** (D1 is absolute; the repository is public). Note one thing
-1c-2b-2a measured that bears on it: the real corpus produces **zero** unmodelled entries (13 files, 566
-keys, all modelled), so it will not exercise item 3 at all — synthetic fixtures are the only coverage
-that item has.
+**Four things 1c-2b-2b-2 should look at before it starts.**
 
-**Three things 1c-2b-2b should look at before it starts.**
+- **Hole 9 (from -1) — nothing measures what a large document costs the primitive.** One segment per
+  invisible character and one `<br>` per line is fine for a five-line match slice and is an open
+  question for a whole file. **1c-2b-2a hole 10 lands here too**: `value_text` is uncapped, disjoint
+  spans bound duplication rather than size, and a raw viewer is the first thing to hold a large
+  document *and* its slices in one frame.
+- **Hole 5 (from -1) — the pane now renders file text two different ways.** The source and value
+  surfaces go through the primitive; the **scalar rows do not** — they still print `ScalarView.text`
+  into a `pre-wrap` `<pre>`. So a U+2028 inside a `replace:` value is *named* in the source section and
+  drawn as *nothing* in the replacement row, on the same screen. An inconsistency, not a false claim,
+  and routing the rows through `SourceText` would touch every row in the pane.
+- **Hole 16 (from 1c-2b-1) — the empty snippet list and the sentence explaining it come from unrelated
+  code.** A match-shaped profile yields "0 of 0" plus a "folder and content disagree" diagnostic, tied
+  together by nothing; a change to either silently leaves the other.
+- **Hole 2 (from 1c-2b-1) — the conflation one level down.** A file that failed to *parse* shows `0`
+  exactly like a file that is genuinely empty. `parsed` is already on the wire for this.
 
-- **Hole 16 (from 1c-2b-1) — the empty snippet list and the sentence explaining it are produced by
-  unrelated code.** A match-shaped profile now yields "0 of 0" plus a "folder and content disagree"
-  diagnostic, and nothing ties the two together; a change to either leaves the other in place, silently.
-- **Hole 2 (from 1c-2b-1) — the conflation one level down.** A file that failed to *parse* still shows
-  `0` exactly like a file that is genuinely empty. `parsed` is already carried on the wire for this.
-- **Hole 10 (from 1c-2b-2a) — `value_text` is uncapped and the viewer is where that lands.** Disjoint
-  spans bound duplication, not size. A raw viewer is the first thing that will hold a very large
-  document *and* its unmodelled slices in the same frame.
+**What 1c-2b-2b-2 inherits, and should not rebuild.**
 
-**What 1c-2b-2b inherits from 1c-2b-2a, and should not rebuild.**
-
-- **`documentText(id)`** in `src/lib/ipc/commands.ts`, returning `CommandResult<string>`, with the
-  contract stated narrowly: **exact preservation of valid UTF-8, typed refusal otherwise.** A non-UTF-8
-  file yields `{code: "notUtf8", path, offset}` and **cannot be displayed at all** — the viewer needs a
-  branch for that, and the dictionary has no string for it yet.
-- **`UnknownEntry.value_text`**, sliced in Rust from `value_span`. **Never re-slice by span in
-  JavaScript**: a JS string index is a UTF-16 code unit and a `ByteSpan` counts bytes, so
-  `text.slice(span.start, span.end)` is wrong for any document with a non-ASCII character before the
-  span and wrong by a different amount again for an astral one. Experiment J in `1c-2b-2a-notes.md` is
-  the demonstration.
-- **The fidelity table, §4 of `1c-2b-2a-notes.md`** — every byte hazard, what it does at the wire, and
-  what pins it. 1c-2b-2b's job is the *rendering* column, which is empty.
+- **`sourceSegments(text, atDocumentStart)` and `SourceText.svelte`.** A whole document is the same call
+  with `documentStart` set. The primitive names the C0/C1 controls, NUL, the two separators, a lone CR,
+  the soft hyphen, the zero-width set and the bidi controls; it deliberately does **not** name joiners,
+  variation selectors, tag characters or combining marks, because those modify a neighbour rather than
+  draw nothing (hole 7). `sourceCharacters()` is the round-trip oracle.
+- **`SourceSlice` and its three arms** — `text`, `empty`, `unavailable`. `document_text` has a **fourth**
+  case the detail pane does not: the typed `notUtf8` refusal. The `unavailable` arm's string has still
+  never been read in place (hole 8).
+- **`documentText(id)`** in `src/lib/ipc/commands.ts`, contract stated narrowly: **exact preservation of
+  valid UTF-8, typed refusal otherwise.**
+- **Never re-slice by a wire span in JavaScript.** A JS string index is a UTF-16 code unit and a
+  `ByteSpan` counts bytes, so `text.slice(span.start, span.end)` is wrong for any document with a
+  non-ASCII character before the span, and wrong by a different amount again for an astral one.
+  Experiment J in `1c-2b-2a-notes.md` is the demonstration.
+- **The fidelity table in two halves** — §4 of `1c-2b-2a-notes.md` (the wire) and §5 of
+  `1c-2b-2b-1-notes.md` (the rendering, with its "detail pane / whole document" split).
+- **`EVERY_TEXT_HAZARD` and `PARSEABLE_HAZARDS`** in `src/lib/browser/fixtures.ts`. The first is every
+  hazard in one run of text; the second is the subset a document that **parses** can carry — corrected
+  at -1's review, because the original was wrong about which controls parse.
+- **The two-halves guard in `detail.test.ts`.** Its shape generalises: when a string on screen is a
+  claim about what the app does *not* do, the assertion that it is gone belongs beside the change that
+  makes it false.
 - **A dispatcher-level test harness** in `src-tauri/src/dispatch_check.rs` that copies the corpus into a
-  workspace and invokes real commands, and a remote-origin table now asserted equal in both directions
-  to the names in `generate_handler!`. **Add a command and that test fails until its row exists.**
+  workspace and invokes real commands, with a remote-origin table asserted equal in both directions to
+  the names in `generate_handler!`. **Add a command and that test fails until its row exists.**
+
+**One lesson -1 paid for, worth carrying into -2.** Three of its four review findings were *a sentence
+attached to the wrong scope* — a caption over three branches that was true of one, a description of
+syntax that only some shapes have, and a headline wider than the classifier under it. The fourth was a
+note asserting something never measured, and measuring it **inverted** the claim. The pattern is not
+carelessness; it is that a sentence is written once and the data underneath it has cases. **Before
+writing a string, enumerate the cases it will sit above.**
 
 **What earlier sub-phases leave, and 1c-2b-2b should also not rebuild.**
 
@@ -3064,6 +3147,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/sourceText.ts`](src/lib/browser/sourceText.ts) | **The one place file text becomes something a screen can draw**, and 1c-2b-2b-2 uses it unchanged. `sourceSegments(text, atDocumentStart)` returns `text` / `break` (carrying `lf` or `crlf`) / `invisible` (carrying a **code** and the character itself); `sourceCharacters()` rebuilds the input and **is the module's oracle**. `atDocumentStart` is the *only* way a `bom` segment is produced — a slice must never pass it. The classifier names the C0/C1 controls, NUL, U+2028/9, a lone CR, the soft hyphen, the zero-width set and the bidi controls, and deliberately does **not** name joiners, variation selectors, tag characters or combining marks, because those modify a neighbour rather than draw nothing |
+| [`src/lib/components/SourceText.svelte`](src/lib/components/SourceText.svelte) | **The only component that draws file text.** A break is a `<br>` (never a newline in a text node), an invisible character is a bordered marker in the *interface's* face, everything else is a text node inside a `white-space: pre` container that scrolls sideways — a soft wrap is indistinguishable from a line break the file does not have. **The markup is one line on purpose**: whitespace written for legibility would be whitespace the file does not have, and a test asserts the exact opening sequence. **No `{@html}`, ever** |
+| [`docs/decisions/1c-2b-2b-1-notes.md`](docs/decisions/1c-2b-2b-1-notes.md) | Phase 1c-2b-2b-1's decision record: the primitive instead of a `<pre>` (§2), **the scope sentence written from a committed measurement rather than the field's name (§3)**, the two halves that had to travel together (§4), **the fidelity table's rendering column with its "detail pane / whole document" split — five rows still open and each says why (§5)**, the window readings and what WKWebView evidence they do and do not give (§6, §5.1), the disabling experiments, **R31's blind spots by name (§8.1)**, the coverage holes as holes (§9) and what -2 inherits (§10) |
+| [`docs/reviews/phase-1c-2b-2b-1-source-text.md`](docs/reviews/phase-1c-2b-2b-1-source-text.md) | The Phase 1c-2b-2b-1 review, dispositioned above. **Three of its four findings are one shape: a sentence attached to the wrong scope** — a caption over three branches true of one, a description of syntax only some shapes have, a headline wider than the classifier beneath it. The fourth was a note never measured, and **measuring it inverted the claim**. Re-read before writing any string that will sit above more than one case |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The seven typed wrappers, and `documentText(id)` is the one with no caller.** Its contract is stated narrowly and must stay that way: **exact preservation of valid UTF-8, typed refusal otherwise** — a non-UTF-8 file answers `{code: "notUtf8", path, offset}` and cannot be displayed at all, which is a branch the raw viewer needs and the dictionary has no string for yet |
 | [`src-tauri/src/dispatch_check.rs`](src-tauri/src/dispatch_check.rs) | **Where reachability and wire fidelity are *measured* rather than argued.** Seven commands invoked with `"permissions": []`; the corpus copied into a workspace and answered byte-for-byte through the real dispatcher (33 fixtures, 37 406 bytes); `value_text` fetched through `get_document` and checked against `std::fs::read` sliced by the span that arrived beside it. The remote-origin table is asserted equal **in both directions** to the names in `generate_handler!` — **add a command and this test fails until its row exists.** What it does *not* cover is WKWebView: `mock_builder()` swaps it out |
 | [`docs/decisions/1c-2b-2a-notes.md`](docs/decisions/1c-2b-2a-notes.md) | Phase 1c-2b-2a's decision record: why `document_text` is a command and never was one (§2), the uncapped `value_text` decision with its cost rather than a saving it cannot prove (§3), **the `CommandResult<string>` inheritance Phases 2–5 would pay to widen (§3.1)**, **the fidelity table hazard by hazard — the wire column is done, the *rendering* column is 1c-2b-2b's (§4)**, the WKWebView limitation named rather than implied (§4.3), the fifteen disabling experiments including the one that could not be constructed at all (§6, §6.0), the holes stated as holes (§9) and what 1c-2b-2b inherits (§10) |
@@ -3080,7 +3167,7 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`docs/decisions/1c-1-notes.md`](docs/decisions/1c-1-notes.md) | Phase 1c-1's decision record: the data path (§2), the four states (§3), search and whose rule is whose (§4), badges as D2u seen from the list (§5), **R27 in the selection (§6)**, the strings and where the lint cannot see them (§7), the **twenty-two disabling experiments including the one that did not fire (§8)**, what the phase got wrong (§9), **R32's five window readings and exactly what they do and do not establish (§10)**, **the coverage holes stated as holes (§11)**, what 1c-2 inherits (§12) and **the review disposition (§13)** |
 | [`docs/reviews/phase-1c-1-shell-and-data-path.md`](docs/reviews/phase-1c-1-shell-and-data-path.md) | The Phase 1c-1 review, dispositioned above. Its High 1 is the sharpest finding in the project so far: a fingerprint that decided `sameMatch` while being blind to `word`, to variables, to form fields and to every non-primary content field. Its Low 2 is **R24's corollary for the fifth time**, and one of the eight tests it names was the very test the notes had cited as making an experiment unnecessary |
 | [`src/lib/i18n/codes.ts`](src/lib/i18n/codes.ts) | **What a 1c component calls, and the one file it should not work around.** Twelve typed key builders and twelve `describe*` functions over the sixteen namespaces; the reactive `t*` wrappers are in [`index.ts`](src/lib/i18n/index.ts). The builders' template-literal return types make a **missing key a compile error here** rather than a blank label at the call site. Build a key by hand and you have opted out of that |
-| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries — **138 keys each**, of which 111 are `code.*` and 16 are `menu.*`. `en.json` **is the schema**: the key set is derived from it, never declared separately. Eight values are identical across the two files and each is on the untranslated-value exception list **by name** |
+| [`src/lib/i18n/en.json`](src/lib/i18n/en.json) · [`es.json`](src/lib/i18n/es.json) | The two dictionaries — **240 keys each** as of 1c-2b-2b-1 (138 at 1b-2b, 226 at 1c-2b-2a). `en.json` **is the schema**: the key set is derived from it, never declared separately. Identical values across the two files are on the untranslated-value exception list **by name** |
 | [`src-tauri/src/dictionary_contract.rs`](src-tauri/src/dictionary_contract.rs) · [`rust_source.rs`](src-tauri/src/rust_source.rs) | **Why a code cannot reach the UI without a string.** `rust_source` parses with `syn` and lexes with `proc-macro2` (dev-dependencies of `src-tauri` **only**); `dictionary_contract` compares the derived variant set against both dictionaries bidirectionally, and two further checks derive the *registry* from source — every `Serialize` enum in both trees, every union in `types.ts` — so a **new enum** is caught without anyone adding a row. What still escapes: an enum a `macro_rules!` expands to, demonstrated in `1b-2b-notes.md` §12.3 experiment 12E |
 | [`src-tauri/src/menu.rs`](src-tauri/src/menu.rs) · [`menu_contract.rs`](src-tauri/src/menu_contract.rs) | The localized menu: three submenus, 16 labels, **zero user-facing string literals in the Rust**, pinned by a check that *lexes* the file rather than masking comment lines. `set_menu_labels` takes an **untyped envelope** and validates it itself so a version skew is `invalidMenuLabels` rather than serde's prose; `on_main_thread` waits on a one-shot channel so a build failure is `menuBuildFailed` rather than a silent `{ ok: true }` |
 | [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | Reads the `.ts` files as text and compares interface properties, union members, error codes and the `generate_handler!` list against what Rust actually writes — bidirectionally, with the six forbidden Phase 2 command names asserted absent from both sets. **Six commands are registered now**, the sixth being `menu::set_menu_labels`; none mutates a file and the test enforces it |
@@ -3175,6 +3262,7 @@ _Updated at each phase boundary._
 | 1c-2a cleanup | `82ad7c5` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-1 | `41b5e40` | ✅ pushed to `origin/main` | clean |
 | 1c-2b-2a | `16f9a0d` | ✅ pushed to `origin/main` | clean |
+| 1c-2b-2b-1 | `PENDING` | pending | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -3224,6 +3312,21 @@ sweeps and the seven-command remote-origin table in `src-tauri/src/dispatch_chec
 contract wording across five files, `documentText()` in `src/lib/ipc/commands.ts`, the review,
 `docs/decisions/1c-2b-2a-notes.md`, `CLAUDE.md` §6 and this checkpoint. **A fresh session should start
 from `16f9a0d` or later.**
+
+`PENDING` is Phase 1c-2b-2b-1 **including its review fix round** — the phase was held open until all
+four findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
+defects: neither the caption claiming bytes were shown as written above the arm that says it could not
+read them, nor the scope sentence describing a `-` marker that a flow item does not have, nor the
+headline promising every glyphless character was named while a zero-width space drew nothing, nor the
+note asserting controls cannot reach the pane when only NUL was ever measured — and measuring the rest
+**inverted** it. It contains the rendering primitive and its component
+(`src/lib/browser/sourceText.ts`, `src/lib/components/SourceText.svelte`), the source-text section and
+the unmodelled value in `src/lib/browser/detail.ts` and `src/lib/components/DetailPane.svelte`, 14 new
+dictionary keys in each language with one reworded, the two committed measurements in
+`crates/espansoconfig-core/tests/model_projection.rs`, the corrected `PARSEABLE_HAZARDS` in
+`src/lib/browser/fixtures.ts`, the review, `docs/decisions/1c-2b-2b-1-notes.md` and this checkpoint.
+**A fresh session should start from `PENDING` or later.** As at 1b-1, `npm install` (or `npm ci`) is
+required before any frontend command will run.
 
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores

@@ -16,6 +16,7 @@ import {
   type OptionGroupName
 } from '../browser/detail';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
+import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   ContentKind,
@@ -327,6 +328,30 @@ export function tDetailField(field: DetailFieldName): string {
 export function tOptionGroup(name: OptionGroupName): string {
   return translate(locale.current, optionGroupKey(name));
 } // End of function tOptionGroup()
+
+/**
+ * Names one character the file holds and no font draws, in the current language.
+ *
+ * The eighteenth accessor, and it exists for the reason the other seventeen do:
+ * `SourceText.svelte` walks segments whose name arrived as a **code**, and a
+ * component turns a code into text by calling this rather than by assembling
+ * `browser.source.invisible.` + something. `invisibleKey` in
+ * `../browser/sourceText.ts` is where the key is built, and its return type makes
+ * a name with no dictionary entry a compile error there.
+ *
+ * It takes the whole segment rather than the name alone because every one of the
+ * six strings carries a `{code}` operand: the name says what family the character
+ * belongs to and the code point says which character it is, and the second half
+ * is what makes `other` — the catch-all — a fact rather than a shrug.
+ *
+ * @param segment - An invisible character as `sourceSegments` classified it.
+ * @returns The translated name, with its code point substituted.
+ */
+export function tInvisible(segment: InvisibleSegment): string {
+  return translate(locale.current, invisibleKey(segment.name), {
+    code: codePointLabel(segment.character)
+  });
+} // End of function tInvisible()
 
 /**
  * Renders "N snippets" in the current language, in the right number.

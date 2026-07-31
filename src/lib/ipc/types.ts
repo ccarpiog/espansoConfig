@@ -225,9 +225,12 @@ export interface UnknownEntry {
    * not be cut at all, which only a defect could produce — `value_span` is what
    * distinguishes that from a genuinely empty value.
    *
-   * Source text, never a resolved value (D2u). As of Phase 1c-2b-2a it is on
-   * the wire and **no screen reads it**; showing it is 1c-2b-2b's, and until
-   * then the detail pane's strings correctly say the value is not displayed.
+   * Source text, never a resolved value (D2u). It reached the wire at Phase
+   * 1c-2b-2a and reached a screen at 1c-2b-2b-1: the detail pane draws it
+   * through `SourceText.svelte`, and `browser.detail.unknownValue` was reworded
+   * in the same change, because the sentence it used to carry said the value was
+   * not shown. `describeUnknown` in `src/lib/browser/detail.ts` is the only
+   * reader; how the bytes are drawn is `src/lib/browser/sourceText.ts`.
    */
   readonly value_text: string;
   /** The path naming this entry, or `null` when no path can. */

@@ -1738,6 +1738,115 @@ fn every_projected_match_carries_exactly_the_bytes_its_span_names() {
 } // End of function every_projected_match_carries_exactly_the_bytes_its_span_names()
 
 #[test]
+fn which_control_characters_can_reach_a_projected_slice() {
+    // **Measured at the 1c-2b-2b-1 review, because a note claimed it without
+    // measuring it.** `docs/decisions/1c-2b-2b-1-notes.md` said a NUL, a lone
+    // carriage return and "the other C0/C1 controls" could never reach the
+    // detail pane, since a source holding one does not parse. Only the NUL had
+    // been measured, and the claim is wrong for the rest: the controls parse
+    // and land inside a match's own span, so the source-text section really can
+    // draw one. The frontend's rendering column depends on this row, so the
+    // measurement lives here as a test rather than in prose.
+    let with_value = |value: &str| format!("matches:\n  - trigger: ':a'\n    replace: {value}\n");
+
+    // Every C0 or C1 control except NUL and the line breaks: it parses, and the
+    // character is inside the match's slice.
+    for control in ['\u{7}', '\u{1b}', '\u{7f}', '\u{85}', '\u{9f}'] {
+        let source = with_value(&format!("he{control}re"));
+        let document = project("controls.yml", &source);
+        assert!(
+            document.view.parsed,
+            "a source holding {:?} was expected to parse",
+            control
+        );
+        let entry = &document.view.matches[0];
+        assert!(
+            entry.source_text.contains(control),
+            "{:?} is missing from the match's own slice",
+            control
+        );
+    } // End of the loop over the controls that survive a parse
+
+    // A lone carriage return is a line break to the parser, so whether it parses
+    // depends on what follows it. Properly indented, it does — and it is then
+    // inside the match's slice like any other byte.
+    let source = "matches:\n  - trigger: ':a'\n    replace: b\r    later: c\n";
+    let document = project("lone-cr.yml", source);
+    assert!(
+        document.view.parsed,
+        "a lone CR before an indented key parses"
+    );
+    assert!(
+        document.view.matches[0].source_text.contains('\r'),
+        "the lone CR is missing from the match's own slice"
+    );
+
+    // A NUL is the one that cannot: in a plain value the parser stops at it, so
+    // the match ends before it and everything after becomes trivia.
+    let source = with_value("he\u{0}re");
+    let document = project("nul-plain.yml", &source);
+    assert!(document.view.parsed, "a NUL in a plain value still parses");
+    assert!(
+        !document.view.matches[0].source_text.contains('\u{0}'),
+        "the parse was expected to stop at the NUL, leaving it outside every span"
+    );
+
+    // And in a quoted scalar the parser reports the same stop as a failure.
+    let source = with_value("\"he\u{0}re\"");
+    let document = project("nul-quoted.yml", &source);
+    assert!(
+        !document.view.parsed,
+        "a NUL inside a quoted scalar was expected to fail the parse"
+    );
+} // End of function which_control_characters_can_reach_a_projected_slice()
+
+#[test]
+fn every_shape_a_matches_sequence_can_hold_is_projected_with_its_own_span() {
+    // **The measurement the detail pane's scope sentence is written from.**
+    // `MatchView::project` projects *every* item of a `matches` sequence, so the
+    // sentence beside the source-text section may not describe a block
+    // sequence's `-`: the item may be a flow mapping with no marker and no
+    // indentation in front of it, or an empty item whose span is zero-width.
+    // The 1c-2b-2b-1 review found the sentence assuming one shape; this is the
+    // set of shapes it has to be true of.
+    let flow = project("flow.yml", "matches: [{trigger: x, replace: y}]\n");
+    assert_eq!(flow.view.matches.len(), 1);
+    assert_eq!(
+        flow.view.matches[0].source_text, "{trigger: x, replace: y}",
+        "a flow item's slice is the item itself, braces included and no marker"
+    );
+
+    let empty = project("empty-item.yml", "matches:\n  -\n");
+    assert_eq!(empty.view.matches.len(), 1);
+    assert_eq!(
+        empty.view.matches[0].span.start, empty.view.matches[0].span.end,
+        "a bare empty item has a zero-width span"
+    );
+    assert!(
+        empty.view.matches[0].source_text.is_empty(),
+        "a zero-width span slices to nothing"
+    );
+
+    let scalar = project("scalar-item.yml", "matches:\n  - just-a-scalar\n");
+    assert_eq!(
+        scalar.view.matches[0].source_text, "just-a-scalar",
+        "a scalar item's slice is the scalar, with no marker and no indentation"
+    );
+
+    // The two boundaries of a block mapping item: the leading `- ` and the
+    // indentation in front of it are outside the slice, and a terminal empty
+    // value ends the mapping node before that key's colon.
+    let block = project(
+        "block-item.yml",
+        "matches:\n  # above\n  - trigger: ':a'   # inline\n    replace:\n",
+    );
+    assert_eq!(
+        block.view.matches[0].source_text, "trigger: ':a'   # inline\n    replace",
+        "the slice runs from the first key to the last child, inline comment included"
+    );
+} // End of function every_shape_a_matches_sequence_can_hold_is_projected_with_its_own_span()
+
+#[test]
 fn the_read_model_serializes() {
     // A `derive` that compiles is not proof that the shape crosses a boundary:
     // `serde` is here for Phase 1b's Tauri commands, so the model has to reach

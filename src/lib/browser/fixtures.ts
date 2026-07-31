@@ -149,6 +149,62 @@ export function elidedValue(kind: ValueKind, node = 0): ValueView {
 } // End of function elidedValue()
 
 /**
+ * Every byte hazard `docs/decisions/1c-2b-2a-notes.md` section 4 lists, in one
+ * run of text.
+ *
+ * **Written as `\u{…}` escapes, and that is the point.** A literal `é` in a
+ * source file can be normalised by an editor, at which point a test asserting
+ * that nothing normalises it would agree with a normalising boundary instead of
+ * catching it. Section 4 states the same rule for the Rust side, and this is its
+ * frontend twin.
+ *
+ * It is a **rendering** fixture: it stands for what a file can hold, not for
+ * what any particular wire value can carry. A NUL, for instance, cannot reach an
+ * `UnknownEntry.value_text` at all — inside a quoted scalar it fails the parse
+ * outright, and inside a plain one the parser **stops** at it, so the NUL and
+ * everything after it fall outside every node span. So nothing may use this
+ * constant to claim that one does. {@link PARSEABLE_HAZARDS} is the subset that
+ * survives a parse.
+ */
+export const EVERY_TEXT_HAZARD = [
+  '  line one  \r\n', // CRLF, and two real trailing spaces before it
+  '  line two\n', // a bare LF among the CRLF endings
+  '\n', // an empty line, which must stay one line
+  '  caf\u{65}\u{301} caf\u{e9} \u{1f600}\n', // decomposed é, precomposed é, astral
+  '  soft\u{2028}break\u{2029}here\n', // the two Unicode separators
+  '  nul\u{0}here\n', // a NUL
+  '  bell\u{7}here\n', // any other C0 control
+  '  return\rhere\n', // a carriage return that is not part of a CRLF
+  '  zero\u{feff}width\n', // U+FEFF away from the start of a document
+  '  tab\there' // a tab, and no final newline
+].join('');
+
+/**
+ * The hazards a document that **parses** can still put in a value.
+ *
+ * Measured rather than reasoned, twice. 1c-2b-2a measured that the substrate
+ * accepts U+2028 and U+2029 and that a NUL never survives to a span
+ * (`docs/decisions/1c-2b-2a-notes.md` section 4). The 1c-2b-2b-1 review measured
+ * the rest, because a note claimed it instead:
+ * `which_control_characters_can_reach_a_projected_slice` in
+ * `crates/espansoconfig-core/tests/model_projection.rs` shows that **the other
+ * C0 and C1 controls parse and land inside a match's own span**, and so does a
+ * lone carriage return when the line that follows it is properly indented. Both
+ * are therefore in this constant.
+ *
+ * So this is what an unmodelled entry's value can really carry, and it is what a
+ * test about `UnknownEntry.value_text` may use.
+ */
+export const PARSEABLE_HAZARDS = [
+  '  keeps  \r\n',
+  '  caf\u{65}\u{301} \u{1f600}\n',
+  '  bell\u{7}here\n',
+  '  return\rhere\n',
+  '  zero\u{200b}width\n',
+  '  soft\u{2028}break\u{2029}here'
+].join('');
+
+/**
  * One mapping entry the projection did not model.
  *
  * @param key - The key's decoded text, or `null` for a non-scalar key.
@@ -167,12 +223,15 @@ export function unknownEntry(
     key,
     key_node: keyNode,
     key_span: { start: 0, end: 1 },
-    value_span: { start: 1, end: 2 },
+    // Empty exactly when the text is, and never measured out of it. The wire's
+    // spans count bytes and this is a JavaScript string, so a fixture that cut
+    // one out of the other would model the exact confusion the field exists to
+    // avoid — but a fixture whose span said "one byte" while its text said
+    // "nothing" would contradict itself, and `sourceSlice()` in `./detail.ts`
+    // reads precisely that pair to tell an empty value from an unreadable one.
+    value_span: { start: 1, end: valueText === '' ? 1 : 2 },
     value_kind: 'Scalar',
-    // Carried since Phase 1c-2b-2a. It is deliberately **not** derived from
-    // `value_span` here: the wire's spans count bytes and this is a JavaScript
-    // string, so a fixture that cut one out of the other would model the exact
-    // confusion the field exists to avoid.
+    // Carried since Phase 1c-2b-2a, and drawn on screen since 1c-2b-2b-1.
     value_text: valueText,
     path: null,
     reason

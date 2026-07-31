@@ -34,6 +34,7 @@ import {
   optionGroupKey,
   scalarDisplay,
   scalarRow,
+  sourceSlice,
   styleWorthShowing,
   type DetailFieldName,
   type LineBlock,
@@ -48,6 +49,7 @@ import {
   field,
   makeMatch,
   makeVariable,
+  PARSEABLE_HAZARDS,
   scalar,
   scalarItem,
   styledScalar,
@@ -591,7 +593,85 @@ describe('an entry the projection did not model', () => {
     expect(variable.unknown[0]?.key).toEqual({ kind: 'empty' });
     expect(match.unknown[0]?.key).toEqual({ kind: 'empty' });
   }); // End of the "shape a variable and a match hand the pane" case
+
+  it('carries the value’s own bytes, hazards and all', () => {
+    // The half of Phase 1c-2b-2b-1 that the wire had been waiting for since
+    // 1c-2b-2a. `PARSEABLE_HAZARDS` is what a value in a document that *parses*
+    // can really hold — a NUL is not in it, because a source containing one
+    // does not parse and so yields no unmodelled entry at all.
+    const row = describeUnknown(unknownEntry('surprise', 'NotModelled', 4, PARSEABLE_HAZARDS));
+    expect(row.value).toEqual({ kind: 'text', text: PARSEABLE_HAZARDS });
+  }); // End of the "value's own bytes" case
+
+  it('does not re-slice anything: the text is the text the wire carried', () => {
+    // `value_span` is a byte range and this is a JavaScript string, so the two
+    // are not interchangeable and nothing here may cut one out of the other
+    // (`docs/decisions/1c-2b-2a-notes.md` section 4.2). The entry below has a
+    // two-byte span and a ten-character value, and the model must answer all
+    // ten characters.
+    const entry = { ...unknownEntry('k'), value_text: '\u{1f600}123456789' };
+    expect(describeUnknown(entry).value).toEqual({ kind: 'text', text: '\u{1f600}123456789' });
+  }); // End of the "no re-slicing" case
+
+  it('tells an empty value apart from one it could not read', () => {
+    const empty = describeUnknown(unknownEntry('k', 'NotModelled', 0, ''));
+    expect(empty.value).toEqual({ kind: 'empty' });
+
+    const unreadable = { ...unknownEntry('k'), value_text: '', value_span: { start: 4, end: 9 } };
+    expect(describeUnknown(unreadable).value).toEqual({ kind: 'unavailable' });
+  }); // End of the "empty against unreadable" case
 }); // End of the "entry the projection did not model" suite
+
+describe('a slice of the file’s own bytes', () => {
+  it('is the text when there is text', () => {
+    expect(sourceSlice('a: b', { start: 0, end: 4 })).toEqual({ kind: 'text', text: 'a: b' });
+  });
+
+  it('is empty when the span is empty, because then the file really writes nothing', () => {
+    expect(sourceSlice('', { start: 7, end: 7 })).toEqual({ kind: 'empty' });
+  });
+
+  it('is unavailable when the span is not empty and no text came with it', () => {
+    // `docs/decisions/1c-2b-2a-notes.md` hole 7, decided rather than inherited:
+    // an empty string means two different things and only the span separates
+    // them. Drawing both as nothing would tell the reader the file holds
+    // nothing in the case where this app simply failed to read it.
+    //
+    // **This is the model half and only the model half.** Nothing in this
+    // repository renders a Svelte component in an automated test, and this arm
+    // is unreachable except through a defect, so the sentence it draws —
+    // `browser.detail.valueUnavailable` — has never been read on a screen. That
+    // is hole 8 of `docs/decisions/1c-2b-2b-1-notes.md`, restated at the review
+    // rather than closed: the 1c-2b-2b-1 fix round removed the *false* caption
+    // above this arm, which is a different thing from having seen it.
+    expect(sourceSlice('', { start: 7, end: 12 })).toEqual({ kind: 'unavailable' });
+  });
+}); // End of the "slice of the file's own bytes" suite
+
+describe('the match’s own bytes', () => {
+  it('are on the model, exactly as the wire carried them', () => {
+    const match = makeMatch({ sourceText: 'trigger: :hi\n    replace: there' });
+    expect(describeMatch(match).source).toEqual({
+      kind: 'text',
+      text: 'trigger: :hi\n    replace: there'
+    });
+  });
+
+  it('keep every hazard a slice of a real file can carry', () => {
+    const match = makeMatch({ sourceText: PARSEABLE_HAZARDS });
+    expect(describeMatch(match).source).toEqual({ kind: 'text', text: PARSEABLE_HAZARDS });
+  });
+
+  it('are not narrowed to a display projection', () => {
+    // The same property `selection.ts` rests on, asked of the pane: two matches
+    // differing only in an option the projection does not surface must produce
+    // different source text. A model that rebuilt this from the rows would
+    // answer the same thing twice.
+    const first = describeMatch(makeMatch({ trigger: ':same', options: { word: 'true' } }));
+    const second = describeMatch(makeMatch({ trigger: ':same', options: { word: 'false' } }));
+    expect(first.source).not.toEqual(second.source);
+  }); // End of the "not narrowed to a display projection" case
+}); // End of the "match's own bytes" suite
 
 describe('the field labels', () => {
   it('name a key that exists in both dictionaries, for every field', () => {
@@ -727,23 +807,109 @@ describe('the source of the pane that renders this model', () => {
     expect(source).toContain('.bullet {');
   });
 
-  it('says what shape an unmodelled entry holds, and does not print the value', () => {
-    // The pane names the shape and says the value is not on screen. Since Phase
-    // 1c-2b-2a `UnknownEntry.value_text` is on the wire, so "cannot" became
-    // "does not": `UnknownRow` does not carry it and this pane does not read
-    // it, which is what keeps `browser.detail.unknownValue` true. A version
-    // that started printing the value while those strings still said it did not
-    // would be the 1c-2a review's first finding in reverse.
+  it('says what shape an unmodelled entry holds, and draws its value', () => {
+    // Until Phase 1c-2b-2b-1 the assertions here were the opposite ones: the
+    // file was required *not* to name the value, because the string beside it
+    // said the value was not on screen. Both halves moved in one commit, and
+    // the suite below is what fails if either half is put back alone.
     expect(source).toContain('browser.detail.unknownValue');
     expect(source).toContain('tValueKind(entry.valueKind)');
-    // The scan is over the whole file, comments included, so it also fires on a
-    // comment that merely names the field. That is the safe direction — it can
-    // only ever be too strict — and it is why the doc block above talks about
-    // "the value's own text" rather than spelling the wire field.
-    expect(source).not.toContain('value_text');
-    expect(source).not.toContain('valueText');
+    expect(source).toContain('slice(entry.value)');
   }); // End of the "shape of an unmodelled entry" case
+
+  it('claims the bytes are the file’s own inside the text arm and nowhere else', () => {
+    // The 1c-2b-2b-1 review's first finding, made mechanical. `SourceSlice` has
+    // three arms and the caption was above all three, so a span this app could
+    // not read was captioned "shown here as the file writes it" with "could not
+    // read these bytes" directly underneath. The claim now belongs to the arm it
+    // is true of, and this is a **position** assertion rather than a presence
+    // one: moving the sentence back above the `{#if}` puts its index before the
+    // text arm's and fails here.
+    const arm = source.indexOf("{#if one.kind === 'text'}");
+    const claim = source.indexOf('browser.detail.valueAsWritten');
+    const empty = source.indexOf("{:else if one.kind === 'empty'}");
+    expect(arm, 'the text arm of the slice snippet').toBeGreaterThan(-1);
+    expect(claim, 'the as-written claim').toBeGreaterThan(arm);
+    expect(claim, 'the as-written claim').toBeLessThan(empty);
+    // And exactly once: a second copy would be a second arm's caption.
+    expect(source.split('browser.detail.valueAsWritten').length - 1).toBe(1);
+  }); // End of the "as-written claim" case
+
+  it('draws the match’s own bytes through the shared rendering primitive', () => {
+    // Not a `<pre>` of its own: how a byte survives rendering is decided in
+    // `./sourceText.ts` and drawn by one component, which 1c-2b-2b-2's raw
+    // viewer will use for a whole document.
+    expect(source).toContain('slice(detail.source)');
+    expect(source).toContain('browser.detail.section.source');
+    expect(source).toContain('browser.detail.sourceScope');
+    expect(source).toContain('<SourceText text={one.text} />');
+  }); // End of the "match's own bytes" case
 }); // End of the "source of the pane that renders this model" suite
+
+describe('the two halves that may only travel together', () => {
+  /*
+   * **The 1c-2a review's first finding, made mechanical.** A pane that shows an
+   * unmodelled value while its caption says the value is not shown is the exact
+   * defect that review found, and reading `value_text` without rewording the
+   * caption reintroduces it in the other direction. So the withdrawn sentences
+   * are written out here, in both languages, and asserted gone: putting either
+   * one back — or reverting the model so the value is no longer carried — fails
+   * this suite by name.
+   *
+   * It is a string comparison and it says only what a string comparison can: it
+   * cannot tell whether the *new* sentence is true. That is what the window
+   * reading in `docs/decisions/1c-2b-2b-1-notes.md` is for.
+   */
+  const WITHDRAWN: ReadonlyMap<'en' | 'es', string> = new Map([
+    ['en', 'holds {kind}, which this pane does not show'],
+    ['es', 'contiene {kind}, que este panel no muestra']
+  ]);
+
+  /**
+   * The **second** withdrawn pair, and the reason there are two.
+   *
+   * The first sentence was withdrawn because the pane started showing the
+   * value. Its replacement — "holds {kind}, shown here as the file writes it" —
+   * was withdrawn at the 1c-2b-2b-1 review because it was above **all three**
+   * arms of `SourceSlice`, so an unreadable span was captioned as shown. A
+   * caption above every arm is the defect; these are the two sentences that
+   * were it, and neither may come back.
+   */
+  const SUPERSEDED: ReadonlyMap<'en' | 'es', string> = new Map([
+    ['en', 'holds {kind}, shown here as the file writes it'],
+    ['es', 'contiene {kind}, que se muestra aquí tal y como lo escribe el archivo']
+  ]);
+
+  it('no longer says the pane does not show an unmodelled value', () => {
+    for (const [locale, withdrawn] of WITHDRAWN) {
+      expect(DICTIONARIES[locale]['browser.detail.unknownValue'], locale).not.toBe(withdrawn);
+    }
+  });
+
+  it('no longer claims above every arm that the value is shown as written', () => {
+    for (const [locale, superseded] of SUPERSEDED) {
+      expect(DICTIONARIES[locale]['browser.detail.unknownValue'], locale).not.toBe(superseded);
+    }
+  });
+
+  it('says only what shape the value has, so all three arms can follow it', () => {
+    // The positive half of the rule: the caption above the `{#if}` may name the
+    // value's kind and nothing else, because whatever it says has to stay true
+    // when the arm underneath is `empty` or `unavailable`. The one operand it
+    // may carry is `{kind}`.
+    for (const locale of ['en', 'es'] as const) {
+      const sentence = DICTIONARIES[locale]['browser.detail.unknownValue'];
+      expect(sentence, locale).toContain('{kind}');
+      expect(sentence.replace('{kind}', '').length, locale).toBeLessThan(12);
+    } // End of the loop over the two locales
+  });
+
+  it('carries the value on the model, which is what made the sentence false', () => {
+    const row = describeUnknown(unknownEntry('k', 'NotModelled', 0, 'shown'));
+    expect(row.value).toEqual({ kind: 'text', text: 'shown' });
+  });
+
+}); // End of the "two halves" suite
 
 describe('the global stylesheet', () => {
   /*

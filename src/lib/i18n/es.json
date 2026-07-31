@@ -48,6 +48,7 @@
   "browser.detail.section.variables": "Variables",
   "browser.detail.section.formFields": "Campos del formulario",
   "browser.detail.section.unknown": "Entradas que esta aplicación no modela",
+  "browser.detail.section.source": "Texto de origen",
 
   "browser.detail.options.matching": "Límites de palabra",
   "browser.detail.options.case": "Mayúsculas",
@@ -68,7 +69,10 @@
   "browser.detail.ambiguousDetail": "Las dos versiones de YAML leen este valor de forma distinta, así que se muestra tal y como lo escribe el archivo.",
   "browser.detail.unknownCount.one": "{count} entrada se registró y se dejó intacta.",
   "browser.detail.unknownCount.other": "{count} entradas se registraron y se dejaron intactas.",
-  "browser.detail.unknownValue": "contiene {kind}, que este panel no muestra",
+  "browser.detail.unknownValue": "contiene {kind}",
+  "browser.detail.valueAsWritten": "se muestra aquí tal y como lo escribe el archivo",
+  "browser.detail.valueUnavailable": "Esta aplicación no ha podido leer estos bytes.",
+  "browser.detail.sourceScope": "La parte del archivo que esta aplicación considera el fragmento en sí. Lo que lo rodea en la lista, la sangría que lo precede y cualquier comentario anterior o posterior quedan fuera.",
 
   "browser.detail.field.trigger": "Disparador",
   "browser.detail.field.triggers": "Disparadores",
@@ -94,6 +98,17 @@
   "browser.detail.field.params": "Parámetros",
   "browser.detail.field.dependsOn": "Depende de",
   "browser.detail.field.injectVars": "Inyectar variables",
+
+  "browser.source.invisibleDetail": "El archivo contiene este carácter aquí. No dibuja nada por sí mismo, así que esta aplicación lo nombra en vez de no mostrarte nada.",
+  "browser.source.invisible.bom": "marca de orden de bytes {code}",
+  "browser.source.invisible.nul": "carácter nulo {code}",
+  "browser.source.invisible.carriageReturn": "retorno de carro {code}",
+  "browser.source.invisible.lineSeparator": "separador de línea {code}",
+  "browser.source.invisible.paragraphSeparator": "separador de párrafo {code}",
+  "browser.source.invisible.softHyphen": "guion discrecional {code}",
+  "browser.source.invisible.zeroWidth": "carácter de ancho cero {code}",
+  "browser.source.invisible.bidi": "control de dirección del texto {code}",
+  "browser.source.invisible.other": "carácter invisible {code}",
 
   "browser.notice.kept": "Este archivo ha cambiado en el disco y el fragmento que tenías seleccionado se ha vuelto a encontrar.",
   "browser.notice.differentMatch": "Este archivo ha cambiado en el disco y en esa posición hay ahora un fragmento distinto, así que se ha borrado la selección.",
