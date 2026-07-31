@@ -2001,7 +2001,7 @@ _Updated at each phase boundary._
 | 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2b | `912cb89` | ✅ pushed to `origin/main` | clean |
-| 1a | `PENDING` | pending | pending |
+| 1a | `185c9a6` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2040,7 +2040,7 @@ Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings")
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
 `.claude/`. Benign and left in place.
 
-Phase 1a is the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
+`185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were
 closed, so no commit holds the demonstrated positional-identity defect or the vacuous coverage audit.
 It contains `src/model/` (nine files), `src/workspace/mod.rs`, the two new test binaries, the
