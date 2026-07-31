@@ -2552,6 +2552,19 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 **Phase 1c-2a is complete. Start Phase 1c-2b — the app's judgements, and Phase 1's exit.**
 
+> ### ⚠️ Do this first: the pane's screen evidence is stale
+>
+> `82ad7c5`, a post-review cleanup pass, **changed `DetailPane.svelte`'s markup and moved its
+> indentation CSS into `src/app.css`** — and **no window reading was re-taken**. By this project's own
+> standing rule (*a component that no test renders is a component nobody has run*), the readings in
+> `1c-2a-notes.md` §11 describe the pane as it was at `5c830d0`, not as it is now. Three things are
+> therefore unverified on a screen: the option groups now render through one `{#each}` instead of four
+> `{#if}` blocks, an unmodelled entry's key renders through a three-arm label, and **the six `.depth-*`
+> rules now live in an unscoped stylesheet** — they are confirmed present and un-suffixed in
+> `dist/assets/*.css`, but experiments N and P established that presence in the bundle is *not* evidence
+> a rule is used. **1c-2b must re-take a reading before claiming anything about this pane**, and it gets
+> that for free since it will be editing the same component anyway.
+
 The detail pane now renders the match itself: §3.3's fields, §3.4's nine variable types, §3.5's forms
 and the entries the projection did not model, all as source text, all seen in a running window in both
 languages. **What it does not yet do is say anything *about* that snippet or the file behind it.**
@@ -2848,6 +2861,7 @@ _Updated at each phase boundary._
 | 1b-2b | `065a516` | ✅ pushed to `origin/main` | clean |
 | 1c-1 | `59d4207` | ✅ pushed to `origin/main` | clean |
 | 1c-2a | `5c830d0` | ✅ pushed to `origin/main` | clean |
+| 1c-2a cleanup | `82ad7c5` | ✅ pushed to `origin/main` | clean |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -2934,6 +2948,19 @@ audited what the implementation chose to emit. It contains the pane's model
 `docs/reviews/phase-1c-2a-detail-pane.md` and this checkpoint. **A fresh session starting Phase 1c-2b
 should start from `5c830d0` or later.** As at 1b-1, `npm install` (or `npm ci`) is required before any
 frontend command will run.
+
+`82ad7c5` is a **code-quality cleanup pass over 1c-2a**, not a phase: twelve fixes from four
+independent review angles (reuse, simplification, efficiency, altitude), no behaviour change intended
+and no dictionary key added or removed. Its recurring theme was decisions living in the one file no test
+can execute — the option groups, the discovery predicate and the unmodelled-entry key label all moved
+into the tested model, and the third was hiding a real defect (an entry whose key is the empty string
+rendered a blank `<dt>`). It also stopped two projections discarding node identity the wire had already
+carried, lifted the exhaustiveness helpers into `src/lib/i18n/exhaustive.ts`, and moved the `.depth-*`
+ladder and the monospace face into `src/app.css`. **The efficiency angle found nothing worth fixing and
+said so**: it decompiled the Svelte output to show `describeMatch()` is already a memoized `$.derived`
+that unrelated state does not invalidate, and measured it at 9.3 µs on a typical match. 412 → 425
+frontend tests. **It changed `DetailPane.svelte` without re-taking a window reading — see the warning at
+the top of "Next action".**
 
 `185c9a6` is Phase 1a, the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
 is committed **including its review fix round** — the phase was held open until all five findings were
