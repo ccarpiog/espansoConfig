@@ -33,6 +33,8 @@
 //! `IMPLEMENTATION_PLAN.md` section 6.2, and the answer is recorded in
 //! [`TriviaItem::owner`] and [`TriviaIndex::comments`].
 
+use serde::Serialize;
+
 use crate::syntax::node::NodeId;
 use crate::syntax::ownership;
 use crate::syntax::{ByteSpan, SyntaxIndex};
@@ -247,7 +249,7 @@ pub struct CommentAttachment {
 /// one of `PROGRESS.md`'s open risks, and plan section 13 defers visual editing
 /// of anchors, aliases, tags and merge keys out of v1 entirely — so the gate
 /// refuses them rather than modelling them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum HazardKind {
     /// A comment sits inside a flow collection, where it belongs to no entry
     /// (`PROGRESS.md`, R6).

@@ -65,13 +65,14 @@
 //! The textual form spells a non-zero document as a leading `#N`, and omits it
 //! for document 0 — see [`DocumentPath`]'s `Display`.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
 use crate::syntax::{Node, NodeId, NodeKind, NodeRole, SyntaxIndex};
 
 /// One step of a [`DocumentPath`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PathSegment {
     /// Descend into a mapping by key — the `replace` of `matches[0].replace`.
     ///
@@ -140,7 +141,7 @@ impl PathSegment {
 /// awkward keys included. The reverse is not guaranteed: parsing accepts the
 /// redundant `#0.` prefix and quotes around keys that need none, and `Display`
 /// normalises both away.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DocumentPath {
     document_index: usize,
     segments: Vec<PathSegment>,

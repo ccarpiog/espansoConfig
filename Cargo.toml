@@ -12,6 +12,8 @@ repository = "https://github.com/ccarpiog/espansoConfig"
 # Shared dependency versions. Every member crate inherits from here so the
 # workspace can never end up with two versions of the YAML substrate.
 [workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 yaml-rust2 = "0.11"

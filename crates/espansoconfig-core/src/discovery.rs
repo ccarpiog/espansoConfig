@@ -25,13 +25,15 @@
 //!   "fix" them.
 //! - Anything under `match/packages/` came from the Hub and is read-only.
 
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
 /// What a discovered file is, from espanso's point of view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum FileKind {
     /// A snippet file under `match/`, outside `match/packages/`.
     MatchFile,
@@ -113,6 +115,11 @@ impl ConfigTree {
 }
 
 /// Everything that can go wrong while locating or reading a config tree.
+///
+/// [`Serialize`] is hand-written because [`std::io::Error`] is not
+/// serializable: the `Io` variant crosses the IPC boundary as its
+/// [`std::io::ErrorKind`] name, which is a code the frontend translates, never
+/// as a rendered English message (plan section 9).
 #[derive(Debug)]
 pub enum DiscoveryError {
     /// No candidate directory existed. Carries the paths that were tried, so
@@ -153,6 +160,33 @@ impl fmt::Display for DiscoveryError {
             }
         }
     } // End of function fmt() for DiscoveryError
+}
+
+impl Serialize for DiscoveryError {
+    /// Serializes as `{ "code": …, … operands }` — codes and data, no prose.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            DiscoveryError::ConfigDirNotFound { candidates } => {
+                let mut out = serializer.serialize_struct("DiscoveryError", 2)?;
+                out.serialize_field("code", "configDirNotFound")?;
+                out.serialize_field("candidates", candidates)?;
+                out.end()
+            }
+            DiscoveryError::NotADirectory(path) => {
+                let mut out = serializer.serialize_struct("DiscoveryError", 2)?;
+                out.serialize_field("code", "notADirectory")?;
+                out.serialize_field("path", path)?;
+                out.end()
+            }
+            DiscoveryError::Io { path, source } => {
+                let mut out = serializer.serialize_struct("DiscoveryError", 3)?;
+                out.serialize_field("code", "io")?;
+                out.serialize_field("path", path)?;
+                out.serialize_field("kind", &format!("{:?}", source.kind()))?;
+                out.end()
+            }
+        }
+    } // End of function serialize() for DiscoveryError
 }
 
 impl std::error::Error for DiscoveryError {

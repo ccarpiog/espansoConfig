@@ -13,12 +13,19 @@ repository.workspace = true
 # described in IMPLEMENTATION_PLAN.md section 6.1.
 # ---------------------------------------------------------------------------
 [dependencies]
+# Serialization for the read model only. The Tauri boundary in Phase 1b is a
+# thin wrapper over these types, so they must cross it without a second copy of
+# every struct. `serde` pulls in no platform code and no tauri.
+serde.workspace = true
 sha2.workspace = true
 # The YAML substrate chosen in Phase 0a (docs/parser-evaluation.md). It is
 # confined to `crate::syntax`; no other module may import it.
 saphyr-parser.workspace = true
 
 [dev-dependencies]
+# Only the tests need a concrete format: they assert the read model actually
+# serializes, which a `derive` alone does not prove.
+serde_json.workspace = true
 tempfile.workspace = true
 yaml-rust2.workspace = true
 marked-yaml.workspace = true

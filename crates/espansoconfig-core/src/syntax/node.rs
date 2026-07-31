@@ -4,6 +4,8 @@
 //! is the first byte on disk, BOM included), a stable identity, and its place
 //! in the tree.
 
+use serde::{Deserialize, Serialize};
+
 use crate::syntax::block::BlockHeader;
 use crate::syntax::collection::CollectionExtent;
 use crate::syntax::{ByteSpan, ScalarPresentation, ScalarStyle};
@@ -14,7 +16,7 @@ use crate::syntax::{ByteSpan, ScalarPresentation, ScalarStyle};
 /// valid for the lifetime of the index. It is deliberately **not** a positional
 /// index into a `matches:` sequence: those shift when entries are reordered,
 /// which plan section 6.2 forbids as a match identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId(u32);
 
 impl NodeId {
@@ -33,7 +35,7 @@ impl NodeId {
 }
 
 /// What kind of YAML construct a node is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum NodeKind {
     /// One document of the stream. A file may hold several.
     Document,

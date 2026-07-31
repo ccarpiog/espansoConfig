@@ -66,6 +66,8 @@ pub use node::{
     TagSpelling,
 };
 pub use preamble::DocumentPreamble;
+use serde::{Deserialize, Serialize};
+
 pub use trivia::{
     BlankRun, CommentAttachment, CommentOwner, Hazard, HazardKind, OwnershipRule, Punctuation,
     TriviaIndex, TriviaItem, TriviaKind,
@@ -76,7 +78,9 @@ pub use trivia::{
 /// Byte offsets, not character offsets: the corpus contains Spanish accents and
 /// `⌘`/`⌥`/`⇧` symbols, so a character-indexed span would silently disagree
 /// with `&source[span]`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub struct ByteSpan {
     /// First byte of the span.
     pub start: usize,
@@ -138,7 +142,7 @@ impl ByteSpan {
 ///
 /// We read all five. We only ever *emit* the first four: folded scalars change
 /// the data on round-trip and are never chosen for new content (section 6.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum ScalarStyle {
     /// Unquoted, e.g. `trigger: :hello`.
     Plain,
@@ -164,7 +168,7 @@ impl ScalarStyle {
 ///
 /// Recovering this correctly is a hard requirement: getting it wrong silently
 /// adds or removes a newline from the user's expansion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Chomping {
     /// `|-` — strip every trailing newline.
     Strip,

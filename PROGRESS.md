@@ -22,8 +22,17 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **0c-3b-2a** | Move a match · the stronger whole-document invariant · the move sweep | ✅ complete — after the review fix round below |
 | **0c-3b-2b** | The round-trip property test over both corpora (R9) · R16 · the gate verdict | ✅ complete — after the review fix round below |
 | **Phase 0** | **⛔️ architectural gate (R4)** | ✅ **PASSED**, with four named qualifications — see the verdict below |
-| 1 | Read-only browser | ⬜️ **next** — unblocked by the gate |
+| **1a** | The core-side read model: the semantic projection · the workspace and its per-revision cache | ✅ complete — after the review fix round below |
+| 1b | The Tauri v2 shell · the Svelte 5 + TypeScript + Vite frontend scaffold · i18n in both languages | ⬜️ **next** |
+| 1c | The three-pane browser: navigation, search, the raw YAML viewer, hazard flagging | ⬜️ not started |
 | 2–5 | See plan §12 | ⬜️ not started |
+
+**Phase 1 is split into 1a / 1b / 1c** for the reason every Phase 0 split had: one worker cannot hold
+it coherently. The cut is by *medium*, not by feature — **1a is Rust with no UI at all**, and it is
+what makes "every snippet renders correctly" a checkable claim before a single pixel exists; 1b is the
+shell and the boundary, where nothing is yet rendered from real data; 1c is the browser itself. The
+plan's stated exit for Phase 1 — *the owner can browse their entire real config and every snippet
+renders correctly* — lands at the end of **1c**.
 
 Phase 0 as written in the plan was split into **0a / 0b / 0c** because it was too large for one
 coherent unit of work, and **0c** was split again into **0c-1 / 0c-2 / 0c-3** for the same reason:
@@ -424,6 +433,55 @@ non-string. Fixed in `is_conservatively_safe_plain_scalar`.
 evidence that included E5 — a demonstrated production escape — as *supporting* evidence. See the
 disposition below. The phase was held open, the blocker was closed **in production**, and the verdict was
 **re-derived rather than reworded**.
+
+### Phase 1a — the core-side read model
+
+The first work after the gate, and still **no UI**: `crate::model` projects a parsed document into the
+read-only view the browser will render, and `crate::workspace` is the load-and-cache layer Phase 1b's
+Tauri commands wrap. The decision record is
+[`docs/decisions/1a-notes.md`](docs/decisions/1a-notes.md).
+
+**The projection is a projection, and D2u is a type rather than a note.** `DocumentView` → `MatchView`
+(all 22 of plan §3.3's fields) / `VariableView` (the nine §3.4 types, `params` shallow) /
+`ConfigProfileView`, with every user-authored scalar exposed as a `ScalarView` holding `decode()`'s
+**source text**. There is no `bool`, no `i64` and no value enum anywhere a user's scalar can reach —
+`word` and `propagate_case` included, which is the whole point: rendering `on` as a boolean is R16's
+open half making a claim this project has not earned. `ScalarView` carries an `ambiguous_yaml_1_1` flag
+read off `emit::tags` — a claim about *risk*, which D2u permits. A badge likewise comes from a key's
+presence or a `type` field's text, **never from a value**, so there is deliberately no "word boundary
+ON" badge; `badges_come_from_key_presence_and_type_text_never_from_a_scalar_value` pins the absence.
+
+**"No key is dropped" is a checked accounting, not a promise.** Every key is either modelled, or
+recorded as an `UnknownEntry` by name and path, or **lies inside a recorded undescended span** — the
+third clause is the review's finding 2, and it is stated as a bound rather than folded into the claim.
+The library checks it itself (`DocumentView::unaccounted_keys` → `DiagnosticCode::KeyNotAccountedFor`),
+which is R24 applied before a reviewer had to; and the test-side oracle derives its expectation from
+the **document tree**, not from the records the projection emitted, which is what the first version got
+wrong. Measured: **546 synthetic keys = 518 named + 28 span-accounted**, and **566 real = 566 named**.
+
+**Identity is scoped to the parse that minted it, and a stale one is refused** (D2v). This is the
+review's finding 1 and it was a real defect: `NodeId` is the parser's arena index, so exchanging two
+equally shaped matches and reparsing handed `:a`'s identity to `:b`. `MatchId` now carries the
+document's `ContentRevision` and `match_by_id` returns `Result<_, IdentityError>`; `DocumentId` comes
+from a monotonic session counter keyed by path rather than from sorted enumeration position, so adding
+an alphabetically earlier file no longer re-points a retained id at another file.
+
+**The cache is R19's remaining half, answered.** `Workspace::{discover, summary, list_documents,
+get_document, get_match, document_view, document_text, refresh, load_all, evict}` builds the
+`SyntaxIndex` + `TriviaIndex` **once per `ContentRevision`** and serves views from the cache;
+`loading_every_document_parses_each_exactly_once` and
+`a_second_view_of_one_revision_is_served_without_reparsing` pin it against an instrumented parse
+counter. A cache slot may hold only what the disk held — the draft-injecting entry point the first
+version exposed is gone (finding 3), because plan §6.4 gives disk state to Rust and the draft to the
+frontend.
+
+**What is proven.** Every match in all 33 synthetic fixtures projects, pinned per fixture in a table
+asserted to cover the corpus exactly, and the real corpus projects with every figure computed. Every
+fixture survives truncation at every character without a panic; the four deliberately invalid fixtures
+yield typed diagnostics and still expose their raw text; a document that is not espanso-shaped at all
+projects rather than failing. **471 tests pass**, up from Phase 0's 465.
+
+**Five review findings, all closed, and two of them were real defects** — see the disposition below.
 
 ---
 
@@ -1131,6 +1189,55 @@ type is a guess, however well-informed. **Flagging** a scalar as 1.1-ambiguous i
 encouraged, because that is a statement about *risk*, which we can prove, rather than about *meaning*,
 which we cannot.
 
+### D2v — an identity is scoped to the parse that minted it, and a stale one is refused
+
+From the Phase 1a review's finding 1, which was a **real defect and not a theoretical one**. `MatchId`
+was `DocumentId` + `NodeId`, and both components are positional under the hood: `NodeId` is the parser's
+arena index, assigned in emission order, and `DocumentId` was the file's position in the sorted
+enumeration. So exchanging two equally shaped matches and reparsing handed `:a`'s former identity to
+`:b` — **identity following position, which plan §6.2 forbids in as many words**. The test that claimed
+to cover this was named `…survives_a_reordering` and never reordered anything: it is the third
+occurrence of the oracle-that-cannot-disagree failure mode (R24), and the first one a reviewer rather
+than the phase itself caught.
+
+**The fix is refusal, not reconstruction.** A content-derived stable identity — matching nodes across a
+reparse by their content — was considered and rejected: it is a much larger design, it must decide what
+"the same match" means when the user edits the trigger, and Phase 1 does not need it. Instead:
+
+- `MatchId` carries the document's `ContentRevision`, and `match_by_id` returns
+  `Result<_, IdentityError>`. An identity from a different parse yields `IdentityError::StaleRevision`
+  naming both revisions. It is never resolved to *a* match, and above all never to the wrong one.
+- `DocumentId` is allocated from a **monotonic session counter keyed by path**, so reopening a directory
+  keeps every existing id, a new file gets a fresh one, and a removed file's id becomes a typed
+  unknown-document error rather than aliasing whatever slid into its position.
+
+**What this costs, and who pays it.** Phase 1b and every later phase must handle `StaleRevision` on
+every lookup that crosses a `refresh()` — which is the correct shape for a UI holding a selection across
+an external file change, and is the same conversation plan §6.5's reconciliation already requires. The
+mirror image is pinned too: reprojecting the *same* bytes mints the *same* identity, so the refusal is
+about the revision changing and not merely about reparsing.
+
+### D2w — an unmodelled subtree is accounted for by span, and that is a bound rather than a claim
+
+Plan §6.2 says unknown entries are never silently discarded. The first Phase 1a draft recorded an
+unrecognised key by name and **did not descend into it**, so `future_option: {nested_key: …}` recorded
+`future_option` and left `nested_key` recorded nowhere — while every coverage check passed, because they
+iterated the records the projection had chosen to emit. A missing record was therefore invisible: the
+audit was vacuous in exactly the way `0c-3b-1`'s property 6 was.
+
+**The claim is now stated so it can be false:** *every key is either modelled, or recorded by name and
+path, or lies inside a recorded undescended span.* The third clause is a real bound — the span comes
+from a node the index published — and it is checked in the **library**
+(`DocumentView::unaccounted_keys` → `DiagnosticCode::KeyNotAccountedFor`), not only in a test, per R24.
+The test-side oracle derives its expectation from the **document tree**; suppressing a coverage
+record's *creation* now fails both corpus sweeps, which the old per-record audit could not see.
+
+**What it does not say.** A key inside an undescended span is *accounted for*; it is **not** addressable,
+searchable or displayable as a field. That is the deliberate trade, and a later phase that wants to
+render such a subtree must decide how rather than assume the projection already did. Accounting is by
+**containment**, so an over-wide recorded span would over-account — unreachable today, and weaker than
+per-key attribution would be.
+
 ### D3b — incomplete input never panics
 
 21 054 prefixes of the valid corpus plus 15 hand-written half-states: **0 panics**, 11 clean
@@ -1176,6 +1283,10 @@ carries a `bom` flag so the byte is restored verbatim on write.
 | R24 | **A safety property that lives only in the test suite is not a safety property** — 0c-3b-2a shipped `the_arrival_is_the_departure` in the sweep but not in `verify()`, so a defective planner that permuted the bytes it carried could still mint a `PatchedDocument` | **Closed in 0c-3b-2a's fix round (D2q)**, and recorded as a *class* rather than an incident: the check is now a production property, plus `comment_ownership_survives` for the re-attribution variant no byte comparison can see. **Standing instruction for every later phase: when a sweep proves something the engine relies on, ask whether the engine asserts it too.** The pattern to watch for is a property whose only home is a test file whose name ends in the thing it protects. Pinned by `every_other_move_property_certifies_the_permuted_candidate`, which asserts the other four properties **accept** the corrupted candidate. **It recurred immediately in 0c-3b-2b** — a removal envelope swallowing an unowned blank line was caught by nothing in production, because `bytes_outside_the_replacements_match` authorised it from the envelope's own declaration. Closed by `RemovalCarriesMoreThanTheEntry` (D2t). **The gate now rests on no property whose only home is a test file**, and that sentence is the closure condition: check it again whenever a sweep gains a property. |
 | R25 | **Move verification is not compositional** — `MoveMustBeTheOnlyEditInItsBatch` refuses a batch pairing a move with any other edit, including the safe and obvious "move this match and change its `replace`" | Accepted as a **deliberate phase-scope limit, not an invariant**, and relabelled as such after the 0c-3b-2a review found the original circularity argument unconvincing. It conceals no demonstrated splice-order bug — a single move still exercises descending application of its own runs. Two costs, both recorded: the safe combined request above is refused, and **`OverlappingEdits` is consequently never tested against a move-versus-edit conflict**, because the restriction rejects such batches before overlap analysis runs. Closing it means applying the permutation to a combined expectation and exempting precisely the independently verified rewritten node, which is how field batching already works. Revisit when the UI needs it or when cross-file move lands. |
 | R26 | **`shares_a_line` and the move sweep's second derivation of `comment_ownership_survives` are pinned or covered more weakly than the rest** | Accepted and named rather than papered over. `shares_a_line` is **reachable** — via a compact nested sequence such as `outer[0][1]` in `- - first` — and is driven by a hand-written unit test rather than a corpus fixture, because neither corpus holds that shape; it is weaker than corpus coverage and R20's rule would prefer a fixture. `comment_ownership_survives` has a production derivation but **no independent second derivation in the sweep**, deferred on R19 cost grounds (`docs/decisions/0c-3b-2a-notes.md` §3.4). Both are the weakest pins added by 0c-3b-2a; R22 remains the weakest in the table overall. |
+| R27 | **A held identity goes stale on every reparse, and the UI is what holds identities.** `MatchId` is refused across a revision change (D2v), which is correct and is not free: a selection, a scroll position or an open editor pane held across an external file change now meets `IdentityError::StaleRevision` | Accepted, and it is the specified behaviour — refusing beats resolving to the wrong match, which is what the code did before the Phase 1a review. **The cost lands squarely on Phase 1b/1c**: every lookup that can cross a `refresh()` must handle the error rather than unwrap it, and the UI needs a re-selection policy (most likely: re-resolve by `DocumentPath`, which is the thing designed to survive a reparse, then fall back to clearing the selection). Plan §6.5's reconciliation already requires that conversation, so this adds a case to it rather than a new mechanism. Pinned in both directions by `an_identity_from_before_a_reordering_is_refused_rather_than_resolved`, which also asserts that reprojecting *identical* bytes mints the *same* identity. |
+| R28 | **`Deserialize` on `ByteSpan` bypasses `ByteSpan::new`'s inverted-span assertion.** A frontend-supplied span is currently only ever echoed back, but nothing in the type system says so | Accepted **for a read-only phase, and dangerous the moment a mutation trusts a span that crossed the IPC boundary.** `serde` is `Serialize`-only except for a named list — `DocumentId`, `NodeId`, `DocumentPath`, `PathSegment`, `ByteSpan`, `MatchId` — which are exactly plan §6.4's command *arguments*. `ContentRevision`'s hand-written `Deserialize` accepts only the 64-character hex string its `Serialize` writes, so a malformed concurrency token is a typed rejection rather than a digest that quietly matches nothing. **Phase 2 must not let a deserialized `ByteSpan` reach the patch engine without revalidating it**, and must not widen the `Deserialize` list without re-reading `docs/decisions/1a-notes.md` §9 hole 6. |
+| R29 | **An unmodelled subtree is accounted for by span, not by name** (D2w): a key nested under an unrecognised option is proven present but is not addressable, searchable or displayable | Accepted as the deliberate trade, and recorded as a hole rather than folded into the "no key is dropped" claim — which is how the Phase 1a review found it. Measured cost: **28 of 546 synthetic keys** are span-accounted rather than named, and **0 of 566 real ones**, so the live config loses nothing today. Two second-order weaknesses named with it: accounting is by *containment*, so an over-wide recorded span would over-account (unreachable today, since every span comes from a published node), and two `UnknownEntry` reasons carry no path by construction — `NonScalarKey` (no `PathSegment` can spell such a key) and `RepeatedKey` (a path would name the *first* entry, not this one). A later phase that wants to render such a subtree must decide how, not assume the projection already did. |
+| R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
 
 ---
 
@@ -1376,6 +1487,36 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 1a review disposition
+
+Review of record: [`docs/reviews/phase-1a-core-read-model.md`](docs/reviews/phase-1a-core-read-model.md).
+Its verdict: **"hold the phase open"** — *"match identity is positional in practice, and the strongest
+'no unknown key is lost' oracle cannot detect whole omitted mappings. Both violate explicit Phase 1a
+gates."* It was right on both counts, and the phase was held open until all five findings were closed.
+**No commit holds the demonstrated defect.**
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Match identity is positional after a reparse, and its test never performs a reorder.** `NodeId` is the parser arena index and `DocumentId` was the sorted-enumeration position, so exchanging two equally shaped matches hands `:a`'s identity to `:b`; separately, adding an alphabetically earlier file re-points a retained `DocumentId` at another file | **Adopted in full — this is D2v.** `MatchId` carries the parse's `ContentRevision` and `match_by_id` returns `Result<_, IdentityError>`; `DocumentId` comes from a monotonic session counter keyed by path. Both reviewer counterexamples are **retained tests**, and the mis-named test was renamed to what it actually does. Disabling experiments A and B reproduce the reviewer's two sequences verbatim with the guards removed. |
+| 2 | **Keys nested under an unknown entry are neither modelled nor recorded, and the coverage oracle passes vacuously** — records exist only for mappings the schema walk chose to scan, so omitting one entirely is invisible to `all()` over emitted records | **Adopted in full — this is D2w.** The unknown entry's whole value span is recorded, the claim is restated as *named or inside a recorded undescended span*, the **library** checks it (`unaccounted_keys` → `KeyNotAccountedFor`, per R24), and the test oracle now derives its expectation from the **document tree**. Experiment C1 suppresses a record's *creation* and fails both corpus sweeps — which the old audit could not see. |
+| 3 | **`load_from_source()` lets an unsaved draft replace Rust's disk snapshot**, contradicting plan §6.4's ownership split; and the API is not yet one-to-one wrappable (`WorkspaceError` unserializable, no `get_match`) | **Adopted in full.** The method is **deleted**, not hidden — its one test now compares `project_source` against the disk path. `WorkspaceError` and `DiscoveryError` gained hand-written code-plus-operand `Serialize`; `Workspace::get_match` added. `SourceDocument` stays unserializable **by design**: `DocumentView` is what crosses the boundary. |
+| 4 | **The D2u oracle has a false-negative branch** — text is compared only when `scalar.decoded` is true, so `text = "true"` with `decoded = false` over source `on` escapes | **Adopted.** Text is compared whenever `decode()` succeeds, plus a clause refusing a decodable scalar labelled undecoded. Experiment D constructs the reviewer's exact pair. No production violation was demonstrated; the oracle's *claim* was broader than its enforcement, which is the same defect class in a smaller box. |
+| 5 | **Non-scalar items inside a scalar sequence are diagnosed but dropped**, contradicting the doc comment and shifting the positions of the remaining elements | **Adopted, by fixing the implementation rather than the documentation.** `triggers`, `search_terms`, `depends_on` and `imports` are `Vec<ValueView>` and elide such an item **in place**, so positions never shift. Losing positional correspondence in a read model is the kind of thing a later phase silently builds on. |
+
+**Pinned counts moved: none.** All 33 `SYNTHETIC_PROJECTIONS` rows are byte-identical after the fix
+round — an elided item contributes no scalar, and neither did a dropped one — which is the desired
+outcome for a fix that changes structure rather than content. The new diagnostics are pinned at 0.
+
+**The lesson, and it is the third occurrence.** R24's failure mode — a property whose only home is a
+test file, or a test whose name claims more than its body checks — was found here by a *reviewer* rather
+than by the phase. Two of the five findings are instances of it: a test called
+`…survives_a_reordering` that never reordered, and a coverage audit that could only see what the
+implementation had already chosen to tell it. **Both were closed by moving the check into the library
+and re-deriving the test's expectation from the document tree**, which is the same shape as every prior
+closure of R24.
+
+---
+
 ## Phase 0c-3b-2b review disposition
 
 Review of record: [`docs/reviews/phase-0c-3b-2b-the-gate.md`](docs/reviews/phase-0c-3b-2b-the-gate.md).
@@ -1391,6 +1532,45 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 1a
+
+All four run by the orchestrator against the working tree, **after** the review fix round:
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | exit 0 — **471 passed, 0 failed, 0 ignored**, across 15 binaries |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+
+Test count moved 465 (baseline `37cb48d`) → 465 (implementation) → **471** (fix round): +3 projection,
++3 workspace. No test was ignored, weakened or deleted. The suite also passes with
+`tests/corpus/real/` absent.
+
+**Architecture rule re-verified**: `rg -c tauri Cargo.lock` finds nothing — `espansoconfig-core` still
+has no tauri dependency, direct or transitive, after gaining `serde`.
+
+**Privacy re-verified**: `git status --short --untracked-files=all` shows no path under
+`tests/corpus/real/`, and every real-corpus figure is computed rather than hard-coded.
+
+**The load-bearing Phase 0 files were checked by the orchestrator directly**, because a change there is
+more dangerous than anything in `model/`: the diffs in `syntax/{mod,node,trivia}.rs`, `patch/path.rs`
+and `discovery.rs` are **derive-only** (`Serialize`/`Deserialize`), and `watch/mod.rs` adds one
+hand-written `Serialize` emitting the revision as its 64-character hex string rather than as 32
+numbers. No Phase 0 behaviour changed, and all 465 Phase 0 tests pass unmodified. The reviewer reached
+the same conclusion independently.
+
+**The projection sweep:**
+
+| | Synthetic | Real |
+|---|---|---|
+| Keys accounted for | 546 | 566 |
+| …named (modelled or recorded) | 518 | 566 |
+| …inside a recorded undescended span | 28 | 0 |
+| Unaccounted keys | 0 | 0 |
 
 ---
 
@@ -1631,22 +1811,58 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 0 is complete and its gate is PASSED. Start Phase 1 — the read-only browser.**
+**Phase 1a is complete. Start Phase 1b — the Tauri shell, the frontend scaffold and i18n.**
 
-Plan §12's exit for Phase 1: *"the owner can browse their entire real config and every snippet renders
-correctly."* Scope, from the plan:
+There is **no `src-tauri/` and no `src/` yet**; the repository is still a single-crate Cargo workspace.
+1b is where both appear. Concretely, and in this order:
 
-- config directory discovery and picker (`discovery.rs` already does the resolution — reuse it);
-- file enumeration and classification (match / profile / package / `_`-disabled) — also already done;
-- parse with diagnostics;
-- three-pane navigation · search · raw YAML viewer;
-- **i18n infrastructure with both languages wired from the start** (CLAUDE.md §2 — a locked decision:
-  English and Spanish, via `src/lib/i18n/{en,es}.json`, and **never a hardcoded user-facing string**);
-- detection and flagging of constructs the visual editor cannot preserve — `TriviaIndex::is_safely_editable`
-  and `HazardKind` already answer this; the work is surfacing it.
+1. **Scaffold `src-tauri/`** — Tauri **v2**, bundle identifier `cc.carpio.espansoConfig` (plan §10),
+   depending on `espansoconfig-core` by path. Add it to the workspace `members`. **The one rule that
+   cannot bend: `crates/espansoconfig-core` must never depend on `tauri`** (CLAUDE.md §3) — the
+   dependency points one way only. Verify with `cargo tree -p espansoconfig-core | rg tauri` finding
+   nothing, which is now the better check than `rg -c tauri Cargo.lock` (the lockfile *will* contain
+   tauri once `src-tauri` exists, so the old one-liner stops meaning anything the moment 1b starts).
+2. **Scaffold `src/`** — Svelte 5 + TypeScript + Vite (plan §6.1). No CodeMirror yet; that is the
+   content editor and belongs to Phase 3.
+3. **Wire the read-only IPC surface** as **thin wrappers** over `crate::workspace`, which was built to
+   be wrapped one-to-one: `open_workspace`, `list_documents`, `get_document`, `get_match`,
+   `reload_document` (plan §6.4). `Workspace` takes `&mut self` where it populates the cache, so the
+   Tauri layer holds it behind a `Mutex`. Do **not** add the mutating commands — they are Phase 2, and
+   the save transaction they need does not exist.
+4. **i18n infrastructure, both languages, from the first commit** (CLAUDE.md §2, plan §9 — a locked
+   decision): `src/lib/i18n/{en,es}.json` with a **typed key union so a missing key is a compile
+   error**, language following the system locale with a manual override. Localize the macOS app menu
+   and `Info.plist` (`CFBundleLocalizations = [en, es]`). **Never a hardcoded user-facing string** —
+   this is the rule Phase 1 is most likely to break, and 1b is where the habit is either established or
+   lost.
+5. **Map the Rust codes to strings on the frontend side.** Rust returns *codes and structured data*,
+   never prose: `DiagnosticCode` (22 variants plus operands), `UnknownReason` (4), `WorkspaceError`
+   (4), `IdentityError`, `MatchBadge` (10). Every one of those needs an `en` and an `es` entry. The
+   `Display` impls in Rust are developer renderings for logs and **must not** be used as the IPC error
+   representation.
+
+**Then 1c** is the browser itself: three-pane navigation, search over trigger/label/content/comment/
+`search_terms` (plan §8.1), the raw YAML viewer, and surfacing `HazardKind` where the visual editor
+cannot preserve a construct.
 
 **Phase 1 is read-only, so it cannot corrupt a file.** That makes it the right place to spend effort on
-the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and proven.
+the UI shell, i18n and the Tauri boundary rather than on fidelity. The fidelity engine is done and
+proven, and since 1a the read model is too.
+
+### What Phase 1b inherits from 1a
+
+- **The command surface already exists.** `Workspace::{discover, summary, list_documents,
+  get_document, get_match, document_view, document_text, refresh, load_all, evict}` maps onto plan
+  §6.4's read-only commands. `DocumentView` is what crosses the boundary; `SourceDocument` is
+  deliberately not serializable.
+- **A held identity can go stale, and the UI is what holds identities** — R27. `match_by_id` returns
+  `Result<_, IdentityError>` and a lookup crossing a `refresh()` may get `StaleRevision`. Handle it;
+  do not unwrap it. The likely re-selection policy is to re-resolve by `DocumentPath` — the thing
+  designed to survive a reparse — then fall back to clearing the selection.
+- **Scalars arrive as source text**, per D2u. There is no type to render, and no badge derives from a
+  value.
+- **`Deserialize` is derived on a named list only** — R28. Do not widen it without reading
+  `docs/decisions/1a-notes.md` §9 hole 6 first.
 
 ### What the gate licenses, and what it does not
 
@@ -1664,25 +1880,39 @@ reordering matches **inside one sequence**.
   "no re-indentation" proof does not transfer. Plan §8.4's drag-between-files needs its own operation.
 - **Combining a move with any other edit in one batch** (R25).
 
-### Before starting Phase 1, note two things that are now the first UI concerns
+### The two concerns this section used to raise before Phase 1, and where they stand
 
-1. **R19's remaining half is a Phase 1 problem.** The safe entry point re-scans on every call by design.
-   The gate's memoisation made the *sweep* fast, but 20 ms per keystroke-triggered rescan is not viable
-   for an editor. Phase 1 needs a cached or incremental index. Decide this early — it shapes the Tauri
-   command surface.
-2. **Architecture rule (CLAUDE.md §3):** `crates/espansoconfig-core` must never depend on `tauri`,
-   directly or transitively. Tauri lives in `src-tauri/`, whose commands are **thin wrappers** over the
-   core. Verify with `rg -c tauri Cargo.lock` that nothing has crept in.
+1. **R19's remaining half — ✅ answered by 1a.** The safe entry point re-scanned on every call, and
+   ~20 ms per keystroke-triggered rescan is not viable for an editor. `crate::workspace` now builds the
+   `SyntaxIndex` + `TriviaIndex` **once per `ContentRevision`** and serves views from the cache, pinned
+   against an instrumented parse counter. What is *not* answered is incrementality: a document that
+   changes is reparsed whole. That is fine for a browser and will need revisiting when Phase 2 edits on
+   a debounce.
+2. **Architecture rule (CLAUDE.md §3) — still absolute, and the check changes in 1b.**
+   `crates/espansoconfig-core` must never depend on `tauri`, directly or transitively. Until now
+   `rg -c tauri Cargo.lock` was a sufficient check; **the moment `src-tauri/` exists the lockfile will
+   legitimately contain tauri**, so from Phase 1b the check is
+   `cargo tree -p espansoconfig-core | rg tauri` finding nothing. Do not keep quoting the old one-liner
+   as evidence after 1b lands.
 
 ### Standing rules that outlive Phase 0
 
 - **R24 — a safety property that lives only in the test suite is not a safety property.** It has now
-  occurred twice, in consecutive phases. Whenever a sweep proves something the engine relies on, ask
+  occurred **three times, in three consecutive phases**, and the third (Phase 1a) was found by a
+  *reviewer* rather than by the phase. Whenever a sweep proves something the engine relies on, ask
   whether the engine asserts it too. The closure condition is the sentence in
   `docs/decisions/0c-3b-2b-notes.md` §8.1: *the gate rests on no property whose only home is a test file.*
+  **Its 1a corollary, which is cheaper to check and catches more:** read the test's *name*, then read its
+  *body*, and ask whether the body could fail if the name's claim were false. `…survives_a_reordering`
+  never reordered anything for a whole phase.
+- **An audit that iterates what the implementation emitted is vacuous.** New in 1a (D2w), and it is R24
+  seen from the other side: a coverage check that walks the records the code chose to produce cannot see
+  a record the code declined to produce. Derive the expectation from the **document**, then compare.
 - **R20 — the corpus is the weak link, eight occurrences.** A new refusal gets a fixture on **each side**
   of its condition, never one inside it. The eighth was `ExplicitKeyMapping`, which had no fixture at all
-  for five phases while being counted as covered.
+  for five phases while being counted as covered. **1a added two more deviations rather than fixtures** —
+  the depth guard and the non-scalar sequence item are pinned by hand-written sources on both sides, not
+  by corpus fixtures — and both are recorded as deviations in `1a-notes.md` §9 holes 4 and 10.
 - **An oracle must be able to disagree.** Break the **engine** and check the oracle fires, not only the
   reverse.
 - **Corpus privacy (D1) is absolute**, and matters more as the UI grows: no real config content in any
@@ -1704,6 +1934,12 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`crates/espansoconfig-core/src/workspace/mod.rs`](crates/espansoconfig-core/src/workspace/mod.rs) | **What Phase 1b wraps, one command per method.** `discover`, `summary`, `list_documents`, `get_document`, `get_match`, `document_view`, `document_text`, `refresh`, `load_all`, `evict` — plus the per-`ContentRevision` cache that answers R19's remaining half, and the monotonic path-keyed `DocumentId` allocation that D2v's identity fix rests on |
+| [`crates/espansoconfig-core/src/model/`](crates/espansoconfig-core/src/model/) | **The read model itself.** `document.rs` (`DocumentView`, `match_by_id`, `unaccounted_keys`, `coverage_is_complete`), `match_view.rs` (plan §3.3's 22 fields, `MatchId`, badges), `variable.rs` (the nine §3.4 types), `scalar.rs` (`ScalarView` — D2u in a type), `unknown.rs` (`UnknownEntry`, the undescended spans of D2w), `diagnostic.rs` (22 codes, no prose), `project.rs` (the walk), `profile.rs`, `value.rs` |
+| [`docs/decisions/1a-notes.md`](docs/decisions/1a-notes.md) | Phase 1a's decision record: what the projection is and is not (§1), D2u as a type (§2), the key accounting stated so it can be false (§3), where the schema stops (§4), identity and the design rejected (§5), the workspace and R19 (§6), the disabling experiments (§7 and §12), what the phase got wrong on the way (§8), **the eleven coverage holes stated as holes (§9)**, the dependencies added (§10), what 1b inherits (§11) and the review disposition (§12) |
+| [`docs/reviews/phase-1a-core-read-model.md`](docs/reviews/phase-1a-core-read-model.md) | The Phase 1a review, which held the phase open. D2v and D2w and R27–R30 all trace to it; its finding 1 is R24's third occurrence and its finding 2 is the vacuous-audit corollary |
+| [`crates/espansoconfig-core/tests/model_projection.rs`](crates/espansoconfig-core/tests/model_projection.rs) | Phase 1a acceptance: the per-fixture `SYNTHETIC_PROJECTIONS` table, the D2u oracle and its disabling experiment, the tree-derived coverage oracle, `an_identity_from_before_a_reordering_is_refused_rather_than_resolved` (the reviewer's counterexample, retained), the truncation sweep and the badge/search pins |
+| [`crates/espansoconfig-core/tests/workspace_cache.rs`](crates/espansoconfig-core/tests/workspace_cache.rs) | The cache and identity acceptance: parse-count instrumentation, `an_identity_survives_a_directory_that_gained_and_lost_a_file`, and the refresh/evict/change-and-back sequences the review asked for |
 | [`crates/espansoconfig-core/tests/gate_roundtrip.rs`](crates/espansoconfig-core/tests/gate_roundtrip.rs) | **The Phase 0 gate itself** — the R9 sweep over every eligible target of both corpora, the 48-cell axis×operation matrix with `REFUSAL_ONLY_CELLS` enumerated, and `independent_yaml_1_1`, the second transcription of the 1.1 productions that makes the tag table's proof non-circular |
 | [`crates/espansoconfig-core/src/emit/tags.rs`](crates/espansoconfig-core/src/emit/tags.rs) | The YAML 1.1 / 1.2-core resolution table (D2s). **Load-bearing in production**: the emitter consults it and `verify()` asserts on it. Hand-maintained — its 1.1 half has an independent second transcription in the gate test, its 1.2-core half does not |
 | [`docs/decisions/0c-3b-2b-notes.md`](docs/decisions/0c-3b-2b-notes.md) | Phase 0c-3b-2b's decision record: what the sweep is and is not (§1), what it measured (§2), the tag oracle and D2h's failure (§3), R16's exact open wording (§4), R24 answered (§5), the twelve disabling experiments (§6), and **the gate verdict, re-derived (§8)** |
@@ -1765,6 +2001,7 @@ _Updated at each phase boundary._
 | 0c-3b-1 | `4015ff7` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2a | `7fd9850` | ✅ pushed to `origin/main` | clean |
 | 0c-3b-2b | `912cb89` | ✅ pushed to `origin/main` | clean |
+| 1a | `PENDING` | pending | pending |
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
@@ -1802,3 +2039,11 @@ or later.**
 Note: commit `123f5c0` ("Ignore the .claude directory and untrack its settings") landed
 out-of-band between the plan commit and 0a. It untracks `.claude/settings.json` and ignores
 `.claude/`. Benign and left in place.
+
+Phase 1a is the first commit after `37cb48d`, which recorded D2u. Like every phase since `8989c16` it
+is committed **including its review fix round** — the phase was held open until all five findings were
+closed, so no commit holds the demonstrated positional-identity defect or the vacuous coverage audit.
+It contains `src/model/` (nine files), `src/workspace/mod.rs`, the two new test binaries, the
+`Serialize`/`Deserialize` derives across `syntax/`, `patch/path.rs`, `discovery.rs` and `watch/`,
+`docs/decisions/1a-notes.md`, `docs/reviews/phase-1a-core-read-model.md` and this checkpoint.
+**A fresh session starting Phase 1b should start from the 1a commit or later.**
