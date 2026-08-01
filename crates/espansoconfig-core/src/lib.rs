@@ -52,11 +52,16 @@
 //!   with optimistic conflict detection**, not a compare-and-swap on file
 //!   contents — no POSIX operation offers one, and the residual race against a
 //!   non-cooperating writer is stated in that module's own documentation.
+//! - **2a-2a** — [`validate`]: step 5 of plan section 6.6, the espanso-semantic
+//!   gate. A pure function from a [`DocumentView`] to classified findings —
+//!   exactly one content field, a valid trigger combination, valid variable
+//!   types with their required parameters, unique variable names,
+//!   `{{references}}` that resolve where statically knowable, and a `regex` that
+//!   compiles. It **reports and never refuses**: blocking policy belongs to the
+//!   save transaction, which is 2a-2b's.
 //!
-//! [`validate`] is still a deliberate stub carrying only the types the plan
-//! already specifies, [`persist`] holds the write primitive and none of the
-//! patch, validation or backup steps around it, and [`watch`] holds only
-//! [`ContentRevision`].
+//! [`persist`] holds the write primitive and none of the patch, reparse or
+//! backup steps around it, and [`watch`] holds only [`ContentRevision`].
 
 #![deny(missing_docs)]
 

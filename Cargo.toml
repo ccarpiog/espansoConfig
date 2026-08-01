@@ -19,6 +19,14 @@ tempfile = "3"
 yaml-rust2 = "0.11"
 saphyr-parser = "0.0.11"
 marked-yaml = "0.8"
+# Phase 2a-2a, plan section 6.6 step 5: "Regex compiles under the Rust `regex`
+# crate". **Default features on purpose.** Espanso 2.3.0 depends on
+# `regex = "1.5.5"` with default features, and dropping `unicode` here would
+# make patterns such as `\p{Greek}` fail to compile for us while espanso
+# accepts them — a rule firing on a working configuration. The version gap is
+# real and is recorded in docs/decisions/2a-2a-notes.md section 5: a successful
+# compile here is not proof of a successful compile there.
+regex = "1.13"
 # The application shell only. Declared here, not in `src-tauri/Cargo.toml`,
 # purely so the version lives with every other pinned version — it must never
 # be inherited by `espansoconfig-core` (CLAUDE.md section 3).

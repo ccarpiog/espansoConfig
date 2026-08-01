@@ -21,6 +21,11 @@ sha2.workspace = true
 # The YAML substrate chosen in Phase 0a (docs/parser-evaluation.md). It is
 # confined to `crate::syntax`; no other module may import it.
 saphyr-parser.workspace = true
+# Plan section 6.6 step 5 names this crate by name: a `regex:` trigger must
+# compile under the Rust `regex` crate. Added at Phase 2a-2a, the first
+# production dependency since Phase 0a, and confined to `crate::validate`.
+# It pulls in no platform code and no tauri.
+regex.workspace = true
 
 [dev-dependencies]
 # Only the tests need a concrete format: they assert the read model actually

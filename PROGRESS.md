@@ -34,7 +34,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **1c-2b-2b-2** | The raw YAML viewer over `document_text`, the `notUtf8` refusal on a screen, and the **real-corpus browse** | ✅ complete — after the review fix round below. **Phase 1's exit lands here, and is met** |
 | **Phase 1** | **The read-only browser** | ✅ complete — plan §12's exit checked in a running window over the real configuration |
 | **2a-1** | The durable atomic write primitive: plan §6.6 steps 1, 2, 6–11 · the first code that modifies a user's file | ✅ complete — after the review fix round below |
-| 2a-2 … 2d | See the Phase 2 split below | ⬜️ **2a-2 is next** |
+| **2a-2a** | The **semantic gate**: plan §6.6 step 5 · the six espanso-semantic rules as a pure classified report | ✅ complete — after the review fix round below |
+| 2a-2b … 2d | See the Phase 2 split below | ⬜️ **2a-2b is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -46,7 +47,7 @@ that can destroy a file is finished and proven before anything can call it.
 | Sub-phase | Scope |
 |---|---|
 | **2a-1** | The **durable atomic write primitive** — plan §6.6 steps 1, 2, 6–11. Takes finished bytes; builds none |
-| **2a-2** | The **save transaction** around it — steps 3–5 and 12: apply patches in memory, reparse the whole candidate (the syntax gate), structural validation (the semantic gate), update the snapshot |
+| **2a-2** | The **save transaction** around it — steps 3–5 and 12. **Split into 2a-2a / 2a-2b** (below) |
 | **2a-3** | **Backups and rotation** — step 13, into a location outside every auto-loaded glob |
 | **2b** | The **Tauri mutation surface** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document`, and `SaveResult::Conflict` on the wire |
 | **2c** | The **editing UI** — the draft model, the small editor (literal trigger · `replace` · label · word boundary), new / duplicate / delete / move, the conflict UI, draft-level undo, restore from backup |
@@ -54,6 +55,17 @@ that can destroy a file is finished and proven before anything can call it.
 
 Plan §12's Phase 2 exit — *the owner uses it for a week on their real config with zero data loss* —
 lands after **2d**, and is the first exit in this project that cannot be checked in a single session.
+
+**2a-2 was split into 2a-2a / 2a-2b**, by the same cut every earlier split used. The four steps 2a-2
+owns are not one piece of work: step 5 is a *judgement about a projection* and steps 3, 4 and 12 are
+a *transaction over bytes*. Splitting them means the rule set is finished, reviewed and proven before
+any code can decide a save on it — and it means the transaction inherits a **classification** rather
+than inventing one while holding a lock.
+
+| Sub-phase | Scope |
+|---|---|
+| **2a-2a** | The **semantic gate** — step 5 alone. `validate(&DocumentView) -> Vec<Finding>`, pure, classified, no I/O |
+| **2a-2b** | The **transaction** — steps 3, 4 and 12: apply patches in memory, reparse the whole candidate (the syntax gate), choose a blocking policy per `FindingClass`, update the in-memory snapshot |
 
 **1c-2b-2b was split into 1c-2b-2b-1 / 1c-2b-2b-2**, by the same cut every earlier split used — a
 dependency order rather than a convenience. **-1 is the rendering primitive proved on a small
@@ -2133,6 +2145,81 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 2a-2a review disposition
+
+The review is
+[`docs/reviews/phase-2a-2a-semantic-gate.md`](docs/reviews/phase-2a-2a-semantic-gate.md), an
+adversarial correctness review by Codex over `validate/mod.rs` and `tests/validate_semantics.rs`:
+**nine findings — four blocking, four should-fix, one nit. All nine were accepted and all nine are
+resolved; nothing was argued down.** §12 of `docs/decisions/2a-2a-notes.md` is the finding-by-finding
+disposition.
+
+**The round has one method, and three of the findings turned on it.** Where a fact about espanso
+**can** be established, establish it from espanso `v2.3.0`'s own sources and cite it at the code;
+where it cannot, the answer is `SuspiciousButPermitted` and a recorded hole — **never silence**.
+Silence and certainty are both wrong answers to an unestablished fact, and the first pass had reached
+for silence three times.
+
+**The four blocking findings were all the same direction — false negatives, the expensive one.**
+
+- **Rule 5 never looked inside variable parameters.** A `{{missing}}` in a `shell` variable's `cmd`
+  is statically knowable and espanso renders it. The first pass recorded this as a *coverage hole*;
+  it was an unimplemented half of a required rule. The projection was never in the way — `params` is
+  a `Vec<FieldView>` of `ValueView`s, and the first pass simply did not look.
+- **A non-mapping `params` suppressed a provably missing required parameter.** The predicate
+  conflated an alias (whose target might be a mapping) with a scalar or a sequence (which provably
+  hold no entry under any key). The negative-side test *required* the wrong silence — a fixture
+  pinning a defect.
+- **`type: match` was accepted with no `params.trigger`.** The first pass found no failure path
+  because it looked among the eight registered render extensions, and `match` is not one — it is
+  resolved in the renderer, where `get_matching_template` begins `params.get("trigger")?` and answers
+  `None` with `MissingSubMatch`. **Looking in the right place and finding nothing is not evidence.**
+- **Four of rule 5's five scope-openers suppressed real findings.** The sharpest is that
+  **`inject_vars: false` opened scope** — the flag that *disables* injection was read as evidence
+  that arbitrary names might arrive. A nameless variable cannot declare a name; a `form` variable
+  named `f` explains `{{f.who}}` and not `{{nobody}}`. All five are gone, each with a citation.
+  Narrowing an opener is the **false-positive** direction, so the real-corpus run is the guard: it
+  still reports **zero** findings of either class.
+
+**The four should-fix findings are one shape, and it is this project's signature defect** — a name or
+a doc comment asserting more than its body can check, for the fifth phase running:
+
+- `the_real_configuration_produces_no_editor_model_errors` **could skip and pass**, and when it did
+  run it asserted only `errors == 0` while *printing* every suspicious finding. A rule 5 that
+  reported every brace pair in the config would have passed it. It now asserts both classes are zero,
+  and the skip is **demandable** — `ESPANSOCONFIG_REQUIRE_REAL_CORPUS` turns absence into a failure,
+  with a four-combination test of the decision itself. A sabotage produces 117 suspicious findings the
+  old assertion would have waved through.
+- A test named `..._exactly_where_espanso_does` compared six hand-picked strings to hand-written
+  expectations. Renamed to what it checks, and joined by one built from **espanso's own unit-test
+  expectations**.
+- `every_fixture()` **was not every fixture** — many were local `let source` strings, so the
+  reachability and purity sweeps covered a subset. All are now top-level `const`s, and
+  `every_fixture_is_listed_in_every_fixture` reads the file's own source and fails when one is
+  declared and not listed.
+- The nit was **backwards, not merely unproven**: the doc comment said the *second* declaration lost.
+  `generate_nodes` keys its node map by name, so espanso is last-wins and the **earlier** one is
+  inert.
+
+**One should-fix was a genuine cost, not a claim.** Duplicate detection was `Vec` + `contains` and
+every reference linearly rescanned the scope, with a clone of every global name per match — quadratic
+work about to run **inside the save lock**, where an adversarial but parseable document makes saving
+look hung. Now a `HashSet`, with `NameScope` borrowing the document's global names once.
+
+**E20 exposed a defect in the round's own instrument**: a guard meant to prove a `match` arm was
+wired matched *its own text*. Recorded in notes §7 rather than quietly fixed — an oracle that cannot
+disagree is the standing rule it violated.
+
+**Two things could not be established and are holes, not decisions.** Whether espanso accepts a
+pattern its `regex` 1.5.5 compiles and ours rejects (hole 4, unchanged), and whether a `match`
+variable's named sub-match exists at all — that is cross-file and unanswerable from one document
+(hole 12). **One new fact arrived too late to act on**: espanso 2.3.0 has a **tenth** variable type,
+`var_type: "global"`, which this crate reports as `VariableTypeNotRecognised`. It is not fixed here
+because `VariableKind` is a **Phase 1 wire type** owing entries in `en.json` *and* `es.json`; the
+variant and the two strings land together or neither lands. Hole 13, and **2b owns it**.
+
+---
+
 ## Phase 2a-1 review disposition
 
 The review is
@@ -2476,6 +2563,32 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2a-2a
+
+Every command below was run by the orchestrator **after** the review fix round, each as its own
+invocation, not taken on the worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **678 tests across 18 binaries**, 0 failed (**+78** on 2a-1's 600: 70 integration in the new `validate_semantics.rs`, 8 unit in `validate/mod.rs`) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way, and re-checked because this sub-phase adds a dependency |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1) |
+
+**The real-corpus run, reported as counts only (D1).** 13 files, 65 matches, 38 variables and **0
+regex triggers** walked; **`EditorModelError` 0, `SuspiciousButPermitted` 0** — after the opener
+narrowing, which is the direction that could have broken it. The walked-counts are asserted alongside
+the zeros, so the zero cannot pass vacuously on an empty walk.
+
+**Two verification facts that are not commands.** The `regex` crate is this crate's **first
+production dependency since Phase 0a** — approved in advance against plan §6.6, which names it. And
+**22 disabling experiments** were run across the two rounds (E12–E22 in the fix round alone); every
+one fired a **named** test, and both source files were diffed byte-identical against pre-experiment
+copies afterwards.
 
 ---
 
@@ -3129,26 +3242,55 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2a-1 is complete and its review is closed.** `docs/decisions/2a-1-notes.md` is the record; §11
-is the finding-by-finding review disposition and §12 is what 2a-2 inherits.
+**Phase 2a-2a is complete and its review is closed.** `docs/decisions/2a-2a-notes.md` is the record;
+§12 is the finding-by-finding review disposition and §11 is what 2a-2b inherits.
 
-**The next step is Phase 2a-2 — the save transaction around the primitive**: plan §6.6 steps **3, 4, 5
-and 12**. Apply patches in memory, **parse the entire candidate document** (the syntax gate), run
-structural validation (the semantic gate), and update the in-memory snapshot. It is Rust with no UI and
-no IPC, exactly like 2a-1. Backups (step 13) are **2a-3**, not this one.
+**The next step is Phase 2a-2b — the transaction around the two gates**: plan §6.6 steps **3, 4 and
+12**. Apply patches in memory, **parse the entire candidate document** (the syntax gate), call the
+semantic gate 2a-2a built, choose a blocking policy per `FindingClass`, and update the in-memory
+snapshot. It is Rust with no UI and no IPC, exactly like 2a-1 and 2a-2a. Backups (step 13) are
+**2a-3**, not this one.
 
 The exact first command a fresh session should run:
 
 ```sh
-cargo test --workspace          # expect 600 tests across 17 binaries, 0 failed
+cargo test --workspace          # expect 678 tests across 18 binaries, 0 failed
 ```
 
-**What 2a-2 inherits from 2a-1, and must not rebuild.**
+**What 2a-2b inherits from 2a-2a, and must not rebuild.**
+
+- **`validate(&DocumentView) -> Vec<Finding>`** in `crates/espansoconfig-core/src/validate/mod.rs` is
+  the whole of step 5. Call it on the projection of the **candidate**, never of the original — that
+  is the entire point of reparsing at step 4. It is pure and does no I/O, so it is safe to run inside
+  the lock and cannot deadlock.
+- **The blocking policy is 2a-2b's to invent, and it belongs at the transaction.** Nothing in
+  `crate::validate` decides whether a save proceeds, and nothing there should start to. `FindingClass`
+  is the axis to gate on, and it has exactly two variants: `EditorModelError` and
+  `SuspiciousButPermitted`. A likely shape — refuse on the first, confirm on the second — is
+  **deliberately not decided** in 2a-2a.
+- **`Finding`, `FindingCode` (10) and `FindingClass` (2) do not derive `Serialize`**, the same
+  deliberate omission as `WriteError`. They owe `code.` namespaces in **both** `en.json` and
+  `es.json` the day one of them gains it, and `src-tauri/src/dictionary_contract.rs` fails the build
+  without them. The derive and the strings land together, or neither lands. **2a-2b does not put
+  validation on the wire** — 2b does.
+- **Step 4 is not step 5.** Reparsing the candidate is a question about *bytes* and must reparse the
+  **whole** document. `patch/edit.rs` already does a reparse-verify at the mutation entry point:
+  **establish what that covers before writing a second one**, and if it is the same check, call it
+  rather than duplicating it.
+- **A rule that fires on the owner's working configuration is a defect** until proven otherwise.
+  `the_real_configuration_produces_no_finding_of_either_class` is where that is enforced; keep the
+  walked-counts assertion when extending it, or the zero goes vacuous. The skip is demandable via
+  `ESPANSOCONFIG_REQUIRE_REAL_CORPUS`.
+- **Hole 13 belongs to 2b, not to 2a-2b**: espanso 2.3.0 has a tenth variable type, `var_type:
+  "global"`, which this crate currently reports as `VariableTypeNotRecognised`. Fixing it means a
+  `VariableKind` variant, which is a Phase 1 **wire** type and owes two dictionary entries.
+
+**What 2a-2b inherits from 2a-1, and must not rebuild.**
 
 - **`replace_file_atomically(path, expected, bytes)`** in
   `crates/espansoconfig-core/src/persist/write.rs`. It takes **finished bytes**. Do not add
   patch-building, parsing or validation to it — that is the whole point of the split.
-- **`lock_path()` and `replace_locked_file()` exist for 2a-2 specifically.** The transaction must hold
+- **`lock_path()` and `replace_locked_file()` exist for 2a-2b specifically.** The transaction must hold
   the lock across steps 2 to 11, or the revision check and the rename are not one operation. Take the
   lock once with `lock_path()`, do steps 3–5 inside it, then call `replace_locked_file()` — calling
   `replace_file_atomically()` while holding the lock **deadlocks**.
@@ -3160,23 +3302,25 @@ cargo test --workspace          # expect 600 tests across 17 binaries, 0 failed
   comment, a test name or a user-facing string that says the app cannot lose an external writer's edit.
   It can. The window is one rename wide.
 - **The guarantee is mode bits**, not permissions. Eight metadata classes are dropped by every save;
-  they are enumerated in notes §4 and are not 2a-2's to fix.
+  they are enumerated in notes §4 and are not 2a-2b's to fix.
 
-**Three things 2a-2 is most likely to get wrong.**
+**Four things 2a-2b is most likely to get wrong.**
 
 - **Reparsing the candidate is the point of step 4, and it must reparse the *whole* document**, not the
   edited region. Phase 0's gate rests on exactly this. `patch/edit.rs` already does a reparse-verify at
   the mutation entry point — establish what that covers **before** writing a second one, and if it is
   the same check, call it rather than duplicating it.
-- **Structural validation is plan §6.6's list**: exactly one content field, a valid trigger combination
-  (`trigger` xor `triggers` xor `regex`), valid variable types with required params, unique variable
-  names, statically-knowable `{{references}}`, and a regex that compiles. `src/validate/mod.rs` is
-  still a 14-line placeholder. **Note the last item needs the `regex` crate** — the first production
-  dependency this crate would gain since Phase 0a. Decide it explicitly and record it; do not add it in
-  passing.
+- **Step 5 is done and must not be rebuilt.** `validate()` is the whole rule set, classified. What is
+  left for 2a-2b is the **policy**: which `FindingClass` refuses a save, which merely warns, and how a
+  caller is told. That decision belongs at the transaction and nowhere else.
 - **Diagnostics are phrased as risk, not as prophecy** (plan §6.6): *"this looks wrong"*, never
   *"espanso will reject this"*. The app does not control the daemon and cannot prove acceptance. This
-  is the same rule D2u applies to scalar types, in a new place.
+  is the same rule D2u applies to scalar types, in a new place — and 2a-2a's review shows it governs
+  variant names, doc comments and **test names**, not only strings on a screen.
+- **Silence and certainty are both wrong answers to an unestablished fact.** 2a-2a's four blocking
+  findings were all one shape: the first pass could not establish what espanso does, so it said
+  nothing — and saying nothing is itself a claim. Where a fact can be established, establish it and
+  cite it; where it cannot, classify it as suspicious and record the hole.
 
 **What the earlier phases leave, and Phase 2 as a whole should not rebuild** — the Phase 1 inheritance
 below is still current for 2b and 2c, and the two items addressed to Phase 2 by name are:
@@ -3444,7 +3588,9 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with `O_NOFOLLOW`, so mode bits, bytes and `(dev, ino)` come from one inode. `WriteError` / `WriteStep` / `TargetDifference` **do not derive `Serialize`**, deliberately — see the Next action |
 | [`docs/decisions/2a-1-notes.md`](docs/decisions/2a-1-notes.md) | Phase 2a-1's decision record: what the primitive actually promises and the residual race (§2), why the new variant is not a reused one (§2.3), resolving the target before locking (§3), **mode bits and the eight metadata classes a rename drops (§4)**, the two independent reasons espanso cannot load the temp file (§5), **the fsync question settled from the toolchain source (§6)**, steps-not-sentences in the error type (§7), the disabling experiments (§9), **the coverage holes stated as holes including the two nothing can test (§10)**, the finding-by-finding **review disposition (§11)** and what 2a-2 inherits (§12) |
 | [`docs/reviews/phase-2a-1-atomic-write.md`](docs/reviews/phase-2a-1-atomic-write.md) | The Phase 2a-1 review, dispositioned above. **Read the test audit before writing a test in 2a-2.** Four of the ten stated guarantees were pinned by tests that would have passed against a weaker implementation — a byte-exact sweep seeded with the bytes it wrote back, a concurrency test that passes with no mutex, a `chflags` test that could skip and pass, and two counts that said "three" above five-element lists. **The critical finding is the one to carry forward**: the code promised a compare-and-swap that no POSIX operation can perform |
-| [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **Still a 14-line placeholder, and 2a-2 fills it.** Plan §6.6's list: exactly one content field, `trigger` xor `triggers` xor `regex`, valid variable types with required params, unique variable names, statically-knowable `{{references}}`, and a regex that compiles — that last one needs the `regex` crate, which would be this crate's first new production dependency since Phase 0a. Diagnostics are phrased as *"this looks wrong"*, never *"espanso will reject this"* |
+| [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **The whole semantic gate (step 5), and 2a-2b calls it rather than rebuilding it.** `validate(&DocumentView) -> Vec<Finding>` — pure, no I/O, safe inside the lock. Ten `FindingCode`s over **two** `FindingClass`es (`EditorModelError`, `SuspiciousButPermitted`); the other two of plan §6.6's four classes belong to step 4 and to the 0b hazard gate and are deliberately absent. `FindingCode::class()` is the **only** place classification happens, and the boundary is one question: *does the claim rest on a vocabulary espanso can extend without telling us?* Nothing here derives `Serialize`. `required_param()` is a table whose every row is an observed failure path in espanso `v2.3.0`'s own source — **not its documentation**, which calls `date`'s `format` required when the source does not, and would have fired on working configs |
+| [`docs/decisions/2a-2a-notes.md`](docs/decisions/2a-2a-notes.md) | Phase 2a-2a's decision record: a report and not a gate, with the boundary drawn (§2), which of plan §6.6's four classes this module emits and why the other two have owners elsewhere (§3), **the required-parameter table's provenance, source over documentation (§4)**, `regex` as a production dependency and **exactly what a compile does and does not prove — espanso 2.3.0 pins 1.5.5 and compiles verbatim, so the inference runs one way only (§5)**, rule 5's closure analysis after the openers were removed (§6), the **22 disabling experiments including E20, which found a guard that matched its own text (§7)**, the verification with the real-corpus counts (§8), the **holes stated as holes (§10)** — hole 13 is espanso's tenth variable type and is **2b's** — what 2a-2b inherits (§11) and the **nine-finding review disposition (§12)** |
+| [`docs/reviews/phase-2a-2a-semantic-gate.md`](docs/reviews/phase-2a-2a-semantic-gate.md) | The Phase 2a-2a review, dispositioned above. **The four blocking findings are all false negatives, and all one shape**: the phase could not establish what espanso does, so it stayed silent — and silence is a claim. **The four should-fix findings are the project's signature defect for the fifth phase running** — a name or doc comment asserting more than its body can check, including a real-corpus test that could skip and pass while printing the findings it declined to assert on. Re-read before writing a rule or a test name in 2a-2b |
 | [`src/lib/browser/rawDocument.ts`](src/lib/browser/rawDocument.ts) | **What the raw YAML viewer shows, and where it lives.** `rawTarget(selection, documents, selected)` — **the sidebar first, the selection second**, which is what keeps a file that does not *parse* reachable — and `documentTextState(answer)`, whose **four** arms are `loading`, `text`, `empty` and `refused`. The module header carries the placement argument (why the third pane, not the second, not a fourth) and its cost: the pane now has two subjects |
 | [`docs/decisions/1c-2b-2b-2-notes.md`](docs/decisions/1c-2b-2b-2-notes.md) | Phase 1c-2b-2b-2's decision record: the placement decision with its four constraints (§2), the four arms and why a refusal is not an empty file (§3), the strings with **the cases each one sits above** (§4), **the fidelity table's five open rows now closed by a window reading (§5)**, the readings themselves and what the instrument cost (§6, §6.1), the **twenty** experiments **including the three that did not fire and the two that changed the code** (§7, §7.1), **Phase 1's exit verdict with its evidence and its three named gaps (§8)**, what a large document costs, measured (§8.1), the **fourteen** holes (§9) — hole 14 is addressed to Phase 2 by name — R31's blind spots (§10.1) and **the review disposition (§12)** |
 | [`src/lib/browser/sourceText.ts`](src/lib/browser/sourceText.ts) | **The one place file text becomes something a screen can draw**, and 1c-2b-2b-2 uses it unchanged. `sourceSegments(text, atDocumentStart)` returns `text` / `break` (carrying `lf` or `crlf`) / `invisible` (carrying a **code** and the character itself); `sourceCharacters()` rebuilds the input and **is the module's oracle**. `atDocumentStart` is the *only* way a `bom` segment is produced — a slice must never pass it. The classifier names the C0/C1 controls, NUL, U+2028/9, a lone CR, the soft hyphen, the zero-width set and the bidi controls, and deliberately does **not** name joiners, variation selectors, tag characters or combining marks, because those modify a neighbour rather than draw nothing |

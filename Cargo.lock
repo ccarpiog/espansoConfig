@@ -768,6 +768,7 @@ name = "espansoconfig-core"
 version = "0.1.0"
 dependencies = [
  "marked-yaml",
+ "regex",
  "saphyr-parser",
  "serde",
  "serde_json",
