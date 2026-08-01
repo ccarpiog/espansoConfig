@@ -531,6 +531,12 @@ impl SaveError {
     /// no check declined anything — both parses ran, and they disagreed. There
     /// is no different way for the user to retry it, which is the question this
     /// predicate exists to answer.
+    ///
+    /// [`WriteError::TempFileChangedDuringWrite`] is a **refusal**, for the same
+    /// reason [`WriteError::TargetChangedDuringWrite`] is: a check this
+    /// application makes declined to commit, the file on disk is untouched, and
+    /// retrying is exactly the right response — the next attempt mints a fresh
+    /// temp name.
     pub fn is_refusal(&self) -> bool {
         match self {
             SaveError::DocumentIsReadOnly { .. }
@@ -543,7 +549,8 @@ impl SaveError {
                 WriteError::TargetMissing { .. }
                 | WriteError::TargetNotRegularFile { .. }
                 | WriteError::RevisionMismatch { .. }
-                | WriteError::TargetChangedDuringWrite { .. } => true,
+                | WriteError::TargetChangedDuringWrite { .. }
+                | WriteError::TempFileChangedDuringWrite { .. } => true,
                 WriteError::VerificationFailed { .. } | WriteError::Io { .. } => false,
             },
         }

@@ -27,6 +27,22 @@ saphyr-parser.workspace = true
 # It pulls in no platform code and no tauri.
 regex.workspace = true
 
+# ---------------------------------------------------------------------------
+# macOS only, and for exactly one call: `fcopyfile(3)` with
+# `COPYFILE_ACL | COPYFILE_XATTR`, which carries the target's access control
+# list and its extended attributes onto the temp file before the rename
+# installs a new inode (Phase 2a-3a, plan section 7 row 11).
+#
+# It is declared under a target section rather than in `[dependencies]` so that
+# a build for any other target does not see it at all: `crate::persist::write`
+# compiles the copy to a documented no-op there, and the crate stays buildable
+# and testable off macOS (plan section 6.1). `libc` has no dependencies of its
+# own and **pulls in no tauri**; the architecture check is unchanged and is
+#   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
+# ---------------------------------------------------------------------------
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 # Only the tests need a concrete format: they assert the read model actually
 # serializes, which a `derive` alone does not prove.

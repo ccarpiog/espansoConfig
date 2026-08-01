@@ -27,6 +27,18 @@ marked-yaml = "0.8"
 # real and is recorded in docs/decisions/2a-2a-notes.md section 5: a successful
 # compile here is not proof of a successful compile there.
 regex = "1.13"
+# Phase 2a-3a, plan section 7 row 11: the atomic save installs a **new inode**,
+# so the target's extended attributes and its access control list have to be
+# copied onto the temp file before the rename or they are dropped — and dropping
+# a *denying* ACL broadens access. The copy is macOS's `copyfile(3)`, and this is
+# the crate that declares it. **A platform binding and nothing else**: `libc` has
+# no dependencies of its own, contains no platform code beyond the declarations,
+# and pulls in no tauri. `crates/espansoconfig-core/Cargo.toml` names it only
+# inside a `cfg(target_os = "macos")` target section, so a build for any other
+# target never sees it and the call site compiles to a documented no-op. The
+# architecture check is unchanged and is
+#   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
+libc = "0.2"
 # The application shell only. Declared here, not in `src-tauri/Cargo.toml`,
 # purely so the version lives with every other pinned version — it must never
 # be inherited by `espansoconfig-core` (CLAUDE.md section 3).

@@ -22,9 +22,24 @@
 //! platform, not of this code, and backups (step 13) are what makes it
 //! recoverable.
 //!
-//! **Still to come:** step 13, backup rotation, in 2a-3. [`write`] itself is
-//! unchanged by 2a-2b: it writes finished bytes and inspects none of them, and
-//! [`save`] is what decides which bytes those are.
+//! **Phase 2a-3a scope:** plan section 7 row 11's unpaid half. [`write`]'s step 7
+//! became two — the target's **access control list and extended attributes** are
+//! copied onto the temp file with macOS's `fcopyfile(3)` before its **mode bits**
+//! are applied — so the new inode the rename installs carries the protection the
+//! old one had. Both happen **after** the candidate's bytes are written and
+//! fsynced, so the temp file is only widened from `0o600` once it is complete,
+//! and both are applied to the open descriptor rather than to the temp file's
+//! name. Nothing else about the primitive changed, and [`save`] is untouched.
+//!
+//! **A failure before the rename promises one thing, and it is about the
+//! target**: it keeps its bytes *and* its protection. It does **not** promise
+//! that no temp file survives — deletion is attempted, a failure to delete is
+//! swallowed, and a denying ACL copied from the target can forbid the unlink.
+//! [`WriteError::may_have_written`] is a statement about the target for exactly
+//! that reason.
+//!
+//! **Still to come:** step 13, backup rotation. [`write`] writes finished bytes
+//! and inspects none of them, and [`save`] is what decides which bytes those are.
 //!
 //! Two details here are load-bearing and easy to get wrong, and both are now
 //! executed by [`write`] rather than only described:
@@ -46,11 +61,28 @@
 //! re-resolved before the commit, so a link retargeted mid-call is a refusal.
 //! `write`'s module documentation carries the decision and its cost.
 //!
-//! **Mode bits, not "permissions".** Step 7 copies the Unix mode and nothing
-//! else. The rename installs a new inode, so ownership, ACLs, extended
-//! attributes, resource forks, BSD flags and hard links are dropped — and
-//! dropping a *denying* ACL broadens access. `docs/decisions/2a-1-notes.md`
-//! section 10 records it as a decision a later phase must revisit.
+//! **Plan section 7 row 11, all four of it.** The row names permissions,
+//! ownership, line endings and BOM, and the four have three different answers:
+//!
+//! - **line endings and BOM are preserved by construction**, not by
+//!   capture-and-restore. Every edit is a byte-span replacement and everything
+//!   outside the span comes out byte-identical, so there is nothing to capture.
+//!   That is the span layer's property, discharged before this module runs;
+//! - **permissions are restored — mode bits *and* ACL.** The mode comes from an
+//!   `fstat` on the same descriptor whose bytes were hashed; the ACL and every
+//!   extended attribute (Finder tags, Finder comments, `com.apple.*`, and the
+//!   resource fork where the filesystem exposes it as an extended attribute)
+//!   come from that same descriptor through `fcopyfile(3)`. A copy that fails
+//!   **refuses the write** rather than committing a file with less protection
+//!   than the one it replaces;
+//! - **ownership is not restored**, and cannot be by an unprivileged process.
+//!   The uid matches by construction when the user owns the file, which is the
+//!   ordinary case; the gid matches when the target's group matches its
+//!   directory's, because a new file inherits the directory's group.
+//!
+//! A new inode still drops **owner and group, creation time, BSD flags and
+//! hard-link relationships**. [`write`]'s module documentation states each, and
+//! `docs/decisions/2a-3a-notes.md` is the decision record.
 //!
 //! **What this module still cannot do**, deliberately: create a file that does
 //! not exist, or delete one. A missing target is

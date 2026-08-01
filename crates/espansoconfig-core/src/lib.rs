@@ -68,6 +68,18 @@
 //!   invented: an editor-model error refuses with no override, a suspicion
 //!   refuses until the caller acknowledges it **by content**, and the findings
 //!   travel back on the success path too.
+//! - **2a-3a** — [`persist::write`] again: plan section 7 row 11's unpaid half.
+//!   The rename installs a new inode, so the target's **access control list and
+//!   extended attributes** are copied onto the temp file with macOS's
+//!   `fcopyfile(3)` before its mode bits are applied — both **after** the
+//!   candidate's bytes are written and fsynced, so a `0o600` temp file is only
+//!   widened once it is complete, and both through the open descriptor rather
+//!   than through the temp file's name. A copy that fails **refuses the write**,
+//!   before the rename, with the target keeping its bytes *and* its protection;
+//!   that is a promise about the target, not a promise that no temp file
+//!   survives. Ownership, creation time, BSD flags and hard links are still
+//!   dropped, and line endings and the BOM were never this module's to restore —
+//!   they are preserved by the span layer, by construction.
 //!
 //! [`persist`] holds the write primitive and the transaction around it, but no
 //! backup step, and [`watch`] holds only [`ContentRevision`].

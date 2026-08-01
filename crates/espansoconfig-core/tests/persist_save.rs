@@ -286,6 +286,129 @@ fn an_edit_that_writes_the_value_already_there_is_not_rewritten_either() {
     assert_eq!(revision_on_disk(&target), base);
 }
 
+/// Sets one extended attribute on `path`, through the syscall rather than
+/// `xattr(1)` so the test depends on the platform and not on a binary.
+#[cfg(target_os = "macos")]
+fn set_extended_attribute(path: &Path, name: &str, value: &[u8]) -> bool {
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("no NUL");
+    let name = std::ffi::CString::new(name).expect("no NUL");
+    // SAFETY: both C strings and `value` outlive the call, and the length passed
+    // is `value`'s own.
+    let written = unsafe {
+        libc::setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    written == 0
+} // End of function set_extended_attribute()
+
+/// Reads one extended attribute from `path`, or `None` if it is absent.
+#[cfg(target_os = "macos")]
+fn extended_attribute(path: &Path, name: &str) -> Option<Vec<u8>> {
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("no NUL");
+    let name = std::ffi::CString::new(name).expect("no NUL");
+    let mut buffer = vec![0u8; 4096];
+    // SAFETY: both C strings outlive the call and `buffer` is `buffer.len()`
+    // bytes long, which is the limit passed.
+    let read = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            0,
+            0,
+        )
+    };
+    if read < 0 {
+        return None;
+    }
+    buffer.truncate(read as usize);
+    Some(buffer)
+} // End of function extended_attribute()
+
+/// The access control entries `ls -lde` reports for `path`, mode line dropped.
+#[cfg(target_os = "macos")]
+fn access_control_entries(path: &Path) -> Vec<String> {
+    let output = std::process::Command::new("/bin/ls")
+        .arg("-lde")
+        .arg(path)
+        .output()
+        .expect("ls runs");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .map(|line| line.trim().to_owned())
+        .collect()
+} // End of function access_control_entries()
+
+/// A save carries the target's protection onto the new inode.
+///
+/// `tests/persist_write.rs` pins the same property on the primitive; this pins
+/// it on **the entry point a user's edit actually travels through**, because the
+/// transaction is what decides whether the primitive is called at all and with
+/// which lock. Plan section 7 row 11, measured end to end.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_committed_save_carries_the_targets_attributes_and_access_control_list() {
+    let (directory, target) = fixture(CLEAN);
+    let base = ContentRevision::of_bytes(CLEAN.as_bytes());
+    assert!(
+        set_extended_attribute(&target, "com.espansoconfig.test.probe", b"through the save"),
+        "setxattr failed, so this test would measure nothing"
+    );
+    let acl_set = std::process::Command::new("/bin/chmod")
+        .arg("+a")
+        .arg("everyone deny write")
+        .arg(&target)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    let before = access_control_entries(&target);
+
+    let saved = save(
+        &target,
+        base,
+        &[scalar_edit("matches[0].replace", NEW_VALUE)],
+        &Acknowledgement::none(),
+    )
+    .expect("the save commits");
+    assert!(saved.committed, "the candidate differs, so it is written");
+
+    assert_eq!(
+        extended_attribute(&target, "com.espansoconfig.test.probe").as_deref(),
+        Some(b"through the save".as_slice()),
+        "the extended attribute did not survive the save"
+    );
+    if acl_set && !before.is_empty() {
+        assert_eq!(
+            access_control_entries(&target),
+            before,
+            "the access control list did not survive the save, so it broadened access"
+        );
+    } else {
+        println!(
+            "NOTE a_committed_save_carries_the_targets_attributes_and_access_control_list: \
+             no ACL could be set here, so only the extended attribute was measured"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("readable"),
+        saved.text,
+        "the metadata copy must not touch the data"
+    );
+    let _ = std::process::Command::new("/bin/chmod")
+        .arg("-R")
+        .arg("-N")
+        .arg(directory.path())
+        .status();
+} // End of function a_committed_save_carries_the_targets_attributes_and_access_control_list()
+
 /// A document of `matches` matches, for a test that needs the transaction to
 /// take a measurable amount of time.
 fn many_matches(matches: usize) -> String {

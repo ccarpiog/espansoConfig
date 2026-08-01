@@ -19,9 +19,19 @@
 //!   `[!_]*.yml` — asserted against a transcription of that glob, not against a
 //!   hard-coded string, and observed **mid-write** as well as generated;
 //! - no temp file survives a success, a refusal, or a rename that fails after
-//!   the temp file already exists;
-//! - the target's **mode bits** survive — and only those; see the notes'
-//!   section 10 for the metadata a rename drops;
+//!   the temp file already exists — **except** the one case that is measured
+//!   here rather than promised away: a target carrying `everyone deny delete`
+//!   puts that entry on the candidate too, and the leftover then cannot be
+//!   unlinked. What is asserted about it is what actually protects the user:
+//!   espanso's glob cannot match its name;
+//! - the temp file is **not widened from `0o600` before its bytes are on disk**,
+//!   so no reader the target's mode admits can observe a partial candidate;
+//! - the target's **mode bits**, its **access control list** and its **extended
+//!   attributes** all survive, and the mode bits survive *beside* the other two
+//!   rather than being overwritten by them. Ownership, creation time, BSD flags
+//!   and hard links are still dropped by the new inode —
+//!   `docs/decisions/2a-3a-notes.md` section 5 states all four of plan section 7
+//!   row 11 in one place;
 //! - a symlinked target has its **real** file written and stays a symlink;
 //! - concurrent writers never lose an update, two spellings of one path contend
 //!   on one lock, and the file never holds a mixture;
@@ -35,6 +45,18 @@
 //! deleted.** All three are invisible while the filesystem behaves. Nothing here
 //! involves a second *process* either, which is the case the residual race is
 //! about. `docs/decisions/2a-1-notes.md` section 10 carries both as holes.
+//!
+//! **Nor does anything here make step 7a's copy fail inside the primitive.** No
+//! input is known that does; what is pinned is the *classification* of such a
+//! failure — before the rename, never a possible write — plus a unit test in
+//! `persist::write` that reaches the syscall's error arm directly.
+//! `docs/decisions/2a-3a-notes.md` section 8 records it as a hole.
+//!
+//! **Nor does anything here reach the temp-pathname identity check through the
+//! whole primitive**, which would need the temp file's directory entry replaced
+//! inside a window a few syscalls wide. `verify_temp_identity` is pinned by unit
+//! tests in `persist::write` instead, which replace the entry directly and
+//! deterministically.
 //!
 //! # Privacy
 //!
@@ -579,14 +601,15 @@ fn set_immutable(path: &Path, immutable: bool) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Mode bits — and only mode bits
+// 7. Mode bits
 // ---------------------------------------------------------------------------
 
 #[test]
 fn the_targets_mode_bits_survive_the_write() {
-    // Mode bits are the *whole* of what step 7 copies. Ownership, ACLs, extended
-    // attributes, resource forks, BSD flags and hard links are dropped by the
-    // rename, and nothing here claims otherwise — see the notes' section 10.
+    // Step 7b, and a regression guard on what already worked before 2a-3a added
+    // step 7a beside it: the metadata copy runs first and the mode bits are set
+    // afterwards, so a `copyfile` flag set that touched the mode would show up
+    // here rather than silently.
     for mode in [0o600u32, 0o640, 0o755] {
         let (_directory, target) = fixture(ORIGINAL);
         let mut permissions = fs::metadata(&target).expect("metadata").permissions();
@@ -609,11 +632,95 @@ fn the_targets_mode_bits_survive_the_write() {
 } // End of function the_targets_mode_bits_survive_the_write()
 
 #[test]
-fn the_write_installs_a_new_inode_which_is_why_only_mode_bits_survive() {
+fn the_temp_file_is_not_widened_before_its_bytes_are_on_disk() {
+    // The review's temporary-file exposure window. The candidate is created
+    // 0o600 and only takes the target's mode **after** `write_all` and
+    // `sync_all` have returned, so no reader the target's mode admits can open
+    // the named temp file and find it empty, partial or unvalidated.
+    //
+    // The assertion is an invariant, not a schedule: *if* the poller sees the
+    // temp file wearing the target's mode, its length must already be the
+    // payload's. Under a correct ordering that can never fail however the
+    // threads interleave; under the ordering this replaced — mode bits before
+    // the bytes — a widened, short temp file is exactly what appears.
+    //
+    // What is deliberately **not** asserted is that the poller caught anything
+    // at all. "The window was sampled" is a claim about the machine's scheduler,
+    // and a test that fails when the machine is busy is a worse instrument than
+    // one that says out loud that it measured nothing.
+    let (directory, target) = fixture(ORIGINAL);
+    let mut permissions = fs::metadata(&target).expect("metadata").permissions();
+    permissions.set_mode(0o644);
+    fs::set_permissions(&target, permissions).expect("chmod");
+    let payload: Vec<u8> = vec![b'z'; 8 * 1024 * 1024];
+    let complete = payload.len() as u64;
+
+    let watched = directory.path().to_path_buf();
+    let stop = Arc::new(AtomicBool::new(false));
+    let watcher_stop = Arc::clone(&stop);
+    let watcher = std::thread::spawn(move || {
+        // The mode and the length of every temp file the poller managed to stat
+        // before it was renamed away.
+        let mut samples: Vec<(u32, u64)> = Vec::new();
+        while !watcher_stop.load(Ordering::SeqCst) {
+            for name in entries(&watched) {
+                if name == "base.yml" {
+                    continue;
+                }
+                if let Ok(metadata) = fs::metadata(watched.join(&name)) {
+                    samples.push((metadata.permissions().mode() & 0o7777, metadata.len()));
+                }
+            } // End of the loop over the directory's entries
+        } // End of the polling loop
+        samples
+    });
+
+    replace_file_atomically(&target, ContentRevision::of_bytes(ORIGINAL), &payload)
+        .expect("the write succeeds");
+    stop.store(true, Ordering::SeqCst);
+    let samples = watcher.join().expect("the watcher thread");
+
+    let exposed: Vec<(u32, u64)> = samples
+        .iter()
+        .copied()
+        .filter(|(mode, length)| *mode != 0o600 && *length != complete)
+        .collect();
+    assert!(
+        exposed.is_empty(),
+        "the temp file wore a mode wider than 0o600 while it was still \
+         incomplete: {exposed:?} (the payload is {complete} bytes)"
+    );
+    if samples.is_empty() {
+        println!(
+            "NOTE the_temp_file_is_not_widened_before_its_bytes_are_on_disk: \
+             the poller never caught the temp file, so the invariant held vacuously"
+        );
+    } else {
+        println!(
+            "NOTE the_temp_file_is_not_widened_before_its_bytes_are_on_disk: \
+             {} samples, of which {} were still 0o600",
+            samples.len(),
+            samples.iter().filter(|(mode, _)| *mode == 0o600).count()
+        );
+    }
+    assert_eq!(
+        fs::metadata(&target)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o7777,
+        0o644,
+        "the mode still has to arrive, just later"
+    );
+} // End of function the_temp_file_is_not_widened_before_its_bytes_are_on_disk()
+
+#[test]
+fn the_write_installs_a_new_inode_which_is_why_metadata_has_to_be_copied() {
     // Not a wish, a measurement: the file identity changes, and that is the
-    // mechanism behind every entry in the notes' metadata hole. A later phase
-    // that wants xattrs or ACLs preserved has to copy them explicitly, because
-    // there is no inode left to inherit them from.
+    // mechanism behind every entry in the notes' metadata list. It is why the
+    // ACL and the extended attributes have to be copied **explicitly** at step
+    // 7a — there is no inode left to inherit them from — and why ownership,
+    // creation time, BSD flags and hard links are still lost.
     use std::os::unix::fs::MetadataExt;
     let (_directory, target) = fixture(ORIGINAL);
     let before = fs::metadata(&target).expect("metadata").ino();
@@ -628,6 +735,340 @@ fn the_write_installs_a_new_inode_which_is_why_only_mode_bits_survive() {
          in the notes is describing something that does not happen"
     );
 } // End of function the_write_installs_a_new_inode_which_is_why_only_mode_bits_survive()
+
+// ---------------------------------------------------------------------------
+// 7b. Plan section 7 row 11's other half: the ACL and the extended attributes
+//
+// Everything in this section is macOS-only, exactly as `copy_metadata` is:
+// `copyfile(3)` is an Apple interface and the step is a documented no-op
+// elsewhere, so a test asserting the guarantee would be asserting something the
+// implementation does not claim off macOS.
+// ---------------------------------------------------------------------------
+
+/// Sets one extended attribute on `path`. Answers whether it worked.
+///
+/// The syscall rather than `xattr(1)`, so the test depends on the platform and
+/// not on a binary being installed.
+#[cfg(target_os = "macos")]
+fn set_extended_attribute(path: &Path, name: &str, value: &[u8]) -> bool {
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("no NUL");
+    let name = std::ffi::CString::new(name).expect("no NUL");
+    // SAFETY: both C strings and `value` outlive the call, and the length passed
+    // is `value`'s own.
+    let written = unsafe {
+        libc::setxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    written == 0
+} // End of function set_extended_attribute()
+
+/// Reads one extended attribute from `path`, or answers `None` if it is absent.
+#[cfg(target_os = "macos")]
+fn extended_attribute(path: &Path, name: &str) -> Option<Vec<u8>> {
+    let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).expect("no NUL");
+    let name = std::ffi::CString::new(name).expect("no NUL");
+    let mut buffer = vec![0u8; 4096];
+    // SAFETY: both C strings outlive the call and `buffer` is `buffer.len()`
+    // bytes long, which is the limit passed.
+    let read = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            0,
+            0,
+        )
+    };
+    if read < 0 {
+        return None;
+    }
+    buffer.truncate(read as usize);
+    Some(buffer)
+} // End of function extended_attribute()
+
+/// Adds one access control entry to `path` with `chmod +a`. Answers whether the
+/// command succeeded.
+///
+/// A shell command, because setting an ACL from Rust means `acl_from_text`,
+/// `acl_set_fd` and a hand-built `acl_t` — far more platform surface in a test
+/// than in the code it tests. A machine or a volume where it does not work makes
+/// the caller **skip with a printed reason**, which is this project's convention
+/// for an unavailable instrument.
+#[cfg(target_os = "macos")]
+fn add_access_control_entry(path: &Path, entry: &str) -> bool {
+    std::process::Command::new("/bin/chmod")
+        .arg("+a")
+        .arg(entry)
+        .arg(path)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+} // End of function add_access_control_entry()
+
+/// The access control entries `ls -lde` reports for `path`, one per element.
+///
+/// `ls` prints the mode line first and then one numbered entry per line; the
+/// mode line is dropped here so the answer is the ACL and nothing else. An empty
+/// vector means the file has no ACL.
+#[cfg(target_os = "macos")]
+fn access_control_entries(path: &Path) -> Vec<String> {
+    let output = std::process::Command::new("/bin/ls")
+        .arg("-lde")
+        .arg(path)
+        .output()
+        .expect("ls runs");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .map(|line| line.trim().to_owned())
+        .collect()
+} // End of function access_control_entries()
+
+/// Removes every ACL under `directory`, so a `TempDir` can delete itself.
+///
+/// A `deny delete` entry stops `remove_file`, which would otherwise leave the
+/// temp directory — and its contents — behind for the life of the machine.
+#[cfg(target_os = "macos")]
+fn strip_access_control_lists(directory: &Path) {
+    let _ = std::process::Command::new("/bin/chmod")
+        .arg("-R")
+        .arg("-N")
+        .arg(directory)
+        .status();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn extended_attributes_on_the_target_survive_the_write() {
+    // The loss this step exists to stop, and on macOS it is ordinary rather than
+    // exotic: a Finder tag, a Finder comment and an application's own attribute
+    // are all just extended attributes, and before 2a-3a the first save dropped
+    // every one of them silently.
+    let (_directory, target) = fixture(ORIGINAL);
+    let attributes: [(&str, &[u8]); 3] = [
+        ("com.apple.metadata:_kMDItemUserTags", b"espansoconfig-test"),
+        (
+            "com.apple.metadata:kMDItemFinderComment",
+            b"a neutral comment",
+        ),
+        ("com.espansoconfig.test.probe", b"carried across the rename"),
+    ];
+    for (name, value) in attributes {
+        assert!(
+            set_extended_attribute(&target, name, value),
+            "setxattr failed for {name}, so this test would measure nothing"
+        );
+    } // End of the loop that seeds the target's attributes
+
+    replace_file_atomically(&target, ContentRevision::of_bytes(ORIGINAL), REPLACEMENT)
+        .expect("the write succeeds");
+
+    for (name, value) in attributes {
+        assert_eq!(
+            extended_attribute(&target, name).as_deref(),
+            Some(value),
+            "{name} did not survive the write"
+        );
+    } // End of the loop that checks the attributes survived
+
+    assert_eq!(
+        fs::read(&target).expect("readable"),
+        REPLACEMENT,
+        "the metadata copy must not touch the data"
+    );
+} // End of function extended_attributes_on_the_target_survive_the_write()
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_access_control_list_on_the_target_survives_the_write() {
+    // The one item on the dropped-metadata list that is a **security** property.
+    // A denying ACL takes away access the mode bits appear to grant, so a write
+    // that dropped it left the file *more* accessible than it found it while the
+    // mode bits looked untouched.
+    //
+    // `deny write` is used rather than `deny delete` deliberately: a `deny
+    // delete` entry stops the `rename()` itself, which the test below pins.
+    let (directory, target) = fixture(ORIGINAL);
+    if !add_access_control_entry(&target, "everyone deny write") {
+        println!(
+            "SKIP an_access_control_list_on_the_target_survives_the_write: \
+             chmod +a could not set an ACL here"
+        );
+        return;
+    }
+    let before = access_control_entries(&target);
+    if before.is_empty() {
+        println!(
+            "SKIP an_access_control_list_on_the_target_survives_the_write: \
+             this volume did not keep the ACL that was set on it"
+        );
+        strip_access_control_lists(directory.path());
+        return;
+    }
+
+    replace_file_atomically(&target, ContentRevision::of_bytes(ORIGINAL), REPLACEMENT)
+        .expect("the write succeeds");
+
+    let after = access_control_entries(&target);
+    assert_eq!(
+        after, before,
+        "the access control list did not survive the write, so this save broadened access"
+    );
+    assert_eq!(
+        fs::read(&target).expect("readable"),
+        REPLACEMENT,
+        "the metadata copy must not touch the data"
+    );
+    strip_access_control_lists(directory.path());
+} // End of function an_access_control_list_on_the_target_survives_the_write()
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_mode_bits_survive_beside_an_access_control_list_and_an_attribute() {
+    // Two mechanisms write the candidate's protection — `fcopyfile` for the ACL
+    // and the extended attributes, `set_permissions` for the mode — and the
+    // whole reason step 7b runs *after* step 7a is so they cannot disagree. This
+    // is the test that would notice if they did.
+    let (directory, target) = fixture(ORIGINAL);
+    let mut permissions = fs::metadata(&target).expect("metadata").permissions();
+    permissions.set_mode(0o640);
+    fs::set_permissions(&target, permissions).expect("chmod");
+    assert!(set_extended_attribute(
+        &target,
+        "com.espansoconfig.test.probe",
+        b"beside the mode bits"
+    ));
+    let has_acl = add_access_control_entry(&target, "everyone deny write")
+        && !access_control_entries(&target).is_empty();
+
+    replace_file_atomically(&target, ContentRevision::of_bytes(ORIGINAL), REPLACEMENT)
+        .expect("the write succeeds");
+
+    let mode = fs::metadata(&target)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o7777;
+    assert_eq!(mode, 0o640, "the mode became {mode:o} across the write");
+    assert_eq!(
+        extended_attribute(&target, "com.espansoconfig.test.probe").as_deref(),
+        Some(b"beside the mode bits".as_slice())
+    );
+    if has_acl {
+        assert!(
+            !access_control_entries(&target).is_empty(),
+            "the ACL was lost while the mode bits survived"
+        );
+    } else {
+        println!(
+            "NOTE the_mode_bits_survive_beside_an_access_control_list_and_an_attribute: \
+             no ACL could be set here, so only the mode bits and the attribute were measured"
+        );
+    }
+    assert_eq!(fs::read(&target).expect("readable"), REPLACEMENT);
+    strip_access_control_lists(directory.path());
+} // End of function the_mode_bits_survive_beside_an_access_control_list_and_an_attribute()
+
+#[cfg(target_os = "macos")]
+#[test]
+fn an_access_control_list_that_denies_delete_refuses_and_can_leave_a_temp_file() {
+    // Recorded because it is the one case where preserving an ACL and committing
+    // a save are in conflict, and because it is **not** a regression: measured
+    // both ways, a `deny delete` entry on the target makes `rename()` fail with
+    // EACCES whether or not the candidate carries a copy of it. So the file was
+    // already unsaveable through this primitive before 2a-3a, and it still is.
+    //
+    // The second half of the name is the review's point, and it is measured here
+    // rather than only described: the same copied entry that stops the rename
+    // stops the guard's `remove_file` too, so **a fully written temp file can
+    // survive the failure**. The guarantee a failure carries is about the
+    // target — it keeps its bytes and its protection — and what makes the
+    // leftover harmless is its **name**, which is asserted below against an
+    // independent transcription of espanso's glob.
+    let (directory, target) = fixture(ORIGINAL);
+    if !add_access_control_entry(&target, "everyone deny delete")
+        || access_control_entries(&target).is_empty()
+    {
+        println!(
+            "SKIP an_access_control_list_that_denies_delete_refuses_and_can_leave_a_temp_file: \
+             chmod +a could not set an ACL here"
+        );
+        strip_access_control_lists(directory.path());
+        return;
+    }
+
+    let result = replace_file_atomically(&target, ContentRevision::of_bytes(ORIGINAL), REPLACEMENT);
+
+    match result {
+        Err(WriteError::Io { step, .. }) => {
+            assert_eq!(
+                step,
+                WriteStep::Rename,
+                "the refusal must be attributed to the rename"
+            );
+            assert!(!step.after_rename(), "nothing was committed");
+        }
+        Err(other) => panic!("expected an I/O failure at the rename, got {other}"),
+        Ok(_) => panic!("a deny-delete ACL did not stop the rename, so nothing was measured"),
+    }
+    assert_eq!(
+        fs::read(&target).expect("readable"),
+        ORIGINAL,
+        "the target must keep its bytes"
+    );
+
+    // What is left in the directory is the observation this test exists to make,
+    // and it is not asserted in one direction: whether the unlink is refused is
+    // the platform's answer, not this crate's. Whatever survives must be
+    // invisible to espanso, which is the property that actually protects the
+    // user.
+    let leftovers: Vec<String> = entries(directory.path())
+        .into_iter()
+        .filter(|name| name != "base.yml")
+        .collect();
+    for name in &leftovers {
+        assert!(
+            !matched_by_espanso_glob(name),
+            "espanso's glob would load the leftover {name}"
+        );
+    } // End of the loop over the leftovers
+    println!(
+        "NOTE an_access_control_list_that_denies_delete_refuses_and_can_leave_a_temp_file: \
+         {} temp file(s) survived the refusal",
+        leftovers.len()
+    );
+    strip_access_control_lists(directory.path());
+} // End of function an_access_control_list_that_denies_delete_refuses_and_can_leave_a_temp_file()
+
+#[test]
+fn a_metadata_copy_failure_is_a_refusal_that_has_written_nothing() {
+    // The failure policy, pinned at the only level a test can reach it without a
+    // fault-injection hook: the classification. `copy_metadata` runs **before**
+    // the rename, so a caller that sees this step must be told the target is
+    // untouched. `docs/decisions/2a-3a-notes.md` section 8 records that no
+    // known input makes the copy itself fail inside the primitive.
+    assert!(
+        !WriteStep::CopyMetadata.after_rename(),
+        "the metadata copy happens before the commit"
+    );
+    let failure = WriteError::Io {
+        step: WriteStep::CopyMetadata,
+        path: PathBuf::from("/nowhere/_base.yml.tmp"),
+        source: std::io::Error::from_raw_os_error(9),
+    };
+    assert!(
+        !failure.may_have_written(),
+        "a metadata-copy failure must never be reported as a possible write"
+    );
+    assert_eq!(WriteStep::CopyMetadata.code(), "copyMetadata");
+} // End of function a_metadata_copy_failure_is_a_refusal_that_has_written_nothing()
 
 // ---------------------------------------------------------------------------
 // 8. Symlinks
@@ -1049,14 +1490,20 @@ fn the_named_bytes_are_actually_in_the_fixtures_this_sweep_uses() {
 
 #[test]
 fn a_caller_can_tell_the_steps_apart_without_reading_a_sentence() {
+    // Declared in the order they execute, which is **not** the order the plan
+    // numbers them: step 8 (the bytes and their fsync) runs before step 7 (the
+    // metadata and the mode bits), so the candidate is only widened from 0o600
+    // once it is complete.
     let steps = [
         WriteStep::ResolveTarget,
         WriteStep::InspectTarget,
         WriteStep::ReadTarget,
         WriteStep::CreateTempFile,
-        WriteStep::ApplyModeBits,
         WriteStep::WriteTempFile,
         WriteStep::SyncTempFile,
+        WriteStep::CopyMetadata,
+        WriteStep::ApplyModeBits,
+        WriteStep::VerifyTempIdentity,
         WriteStep::RecheckTarget,
         WriteStep::Rename,
         WriteStep::SyncDirectory,

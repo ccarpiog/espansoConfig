@@ -29,13 +29,23 @@
 //! | 1 | per-path write lock | [`lock_path`] |
 //! | 2 | re-read target, verify the revision | [`replace_locked_file`] |
 //! | 3–5 | patch, reparse, validate | **not here** — sub-phase 2a-2 |
-//! | 6 | uniquely named temp file in the same directory | [`temp_file_name`] |
-//! | 7 | apply the original file's **mode bits** | [`replace_locked_file`] |
-//! | 8 | flush and fsync | [`replace_locked_file`] |
-//! | 9 | atomic rename, **preceded by a re-check** | [`replace_locked_file`] |
+//! | 6 | uniquely named temp file in the same directory, `0o600` | [`temp_file_name`] |
+//! | 8 | the bytes, then flush and fsync | `write_through_temp_file` |
+//! | 7a | copy the original file's **ACL and extended attributes** | `copy_metadata` |
+//! | 7b | apply the original file's **mode bits**, then fsync again | `write_through_temp_file` |
+//! | 9 | atomic rename, **preceded by two re-checks** | [`replace_locked_file`] |
 //! | 10 | sync the containing directory | [`replace_locked_file`] |
 //! | 11 | re-read and hash the result | [`replace_locked_file`] |
 //! | 12–13 | snapshot update, backup rotation | **not here** — 2a-2, 2a-3 |
+//!
+//! **Step 8 runs before step 7, and that is deliberate.** The plan numbers the
+//! metadata copy 7 and the write 8; this module executes them the other way
+//! round, because the temp file is only widened from `0o600` to the target's
+//! mode **after** its final bytes are on disk. There is then no instant in which
+//! a legitimate reader of the target's mode — someone the mode bits admit — can
+//! open the named temp file and observe an empty, partial or unvalidated
+//! candidate. `docs/decisions/2a-3a-notes.md` section 3.3 records the ordering
+//! and what each hop of it buys.
 //!
 //! # The residual race
 //!
@@ -50,9 +60,10 @@
 //! - the revision is checked **twice**, the second time immediately before the
 //!   rename, together with the target's **device and inode** and its type, and
 //!   together with a re-resolution of the caller's own path. Any difference is
-//!   [`WriteError::TargetChangedDuringWrite`], and it is a refusal that has
-//!   written nothing to the target — the candidate is discarded with the temp
-//!   file;
+//!   [`WriteError::TargetChangedDuringWrite`], and it is a refusal after which
+//!   **the target keeps its bytes and its protection**. The candidate is a temp
+//!   file whose deletion is *attempted* on the way out; see "What a failure
+//!   leaves behind" below;
 //! - the expensive part of the window — building, writing and fsyncing a whole
 //!   candidate file, which is milliseconds — is therefore **outside** the
 //!   remaining race. What is left is the gap between the second check and the
@@ -61,6 +72,46 @@
 //! **This narrows the window. It does not close it, and it cannot be closed at
 //! this layer.** A caller that needs recoverability from the residual race needs
 //! backups (step 13) and a conflict-handling path, not a stronger primitive.
+//!
+//! # What a failure leaves behind, stated exactly
+//!
+//! Every failure before the rename has **one** guarantee, and it is about the
+//! target:
+//!
+//! > the target keeps its bytes **and** its protection.
+//!
+//! It is deliberately **not** "the temp file is deleted" and **not** "nothing was
+//! written". A candidate inode may have received the whole of the new bytes, the
+//! target's ACL and the target's extended attributes before the step that failed,
+//! and [`TempFile`]'s deletion is *attempted* rather than guaranteed: a failing
+//! `remove_file` is swallowed, and a copied denying ACL can make both the
+//! `rename()` and that `remove_file` fail (`docs/decisions/2a-3a-notes.md`
+//! section 6, measurement 5). **A temp file can therefore survive a failure.**
+//!
+//! What makes a leftover harmless is the **name**, not the guard —
+//! [`temp_file_name`] and [`TempFile`] say it in full. [`WriteError::may_have_written`]
+//! answers the question about the *target*, which is the one that changes what a
+//! caller does next, and its own documentation says so.
+//!
+//! # Preconditions: the containing directory
+//!
+//! **A directory writable by an untrusted principal is out of scope.** This is a
+//! precondition, not a solved problem.
+//!
+//! The temp file is created with `O_CREAT | O_EXCL` and everything that follows
+//! is done to the **open descriptor** — the bytes, the `fsync`, the metadata
+//! copy, the `fchmod` — never to the name. Immediately before the commit,
+//! `verify_temp_identity` confirms that the temp *pathname* still resolves to
+//! the very inode that descriptor holds, and refuses with
+//! [`WriteError::TempFileChangedDuringWrite`] when it does not, so a directory
+//! entry swapped under the write is not renamed over the target.
+//!
+//! **A final race remains and cannot be removed here.** `rename()` takes two
+//! pathnames; there is no descriptor-based form of it, so between the identity
+//! check and the rename the entry can be replaced once more. An attacker who can
+//! create entries in the target's own directory therefore remains out of scope,
+//! and for an espanso configuration under the user's own home directory that is
+//! an assumption the whole application already rests on.
 //!
 //! # Symlinks: the target is **resolved before anything else happens**
 //!
@@ -101,21 +152,69 @@
 //! - a target that changed **while the call was running**
 //!   ([`WriteError::TargetChangedDuringWrite`]).
 //!
-//! # Mode bits, not "permissions"
+//! # Plan section 7 row 11, all four of it
 //!
-//! Step 7 copies the target's **Unix mode bits** and nothing else. A temp file
-//! and a rename install a *new inode*, so owner and group, POSIX ACLs, extended
-//! attributes (Finder tags and every other `com.apple.*` attribute), resource
-//! forks, creation time, BSD flags such as `uchg`, and hard-link relationships
-//! are all **dropped**. One of those is a security property and not a cosmetic
-//! one: a **denying ACL is access control that this write removes**, so the
-//! result can be *more* accessible than the file it replaced even though the
-//! mode bits are identical. `docs/decisions/2a-1-notes.md` section 10 records
-//! this as a decision a later phase must revisit.
+//! Row 11 of the plan's corruption register reads *"changing permissions /
+//! ownership / line endings / BOM → capture and restore all four"*. Here is
+//! where each of the four actually stands, and by what mechanism — stated in one
+//! place because the answer is not the same mechanism for any two of them.
+//!
+//! | Row 11 names | Status | By what |
+//! |---|---|---|
+//! | **line endings** | preserved **by construction** | every edit is a byte-span replacement and everything outside the span comes out byte-identical. Nothing here reformats, so there is nothing to capture |
+//! | **BOM** | preserved **by construction** | the same span layer. `bom-utf8.yml` goes through the whole transaction and commits |
+//! | **permissions** | restored — mode bits **and ACL** | mode bits by `fstat` on the same descriptor whose bytes were hashed, then [`File::set_permissions`] on the candidate's own descriptor; the ACL by `copy_metadata` (macOS) |
+//! | **ownership** | **not restored**, and cannot be from an unprivileged process | see below |
 //!
 //! The mode bits are taken by `fstat` on the **same open file descriptor** whose
 //! bytes are hashed, so they cannot come from a different inode than the one the
-//! revision describes.
+//! revision describes. The ACL and the extended attributes are copied through
+//! **that same descriptor**, for the same reason: `fcopyfile` takes two open
+//! files and resolves no path at all.
+//!
+//! **Every one of the three is applied to a descriptor, never to a name.** The
+//! mode goes on with [`File::set_permissions`], which is `fchmod` on the temp
+//! file this call opened; the ACL and the attributes go on with `fcopyfile`,
+//! which takes that same descriptor. Nothing between the temp file's creation
+//! and the rename resolves the temp *pathname* except the identity check that
+//! exists to prove the pathname has not been swapped.
+//!
+//! ## Ownership, honestly
+//!
+//! `chown` to another user needs privilege this application does not have, and
+//! `COPYFILE_STAT` — which would attempt owner and group — is deliberately
+//! **not** in the flag set (`copy_metadata` says why). So:
+//!
+//! - **uid**: when the user owns the file, which is the ordinary case for an
+//!   espanso configuration under their own home directory, the temp file is
+//!   created by that same user and the uid matches **by construction**. When
+//!   they do *not* own it, this write makes them the owner, and no flag set
+//!   available to an unprivileged process could have prevented that;
+//! - **gid**: a new file on macOS inherits the **containing directory's** group,
+//!   not the creating process's — measured, `docs/decisions/2a-3a-notes.md`
+//!   section 6. The temp file is created in the target's own directory, so the
+//!   group matches whenever the target's group matches its directory's, which is
+//!   the ordinary case and is again by construction rather than by capture. A
+//!   target whose group was changed away from its directory's **loses that
+//!   group**.
+//!
+//! ## What a new inode still drops
+//!
+//! Even with `copy_metadata`, a temp file and a rename install a *new inode*,
+//! so these do not survive: **owner and group** (above), **creation time**
+//! (`st_birthtime` resets), **the inode number itself**, **BSD flags** such as
+//! `uchg`, and **hard-link relationships** — other links keep the old inode, so
+//! they no longer see the edit. `docs/decisions/2a-1-notes.md` section 4
+//! enumerates all eight classes; this module now answers three of them (ACLs,
+//! extended attributes and, with them, resource forks) and continues to drop the
+//! rest. The resource fork travels **where the filesystem exposes it as an
+//! extended attribute**, which is what modern macOS filesystems do with
+//! `com.apple.ResourceFork`; it is not a promise about every destination volume.
+//!
+//! **BSD flags are dropped on purpose, not by omission.** Copying them is what
+//! `COPYFILE_STAT` would do, and a copied `uchg` makes the very next `rename()`
+//! fail with `EPERM` *and* leaves a temp file the cleanup guard cannot delete —
+//! measured, notes section 6.
 //!
 //! # Durability, exactly
 //!
@@ -137,15 +236,40 @@
 //!   mode is a silently lost save, never a corrupt file, because the old inode
 //!   is intact and complete.
 //!
-//! # This module is unix-only, on purpose
+//! # Metadata that cannot be carried is a **refusal**, not a footnote
+//!
+//! If `copy_metadata` fails, the write stops: the target is left byte-identical
+//! **and keeps its protection**, deletion of the candidate is attempted, and the
+//! caller gets `WriteError::Io { step: WriteStep::CopyMetadata }`, for which
+//! [`WriteStep::after_rename`] and [`WriteError::may_have_written`] both answer
+//! `false`. As everywhere else in this module, that is a statement about the
+//! target and not a promise that no temp file survives.
+//!
+//! The alternative — commit the bytes and report the lost metadata on the
+//! success value — is rejected because it converts a metadata failure into a
+//! **silent access-control change**: a caller that does not read the extra field
+//! writes a file that is more accessible than the one it replaced, and there is
+//! nothing to undo it with. A refusal cannot be ignored, costs the user nothing
+//! but the attempt, and leaves the file with both its old bytes and its old
+//! protection. `docs/decisions/2a-3a-notes.md` section 4 argues it in full.
+//!
+//! # This module is unix-only, on purpose, and its metadata copy is macOS-only
 //!
 //! It uses [`std::os::unix::fs::OpenOptionsExt`] so the temp file is created
 //! `0o600` and *then* widened to the target's mode, rather than created at
 //! `0o666 & !umask` and narrowed afterwards. A private file must never be
-//! world-readable for even the instant between the two calls. It also uses
+//! world-readable for even the instant between the two calls, and the widening
+//! happens only once the candidate's final bytes are on disk. It also uses
 //! [`std::os::unix::fs::MetadataExt`] for the device and inode numbers the
 //! pre-commit check compares. The application is macOS-only (plan section 1), so
 //! committing the core to unix here costs nothing that is not already spent.
+//!
+//! `copy_metadata` goes one step further and is **macOS-only**: `copyfile(3)`
+//! is an Apple interface with no portable equivalent, and `libc` is declared for
+//! `cfg(target_os = "macos")` alone. On every other target the function is a
+//! documented no-op that answers `Ok(())`, so the crate still builds and its
+//! tests still run — and this module's ACL and extended-attribute guarantee
+//! **does not hold there**, which is said rather than implied.
 //!
 //! # No `Serialize`
 //!
@@ -524,9 +648,9 @@ pub fn replace_locked_file(
 } // End of function replace_locked_file()
 
 /// What one open of the target established: which inode it is, what mode bits it
-/// carries and what bytes it holds.
+/// carries, what bytes it holds — and the descriptor all three came from.
 ///
-/// All three come from **one file description**, so they cannot describe
+/// All of them come from **one file description**, so they cannot describe
 /// different inodes.
 ///
 /// Visible to [`crate::persist::save`] because the save transaction's own step-2
@@ -534,10 +658,19 @@ pub fn replace_locked_file(
 /// [`fs::read`]: two ways into the same file are two places to forget the
 /// `O_NOFOLLOW`, the non-blocking open and the regular-file check.
 pub(super) struct InspectedTarget {
+    /// The open file, kept so that step 7a's metadata copy reads the ACL and the
+    /// extended attributes from **the same file description** the mode bits and
+    /// the bytes came from.
+    ///
+    /// Re-opening the target by path instead would reintroduce exactly the
+    /// TOCTOU that `docs/decisions/2a-1-notes.md` section 4 records as fixed: a
+    /// second `open` can land on a different inode and copy its protection onto
+    /// this candidate. Holding the descriptor costs one file descriptor for the
+    /// life of the transaction and removes the question.
+    pub(super) handle: File,
     /// Device and inode number, for the pre-commit identity comparison.
     pub(super) identity: (u64, u64),
-    /// The mode bits step 7 copies. Nothing else about the inode is captured;
-    /// see the module documentation.
+    /// The mode bits step 7b copies.
     pub(super) mode: Permissions,
     /// The bytes the revision is computed from.
     pub(super) bytes: Vec<u8>,
@@ -589,18 +722,182 @@ pub(super) fn inspect_target(target: &Path) -> Result<InspectedTarget, WriteErro
             source: error,
         })?;
     Ok(InspectedTarget {
+        handle,
         identity: (metadata.dev(), metadata.ino()),
         mode: metadata.permissions(),
         bytes,
     })
 } // End of function inspect_target()
 
-/// Steps 6 to 10: temp file, mode bits, fsync, the pre-commit re-check, rename,
-/// directory sync.
+/// Copies the target's **access control list and extended attributes** onto the
+/// candidate, through two already-open descriptors (step 7a).
+///
+/// This is the unpaid half of plan section 7 row 11. A temp file plus a
+/// `rename()` installs a new inode, and a new inode is born with no ACL and no
+/// extended attributes — so on macOS every save used to drop Finder tags, Finder
+/// comments, `com.apple.quarantine`, every `com.apple.metadata:*` attribute, the
+/// resource fork and, worst of all, the ACL. A **denying** ACL is access
+/// control, so dropping it left the replacement *more* accessible than the file
+/// it replaced while the mode bits looked identical.
+///
+/// Two of those deserve a sentence each, because carrying them is a decision and
+/// not an accident:
+///
+/// - **the resource fork travels because the filesystem exposes it as an
+///   extended attribute** (`com.apple.ResourceFork`), which is what modern macOS
+///   filesystems do. It is preserved *where that holds*, and this is not a
+///   promise about every volume a configuration might live on;
+/// - **`com.apple.quarantine` is carried forward on purpose.** This call
+///   replaces the contents of one logical file; the quarantine attribute is a
+///   property of that file, and dropping it merely because a new inode is
+///   installed would silently un-quarantine a file the system had marked. That
+///   is an accidental security change in the permissive direction, which is
+///   exactly the class of change this whole step exists to stop.
+///
+/// # Why `fcopyfile` and not `copyfile`
+///
+/// The descriptor form **resolves no path**. Both files are already open — the
+/// source is the descriptor [`inspect_target`] opened `O_NOFOLLOW` and hashed
+/// from, the destination is the temp file this call already owns — so there is
+/// no second name lookup to race, no symlink question and no way for either end
+/// to be a different inode than the one the caller means. The path form would
+/// have to re-resolve the target and would reintroduce the TOCTOU 2a-1 removed.
+///
+/// # Why `COPYFILE_ACL | COPYFILE_XATTR` and not `COPYFILE_STAT`
+///
+/// `COPYFILE_STAT` would additionally carry mode, owner, group, timestamps and
+/// BSD flags. Each of those three additions is a reason not to use it, and all
+/// three were measured (`docs/decisions/2a-3a-notes.md` section 6):
+///
+/// - **timestamps.** It restores the source's `mtime` onto a file whose contents
+///   just changed. Every mtime-driven tool — a backup, a sync agent, `make`,
+///   anything watching for modification — would then be told the file did not
+///   change. Restoring a stale mtime is not preservation, it is a lie about the
+///   edit that just happened;
+/// - **BSD flags.** A `uchg` target would put `uchg` on the temp file, and the
+///   very next `rename()` fails with `EPERM` — measured — leaving a temp file
+///   the cleanup guard then cannot delete either;
+/// - **mode bits.** Step 7b already sets them, from an `fstat` on the same
+///   descriptor. Two mechanisms writing one property is how they come to
+///   disagree. Measured: `COPYFILE_ACL | COPYFILE_XATTR` alone leaves the
+///   destination's mode untouched, and step 7b runs **after** this call anyway,
+///   so the mode has exactly one owner whatever `copyfile` does.
+///
+/// Owner and group are the other thing `COPYFILE_STAT` would attempt, and they
+/// need privilege this process does not have; the module documentation states
+/// what actually happens to each instead of implying they are handled. What this
+/// call preserves is therefore **the ACL, the extended attributes and — through
+/// step 7b beside it — the mode bits**, not "the security metadata".
+///
+/// # What a zero return proves, and what it does not
+///
+/// A `0` is **the copying facility reporting success for the operations that
+/// were requested**. It is not an independently verified, byte-for-byte
+/// inventory match between the two files' attributes, and this function must
+/// never be documented or relied on as one:
+///
+/// - `fcopyfile` is **not transactional.** A failure can leave some extended
+///   attributes, or some ACL state, already installed on the destination; it
+///   rolls nothing back. That is harmless to the target, which is untouched, but
+///   it means a partially protected candidate can exist — and a partially
+///   installed denying ACL is one of the ways the cleanup of that candidate can
+///   itself fail;
+/// - the filesystem may treat particular attributes specially, and whether a
+///   given ACL entry could be silently filtered while the call still returns `0`
+///   is **not known here** and was not measured;
+/// - an invalid *destination* descriptor is not detected at all — measured, it
+///   answers `0` (`docs/decisions/2a-3a-notes.md` section 8, hole 3).
+///
+/// So the guarantee this function carries upward is *the OS copying facility was
+/// used and reported success*, and the tests that assert particular attributes
+/// arrived are what turn that into evidence for those attributes.
+///
+/// # The state argument is `NULL`, deliberately
+///
+/// `copyfile(3)` documents a `NULL` state as *"both functions will work
+/// normally, but less control will be available to the caller"*. Nothing here
+/// wants that control — no progress callback, no per-attribute filter — and a
+/// `copyfile_state_t` would be an allocation to free on every early return.
+///
+/// # Failure is the caller's to refuse on
+///
+/// This returns the OS error and decides nothing. [`write_through_temp_file`]
+/// turns it into `WriteError::Io { step: WriteStep::CopyMetadata }` **before the
+/// rename**, so the target is untouched; the module documentation argues why
+/// that is the policy.
+#[cfg(target_os = "macos")]
+fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
+    use std::os::unix::io::AsRawFd as _;
+
+    // SAFETY: both descriptors are borrowed from live `File` values, so they are
+    // open for the whole call; the state argument is documented to accept NULL;
+    // and the flags are two of the constants `copyfile(3)` defines. `fcopyfile`
+    // touches only **the file objects the two descriptors refer to** — a
+    // descriptor names no path, so no third file can be reached from here — and
+    // it returns 0 or -1. It does write: an ACL onto the destination, and
+    // extended-attribute storage, which on modern macOS includes the resource
+    // fork. What it does not do with this flag set is copy or truncate the
+    // destination's main data fork.
+    let outcome = unsafe {
+        libc::fcopyfile(
+            source.as_raw_fd(),
+            destination.as_raw_fd(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_ACL | libc::COPYFILE_XATTR,
+        )
+    };
+    if outcome == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+} // End of function copy_metadata()
+
+/// The no-op this step becomes off macOS, where `copyfile(3)` does not exist.
+///
+/// **The ACL and extended-attribute guarantee does not hold on this target**,
+/// and answering `Ok(())` is what makes that a documented limitation rather than
+/// a build failure: `espansoconfig-core` is meant to build, test and fuzz
+/// anywhere (plan section 6.1) even though the application ships on macOS alone.
+/// The step marker [`WriteStep::CopyMetadata`] exists on every target so that the
+/// enum, its codes and every exhaustive match over it are platform-independent.
+#[cfg(not(target_os = "macos"))]
+fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
+    let _ = (source, destination);
+    Ok(())
+}
+
+/// Steps 6 to 10: temp file, the bytes, fsync, the ACL and extended attributes,
+/// mode bits, fsync again, the two pre-commit checks, rename, directory sync.
 ///
 /// Split out of [`replace_locked_file`] so that the [`TempFile`] guard's scope
 /// is exactly the window in which a temp file exists. Every `?` below returns
-/// through that scope, so a normal return and an unwind both delete it.
+/// through that scope, so a normal return and an unwind both *attempt* to delete
+/// it — an attempt, not a guarantee; the module documentation's "What a failure
+/// leaves behind" says exactly what is promised instead.
+///
+/// **The plan's step 7 runs after its step 8 here**, and the ordering is the
+/// point rather than an accident:
+///
+/// 1. the candidate is created `0o600`, written and fsynced while still `0o600`,
+///    so a legitimate reader of the target's mode can never open the named temp
+///    file and find an empty or partial candidate;
+/// 2. only then are the ACL and the extended attributes copied on, and only then
+///    is the mode widened — **after** the metadata copy, so the mode bits keep
+///    exactly one owner;
+/// 3. a second `sync_all` persists what steps 7a and 7b just wrote, which the
+///    first one could not have covered;
+/// 4. the temp pathname is proved to still name the inode all of that went into,
+///    and only then does the name reach `rename()`.
+///
+/// Two consequences worth naming. Because no data write follows `fcopyfile`,
+/// **no question about file offsets can arise** — the metadata copy is the last
+/// thing that touches the candidate's contents in any sense, and nothing after
+/// it depends on where a descriptor's offset was left. And because the copy
+/// happens as late as it can, the window in which another process can change the
+/// *target's* protection after it was copied and before the rename is **as short
+/// as this design can make it** — it is not closed, and
+/// `docs/decisions/2a-3a-notes.md` section 8 records that as a hole.
 fn write_through_temp_file(
     lock: &PathWriteLock,
     directory: &Path,
@@ -612,22 +909,15 @@ fn write_through_temp_file(
     let target = lock.path();
 
     // Step 6: a uniquely named temp file in the same directory as the target,
-    // because `rename()` is only atomic within one filesystem.
+    // because `rename()` is only atomic within one filesystem. It is created
+    // 0o600 and stays 0o600 until its last byte is on disk.
     let (mut handle, guard) = create_temp_file(directory, file_name)?;
 
-    // Step 7: hazard 11, half of it. The temp file was created 0o600 and is
-    // widened here, never narrowed, so a private file is never briefly readable
-    // by anyone else. Mode bits only — the module documentation lists what a new
-    // inode drops.
-    fs::set_permissions(guard.path(), inspected.mode.clone()).map_err(|error| WriteError::Io {
-        step: WriteStep::ApplyModeBits,
-        path: guard.path().to_path_buf(),
-        source: error,
-    })?;
-
-    // Step 8: the bytes, then fsync. Without the fsync a crash between the
-    // rename and the flush leaves the target naming an empty or half-written
-    // inode — hazard 2 in its subtler form.
+    // Step 8, and it runs **before** step 7 deliberately: while the candidate is
+    // still 0o600, nobody the target's mode admits can open the named temp file
+    // and observe an empty or partial candidate. Without the fsync a crash
+    // between the rename and the flush leaves the target naming an empty or
+    // half-written inode — hazard 2 in its subtler form.
     handle.write_all(bytes).map_err(|error| WriteError::Io {
         step: WriteStep::WriteTempFile,
         path: guard.path().to_path_buf(),
@@ -643,6 +933,45 @@ fn write_through_temp_file(
         path: guard.path().to_path_buf(),
         source: error,
     })?;
+
+    // Step 7a: hazard 11's other half. The new inode is born with no ACL and no
+    // extended attributes, so both are copied from the target's own descriptor
+    // before the rename. A failure here **refuses the write**: the target keeps
+    // its bytes *and* its protection, and deletion of the candidate is
+    // attempted. No data write follows this call, so no question about either
+    // descriptor's file offset can arise.
+    copy_metadata(&inspected.handle, &handle).map_err(|error| WriteError::Io {
+        step: WriteStep::CopyMetadata,
+        path: guard.path().to_path_buf(),
+        source: error,
+    })?;
+
+    // Step 7b: the temp file was created 0o600 and is widened here, never
+    // narrowed, so a private file is never briefly readable by anyone else.
+    // **After** the metadata copy, so the mode bits have exactly one owner even
+    // if a future flag set made `copyfile` touch them — and on the open
+    // descriptor rather than on `guard.path()`, so the inode chmod-ed is
+    // provably the inode this call wrote.
+    handle
+        .set_permissions(inspected.mode.clone())
+        .map_err(|error| WriteError::Io {
+            step: WriteStep::ApplyModeBits,
+            path: guard.path().to_path_buf(),
+            source: error,
+        })?;
+
+    // Step 8 again: the ACL, the extended attributes and the mode bits were all
+    // written after the first fsync, so they need their own.
+    handle.sync_all().map_err(|error| WriteError::Io {
+        step: WriteStep::SyncTempFile,
+        path: guard.path().to_path_buf(),
+        source: error,
+    })?;
+
+    // Everything above was done to the descriptor. The rename below is the one
+    // step that must use the *name*, so the name is proved to still refer to the
+    // inode the descriptor holds before it is handed to `rename()`.
+    verify_temp_identity(&handle, guard.path())?;
     drop(handle);
 
     // The last thing before the commit: is the target still the object we
@@ -675,6 +1004,46 @@ fn write_through_temp_file(
     Ok(())
 } // End of function write_through_temp_file()
 
+/// Proves that the temp **pathname** still names the inode `handle` holds.
+///
+/// Everything this module does to the candidate — the bytes, the fsyncs, the
+/// metadata copy, the `fchmod` — is done to an open descriptor, which resolves
+/// no path and cannot be redirected. `rename()` is the exception: it takes two
+/// *names*, and there is no descriptor-based form of it. So between the temp
+/// file's creation and the commit there is a name that a process able to write
+/// the containing directory could replace, and renaming that replacement over
+/// the target would install a file this call never wrote.
+///
+/// This is the check that refuses it. Both ends of the comparison are device and
+/// inode numbers: `fstat` on the descriptor, and `lstat` — not `stat` — on the
+/// name, so an entry swapped for a *symlink* is a mismatch rather than a
+/// dereference. A difference is [`WriteError::TempFileChangedDuringWrite`], and
+/// it is a refusal before the rename, so the target keeps its bytes and its
+/// protection.
+///
+/// **It narrows the window; it does not close it.** The rename that follows is
+/// still by pathname, and the entry can be replaced once more in the few
+/// instructions between the two. The module documentation states the
+/// hostile-directory precondition that this leaves standing.
+fn verify_temp_identity(handle: &File, path: &Path) -> Result<(), WriteError> {
+    let open = handle.metadata().map_err(|error| WriteError::Io {
+        step: WriteStep::VerifyTempIdentity,
+        path: path.to_path_buf(),
+        source: error,
+    })?;
+    let named = fs::symlink_metadata(path).map_err(|error| WriteError::Io {
+        step: WriteStep::VerifyTempIdentity,
+        path: path.to_path_buf(),
+        source: error,
+    })?;
+    if (named.dev(), named.ino()) != (open.dev(), open.ino()) {
+        return Err(WriteError::TempFileChangedDuringWrite {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
+} // End of function verify_temp_identity()
+
 /// The check immediately before the commit, and the whole of what narrows the
 /// residual race.
 ///
@@ -689,8 +1058,9 @@ fn write_through_temp_file(
 ///    fails here.
 ///
 /// A failure is [`WriteError::TargetChangedDuringWrite`] and **nothing has been
-/// written to the target**: the candidate is still a temp file, and the guard
-/// deletes it on the way out.
+/// written to the target**, which keeps both its bytes and its protection: the
+/// candidate is still a temp file under its own name, and deleting it is
+/// attempted on the way out.
 ///
 /// The cost is a second full read of the target. For an espanso configuration
 /// that is kilobytes, and it buys the difference between a race the width of a
@@ -814,6 +1184,15 @@ fn create_temp_file(directory: &Path, file_name: &OsStr) -> Result<(File, TempFi
 /// (see [`temp_file_name`]). The guard is hygiene; the name is the safety
 /// property.
 ///
+/// Since step 7a copies the target's ACL onto the candidate, there is now a
+/// **known, reachable** way for that `remove_file` to fail rather than only a
+/// theoretical one: a target carrying `everyone deny delete` puts the same entry
+/// on the candidate, and macOS then refuses both the `rename()` and the unlink
+/// (`docs/decisions/2a-3a-notes.md` section 6, measurement 5, and its hole 6).
+/// **No sentence anywhere in this crate may therefore say that a failure deletes
+/// the temp file.** What a failure guarantees is about the target: it keeps its
+/// bytes and its protection.
+///
 /// [`TempFile::disarm`] is called exactly once, immediately after a successful
 /// rename, at which point the name no longer refers to anything.
 struct TempFile {
@@ -844,9 +1223,12 @@ impl TempFile {
 impl Drop for TempFile {
     /// Attempts to delete the temp file unless it was renamed away.
     ///
-    /// A failure to delete is swallowed: it can only mean the file is already
-    /// gone or the directory became unwritable, and neither is worth a panic in
-    /// a destructor. The leftover is harmless because of its name.
+    /// A failure to delete is swallowed rather than escalated — a destructor is
+    /// not a place to panic from, and there is nothing left to try. The file may
+    /// already be gone, the directory may have become unwritable, or a denying
+    /// ACL copied from the target at step 7a may forbid the unlink. **The
+    /// leftover is then permanent**, and harmless because of its name rather
+    /// than because it was cleaned up.
     fn drop(&mut self) {
         if self.armed {
             let _ = fs::remove_file(&self.path);
@@ -871,12 +1253,36 @@ pub enum WriteStep {
     ReadTarget,
     /// Step 6: creating the temp file.
     CreateTempFile,
-    /// Step 7: copying the target's mode bits onto the temp file.
-    ApplyModeBits,
     /// Step 8: writing the bytes into the temp file.
+    ///
+    /// It runs **before** step 7, so the candidate is still `0o600` while it is
+    /// incomplete. The variants are declared in the order they execute.
     WriteTempFile,
-    /// Step 8: `fsync` on the temp file.
+    /// Step 8: `fsync` on the temp file — once after the bytes, once after the
+    /// ACL, the extended attributes and the mode bits.
     SyncTempFile,
+    /// Step 7a: copying the target's **ACL and extended attributes** onto the
+    /// temp file.
+    ///
+    /// A failure here is a **refusal after which the target keeps both its bytes
+    /// and its protection**: it happens before the rename. The alternative —
+    /// committing and reporting the loss — would make an unread field the only
+    /// thing standing between a user and a file that is more accessible than the
+    /// one it replaced.
+    ///
+    /// On a target that is not macOS the step exists but never fails, because
+    /// there is no `copyfile(3)` to call.
+    CopyMetadata,
+    /// Step 7b: copying the target's mode bits onto the temp file, with
+    /// `fchmod` on the descriptor the candidate was written through.
+    ApplyModeBits,
+    /// Step 9, immediately before the commit: confirming that the temp
+    /// **pathname** still names the inode this call wrote.
+    ///
+    /// The step itself only fails as `Io` when the descriptor or the name cannot
+    /// be stat-ed. A name that resolves to a *different* inode is not an I/O
+    /// failure at all — it is [`WriteError::TempFileChangedDuringWrite`].
+    VerifyTempIdentity,
     /// Step 9, immediately before the commit: re-resolving the caller's path and
     /// re-reading the target to confirm nothing changed under the write.
     RecheckTarget,
@@ -909,9 +1315,11 @@ impl WriteStep {
             WriteStep::InspectTarget => "inspectTarget",
             WriteStep::ReadTarget => "readTarget",
             WriteStep::CreateTempFile => "createTempFile",
-            WriteStep::ApplyModeBits => "applyModeBits",
             WriteStep::WriteTempFile => "writeTempFile",
             WriteStep::SyncTempFile => "syncTempFile",
+            WriteStep::CopyMetadata => "copyMetadata",
+            WriteStep::ApplyModeBits => "applyModeBits",
+            WriteStep::VerifyTempIdentity => "verifyTempIdentity",
             WriteStep::RecheckTarget => "recheckTarget",
             WriteStep::Rename => "rename",
             WriteStep::SyncDirectory => "syncDirectory",
@@ -1019,6 +1427,27 @@ pub enum WriteError {
         /// What differed.
         difference: TargetDifference,
     },
+    /// The **temp file's own name** stopped referring to the inode this call
+    /// wrote, so the commit was refused. The target keeps its bytes and its
+    /// protection.
+    ///
+    /// Every step between the temp file's creation and the commit is performed
+    /// on an open descriptor, which resolves no path; `rename()` is the one that
+    /// cannot be, and this is the check that refuses to hand it a name some
+    /// other process has repointed. Renaming that entry over the target would
+    /// install a file this call never wrote — different bytes, different
+    /// protection, and a success reported for both.
+    ///
+    /// It is a **different fact from [`WriteError::TargetChangedDuringWrite`]**
+    /// and deliberately not folded into it: nothing about the target changed.
+    /// What changed is the candidate's directory entry, which means the
+    /// containing directory is being written by something else. See the module
+    /// documentation's precondition on that directory: this narrows the window
+    /// and does not close it.
+    TempFileChangedDuringWrite {
+        /// The temp file's path — **not** the target's.
+        path: PathBuf,
+    },
     /// The bytes read back after the rename are not the bytes that were written.
     ///
     /// Step 11 failing means the rename committed and then something else
@@ -1048,12 +1477,18 @@ pub enum WriteError {
 
 impl WriteError {
     /// The path the failure is about.
+    ///
+    /// Usually the target. For [`WriteError::TempFileChangedDuringWrite`] and
+    /// for an [`WriteError::Io`] whose step names the temp file or the
+    /// containing directory it is that path instead, which is why the variant
+    /// and the step are carried rather than flattened away.
     pub fn path(&self) -> &Path {
         match self {
             WriteError::TargetMissing { path }
             | WriteError::TargetNotRegularFile { path }
             | WriteError::RevisionMismatch { path, .. }
             | WriteError::TargetChangedDuringWrite { path, .. }
+            | WriteError::TempFileChangedDuringWrite { path }
             | WriteError::VerificationFailed { path, .. }
             | WriteError::Io { path, .. } => path,
         }
@@ -1065,7 +1500,17 @@ impl WriteError {
     /// failure before the commit. `true` for [`WriteError::VerificationFailed`]
     /// and for an [`WriteError::Io`] whose step is [`WriteStep::after_rename`].
     ///
-    /// **It is not a statement about what the target holds now.** `false` does
+    /// **It is a statement about the target, and about this call's rename over
+    /// it.** A `false` says this call did not replace the target; it does **not**
+    /// say that no inode anywhere received bytes. A candidate temp file may hold
+    /// the whole of the new content, the target's ACL and the target's extended
+    /// attributes, and it may **survive** — deleting it is attempted and a
+    /// failure to delete is swallowed (see [`TempFile`] and the module
+    /// documentation's "What a failure leaves behind"). What a `false` promises
+    /// is that the target kept its bytes and its protection at the moment this
+    /// call gave up.
+    ///
+    /// **Nor is it a statement about what the target holds now.** `false` does
     /// not mean the target still holds `expected`, and `true` does not mean it
     /// currently holds the new bytes: another process can have written it either
     /// way. The target must be re-read whenever external writers are possible,
@@ -1075,7 +1520,8 @@ impl WriteError {
             WriteError::TargetMissing { .. }
             | WriteError::TargetNotRegularFile { .. }
             | WriteError::RevisionMismatch { .. }
-            | WriteError::TargetChangedDuringWrite { .. } => false,
+            | WriteError::TargetChangedDuringWrite { .. }
+            | WriteError::TempFileChangedDuringWrite { .. } => false,
             WriteError::VerificationFailed { .. } => true,
             WriteError::Io { step, .. } => step.after_rename(),
         }
@@ -1103,6 +1549,11 @@ impl fmt::Display for WriteError {
             WriteError::TargetChangedDuringWrite { path, difference } => write!(
                 formatter,
                 "{} changed during the write: {difference}",
+                path.display()
+            ),
+            WriteError::TempFileChangedDuringWrite { path } => write!(
+                formatter,
+                "the temp file {} is no longer the file this call wrote",
                 path.display()
             ),
             WriteError::VerificationFailed {
@@ -1197,9 +1648,11 @@ mod tests {
             WriteStep::InspectTarget,
             WriteStep::ReadTarget,
             WriteStep::CreateTempFile,
-            WriteStep::ApplyModeBits,
             WriteStep::WriteTempFile,
             WriteStep::SyncTempFile,
+            WriteStep::CopyMetadata,
+            WriteStep::ApplyModeBits,
+            WriteStep::VerifyTempIdentity,
             WriteStep::RecheckTarget,
             WriteStep::Rename,
             WriteStep::SyncDirectory,
@@ -1489,6 +1942,208 @@ mod tests {
             other => panic!("expected a retarget, got {other}"),
         }
     } // End of function the_recheck_refuses_a_symlink_retargeted_while_the_call_ran()
+
+    /// Reads one extended attribute by path, or answers `None` if it is absent.
+    ///
+    /// The tests below need to *observe* an attribute rather than only set one,
+    /// and `getxattr` is the syscall that does it without a second binary.
+    #[cfg(target_os = "macos")]
+    fn read_xattr(path: &Path, name: &str) -> Option<Vec<u8>> {
+        use std::ffi::CString;
+        let path = CString::new(path.as_os_str().as_encoded_bytes()).expect("no interior NUL");
+        let name = CString::new(name).expect("no interior NUL");
+        let mut buffer = vec![0u8; 1024];
+        // SAFETY: both C strings outlive the call, the buffer is `buffer.len()`
+        // bytes long, and `getxattr` writes at most that many.
+        let read = unsafe {
+            libc::getxattr(
+                path.as_ptr(),
+                name.as_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                0,
+                0,
+            )
+        };
+        if read < 0 {
+            return None;
+        }
+        buffer.truncate(read as usize);
+        Some(buffer)
+    } // End of function read_xattr()
+
+    /// Sets one extended attribute by path. Answers whether it worked.
+    #[cfg(target_os = "macos")]
+    fn write_xattr(path: &Path, name: &str, value: &[u8]) -> bool {
+        use std::ffi::CString;
+        let path = CString::new(path.as_os_str().as_encoded_bytes()).expect("no interior NUL");
+        let name = CString::new(name).expect("no interior NUL");
+        // SAFETY: both C strings and `value` outlive the call, and the length
+        // passed is `value`'s own.
+        let written = unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            )
+        };
+        written == 0
+    } // End of function write_xattr()
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_metadata_copy_moves_an_extended_attribute_between_two_open_files() {
+        // The unit-level pin on step 7a: two descriptors, one call, and an
+        // attribute that was on one file and is now on both. The acceptance
+        // binary pins the same property through the whole primitive; this one
+        // pins the syscall wrapper itself, so a wrong flag constant fails here
+        // rather than only in an integration test.
+        let directory = tempfile::tempdir().expect("a temp directory");
+        let source_path = directory.path().join("source.yml");
+        fs::write(&source_path, b"matches: []\n").expect("write");
+        assert!(
+            write_xattr(&source_path, "com.espansoconfig.probe", b"carried"),
+            "setxattr failed, so nothing could be measured"
+        );
+
+        let destination_path = directory.path().join("_destination.tmp");
+        let destination = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&destination_path)
+            .expect("create");
+        let source = File::open(&source_path).expect("open");
+
+        copy_metadata(&source, &destination).expect("the copy succeeds");
+        assert_eq!(
+            read_xattr(&destination_path, "com.espansoconfig.probe").as_deref(),
+            Some(b"carried".as_slice()),
+            "the extended attribute did not reach the candidate"
+        );
+    } // End of function the_metadata_copy_moves_an_extended_attribute_between_two_open_files()
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_metadata_copy_reports_a_failure_instead_of_succeeding_silently() {
+        // The failure policy has to have something to refuse on, and a source
+        // descriptor that was never open is the one way to reach
+        // `copy_metadata`'s error arm deterministically. `i32::MAX` is used
+        // rather than a descriptor this test closes, because a closed number can
+        // be handed straight back to another test thread's `open` and would make
+        // this flaky.
+        //
+        // Measured on this machine: an invalid **source** answers -1 with
+        // `errno` EBADF (9), while an invalid **destination** answers 0 — which
+        // is why the source is the end sabotaged here, and is recorded as a hole
+        // in `docs/decisions/2a-3a-notes.md`.
+        use std::os::unix::io::FromRawFd as _;
+
+        let directory = tempfile::tempdir().expect("a temp directory");
+        let destination_path = directory.path().join("_destination.tmp");
+        let destination = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&destination_path)
+            .expect("create");
+
+        // SAFETY: `i32::MAX` is above every descriptor this process can hold, so
+        // it names nothing, and `ManuallyDrop` keeps this value from closing it.
+        let unopened = std::mem::ManuallyDrop::new(unsafe { File::from_raw_fd(i32::MAX) });
+        let error =
+            copy_metadata(&unopened, &destination).expect_err("an unopened source must fail");
+        assert_eq!(
+            error.raw_os_error(),
+            Some(9),
+            "expected EBADF (9 on Darwin), got {error:?}"
+        );
+    } // End of function the_metadata_copy_reports_a_failure_instead_of_succeeding_silently()
+
+    /// A directory, an open `0o600` temp file in it, and that file's path.
+    ///
+    /// The temp-identity tests all need the same three: a descriptor that is the
+    /// trusted end of the comparison, and a name that the test then attacks.
+    fn open_temp_fixture() -> (tempfile::TempDir, PathBuf, File) {
+        let directory = tempfile::tempdir().expect("a temp directory");
+        let path = directory.path().join("_candidate.tmp");
+        let handle = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .expect("create");
+        (directory, path, handle)
+    } // End of function open_temp_fixture()
+
+    #[test]
+    fn the_temp_identity_check_accepts_a_name_nobody_touched() {
+        let (_directory, path, handle) = open_temp_fixture();
+        verify_temp_identity(&handle, &path).expect("an untouched temp name passes");
+    }
+
+    #[test]
+    fn the_temp_identity_check_refuses_a_name_repointed_at_another_inode() {
+        // The review's `BLOCKING when the directory is attacker-writable`
+        // finding, reproduced deterministically: the directory entry is replaced
+        // while the descriptor stays open, exactly as a process able to write
+        // the directory could do. Renaming that entry over the target would
+        // install a file this call never wrote.
+        let (directory, path, handle) = open_temp_fixture();
+        let intruder = directory.path().join("_intruder.tmp");
+        fs::write(&intruder, b"bytes this call never wrote\n").expect("write");
+        fs::rename(&intruder, &path).expect("the entry is repointed");
+
+        let error = verify_temp_identity(&handle, &path).expect_err("must refuse");
+        match error {
+            WriteError::TempFileChangedDuringWrite { path: ref reported } => {
+                assert_eq!(reported, &path, "the temp file's path, not the target's")
+            }
+            other => panic!("expected a temp-file identity refusal, got {other}"),
+        }
+        assert!(
+            !error.may_have_written(),
+            "the refusal happens before the rename, so the target is untouched"
+        );
+    } // End of function the_temp_identity_check_refuses_a_name_repointed_at_another_inode()
+
+    #[test]
+    fn the_temp_identity_check_refuses_a_name_replaced_by_a_symlink() {
+        // `lstat`, not `stat`, is what makes this a refusal: a symlink pointing
+        // back at the very inode the descriptor holds would pass a `stat`
+        // comparison, and the name would still not be the file.
+        let (directory, path, handle) = open_temp_fixture();
+        fs::remove_file(&path).expect("unlink");
+        std::os::unix::fs::symlink(directory.path().join("_candidate.tmp.real"), &path)
+            .expect("the entry becomes a symlink");
+
+        let error = verify_temp_identity(&handle, &path).expect_err("must refuse");
+        assert!(
+            matches!(error, WriteError::TempFileChangedDuringWrite { .. }),
+            "expected a temp-file identity refusal, got {error}"
+        );
+    } // End of function the_temp_identity_check_refuses_a_name_replaced_by_a_symlink()
+
+    #[test]
+    fn the_temp_identity_check_reports_a_vanished_name_as_an_io_failure() {
+        // A name that is simply gone is not the same fact as a name pointing
+        // somewhere else, and the step marker is what tells them apart.
+        let (_directory, path, handle) = open_temp_fixture();
+        fs::remove_file(&path).expect("unlink");
+
+        let error = verify_temp_identity(&handle, &path).expect_err("must refuse");
+        match error {
+            WriteError::Io { step, .. } => {
+                assert_eq!(step, WriteStep::VerifyTempIdentity);
+                assert!(!step.after_rename(), "the check runs before the commit");
+            }
+            other => panic!("expected an I/O failure at the identity check, got {other}"),
+        }
+        assert!(!error.may_have_written());
+    } // End of function the_temp_identity_check_reports_a_vanished_name_as_an_io_failure()
 
     #[test]
     fn the_inspection_reads_mode_and_bytes_from_one_descriptor() {
