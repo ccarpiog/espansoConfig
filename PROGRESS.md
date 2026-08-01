@@ -4377,6 +4377,7 @@ _Updated at each phase boundary._
 | 2a-2b | `cbcc25b` | ✅ pushed to `origin/main` | clean |
 | 2a-3a | `cda72f3` | ✅ pushed to `origin/main` | clean |
 | 2a-3b | `7aab106` | ✅ pushed to `origin/main` | clean |
+| 2b-1 | `0229b14` | ✅ pushed to `origin/main` | clean |
 
 `7aab106` is Phase 2a-3b **including both its review fix round and the confirmation fix round** — the
 phase was held open until all eleven findings and the confirmation pass's one residue were closed, so,
