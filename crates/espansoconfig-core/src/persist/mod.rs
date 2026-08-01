@@ -6,6 +6,13 @@
 //! of the entry point: **atomic replacement of an existing regular file, with
 //! optimistic conflict detection.**
 //!
+//! **Phase 2a-2b scope:** the transaction around it — steps 3, 4 and 12, plus
+//! the blocking policy. [`save`] holds it, and [`save_document`] is the entry
+//! point: lock once, read and hash *under the lock*, patch, let
+//! [`crate::patch::apply_edits`] reparse the whole candidate, project and
+//! validate that candidate, decide, and only then commit through
+//! [`replace_locked_file`]. Step 13 — rotating backups — is **not built**.
+//!
 //! It is *not* a compare-and-swap on file contents. No ordinary POSIX or macOS
 //! pathname operation provides one, so the revision is checked twice — once
 //! before the candidate is built and once immediately before the commit — and a
@@ -15,10 +22,9 @@
 //! platform, not of this code, and backups (step 13) are what makes it
 //! recoverable.
 //!
-//! **Still to come:** steps 3 to 5 (apply the patches in memory, reparse the
-//! whole candidate, structural validation) in 2a-2, and steps 12 and 13
-//! (snapshot update, backup rotation) in 2a-2 and 2a-3. This module writes
-//! finished bytes and inspects none of them.
+//! **Still to come:** step 13, backup rotation, in 2a-3. [`write`] itself is
+//! unchanged by 2a-2b: it writes finished bytes and inspects none of them, and
+//! [`save`] is what decides which bytes those are.
 //!
 //! Two details here are load-bearing and easy to get wrong, and both are now
 //! executed by [`write`] rather than only described:
@@ -57,8 +63,13 @@
 //! any auto-loaded glob, and are a safety net rather than a substitute for
 //! revision checks. Nothing here writes one yet (step 13, sub-phase 2a-3).
 
+pub mod save;
 pub mod write;
 
+pub use save::{
+    save_document, verdict, Acknowledgement, SaveError, SaveRefusal, SaveRequest, SaveVerdict,
+    SavedDocument,
+};
 pub use write::{
     lock_path, replace_file_atomically, replace_locked_file, temp_file_name, PathWriteLock,
     TargetDifference, WriteError, WriteStep, TEMP_NAME_INFIX, TEMP_NAME_PREFIX, TEMP_NAME_SUFFIX,

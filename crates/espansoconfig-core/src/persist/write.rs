@@ -93,7 +93,9 @@
 //!   primitive never creates a file**, which is why it can be exposed to a
 //!   caller without also handing out a way to litter the config tree;
 //! - a target that is not a regular file — a directory, a socket, a fifo
-//!   ([`WriteError::TargetNotRegularFile`]);
+//!   ([`WriteError::TargetNotRegularFile`]). The open that establishes this is
+//!   **non-blocking**, because `open(O_RDONLY)` on a fifo waits for a writer and
+//!   would do so with the path lock already held;
 //! - a target whose current bytes hash to something other than the caller's
 //!   `expected` revision ([`WriteError::RevisionMismatch`], carrying both);
 //! - a target that changed **while the call was running**
@@ -222,6 +224,44 @@ const OPEN_NO_FOLLOW: i32 = 0o400_000;
     target_os = "android"
 )))]
 const OPEN_NO_FOLLOW: i32 = 0;
+
+/// `O_NONBLOCK` on Apple and BSD targets: **open, do not wait**.
+///
+/// Without it, `open(O_RDONLY)` on a fifo blocks until some other process opens
+/// the same fifo for writing — and the type check that would refuse the fifo is
+/// downstream of the open, so it never runs. [`inspect_target`] is called with
+/// the per-path write lock held, so that block is a lock held for as long as
+/// nobody writes: every later save of the same resolved path waits behind it,
+/// indefinitely. The flag turns that into an immediate open followed by
+/// [`WriteError::TargetNotRegularFile`].
+///
+/// It changes nothing for a regular file — reads from one are never `EAGAIN` —
+/// and the read only happens after the type check has passed, so no code here
+/// can observe a short non-blocking read.
+///
+/// Spelled out rather than taken from `libc`, exactly as [`OPEN_NO_FOLLOW`] is,
+/// and `the_non_blocking_flag_opens_a_fifo_without_waiting_for_a_writer` pins
+/// its *meaning* rather than its number.
+#[cfg(any(target_vendor = "apple", target_os = "freebsd", target_os = "openbsd"))]
+const OPEN_NON_BLOCKING: i32 = 0x4;
+
+/// `O_NONBLOCK` on Linux and Android.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const OPEN_NON_BLOCKING: i32 = 0o4000;
+
+/// No `O_NONBLOCK` value is known for this target, so the flag is not
+/// requested.
+///
+/// The open then blocks on a fifo planted at the resolved path, with the write
+/// lock held. Written down rather than assumed: the guarantee is weaker here.
+#[cfg(not(any(
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "linux",
+    target_os = "android"
+)))]
+const OPEN_NON_BLOCKING: i32 = 0;
 
 /// Builds the name of the temp file that sits beside `target_file_name`.
 ///
@@ -488,25 +528,37 @@ pub fn replace_locked_file(
 ///
 /// All three come from **one file description**, so they cannot describe
 /// different inodes.
-struct InspectedTarget {
+///
+/// Visible to [`crate::persist::save`] because the save transaction's own step-2
+/// read goes through [`inspect_target`] rather than through a second, unchecked
+/// [`fs::read`]: two ways into the same file are two places to forget the
+/// `O_NOFOLLOW`, the non-blocking open and the regular-file check.
+pub(super) struct InspectedTarget {
     /// Device and inode number, for the pre-commit identity comparison.
-    identity: (u64, u64),
+    pub(super) identity: (u64, u64),
     /// The mode bits step 7 copies. Nothing else about the inode is captured;
     /// see the module documentation.
-    mode: Permissions,
+    pub(super) mode: Permissions,
     /// The bytes the revision is computed from.
-    bytes: Vec<u8>,
+    pub(super) bytes: Vec<u8>,
 }
 
 /// Opens the target once and reads everything the transaction needs from it.
 ///
 /// `O_NOFOLLOW` means the final component is opened as itself: a symlink planted
-/// at the resolved path is `ELOOP`, not a second dereference. The type check
-/// then rejects a directory, a fifo, a socket or a device.
-fn inspect_target(target: &Path) -> Result<InspectedTarget, WriteError> {
+/// at the resolved path is `ELOOP`, not a second dereference. `O_NONBLOCK` means
+/// a fifo planted there is an *open that returns*, so the type check below can
+/// reject it instead of the caller waiting for a writer with the path lock held.
+/// The type check then rejects a directory, a fifo, a socket or a device.
+///
+/// **This is the only read of a save target in the crate**, deliberately: the
+/// transaction ([`crate::persist::save_document`]) calls it for its step-2 read
+/// as well, so the three checks above happen once, in one place, for every path
+/// that reads a file this application may write.
+pub(super) fn inspect_target(target: &Path) -> Result<InspectedTarget, WriteError> {
     let mut handle = OpenOptions::new()
         .read(true)
-        .custom_flags(OPEN_NO_FOLLOW)
+        .custom_flags(OPEN_NO_FOLLOW | OPEN_NON_BLOCKING)
         .open(target)
         .map_err(|error| match error.kind() {
             io::ErrorKind::NotFound => WriteError::TargetMissing {
@@ -1082,6 +1134,7 @@ impl std::error::Error for WriteError {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
+    use std::time::Duration;
 
     #[test]
     fn a_temp_name_cannot_be_matched_by_espansos_include_glob() {
@@ -1224,6 +1277,81 @@ mod tests {
             "expected ELOOP (62 on Darwin), got {error:?}"
         );
     } // End of function the_no_follow_flag_really_refuses_a_symlink()
+
+    /// Creates a fifo at `path` with `mkfifo(1)`, or answers `false`.
+    ///
+    /// Shelling out rather than adding a dependency: `libc` and `nix` are not in
+    /// this crate's tree and would not be worth adding for one test. A platform
+    /// without `mkfifo` makes the caller skip rather than fail.
+    fn make_fifo(path: &Path) -> bool {
+        std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    /// Runs `work` on another thread and gives it `limit` to finish.
+    ///
+    /// The thread is **abandoned** on a timeout rather than joined: the whole
+    /// point of these two tests is that the work may never return, and a test
+    /// that hangs is a suite that hangs. The abandoned thread is blocked on a
+    /// fifo inside a temp directory of its own, so it holds nothing another test
+    /// wants.
+    fn within<T: Send + 'static>(
+        limit: Duration,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Option<T> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(work());
+        });
+        receiver.recv_timeout(limit).ok()
+    } // End of function within()
+
+    #[test]
+    fn the_non_blocking_flag_opens_a_fifo_without_waiting_for_a_writer() {
+        // `OPEN_NON_BLOCKING` is a hand-written syscall constant, so its
+        // *meaning* is pinned rather than its number: without it the first open
+        // below never returns, and `inspect_target` would hold the path lock for
+        // as long as nobody writes to the fifo.
+        let directory = tempfile::tempdir().expect("a temp directory");
+        let fifo = directory.path().join("base.yml");
+        if !make_fifo(&fifo) {
+            println!(
+                "SKIP the_non_blocking_flag_opens_a_fifo_without_waiting_for_a_writer: \
+                 mkfifo(1) is not available here"
+            );
+            return;
+        }
+
+        let flagged = fifo.clone();
+        let opened = within(Duration::from_secs(5), move || {
+            OpenOptions::new()
+                .read(true)
+                .custom_flags(OPEN_NO_FOLLOW | OPEN_NON_BLOCKING)
+                .open(&flagged)
+                .is_ok()
+        });
+        assert_eq!(
+            opened,
+            Some(true),
+            "O_NONBLOCK must open a fifo immediately; without it this open waits for a writer"
+        );
+
+        let refused = within(Duration::from_secs(5), move || {
+            match inspect_target(&fifo) {
+                Err(WriteError::TargetNotRegularFile { .. }) => "refused".to_owned(),
+                Err(other) => format!("{other}"),
+                Ok(_) => "inspected a fifo as if it were a file".to_owned(),
+            }
+        });
+        assert_eq!(
+            refused.as_deref(),
+            Some("refused"),
+            "inspect_target must refuse a fifo, and must do so without waiting for a writer"
+        );
+    } // End of function the_non_blocking_flag_opens_a_fifo_without_waiting_for_a_writer()
 
     /// A directory, a target holding `ORIGINAL`, and a lock on it.
     ///

@@ -59,9 +59,18 @@
 //!   `{{references}}` that resolve where statically knowable, and a `regex` that
 //!   compiles. It **reports and never refuses**: blocking policy belongs to the
 //!   save transaction, which is 2a-2b's.
+//! - **2a-2b** — [`persist::save`]: the save transaction. Steps 3, 4 and 12 of
+//!   plan section 6.6, wrapped around 2a-1's primitive and 2a-2a's report, with
+//!   **one lock held across steps 2 to 11**. It reads the target *inside* the
+//!   lock, patches those bytes with [`patch::apply_edits`] — whose own
+//!   verification is step 4's whole-document reparse — projects and validates
+//!   the **candidate**, and applies the blocking policy this sub-phase
+//!   invented: an editor-model error refuses with no override, a suspicion
+//!   refuses until the caller acknowledges it **by content**, and the findings
+//!   travel back on the success path too.
 //!
-//! [`persist`] holds the write primitive and none of the patch, reparse or
-//! backup steps around it, and [`watch`] holds only [`ContentRevision`].
+//! [`persist`] holds the write primitive and the transaction around it, but no
+//! backup step, and [`watch`] holds only [`ContentRevision`].
 
 #![deny(missing_docs)]
 

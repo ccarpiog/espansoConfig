@@ -35,7 +35,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **Phase 1** | **The read-only browser** | ✅ complete — plan §12's exit checked in a running window over the real configuration |
 | **2a-1** | The durable atomic write primitive: plan §6.6 steps 1, 2, 6–11 · the first code that modifies a user's file | ✅ complete — after the review fix round below |
 | **2a-2a** | The **semantic gate**: plan §6.6 step 5 · the six espanso-semantic rules as a pure classified report | ✅ complete — after the review fix round below |
-| 2a-2b … 2d | See the Phase 2 split below | ⬜️ **2a-2b is next** |
+| **2a-2b** | The **save transaction**: plan §6.6 steps 3, 4 and 12 · the blocking policy · the first code that can refuse a save | ✅ complete — after the review fix round below. **2a-2 is closed** |
+| 2a-3 … 2d | See the Phase 2 split below | ⬜️ **2a-3 is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -2145,6 +2146,52 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 2a-2b review disposition
+
+The review is
+[`docs/reviews/phase-2a-2b-save-transaction.md`](docs/reviews/phase-2a-2b-save-transaction.md), an
+adversarial correctness review by Codex over `persist/save.rs`, `tests/persist_save.rs` and the
+decision record, read against plan §6.6 and §7's hazard register: **eight findings — one blocking,
+seven should-fix. Five were fixed, three were dispositioned in writing and none was argued down.**
+§9 of `docs/decisions/2a-2b-notes.md` is the finding-by-finding disposition.
+
+**The finding that mattered most was not the blocking one.** Finding 8 is a **concrete deadlock**: the
+transaction's step-2 read used `std::fs::read`, bypassing the primitive's regular-file check and its
+`O_NOFOLLOW` open. A fifo at the resolved path — planted by a caller's context, or swapped in after
+`lock_path()` resolved it — makes that read wait for a writer **with the non-reentrant path lock
+held**, so every later save of that path waits behind it forever. The fix needed more than the reuse
+the brief asked for: `open(O_RDONLY)` on a fifo blocks *wherever* it is called, and the type check that
+would refuse the fifo is downstream of the open, so `inspect_target` itself gained **`O_NONBLOCK`**.
+That is the only change this sub-phase made to 2a-1's primitive, and `persist_write.rs` still passes
+25/25 unchanged.
+
+**The blocking finding is real and is not this sub-phase's.** Plan §7 row 11 registers "capture and
+restore all four" and `write.rs` restores **mode bits only** — 2a-2b changed no line of that code, and
+2a-1 notes §4 already enumerates the eight dropped classes. What Codex adds beyond that record is
+worth keeping: on macOS the **extended-attribute** case is ordinary rather than exotic (Finder tags,
+comments, quarantine flags), and an ACL loss is an access-control **broadening**. It is accepted as a
+real deviation from the plan's register, with `copyfile(3)` + `COPYFILE_ACL | COPYFILE_XATTR` between
+the temp write and the rename as the named remedy and **2a-3 as its owner**. It is not silently closed.
+
+**Two findings were about the record rather than the code, and both were overclaims.** §2.2 had said a
+blanket "accept everything" acknowledgement **cannot be written** — it can, because `validate()` is
+public and `Finding` is publicly constructible, so a caller can compute the findings itself and
+acknowledge them without showing anyone anything. And hole 1 had said a `regex` version divergence
+could bite "today" while **supplying no divergent pattern and no parity experiment anywhere**. Both
+claims are withdrawn and replaced with what is established; the missing parity experiment is now its
+own hole. This is the project's signature defect for the sixth phase running — a sentence asserting
+more than its body can check — and it now appears in a decision record rather than in a test name.
+
+**Findings 5 and 6 were confirmed and deliberately not fixed.** `DuplicateVariableName` and
+`RegexDoesNotCompile` stay unoverrideable `EditorModelError`s, so a file espanso demonstrably runs can
+be unsaveable through the visual editor. The reasoning, recorded rather than assumed: refusing a save
+never destroys data while permitting one might, so the **reversible** direction is to refuse;
+reclassifying is a change to `crate::validate`, which is 2a-2a's closed module; and the escape hatch
+the plan names is a **raw editor**, which is a user-interface question **2b** answers and not a policy
+question this layer can settle.
+
+---
+
 ## Phase 2a-2a review disposition
 
 The review is
@@ -2563,6 +2610,40 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2a-2b
+
+Every command below was run by the orchestrator **after** the review fix round, each as its own
+invocation, not taken on the worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **723 tests across 19 binaries**, 0 failed (**+45** on 2a-2a's 678: 29 integration in the new `persist_save.rs`, 16 unit across `persist/save.rs` and `persist/write.rs`) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 cargo test -p espansoconfig-core --test persist_save -- saving_the_real_configuration` | ✅ **not a vacuous skip** — run with the switch that makes the corpus mandatory |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1); no corpus fixture modified |
+
+**The real-corpus run, reported as counts only (D1).** 13 files, 65 matches walked; each file saved
+**twice** — once with an empty batch, which exercises the lock, the read, the hash, the
+reparse-verify, the projection, the semantic gate and the policy without changing a byte, and once
+with a real scalar edit, which additionally exercises the commit. **13 files edited and committed, 0
+saves refused by either gate.** Every committed file's bytes were checked by an independent rebuild
+from the declared replacements rather than by trusting the candidate.
+
+**`persist_write.rs` still passes 25/25 unchanged**, which is the check that mattered after this
+sub-phase modified 2a-1's `inspect_target`. The `O_NONBLOCK` constant is hand-written per platform, so
+the test that guards it — `the_non_blocking_flag_opens_a_fifo_without_waiting_for_a_writer` — pins its
+**meaning** and not its number: a wrong constant fails rather than silently disabling the fix.
+
+**Two verification facts that are not commands.** **No dependency was added**, in any section, by
+either round — the fifo test shells out to `mkfifo(1)` and skips cleanly where it is absent. And
+**eighteen disabling experiments** were run across the two rounds; every one fired a **named** test
+except E7, which fired nothing and is the reason a test exists that did not before. Every sabotage was
+reverted and the touched files diffed byte-identical against pre-experiment copies afterwards.
 
 ---
 
@@ -3242,85 +3323,95 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2a-2a is complete and its review is closed.** `docs/decisions/2a-2a-notes.md` is the record;
-§12 is the finding-by-finding review disposition and §11 is what 2a-2b inherits.
+**Phase 2a-2b is complete and its review is closed. Phase 2a-2 is closed with it.**
+`docs/decisions/2a-2b-notes.md` is the record; §9 is the finding-by-finding review disposition and §8
+is what 2a-3 and 2b inherit.
 
-**The next step is Phase 2a-2b — the transaction around the two gates**: plan §6.6 steps **3, 4 and
-12**. Apply patches in memory, **parse the entire candidate document** (the syntax gate), call the
-semantic gate 2a-2a built, choose a blocking policy per `FindingClass`, and update the in-memory
-snapshot. It is Rust with no UI and no IPC, exactly like 2a-1 and 2a-2a. Backups (step 13) are
-**2a-3**, not this one.
+**The next step is Phase 2a-3 — backups and rotation**: plan §6.6 step **13** and plan §6.6's
+"Backups" paragraph. Before the first modification of each file per session, copy the file into a
+location that is **not** under an auto-loaded glob, retain the last 10 save batches, and offer *Reveal
+backups in Finder*. It is Rust with no UI and no IPC, exactly like 2a-1, 2a-2a and 2a-2b — the
+*Reveal* affordance is a UI and belongs to 2c; what 2a-3 owes it is a path.
 
 The exact first command a fresh session should run:
 
 ```sh
-cargo test --workspace          # expect 678 tests across 18 binaries, 0 failed
+cargo test --workspace          # expect 723 tests across 19 binaries, 0 failed
 ```
 
-**What 2a-2b inherits from 2a-2a, and must not rebuild.**
+**2a-3 carries one inherited obligation that is not step 13, and it is the review's blocking finding.**
+Plan §7 row 11 registers "capture and restore all four" for permissions / ownership / line endings /
+BOM, and `persist/write.rs` restores **mode bits only**; 2a-1 notes §4 enumerates the eight classes a
+rename drops. On macOS the **extended-attribute** loss is ordinary rather than exotic — Finder tags,
+comments and quarantine flags — and an ACL loss is an access-control **broadening**. The named remedy
+is `copyfile(3)` with `COPYFILE_ACL | COPYFILE_XATTR` between the temp write and the rename, which
+needs a platform-specific dependency this crate does not yet have. **2a-3 is its owner.** A backup
+phase that copies files while the thing being backed up still loses its metadata on every save is
+half a safety net.
 
-- **`validate(&DocumentView) -> Vec<Finding>`** in `crates/espansoconfig-core/src/validate/mod.rs` is
-  the whole of step 5. Call it on the projection of the **candidate**, never of the original — that
-  is the entire point of reparsing at step 4. It is pure and does no I/O, so it is safe to run inside
-  the lock and cannot deadlock.
-- **The blocking policy is 2a-2b's to invent, and it belongs at the transaction.** Nothing in
-  `crate::validate` decides whether a save proceeds, and nothing there should start to. `FindingClass`
-  is the axis to gate on, and it has exactly two variants: `EditorModelError` and
-  `SuspiciousButPermitted`. A likely shape — refuse on the first, confirm on the second — is
-  **deliberately not decided** in 2a-2a.
-- **`Finding`, `FindingCode` (10) and `FindingClass` (2) do not derive `Serialize`**, the same
-  deliberate omission as `WriteError`. They owe `code.` namespaces in **both** `en.json` and
-  `es.json` the day one of them gains it, and `src-tauri/src/dictionary_contract.rs` fails the build
-  without them. The derive and the strings land together, or neither lands. **2a-2b does not put
-  validation on the wire** — 2b does.
-- **Step 4 is not step 5.** Reparsing the candidate is a question about *bytes* and must reparse the
-  **whole** document. `patch/edit.rs` already does a reparse-verify at the mutation entry point:
-  **establish what that covers before writing a second one**, and if it is the same check, call it
-  rather than duplicating it.
-- **A rule that fires on the owner's working configuration is a defect** until proven otherwise.
-  `the_real_configuration_produces_no_finding_of_either_class` is where that is enforced; keep the
-  walked-counts assertion when extending it, or the zero goes vacuous. The skip is demandable via
-  `ESPANSOCONFIG_REQUIRE_REAL_CORPUS`.
-- **Hole 13 belongs to 2b, not to 2a-2b**: espanso 2.3.0 has a tenth variable type, `var_type:
-  "global"`, which this crate currently reports as `VariableTypeNotRecognised`. Fixing it means a
-  `VariableKind` variant, which is a Phase 1 **wire** type and owes two dictionary entries.
+**Where the backup step goes, established rather than guessed** (2a-2b notes §8): **between the verdict
+and the commit**, inside `save_document`. The lock is already held there, the candidate already
+exists, and the target's current bytes are already in memory as `source` — so a backup needs **no extra
+read**. It must **not** run before the verdict, or a refused save leaves a backup of a file nobody
+changed.
 
-**What 2a-2b inherits from 2a-1, and must not rebuild.**
+**What 2a-3 inherits from 2a-2b, and must not rebuild.**
 
-- **`replace_file_atomically(path, expected, bytes)`** in
-  `crates/espansoconfig-core/src/persist/write.rs`. It takes **finished bytes**. Do not add
-  patch-building, parsing or validation to it — that is the whole point of the split.
-- **`lock_path()` and `replace_locked_file()` exist for 2a-2b specifically.** The transaction must hold
-  the lock across steps 2 to 11, or the revision check and the rename are not one operation. Take the
-  lock once with `lock_path()`, do steps 3–5 inside it, then call `replace_locked_file()` — calling
-  `replace_file_atomically()` while holding the lock **deadlocks**.
-- **`WriteError` / `WriteStep` / `TargetDifference`, and the fact that none of them derive
-  `Serialize`.** That is deliberate: a wire-visible enum needs strings in **both** dictionaries and the
-  `dictionary_contract` test in `src-tauri/` fails without them. When 2b puts a save command on the
-  wire, the dictionary keys and the derive land together, or neither lands.
-- **D4 — the write is optimistic conflict detection, not a compare-and-swap.** Do not write a doc
-  comment, a test name or a user-facing string that says the app cannot lose an external writer's edit.
-  It can. The window is one rename wide.
-- **The guarantee is mode bits**, not permissions. Eight metadata classes are dropped by every save;
-  they are enumerated in notes §4 and are not 2a-2b's to fix.
+- **`save_document(SaveRequest) -> Result<SavedDocument, SaveError>`** in
+  `crates/espansoconfig-core/src/persist/save.rs` is plan §6.6 steps 1 to 12, under **one** lock. It is
+  **the only entry point that should ever write a user's file**; `replace_file_atomically` and
+  `replace_locked_file` take finished bytes and validate nothing.
+- **Do not call `replace_file_atomically` from inside the transaction.** Disabling experiment E12 is
+  what happens: the lock is not reentrant and the process hangs, silently and forever.
+- **`SavedDocument::committed` can be `false` on a success.** A candidate byte-identical to the target
+  is not rewritten, because every rename installs a new inode and drops eight metadata classes for
+  nothing. A backup must not be taken for a save that wrote nothing.
+- **The blocking policy is one pure function, `verdict(&[Finding], &Acknowledgement)`.** An
+  `EditorModelError` refuses with no override; a `SuspiciousButPermitted` refuses until the caller
+  acknowledges it **by content**, matched as a **multiset**. Extending it means a `SaveVerdict` variant,
+  which is an exhaustive-match compile error.
+- **`inspect_target` is the only read of a save target in the crate**, and it is `pub(super)` for that
+  reason. It opens `O_NOFOLLOW | O_NONBLOCK` and refuses a non-regular target. A second, unchecked read
+  is how finding 8 happened; do not add one.
+- **Nothing new derives `Serialize`.** `SaveError` (8 variants), `SaveVerdict`, `SaveRefusal` and
+  `Acknowledgement` owe `code.` namespaces in **both** `en.json` and `es.json` the day any of them
+  gains it, and they carry `Finding`, `FindingCode`, `FindingClass`, `WriteError`, `WriteStep`,
+  `TargetDifference` and `EditError` with them. That is a large, single, indivisible change, and it is
+  **2b's**.
 
-**Four things 2a-2b is most likely to get wrong.**
+**Three things 2a-3 is most likely to get wrong.**
 
-- **Reparsing the candidate is the point of step 4, and it must reparse the *whole* document**, not the
-  edited region. Phase 0's gate rests on exactly this. `patch/edit.rs` already does a reparse-verify at
-  the mutation entry point — establish what that covers **before** writing a second one, and if it is
-  the same check, call it rather than duplicating it.
-- **Step 5 is done and must not be rebuilt.** `validate()` is the whole rule set, classified. What is
-  left for 2a-2b is the **policy**: which `FindingClass` refuses a save, which merely warns, and how a
-  caller is told. That decision belongs at the transaction and nowhere else.
-- **Diagnostics are phrased as risk, not as prophecy** (plan §6.6): *"this looks wrong"*, never
-  *"espanso will reject this"*. The app does not control the daemon and cannot prove acceptance. This
-  is the same rule D2u applies to scalar types, in a new place — and 2a-2a's review shows it governs
-  variant names, doc comments and **test names**, not only strings on a screen.
-- **Silence and certainty are both wrong answers to an unestablished fact.** 2a-2a's four blocking
-  findings were all one shape: the first pass could not establish what espanso does, so it said
-  nothing — and saying nothing is itself a claim. Where a fact can be established, establish it and
-  cite it; where it cannot, classify it as suspicious and record the hole.
+- **A backup location under an auto-loaded glob is a bug that creates snippets.** Plan §6.6 names
+  `~/Library/Application Support/espanso/.espansoconfig-backups/<timestamp>/…`; the leading `.` and the
+  directory nesting are both load-bearing, exactly as the temp file's leading `_` and non-`.yml` suffix
+  are in 2a-1.
+- **"Before the first modification of each file per session" is a statement about session state**, and
+  `crate::persist` currently holds none. Where that state lives is 2a-3's decision to make and to write
+  down — a transaction that consulted the caller's cache would be a second owner of the session's state,
+  which 2a-2b explicitly refused to become.
+- **Diagnostics are phrased as risk, not prophecy**, and this governs variant names, doc comments and
+  **test names**. Three sentences a string must never say, inherited rather than invented: *espanso will
+  reject this* (plan §6.6); *your edit cannot be lost* (2a-1 D4 — the residual race is one rename wide);
+  *this file is valid* (step 4 proves it parses under **our** substrate, step 5 reports under **our**
+  model). A backup phase adds a fourth candidate: *your file is recoverable* — retention is 10 batches,
+  not forever.
+
+**What 2b inherits from 2a-2b, and must not rebuild.**
+
+- **An acknowledgement is content-addressed, and 2b must round-trip the findings, not a boolean.** The
+  save command's wire shape has to carry the findings out and the acknowledged subset back in. A
+  `force: true` parameter would undo the whole design.
+- **Nothing in this crate can establish that a human saw a finding.** `validate()` is public and
+  `Finding` is publicly constructible, so a caller can compute the candidate's findings itself and
+  acknowledge all of them. Enforcing presentation is the **user interface's** obligation, and 2b owes
+  it. (This corrects a claim the first pass of the notes made and the review withdrew.)
+- **Hole 1 is 2b's to close, not 2a-3's.** `DuplicateVariableName` and `RegexDoesNotCompile` are
+  unoverrideable `EditorModelError`s, so a file espanso demonstrably runs — duplicates are last-wins —
+  can be unsaveable through the visual editor. The escape hatch the plan names is the **raw editor**,
+  which is a UI. Until it exists, the hole is open.
+- **Hole 13 is still 2b's**: espanso 2.3.0 has a tenth variable type, `var_type: "global"`, which this
+  crate reports as `VariableTypeNotRecognised`. Fixing it means a `VariableKind` variant, which is a
+  Phase 1 **wire** type and owes two dictionary entries.
 
 **What the earlier phases leave, and Phase 2 as a whole should not rebuild** — the Phase 1 inheritance
 below is still current for 2b and 2c, and the two items addressed to Phase 2 by name are:
@@ -3585,7 +3676,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with `O_NOFOLLOW`, so mode bits, bytes and `(dev, ino)` come from one inode. `WriteError` / `WriteStep` / `TargetDifference` **do not derive `Serialize`**, deliberately — see the Next action |
+| [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with **`O_NOFOLLOW \| O_NONBLOCK`**, so mode bits, bytes and `(dev, ino)` come from one inode — and a fifo planted at the resolved path is an open that *returns*, refused as `TargetNotRegularFile`, rather than a wait for a writer with the lock held (2a-2b review finding 8). It is `pub(super)` and is **the only read of a save target in the crate**; a second, unchecked read is exactly how that finding happened. `WriteError` / `WriteStep` / `TargetDifference` **do not derive `Serialize`**, deliberately — see the Next action |
+| [`crates/espansoconfig-core/src/persist/save.rs`](crates/espansoconfig-core/src/persist/save.rs) | **The save transaction, and the only entry point that should ever write a user's file.** `save_document(SaveRequest) -> Result<SavedDocument, SaveError>` is plan §6.6 steps 1–12 under **one** lock: read and hash **inside** the lock, `apply_edits` (whose own `verify` **is** step 4 — not reimplemented), project and validate the **candidate**, apply the policy, commit via `replace_locked_file`. `verdict(&[Finding], &Acknowledgement) -> SaveVerdict` is **the blocking policy**, pure: an `EditorModelError` refuses with **no override**, a `SuspiciousButPermitted` refuses until acknowledged **by content and as a multiset** — never a boolean — and the findings come back on the success path too. A candidate byte-identical to the target is **not rewritten** (`committed: false`), because every rename drops eight metadata classes for nothing; that path re-reads under the lock and answers `RevisionMismatch` rather than returning facts it has not established. `SaveError` has **8** variants and `is_refusal()` / `may_have_written()` / `findings()` / `syntax_gate_failure()` are the four questions a caller asks of one. **Nothing here derives `Serialize`** |
+| [`docs/decisions/2a-2b-notes.md`](docs/decisions/2a-2b-notes.md) | Phase 2a-2b's decision record: what was built and the read-only refusal that was not in the brief (§1), **the blocking policy with the six alternatives it rejected (§2)**, **why step 4 is not reimplemented, established by reading `verify()` rather than assumed, with what it does *not* cover (§3)**, the **eighteen disabling experiments — including E7, which fired nothing and is the reason a test exists that did not before, and E12, which hangs forever (§4)**, the verification with the real-corpus counts and **the measured cost of step 5's second parse, where the trivia scan is the super-linear term (§5)**, what was deliberately not done (§6), the **sixteen holes stated as holes (§7)**, what 2a-3 and 2b inherit (§8) and the **eight-finding review disposition (§9)** |
+| [`docs/reviews/phase-2a-2b-save-transaction.md`](docs/reviews/phase-2a-2b-save-transaction.md) | The Phase 2a-2b review, dispositioned above. **The blocking finding is inherited (hazard 11's metadata loss, owner 2a-3); the one that mattered most is finding 8**, a concrete deadlock from a second unchecked read. **Two findings were overclaims in the decision record itself** — a property the notes said "cannot be written" that can, and a risk said to bite "today" with no experiment supporting it. Re-read before writing a sentence about what this application guarantees |
 | [`docs/decisions/2a-1-notes.md`](docs/decisions/2a-1-notes.md) | Phase 2a-1's decision record: what the primitive actually promises and the residual race (§2), why the new variant is not a reused one (§2.3), resolving the target before locking (§3), **mode bits and the eight metadata classes a rename drops (§4)**, the two independent reasons espanso cannot load the temp file (§5), **the fsync question settled from the toolchain source (§6)**, steps-not-sentences in the error type (§7), the disabling experiments (§9), **the coverage holes stated as holes including the two nothing can test (§10)**, the finding-by-finding **review disposition (§11)** and what 2a-2 inherits (§12) |
 | [`docs/reviews/phase-2a-1-atomic-write.md`](docs/reviews/phase-2a-1-atomic-write.md) | The Phase 2a-1 review, dispositioned above. **Read the test audit before writing a test in 2a-2.** Four of the ten stated guarantees were pinned by tests that would have passed against a weaker implementation — a byte-exact sweep seeded with the bytes it wrote back, a concurrency test that passes with no mutex, a `chflags` test that could skip and pass, and two counts that said "three" above five-element lists. **The critical finding is the one to carry forward**: the code promised a compare-and-swap that no POSIX operation can perform |
 | [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **The whole semantic gate (step 5), and 2a-2b calls it rather than rebuilding it.** `validate(&DocumentView) -> Vec<Finding>` — pure, no I/O, safe inside the lock. Ten `FindingCode`s over **two** `FindingClass`es (`EditorModelError`, `SuspiciousButPermitted`); the other two of plan §6.6's four classes belong to step 4 and to the 0b hazard gate and are deliberately absent. `FindingCode::class()` is the **only** place classification happens, and the boundary is one question: *does the claim rest on a vocabulary espanso can extend without telling us?* Nothing here derives `Serialize`. `required_param()` is a table whose every row is an observed failure path in espanso `v2.3.0`'s own source — **not its documentation**, which calls `date`'s `format` required when the source does not, and would have fired on working configs |
