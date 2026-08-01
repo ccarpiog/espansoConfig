@@ -80,8 +80,23 @@
 //!   survives. Ownership, creation time, BSD flags and hard links are still
 //!   dropped, and line endings and the BOM were never this module's to restore —
 //!   they are preserved by the span layer, by construction.
+//! - **2a-3b** — [`persist::backup`]: step 13 of plan section 6.6. Before the
+//!   **first modification of each file per session**, the target's bytes, mode
+//!   bits and extended attributes are copied into
+//!   `<config root>/.espansoconfig-backups/<timestampZ>/<its own relative path>`
+//!   — a *sibling* of `match/`, which is what puts it out of espanso's include
+//!   glob — and the last ten batches are kept. **A batch is a session**, so
+//!   rotation runs once per session, **after** that session's first copy is on
+//!   disk, and with that session's own batch excluded from removal by identity.
+//!   It removes only directories carrying the batch marker this application
+//!   writes, because a timestamp-shaped name is a shape and not a claim of
+//!   ownership. The copy deliberately drops the access control list, because a
+//!   copied `deny delete` entry would make a backup unrotatable. A backup that
+//!   cannot be written **fails the save before the commit**; a *rotation* that
+//!   fails is counted and never fails anything. Retention is ten sessions, not
+//!   forever, and no string may say *your file is recoverable*.
 //!
-//! [`persist`] holds the write primitive and the transaction around it, but no
+//! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step, and [`watch`] holds only [`ContentRevision`].
 
 #![deny(missing_docs)]

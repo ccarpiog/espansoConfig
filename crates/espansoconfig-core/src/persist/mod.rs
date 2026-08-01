@@ -11,7 +11,19 @@
 //! point: lock once, read and hash *under the lock*, patch, let
 //! [`crate::patch::apply_edits`] reparse the whole candidate, project and
 //! validate that candidate, decide, and only then commit through
-//! [`replace_locked_file`]. Step 13 — rotating backups — is **not built**.
+//! [`replace_locked_file`].
+//!
+//! **Phase 2a-3b scope:** step 13. [`backup`] holds it, and [`BackupSession`] is
+//! the entry point — an explicit, caller-owned value threaded through
+//! [`SaveRequest::backups`]. Before the **first modification of each file per
+//! session** the target's current bytes, mode bits and extended attributes are
+//! copied into
+//! `<config root>/.espansoconfig-backups/<timestampZ>/<the file's own relative
+//! path>`, between the verdict and the commit; the last
+//! [`backup::BATCHES_RETAINED`] batches are kept and the rest are removed. **A
+//! batch is a session**, so rotation runs once per session, after that session's
+//! first copy is on disk, and with that session's own batch excluded from removal
+//! by identity.
 //!
 //! It is *not* a compare-and-swap on file contents. No ordinary POSIX or macOS
 //! pathname operation provides one, so the revision is checked twice — once
@@ -38,8 +50,10 @@
 //! [`WriteError::may_have_written`] is a statement about the target for exactly
 //! that reason.
 //!
-//! **Still to come:** step 13, backup rotation. [`write`] writes finished bytes
-//! and inspects none of them, and [`save`] is what decides which bytes those are.
+//! **Still to come:** nothing of plan section 6.6. What remains for Phase 2 is
+//! the IPC surface (2b) and the user interface (2c) — including *Reveal backups
+//! in Finder*, whose only obligation on this module was a path, and that is
+//! [`BackupSession::root`].
 //!
 //! Two details here are load-bearing and easy to get wrong, and both are now
 //! executed by [`write`] rather than only described:
@@ -91,13 +105,28 @@
 //! own answers about the mode to give it, about the parent directory and about
 //! what espanso does with a file that appears empty.
 //!
-//! Backups go under `.espansoconfig-backups/`, which is deliberately outside
-//! any auto-loaded glob, and are a safety net rather than a substitute for
-//! revision checks. Nothing here writes one yet (step 13, sub-phase 2a-3).
+//! **Backups go under `.espansoconfig-backups/`, a direct child of the
+//! configuration root**, which is what keeps them outside any auto-loaded glob:
+//! espanso's include glob is rooted at `match/`, and no glob rooted at `match/`
+//! can reach a *sibling* of `match/`. The leading dot is belt-and-braces. They
+//! are **a safety net, not a substitute** for revision checks and atomic writes,
+//! and retention is ten batches rather than forever — no string anywhere may say
+//! *your file is recoverable*.
+//!
+//! **A backup deliberately does not carry the target's access control list**,
+//! though the atomic write does. Rotation deletes directories, and a copied
+//! `deny delete` entry makes a backup undeletable; [`backup`] argues it and
+//! `docs/decisions/2a-3b-notes.md` section 5 records the trade.
 
+pub mod backup;
 pub mod save;
 pub mod write;
 
+pub use backup::{
+    BackupError, BackupRecord, BackupSession, BackupStep, Rotation, RotationOutcome,
+    BACKUP_DIRECTORY_NAME, BATCHES_RETAINED, BATCH_MARKER_FORMAT, BATCH_MARKER_NAME,
+    OUTSIDE_CONFIG_ROOT,
+};
 pub use save::{
     save_document, verdict, Acknowledgement, SaveError, SaveRefusal, SaveRequest, SaveVerdict,
     SavedDocument,

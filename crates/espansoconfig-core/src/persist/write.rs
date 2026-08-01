@@ -657,6 +657,7 @@ pub fn replace_locked_file(
 /// read goes through [`inspect_target`] rather than through a second, unchecked
 /// [`fs::read`]: two ways into the same file are two places to forget the
 /// `O_NOFOLLOW`, the non-blocking open and the regular-file check.
+#[derive(Debug)]
 pub(super) struct InspectedTarget {
     /// The open file, kept so that step 7a's metadata copy reads the ACL and the
     /// extended attributes from **the same file description** the mode bits and
@@ -827,23 +828,67 @@ pub(super) fn inspect_target(target: &Path) -> Result<InspectedTarget, WriteErro
 /// that is the policy.
 #[cfg(target_os = "macos")]
 fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
+    copy_through_copyfile(
+        source,
+        destination,
+        libc::COPYFILE_ACL | libc::COPYFILE_XATTR,
+    )
+}
+
+/// The **extended attributes alone**, for a copy that must stay deletable
+/// (Phase 2a-3b's backups).
+///
+/// The same call as [`copy_metadata`] with **`COPYFILE_ACL` removed**, and the
+/// removal is the decision. A backup is rotated — that is, deleted — and 2a-3a
+/// measured that an `everyone deny delete` entry copied onto a new inode makes
+/// `remove_file` on it fail (`docs/decisions/2a-3a-notes.md` section 6,
+/// measurement 5). Carrying the list onto a backup would therefore turn *retain
+/// the last ten batches* into unbounded growth of directories this application
+/// can never clean up, and would do it silently.
+///
+/// What replaces the ACL for the backup's own protection is stated where the
+/// backup is written ([`crate::persist::backup`]): the copy keeps the target's
+/// **mode bits**, and the whole backup tree is created `0o700`.
+///
+/// Everything else about the call is [`copy_metadata`]'s, unchanged — the
+/// descriptor form that resolves no path, the `NULL` state, the absence of
+/// `COPYFILE_STAT` and of `COPYFILE_DATA`, and what a zero return does and does
+/// not prove.
+#[cfg(target_os = "macos")]
+pub(super) fn copy_extended_attributes(source: &File, destination: &File) -> io::Result<()> {
+    copy_through_copyfile(source, destination, libc::COPYFILE_XATTR)
+}
+
+/// The one `fcopyfile` call site, with the flag set as its argument.
+///
+/// Two named policies sit on it — [`copy_metadata`] for the atomic write and
+/// [`copy_extended_attributes`] for a backup — so that the difference between
+/// them is **one visible constant** rather than two independently maintained
+/// `unsafe` blocks that can drift.
+#[cfg(target_os = "macos")]
+fn copy_through_copyfile(
+    source: &File,
+    destination: &File,
+    flags: libc::copyfile_flags_t,
+) -> io::Result<()> {
     use std::os::unix::io::AsRawFd as _;
 
     // SAFETY: both descriptors are borrowed from live `File` values, so they are
     // open for the whole call; the state argument is documented to accept NULL;
-    // and the flags are two of the constants `copyfile(3)` defines. `fcopyfile`
-    // touches only **the file objects the two descriptors refer to** — a
-    // descriptor names no path, so no third file can be reached from here — and
-    // it returns 0 or -1. It does write: an ACL onto the destination, and
+    // and the flags are constants `copyfile(3)` defines, supplied by the two
+    // callers above and by nothing else. `fcopyfile` touches only **the file
+    // objects the two descriptors refer to** — a descriptor names no path, so no
+    // third file can be reached from here — and it returns 0 or -1. It does
+    // write: an ACL onto the destination where `COPYFILE_ACL` is requested, and
     // extended-attribute storage, which on modern macOS includes the resource
-    // fork. What it does not do with this flag set is copy or truncate the
-    // destination's main data fork.
+    // fork. What it does not do with either flag set used here is copy or
+    // truncate the destination's main data fork.
     let outcome = unsafe {
         libc::fcopyfile(
             source.as_raw_fd(),
             destination.as_raw_fd(),
             std::ptr::null_mut(),
-            libc::COPYFILE_ACL | libc::COPYFILE_XATTR,
+            flags,
         )
     };
     if outcome == 0 {
@@ -851,7 +896,7 @@ fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
-} // End of function copy_metadata()
+} // End of function copy_through_copyfile()
 
 /// The no-op this step becomes off macOS, where `copyfile(3)` does not exist.
 ///
@@ -863,6 +908,17 @@ fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
 /// enum, its codes and every exhaustive match over it are platform-independent.
 #[cfg(not(target_os = "macos"))]
 fn copy_metadata(source: &File, destination: &File) -> io::Result<()> {
+    let _ = (source, destination);
+    Ok(())
+}
+
+/// The no-op [`copy_extended_attributes`] becomes off macOS.
+///
+/// A backup taken on this target carries its bytes and its mode bits and **no
+/// extended attributes**, for the same reason and with the same consequence as
+/// [`copy_metadata`]'s twin above.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn copy_extended_attributes(source: &File, destination: &File) -> io::Result<()> {
     let _ = (source, destination);
     Ok(())
 }
@@ -1026,23 +1082,35 @@ fn write_through_temp_file(
 /// instructions between the two. The module documentation states the
 /// hostile-directory precondition that this leaves standing.
 fn verify_temp_identity(handle: &File, path: &Path) -> Result<(), WriteError> {
-    let open = handle.metadata().map_err(|error| WriteError::Io {
+    let same = names_the_same_inode(handle, path).map_err(|error| WriteError::Io {
         step: WriteStep::VerifyTempIdentity,
         path: path.to_path_buf(),
         source: error,
     })?;
-    let named = fs::symlink_metadata(path).map_err(|error| WriteError::Io {
-        step: WriteStep::VerifyTempIdentity,
-        path: path.to_path_buf(),
-        source: error,
-    })?;
-    if (named.dev(), named.ino()) != (open.dev(), open.ino()) {
+    if !same {
         return Err(WriteError::TempFileChangedDuringWrite {
             path: path.to_path_buf(),
         });
     }
     Ok(())
 } // End of function verify_temp_identity()
+
+/// Whether `path` still names the inode `handle` holds.
+///
+/// The comparison [`verify_temp_identity`] is made of, without its error type, so
+/// that [`crate::persist::backup`] can ask the same question about **its** own
+/// temporary file and answer it with a `BackupError` instead. The reasoning is
+/// entirely [`verify_temp_identity`]'s — one shared question, two callers, one
+/// implementation that cannot drift.
+///
+/// Both ends are `(device, inode)` pairs: `fstat` on the descriptor, and `lstat`
+/// — not `stat` — on the name, so an entry swapped for a **symlink** answers
+/// `false` rather than being dereferenced.
+pub(super) fn names_the_same_inode(handle: &File, path: &Path) -> io::Result<bool> {
+    let open = handle.metadata()?;
+    let named = fs::symlink_metadata(path)?;
+    Ok((named.dev(), named.ino()) == (open.dev(), open.ino()))
+} // End of function names_the_same_inode()
 
 /// The check immediately before the commit, and the whole of what narrows the
 /// residual race.

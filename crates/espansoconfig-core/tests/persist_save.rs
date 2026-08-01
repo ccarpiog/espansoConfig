@@ -150,6 +150,11 @@ fn save(
         base_revision: base,
         edits,
         acknowledgement,
+        // Backups are 2a-3b's, and every test in *this* binary is about the
+        // transaction without them. `tests/persist_backup.rs` is where they are
+        // pinned; `None` here is what makes "no backup was taken" a statement
+        // this file is entitled to make.
+        backups: None,
     })
 } // End of function save()
 
@@ -918,6 +923,7 @@ fn a_package_file_is_refused_before_anything_is_read() {
         base_revision: before,
         edits: &[scalar_edit("matches[0].replace", NEW_VALUE)],
         acknowledgement: &Acknowledgement::none(),
+        backups: None,
     })
     .expect_err("a package file is refused");
 
