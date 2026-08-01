@@ -60,22 +60,57 @@
 
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
+  BackupError,
+  BackupErrorName,
+  BackupStep,
   ContentKind,
+  DecodeError,
+  DecodeErrorName,
   DiagnosticCode,
   DiagnosticCodeName,
   DocumentShape,
+  EditError,
+  EditErrorName,
   FileKind,
+  FindingClass,
+  FindingCode,
+  FindingCodeName,
   HazardKind,
+  InvariantViolation,
+  InvariantViolationName,
   LineEnding,
   MatchBadge,
+  MoveSeam,
+  NodeKind,
+  PathError,
+  PathErrorName,
+  RotationOutcome,
+  SaveError,
+  SaveErrorName,
+  SaveVerdict,
   ScalarStyle,
+  SyntaxError,
+  SyntaxErrorName,
+  TargetDifference,
+  TargetDifferenceName,
   TriggerKind,
   UnknownReason,
   UnknownReasonName,
   ValueKind,
-  VariableKind
+  VariableKind,
+  VerificationFailure,
+  VerificationFailureName,
+  WriteError,
+  WriteErrorName,
+  WriteStep
 } from '../ipc/types';
-import { diagnosticCodeName, diagnosticCodeOperands, unknownReasonName } from '../ipc/types';
+import {
+  diagnosticCodeName,
+  diagnosticCodeOperands,
+  unknownReasonName,
+  wireVariantName,
+  wireVariantOperands
+} from '../ipc/types';
 import { DICTIONARIES, translate, type TranslationKey, type TranslationParams } from './dictionaries';
 import type { Locale } from './locale';
 
@@ -575,3 +610,459 @@ export function describeIpcFailure(locale: Locale, failure: IpcFailure): string 
   }
   return translate(locale, 'ipc.unexpectedFailure');
 } // End of function describeIpcFailure()
+
+// ---------------------------------------------------------------------------
+// The save transaction — Phase 2b-1
+// ---------------------------------------------------------------------------
+
+/**
+ * The operands of a save-transaction code, filtered down to what a sentence can
+ * hold.
+ *
+ * **Strings and numbers only**, and everything else is dropped. Three kinds of
+ * value are deliberately not carried into a message:
+ *
+ * - **a nested wire value.** `SaveError.Patch` carries a whole `EditError`, which
+ *   has a message of its own; interpolating `[object Object]` is the failure this
+ *   filter exists to prevent;
+ * - **a `null` operand.** A placeholder left unsubstituted stays visible in the
+ *   output, which is more honest than the word "null" in a sentence — the rule
+ *   {@link localizedOperands} already follows;
+ * - **an enum-valued operand.** These are *not* translated here, unlike the three
+ *   the diagnostics table names, and that is a decision rather than an omission:
+ *   `kind` means a `NodeKind` in `EditError.NotAScalar`, a `VariableKind` in
+ *   `FindingCode.VariableMissingRequiredParam` and a `std::io::ErrorKind` name in
+ *   `WriteError.Io`, so one operand-name-to-namespace table would have to be
+ *   wrong about two of the three. No message written for these codes names such
+ *   an operand; the value is in the wire object the caller still holds.
+ *
+ * @param operands - The operand object as it crossed the boundary, or `null`.
+ * @returns Substitutions for the message's `{placeholder}` tokens.
+ */
+function scalarOperands(operands: Readonly<Record<string, unknown>> | null): TranslationParams {
+  const params: Record<string, string | number> = {};
+  if (operands === null) {
+    return params;
+  }
+  for (const [name, value] of Object.entries(operands)) {
+    if (typeof value === 'string' || typeof value === 'number') {
+      params[name] = value;
+    }
+  } // End of the loop over the operands
+  return params;
+} // End of function scalarOperands()
+
+/**
+ * The dictionary key for one kind of YAML construct.
+ *
+ * @param kind - A `NodeKind` as it crossed the boundary.
+ * @returns The key holding that construct's noun phrase.
+ */
+export function nodeKindKey(kind: NodeKind): TranslationKey {
+  return `code.nodeKind.${uncapitalize(kind)}`;
+} // End of function nodeKindKey()
+
+/**
+ * The dictionary key for one save verdict.
+ *
+ * @param verdict - A `SaveVerdict` as it crossed the boundary.
+ * @returns The key holding that verdict's sentence.
+ */
+export function saveVerdictKey(verdict: SaveVerdict): TranslationKey {
+  return `code.saveVerdict.${uncapitalize(verdict)}`;
+} // End of function saveVerdictKey()
+
+/**
+ * The dictionary key for one class of finding.
+ *
+ * @param value - A `FindingClass` as it crossed the boundary.
+ * @returns The key holding that class's phrase.
+ */
+export function findingClassKey(value: FindingClass): TranslationKey {
+  return `code.findingClass.${uncapitalize(value)}`;
+} // End of function findingClassKey()
+
+/**
+ * The dictionary key for one step of the atomic write.
+ *
+ * @param step - A `WriteStep` as it crossed the boundary.
+ * @returns The key holding that step's noun phrase.
+ */
+export function writeStepKey(step: WriteStep): TranslationKey {
+  return `code.writeStep.${uncapitalize(step)}`;
+} // End of function writeStepKey()
+
+/**
+ * The dictionary key for one step of taking a backup.
+ *
+ * @param step - A `BackupStep` as it crossed the boundary.
+ * @returns The key holding that step's noun phrase.
+ */
+export function backupStepKey(step: BackupStep): TranslationKey {
+  return `code.backupStep.${uncapitalize(step)}`;
+} // End of function backupStepKey()
+
+/**
+ * The dictionary key for how far the backup tidy-up got.
+ *
+ * @param outcome - A `RotationOutcome` as it crossed the boundary.
+ * @returns The key holding that outcome's sentence.
+ */
+export function rotationOutcomeKey(outcome: RotationOutcome): TranslationKey {
+  return `code.rotationOutcome.${uncapitalize(outcome)}`;
+} // End of function rotationOutcomeKey()
+
+/**
+ * The dictionary key for one join a move creates.
+ *
+ * @param seam - A `MoveSeam` as it crossed the boundary.
+ * @returns The key holding that seam's phrase.
+ */
+export function moveSeamKey(seam: MoveSeam): TranslationKey {
+  return `code.moveSeam.${uncapitalize(seam)}`;
+} // End of function moveSeamKey()
+
+/**
+ * The dictionary key for one semantic-gate finding.
+ *
+ * @param name - The variant name of a `FindingCode`.
+ * @returns The key holding that finding's message.
+ */
+export function findingCodeKey(name: FindingCodeName): TranslationKey {
+  return `code.findingCode.${uncapitalize(name)}`;
+} // End of function findingCodeKey()
+
+/**
+ * The dictionary key for one reason a change was not applied.
+ *
+ * @param name - The variant name of an `EditError`.
+ * @returns The key holding that reason's message.
+ */
+export function editErrorKey(name: EditErrorName): TranslationKey {
+  return `code.editError.${uncapitalize(name)}`;
+} // End of function editErrorKey()
+
+/**
+ * The dictionary key for one reason a candidate failed verification.
+ *
+ * @param name - The variant name of a `VerificationFailure`.
+ * @returns The key holding that reason's message.
+ */
+export function verificationFailureKey(name: VerificationFailureName): TranslationKey {
+  return `code.verificationFailure.${uncapitalize(name)}`;
+} // End of function verificationFailureKey()
+
+/**
+ * The dictionary key for one reason a document could not be indexed.
+ *
+ * @param name - The variant name of a `SyntaxError`.
+ * @returns The key holding that reason's message.
+ */
+export function syntaxErrorKey(name: SyntaxErrorName): TranslationKey {
+  return `code.syntaxError.${uncapitalize(name)}`;
+} // End of function syntaxErrorKey()
+
+/**
+ * The dictionary key for one broken invariant of the span index.
+ *
+ * @param name - The variant name of an `InvariantViolation`.
+ * @returns The key holding that violation's message.
+ */
+export function invariantViolationKey(name: InvariantViolationName): TranslationKey {
+  return `code.invariantViolation.${uncapitalize(name)}`;
+} // End of function invariantViolationKey()
+
+/**
+ * The dictionary key for one reason an address did not resolve.
+ *
+ * @param name - The variant name of a `PathError`.
+ * @returns The key holding that reason's message.
+ */
+export function pathErrorKey(name: PathErrorName): TranslationKey {
+  return `code.pathError.${uncapitalize(name)}`;
+} // End of function pathErrorKey()
+
+/**
+ * The dictionary key for one reason a scalar could not be decoded.
+ *
+ * @param name - The variant name of a `DecodeError`.
+ * @returns The key holding that reason's message.
+ */
+export function decodeErrorKey(name: DecodeErrorName): TranslationKey {
+  return `code.decodeError.${uncapitalize(name)}`;
+} // End of function decodeErrorKey()
+
+/**
+ * The dictionary key for one way the save target differed from what was inspected.
+ *
+ * @param name - The variant name of a `TargetDifference`.
+ * @returns The key holding that difference's sentence.
+ */
+export function targetDifferenceKey(name: TargetDifferenceName): TranslationKey {
+  return `code.targetDifference.${uncapitalize(name)}`;
+} // End of function targetDifferenceKey()
+
+/**
+ * The dictionary key for one failure of the atomic write.
+ *
+ * @param name - The variant name of a `WriteError`.
+ * @returns The key holding that failure's message.
+ */
+export function writeErrorKey(name: WriteErrorName): TranslationKey {
+  return `code.writeError.${uncapitalize(name)}`;
+} // End of function writeErrorKey()
+
+/**
+ * The dictionary key for one failure of taking a backup.
+ *
+ * @param name - The variant name of a `BackupError`.
+ * @returns The key holding that failure's message.
+ */
+export function backupErrorKey(name: BackupErrorName): TranslationKey {
+  return `code.backupError.${uncapitalize(name)}`;
+} // End of function backupErrorKey()
+
+/**
+ * The dictionary key for one reason a save did not commit.
+ *
+ * @param name - The variant name of a `SaveError`.
+ * @returns The key holding that reason's message.
+ */
+export function saveErrorKey(name: SaveErrorName): TranslationKey {
+  return `code.saveError.${uncapitalize(name)}`;
+} // End of function saveErrorKey()
+
+/**
+ * The noun phrase one kind of YAML construct reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param kind - A node kind as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeNodeKind(locale: Locale, kind: NodeKind): string {
+  return translate(locale, nodeKindKey(kind));
+} // End of function describeNodeKind()
+
+/**
+ * The sentence one save verdict reads as.
+ *
+ * **Risk, not prophecy.** A refusal says this editor declined to write, never
+ * that espanso would have rejected the file.
+ *
+ * @param locale - The dictionary to read from.
+ * @param verdict - A save verdict as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeSaveVerdict(locale: Locale, verdict: SaveVerdict): string {
+  return translate(locale, saveVerdictKey(verdict));
+} // End of function describeSaveVerdict()
+
+/**
+ * The phrase one class of finding reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param value - A finding class as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeFindingClass(locale: Locale, value: FindingClass): string {
+  return translate(locale, findingClassKey(value));
+} // End of function describeFindingClass()
+
+/**
+ * The noun phrase one step of the atomic write reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param step - A write step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeWriteStep(locale: Locale, step: WriteStep): string {
+  return translate(locale, writeStepKey(step));
+} // End of function describeWriteStep()
+
+/**
+ * The noun phrase one step of taking a backup reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param step - A backup step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeBackupStep(locale: Locale, step: BackupStep): string {
+  return translate(locale, backupStepKey(step));
+} // End of function describeBackupStep()
+
+/**
+ * The sentence one backup tidy-up outcome reads as.
+ *
+ * **Tidiness, never safety.** An outcome other than `Scanned` says the backups
+ * folder is not known to hold at most ten batches; it says nothing about whether
+ * any file can be recovered, and no string here may.
+ *
+ * @param locale - The dictionary to read from.
+ * @param outcome - A rotation outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeRotationOutcome(locale: Locale, outcome: RotationOutcome): string {
+  return translate(locale, rotationOutcomeKey(outcome));
+} // End of function describeRotationOutcome()
+
+/**
+ * The phrase one join created by a move reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param seam - A move seam as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeMoveSeam(locale: Locale, seam: MoveSeam): string {
+  return translate(locale, moveSeamKey(seam));
+} // End of function describeMoveSeam()
+
+/**
+ * The sentence one semantic-gate finding reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param code - A finding code as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeFindingCode(locale: Locale, code: FindingCode): string {
+  const key = findingCodeKey(wireVariantName<FindingCodeName>(code));
+  return translate(locale, key, scalarOperands(wireVariantOperands(code)));
+} // End of function describeFindingCode()
+
+/**
+ * The sentence one reason a change was not applied reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - An edit error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeEditError(locale: Locale, error: EditError): string {
+  const key = editErrorKey(wireVariantName<EditErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeEditError()
+
+/**
+ * The sentence one verification failure reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param failure - A verification failure as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeVerificationFailure(
+  locale: Locale,
+  failure: VerificationFailure
+): string {
+  const key = verificationFailureKey(wireVariantName<VerificationFailureName>(failure));
+  return translate(locale, key, scalarOperands(wireVariantOperands(failure)));
+} // End of function describeVerificationFailure()
+
+/**
+ * The sentence one span-layer refusal reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A syntax error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function describeSyntaxError(locale: Locale, error: SyntaxError): string {
+  return translate(locale, syntaxErrorKey(wireVariantName<SyntaxErrorName>(error)));
+} // End of function describeSyntaxError()
+
+/**
+ * The sentence one broken index invariant reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param violation - An invariant violation as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeInvariantViolation(
+  locale: Locale,
+  violation: InvariantViolation
+): string {
+  const key = invariantViolationKey(wireVariantName<InvariantViolationName>(violation));
+  return translate(locale, key, scalarOperands(wireVariantOperands(violation)));
+} // End of function describeInvariantViolation()
+
+/**
+ * The sentence one unresolved address reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A path error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describePathError(locale: Locale, error: PathError): string {
+  const key = pathErrorKey(wireVariantName<PathErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describePathError()
+
+/**
+ * The sentence one undecodable scalar reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A decode error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeDecodeError(locale: Locale, error: DecodeError): string {
+  const key = decodeErrorKey(wireVariantName<DecodeErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeDecodeError()
+
+/**
+ * The sentence one difference in the save target reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param difference - A target difference as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeTargetDifference(
+  locale: Locale,
+  difference: TargetDifference
+): string {
+  const key = targetDifferenceKey(wireVariantName<TargetDifferenceName>(difference));
+  return translate(locale, key, scalarOperands(wireVariantOperands(difference)));
+} // End of function describeTargetDifference()
+
+/**
+ * The sentence one atomic-write failure reads as.
+ *
+ * The path is substituted and the `kind` is not: an `io::ErrorKind` name is an
+ * English identifier with no dictionary of its own, and it belongs in a console
+ * rather than in a message — the same rule `IoError.kind` already follows.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A write error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeWriteError(locale: Locale, error: WriteError): string {
+  const key = writeErrorKey(wireVariantName<WriteErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeWriteError()
+
+/**
+ * The sentence one backup failure reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A backup error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeBackupError(locale: Locale, error: BackupError): string {
+  const key = backupErrorKey(wireVariantName<BackupErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeBackupError()
+
+/**
+ * The sentence one refused or failed save reads as.
+ *
+ * **One sentence per variant, and the nested error is not unwrapped here.**
+ * `SaveError.Patch` carries a whole `EditError` and `SaveError.Write` a whole
+ * `WriteError`; each has {@link describeEditError} and {@link describeWriteError}
+ * of its own, and a caller that wants both sentences asks for both. Folding them
+ * into one string here would decide, for every screen at once, how much detail a
+ * user is shown.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A save error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeSaveError(locale: Locale, error: SaveError): string {
+  const key = saveErrorKey(wireVariantName<SaveErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeSaveError()

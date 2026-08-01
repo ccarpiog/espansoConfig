@@ -227,6 +227,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::emit::{
     choose_scalar, decode, plain_scalar_is_ambiguous, preserve_scalar, reencode_in_place,
     DecodeError, NotReencodable, ScalarContext, ScalarPlan,
@@ -632,7 +634,7 @@ impl PatchedDocument {
 /// [`PathError`] already documents. No variant carries scalar text, because the
 /// real-file corpus is private (`CLAUDE.md` section 1) and these errors are
 /// printed by tests that run over it: spans, lengths and counts only.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum EditError {
     /// The document does not parse, so nothing in it can be addressed.
     SourceDoesNotParse(SyntaxError),
@@ -1147,7 +1149,7 @@ pub enum EditError {
 /// document. A run ending in a block scalar's body followed by a run beginning
 /// with a deeper-indented comment feeds that comment to the block, and none of the
 /// three external seams looks there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MoveSeam {
     /// **The source closes.** What followed the item rises to sit under what
     /// preceded it. This is the seam a plain removal also creates.
@@ -1174,7 +1176,7 @@ pub enum MoveSeam {
 /// here means the splice produced something other than what was asked for, and
 /// **every one of them discards the candidate**: there is no code path from a
 /// verification failure to bytes a caller could write.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum VerificationFailure {
     /// The candidate is not valid YAML any more.
     DoesNotParse(SyntaxError),

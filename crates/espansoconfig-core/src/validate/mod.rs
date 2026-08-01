@@ -53,12 +53,20 @@
 //!   of bytes rather than of a projection.
 //! - **Not a type resolver** (D2u). Every value it reads is
 //!   [`crate::model::ScalarView::text`] — source text as written.
-//! - **Not on the wire.** No type here derives `Serialize`, deliberately: a
-//!   wire-visible enum owes `code.` namespaces in **both**
-//!   `src/lib/i18n/en.json` and `es.json`, and
-//!   `src-tauri/src/dictionary_contract.rs` fails the build without them. The
-//!   sub-phase that puts validation on the wire adds the derive and the strings
-//!   in one change, which is the property that check exists to enforce.
+//! - **On the wire since Phase 2b-1, in one direction.** [`Finding`],
+//!   [`FindingCode`] and [`FindingClass`] serialize, and every variant of the
+//!   two enums has a `code.` entry in **both** `src/lib/i18n/en.json` and
+//!   `es.json` — `src-tauri/src/dictionary_contract.rs` fails the build without
+//!   them, which is why the derives and the strings landed in one change.
+//!   Nothing here **deserializes**, and that is a real gap rather than an
+//!   oversight: an acknowledgement has to arrive *from* the interface, and
+//!   [`serde::Deserialize`] is still absent from [`Finding`], [`ByteSpan`] and
+//!   [`crate::model::VariableKind`]. The one *type-level* obstruction is gone —
+//!   [`FindingCode::VariableMissingRequiredParam`]'s `param` is an owned
+//!   [`String`] since Phase 2b-1's review, not a `&'static str` `serde` could
+//!   never read back into — but which direction 2b-2 takes, and how it compares
+//!   what arrives, is that sub-phase's decision
+//!   (`docs/decisions/2b-1-notes.md`).
 //!
 //! # What a successful regex compile here does and does not prove
 //!
@@ -77,6 +85,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use regex::Regex;
+use serde::Serialize;
 
 use crate::model::{
     ContentKind, DocumentView, MatchView, ScalarView, TriggerKind, ValueKind, ValueView,
@@ -102,9 +111,9 @@ const MERGE_KEY: &str = "<<";
 /// How seriously a caller should take a [`Finding`].
 ///
 /// Two of plan section 6.6's four classes; the module documentation says which
-/// two and why the other two belong elsewhere. Deliberately **not**
-/// `Serialize` — see the module documentation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// two and why the other two belong elsewhere. On the wire since Phase 2b-1, so
+/// both variants owe a `code.findingClass.` entry in both dictionaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum FindingClass {
     /// The document contradicts espanso's schema as this editor models it, in
     /// a way that is not explainable by espanso having grown since this crate
@@ -150,7 +159,7 @@ impl fmt::Display for FindingClass {
 /// Plan section 9: *"Rust returns error codes and structured data, never
 /// user-facing prose."* Nothing here is a sentence. Every operand is either a
 /// number, an enum this crate owns, or **text the file itself supplied**.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum FindingCode {
     /// Rule 1. The match has none of `replace`, `form`, `markdown`, `html` and
     /// `image_path`, so nothing says what it expands to.
@@ -180,7 +189,15 @@ pub enum FindingCode {
         kind: VariableKind,
         /// The parameter key that is absent. See [`required_param`] for where
         /// each entry of that table comes from.
-        param: &'static str,
+        ///
+        /// **Owned rather than `&'static str`**, even though every value this
+        /// crate produces comes from that table. A borrowed static is a type
+        /// `serde` cannot read *back* into, so it was the one field in the whole
+        /// acknowledgement graph that made [`serde::Deserialize`] impossible to
+        /// derive at all. Owning it removes that obstruction; whether an
+        /// acknowledgement round-trips, and how, is still Phase 2b-2's decision
+        /// (`docs/reviews/phase-2b-1-wire-boundary.md` section 1).
+        param: String,
     },
     /// Rule 4. Two variables of one `vars` or `global_vars` sequence declare
     /// the same `name`. The finding is attached to the **later** one.
@@ -316,9 +333,9 @@ impl fmt::Display for FindingCode {
 /// is about, the node, and the path that addresses it — so a caller that
 /// already renders diagnostics has nothing new to learn. It is a separate type
 /// because a diagnostic describes *the file as read* and a finding describes
-/// *a candidate about to be written*, and because this one must not be
-/// `Serialize` yet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// *a candidate about to be written*. Both are on the wire; only the diagnostic
+/// is ever produced by a read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
     /// What was noticed.
     pub code: FindingCode,
@@ -528,7 +545,7 @@ fn check_variable_type(variable: &VariableView, findings: &mut Vec<Finding>) {
             variable,
             FindingCode::VariableMissingRequiredParam {
                 kind: variable.kind,
-                param,
+                param: param.to_owned(),
             },
         ));
     }
@@ -1014,7 +1031,7 @@ mod tests {
             },
             FindingCode::VariableMissingRequiredParam {
                 kind: VariableKind::Shell,
-                param: "cmd",
+                param: "cmd".to_owned(),
             },
             FindingCode::DuplicateVariableName {
                 name: String::new(),

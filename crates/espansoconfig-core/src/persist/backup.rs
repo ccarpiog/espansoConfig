@@ -109,14 +109,20 @@
 //! plus a fifth that is specific here: it carries BSD flags, and a `uchg` backup
 //! is an unrotatable backup.
 //!
-//! # Not on the wire
+//! # On the wire since Phase 2b-1
 //!
-//! Nothing here derives `Serialize`, deliberately and for the reason
-//! [`crate::persist::save`] states: a wire-visible enum owes `code.` namespaces in
-//! **both** `src/lib/i18n/en.json` and `es.json`, and
-//! `src-tauri/src/dictionary_contract.rs` fails the build without them. What this
-//! sub-phase owes Phase 2c is a **path** — [`BackupSession::root`] — not a
-//! command.
+//! [`BackupError`], [`BackupStep`], [`RotationOutcome`], [`Rotation`] and
+//! [`BackupRecord`] serialize, and every variant of the three enums has a `code.`
+//! entry in **both** `src/lib/i18n/en.json` and `es.json` —
+//! `src-tauri/src/dictionary_contract.rs` fails the build without them.
+//!
+//! **A serialized [`BackupRecord`] is display data and counts, and it is not a
+//! promise.** Retention is [`BATCHES_RETAINED`] batches and a batch is a session,
+//! so no string built on it may say a file is recoverable; and a
+//! [`Rotation::bounded`] that answers `false` is a claim about *tidiness* — the
+//! root may now hold more than ten batches — never about safety. What this
+//! sub-phase still owes Phase 2c is a **path**, [`BackupSession::root`], and that
+//! directory may not exist.
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -127,6 +133,11 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt as _, OpenOptionsExt, Permiss
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::ser::{SerializeStruct, SerializeStructVariant, Serializer};
+use serde::Serialize;
+
+use crate::wire::{io_kind_name, io_raw_os_error, WirePathRef};
 
 use super::write::{copy_extended_attributes, names_the_same_inode, temp_file_name};
 
@@ -220,7 +231,7 @@ const BACKUP_DIRECTORY_MODE: u32 = 0o700;
 /// and there was nothing to do"* from *"the root could not be listed at all"* —
 /// and those are opposite facts, because the second one means the tree can grow
 /// without bound. This enum is the difference between them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum RotationOutcome {
     /// Rotation was not run at all.
     ///
@@ -269,7 +280,7 @@ impl fmt::Display for RotationOutcome {
 /// outcome that is not [`RotationOutcome::Scanned`] all mean the same thing to a
 /// caller — **the backup root is not known to hold at most
 /// [`BATCHES_RETAINED`] batches**, which is untidy and is not dangerous.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
 pub struct Rotation {
     /// How far rotation got.
     pub outcome: RotationOutcome,
@@ -337,6 +348,24 @@ pub struct BackupRecord {
     pub rotation: Rotation,
 }
 
+impl Serialize for BackupRecord {
+    /// Both paths go through [`WirePathRef`], which is the whole reason this is
+    /// hand-written: `serde`'s own `PathBuf` serializer **fails** on a path that
+    /// is not valid UTF-8, and a backup record travels on the *success* path,
+    /// where a serializer failure has no typed refusal to fall back to.
+    ///
+    /// A serialized record is **display data plus counts**. It is not a promise
+    /// that the file is recoverable: retention is [`BATCHES_RETAINED`] batches
+    /// and a batch is a session, so nothing built on this may say otherwise.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("BackupRecord", 3)?;
+        out.serialize_field("path", &WirePathRef(&self.path))?;
+        out.serialize_field("batch", &WirePathRef(&self.batch))?;
+        out.serialize_field("rotation", &self.rotation)?;
+        out.end()
+    } // End of function serialize() for BackupRecord
+}
+
 // ---------------------------------------------------------------------------
 // The failures
 // ---------------------------------------------------------------------------
@@ -345,7 +374,7 @@ pub struct BackupRecord {
 ///
 /// Carried by [`BackupError::Io`] so a caller can tell them apart **without
 /// parsing a sentence**, exactly as [`crate::persist::WriteStep`] is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum BackupStep {
     /// Creating `<config root>/.espansoconfig-backups`.
     ///
@@ -409,7 +438,9 @@ impl fmt::Display for BackupStep {
 /// [`BackupError`] at all, because a failure to tidy old batches must never stop
 /// a save. It is counted on [`Rotation`] instead.
 ///
-/// No `Serialize`, deliberately — see the module documentation.
+/// Serializes as an externally tagged variant whose paths are lossy renderings
+/// and whose I/O failure carries a `kind` code and a nullable `raw_os_error`
+/// number — see the `Serialize` impl below.
 #[derive(Debug)]
 pub enum BackupError {
     /// The filesystem refused an operation.
@@ -525,6 +556,100 @@ impl BackupError {
             | BackupError::BackupNameExhausted { path } => path,
         }
     } // End of function path()
+}
+
+impl Serialize for BackupError {
+    /// Externally tagged, with the same two departures [`crate::persist::WriteError`]
+    /// makes and for the same reasons: **every** path goes through
+    /// [`WirePathRef`] because a path that is not valid UTF-8 would otherwise fail
+    /// the serializer at the one moment there is no second error to send, and
+    /// [`BackupError::Io`] writes **`kind`** — the [`io::ErrorKind`] variant name,
+    /// a code — never the operating system's own sentence. Beside it rides
+    /// **`raw_os_error`**, the system's own error number as a nullable number:
+    /// `kind` collapses whole families of failures into `Other`, and the number is
+    /// diagnostic data with no dictionary entry rather than a second code.
+    ///
+    /// Hand-written so a variant added here is a compile error rather than a
+    /// silent wire addition with no string behind it.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            BackupError::Io { step, path, source } => {
+                let mut out = serializer.serialize_struct_variant("BackupError", 0, "Io", 4)?;
+                out.serialize_field("step", step)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("kind", &io_kind_name(source))?;
+                out.serialize_field("raw_os_error", &io_raw_os_error(source))?;
+                out.end()
+            }
+            BackupError::BatchNameExhausted { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    1,
+                    "BatchNameExhausted",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupError::NotADirectory { path } => {
+                let mut out =
+                    serializer.serialize_struct_variant("BackupError", 2, "NotADirectory", 1)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupError::BackupRootNotPrivate { path, mode } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    3,
+                    "BackupRootNotPrivate",
+                    2,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("mode", mode)?;
+                out.end()
+            }
+            BackupError::ConfigRootIsAutoLoaded { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    4,
+                    "ConfigRootIsAutoLoaded",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupError::TempFileChangedDuringWrite { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    5,
+                    "TempFileChangedDuringWrite",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupError::DestinationExists { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    6,
+                    "DestinationExists",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupError::BackupNameExhausted { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupError",
+                    7,
+                    "BackupNameExhausted",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+        }
+    } // End of function serialize() for BackupError
 }
 
 impl fmt::Display for BackupError {

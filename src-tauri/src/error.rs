@@ -379,10 +379,15 @@ fn declared_variants() -> std::collections::BTreeSet<String> {
 /// The `Debug` rendering of an `ErrorKind` is its variant name — `NotFound`,
 /// `PermissionDenied` — which is a code. The error's `Display` string is the
 /// operating system's own message, in the operating system's own language, and
-/// is deliberately never sent. The core's `WorkspaceError` uses the same rule,
-/// so the two agree on what a `kind` operand means.
+/// is deliberately never sent.
+///
+/// **Delegates to the core rather than repeating it.** Phase 2b-1 put the same
+/// rule on `WriteError::Io` and `BackupError::Io`, so the spelling moved to
+/// [`espansoconfig_core::wire::io_kind_name`] and this is the one caller left on
+/// this side of the boundary. Two copies could disagree about what a `kind`
+/// operand means, and only one of them would be wrong in a way anybody noticed.
 fn io_kind_name(error: &io::Error) -> String {
-    format!("{:?}", error.kind())
+    espansoconfig_core::wire::io_kind_name(error)
 }
 
 impl From<IdentityError> for CommandError {

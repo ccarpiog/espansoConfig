@@ -25,13 +25,15 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::syntax::{ByteSpan, ScalarPresentation, ScalarStyle};
 
 /// Why a scalar's source bytes could not be decoded.
 ///
 /// Diagnostics, not user-facing prose: every string a user reads goes through
 /// the frontend i18n layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum DecodeError {
     /// The presentation's content span does not slice the source, or does not
     /// land on UTF-8 character boundaries.

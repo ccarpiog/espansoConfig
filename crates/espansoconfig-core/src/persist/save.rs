@@ -66,17 +66,36 @@
 //! *this looks wrong* or *this editor refuses to write that*, never *espanso
 //! will reject this*.
 //!
-//! # Not on the wire
+//! # On the wire since Phase 2b-1, and no command yet
 //!
-//! Nothing here derives `Serialize`, deliberately and for the same reason
-//! [`crate::persist::WriteError`] and [`crate::validate::Finding`] do not: a
-//! wire-visible enum owes `code.` namespaces in **both** `src/lib/i18n/en.json`
-//! and `es.json`, and `src-tauri/src/dictionary_contract.rs` fails the build
-//! without them. Putting a save on the wire is Phase 2b's change, and it lands
-//! with the strings or it does not land.
+//! [`SaveError`], [`SaveVerdict`], [`SaveRefusal`] and [`Acknowledgement`]
+//! serialize, and every variant of the two enums — together with every variant of
+//! everything they carry — has a `code.` entry in **both**
+//! `src/lib/i18n/en.json` and `es.json`. That was the whole of Phase 2b-1, and it
+//! was indivisible: `src-tauri/src/dictionary_contract.rs` fails the build for one
+//! variant serialized without its string, so half the enum on the wire is worse
+//! than none of it.
+//!
+//! **No `#[tauri::command]` calls any of this yet.** The boundary exists before
+//! the commands that will cross it, exactly as Phase 1b-1 shipped the whole i18n
+//! layer with no command behind it.
+//!
+//! [`Acknowledgement`] serializes and does **not** deserialize, which is stated
+//! rather than left to be discovered: an acknowledgement is content-addressed and
+//! has to travel *back in*. Phase 2b-1's review removed the one obstruction that
+//! was a **type** rather than a decision —
+//! [`crate::validate::FindingCode::VariableMissingRequiredParam`] now carries an
+//! owned [`String`] — but [`serde::Deserialize`] is still absent from [`Finding`],
+//! [`crate::syntax::ByteSpan`] and [`crate::model::VariableKind`], and 2b-2 must
+//! compare what arrives against freshly recomputed findings as an exact
+//! **multiset**, so `[A, A]` differs from `[A]`.
+//! `docs/decisions/2b-1-notes.md` records it as this phase's open hole.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+use serde::ser::{SerializeStructVariant, Serializer};
+use serde::Serialize;
 
 use crate::model::{DocumentContext, DocumentView};
 use crate::patch::{
@@ -88,6 +107,7 @@ use crate::persist::write::{
 };
 use crate::syntax::{SyntaxError, SyntaxIndex, TriviaIndex};
 use crate::validate::{validate, Finding, FindingClass};
+use crate::wire::WirePathRef;
 use crate::ContentRevision;
 
 // ---------------------------------------------------------------------------
@@ -114,7 +134,7 @@ use crate::ContentRevision;
 /// no longer covers anything, and the save is refused again. That strictness is
 /// the point: the second call re-reads, re-patches and re-validates, and what
 /// the user agreed to has to still be what the transaction is about to write.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Acknowledgement {
     /// The suspicions the caller accepted, in the order it supplied them.
     accepted: Vec<Finding>,
@@ -229,7 +249,7 @@ impl Acknowledgement {
 ///   authority it does not have — the same mistake as "espanso will reject
 ///   this", one level up. So it is refused **until the caller acknowledges it
 ///   by content**, and the findings travel back on the success path too.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum SaveVerdict {
     /// Nothing in the candidate stands in the way of the commit.
     ///
@@ -427,7 +447,7 @@ pub struct SavedDocument {
 }
 
 /// Why the semantic gate refused — step 5's answer, with its evidence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SaveRefusal {
     /// Which arm of the policy refused.
     pub verdict: SaveVerdict,
@@ -455,7 +475,9 @@ pub struct SaveRefusal {
 /// happening. Both leave the file alone except where
 /// [`SaveError::may_have_written`] says otherwise.
 ///
-/// No `Serialize`, deliberately — see the module documentation.
+/// Serializes as an externally tagged variant, with every path rendered through
+/// [`WirePathRef`] and every carried error kept whole — see the `Serialize` impl
+/// below for why neither is a default.
 #[derive(Debug)]
 pub enum SaveError {
     /// The document is one the editor must not write at all: a Hub package
@@ -667,6 +689,84 @@ impl SaveError {
             _ => None,
         }
     }
+}
+
+impl Serialize for SaveError {
+    /// Externally tagged, exactly as its neighbours are, and hand-written for the
+    /// two reasons [`crate::persist::WriteError`]'s impl states: five variants
+    /// carry a [`PathBuf`], and `serde`'s own path serializer **fails** on a path
+    /// that is not valid UTF-8 — which would replace a typed refusal with the
+    /// serializer's English prose at the one moment nothing is left to send.
+    /// [`WirePathRef`] renders lossily and cannot fail.
+    ///
+    /// **The nesting is deliberate.** [`SaveError::Target`] and
+    /// [`SaveError::Write`] both carry a whole [`WriteError`] rather than a
+    /// flattened copy of its fields, because [`WriteError::may_have_written`] is
+    /// the one question whose answer changes what a caller does next, and
+    /// flattening loses the [`crate::persist::WriteStep`] it is computed from.
+    /// The same argument
+    /// keeps [`SaveError::Patch`], [`SaveError::Backup`] and
+    /// [`SaveError::Refused`] whole. A *shell* type that wants nine flat codes to
+    /// switch on builds them from these, the way `CommandError` already does for
+    /// the read surface; it does not get them from here.
+    ///
+    /// A variant added to this enum is a compile error in this `match`, which is
+    /// the prompt to add its two dictionary entries.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            SaveError::DocumentIsReadOnly { path } => {
+                let mut out =
+                    serializer.serialize_struct_variant("SaveError", 0, "DocumentIsReadOnly", 1)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            SaveError::Target(error) => {
+                serializer.serialize_newtype_variant("SaveError", 1, "Target", error)
+            }
+            SaveError::TargetNotUtf8 { path, offset } => {
+                let mut out =
+                    serializer.serialize_struct_variant("SaveError", 2, "TargetNotUtf8", 2)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("offset", offset)?;
+                out.end()
+            }
+            SaveError::RevisionMismatch {
+                path,
+                expected,
+                found,
+            } => {
+                let mut out =
+                    serializer.serialize_struct_variant("SaveError", 3, "RevisionMismatch", 3)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("expected", expected)?;
+                out.serialize_field("found", found)?;
+                out.end()
+            }
+            SaveError::Patch(error) => {
+                serializer.serialize_newtype_variant("SaveError", 4, "Patch", error)
+            }
+            SaveError::CandidateParseDisagrees { path, error } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "SaveError",
+                    5,
+                    "CandidateParseDisagrees",
+                    2,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("error", error)?;
+                out.end()
+            }
+            SaveError::Refused(refusal) => {
+                serializer.serialize_newtype_variant("SaveError", 6, "Refused", refusal)
+            }
+            SaveError::Backup(error) => {
+                serializer.serialize_newtype_variant("SaveError", 7, "Backup", error)
+            }
+            SaveError::Write(error) => {
+                serializer.serialize_newtype_variant("SaveError", 8, "Write", error)
+            }
+        }
+    } // End of function serialize() for SaveError
 }
 
 impl fmt::Display for SaveError {

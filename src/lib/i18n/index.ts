@@ -19,33 +19,69 @@ import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
+  BackupError,
+  BackupStep,
   ContentKind,
+  DecodeError,
   DiagnosticCode,
+  EditError,
   FileKind,
+  FindingClass,
+  FindingCode,
   HazardKind,
+  InvariantViolation,
   LineEnding,
   MatchBadge,
+  MoveSeam,
+  NodeKind,
+  PathError,
+  RotationOutcome,
+  SaveError,
+  SaveVerdict,
   ScalarStyle,
+  SyntaxError,
+  TargetDifference,
   TriggerKind,
   UnknownReason,
   ValueKind,
-  VariableKind
+  VariableKind,
+  VerificationFailure,
+  WriteError,
+  WriteStep
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
 import {
+  describeBackupError,
+  describeBackupStep,
   describeCommandError,
   describeContentKind,
+  describeDecodeError,
   describeDiagnostic,
+  describeEditError,
   describeFileKind,
+  describeFindingClass,
+  describeFindingCode,
   describeHazard,
+  describeInvariantViolation,
   describeIpcFailure,
   describeLineEnding,
   describeMatchBadge,
+  describeMoveSeam,
+  describeNodeKind,
+  describePathError,
+  describeRotationOutcome,
+  describeSaveError,
+  describeSaveVerdict,
   describeScalarStyle,
+  describeSyntaxError,
+  describeTargetDifference,
   describeTriggerKind,
   describeUnknownReason,
   describeValueKind,
-  describeVariableKind
+  describeVariableKind,
+  describeVerificationFailure,
+  describeWriteError,
+  describeWriteStep
 } from './codes';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
 import { describeOccurrenceCount, describeSnippetCount, describeUnknownCount } from './plural';
@@ -64,32 +100,68 @@ export type { TranslationKey, TranslationParams } from './dictionaries';
 export { DEFAULT_LOCALE, LOCALES, isLocale, matchLocaleTag, negotiateLocale } from './locale';
 export type { Locale } from './locale';
 export {
+  backupErrorKey,
+  backupStepKey,
   commandErrorKey,
   contentKindKey,
+  decodeErrorKey,
+  describeBackupError,
+  describeBackupStep,
   describeCommandError,
   describeContentKind,
+  describeDecodeError,
   describeDiagnostic,
+  describeEditError,
   describeFileKind,
+  describeFindingClass,
+  describeFindingCode,
   describeHazard,
+  describeInvariantViolation,
   describeIpcFailure,
   describeLineEnding,
   describeMatchBadge,
+  describeMoveSeam,
+  describeNodeKind,
+  describePathError,
+  describeRotationOutcome,
+  describeSaveError,
+  describeSaveVerdict,
   describeScalarStyle,
+  describeSyntaxError,
+  describeTargetDifference,
   describeTriggerKind,
   describeUnknownReason,
   describeValueKind,
   describeVariableKind,
+  describeVerificationFailure,
+  describeWriteError,
+  describeWriteStep,
   diagnosticCodeKey,
   documentShapeKey,
+  editErrorKey,
   fileKindKey,
+  findingClassKey,
+  findingCodeKey,
   hazardKindKey,
+  invariantViolationKey,
   lineEndingKey,
   matchBadgeKey,
+  moveSeamKey,
+  nodeKindKey,
+  pathErrorKey,
+  rotationOutcomeKey,
+  saveErrorKey,
+  saveVerdictKey,
   scalarStyleKey,
+  syntaxErrorKey,
+  targetDifferenceKey,
   triggerKindKey,
   unknownReasonKey,
   valueKindKey,
-  variableKindKey
+  variableKindKey,
+  verificationFailureKey,
+  writeErrorKey,
+  writeStepKey
 } from './codes';
 
 /**
@@ -382,3 +454,205 @@ export function tUnknownCount(count: number): string {
 export function tOccurrenceCount(count: number): string {
   return describeOccurrenceCount(locale.current, count);
 } // End of function tOccurrenceCount()
+
+// ---------------------------------------------------------------------------
+// The save transaction — Phase 2b-1
+// ---------------------------------------------------------------------------
+//
+// Eighteen more accessors, for the eighteen enums the save transaction put on
+// the wire. They exist for the reason every accessor above exists: a component
+// turns a code into text by calling one of these, never by assembling a `code.`
+// key itself — the key builders in `./codes` are where a key is built, and their
+// return types make a missing dictionary entry a compile error there.
+//
+// **Nothing calls them yet.** No command answers with a save error until Phase
+// 2b-2, and 1b-1 shipped the whole i18n layer with no caller for exactly this
+// reason: a boundary that arrives with the code it describes cannot be half
+// built.
+
+/**
+ * Renders what kind of YAML construct a node is, in the current language.
+ *
+ * @param kind - A node kind as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tNodeKind(kind: NodeKind): string {
+  return describeNodeKind(locale.current, kind);
+} // End of function tNodeKind()
+
+/**
+ * Renders which arm of the blocking policy decided a save, in the current language.
+ *
+ * @param verdict - A save verdict as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tSaveVerdict(verdict: SaveVerdict): string {
+  return describeSaveVerdict(locale.current, verdict);
+} // End of function tSaveVerdict()
+
+/**
+ * Renders how seriously to take a finding, in the current language.
+ *
+ * @param value - A finding class as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tFindingClass(value: FindingClass): string {
+  return describeFindingClass(locale.current, value);
+} // End of function tFindingClass()
+
+/**
+ * Renders one semantic-gate finding, in the current language.
+ *
+ * @param code - A finding code as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tFindingCode(code: FindingCode): string {
+  return describeFindingCode(locale.current, code);
+} // End of function tFindingCode()
+
+/**
+ * Renders which step of the atomic write failed, in the current language.
+ *
+ * @param step - A write step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tWriteStep(step: WriteStep): string {
+  return describeWriteStep(locale.current, step);
+} // End of function tWriteStep()
+
+/**
+ * Renders which part of taking a backup failed, in the current language.
+ *
+ * @param step - A backup step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tBackupStep(step: BackupStep): string {
+  return describeBackupStep(locale.current, step);
+} // End of function tBackupStep()
+
+/**
+ * Renders how far the backup tidy-up got, in the current language.
+ *
+ * A claim about tidiness, never about safety.
+ *
+ * @param outcome - A rotation outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tRotationOutcome(outcome: RotationOutcome): string {
+  return describeRotationOutcome(locale.current, outcome);
+} // End of function tRotationOutcome()
+
+/**
+ * Renders which join of a move a refusal is about, in the current language.
+ *
+ * @param seam - A move seam as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tMoveSeam(seam: MoveSeam): string {
+  return describeMoveSeam(locale.current, seam);
+} // End of function tMoveSeam()
+
+/**
+ * Renders why a change was not applied, in the current language.
+ *
+ * @param error - An edit error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tEditError(error: EditError): string {
+  return describeEditError(locale.current, error);
+} // End of function tEditError()
+
+/**
+ * Renders why a candidate failed verification, in the current language.
+ *
+ * @param failure - A verification failure as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tVerificationFailure(failure: VerificationFailure): string {
+  return describeVerificationFailure(locale.current, failure);
+} // End of function tVerificationFailure()
+
+/**
+ * Renders why a document could not be indexed, in the current language.
+ *
+ * @param error - A syntax error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tSyntaxError(error: SyntaxError): string {
+  return describeSyntaxError(locale.current, error);
+} // End of function tSyntaxError()
+
+/**
+ * Renders which invariant of the span index broke, in the current language.
+ *
+ * @param violation - An invariant violation as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tInvariantViolation(violation: InvariantViolation): string {
+  return describeInvariantViolation(locale.current, violation);
+} // End of function tInvariantViolation()
+
+/**
+ * Renders why an address did not resolve, in the current language.
+ *
+ * @param error - A path error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tPathError(error: PathError): string {
+  return describePathError(locale.current, error);
+} // End of function tPathError()
+
+/**
+ * Renders why a scalar could not be decoded, in the current language.
+ *
+ * @param error - A decode error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tDecodeError(error: DecodeError): string {
+  return describeDecodeError(locale.current, error);
+} // End of function tDecodeError()
+
+/**
+ * Renders how the save target differed from what was inspected, in the current
+ * language.
+ *
+ * @param difference - A target difference as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tTargetDifference(difference: TargetDifference): string {
+  return describeTargetDifference(locale.current, difference);
+} // End of function tTargetDifference()
+
+/**
+ * Renders one atomic-write failure, in the current language.
+ *
+ * @param error - A write error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tWriteError(error: WriteError): string {
+  return describeWriteError(locale.current, error);
+} // End of function tWriteError()
+
+/**
+ * Renders one backup failure, in the current language.
+ *
+ * @param error - A backup error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tBackupError(error: BackupError): string {
+  return describeBackupError(locale.current, error);
+} // End of function tBackupError()
+
+/**
+ * Renders why a save did not commit, in the current language.
+ *
+ * One sentence for the outer reason. A nested `EditError` or `WriteError` has
+ * {@link tEditError} and {@link tWriteError} of its own; how much of the chain a
+ * screen shows is that screen's decision, not this function's.
+ *
+ * @param error - A save error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tSaveError(error: SaveError): string {
+  return describeSaveError(locale.current, error);
+} // End of function tSaveError()

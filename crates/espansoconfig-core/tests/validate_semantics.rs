@@ -409,7 +409,7 @@ fn a_match_variable_without_a_trigger_param_is_reported() {
         found[0].code,
         FindingCode::VariableMissingRequiredParam {
             kind: espansoconfig_core::model::VariableKind::Match,
-            param: "trigger",
+            param: "trigger".to_owned(),
         }
     );
 } // End of function a_match_variable_without_a_trigger_param_is_reported()

@@ -532,7 +532,7 @@ fn parse_quoted_key(text: &str, open: usize) -> Result<(String, usize), PathPars
 /// rather than only that it did.
 ///
 /// Resolution never panics, for any path against any document.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum PathError {
     /// The stream has no document with that index.
     NoSuchDocument {

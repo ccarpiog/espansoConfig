@@ -36,11 +36,51 @@
 //! than asking the filesystem for one it will not give.
 
 use std::fmt;
+use std::io;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
+
+/// The [`std::io::ErrorKind`] variant name of an I/O error.
+///
+/// The `Debug` rendering of an `ErrorKind` is its variant name — `NotFound`,
+/// `PermissionDenied` — which is a **code**. The error's `Display` string is the
+/// operating system's own message, in the operating system's own language, and
+/// is deliberately never sent (plan section 9).
+///
+/// It lives here rather than beside any one error type because three of them now
+/// carry an [`io::Error`] across the boundary — `WorkspaceError`, `WriteError`
+/// and `BackupError` — and one spelling of *"what an I/O failure crosses as"* is
+/// the whole point of putting it in the wire module.
+pub fn io_kind_name(error: &io::Error) -> String {
+    format!("{:?}", error.kind())
+}
+
+/// The operating system's own error number, when the failure came from one.
+///
+/// [`io_kind_name`] answers *what category of failure this was*, and a frontend
+/// branches on it. It is deliberately coarse: [`io::ErrorKind`] is a small
+/// stable set, so several genuinely different operating-system failures collapse
+/// into one variant — most of all into `Other`, which says nothing at all.
+///
+/// This is the second half, and it is **diagnostic data rather than a code**: a
+/// bare integer, never interpolated into a sentence, with no dictionary entry
+/// and no meaning this application assigns it. It exists so that a report of a
+/// failure can name the errno the system actually returned instead of losing it,
+/// which is what `docs/reviews/phase-2b-1-wire-boundary.md` section 3 asked for.
+///
+/// It is **not** the operating system's message. `io::Error`'s `Display` is
+/// prose in a language nobody chose, and plan section 9 keeps it off the wire;
+/// a number is not prose.
+///
+/// [`None`] whenever the error did not come from the operating system — an error
+/// this crate constructed itself, or one carrying a boxed inner error — which is
+/// why the field is nullable on the wire rather than always present.
+pub fn io_raw_os_error(error: &io::Error) -> Option<i32> {
+    error.raw_os_error()
+}
 
 /// The lossy Unicode rendering of a path, which every path has.
 ///
@@ -181,8 +221,29 @@ impl Serialize for WirePaths<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{lossy, WirePath, WirePathRef, WirePaths};
+    use super::{io_kind_name, io_raw_os_error, lossy, WirePath, WirePathRef, WirePaths};
     use std::path::{Path, PathBuf};
+
+    /// The kind is always there; the errno is there only when the system
+    /// supplied one.
+    ///
+    /// The second half is the point: an error this crate constructed has a kind
+    /// and **no** errno, which is why the wire field is nullable rather than a
+    /// number that would have to be invented for such a value.
+    #[test]
+    fn an_io_error_carries_a_kind_always_and_an_errno_only_from_the_system() {
+        let from_the_system = std::io::Error::from_raw_os_error(13);
+        assert_eq!(io_kind_name(&from_the_system), "PermissionDenied");
+        assert_eq!(io_raw_os_error(&from_the_system), Some(13));
+
+        let ours = std::io::Error::other("built by this crate");
+        assert_eq!(io_kind_name(&ours), "Other");
+        assert_eq!(
+            io_raw_os_error(&ours),
+            None,
+            "an error with no operating system behind it has no number to send"
+        );
+    } // End of function an_io_error_carries_a_kind_always_and_an_errno_only_from_the_system()
 
     /// A path whose basename is not valid UTF-8.
     ///

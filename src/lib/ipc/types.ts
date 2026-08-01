@@ -652,6 +652,703 @@ export interface WorkspaceSummary {
   readonly disabled: number;
 }
 
+
+// ---------------------------------------------------------------------------
+// The save transaction — Phase 2b-1
+// ---------------------------------------------------------------------------
+
+/**
+ * The wire form of everything the save transaction can hand a caller.
+ *
+ * Every type below mirrors a `espansoconfig-core` type that gained `Serialize`
+ * at Phase 2b-1, and every enum's variants have a `code.` entry in both
+ * dictionaries — `src-tauri/src/dictionary_contract.rs` fails `cargo test`
+ * otherwise. **No command answers with any of them yet**; the boundary exists
+ * before the commands that will cross it, exactly as the i18n layer shipped
+ * before anything rendered a string.
+ *
+ * Three conventions, all inherited from the read model above:
+ *
+ * 1. **Externally tagged.** A variant with no operands crosses as its bare name
+ *    and a variant with operands as a one-key object. A `…Name` union beside a
+ *    value union is the *name set*, which is what a dictionary key is built from.
+ * 2. **A path is a lossy string, for display only.** Every `path` below is a
+ *    `WirePath` rendering (`crates/espansoconfig-core/src/wire.rs`), so bytes no
+ *    encoding can name arrive as `U+FFFD`. Nothing addresses a file by one:
+ *    two distinct filenames can render to the same string, and the string cannot
+ *    be handed back to name either of them. The real `PathBuf` stays in the
+ *    transaction, so a wire path is never an identifier and never round-trippable.
+ * 3. **An I/O failure crosses as a `kind`, never as a message.** `kind` holds a
+ *    `std::io::ErrorKind` variant name — `NotFound`, `PermissionDenied` — which
+ *    is a code, not prose, and is deliberately never interpolated into a
+ *    sentence (see `src/lib/i18n/codes.ts`). Beside it rides `raw_os_error`, the
+ *    system's own error number as a nullable **number**: `kind` is coarse enough
+ *    to collapse several actionable failures into `Other`, and the number is
+ *    diagnostic data with no dictionary entry, not a second code to branch on.
+ */
+
+/** What kind of YAML construct a node is. */
+export type NodeKind = 'Document' | 'Mapping' | 'Sequence' | 'Scalar' | 'Alias';
+
+/** Which arm of the blocking policy decided a save. */
+export type SaveVerdict =
+  | 'Proceed'
+  | 'RefusedForEditorModelErrors'
+  | 'RefusedForUnacknowledgedSuspicions';
+
+/** How seriously a caller should take a {@link Finding}. */
+export type FindingClass = 'EditorModelError' | 'SuspiciousButPermitted';
+
+/** Which step of the atomic write an I/O failure happened on. */
+export type WriteStep =
+  | 'ResolveTarget'
+  | 'InspectTarget'
+  | 'ReadTarget'
+  | 'CreateTempFile'
+  | 'WriteTempFile'
+  | 'SyncTempFile'
+  | 'CopyMetadata'
+  | 'ApplyModeBits'
+  | 'VerifyTempIdentity'
+  | 'RecheckTarget'
+  | 'Rename'
+  | 'SyncDirectory'
+  | 'ReadBack';
+
+/** Which part of taking a backup failed. */
+export type BackupStep =
+  | 'CreateBackupRoot'
+  | 'InspectBackupRoot'
+  | 'CreateBatch'
+  | 'WriteBatchMarker'
+  | 'CreateBackupParents'
+  | 'CreateBackupFile'
+  | 'WriteBackupFile'
+  | 'CopyExtendedAttributes'
+  | 'ApplyModeBits'
+  | 'SyncBackupFile'
+  | 'VerifyBackupFile'
+  | 'PublishBackupFile';
+
+/**
+ * How far the tidy-up of older backups got.
+ *
+ * Not the same question as what it removed: `ScanFailed` and a `Scanned` that
+ * removed nothing produce the same counts and mean opposite things.
+ */
+export type RotationOutcome = 'NotAttempted' | 'Refused' | 'ScanFailed' | 'Scanned';
+
+/** Which join of a move a block-scalar refusal is about. */
+export type MoveSeam = 'SourceCloses' | 'ArrivalLands' | 'ArrivalCloses' | 'CarriedRunsJoin';
+
+/** The name of every {@link DecodeError} variant. */
+export type DecodeErrorName =
+  | 'SpanOutsideSource'
+  | 'UnknownEscape'
+  | 'MalformedNumericEscape'
+  | 'InvalidCodePoint'
+  | 'TrailingBackslash';
+
+/** Why a scalar's source bytes could not be decoded. */
+export type DecodeError =
+  | 'TrailingBackslash'
+  | { readonly SpanOutsideSource: { readonly span: ByteSpan; readonly source_len: number } }
+  | { readonly UnknownEscape: { readonly escape: string } }
+  | { readonly MalformedNumericEscape: { readonly introducer: string } }
+  | { readonly InvalidCodePoint: { readonly value: number } };
+
+/** The name of every {@link InvariantViolation} variant. */
+export type InvariantViolationName =
+  | 'InvertedSpan'
+  | 'SpanOutsideSource'
+  | 'BlockHeaderNotFound'
+  | 'FrontierOverlap'
+  | 'UnbalancedEvents';
+
+/** An internal consistency failure of the span index. Always a fault in this app. */
+export type InvariantViolation =
+  | { readonly InvertedSpan: { readonly start: number; readonly end: number } }
+  | {
+      readonly SpanOutsideSource: {
+        readonly start: number;
+        readonly end: number;
+        readonly source_len: number;
+      };
+    }
+  | { readonly BlockHeaderNotFound: { readonly start: number; readonly end: number } }
+  | {
+      readonly FrontierOverlap: { readonly previous_end: number; readonly next_start: number };
+    }
+  | { readonly UnbalancedEvents: { readonly depth: number } };
+
+/** A parse rejection, located precisely enough to drive an editor gutter. */
+export interface ParseFailure {
+  /** Offset in Unicode scalar values, as the substrate reported it. */
+  readonly char_index: number;
+  /** The same position as a byte offset into the original document, or `null`. */
+  readonly byte_index: number | null;
+  /** Line number, as the substrate reports it. */
+  readonly line: number;
+  /** Column number, as the substrate reports it. */
+  readonly column: number;
+  /**
+   * The substrate's own message.
+   *
+   * A developer diagnostic in one language, and **never displayed** — the same
+   * rule `IoError.kind` follows. A localized message is built from the code.
+   */
+  readonly detail: string;
+}
+
+/** A character offset the document's conversion table cannot map. */
+export interface OffsetOutOfDomain {
+  /** The offending character index. */
+  readonly char_index: number;
+  /** Number of Unicode scalar values in the document. */
+  readonly char_len: number;
+}
+
+/** The name of every {@link SyntaxError} variant. */
+export type SyntaxErrorName = 'Parse' | 'Offset' | 'Invariant';
+
+/** Why a document could not be turned into a span index. */
+export type SyntaxError =
+  | { readonly Parse: ParseFailure }
+  | { readonly Offset: OffsetOutOfDomain }
+  | { readonly Invariant: InvariantViolation };
+
+/** The name of every {@link PathError} variant. */
+export type PathErrorName =
+  | 'NoSuchDocument'
+  | 'EmptyDocument'
+  | 'NoSuchKey'
+  | 'DuplicateKey'
+  | 'KeyIntoNonMapping'
+  | 'IndexIntoNonSequence'
+  | 'IndexOutOfRange'
+  | 'NoKeySegment'
+  | 'MalformedIndex';
+
+/** Why a {@link DocumentPath} could not be resolved against a document. */
+export type PathError =
+  | 'NoKeySegment'
+  | {
+      readonly NoSuchDocument: { readonly document_index: number; readonly documents: number };
+    }
+  | { readonly EmptyDocument: { readonly document_index: number } }
+  | {
+      readonly NoSuchKey: { readonly key: string; readonly segment: number; readonly node: NodeId };
+    }
+  | {
+      readonly DuplicateKey: {
+        readonly key: string;
+        readonly occurrences: number;
+        readonly segment: number;
+        readonly node: NodeId;
+      };
+    }
+  | {
+      readonly KeyIntoNonMapping: {
+        readonly key: string;
+        readonly segment: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | {
+      readonly IndexIntoNonSequence: {
+        readonly index: number;
+        readonly segment: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | {
+      readonly IndexOutOfRange: {
+        readonly index: number;
+        readonly len: number;
+        readonly segment: number;
+        readonly node: NodeId;
+      };
+    }
+  | { readonly MalformedIndex: { readonly node: NodeId } };
+
+/** The name of every {@link VerificationFailure} variant. */
+export type VerificationFailureName =
+  | 'DoesNotParse'
+  | 'TargetLost'
+  | 'TargetKindChanged'
+  | 'ValueMismatch'
+  | 'DecoderDisagreement'
+  | 'Undecodable'
+  | 'BytesOutsideTheSpanChanged'
+  | 'SpanNotPermitted'
+  | 'LengthMismatch'
+  | 'MappingLost'
+  | 'FieldNotInserted'
+  | 'FieldNotRemoved'
+  | 'SiblingChanged'
+  | 'EntryCountChanged'
+  | 'EnvelopeCoversAnotherNode'
+  | 'EnvelopeMissesTheEntry'
+  | 'InsertionPointInsideANode'
+  | 'FileCommentLost'
+  | 'ItemsNotInTheIntendedOrder'
+  | 'ConstructChangedOutsideTheMove'
+  | 'DocumentLinesNotConserved'
+  | 'MoveCarriesMoreThanTheItem'
+  | 'MovedBytesWereRewritten'
+  | 'CommentOwnershipChanged'
+  | 'AmbiguousPlainScalarIntroduced'
+  | 'RemovalCarriesMoreThanTheEntry';
+
+/**
+ * Why a candidate document was rejected after being reparsed.
+ *
+ * Every one of these discards the candidate: there is no path from a
+ * verification failure to bytes anything could write.
+ */
+export type VerificationFailure =
+  | { readonly DoesNotParse: SyntaxError }
+  | { readonly TargetLost: { readonly edit: number; readonly error: PathError } }
+  | { readonly TargetKindChanged: { readonly edit: number; readonly kind: NodeKind } }
+  | {
+      readonly ValueMismatch: {
+        readonly edit: number;
+        readonly wanted_len: number;
+        readonly found_len: number;
+        readonly first_difference: number;
+      };
+    }
+  | { readonly DecoderDisagreement: { readonly edit: number } }
+  | { readonly Undecodable: { readonly edit: number; readonly error: DecodeError } }
+  | { readonly BytesOutsideTheSpanChanged: { readonly at: number } }
+  | { readonly SpanNotPermitted: { readonly at: ByteSpan } }
+  | { readonly LengthMismatch: { readonly expected: number; readonly found: number } }
+  | { readonly MappingLost: { readonly edit: number; readonly error: PathError } }
+  | { readonly FieldNotInserted: { readonly edit: number; readonly key_len: number } }
+  | { readonly FieldNotRemoved: { readonly edit: number; readonly key_len: number } }
+  | { readonly SiblingChanged: { readonly edit: number; readonly entry: number } }
+  | {
+      readonly EntryCountChanged: {
+        readonly edit: number;
+        readonly expected: number;
+        readonly found: number;
+      };
+    }
+  | { readonly EnvelopeCoversAnotherNode: { readonly at: ByteSpan; readonly node: NodeId } }
+  | { readonly EnvelopeMissesTheEntry: { readonly at: ByteSpan; readonly node: NodeId } }
+  | { readonly InsertionPointInsideANode: { readonly at: number; readonly node: NodeId } }
+  | { readonly FileCommentLost: { readonly at: number } }
+  | { readonly ItemsNotInTheIntendedOrder: { readonly edit: number; readonly position: number } }
+  | { readonly ConstructChangedOutsideTheMove: { readonly edit: number; readonly node: NodeId } }
+  | { readonly DocumentLinesNotConserved: { readonly at: number } }
+  | {
+      readonly MoveCarriesMoreThanTheItem: {
+        readonly edit: number;
+        readonly at: ByteSpan;
+        readonly lines: ByteSpan;
+      };
+    }
+  | {
+      readonly MovedBytesWereRewritten: {
+        readonly edit: number;
+        readonly at: number;
+        readonly first_difference: number;
+      };
+    }
+  | { readonly CommentOwnershipChanged: { readonly edit: number; readonly at: number } }
+  | { readonly AmbiguousPlainScalarIntroduced: { readonly at: number; readonly len: number } }
+  | { readonly RemovalCarriesMoreThanTheEntry: { readonly at: ByteSpan; readonly lines: ByteSpan } };
+
+/** The name of every {@link EditError} variant. */
+export type EditErrorName =
+  | 'SourceDoesNotParse'
+  | 'Unresolvable'
+  | 'NotAScalar'
+  | 'EmptyTarget'
+  | 'Refused'
+  | 'OverlappingEdits'
+  | 'TrailingNewlinesNotRepresentable'
+  | 'MalformedSpan'
+  | 'NotAMapping'
+  | 'FlowCollection'
+  | 'KeyAlreadyPresent'
+  | 'NoSuchSibling'
+  | 'InconsistentEntryIndentation'
+  | 'EntryDoesNotOwnItsLines'
+  | 'RemovalWouldExtendAKeptBlock'
+  | 'RemovalWouldDeleteAFileComment'
+  | 'RemovalWouldExtendABlockScalar'
+  | 'NoObservableLineEnding'
+  | 'LastEntryOfMapping'
+  | 'NotASequenceItem'
+  | 'NoSuchDestinationItem'
+  | 'MoveChangesNothing'
+  | 'MoveMustBeTheOnlyEditInItsBatch'
+  | 'MoveWouldInventALineEnding'
+  | 'MoveWouldTerminateTheFinalLine'
+  | 'MoveWouldExtendAKeptBlock'
+  | 'MoveWouldExtendABlockScalar'
+  | 'Verification';
+
+/** Why a change was not applied to a document's bytes. */
+export type EditError =
+  | { readonly SourceDoesNotParse: SyntaxError }
+  | { readonly Unresolvable: { readonly edit: number; readonly error: PathError } }
+  | {
+      readonly NotAScalar: {
+        readonly edit: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | {
+      readonly EmptyTarget: { readonly edit: number; readonly node: NodeId; readonly at: ByteSpan };
+    }
+  | {
+      readonly Refused: {
+        readonly edit: number;
+        readonly node: NodeId;
+        readonly hazard: HazardKind;
+        readonly at: ByteSpan;
+      };
+    }
+  | { readonly OverlappingEdits: { readonly first: ByteSpan; readonly second: ByteSpan } }
+  | {
+      readonly TrailingNewlinesNotRepresentable: {
+        readonly edit: number;
+        readonly wanted: number;
+        readonly following: number;
+      };
+    }
+  | { readonly MalformedSpan: { readonly edit: number; readonly at: ByteSpan } }
+  | {
+      readonly NotAMapping: {
+        readonly edit: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | { readonly FlowCollection: { readonly edit: number; readonly node: NodeId } }
+  | { readonly KeyAlreadyPresent: { readonly edit: number; readonly mapping: NodeId } }
+  | { readonly NoSuchSibling: { readonly edit: number; readonly mapping: NodeId } }
+  | {
+      readonly InconsistentEntryIndentation: {
+        readonly edit: number;
+        readonly mapping: NodeId;
+        readonly expected: number;
+        readonly found: number;
+      };
+    }
+  | { readonly EntryDoesNotOwnItsLines: { readonly edit: number; readonly at: ByteSpan } }
+  | { readonly RemovalWouldExtendAKeptBlock: { readonly edit: number; readonly block: NodeId } }
+  | {
+      readonly RemovalWouldDeleteAFileComment: {
+        readonly edit: number;
+        readonly comment: ByteSpan;
+      };
+    }
+  | { readonly RemovalWouldExtendABlockScalar: { readonly edit: number; readonly block: NodeId } }
+  | { readonly NoObservableLineEnding: { readonly edit: number; readonly at: number } }
+  | { readonly LastEntryOfMapping: { readonly edit: number; readonly mapping: NodeId } }
+  | {
+      readonly NotASequenceItem: {
+        readonly edit: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | {
+      readonly NoSuchDestinationItem: {
+        readonly edit: number;
+        readonly sequence: NodeId;
+        readonly items: number;
+      };
+    }
+  | { readonly MoveChangesNothing: { readonly edit: number; readonly item: NodeId } }
+  | {
+      readonly MoveMustBeTheOnlyEditInItsBatch: { readonly edit: number; readonly edits: number };
+    }
+  | { readonly MoveWouldInventALineEnding: { readonly edit: number; readonly at: number } }
+  | { readonly MoveWouldTerminateTheFinalLine: { readonly edit: number; readonly at: number } }
+  | { readonly MoveWouldExtendAKeptBlock: { readonly edit: number; readonly block: NodeId } }
+  | {
+      readonly MoveWouldExtendABlockScalar: {
+        readonly edit: number;
+        readonly block: NodeId;
+        readonly seam: MoveSeam;
+      };
+    }
+  | { readonly Verification: VerificationFailure };
+
+/** The name of every {@link FindingCode} variant. */
+export type FindingCodeName =
+  | 'MatchHasNoContentField'
+  | 'MatchHasSeveralContentFields'
+  | 'MatchHasNoTriggerField'
+  | 'MatchHasSeveralTriggerForms'
+  | 'VariableHasNoType'
+  | 'VariableTypeNotRecognised'
+  | 'VariableMissingRequiredParam'
+  | 'DuplicateVariableName'
+  | 'ReferenceHasNoDeclaration'
+  | 'RegexDoesNotCompile';
+
+/** What the semantic gate noticed about a candidate, as a code plus operands. */
+export type FindingCode =
+  | 'MatchHasNoContentField'
+  | 'MatchHasSeveralContentFields'
+  | 'MatchHasNoTriggerField'
+  | 'MatchHasSeveralTriggerForms'
+  | 'VariableHasNoType'
+  | { readonly VariableTypeNotRecognised: { readonly declared: string } }
+  | {
+      readonly VariableMissingRequiredParam: {
+        readonly kind: VariableKind;
+        readonly param: string;
+      };
+    }
+  | { readonly DuplicateVariableName: { readonly name: string } }
+  | { readonly ReferenceHasNoDeclaration: { readonly name: string } }
+  | {
+      readonly RegexDoesNotCompile: {
+        /**
+         * The `regex` crate's own English diagnostic, carried verbatim.
+         *
+         * Developer-facing, and never rendered: a localized message is built
+         * from the code and the pattern, not from this.
+         */
+        readonly detail: string;
+      };
+    };
+
+/** One thing the semantic gate noticed about a candidate about to be written. */
+export interface Finding {
+  /** What was noticed. */
+  readonly code: FindingCode;
+  /** The bytes it is about, when it is about bytes. */
+  readonly span: ByteSpan | null;
+  /** The node it is about, when one is identifiable. */
+  readonly node: NodeId | null;
+  /** The path naming that node, when it has one. */
+  readonly path: DocumentPath | null;
+}
+
+/**
+ * The findings a caller has already shown someone and has chosen to save past.
+ *
+ * **Content-addressed, never a flag.** A save is refused until every suspicion
+ * the candidate produces is matched, as a multiset, by a finding in here — so a
+ * `force: true` has no equivalent on this wire and adding one would undo the
+ * design.
+ *
+ * **It crosses outward only, as of Phase 2b-1.** Nothing in the core
+ * deserializes it yet; the request type that carries one back in is Phase 2b-2's,
+ * and `docs/decisions/2b-1-notes.md` records what has to change first.
+ */
+export interface Acknowledgement {
+  /** The suspicions the caller accepted, in the order it supplied them. */
+  readonly accepted: readonly Finding[];
+}
+
+/** Why the semantic gate refused a save, with its evidence. */
+export interface SaveRefusal {
+  /** Which arm of the policy refused. */
+  readonly verdict: SaveVerdict;
+  /** Every finding the candidate produced, of both classes, in report order. */
+  readonly findings: readonly Finding[];
+}
+
+/** The name of every {@link TargetDifference} variant. */
+export type TargetDifferenceName = 'Retargeted' | 'Vanished' | 'Identity' | 'Contents';
+
+/** How the target differed, just before the commit, from what was inspected. */
+export type TargetDifference =
+  | 'Vanished'
+  | 'Identity'
+  | { readonly Retargeted: { readonly now: string } }
+  | {
+      readonly Contents: {
+        readonly expected: ContentRevision;
+        readonly found: ContentRevision;
+      };
+    };
+
+/** The name of every {@link WriteError} variant. */
+export type WriteErrorName =
+  | 'TargetMissing'
+  | 'TargetNotRegularFile'
+  | 'RevisionMismatch'
+  | 'TargetChangedDuringWrite'
+  | 'TempFileChangedDuringWrite'
+  | 'VerificationFailed'
+  | 'Io';
+
+/** Everything the atomic write primitive can refuse or fail on. */
+export type WriteError =
+  | { readonly TargetMissing: { readonly path: string } }
+  | { readonly TargetNotRegularFile: { readonly path: string } }
+  | {
+      readonly RevisionMismatch: {
+        readonly path: string;
+        readonly expected: ContentRevision;
+        readonly found: ContentRevision;
+      };
+    }
+  | {
+      readonly TargetChangedDuringWrite: {
+        readonly path: string;
+        readonly difference: TargetDifference;
+      };
+    }
+  | { readonly TempFileChangedDuringWrite: { readonly path: string } }
+  | {
+      readonly VerificationFailed: {
+        readonly path: string;
+        readonly expected: ContentRevision;
+        readonly found: ContentRevision;
+      };
+    }
+  | {
+      readonly Io: {
+        readonly step: WriteStep;
+        readonly path: string;
+        /** A `std::io::ErrorKind` variant name. A code, never a message. */
+        readonly kind: string;
+        /**
+         * The operating system's own error number, or `null` when the failure
+         * did not come from one.
+         *
+         * Diagnostic data, not a code: it has no dictionary entry, nothing
+         * branches on it and no message interpolates it. It exists because
+         * `kind` is coarse enough to collapse several actionable failures into
+         * one name.
+         */
+        readonly raw_os_error: number | null;
+      };
+    };
+
+/** The name of every {@link BackupError} variant. */
+export type BackupErrorName =
+  | 'Io'
+  | 'BatchNameExhausted'
+  | 'NotADirectory'
+  | 'BackupRootNotPrivate'
+  | 'ConfigRootIsAutoLoaded'
+  | 'TempFileChangedDuringWrite'
+  | 'DestinationExists'
+  | 'BackupNameExhausted';
+
+/** Why the copy taken before a file's first change of a session was not made. */
+export type BackupError =
+  | {
+      readonly Io: {
+        readonly step: BackupStep;
+        readonly path: string;
+        /** A `std::io::ErrorKind` variant name. A code, never a message. */
+        readonly kind: string;
+        /**
+         * The operating system's own error number, or `null` when the failure
+         * did not come from one. Diagnostic data with no dictionary entry, for
+         * the same reason as {@link WriteError}'s.
+         */
+        readonly raw_os_error: number | null;
+      };
+    }
+  | { readonly BatchNameExhausted: { readonly path: string } }
+  | { readonly NotADirectory: { readonly path: string } }
+  | {
+      readonly BackupRootNotPrivate: { readonly path: string; readonly mode: number };
+    }
+  | { readonly ConfigRootIsAutoLoaded: { readonly path: string } }
+  | { readonly TempFileChangedDuringWrite: { readonly path: string } }
+  | { readonly DestinationExists: { readonly path: string } }
+  | { readonly BackupNameExhausted: { readonly path: string } };
+
+/**
+ * What the tidy-up of older backups did, on the one save per session that runs it.
+ *
+ * Counts plus an outcome, never an error: a tidy-up failure must not fail a save
+ * that has already been decided. A non-zero `failed`, a non-zero `unreadable` or
+ * an outcome other than `Scanned` all mean one thing — **the backups folder is
+ * not known to hold at most ten batches**, which is untidy and is not dangerous.
+ */
+export interface Rotation {
+  /** How far the tidy-up got. */
+  readonly outcome: RotationOutcome;
+  /** Batch folders removed. */
+  readonly removed: number;
+  /** Batch folders the tidy-up tried to remove and could not. */
+  readonly failed: number;
+  /** Entries of the backups folder it did not recognise as its own. */
+  readonly unrecognised: number;
+  /** Entries the folder listing itself could not produce. */
+  readonly unreadable: number;
+}
+
+/**
+ * One file copied before a session's first change to it, and what the tidy-up did.
+ *
+ * **Not a promise that the file is recoverable.** Retention is ten batches and a
+ * batch is a session, so the eleventh session after this one removes this one's
+ * copies. It is also not a version history: it holds the file as it was before
+ * the session's first change, not before each change.
+ */
+export interface BackupRecord {
+  /** Where the copy was written. Lossy — see {@link DocumentView.path}. */
+  readonly path: string;
+  /** The batch folder the copy is inside. Lossy, as above. */
+  readonly batch: string;
+  /** What the tidy-up did. All zeroes on every save but the one that ran it. */
+  readonly rotation: Rotation;
+}
+
+/** The name of every {@link SaveError} variant. */
+export type SaveErrorName =
+  | 'DocumentIsReadOnly'
+  | 'Target'
+  | 'TargetNotUtf8'
+  | 'RevisionMismatch'
+  | 'Patch'
+  | 'CandidateParseDisagrees'
+  | 'Refused'
+  | 'Backup'
+  | 'Write';
+
+/**
+ * Why a save did not commit.
+ *
+ * **A refusal is not a failure.** A refusal is a check of this application
+ * declining to write and is worth offering to retry differently; a failure is a
+ * disk, a permission or a filesystem. `SaveError::is_refusal` in
+ * `crates/espansoconfig-core/src/persist/save.rs` is the authority on which is
+ * which, and it does not cross this boundary — a caller that needs the answer
+ * asks for it there rather than re-deriving it here.
+ *
+ * Every carried error stays **whole** rather than being flattened, because
+ * `WriteError::may_have_written` is the one question whose answer changes what a
+ * caller does next and flattening loses the step it is computed from.
+ */
+export type SaveError =
+  | { readonly DocumentIsReadOnly: { readonly path: string } }
+  | { readonly Target: WriteError }
+  | { readonly TargetNotUtf8: { readonly path: string; readonly offset: number } }
+  | {
+      readonly RevisionMismatch: {
+        readonly path: string;
+        readonly expected: ContentRevision;
+        readonly found: ContentRevision;
+      };
+    }
+  | { readonly Patch: EditError }
+  | {
+      readonly CandidateParseDisagrees: { readonly path: string; readonly error: SyntaxError };
+    }
+  | { readonly Refused: SaveRefusal }
+  | { readonly Backup: BackupError }
+  | { readonly Write: WriteError };
+
 // ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
@@ -706,3 +1403,59 @@ export function diagnosticCodeOperands(code: DiagnosticCode): Readonly<Record<st
   const operands = Object.values(code)[0];
   return operands === undefined ? null : (operands as Readonly<Record<string, unknown>>);
 } // End of function diagnosticCodeOperands()
+
+/**
+ * The variant name of any externally tagged wire value.
+ *
+ * The generic twin of {@link diagnosticCodeName}, added at Phase 2b-1 because
+ * eleven more tagged unions arrived at once and eleven near-identical projections
+ * would have been eleven places for one of them to be wrong. `serde` writes a
+ * variant with no operands as its bare name and a variant with operands as a
+ * one-key object, so the rule is the same for all of them.
+ *
+ * The cast states the invariant `serde` guarantees rather than checking it — a
+ * runtime check here could only throw, and there is no honest thing to throw. The
+ * *type* is still checked where it matters: the caller names the union, and every
+ * key builder in `src/lib/i18n/codes.ts` takes that union and returns a
+ * `TranslationKey`, so a name with no dictionary entry is a compile error there.
+ *
+ * @typeParam Name - The `…Name` union the value's variants are drawn from.
+ * @param value - An externally tagged value as it crossed the boundary.
+ * @returns The variant name.
+ */
+export function wireVariantName<Name extends string>(
+  value: string | Readonly<Record<string, unknown>>
+): Name {
+  if (typeof value === 'string') {
+    return value as Name;
+  }
+  return Object.keys(value)[0] as Name;
+} // End of function wireVariantName()
+
+/**
+ * The operands an externally tagged wire value carries, or `null` for none.
+ *
+ * Structured data, never a sentence: the prose lives in the dictionary, and these
+ * fill its `{placeholder}` tokens.
+ *
+ * A variant whose payload is another tagged value — `SaveError.Patch` carries a
+ * whole `EditError` — answers with that value, because there is no shape here
+ * that could distinguish the two. What keeps a nested error out of a sentence is
+ * the operand collector in `src/lib/i18n/codes.ts`, which keeps strings and
+ * numbers and drops everything else.
+ *
+ * @param value - An externally tagged value as it crossed the boundary.
+ * @returns The payload object, or `null` for a bare-name variant.
+ */
+export function wireVariantOperands(
+  value: string | Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> | null {
+  if (typeof value === 'string') {
+    return null;
+  }
+  const payload = Object.values(value)[0];
+  if (payload === undefined || payload === null || typeof payload !== 'object') {
+    return null;
+  }
+  return payload as Readonly<Record<string, unknown>>;
+} // End of function wireVariantOperands()

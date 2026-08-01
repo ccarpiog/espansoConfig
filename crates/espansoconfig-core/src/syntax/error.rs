@@ -8,8 +8,10 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 /// Why a document could not be turned into a [`crate::syntax::SyntaxIndex`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SyntaxError {
     /// The YAML substrate rejected the document.
     Parse(ParseFailure),
@@ -52,7 +54,7 @@ impl From<InvariantViolation> for SyntaxError {
 /// The substrate reports a character index; `byte_index` is that index after
 /// conversion, and is `None` only when the reported index lies outside the
 /// document — which would itself be a substrate bug.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ParseFailure {
     /// Offset in Unicode scalar values, as the substrate reported it, counted
     /// from the start of the parsed body (the BOM excluded).
@@ -79,7 +81,7 @@ impl fmt::Display for ParseFailure {
 }
 
 /// A character offset that the document's conversion table cannot map.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OffsetOutOfDomain {
     /// The offending character index.
     pub char_index: usize,
@@ -103,7 +105,7 @@ impl fmt::Display for OffsetOutOfDomain {
 /// Each of these is a bug in this crate. They are returned rather than
 /// panicked so that a malformed document can never take a caller's process
 /// down, and so that the tests can assert on them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum InvariantViolation {
     /// A span whose end precedes its start.
     InvertedSpan {

@@ -46,20 +46,32 @@
 //! `docs/decisions/1b-2a-notes.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::Value;
 
 use espansoconfig_core::discovery::FileKind;
+use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::model::{
     ContentKind, Diagnostic, DiagnosticCode, DocumentContext, DocumentShape, DocumentView,
     MatchBadge, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
 };
-use espansoconfig_core::syntax::HazardKind;
+use espansoconfig_core::patch::{
+    DocumentPath, EditError, MoveSeam, PathError, PathSegment, VerificationFailure,
+};
+use espansoconfig_core::persist::{
+    Acknowledgement, BackupError, BackupRecord, BackupStep, Rotation, RotationOutcome, SaveError,
+    SaveRefusal, SaveVerdict, TargetDifference, WriteError, WriteStep,
+};
+use espansoconfig_core::syntax::{
+    HazardKind, InvariantViolation, NodeKind, OffsetOutOfDomain, ParseFailure, SyntaxError,
+};
+use espansoconfig_core::validate::{Finding, FindingClass, FindingCode};
 use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::{project_source, DocumentSummary, WorkspaceSummary};
-use espansoconfig_core::{DocumentId, LineEnding, ScalarStyle};
+use espansoconfig_core::{ContentRevision, DocumentId, LineEnding, ScalarStyle};
 
 use crate::error::every_command_error;
 
@@ -358,10 +370,21 @@ pub(crate) fn declared_type_names(source: &str) -> Vec<String> {
 /// a bare string literal, which carries no operands. This is what closes the
 /// review's example of a nested field renamed from `byte_index` to `byteIndex`:
 /// the union check sees variant *names* only, and would not have noticed.
+///
+/// **It also answers `None` for a payload written as a type reference**, e.g.
+/// `readonly Parse: ParseFailure`. Phase 2b-1 added eleven such variants, and
+/// without this guard the scan walked past the reference to the *next* variant's
+/// braces and compared one variant's operands against another's — a failure whose
+/// message pointed at the wrong declaration entirely. Resolving the reference is
+/// deliberately not attempted; the referenced type is checked on its own, exactly
+/// as `ValueView`'s named-interface payloads are.
 fn tagged_variant_fields(source: &str, union: &str, variant: &str) -> Option<BTreeSet<String>> {
     let body = union_body(source, union);
     let header = format!("readonly {variant}: ");
     let start = body.find(&header)? + header.len();
+    if !body[start..].trim_start().starts_with('{') {
+        return None;
+    }
     let what = format!("the {variant} payload of type {union}");
     Some(block_fields(braced_block(&body[start..], &what), &what))
 } // End of function tagged_variant_fields()
@@ -1197,3 +1220,1113 @@ fn a_diagnostic_crosses_as_a_code_and_operands() {
         "the Display rendering is a developer string and must not be on the wire"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The save transaction — Phase 2b-1
+// ---------------------------------------------------------------------------
+//
+// Eighteen enums and seven structs reached the wire in one change, because that
+// is the only size the change came in: one variant serialized without its
+// dictionary entry fails `crate::dictionary_contract`, so half of `SaveError` on
+// the wire is worse than none of it.
+//
+// What follows pins the **shape** rather than the strings. Three claims, each a
+// test below:
+//
+// 1. every TypeScript union declares exactly the Rust variants, both ways;
+// 2. every tagged variant's operands are exactly the keys `serde` writes;
+// 3. every one of the sample lists this module is built on is **complete**,
+//    checked against the enum declaration parsed out of the core's own source
+//    rather than against itself — the vacuous-audit corollary applied to a
+//    sample list (`PROGRESS.md`, D2w), and the same guard `crate::error`'s
+//    `every_declared_variant_has_an_instance_in_the_enumeration` gives
+//    `CommandError`.
+
+/// A real `NodeId`, taken from a parse.
+///
+/// `NodeId` cannot be constructed outside the core — deliberately, so that only
+/// `SyntaxIndex` mints one — so a sample comes from a trivial document rather
+/// than being invented.
+fn a_node() -> espansoconfig_core::NodeId {
+    espansoconfig_core::SyntaxIndex::parse("a: b")
+        .expect("a trivial parse")
+        .nodes()[0]
+        .id
+}
+
+/// A byte span, for a sample that carries one.
+fn a_span() -> espansoconfig_core::ByteSpan {
+    espansoconfig_core::ByteSpan::new(3, 11)
+}
+
+/// A content revision, for a sample that carries one.
+fn a_revision() -> espansoconfig_core::ContentRevision {
+    espansoconfig_core::ContentRevision::of_bytes(b"a")
+}
+
+/// A path that names nothing, for a sample that carries one.
+fn a_path() -> PathBuf {
+    PathBuf::from("/nowhere/match/base.yml")
+}
+
+/// A path resolver failure, for the samples that carry one.
+fn a_path_error() -> PathError {
+    PathError::NoKeySegment
+}
+
+/// One value of every [`NodeKind`] variant.
+fn node_kind_samples() -> Vec<NodeKind> {
+    vec![
+        NodeKind::Document,
+        NodeKind::Mapping,
+        NodeKind::Sequence,
+        NodeKind::Scalar,
+        NodeKind::Alias,
+    ]
+}
+
+/// One value of every [`SaveVerdict`] variant.
+fn save_verdict_samples() -> Vec<SaveVerdict> {
+    vec![
+        SaveVerdict::Proceed,
+        SaveVerdict::RefusedForEditorModelErrors,
+        SaveVerdict::RefusedForUnacknowledgedSuspicions,
+    ]
+}
+
+/// One value of every [`FindingClass`] variant.
+fn finding_class_samples() -> Vec<FindingClass> {
+    vec![
+        FindingClass::EditorModelError,
+        FindingClass::SuspiciousButPermitted,
+    ]
+}
+
+/// One value of every [`WriteStep`] variant.
+fn write_step_samples() -> Vec<WriteStep> {
+    vec![
+        WriteStep::ResolveTarget,
+        WriteStep::InspectTarget,
+        WriteStep::ReadTarget,
+        WriteStep::CreateTempFile,
+        WriteStep::WriteTempFile,
+        WriteStep::SyncTempFile,
+        WriteStep::CopyMetadata,
+        WriteStep::ApplyModeBits,
+        WriteStep::VerifyTempIdentity,
+        WriteStep::RecheckTarget,
+        WriteStep::Rename,
+        WriteStep::SyncDirectory,
+        WriteStep::ReadBack,
+    ]
+} // End of function write_step_samples()
+
+/// One value of every [`BackupStep`] variant.
+fn backup_step_samples() -> Vec<BackupStep> {
+    vec![
+        BackupStep::CreateBackupRoot,
+        BackupStep::InspectBackupRoot,
+        BackupStep::CreateBatch,
+        BackupStep::WriteBatchMarker,
+        BackupStep::CreateBackupParents,
+        BackupStep::CreateBackupFile,
+        BackupStep::WriteBackupFile,
+        BackupStep::CopyExtendedAttributes,
+        BackupStep::ApplyModeBits,
+        BackupStep::SyncBackupFile,
+        BackupStep::VerifyBackupFile,
+        BackupStep::PublishBackupFile,
+    ]
+} // End of function backup_step_samples()
+
+/// One value of every [`RotationOutcome`] variant.
+fn rotation_outcome_samples() -> Vec<RotationOutcome> {
+    vec![
+        RotationOutcome::NotAttempted,
+        RotationOutcome::Refused,
+        RotationOutcome::ScanFailed,
+        RotationOutcome::Scanned,
+    ]
+}
+
+/// One value of every [`MoveSeam`] variant.
+fn move_seam_samples() -> Vec<MoveSeam> {
+    vec![
+        MoveSeam::SourceCloses,
+        MoveSeam::ArrivalLands,
+        MoveSeam::ArrivalCloses,
+        MoveSeam::CarriedRunsJoin,
+    ]
+}
+
+/// One value of every [`DecodeError`] variant.
+fn decode_error_samples() -> Vec<DecodeError> {
+    vec![
+        DecodeError::SpanOutsideSource {
+            span: a_span(),
+            source_len: 4,
+        },
+        DecodeError::UnknownEscape { escape: 'q' },
+        DecodeError::MalformedNumericEscape { introducer: 'u' },
+        DecodeError::InvalidCodePoint { value: 0xd800 },
+        DecodeError::TrailingBackslash,
+    ]
+} // End of function decode_error_samples()
+
+/// One value of every [`InvariantViolation`] variant.
+fn invariant_violation_samples() -> Vec<InvariantViolation> {
+    vec![
+        InvariantViolation::InvertedSpan { start: 9, end: 4 },
+        InvariantViolation::SpanOutsideSource {
+            start: 0,
+            end: 40,
+            source_len: 12,
+        },
+        InvariantViolation::BlockHeaderNotFound { start: 3, end: 11 },
+        InvariantViolation::FrontierOverlap {
+            previous_end: 12,
+            next_start: 8,
+        },
+        InvariantViolation::UnbalancedEvents { depth: 2 },
+    ]
+} // End of function invariant_violation_samples()
+
+/// One value of every [`SyntaxError`] variant.
+fn syntax_error_samples() -> Vec<SyntaxError> {
+    vec![
+        SyntaxError::Parse(ParseFailure {
+            char_index: 7,
+            byte_index: Some(7),
+            line: 2,
+            column: 3,
+            detail: "a developer diagnostic".to_owned(),
+        }),
+        SyntaxError::Offset(OffsetOutOfDomain {
+            char_index: 99,
+            char_len: 12,
+        }),
+        SyntaxError::Invariant(InvariantViolation::UnbalancedEvents { depth: 2 }),
+    ]
+} // End of function syntax_error_samples()
+
+/// One value of every [`PathError`] variant.
+fn path_error_samples() -> Vec<PathError> {
+    vec![
+        PathError::NoSuchDocument {
+            document_index: 3,
+            documents: 1,
+        },
+        PathError::EmptyDocument { document_index: 0 },
+        PathError::NoSuchKey {
+            key: "replace".to_owned(),
+            segment: 1,
+            node: a_node(),
+        },
+        PathError::DuplicateKey {
+            key: "replace".to_owned(),
+            occurrences: 2,
+            segment: 1,
+            node: a_node(),
+        },
+        PathError::KeyIntoNonMapping {
+            key: "replace".to_owned(),
+            segment: 1,
+            node: a_node(),
+            kind: NodeKind::Sequence,
+        },
+        PathError::IndexIntoNonSequence {
+            index: 0,
+            segment: 1,
+            node: a_node(),
+            kind: NodeKind::Mapping,
+        },
+        PathError::IndexOutOfRange {
+            index: 4,
+            len: 2,
+            segment: 1,
+            node: a_node(),
+        },
+        PathError::NoKeySegment,
+        PathError::MalformedIndex { node: a_node() },
+    ]
+} // End of function path_error_samples()
+
+/// One value of every [`VerificationFailure`] variant.
+fn verification_failure_samples() -> Vec<VerificationFailure> {
+    vec![
+        VerificationFailure::DoesNotParse(SyntaxError::Invariant(
+            InvariantViolation::UnbalancedEvents { depth: 1 },
+        )),
+        VerificationFailure::TargetLost {
+            edit: 0,
+            error: a_path_error(),
+        },
+        VerificationFailure::TargetKindChanged {
+            edit: 0,
+            kind: NodeKind::Mapping,
+        },
+        VerificationFailure::ValueMismatch {
+            edit: 0,
+            wanted_len: 4,
+            found_len: 5,
+            first_difference: 2,
+        },
+        VerificationFailure::DecoderDisagreement { edit: 0 },
+        VerificationFailure::Undecodable {
+            edit: 0,
+            error: DecodeError::TrailingBackslash,
+        },
+        VerificationFailure::BytesOutsideTheSpanChanged { at: 12 },
+        VerificationFailure::SpanNotPermitted { at: a_span() },
+        VerificationFailure::LengthMismatch {
+            expected: 40,
+            found: 41,
+        },
+        VerificationFailure::MappingLost {
+            edit: 0,
+            error: a_path_error(),
+        },
+        VerificationFailure::FieldNotInserted {
+            edit: 0,
+            key_len: 5,
+        },
+        VerificationFailure::FieldNotRemoved {
+            edit: 0,
+            key_len: 5,
+        },
+        VerificationFailure::SiblingChanged { edit: 0, entry: 1 },
+        VerificationFailure::EntryCountChanged {
+            edit: 0,
+            expected: 2,
+            found: 1,
+        },
+        VerificationFailure::EnvelopeCoversAnotherNode {
+            at: a_span(),
+            node: a_node(),
+        },
+        VerificationFailure::EnvelopeMissesTheEntry {
+            at: a_span(),
+            node: a_node(),
+        },
+        VerificationFailure::InsertionPointInsideANode {
+            at: 12,
+            node: a_node(),
+        },
+        VerificationFailure::FileCommentLost { at: 12 },
+        VerificationFailure::ItemsNotInTheIntendedOrder {
+            edit: 0,
+            position: 1,
+        },
+        VerificationFailure::ConstructChangedOutsideTheMove {
+            edit: 0,
+            node: a_node(),
+        },
+        VerificationFailure::DocumentLinesNotConserved { at: 12 },
+        VerificationFailure::MoveCarriesMoreThanTheItem {
+            edit: 0,
+            at: a_span(),
+            lines: a_span(),
+        },
+        VerificationFailure::MovedBytesWereRewritten {
+            edit: 0,
+            at: 12,
+            first_difference: 3,
+        },
+        VerificationFailure::CommentOwnershipChanged { edit: 0, at: 12 },
+        VerificationFailure::AmbiguousPlainScalarIntroduced { at: 12, len: 3 },
+        VerificationFailure::RemovalCarriesMoreThanTheEntry {
+            at: a_span(),
+            lines: a_span(),
+        },
+    ]
+} // End of function verification_failure_samples()
+
+/// One value of every [`EditError`] variant.
+fn edit_error_samples() -> Vec<EditError> {
+    vec![
+        EditError::SourceDoesNotParse(SyntaxError::Invariant(
+            InvariantViolation::UnbalancedEvents { depth: 1 },
+        )),
+        EditError::Unresolvable {
+            edit: 0,
+            error: a_path_error(),
+        },
+        EditError::NotAScalar {
+            edit: 0,
+            node: a_node(),
+            kind: NodeKind::Mapping,
+        },
+        EditError::EmptyTarget {
+            edit: 0,
+            node: a_node(),
+            at: a_span(),
+        },
+        EditError::Refused {
+            edit: 0,
+            node: a_node(),
+            hazard: HazardKind::MergeKey,
+            at: a_span(),
+        },
+        EditError::OverlappingEdits {
+            first: a_span(),
+            second: a_span(),
+        },
+        EditError::TrailingNewlinesNotRepresentable {
+            edit: 0,
+            wanted: 1,
+            following: 3,
+        },
+        EditError::MalformedSpan {
+            edit: 0,
+            at: a_span(),
+        },
+        EditError::NotAMapping {
+            edit: 0,
+            node: a_node(),
+            kind: NodeKind::Sequence,
+        },
+        EditError::FlowCollection {
+            edit: 0,
+            node: a_node(),
+        },
+        EditError::KeyAlreadyPresent {
+            edit: 0,
+            mapping: a_node(),
+        },
+        EditError::NoSuchSibling {
+            edit: 0,
+            mapping: a_node(),
+        },
+        EditError::InconsistentEntryIndentation {
+            edit: 0,
+            mapping: a_node(),
+            expected: 2,
+            found: 4,
+        },
+        EditError::EntryDoesNotOwnItsLines {
+            edit: 0,
+            at: a_span(),
+        },
+        EditError::RemovalWouldExtendAKeptBlock {
+            edit: 0,
+            block: a_node(),
+        },
+        EditError::RemovalWouldDeleteAFileComment {
+            edit: 0,
+            comment: a_span(),
+        },
+        EditError::RemovalWouldExtendABlockScalar {
+            edit: 0,
+            block: a_node(),
+        },
+        EditError::NoObservableLineEnding { edit: 0, at: 12 },
+        EditError::LastEntryOfMapping {
+            edit: 0,
+            mapping: a_node(),
+        },
+        EditError::NotASequenceItem {
+            edit: 0,
+            node: a_node(),
+            kind: NodeKind::Mapping,
+        },
+        EditError::NoSuchDestinationItem {
+            edit: 0,
+            sequence: a_node(),
+            items: 2,
+        },
+        EditError::MoveChangesNothing {
+            edit: 0,
+            item: a_node(),
+        },
+        EditError::MoveMustBeTheOnlyEditInItsBatch { edit: 0, edits: 2 },
+        EditError::MoveWouldInventALineEnding { edit: 0, at: 12 },
+        EditError::MoveWouldTerminateTheFinalLine { edit: 0, at: 12 },
+        EditError::MoveWouldExtendAKeptBlock {
+            edit: 0,
+            block: a_node(),
+        },
+        EditError::MoveWouldExtendABlockScalar {
+            edit: 0,
+            block: a_node(),
+            seam: MoveSeam::CarriedRunsJoin,
+        },
+        EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
+    ]
+} // End of function edit_error_samples()
+
+/// One value of every [`FindingCode`] variant.
+fn finding_code_samples() -> Vec<FindingCode> {
+    vec![
+        FindingCode::MatchHasNoContentField,
+        FindingCode::MatchHasSeveralContentFields,
+        FindingCode::MatchHasNoTriggerField,
+        FindingCode::MatchHasSeveralTriggerForms,
+        FindingCode::VariableHasNoType,
+        FindingCode::VariableTypeNotRecognised {
+            declared: "global".to_owned(),
+        },
+        FindingCode::VariableMissingRequiredParam {
+            kind: VariableKind::Echo,
+            param: "echo".to_owned(),
+        },
+        FindingCode::DuplicateVariableName {
+            name: "greeting".to_owned(),
+        },
+        FindingCode::ReferenceHasNoDeclaration {
+            name: "greeting".to_owned(),
+        },
+        FindingCode::RegexDoesNotCompile {
+            detail: "a third party's English diagnostic".to_owned(),
+        },
+    ]
+} // End of function finding_code_samples()
+
+/// One value of every [`TargetDifference`] variant.
+fn target_difference_samples() -> Vec<TargetDifference> {
+    vec![
+        TargetDifference::Retargeted { now: a_path() },
+        TargetDifference::Vanished,
+        TargetDifference::Identity,
+        TargetDifference::Contents {
+            expected: a_revision(),
+            found: ContentRevision::of_bytes(b"b"),
+        },
+    ]
+} // End of function target_difference_samples()
+
+/// One value of every [`WriteError`] variant.
+fn write_error_samples() -> Vec<WriteError> {
+    vec![
+        WriteError::TargetMissing { path: a_path() },
+        WriteError::TargetNotRegularFile { path: a_path() },
+        WriteError::RevisionMismatch {
+            path: a_path(),
+            expected: a_revision(),
+            found: ContentRevision::of_bytes(b"b"),
+        },
+        WriteError::TargetChangedDuringWrite {
+            path: a_path(),
+            difference: TargetDifference::Vanished,
+        },
+        WriteError::TempFileChangedDuringWrite { path: a_path() },
+        WriteError::VerificationFailed {
+            path: a_path(),
+            expected: a_revision(),
+            found: ContentRevision::of_bytes(b"b"),
+        },
+        WriteError::Io {
+            step: WriteStep::Rename,
+            path: a_path(),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        },
+    ]
+} // End of function write_error_samples()
+
+/// One value of every [`BackupError`] variant.
+fn backup_error_samples() -> Vec<BackupError> {
+    vec![
+        BackupError::Io {
+            step: BackupStep::CreateBatch,
+            path: a_path(),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        },
+        BackupError::BatchNameExhausted { path: a_path() },
+        BackupError::NotADirectory { path: a_path() },
+        BackupError::BackupRootNotPrivate {
+            path: a_path(),
+            mode: 0o755,
+        },
+        BackupError::ConfigRootIsAutoLoaded { path: a_path() },
+        BackupError::TempFileChangedDuringWrite { path: a_path() },
+        BackupError::DestinationExists { path: a_path() },
+        BackupError::BackupNameExhausted { path: a_path() },
+    ]
+} // End of function backup_error_samples()
+
+/// A finding a caller could be shown and could acknowledge.
+fn a_finding() -> Finding {
+    Finding {
+        code: FindingCode::VariableTypeNotRecognised {
+            declared: "global".to_owned(),
+        },
+        span: Some(a_span()),
+        node: Some(a_node()),
+        path: Some(DocumentPath::new(
+            0,
+            vec![PathSegment::key("matches"), PathSegment::Index(0)],
+        )),
+    }
+} // End of function a_finding()
+
+/// One value of every [`SaveError`] variant.
+fn save_error_samples() -> Vec<SaveError> {
+    vec![
+        SaveError::DocumentIsReadOnly { path: a_path() },
+        SaveError::Target(WriteError::TargetMissing { path: a_path() }),
+        SaveError::TargetNotUtf8 {
+            path: a_path(),
+            offset: 12,
+        },
+        SaveError::RevisionMismatch {
+            path: a_path(),
+            expected: a_revision(),
+            found: ContentRevision::of_bytes(b"b"),
+        },
+        SaveError::Patch(EditError::NoObservableLineEnding { edit: 0, at: 12 }),
+        SaveError::CandidateParseDisagrees {
+            path: a_path(),
+            error: SyntaxError::Invariant(InvariantViolation::UnbalancedEvents { depth: 1 }),
+        },
+        SaveError::Refused(SaveRefusal {
+            verdict: SaveVerdict::RefusedForUnacknowledgedSuspicions,
+            findings: vec![a_finding()],
+        }),
+        SaveError::Backup(BackupError::NotADirectory { path: a_path() }),
+        SaveError::Write(WriteError::TempFileChangedDuringWrite { path: a_path() }),
+    ]
+} // End of function save_error_samples()
+
+/// Every save-transaction struct paired with the JSON `serde` really writes.
+///
+/// Struct literals rather than a projection, because none of these has one behind
+/// it — and a struct literal has its own guarantee: a field added to any of them
+/// makes this module fail to compile.
+fn save_transaction_structs() -> Vec<(&'static str, Value)> {
+    let rotation = Rotation {
+        outcome: RotationOutcome::Scanned,
+        removed: 1,
+        failed: 0,
+        unrecognised: 0,
+        unreadable: 0,
+    };
+    vec![
+        (
+            "ParseFailure",
+            json_of(&ParseFailure {
+                char_index: 7,
+                byte_index: Some(7),
+                line: 2,
+                column: 3,
+                detail: "a developer diagnostic".to_owned(),
+            }),
+        ),
+        (
+            "OffsetOutOfDomain",
+            json_of(&OffsetOutOfDomain {
+                char_index: 99,
+                char_len: 12,
+            }),
+        ),
+        ("Finding", json_of(&a_finding())),
+        (
+            "SaveRefusal",
+            json_of(&SaveRefusal {
+                verdict: SaveVerdict::RefusedForUnacknowledgedSuspicions,
+                findings: vec![a_finding()],
+            }),
+        ),
+        (
+            "Acknowledgement",
+            json_of(&Acknowledgement::of(&[a_finding()])),
+        ),
+        ("Rotation", json_of(&rotation)),
+        (
+            "BackupRecord",
+            json_of(&BackupRecord {
+                path: a_path(),
+                batch: PathBuf::from("/nowhere/.espansoconfig-backups/batch"),
+                rotation,
+            }),
+        ),
+    ]
+} // End of function save_transaction_structs()
+
+/// Every save-transaction enum, its declaration, and the samples for it.
+///
+/// The first two columns feed the completeness check against the core's own
+/// source; the third is the JSON every shape check is derived from. One table, so
+/// a sample list and the union it is compared against cannot name different
+/// enums.
+fn save_transaction_enums() -> Vec<(&'static str, Vec<Value>)> {
+    vec![
+        (
+            "NodeKind",
+            node_kind_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "SaveVerdict",
+            save_verdict_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "FindingClass",
+            finding_class_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "WriteStep",
+            write_step_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BackupStep",
+            backup_step_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "RotationOutcome",
+            rotation_outcome_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "MoveSeam",
+            move_seam_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "DecodeError",
+            decode_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "InvariantViolation",
+            invariant_violation_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "SyntaxError",
+            syntax_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "PathError",
+            path_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "VerificationFailure",
+            verification_failure_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "EditError",
+            edit_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "FindingCode",
+            finding_code_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "TargetDifference",
+            target_difference_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "WriteError",
+            write_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BackupError",
+            backup_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "SaveError",
+            save_error_samples().iter().map(json_of).collect(),
+        ),
+    ]
+} // End of function save_transaction_enums()
+
+/// The TypeScript type whose members are one enum's **names**.
+///
+/// A union of bare string literals is its own name set; a union with tagged
+/// members has a `…Name` twin beside it, exactly as `DiagnosticCodeName` sits
+/// beside `DiagnosticCode`. Derived from the JSON rather than listed, so the
+/// answer cannot disagree with the samples it is derived from.
+fn name_union_of(name: &str, samples: &[Value]) -> String {
+    if samples.iter().all(Value::is_string) {
+        name.to_owned()
+    } else {
+        format!("{name}Name")
+    }
+}
+
+/// Every sample list holds one instance of every variant its enum declares.
+///
+/// **Read from the core's own source, not from the list.** A list checked against
+/// itself is a list that cannot fail, and this is the same guard
+/// `crate::error::every_declared_variant_has_an_instance_in_the_enumeration`
+/// gives `CommandError` — the vacuous-audit corollary (`PROGRESS.md`, D2w)
+/// applied to eighteen enums at once. A variant added in the core and forgotten
+/// here fails this test rather than reaching a screen with no shape behind it.
+#[test]
+fn every_save_transaction_sample_list_is_its_enums_declaration() {
+    let mut variants = 0usize;
+    for (name, samples) in save_transaction_enums() {
+        let declared = crate::dictionary_contract::declared_variants_of(name);
+        let enumerated: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(
+            declared, enumerated,
+            "the {name} sample list and the {name} declaration disagree"
+        );
+        assert_eq!(
+            samples.len(),
+            enumerated.len(),
+            "the {name} sample list holds two instances of one variant"
+        );
+        variants += samples.len();
+    } // End of the loop over the save-transaction enums
+    assert_eq!(
+        variants, 157,
+        "Phase 2b-1 put 157 variants on the wire; this list now holds {variants}"
+    );
+} // End of function every_save_transaction_sample_list_is_its_enums_declaration()
+
+/// Every save-transaction union declares exactly the Rust variants.
+#[test]
+fn every_save_transaction_union_declares_exactly_the_rust_variants() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    for (name, samples) in save_transaction_enums() {
+        let union = name_union_of(name, &samples);
+        let rust: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        let declared = union_members(&source, &union);
+        assert_same_names(&format!("type {union}"), &rust, &declared);
+    } // End of the loop over the save-transaction enums
+} // End of function every_save_transaction_union_declares_exactly_the_rust_variants()
+
+/// Every save-transaction struct declares exactly the properties `serde` writes.
+#[test]
+fn every_save_transaction_struct_declares_exactly_the_properties_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    for (name, value) in save_transaction_structs() {
+        let declared = interface_fields(&source, name);
+        let written = json_keys(&value);
+        assert_same_names(&format!("interface {name}"), &written, &declared);
+    }
+} // End of function every_save_transaction_struct_declares_exactly_the_properties_serde_writes()
+
+/// Every tagged save-transaction variant's operands are the keys `serde` writes.
+///
+/// The union check above compares variant *names*; this compares what is inside
+/// each variant, which is where a renamed `first_difference` or a dropped
+/// `source_len` would hide.
+///
+/// **Three shapes, and only one of them is checked here.** A unit variant crosses
+/// as a bare string and has nothing to compare. A *newtype* variant —
+/// `SaveError::Patch(EditError)`, `SyntaxError::Parse(ParseFailure)` — crosses as
+/// a one-key object whose payload is another wire type, which the check for
+/// *that* type covers; declaring it as `readonly Patch: EditError` is a type
+/// reference this harness deliberately does not resolve, exactly as `ValueView`'s
+/// named-interface payloads are left to `samples()`. What is left is the **struct
+/// variant**, whose payload is a set of named operands, and the two counts below
+/// are pinned so that a struct variant silently declared as a type reference is a
+/// failure rather than a skip.
+#[test]
+fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let mut checked = 0usize;
+    let mut nested = 0usize;
+    let mut unit = 0usize;
+    for (name, samples) in save_transaction_enums() {
+        let union = name_union_of(name, &samples);
+        // A `…Name` union carries the names; the *value* union is where the
+        // payloads are declared, and for a bare-name-only enum they are one type.
+        let value_union = name;
+        for json in samples {
+            let Value::Object(map) = &json else {
+                unit += 1;
+                continue;
+            };
+            let variant = variant_name(&json);
+            let Some(payload) = map.get(&variant).and_then(Value::as_object) else {
+                // A newtype variant carrying a scalar or a list. None exists
+                // today; counted rather than assumed away.
+                nested += 1;
+                continue;
+            };
+            let Some(declared) = tagged_variant_fields(&source, value_union, &variant) else {
+                nested += 1;
+                continue;
+            };
+            let written: BTreeSet<String> = payload.keys().cloned().collect();
+            assert_same_names(
+                &format!("the {variant} payload of type {union}"),
+                &written,
+                &declared,
+            );
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the save-transaction enums
+    assert_eq!(
+        (checked, nested, unit),
+        (94, 11, 52),
+        "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
+         variants on this wire; a struct variant that became a skip is a hole"
+    );
+} // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
+
+/// A path no encoding can name still crosses as a save-transaction error.
+///
+/// The reason `WriteError`, `BackupError`, `SaveError`, `TargetDifference` and
+/// `BackupRecord` have hand-written `Serialize` impls: `serde`'s own `PathBuf`
+/// serializer **fails** on such a path, and a failure there arrives *after* the
+/// command has answered, with no typed refusal left to fall back on. The premise
+/// is asserted first, so this cannot pass with the fix removed.
+#[test]
+#[cfg(unix)]
+fn a_non_utf8_path_crosses_every_save_transaction_error() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut path = PathBuf::from("/nowhere/match");
+    path.push(OsStr::from_bytes(b"ba\xffse.yml"));
+    assert!(
+        serde_json::to_value(&path).is_err(),
+        "the premise of this test is that a bare PathBuf cannot carry these bytes"
+    );
+
+    let carriers: Vec<(&str, Value)> = vec![
+        (
+            "SaveError",
+            json_of(&SaveError::DocumentIsReadOnly { path: path.clone() }),
+        ),
+        (
+            "WriteError",
+            json_of(&WriteError::TargetMissing { path: path.clone() }),
+        ),
+        (
+            "WriteError::Io",
+            json_of(&WriteError::Io {
+                step: WriteStep::Rename,
+                path: path.clone(),
+                source: io::Error::from(io::ErrorKind::PermissionDenied),
+            }),
+        ),
+        (
+            "BackupError",
+            json_of(&BackupError::NotADirectory { path: path.clone() }),
+        ),
+        (
+            "TargetDifference",
+            json_of(&TargetDifference::Retargeted { now: path.clone() }),
+        ),
+        (
+            "BackupRecord",
+            json_of(&BackupRecord {
+                path: path.clone(),
+                batch: path.clone(),
+                rotation: Rotation::default(),
+            }),
+        ),
+    ];
+    for (what, value) in carriers {
+        let rendered = serde_json::to_string(&value).expect("a wire value must always serialize");
+        assert!(
+            rendered.contains('\u{fffd}'),
+            "{what} lost the replacement character: {rendered}"
+        );
+        assert!(
+            rendered.contains("se.yml"),
+            "{what} lost the rest of the name: {rendered}"
+        );
+    } // End of the loop over the path-carrying wire values
+} // End of function a_non_utf8_path_crosses_every_save_transaction_error()
+
+/// An `io::Error`'s message never reaches the save wire; its kind does.
+///
+/// "Codes, never prose" (plan section 9) applied to the two variants that carry
+/// an [`io::Error`]. The sentence below is what an operating system would supply,
+/// in a language nobody chose.
+#[test]
+fn an_io_errors_message_is_not_on_the_save_wire_but_its_kind_is() {
+    let sentence = "the developer-facing sentence that must not be sent";
+    let write = json_of(&WriteError::Io {
+        step: WriteStep::Rename,
+        path: a_path(),
+        source: io::Error::new(io::ErrorKind::PermissionDenied, sentence),
+    });
+    let backup = json_of(&BackupError::Io {
+        step: BackupStep::CreateBatch,
+        path: a_path(),
+        source: io::Error::new(io::ErrorKind::PermissionDenied, sentence),
+    });
+    for (what, value) in [("WriteError", write), ("BackupError", backup)] {
+        let rendered = serde_json::to_string(&value).expect("a wire value must serialize");
+        assert!(
+            !rendered.contains(sentence),
+            "{what} put the io::Error's Display string on the wire: {rendered}"
+        );
+        assert!(
+            rendered.contains("PermissionDenied"),
+            "{what} dropped the io::ErrorKind name, which is the code: {rendered}"
+        );
+        assert!(
+            !rendered.contains("\"source\""),
+            "{what} still writes a `source` field, which serde cannot render as a code"
+        );
+        assert!(
+            rendered.contains("\"raw_os_error\":null"),
+            "{what} must still write the errno field for an error the system did \
+             not raise, because the field is nullable rather than optional: {rendered}"
+        );
+    } // End of the loop over the two I/O carriers
+} // End of function an_io_errors_message_is_not_on_the_save_wire_but_its_kind_is()
+
+/// The system's own error number crosses beside the kind, as a number.
+///
+/// `docs/reviews/phase-2b-1-wire-boundary.md` section 3: [`io::ErrorKind`] is a
+/// small stable set, so several actionable operating-system failures collapse
+/// into one name and platform-specific distinctions are lost. The errno is the
+/// distinction, and it is **a number** — not a code with a dictionary entry, and
+/// not the operating system's localized prose, which stays off this wire.
+///
+/// It is nullable rather than absent, following the wire's own convention
+/// (`src/lib/ipc/types.ts`: *nullable, never optional*), so a consumer reads one
+/// shape whether or not the system supplied a number.
+#[test]
+fn an_io_errors_raw_os_error_crosses_as_a_number_beside_its_kind() {
+    let from_the_system = json_of(&WriteError::Io {
+        step: WriteStep::Rename,
+        path: a_path(),
+        source: io::Error::from_raw_os_error(28),
+    });
+    assert_eq!(from_the_system["Io"]["kind"], "StorageFull");
+    assert_eq!(
+        from_the_system["Io"]["raw_os_error"], 28,
+        "the errno the system returned must survive the crossing: {from_the_system}"
+    );
+
+    let ours = json_of(&BackupError::Io {
+        step: BackupStep::CreateBatch,
+        path: a_path(),
+        source: io::Error::other("built by this crate, with no errno behind it"),
+    });
+    assert!(
+        ours["Io"]["raw_os_error"].is_null(),
+        "an error with no operating system behind it writes null, never an \
+         invented number: {ours}"
+    );
+} // End of function an_io_errors_raw_os_error_crosses_as_a_number_beside_its_kind()
+
+/// A save error keeps the error it carries whole, rather than flattening it.
+///
+/// The decision `SaveError`'s `Serialize` impl argues, asserted rather than left
+/// as prose: `WriteError::may_have_written` is computed from the `WriteStep`, and
+/// a flattened copy would drop the step and with it the one question whose answer
+/// changes what a caller does next.
+#[test]
+fn a_save_error_carries_its_write_error_whole() {
+    let value = json_of(&SaveError::Write(WriteError::Io {
+        step: WriteStep::SyncDirectory,
+        path: a_path(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    }));
+    assert_eq!(value["Write"]["Io"]["step"], "SyncDirectory");
+    assert!(
+        value["Write"]["Io"]["path"].is_string(),
+        "the nested path is a lossy string: {value}"
+    );
+} // End of function a_save_error_carries_its_write_error_whole()
+
+/// An acknowledgement crosses as the findings it holds, never as a flag.
+///
+/// The wire form of the whole design: a save is refused until every suspicion the
+/// candidate produces is matched, by content, against one of these. A boolean
+/// would let a caller wave past findings nobody looked at, and there is
+/// deliberately no boolean anywhere on this wire to find.
+#[test]
+fn an_acknowledgement_crosses_as_its_findings_and_not_as_a_flag() {
+    let value = json_of(&Acknowledgement::of(&[a_finding()]));
+    let accepted = value["accepted"]
+        .as_array()
+        .expect("an acknowledgement carries a list of findings");
+    assert_eq!(accepted.len(), 1);
+    assert!(
+        accepted[0]["code"]["VariableTypeNotRecognised"]["declared"] == "global",
+        "the finding's own code and operands travel with it: {value}"
+    );
+    assert!(
+        !value.to_string().contains("true") && !value.to_string().contains("false"),
+        "nothing on this wire is a boolean override: {value}"
+    );
+} // End of function an_acknowledgement_crosses_as_its_findings_and_not_as_a_flag()
+
+/// The `{placeholder}` names one dictionary value uses.
+///
+/// The same token grammar `placeholdersOf` applies in
+/// `src/lib/i18n/dictionaries.ts`: an ASCII letter followed by letters, digits
+/// and underscores, between braces. Written out here rather than shared, because
+/// the two live in different languages and the check is only worth anything if
+/// this side reads what that side will substitute.
+fn placeholders_of(value: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let characters: Vec<char> = value.chars().collect();
+    let mut index = 0usize;
+    while index < characters.len() {
+        if characters[index] != '{' {
+            index += 1;
+            continue;
+        }
+        let mut end = index + 1;
+        while end < characters.len() && characters[end] != '}' {
+            end += 1;
+        }
+        let name: String = characters[index + 1..end.min(characters.len())]
+            .iter()
+            .collect();
+        let is_token = !name.is_empty()
+            && name.starts_with(|first: char| first.is_ascii_alphabetic())
+            && name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_');
+        if end < characters.len() && is_token {
+            found.insert(name);
+        }
+        index = end + 1;
+    } // End of the walk over the value's characters
+    found
+} // End of function placeholders_of()
+
+/// Every placeholder of a save-transaction message names an operand `serde` writes.
+///
+/// **The gap between a sentence and a wire value, and nothing else checks it.**
+/// `translate` leaves an unmatched `{placeholder}` in the output verbatim — on
+/// purpose, so a gap is visible rather than silently empty — so a message naming
+/// `{path}` for a variant that carries no `path` reaches a screen with a brace in
+/// it. The dictionary contract sees only keys, `dictionaries.test.ts` sees only
+/// that the two languages agree with each other, and neither has the JSON.
+///
+/// The operand must also be a **string or a number**: `scalarOperands` in
+/// `src/lib/i18n/codes.ts` drops everything else, so naming a nested error or an
+/// enum operand would leave the same visible brace.
+///
+/// Both dictionaries are read. The Spanish one is checked separately rather than
+/// trusted to `dictionaries.test.ts`'s placeholder-parity assertion, because that
+/// assertion says the two agree and this one says they are both right.
+#[test]
+fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
+    let english = crate::dictionary_contract::dictionary_values("src/lib/i18n/en.json");
+    let spanish = crate::dictionary_contract::dictionary_values("src/lib/i18n/es.json");
+    let mut checked = 0usize;
+    for (name, samples) in save_transaction_enums() {
+        for json in samples {
+            let variant = variant_name(&json);
+            let key = crate::dictionary_contract::code_key(name, &variant);
+            let operands: BTreeSet<String> = json
+                .get(&variant)
+                .and_then(Value::as_object)
+                .map(|payload| {
+                    payload
+                        .iter()
+                        .filter(|(_, value)| value.is_string() || value.is_number())
+                        .map(|(operand, _)| operand.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (locale, dictionary) in [("en", &english), ("es", &spanish)] {
+                let sentence = dictionary
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("{locale}.json has no {key}"));
+                let named = placeholders_of(sentence);
+                let unbacked: Vec<&String> = named.difference(&operands).collect();
+                assert!(
+                    unbacked.is_empty(),
+                    "{locale}.json's {key} names {unbacked:?}, which {name}::{variant} does \
+                     not write as a string or a number, so the brace would reach a screen"
+                );
+            } // End of the loop over the two dictionaries
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the save-transaction enums
+    assert_eq!(
+        checked, 157,
+        "the placeholder check stopped covering every variant"
+    );
+} // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

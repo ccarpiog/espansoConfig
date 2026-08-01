@@ -271,15 +271,22 @@
 //! tests still run — and this module's ACL and extended-attribute guarantee
 //! **does not hold there**, which is said rather than implied.
 //!
-//! # No `Serialize`
+//! # On the wire since Phase 2b-1
 //!
-//! [`WriteError`] deliberately does **not** implement `serde::Serialize`, unlike
-//! `crate::workspace::WorkspaceError`. Nothing crosses the IPC boundary in this
-//! sub-phase, and in this repository an enum `serde` can write owes a dictionary
-//! namespace in both `src/lib/i18n/{en,es}.json` — `src-tauri/src/
-//! dictionary_contract.rs` fails the build otherwise. The sub-phase that exposes
-//! a save command adds the strings and the `Serialize` impl together, so that a
-//! code can never reach a screen with no sentence behind it.
+//! [`WriteError`], [`WriteStep`] and [`TargetDifference`] are serializable, and
+//! each of their variants has a `code.` entry in **both**
+//! `src/lib/i18n/en.json` and `es.json` — `src-tauri/src/dictionary_contract.rs`
+//! fails the build otherwise, which is why the derives and the strings landed in
+//! one change rather than in two.
+//!
+//! Two things about that wire form are decisions rather than defaults, and both
+//! are argued on the impls below: every path crosses through
+//! [`crate::wire::WirePathRef`], because `serde`'s own `PathBuf` serializer
+//! *fails* on a path that is not valid UTF-8 and a failure there has no typed
+//! refusal left to fall back on; and [`WriteError::Io`] writes a **`kind`** field
+//! holding the [`io::ErrorKind`] variant name — plus a nullable **`raw_os_error`**
+//! number, because that name is coarse — never the operating system's own
+//! sentence (plan section 9).
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -292,6 +299,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::ser::{SerializeStructVariant, Serializer};
+use serde::Serialize;
+
+use crate::wire::{io_kind_name, io_raw_os_error, WirePathRef};
 use crate::ContentRevision;
 
 /// The first character of every temp file this module creates.
@@ -1311,7 +1322,7 @@ impl Drop for TempFile {
 /// prose (plan section 9). It also answers the only question that changes what a
 /// caller should do next: has this call's rename already happened? See
 /// [`WriteStep::after_rename`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum WriteStep {
     /// Step 1: canonicalising the caller's path.
     ResolveTarget,
@@ -1426,6 +1437,43 @@ pub enum TargetDifference {
         /// The revision the file holds now.
         found: ContentRevision,
     },
+}
+
+impl Serialize for TargetDifference {
+    /// Externally tagged, exactly as a `#[derive(Serialize)]` would write it —
+    /// and hand-written for one reason: [`TargetDifference::Retargeted`] carries
+    /// a [`PathBuf`], and `serde`'s own `PathBuf` serializer **fails** on a path
+    /// that is not valid UTF-8. A failure there arrives after the command has
+    /// already answered, so the refusal that was supposed to carry the news is
+    /// the value that cannot be written. [`WirePathRef`] renders lossily and
+    /// therefore always succeeds.
+    ///
+    /// Writing the `match` by hand also makes a **new variant a compile error
+    /// here**, which is the prompt to add its two dictionary entries; a derive
+    /// would have serialized it silently with no string on the other side.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            TargetDifference::Retargeted { now } => {
+                let mut out =
+                    serializer.serialize_struct_variant("TargetDifference", 0, "Retargeted", 1)?;
+                out.serialize_field("now", &WirePathRef(now))?;
+                out.end()
+            }
+            TargetDifference::Vanished => {
+                serializer.serialize_unit_variant("TargetDifference", 1, "Vanished")
+            }
+            TargetDifference::Identity => {
+                serializer.serialize_unit_variant("TargetDifference", 2, "Identity")
+            }
+            TargetDifference::Contents { expected, found } => {
+                let mut out =
+                    serializer.serialize_struct_variant("TargetDifference", 3, "Contents", 2)?;
+                out.serialize_field("expected", expected)?;
+                out.serialize_field("found", found)?;
+                out.end()
+            }
+        }
+    } // End of function serialize() for TargetDifference
 }
 
 impl fmt::Display for TargetDifference {
@@ -1594,6 +1642,106 @@ impl WriteError {
             WriteError::Io { step, .. } => step.after_rename(),
         }
     } // End of function may_have_written()
+}
+
+impl Serialize for WriteError {
+    /// Externally tagged, with two departures from what a derive would write —
+    /// and neither is cosmetic.
+    ///
+    /// - **Every path goes through [`WirePathRef`].** A path is a bag of bytes on
+    ///   Unix, `serde`'s own `PathBuf` serializer *fails* on one that is not
+    ///   valid UTF-8, and a failure at that point turns a typed refusal into the
+    ///   serializer's English prose. Every variant of this enum carries a path.
+    /// - **[`WriteError::Io`] writes `kind` and `raw_os_error`, never `source`.**
+    ///   An [`io::Error`]'s `Display` is the operating system's own message in the
+    ///   operating system's own language; the `ErrorKind` name is a code (plan
+    ///   section 9). The field is therefore renamed on the wire, deliberately, so
+    ///   nothing downstream can mistake it for the message. `kind` is coarse — a
+    ///   whole family of distinct failures arrives as `Other` — so the system's
+    ///   own error number rides alongside it as a **number**, nullable because an
+    ///   error this crate built itself has none. It is diagnostic data with no
+    ///   dictionary entry, never a code to branch on and never interpolated into
+    ///   a sentence.
+    ///
+    /// Hand-written rather than derived so that a variant added to this enum is a
+    /// compile error here, which is the prompt to add its two dictionary entries.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            WriteError::TargetMissing { path } => {
+                let mut out =
+                    serializer.serialize_struct_variant("WriteError", 0, "TargetMissing", 1)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            WriteError::TargetNotRegularFile { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "WriteError",
+                    1,
+                    "TargetNotRegularFile",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            WriteError::RevisionMismatch {
+                path,
+                expected,
+                found,
+            } => {
+                let mut out =
+                    serializer.serialize_struct_variant("WriteError", 2, "RevisionMismatch", 3)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("expected", expected)?;
+                out.serialize_field("found", found)?;
+                out.end()
+            }
+            WriteError::TargetChangedDuringWrite { path, difference } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "WriteError",
+                    3,
+                    "TargetChangedDuringWrite",
+                    2,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("difference", difference)?;
+                out.end()
+            }
+            WriteError::TempFileChangedDuringWrite { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "WriteError",
+                    4,
+                    "TempFileChangedDuringWrite",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            WriteError::VerificationFailed {
+                path,
+                expected,
+                found,
+            } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "WriteError",
+                    5,
+                    "VerificationFailed",
+                    3,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("expected", expected)?;
+                out.serialize_field("found", found)?;
+                out.end()
+            }
+            WriteError::Io { step, path, source } => {
+                let mut out = serializer.serialize_struct_variant("WriteError", 6, "Io", 4)?;
+                out.serialize_field("step", step)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("kind", &io_kind_name(source))?;
+                out.serialize_field("raw_os_error", &io_raw_os_error(source))?;
+                out.end()
+            }
+        }
+    } // End of function serialize() for WriteError
 }
 
 impl fmt::Display for WriteError {

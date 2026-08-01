@@ -38,7 +38,7 @@
 //! sample list is a check against the samples. `wire_contract.rs` learned that
 //! at 1b-2a: its `every_declared_variant_has_an_instance_in_the_enumeration`
 //! reads `error.rs`'s own enum block for exactly this reason, and this module is
-//! that pattern applied to the other fifteen enumerations.
+//! that pattern applied to the other thirty-three enumerations.
 //!
 //! # The three questions, and which of them is answered
 //!
@@ -103,23 +103,39 @@ impl CodeEnum {
 
 /// Every enum whose variants can reach a user, and where its declaration is.
 ///
-/// Twelve of the sixteen are on the wire in some form. The other four —
+/// Thirty of the thirty-four are on the wire in some form. The other four —
 /// `WorkspaceError`, `DiscoveryError`, `IdentityError` and `DocumentShape` as an
 /// operand — are here because a code with no string is worse than a code with no
 /// caller (`1b-2a-notes.md` section 9, hole 3): the first three never cross the
 /// Tauri boundary in their own shape, since `CommandError` flattens their
 /// conditions, and they still owe a sentence in case a later phase forwards one.
 ///
-/// **The last six were added by Phase 1b-2b's review.** `ScalarStyle`,
-/// `LineEnding`, `FileKind`, `TriggerKind`, `ContentKind` and `VariableKind`
-/// already cross the wire as fields of the read projection, and the phase had
-/// deferred their strings to 1c on the grounds that no message interpolates
-/// them. That was the wrong test: a Phase 1c component meeting
-/// `trigger.kind = "Single"` with no key can only render the raw Rust
-/// identifier or invent an unchecked mapping, which is a hardcoded English
-/// string arriving by the back door (CLAUDE.md section 2). A code with no string
-/// is worse than a code with no caller — the rule this file already applied to
-/// `identityWrongDocument`.
+/// **Six were added by Phase 1b-2b's review.** `ScalarStyle`, `LineEnding`,
+/// `FileKind`, `TriggerKind`, `ContentKind` and `VariableKind` already cross the
+/// wire as fields of the read projection, and the phase had deferred their
+/// strings to 1c on the grounds that no message interpolates them. That was the
+/// wrong test: a Phase 1c component meeting `trigger.kind = "Single"` with no key
+/// can only render the raw Rust identifier or invent an unchecked mapping, which
+/// is a hardcoded English string arriving by the back door (CLAUDE.md section 2).
+/// A code with no string is worse than a code with no caller — the rule this file
+/// already applied to `identityWrongDocument`.
+///
+/// **Eighteen were added by Phase 2b-1**, in one change, because that is the only
+/// size that change comes in: the save transaction's own types (`SaveError`,
+/// `SaveVerdict`), the write primitive's (`WriteError`, `WriteStep`,
+/// `TargetDifference`), the backup's (`BackupError`, `BackupStep`,
+/// `RotationOutcome`), the semantic gate's (`FindingCode`, `FindingClass`), and
+/// everything those carry transitively — `EditError`, `MoveSeam`,
+/// `VerificationFailure`, `SyntaxError`, `InvariantViolation`, `PathError`,
+/// `DecodeError` and `NodeKind`. One variant serialized without its string is a
+/// failure of this module, which is why none of them could land alone.
+///
+/// **`NodeKind` moved here from [`NOT_A_CODE`] in the same change**, and the
+/// exclusion it left is the shape of the rule: its reason was *"a substrate
+/// detail the read projection never carries"*, which stopped being true the
+/// moment `EditError::NotAScalar { kind: NodeKind }` reached the wire. An
+/// exclusion is a claim about what crosses the boundary, and it expires when the
+/// boundary moves.
 const CODE_ENUMS: &[CodeEnum] = &[
     CodeEnum {
         source: "crates/espansoconfig-core/src/model/diagnostic.rs",
@@ -185,6 +201,78 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/model/variable.rs",
         name: "VariableKind",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/syntax/node.rs",
+        name: "NodeKind",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/save.rs",
+        name: "SaveError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/save.rs",
+        name: "SaveVerdict",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/write.rs",
+        name: "WriteError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/write.rs",
+        name: "WriteStep",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/write.rs",
+        name: "TargetDifference",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupStep",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "RotationOutcome",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/validate/mod.rs",
+        name: "FindingCode",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/validate/mod.rs",
+        name: "FindingClass",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/edit.rs",
+        name: "EditError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/edit.rs",
+        name: "MoveSeam",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/edit.rs",
+        name: "VerificationFailure",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/syntax/error.rs",
+        name: "SyntaxError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/syntax/error.rs",
+        name: "InvariantViolation",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/path.rs",
+        name: "PathError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/emit/decode.rs",
+        name: "DecodeError",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -211,6 +299,24 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("triggerKind", 5),
     ("contentKind", 7),
     ("variableKind", 11),
+    ("nodeKind", 5),
+    ("saveError", 9),
+    ("saveVerdict", 3),
+    ("writeError", 7),
+    ("writeStep", 13),
+    ("targetDifference", 4),
+    ("backupError", 8),
+    ("backupStep", 12),
+    ("rotationOutcome", 4),
+    ("findingCode", 10),
+    ("findingClass", 2),
+    ("editError", 28),
+    ("moveSeam", 4),
+    ("verificationFailure", 26),
+    ("syntaxError", 3),
+    ("invariantViolation", 5),
+    ("pathError", 9),
+    ("decodeError", 5),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -236,11 +342,6 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "PathSegment",
         "an address, not a code: `Key`/`Index` are how the edit engine names a \
          node, and a path is never shown as a sentence",
-    ),
-    (
-        "NodeKind",
-        "a substrate detail the read projection never carries: `SyntaxIndex` \
-         nodes do not cross the boundary, and no wire type mirrors this enum",
     ),
     (
         "Chomping",
@@ -323,6 +424,26 @@ fn registered_namespaces() -> BTreeSet<String> {
     CODE_ENUMS.iter().map(CodeEnum::namespace).collect()
 }
 
+/// The variants one registered enum declares, parsed out of the core's source.
+///
+/// Exposed for `crate::wire_contract`, whose Phase 2b-1 sample lists are checked
+/// against the declaration rather than against themselves. It reads
+/// [`CODE_ENUMS`] rather than taking a file path, so there is **one** table of
+/// where each enum lives: a second one could name a moved file and answer with a
+/// panic that pointed at the wrong module.
+///
+/// # Panics
+///
+/// When `name` is not a registered enum, which is the honest answer — an enum
+/// with no dictionary namespace has no business being on the wire at all.
+pub(crate) fn declared_variants_of(name: &str) -> BTreeSet<String> {
+    let entry = CODE_ENUMS
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap_or_else(|| panic!("{name} is not registered in CODE_ENUMS"));
+    declared_variants(&read_repository_file(entry.source), name)
+} // End of function declared_variants_of()
+
 /// Every key of one dictionary file, read as JSON.
 fn dictionary_keys(relative: &str) -> BTreeSet<String> {
     let text = read_repository_file(relative);
@@ -334,6 +455,41 @@ fn dictionary_keys(relative: &str) -> BTreeSet<String> {
         .keys()
         .cloned()
         .collect()
+}
+
+/// The whole of one dictionary file, as key-to-value pairs.
+///
+/// Exposed for `crate::wire_contract`, which asks a question this module cannot:
+/// whether a message's `{placeholder}` names an operand `serde` really writes.
+/// That needs the sentence *and* the JSON, and only that module has the JSON.
+pub(crate) fn dictionary_values(relative: &str) -> BTreeMap<String, String> {
+    let text = read_repository_file(relative);
+    let parsed: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("{relative} is not valid JSON: {error}"));
+    parsed
+        .as_object()
+        .unwrap_or_else(|| panic!("{relative} is not a JSON object"))
+        .iter()
+        .map(|(key, value)| {
+            let text = value
+                .as_str()
+                .unwrap_or_else(|| panic!("{relative}'s {key} is not a string"));
+            (key.clone(), text.to_owned())
+        })
+        .collect()
+} // End of function dictionary_values()
+
+/// A name with its first character lowercased, for another module's use.
+///
+/// The naming formula has exactly one implementation in this crate, and this is
+/// how `crate::wire_contract` reaches it rather than writing a second one that
+/// could disagree about what a key looks like.
+pub(crate) fn code_key(namespace: &str, variant: &str) -> String {
+    format!(
+        "{CODE_PREFIX}{}.{}",
+        uncapitalize(namespace),
+        uncapitalize(variant)
+    )
 }
 
 /// The `code.` keys of one dictionary file.

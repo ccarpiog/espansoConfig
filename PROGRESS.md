@@ -38,7 +38,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2a-2b** | The **save transaction**: plan §6.6 steps 3, 4 and 12 · the blocking policy · the first code that can refuse a save | ✅ complete — after the review fix round below. **2a-2 is closed** |
 | **2a-3a** | **Metadata preservation across the rename**: plan §7 row 11's unpaid half · the ACL and the extended attributes · the temp file's own identity | ✅ complete — after the review fix round below |
 | **2a-3b** | **Backups and rotation**: plan §6.6 step 13 · the copy taken before the first modification of each file per session · the ten-batch retention · the only destructive operation in the crate | ✅ complete — after the review fix round below. **2a-3 is closed, and with it 2a** |
-| 2b … 2d | See the Phase 2 split below | ⬜️ **2b is next** |
+| **2b-1** | The **wire boundary for `persist`**: every save-transaction type serialized, with its two dictionary entries and the contracts that pin them | ✅ complete — after the review fix round below |
+| 2b-2 … 2d | See the Phase 2 split below | ⬜️ **2b-2 is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -55,6 +56,22 @@ that can destroy a file is finished and proven before anything can call it.
 | **2b** | The **Tauri mutation surface** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document`, and `SaveResult::Conflict` on the wire |
 | **2c** | The **editing UI** — the draft model, the small editor (literal trigger · `replace` · label · word boundary), new / duplicate / delete / move, the conflict UI, draft-level undo, restore from backup |
 | **2d** | **External change reconciliation** — plan §6.5's debounced watcher, self-write suppression, and the clean-draft reload |
+
+**2b is split into 2b-1 / 2b-2**, by the same cut every earlier split used — a dependency order, not a
+convenience, and by *failure mode*. 2b was handed two pieces of work that fail differently. The first
+is a **data-format decision every later phase inherits**: `SaveError` and the sixteen types it carries
+have to cross the wire, and *nothing in `persist` derives `Serialize` today*, deliberately, because the
+day any of it does every variant owes a `code.` namespace in **both** `en.json` and `es.json`. The 2a-3b
+checkpoint records that this piece is **indivisible** — "one variant serialized without its string is a
+dictionary-contract test failure, and half the enum serialized is worse than none" — so it is a phase of
+its own, with no command registered, exactly as 1b-1 shipped the i18n layer with no command. The second
+is the **commands themselves**, which fail loudly and can only be built on a boundary that already
+exists.
+
+| Sub-phase | Scope |
+|---|---|
+| **2b-1** | The **wire boundary**: `Serialize` on `SaveError`, `SaveVerdict`, `SaveRefusal`, `Acknowledgement`, `Finding`, `FindingCode`, `FindingClass`, `WriteError`, `WriteStep`, `TargetDifference`, `EditError`, `BackupError`, `BackupStep`, `BackupRecord`, `Rotation`, `RotationOutcome`; the `code.` namespaces in both dictionaries; the dictionary-contract and wire-contract extensions; the typed frontend mirror and its `describe*`/`t*` accessors. **No `#[tauri::command]` is registered** |
+| **2b-2** | The **six mutating commands** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document` — each returning `SaveResult`, each carrying an optimistic-concurrency token, `SaveResult::Conflict` on the wire, the app-owned `BackupSession`, and the first call to `forgetFileText()` |
 
 **2a-3 is split into 2a-3a / 2a-3b**, by the same cut every earlier split used — a dependency order,
 not a convenience. 2a-3 was handed *two* pieces of work, and only one of them is step 13. The other is
@@ -2163,6 +2180,71 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 2b-1 review disposition
+
+The review ran as **two** files rather than one, and the reason is itself a finding worth keeping. The
+first attempt handed a reviewer the whole 3 582-line diff and six review dimensions at once; it read
+files steadily for 1m42s and then went silent for thirteen minutes with no output. It was cancelled —
+the known runaway signature (a repeating web-search loop) was **absent**, so this was a job too large
+to finish, not a job stuck. Split into two single-file briefs, each reading exactly one bounded diff
+and nothing else, both finished. **The lesson is the brief's size, not the reviewer**: a review whose
+input is a whole phase's diff plus repository exploration plus six dimensions is a review that may
+never answer.
+
+- [`docs/reviews/phase-2b-1-wire-boundary.md`](docs/reviews/phase-2b-1-wire-boundary.md) — the
+  core-crate diff (797 lines): the format, the deferral, the two lossy reductions, scope.
+- [`docs/reviews/phase-2b-1-strings.md`](docs/reviews/phase-2b-1-strings.md) — the i18n diff (372
+  lines): the five forbidden claims and the Spanish read as Spanish.
+
+**Nothing was declined.** The finding-by-finding disposition is `docs/decisions/2b-1-notes.md` §7; what
+follows is only what a fresh session needs without opening it.
+
+**Review A — the wire format.**
+
+- **A-i, blocking — applied.** `FindingCode::VariableMissingRequiredParam::param` was a `&'static str`,
+  which `serde` cannot deserialize into, and the phase's own notes had named it the one type-level
+  blocker to the acknowledgement ever coming *back*. The reviewer ruled on all three escape routes and
+  called changing the field type soundest. It is now an owned `String`, at four construction sites.
+  **The design itself was not touched** — how an acknowledgement round-trips is still 2b-2's to decide;
+  this only removed the obstruction to deciding it.
+- **A-ii, should-fix — applied, and the timing is the point.** `io::Error`'s `raw_os_error()` was being
+  discarded, so genuinely different operating-system failures collapsed into one `ErrorKind` — above all
+  into `Other`, which says nothing. The errno now rides beside the kind as a **nullable number** with no
+  dictionary entry. It was done *now* because the wire format has no consumer yet: this was the last
+  moment at which adding a field cost nothing, and after 2b-2 it is a format change Phases 2c–5 inherit.
+- **A-iii, minor — recorded, no code.** A wire path is lossy display text and can never be an
+  identifier. Folded into the notes' inheritance section and into this file's Next action.
+- **A2 and A4 — clean.** No inconsistency among the eighteen enums' tagging; the hand-written impls
+  reproduce what a derive on a sibling produces. No behavioural change in `persist/save.rs`,
+  `write.rs` or `backup.rs` — derives, impls, imports, doc comments and tests only.
+
+**Review B — the strings. Three forbidden claims found, a fourth found by the fix worker, and four more
+found by the orchestrator in pre-existing strings.**
+
+The rule the project holds is that the app may describe **risk under its own model** and may never
+**predict espanso's behaviour** or pronounce a file **valid or invalid absolutely**.
+`matchHasSeveralTriggerForms` said *"where espanso expects exactly one"*; `duplicateVariableName` said
+*"espanso keeps the last one"*; `verificationFailure.doesNotParse` said *"no longer valid YAML"*. The
+fix worker found `editError.sourceDoesNotParse` making the same absolute-validity claim about the
+source. All four were corrected in both languages, along with review B's eight further Spanish quality
+findings and five English register findings — **10 English and 16 Spanish values edited**.
+
+**The four pre-existing strings are the disposition worth reading, because the rule for them was
+deliberately overridden.** The fix worker was told not to rewrite strings the phase had not added, and
+it complied, recording `code.diagnosticCode.{parseFailed, fieldHasUnexpectedShape,
+matchHasSeveralTriggerForms, matchHasSeveralContentForms}` as owed to *"whichever sub-phase next
+touches the diagnostic strings"*. The orchestrator fixed them anyway, for one reason: **2b-2 through 2d
+are all about saving, not diagnostics, so the named owner may never arrive**, and a violation the
+project has now demonstrated in its own review is worse to leave shipped than a slightly wider phase is
+to commit. Eight values changed; each keeps its operands and its shape and changes only the claim.
+
+**What that did not buy is a reading.** Those four appear on the diagnostics surface Phase 1c-2b-1 read
+in a running window, and it has not been re-read. The claim recorded is narrower than a screen claim —
+that the *strings* no longer predict espanso's behaviour, checked by key and placeholder parity — and
+the next phase that opens a window owes the look.
+
+---
+
 ## Phase 2a-3b review disposition
 
 The review is [`docs/reviews/2a-3b-codex.md`](docs/reviews/2a-3b-codex.md) — an adversarial review
@@ -2771,6 +2853,42 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2b-1
+
+Every command below was run by the orchestrator **after** the review fix round, each as its own
+invocation, not taken on any worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **798 tests across 20 binaries**, 0 failed (**+11** on 2a-3b's 787: 9 in the first pass, 2 more in the review fix round) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test persist_save -- saving_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, 13 committed, **0 refusals** |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test persist_backup -- backing_up_the_real` | ✅ 13 files copied into one batch, 0 with no editable scalar |
+| `npm test` | ✅ 28 files, **671 tests** (662 at 2a-3b) |
+| `npm run check` | ✅ 375 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `rg -c '#\[tauri::command\]' src-tauri/src/` | ✅ `commands.rs:6`, `menu.rs:1` — **unchanged from `HEAD`**, checked against `git show HEAD:…` |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1); no corpus fixture modified |
+
+**The claim this phase does *not* make.** 157 variants have shapes and strings and **zero callers**.
+The dictionary contract proves every variant has two entries and the wire contract proves the JSON
+shape is what it says; **nothing proves any of it is useful**, and nothing will until 2b-2. No Svelte
+component calls any of the eighteen new accessors, so **no screen was read for this phase** and none
+needed to be. This is the exposure 1b-1 accepted for the i18n layer, deliberately, and it is why 2b-1
+is a phase rather than a commit.
+
+**The deletion experiment, re-run by the orchestrator's instruction rather than taken on trust.** With
+`code.backupError.destinationExists` removed from `en.json`, **both** sides failed:
+`dictionary_contract::the_code_dictionary_is_exactly_the_declared_variants` and
+`the_spanish_dictionary_declares_the_same_code_keys` on the Rust side, `dictionaries.test.ts > key sets`
+on the frontend. Restored; both suites green. A variant serialized without its string cannot reach a
+commit.
 
 ---
 
@@ -3572,6 +3690,115 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-1 is complete and its review is closed.** `docs/decisions/2b-1-notes.md` is the record; §7 is
+the finding-by-finding disposition of both reviews and §4 is what 2b-2 inherits. The save transaction's
+types now cross the IPC wire — **18 enums / 157 variants and 7 structs**, each with a `code.` namespace
+in both `src/lib/i18n/en.json` and `es.json`, pinned by `src-tauri/src/dictionary_contract.rs` and
+`src-tauri/src/wire_contract.rs`. **No `#[tauri::command]` was added**: the count is 6 in
+`src-tauri/src/commands.rs` and 1 in `menu.rs`, before and after. This is 1b-1's shape repeated — the
+i18n layer shipped with no command behind it for the same reason.
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 798 tests across 20 binaries, 0 failed
+```
+
+**The next step is Phase 2b-2 — the six mutating commands**: `save_match`, `create_match`,
+`delete_match`, `move_match`, `save_raw_document`, `reload_document`, each returning `SaveResult`, each
+carrying an optimistic-concurrency token, with `SaveResult::Conflict` on the wire. It is the first code
+that lets anything outside `espansoconfig-core` write a user's file.
+
+**The one thing 2b-2 must do first, and it is a type change before it is a design.** The
+acknowledgement has to arrive *from* the interface, and **nothing in the save wire deserializes**.
+2b-1 removed the one type-level obstruction — `FindingCode::VariableMissingRequiredParam::param` is now
+an owned `String`, not a `&'static str` — but `Deserialize` itself is still absent from `Finding`,
+`ByteSpan` and `VariableKind`. Review A (`docs/reviews/phase-2b-1-wire-boundary.md`) ruled on the three
+options and named changing the field type the soundest; it is done. What remains:
+
+- **derive `Deserialize` on `Acknowledgement`, `Finding`, `FindingCode` and their complete transitive
+  payload graph** — that is `ByteSpan` and `VariableKind` today, and the compiler will name any others;
+- **compare acknowledgements as an exact multiset**, consuming matches or counting occurrences, so that
+  `[A, A]` differs from `[A]`. Review A calls a set-membership check insufficient, by name;
+- **do not** round-trip an index-based selection (unstable if findings reorder between calls) and **do
+  not** hand back the exact JSON bytes (JSON permits insignificant byte differences, object-key order
+  is not semantic, and Tauri parses the JSON before Rust sees it). Both were considered and rejected.
+
+**Two wire facts 2b-2 inherits and must not re-decide.**
+
+- **A path on the wire is display text, never an identifier.** Every path crosses through `WirePathRef`
+  as a *lossy* String, so two distinct non-UTF-8 filenames can render identically and the string cannot
+  be copied back to name the file. The real `PathBuf` stays inside the transaction. A command that
+  accepts a wire path back as a target is a bug (review A, A-iii).
+- **`io::Error` crosses as `kind` plus a nullable numeric `raw_os_error`, never as prose.** The errno
+  was added *because* `ErrorKind` collapses distinct failures into `Other`; it is diagnostic data, gets
+  **no dictionary entry**, and no message interpolates it. `CommandError::Io` on the read surface was
+  deliberately left alone — widening it is a separate decision.
+
+**Five things 2b-2 must not rebuild, and one it must not undo** — unchanged from the 2a-3b checkpoint
+and restated because they are still the ones most likely to be re-derived wrongly:
+
+- **An acknowledgement is content-addressed.** The save command carries the findings *out* and the
+  acknowledged subset *back in*, matched as a multiset. **A `force: true` parameter would undo the
+  whole design.**
+- **Nothing in the core can establish that a human saw a finding.** `validate()` is public and `Finding`
+  is publicly constructible, so a caller can compute the findings itself and acknowledge them all.
+  **Enforcing presentation is the user interface's obligation**; 2b-2 owes the wire shape that makes it
+  possible.
+- **`save_document` is the only entry point that may write a user's file**, and it writes *two* — the
+  target and, on a first modification, one backup. `replace_file_atomically` and `replace_locked_file`
+  take finished bytes and validate nothing; **do not call either from a command**, and never from
+  inside the transaction (the lock is not reentrant — the process hangs, silently and forever).
+- **`SaveRequest::backups` is `Option<&BackupSession>`, and `None` means no backup at all.** 2b-2 must
+  construct and own a `BackupSession` for the app session and thread it through, or every save silently
+  runs without a safety net. **The user interface owns what a session is** — the core cannot know.
+- **`SavedDocument::committed` can be `false` on a success**, and `SavedDocument::backup` can be `None`
+  on a success for four documented reasons each. Neither is a failure, and neither may be presented as
+  one.
+- **`forgetFileText()`** in `src/lib/browser/workspace.svelte.ts` still has **no caller** and must be
+  called after a successful write, or the raw viewer keeps the bytes it read before it.
+
+**`SavedDocument` is *not* serialized**, and that is deliberate rather than an omission. It carries
+`Replacement` and `PresentationNote`, which are on neither `PROGRESS.md`'s list nor in `SaveError`'s
+closure, and which owe their own dictionary entries the day they cross. **What `SaveResult::Saved`
+carries out of a successful save is 2b-2's design to make**, not a leftover to pick up.
+
+**`SaveError` is not flattened, and flattening it is 2b-2's call to make explicitly.** The core's types
+took the *core's* wire convention — externally tagged, Rust variant names verbatim, `snake_case` fields
+— not `CommandError`'s flat `camelCase` `code` + operands. If the frontend wants nine switchable
+top-level codes it builds a shell type the way `CommandError` already does for the read surface; it
+does not get them from the core.
+
+**Two holes that are still 2b's to close, both inherited unchanged.**
+
+- **Hole 1** — `DuplicateVariableName` and `RegexDoesNotCompile` are unoverrideable `EditorModelError`s,
+  so a file espanso demonstrably runs (duplicates are last-wins) can be unsaveable through the visual
+  editor. The escape hatch the plan names is the **raw editor**, which is a UI.
+- **Hole 13** — espanso 2.3.0 has a tenth variable type, `var_type: "global"`, which this crate reports
+  as `VariableTypeNotRecognised`. Fixing it means a `VariableKind` variant, which is a Phase 1 **wire**
+  type and owes two dictionary entries.
+
+**What 2c inherits from 2a-3b specifically** (recorded so it is not re-derived): *Reveal backups in
+Finder* points at `BackupSession::root()`, **and that directory may not exist** — a session that saved
+nothing creates nothing, deliberately. No string may say a file is recoverable; retention is ten
+sessions, and the honest sentence names the number. **A backup is not a version history**: it holds the
+file as it was before the session's first change to it, not before each change.
+
+**One thing owed that no test can discharge.** Four pre-existing `code.diagnosticCode.*` strings were
+corrected during 2b-1's fix round for predicting espanso's behaviour (`parseFailed`,
+`fieldHasUnexpectedShape`, `matchHasSeveralTriggerForms`, `matchHasSeveralContentForms` — both
+languages, eight values). They appear on the diagnostics surface that Phase 1c-2b-1 read in a running
+window, and **that surface has not been re-read since**. CLAUDE.md's rule is that a claim about a screen
+needs a reading of a screen; the claim made in `2b-1-notes.md` §7.2 is deliberately narrower — that the
+strings no longer predict espanso's behaviour — and the next phase that opens a window owes the look.
+
+**And one that a bilingual reader owes.** 157 Spanish values were written by 2b-1 and checked only for
+being non-blank, non-identical to their English twin, and in placeholder agreement with it. That is the
+untranslated-value *heuristic*, and `dictionaries.test.ts` says so itself. Review B corrected ten
+Spanish strings on quality grounds; nothing establishes that the remaining ones are idiomatic.
+
+---
+
 **Phase 2a-3b is complete, its review is closed, and with it 2a-3 and the whole of 2a.**
 `docs/decisions/2a-3b-notes.md` is the record; §12 is the finding-by-finding disposition of all eleven
 review findings plus the confirmation pass's one residue, and §11 is what 2b and 2c inherit.
@@ -4006,9 +4233,14 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with **`O_NOFOLLOW \| O_NONBLOCK`**, so mode bits, bytes and `(dev, ino)` come from one inode — and a fifo planted at the resolved path is an open that *returns*, refused as `TargetNotRegularFile`, rather than a wait for a writer with the lock held (2a-2b review finding 8). It is `pub(super)` and is **the only read of a save target in the crate**; a second, unchecked read is exactly how that finding happened. `WriteError` / `WriteStep` / `TargetDifference` **do not derive `Serialize`**, deliberately — see the Next action. **2a-3a added steps 7a and 7b and reordered the block:** the temp file is created 0o600, written, flushed and fsynced **while still 0o600**, and only then does `copy_metadata()` carry the target's **ACL and extended attributes** across with `fcopyfile(COPYFILE_ACL \| COPYFILE_XATTR)` — `COPYFILE_STAT` is excluded, measured to restore a stale mtime and to copy `uchg` — after which `handle.set_permissions()` (**`fchmod`, not a path**) applies the mode, a second `sync_all()` persists all three, and `verify_temp_identity()` proves the temp *name* still `lstat`s to the inode the descriptor holds. A metadata-copy failure and a temp-name replacement both **refuse before the rename**; the target keeps its bytes and its protection, but **a temp file may be left behind** — the guard swallows `remove_file` errors and a copied `deny delete` ACL can defeat it. The rename is still by pathname, so **a directory writable by an untrusted principal is an explicit precondition**, not a solved problem |
-| [`crates/espansoconfig-core/src/persist/save.rs`](crates/espansoconfig-core/src/persist/save.rs) | **The save transaction, and the only entry point that should ever write a user's file.** `save_document(SaveRequest) -> Result<SavedDocument, SaveError>` is plan §6.6 steps 1–12 under **one** lock: read and hash **inside** the lock, `apply_edits` (whose own `verify` **is** step 4 — not reimplemented), project and validate the **candidate**, apply the policy, commit via `replace_locked_file`. `verdict(&[Finding], &Acknowledgement) -> SaveVerdict` is **the blocking policy**, pure: an `EditorModelError` refuses with **no override**, a `SuspiciousButPermitted` refuses until acknowledged **by content and as a multiset** — never a boolean — and the findings come back on the success path too. A candidate byte-identical to the target is **not rewritten** (`committed: false`), because every rename drops eight metadata classes for nothing; that path re-reads under the lock and answers `RevisionMismatch` rather than returning facts it has not established. `SaveError` has **8** variants and `is_refusal()` / `may_have_written()` / `findings()` / `syntax_gate_failure()` are the four questions a caller asks of one. **Nothing here derives `Serialize`** |
-| [`crates/espansoconfig-core/src/persist/backup.rs`](crates/espansoconfig-core/src/persist/backup.rs) | **Plan §6.6 step 13, and the only code in the crate that deletes anything but its own temp file.** `BackupSession` is **caller-owned** and threaded through `SaveRequest::backups: Option<&BackupSession>` — a process global and a second reader of the workspace cache were both rejected, and **`None` means no backup at all**. `capture()` mints the batch, writes one copy, then rotates; **a batch is a session**, which is what makes rotation unable to remove a copy the running session took. `BackupSession::root()` is **the path 2c reveals in Finder, and it may not exist**. Five checks guard `rotate`, and each is a check rather than an intention: a strict `YYYY-MM-DDTHHMMSSZ[-n]` name grammar, the **`.espansoconfig-batch` ownership marker** (a name is a shape, not a claim of ownership), `symlink_metadata` so no link is followed, the current batch excluded by **`(device, inode)`** rather than by name order, and a root whose own name must be `.espansoconfig-backups`. Rotation is **counted, never returned**; a **backup that cannot be written fails the save before the commit**. The copy carries the target's bytes (from memory), mode bits and `COPYFILE_XATTR` but **deliberately not the ACL** — a copied `deny delete` makes a backup unrotatable. `publish_backup` **disambiguates rather than refusing** when a name is occupied by a copy this session abandoned, so no file becomes permanently unsaveable; `DestinationExists` survives only for two targets resolving to one path. **Nothing here derives `Serialize`** |
+| [`crates/espansoconfig-core/src/wire.rs`](crates/espansoconfig-core/src/wire.rs) | **The single spelling of three wire rules, and 2b-2 must reuse it rather than re-derive it.** `WirePathRef` writes every path as a **lossy** String — because `serde`'s own `PathBuf` serializer *fails* on a non-UTF-8 path, and that failure arrives **after** a command has already answered `Ok`, so the typed refusal meant to carry the news is the value that cannot be written. The consequence is load-bearing: **a wire path is display text and can never be an identifier** — two distinct non-UTF-8 filenames can render identically and the string cannot be copied back to name the file. `io_kind_name` and `io_raw_os_error` are the other two: an `io::Error` crosses as its `ErrorKind` **variant name** plus a **nullable numeric errno**, never as the operating system's own message in the operating system's own language (plan §9). `src-tauri/src/error.rs`'s private copy **delegates** to `io_kind_name` rather than duplicating it |
+| [`src-tauri/src/dictionary_contract.rs`](src-tauri/src/dictionary_contract.rs) | **The check that makes 2b-1's derives safe rather than a liability, and the one 2b-2 will trip first.** It parses the Rust source for every registered enum's variants and fails the build if any lacks a `code.<enum>.<variant>` entry in `en.json` **or** in `es.json`. A new variant, or a whole new enum, is a `cargo test` failure — which is the prompt to write the two strings. **A pre-existing parser defect was repaired here**: `tagged_variant_fields` walked past a type-reference payload (`readonly Parse: ParseFailure`) into the *next* variant's braces, silently skipping variants; it now returns `None` for those, and the shape counts (94 struct / 11 newtype / 52 unit) are asserted so a struct variant declared as a reference is a failure rather than a skip. **The one construct that still escapes is an enum a `macro_rules!` expands to** — unchanged since 1b-2b |
+| [`docs/decisions/2b-1-notes.md`](docs/decisions/2b-1-notes.md) | Phase 2b-1's decision record: **why the core's wire convention and not `CommandError`'s flat one (§1.1)**, why nested errors stay whole (§1.2), **the five hand-written `Serialize` impls and the two properties a derive cannot buy (§1.3)**, **`io::Error` as `kind` + `raw_os_error`, and why adding the errno *now* was the last free moment (§1.4)**, **Serialize-without-Deserialize and what the review changed about it (§1.5)**, the enum-by-enum inventory (§2), **how the dictionary contract fails, with the deletion experiment as evidence (§3)**, what 2b-2 inherits (§4), the **seven holes stated as holes (§5)**, verification (§6) and the **two-review disposition (§7)** — §7.2 is where the four pre-existing diagnostic strings were fixed rather than deferred, and why |
+| [`docs/reviews/phase-2b-1-wire-boundary.md`](docs/reviews/phase-2b-1-wire-boundary.md) | Review A, dispositioned above. **Read it before designing 2b-2's acknowledgement.** It rules on all three ways an acknowledgement could round-trip and rejects two of them by name — index-based selection (unstable if findings reorder between calls) and handing back the exact JSON bytes (JSON permits insignificant byte differences, key order is not semantic, and Tauri parses before Rust sees it) — and it requires **exact multiset** comparison, not set membership, so `[A, A]` differs from `[A]` |
+| [`docs/reviews/phase-2b-1-strings.md`](docs/reviews/phase-2b-1-strings.md) | Review B, dispositioned above. **The register rule with worked examples**: three strings predicted espanso's behaviour or pronounced a file absolutely (in)valid, in both languages, and the file gives the corrected sentence for each. Re-read before writing any user-facing string in 2b-2 — this is the sixth phase running in which a claim outran what the code had earned |
+| [`crates/espansoconfig-core/src/persist/write.rs`](crates/espansoconfig-core/src/persist/write.rs) | **The only code in the crate that opens a file for writing, and the thing 2a-2 wraps.** `replace_file_atomically(path, expected, bytes)` takes **finished bytes**; `lock_path()` + `replace_locked_file()` exist so the transaction can hold the lock across steps 2–11 — calling `replace_file_atomically()` while holding the lock **deadlocks**. `recheck_target()` runs three lines above the rename and is what narrows D4's race to one rename. `inspect_target()` does one `open` + `fstat` + `read` on one descriptor with **`O_NOFOLLOW \| O_NONBLOCK`**, so mode bits, bytes and `(dev, ino)` come from one inode — and a fifo planted at the resolved path is an open that *returns*, refused as `TargetNotRegularFile`, rather than a wait for a writer with the lock held (2a-2b review finding 8). It is `pub(super)` and is **the only read of a save target in the crate**; a second, unchecked read is exactly how that finding happened. `WriteError` / `WriteStep` / `TargetDifference` **now cross the wire** (2b-1); `WriteError` and `TargetDifference` have **hand-written** impls so every path goes through `WirePathRef` and a new variant is a compile error, and `WriteError::Io` writes `{ step, path, kind, raw_os_error }` — never the operating system's own prose. **2a-3a added steps 7a and 7b and reordered the block:** the temp file is created 0o600, written, flushed and fsynced **while still 0o600**, and only then does `copy_metadata()` carry the target's **ACL and extended attributes** across with `fcopyfile(COPYFILE_ACL \| COPYFILE_XATTR)` — `COPYFILE_STAT` is excluded, measured to restore a stale mtime and to copy `uchg` — after which `handle.set_permissions()` (**`fchmod`, not a path**) applies the mode, a second `sync_all()` persists all three, and `verify_temp_identity()` proves the temp *name* still `lstat`s to the inode the descriptor holds. A metadata-copy failure and a temp-name replacement both **refuse before the rename**; the target keeps its bytes and its protection, but **a temp file may be left behind** — the guard swallows `remove_file` errors and a copied `deny delete` ACL can defeat it. The rename is still by pathname, so **a directory writable by an untrusted principal is an explicit precondition**, not a solved problem |
+| [`crates/espansoconfig-core/src/persist/save.rs`](crates/espansoconfig-core/src/persist/save.rs) | **The save transaction, and the only entry point that should ever write a user's file.** `save_document(SaveRequest) -> Result<SavedDocument, SaveError>` is plan §6.6 steps 1–12 under **one** lock: read and hash **inside** the lock, `apply_edits` (whose own `verify` **is** step 4 — not reimplemented), project and validate the **candidate**, apply the policy, commit via `replace_locked_file`. `verdict(&[Finding], &Acknowledgement) -> SaveVerdict` is **the blocking policy**, pure: an `EditorModelError` refuses with **no override**, a `SuspiciousButPermitted` refuses until acknowledged **by content and as a multiset** — never a boolean — and the findings come back on the success path too. A candidate byte-identical to the target is **not rewritten** (`committed: false`), because every rename drops eight metadata classes for nothing; that path re-reads under the lock and answers `RevisionMismatch` rather than returning facts it has not established. `SaveError` has **8** variants and `is_refusal()` / `may_have_written()` / `findings()` / `syntax_gate_failure()` are the four questions a caller asks of one. **`SaveError`, `SaveVerdict`, `SaveRefusal` and `Acknowledgement` now cross the wire (2b-1)**, `SaveError` by a hand-written impl; nested errors stay **whole** rather than flattened, because `WriteError::may_have_written` is computed from the `WriteStep` and a flattened copy would drop it. **`SavedDocument` is still not serialized** — what a successful save carries out is 2b-2's design. **Nothing here derives `Deserialize`**, which is what 2b-2 must add before an acknowledgement can arrive |
+| [`crates/espansoconfig-core/src/persist/backup.rs`](crates/espansoconfig-core/src/persist/backup.rs) | **Plan §6.6 step 13, and the only code in the crate that deletes anything but its own temp file.** `BackupSession` is **caller-owned** and threaded through `SaveRequest::backups: Option<&BackupSession>` — a process global and a second reader of the workspace cache were both rejected, and **`None` means no backup at all**. `capture()` mints the batch, writes one copy, then rotates; **a batch is a session**, which is what makes rotation unable to remove a copy the running session took. `BackupSession::root()` is **the path 2c reveals in Finder, and it may not exist**. Five checks guard `rotate`, and each is a check rather than an intention: a strict `YYYY-MM-DDTHHMMSSZ[-n]` name grammar, the **`.espansoconfig-batch` ownership marker** (a name is a shape, not a claim of ownership), `symlink_metadata` so no link is followed, the current batch excluded by **`(device, inode)`** rather than by name order, and a root whose own name must be `.espansoconfig-backups`. Rotation is **counted, never returned**; a **backup that cannot be written fails the save before the commit**. The copy carries the target's bytes (from memory), mode bits and `COPYFILE_XATTR` but **deliberately not the ACL** — a copied `deny delete` makes a backup unrotatable. `publish_backup` **disambiguates rather than refusing** when a name is occupied by a copy this session abandoned, so no file becomes permanently unsaveable; `DestinationExists` survives only for two targets resolving to one path. **`BackupError`, `BackupStep`, `BackupRecord`, `Rotation` and `RotationOutcome` now cross the wire (2b-1)**, `BackupError` and `BackupRecord` by hand-written impls; `Rotation::bounded()` is a **predicate**, not a field, so it does **not** cross — a frontend that wants the answer must get it from a command's own result shape rather than reimplementing it |
 | [`docs/decisions/2a-3b-notes.md`](docs/decisions/2a-3b-notes.md) | Phase 2a-3b's decision record: what was built (§1), **the location, and what a target outside the configuration root does (§2 — `_outside`, and why the placement beside `match/` is the defence while the leading dot is only belt-and-braces)**, **where the session state lives, with the two rejected shapes (§3)**, **rotation, the one destructive operation, and its safety properties (§4)**, **what the copy carries and the ACL it deliberately does not (§5)**, **the tension between "first modification per session" and "retain ten batches", removed structurally rather than documented (§6)**, **why a backup that cannot be written fails the save (§7)** with the disabling experiments E25–E39c, what is proven versus assumed (§8), the **holes stated as holes (§9)**, verification (§10), what 2b and 2c inherit (§11) and the **eleven-finding review disposition (§12)** |
 | [`docs/reviews/2a-3b-codex.md`](docs/reviews/2a-3b-codex.md) | The Phase 2a-3b review, dispositioned above. **Verdict: `not safe to commit as-is`** — one critical, four high, five medium, one low. **Read findings 1, 2, 3 and 10 before touching `rotate`**: they are four separate routes to deleting a directory the application did not create, and the fixes for them are why the function looks the way it does. Finding 4 is accepted and *not* fully implemented — the prepare/commit split of the locked writer is out of 2a's scope |
 | [`docs/reviews/2a-3b-codex-confirmation.md`](docs/reviews/2a-3b-codex-confirmation.md) | The narrowed confirmation pass over the fix round. Three questions about named line ranges; two confirmed closed, one residue found (`discard` leaving a copy it could not remove, making later retries refuse forever) and then fixed. **The shape of this file is the lesson**: the first attempt was pointed at ~5,600 lines and stalled |
@@ -4018,7 +4250,7 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`docs/reviews/phase-2a-2b-save-transaction.md`](docs/reviews/phase-2a-2b-save-transaction.md) | The Phase 2a-2b review, dispositioned above. **Its blocking finding — hazard 11's metadata loss — was paid by 2a-3a**; the one that mattered most is finding 8, a concrete deadlock from a second unchecked read. **Two findings were overclaims in the decision record itself** — a property the notes said "cannot be written" that can, and a risk said to bite "today" with no experiment supporting it. Re-read before writing a sentence about what this application guarantees |
 | [`docs/decisions/2a-1-notes.md`](docs/decisions/2a-1-notes.md) | Phase 2a-1's decision record: what the primitive actually promises and the residual race (§2), why the new variant is not a reused one (§2.3), resolving the target before locking (§3), **mode bits and the eight metadata classes a rename drops (§4)**, the two independent reasons espanso cannot load the temp file (§5), **the fsync question settled from the toolchain source (§6)**, steps-not-sentences in the error type (§7), the disabling experiments (§9), **the coverage holes stated as holes including the two nothing can test (§10)**, the finding-by-finding **review disposition (§11)** and what 2a-2 inherits (§12) |
 | [`docs/reviews/phase-2a-1-atomic-write.md`](docs/reviews/phase-2a-1-atomic-write.md) | The Phase 2a-1 review, dispositioned above. **Read the test audit before writing a test in 2a-2.** Four of the ten stated guarantees were pinned by tests that would have passed against a weaker implementation — a byte-exact sweep seeded with the bytes it wrote back, a concurrency test that passes with no mutex, a `chflags` test that could skip and pass, and two counts that said "three" above five-element lists. **The critical finding is the one to carry forward**: the code promised a compare-and-swap that no POSIX operation can perform |
-| [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **The whole semantic gate (step 5), and 2a-2b calls it rather than rebuilding it.** `validate(&DocumentView) -> Vec<Finding>` — pure, no I/O, safe inside the lock. Ten `FindingCode`s over **two** `FindingClass`es (`EditorModelError`, `SuspiciousButPermitted`); the other two of plan §6.6's four classes belong to step 4 and to the 0b hazard gate and are deliberately absent. `FindingCode::class()` is the **only** place classification happens, and the boundary is one question: *does the claim rest on a vocabulary espanso can extend without telling us?* Nothing here derives `Serialize`. `required_param()` is a table whose every row is an observed failure path in espanso `v2.3.0`'s own source — **not its documentation**, which calls `date`'s `format` required when the source does not, and would have fired on working configs |
+| [`crates/espansoconfig-core/src/validate/mod.rs`](crates/espansoconfig-core/src/validate/mod.rs) | **The whole semantic gate (step 5), and 2a-2b calls it rather than rebuilding it.** `validate(&DocumentView) -> Vec<Finding>` — pure, no I/O, safe inside the lock. Ten `FindingCode`s over **two** `FindingClass`es (`EditorModelError`, `SuspiciousButPermitted`); the other two of plan §6.6's four classes belong to step 4 and to the 0b hazard gate and are deliberately absent. `FindingCode::class()` is the **only** place classification happens, and the boundary is one question: *does the claim rest on a vocabulary espanso can extend without telling us?* **`Finding`, `FindingCode` and `FindingClass` now cross the wire (2b-1)**, and `FindingCode::VariableMissingRequiredParam::param` is an owned **`String`** rather than the `&'static str` it was — changed on review A's ruling, because it was the one type-level obstruction to ever deriving `Deserialize`, which 2b-2 needs for the acknowledgement's inbound direction. `required_param()` is a table whose every row is an observed failure path in espanso `v2.3.0`'s own source — **not its documentation**, which calls `date`'s `format` required when the source does not, and would have fired on working configs |
 | [`docs/decisions/2a-2a-notes.md`](docs/decisions/2a-2a-notes.md) | Phase 2a-2a's decision record: a report and not a gate, with the boundary drawn (§2), which of plan §6.6's four classes this module emits and why the other two have owners elsewhere (§3), **the required-parameter table's provenance, source over documentation (§4)**, `regex` as a production dependency and **exactly what a compile does and does not prove — espanso 2.3.0 pins 1.5.5 and compiles verbatim, so the inference runs one way only (§5)**, rule 5's closure analysis after the openers were removed (§6), the **22 disabling experiments including E20, which found a guard that matched its own text (§7)**, the verification with the real-corpus counts (§8), the **holes stated as holes (§10)** — hole 13 is espanso's tenth variable type and is **2b's** — what 2a-2b inherits (§11) and the **nine-finding review disposition (§12)** |
 | [`docs/reviews/phase-2a-2a-semantic-gate.md`](docs/reviews/phase-2a-2a-semantic-gate.md) | The Phase 2a-2a review, dispositioned above. **The four blocking findings are all false negatives, and all one shape**: the phase could not establish what espanso does, so it stayed silent — and silence is a claim. **The four should-fix findings are the project's signature defect for the fifth phase running** — a name or doc comment asserting more than its body can check, including a real-corpus test that could skip and pass while printing the findings it declined to assert on. Re-read before writing a rule or a test name in 2a-2b |
 | [`src/lib/browser/rawDocument.ts`](src/lib/browser/rawDocument.ts) | **What the raw YAML viewer shows, and where it lives.** `rawTarget(selection, documents, selected)` — **the sidebar first, the selection second**, which is what keeps a file that does not *parse* reachable — and `documentTextState(answer)`, whose **four** arms are `loading`, `text`, `empty` and `refused`. The module header carries the placement argument (why the third pane, not the second, not a fourth) and its cost: the pane now has two subjects |
