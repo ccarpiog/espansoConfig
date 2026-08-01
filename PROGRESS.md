@@ -4144,6 +4144,15 @@ _Updated at each phase boundary._
 | 2a-2a | `7128242` | ✅ pushed to `origin/main` | clean |
 | 2a-2b | `cbcc25b` | ✅ pushed to `origin/main` | clean |
 | 2a-3a | `cda72f3` | ✅ pushed to `origin/main` | clean |
+| 2a-3b | `7aab106` | ✅ pushed to `origin/main` | clean |
+
+`7aab106` is Phase 2a-3b **including both its review fix round and the confirmation fix round** — the
+phase was held open until all eleven findings and the confirmation pass's one residue were closed, so,
+as with every phase since `8989c16`, no commit holds a demonstrated defect. It contains
+`persist/backup.rs`, `tests/persist_backup.rs`, the placement in `persist/save.rs`, the two named
+`fcopyfile` policies in `persist/write.rs`, both review files, `docs/decisions/2a-3b-notes.md` and this
+checkpoint. **It closes 2a-3, and with it the whole of 2a: plan §6.6 exists end to end.**
+A fresh session should start from `7aab106` or later.
 
 Two follow-ups landed after `4f92c03`, both documentation only: `3b76697` recorded the commit here,
 and `2eb12cb` reconciled the Phase 0a–0c-2a corpus figures in this file with the fixture Phase 0c-2b
