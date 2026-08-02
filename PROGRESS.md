@@ -4927,6 +4927,7 @@ _Updated at each phase boundary._
 | 2a-3b | `7aab106` | ✅ pushed to `origin/main` | clean |
 | 2b-1 | `0229b14` | ✅ pushed to `origin/main` | clean |
 | 2b-2a | `c3fe5a6` | ✅ pushed to `origin/main` | clean |
+| 2b-2b-2 | `8016a3b` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
 
 `c3fe5a6` is Phase 2b-2a **including its review fix round** — the phase was held open until all five
