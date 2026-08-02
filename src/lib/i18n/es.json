@@ -125,6 +125,13 @@
   "browser.notice.unresolved": "Este archivo ha cambiado en el disco y no se ha podido volver a leer, así que se ha borrado la selección.",
   "browser.notice.dismiss": "Descartar",
 
+  "browser.rawSave.replacesWholeDocument": "Al guardar se escribe todo el texto de este archivo tal y como aparece aquí. No es una edición de un fragmento: se reemplaza el documento entero.",
+  "browser.rawSave.willNotLoad": "espanso no cargará este archivo mientras no se corrija.",
+  "browser.rawSave.stoppedAt": "El lector de YAML se detuvo en la línea {line}, columna {column}.",
+  "browser.rawSave.positionUnknown": "El lector de YAML no indicó dónde se detuvo.",
+  "browser.rawSave.choice.saveAnyway": "Guardar de todos modos",
+  "browser.rawSave.choice.keepEditing": "Seguir editando",
+
   "language.label": "Idioma",
   "language.followSystem": "Seguir el idioma del sistema",
   "language.english": "English",

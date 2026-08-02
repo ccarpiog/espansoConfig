@@ -528,13 +528,18 @@ pub(crate) fn registered_commands() -> BTreeSet<String> {
 /// is the version that can fail.
 ///
 /// **`move_match` left this list at Phase 2b-2a, `save_match` at Phase 2b-2b-3,
-/// and `create_match` and `delete_match` at Phase 2b-2c-2**, which is the only
-/// way a name may leave it: the command exists, is registered, and writes a
-/// user's file through `espansoconfig_core::persist::save_document`. The two that
-/// remain are still absent, and `save_raw_document` is absent for a reason
-/// stronger than sequencing — a whole-document text is not a span replacement,
-/// and `SaveRequest` takes a list of edits and nothing else.
-const FORBIDDEN_COMMANDS: [&str; 2] = ["save_raw_document", "validate_match"];
+/// `create_match` and `delete_match` at Phase 2b-2c-2, and `save_raw_document`
+/// at Phase 2b-2c-3b**, which is the only way a name may leave it: the command
+/// exists, is registered, and writes a user's file through
+/// `espansoconfig_core::persist::save_document`. `save_raw_document` could not
+/// leave it any earlier than it did — a whole-document text is not a span
+/// replacement, so `SaveRequest` had to gain a second content mode first
+/// (Phase 2b-2c-3a), and forcing the command into existence before that would
+/// have meant writing a file outside the transaction.
+///
+/// **The one that remains has no phase yet.** `validate_match` is Phase 2c's, and
+/// its absence is asserted rather than intended.
+const FORBIDDEN_COMMANDS: [&str; 1] = ["validate_match"];
 
 /// The single-quoted literals of `export const {name} = [ … ]`.
 ///
@@ -1231,9 +1236,10 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// declared nowhere else was invisible to it: adding `commands::save_match` to
 /// `generate_handler!` left all five declared names found and the test green.
 /// The registered set is now parsed out of `generate_handler!` independently and
-/// compared in both directions, and the six mutating names Phase 2 owns are
-/// asserted absent from both sets — because "no mutating command is registered"
-/// is the claim this check exists to keep true, and it was not being checked.
+/// compared in both directions, and the mutating names Phase 2 owns but has not
+/// yet built are asserted absent from both sets — because "no command this phase
+/// did not mean to ship is registered" is the claim this check exists to keep
+/// true, and it was not being checked.
 ///
 /// Phase 1b-2b added the menu name, and it is deliberately read from a
 /// **different** frontend file: `MENU_COMMAND_NAMES` in `src/lib/ipc/menu.ts`.
@@ -1257,8 +1263,14 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// leave [`FORBIDDEN_COMMANDS`], and they leave it for the reason the list gives:
 /// each now has a core primitive behind it — `InsertItem` and `RemoveItem` —
 /// rather than being forced into existence by a write outside the transaction.
+///
+/// Phase 2b-2c-3b adds `save_raw_document`, taking the workspace surface to
+/// eleven and the whole to twelve. It is the fifth name to leave
+/// [`FORBIDDEN_COMMANDS`] and the last of Phase 2b-2c, and it leaves for the same
+/// reason: `SaveContent::ReplaceText`, added to the one writing entry point at
+/// Phase 2b-2c-3a, is the mode behind it.
 #[test]
-fn the_registered_commands_are_the_workspace_ten_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1267,10 +1279,16 @@ fn the_registered_commands_are_the_workspace_ten_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        10,
-        "the workspace surface is six read-only commands and four that write: {workspace:?}"
+        11,
+        "the workspace surface is six read-only commands and five that write: {workspace:?}"
     );
-    for mutating in ["move_match", "save_match", "create_match", "delete_match"] {
+    for mutating in [
+        "move_match",
+        "save_match",
+        "create_match",
+        "delete_match",
+        "save_raw_document",
+    ] {
         assert!(
             workspace.contains(mutating),
             "{mutating} writes a user's file and must be declared where the frontend can call it"
@@ -1282,8 +1300,8 @@ fn the_registered_commands_are_the_workspace_ten_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        11,
-        "Phase 2b-2c-2 registers ten workspace commands and one menu command, and no more: {registered:?}"
+        12,
+        "Phase 2b-2c-3b registers eleven workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1291,7 +1309,7 @@ fn the_registered_commands_are_the_workspace_ten_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_ten_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_eleven_and_the_menu_command()
 
 /// The three outcomes of a save are declared exactly as Rust writes them.
 ///

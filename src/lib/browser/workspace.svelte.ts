@@ -43,9 +43,10 @@ import {
   listDocuments,
   moveMatch,
   openWorkspace,
-  reloadDocument
+  reloadDocument,
+  saveRawDocument
 } from '../ipc/commands';
-import type { CommandResult } from '../ipc/commands';
+import type { CommandResult, RawSaveOutcome, ReloadAfterRawSave } from '../ipc/commands';
 import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 import type {
@@ -71,11 +72,11 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
  * The commands the browser needs, as one injectable object.
  *
  * The six read-only commands of `../ipc/commands`, with the same signatures, and
- * — since Phase 2b-2a — the one that writes. {@link BrowserCommands.moveMatch} is
- * the only member that can change a file on disk, and it is here for the same
- * reason the others are: a test that cannot run Tauri still has to be able to
- * drive a refusal, a conflict and a commit and watch what this state does about
- * each.
+ * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch}
+ * and {@link BrowserCommands.saveRawDocument} are the two members that can change
+ * a file on disk, and they are here for the same reason the others are: a test
+ * that cannot run Tauri still has to be able to drive a refusal, a conflict and a
+ * commit and watch what this state does about each.
  */
 export interface BrowserCommands {
   /**
@@ -139,6 +140,27 @@ export interface BrowserCommands {
     baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
   ): Promise<CommandResult<SaveResult>>;
+  /**
+   * Replaces one file's whole text, and saves it.
+   *
+   * **The one member whose answer is not a `CommandResult`**, because a
+   * committed replacement and a failed invalidation are two facts and both have
+   * to survive to the caller (`PROGRESS.md` D2).
+   *
+   * @param document - The file to replace, by the identity this window holds.
+   * @param baseRevision - The revision the text being replaced was loaded at.
+   * @param text - The file's whole new text, committed exactly as given.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @param reload - What to do once the file has been replaced.
+   * @returns How the save ended and what became of the reload, or a failure.
+   */
+  saveRawDocument(
+    document: DocumentId,
+    baseRevision: ContentRevision,
+    text: string,
+    acknowledgement: Acknowledgement,
+    reload: ReloadAfterRawSave
+  ): Promise<RawSaveOutcome>;
 }
 
 /** The real boundary, for the running application. */
@@ -149,7 +171,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   getMatch,
   reloadDocument,
   documentText,
-  moveMatch
+  moveMatch,
+  saveRawDocument
 };
 
 /** Where the workspace load has got to. */
@@ -294,8 +317,8 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The one entry point on this state that changes a file.** Everything else
-   * here reads.
+   * **The first of the two entry points on this state that change a file**; the
+   * other is {@link BrowserState.saveRawDocument}. Everything else here reads.
    *
    * What comes back is the outcome, and all three of its arms are answers rather
    * than failures: `saved`, `conflict` — the file moved on, and nothing was
@@ -318,6 +341,46 @@ export interface BrowserState {
   moveMatch(
     match: MatchView,
     after: MatchView | null,
+    acknowledgement: Acknowledgement
+  ): Promise<SaveResult | null>;
+  /**
+   * Replaces one file's whole text, and saves the file.
+   *
+   * **The second entry point on this state that changes a file, and the only one
+   * that is not an edit.** It exists here rather than being called through
+   * `../ipc/commands` directly because the invalidation a committed replacement
+   * owes is about *this module's* cache: the projections, the selection and the
+   * raw viewer's snapshot are all held here, so nothing outside can be trusted to
+   * forget them. The wrapper's `reload` parameter is still what makes the
+   * boundary drivable by a test; what closes the obligation on the running path
+   * is that this method supplies its own.
+   *
+   * On a committed save this **forgets everything cached for that file** — the
+   * projection, the held selection's identity and position, and the raw viewer's
+   * text — and then reads the file again. Nothing is re-pointed by identity, as a
+   * move's recovery does: a replacement rewrites the whole document, so there is
+   * no identity to re-point with and `moved` is `null` by construction. The
+   * selection is looked for the ordinary way and dropped with a notice when what
+   * is at its position is not what was selected (R27).
+   *
+   * `null` means the command itself failed; a reload that failed after a commit
+   * is **not** a failure of the save and does not produce one — it is reported on
+   * the failure channel and the committed outcome still comes back.
+   *
+   * @param document - The file to replace, by the identity this window holds.
+   * @param baseRevision - The revision the file held when the text being replaced
+   *   was loaded. Never one re-read just before saving: it is the only thing
+   *   standing between this call and silently overwriting whatever changed the
+   *   file since.
+   * @param text - The file's whole new text, committed exactly as given.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended, or `null` when the command failed.
+   */
+  saveRawDocument(
+    document: DocumentId,
+    baseRevision: ContentRevision,
+    text: string,
     acknowledgement: Acknowledgement
   ): Promise<SaveResult | null>;
 }
@@ -904,7 +967,70 @@ export function createBrowserState(
         await readFileText();
       }
       return answer.value;
-    } // End of function moveMatch()
+    }, // End of function moveMatch()
+
+    async saveRawDocument(
+      document: DocumentId,
+      baseRevision: ContentRevision,
+      text: string,
+      acknowledgement: Acknowledgement
+    ): Promise<SaveResult | null> {
+      // **The invalidation is this module's, not the caller's.** The wrapper's
+      // parameter cannot make a body do anything — `() => {}` type-checks — so
+      // what closes the obligation on the running path is that the state which
+      // owns the cache is the thing that passes one. The closure below is the
+      // only production caller of that parameter.
+      const invalidate: ReloadAfterRawSave = async (invalidation) => {
+        await adoptTheReplacedDocument(invalidation.document);
+      };
+      const answer = await commands.saveRawDocument(
+        document,
+        baseRevision,
+        text,
+        acknowledgement,
+        invalidate
+      );
+      if (!answer.ok) {
+        // Same rule as a failed move: a save that failed is not a workspace that
+        // failed, but `mayHaveWritten` decides whether this window is still
+        // describing the file correctly. A replacement that failed after its
+        // rename means the file may already hold a *whole new text*, so nothing
+        // cached for it can be vouched for.
+        report(answer.failure);
+        if (mayHaveWritten(answer.failure)) {
+          await adoptTheReplacedDocument(document);
+        }
+        return null;
+      }
+      if (answer.reload.kind === 'failed') {
+        // **The write committed and the window could not be brought back into
+        // step.** It is reported rather than turned into a failed save, because
+        // the bytes really are on disk and telling the caller otherwise would
+        // invite a retry of a write that already happened (D2). Everything
+        // cached for the file has already been forgotten by then, so what is on
+        // screen is incomplete rather than wrong.
+        report(answer.reload.failure);
+      }
+      // **There is no `outOfDate` arm here, and a move's is not missing.** A move
+      // compares the revision the transaction ended on against the one this state
+      // was projecting, because a `committed: false` there can still mean some
+      // other program moved the file on between the lock's two reads. A
+      // replacement cannot reach that: `committed: false` means the candidate was
+      // byte-identical to what the locked read found, and the locked read already
+      // agreed with `baseRevision` or this would be a conflict — so the revision
+      // the answer carries is the one that was sent.
+      if (answer.value.outcome === 'conflict') {
+        // Nothing was written, and the command has already refreshed its own
+        // cache from the disk. Same handling as a conflicted move: adopt the
+        // projection it handed back, so this state describes the bytes the next
+        // save will be checked against.
+        forgetFileText();
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return answer.value;
+    } // End of function saveRawDocument()
   };
 
   /**
@@ -947,6 +1073,81 @@ export function createBrowserState(
     }
     repairAfter(fresh.value);
   } // End of function adoptTheDocumentOnDisk()
+
+  /**
+   * Forgets everything this state holds about one document.
+   *
+   * **Total, and synchronous.** After a committed whole-document replacement the
+   * file's projection, every identity minted from it and the raw viewer's
+   * snapshot of its bytes are stale *at once*, so they go together and they go
+   * before any `await` — an asynchronous invalidation has a window in which a
+   * getter can still read the projections the commit destroyed, and `await` only
+   * protects the code that comes after it.
+   *
+   * The selection is **dropped, not re-pointed**, and that is the difference from
+   * {@link adoptTheDocumentOnDisk}: a move answers with the moved snippet's
+   * identity in the new revision, and a replacement answers `moved: null`
+   * permanently, so there is no identity to follow. What the selection *was* is
+   * returned rather than kept, so that a caller which reads the file again can
+   * look for it the ordinary way — positionally and then checked (R27) — without
+   * this function holding a selection into a document it has just forgotten.
+   *
+   * @param document - The file whose cached state is stale.
+   * @returns The selection that was held in that file, or `null`.
+   */
+  function forgetTheReplacedDocument(document: DocumentId): SelectedMatch | null {
+    const held = selected !== null && selected.document === document ? selected : null;
+    views = views.filter((view) => view.id !== document);
+    if (held !== null) {
+      // A `select()` in flight for this document describes a parse that no
+      // longer exists, so its answer must not land after this.
+      selectGeneration += 1;
+      selected = null;
+      notice = null;
+    }
+    if (fileTextDocument === document) {
+      // The snapshot is of bytes that have just been replaced whole. Another
+      // file's snapshot is untouched, because nothing about it changed.
+      forgetFileText();
+    }
+    return held;
+  } // End of function forgetTheReplacedDocument()
+
+  /**
+   * Forgets a replaced document and reads it again.
+   *
+   * The whole invalidation a committed raw save owes, in the module that owns the
+   * cache. The forgetting is unconditional; the re-read is what keeps the window
+   * from going blank, and a re-read that itself fails is reported and leaves the
+   * file unprojected — this state cannot describe a file it could not read, and
+   * blanking the workspace over one file would be a bigger claim than the failure
+   * supports.
+   *
+   * @param document - The file whose whole text was replaced.
+   */
+  async function adoptTheReplacedDocument(document: DocumentId): Promise<void> {
+    const held = forgetTheReplacedDocument(document);
+    const fresh = await commands.getDocument(document);
+    if (!fresh.ok) {
+      report(fresh.failure);
+      return;
+    }
+    installView(fresh.value);
+    if (held !== null) {
+      // Positional, and then checked. `reresolve` answers `differentMatch` when
+      // the snippet at the held position is not the one that was selected, which
+      // after a whole-text replacement is the expected answer rather than the
+      // surprising one.
+      const found = reresolve(held, fresh.value);
+      if (found.outcome === 'sameMatch') {
+        selected = found.selected;
+        notice = 'kept';
+      } else {
+        notice = found.outcome;
+      }
+    }
+    await readFileText();
+  } // End of function adoptTheReplacedDocument()
 
   /**
    * Puts the selection back in a projection that has just replaced the one it

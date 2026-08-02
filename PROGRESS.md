@@ -46,7 +46,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2c-1** | **The two missing sequence-item primitives** — `InsertItem` and `RemoveItem` — in the core, with **no command**: a flat block-mapping item synthesized at a sequence-item boundary and spelled by the existing scalar codec, and a removal that is literally `ItemMove`'s lift half | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding in five of six categories** and one Low documentation finding, fixed |
 | **2b-2c-2** | **`create_match` and `delete_match`, the ninth and tenth commands**, over those two primitives and through `save_document`: the closed `NewMatch`, the identity-addressed `NewMatchPosition`, a front insertion made a **planner** operation, and `PresentationNote` generalized into a tagged union so a deletion can disclose the blank line it doubles | ✅ complete — its design consult and its aggregate code review are both closed. The review returned **NOT READY** on one Medium finding; **both findings were fixed before the commit** and the verdict's condition discharged |
 | **2b-2c-3a** | **The whole-document-text replacement mode**, in the core, with **no command**: `SaveContent::ReplaceText` beside `SaveContent::Edits` inside the one entry point that writes, the parse demoted from a gate to a reported fact, and "does not parse" made an **acknowledgeable finding** so the owner's ruling is safe rather than silent | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on a High finding; **it was fixed before the commit** |
-| 2b-2c-3b … 2d | See the Phase 2 split below | ⬜️ **2b-2c-3b is next** |
+| **2b-2c-3b** | **`save_raw_document`, the eleventh `#[tauri::command]` and the fifth that writes**: the whole-text request off the wire, the mandatory `BackupSession`, `run_one_save` generalized to carry a `SaveContent` so all five writers share one tail, `moved: null` by construction, the Q8 presentation model in both languages, and the **full identity invalidation** moved into the state that owns the cache | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on a High finding; **all four findings were fixed before the commit**. **2b-2c is closed, and with it 2b: every command Phase 2b was scoped to deliver exists** |
+| 2c … 2d | See the Phase 2 split below | ⬜️ **2c is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -2981,6 +2982,55 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2b-2c-3b
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was run **twice** — on the implementation and again after the review fix
+round — and the table records the second run.
+
+| Command | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | **1007 passed, 0 failed** (1001 before the phase) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **no output** — the architecture rule holds (D2x) |
+| `npm run check` | 378 files, **0 errors, 0 warnings** |
+| `npm run build` | exit 0 |
+| `npm test` | **738 passed** (702 before the phase; 728 before the fix round) |
+| `git status --short` | nothing under `tests/corpus/`, nothing under `tests/corpus/real/`, `package-lock.json` unmodified |
+
+The Rust total is unchanged across the fix round because two of the four findings were **test
+strengthening rather than new tests**: the dispatcher test that claimed to read the disk and the
+acknowledgement-mismatch test that compared three operands and named four. The frontend total moved
+728 → 738: two tests for the High and eight for the workspace state the Medium forced into existence.
+
+### Phase 2b-2c-3b review disposition
+
+The aggregate code review is `docs/reviews/phase-2b-2c-3b-code.md` and it returned
+**`READINESS: NOT READY`** — one High, one Medium, two Low. **All four were fixed before the commit**,
+so, as with every phase since `8989c16`, no commit holds a demonstrated defect. The review explicitly
+cleared everything else it was asked to attack: the single write entry point, the omission of
+`view_at`, the acknowledgement binding, `moved: null`, the error-channel rules, the absence of a
+`force` flag, the localization, the no-position case, the four unchanged `run_one_save` callers and
+the retabulated contract checks.
+
+| # | Severity | What was actually wrong | How it was closed |
+|---|---|---|---|
+| 1 | **High** | `saveRawDocument` awaited the caller's `reload` **after a committed write**, inside a `Promise<CommandResult<SaveResult>>`. A rejecting callback threw past the return type: the successful `Saved` was hidden and a caller could retry a write that had already happened. **This is D2 — *a committed write is never afterwards reported as an `Err`* — broken in TypeScript**, an invariant written for the Rust side that the boundary layer had just violated | The wrapper now answers a boundary type `RawSaveOutcome` whose success arm **always** carries the `SaveResult`, beside a required `reload` discriminant — `notOwed` / `done` / `failed`, the last carrying a `classifyFailure`-classified `IpcFailure`. The call is wrapped in `try`/`catch`, so a failing reload can neither reject nor be swallowed. `SaveResult` and `moved: null` are untouched (consult Q3). Two tests pin both halves |
+| 2 | Medium | The required callback made **omitting an argument** a compile error, not **ignoring the obligation**: `() => {}` compiles, and the phase's own tests passed exactly that. An asynchronous body could also expose stale projections before invalidating — `await` only protects code after the *caller's* await | `BrowserState.saveRawDocument` now exists in `src/lib/browser/workspace.svelte.ts` with **no callback parameter**, passing its own invalidation: `forgetTheReplacedDocument` runs **synchronously, before any `await`** (drops the projection from `views`, drops the selection, bumps the selection generation, forgets the raw snapshot), then `adoptTheReplacedDocument` re-reads and re-resolves positionally-and-checked, because a replacement has no identity to re-point with. Eight new state tests. No `.svelte` file was touched |
+| 3 | Low | The dispatcher test claimed to inspect **bytes on disk** but called `document_text`, which may serve the workspace cache — it would pass if a future command updated cached text without persisting it | The temp directory is retained and `std::fs::read` is compared directly, at all three points (commit, refusal, acknowledged commit) |
+| 4 | Low | The command-layer acknowledgement-mismatch test said it proved the two findings had **identical parser stopping points**, but compared only `span`, `node` and `path` before asserting the whole codes differ. It would still have passed if `line`, `column`, `byte_index` or `detail` differed — in which case `revision` would not be what distinguished them | Both codes are destructured, every non-`revision` operand is compared, and each `revision` is checked against `ContentRevision::of_bytes` of **its own** candidate before inequality is asserted |
+
+**The design consult was not re-commissioned**, per the standing instruction: `docs/reviews/phase-2b-2c-3-design.md`
+covers the whole of 2b-2c-3 and the owner's ruling overriding its Q2 is appended to it. **A second Codex
+round-trip to confirm the fixes was deliberately not taken** — the four fixes are small, each followed the
+review's own stated minimal fix, and the orchestrator read the High's fix directly rather than accepting a
+report of it. That is a recorded judgement call, not an oversight: a confirmation pass would be the honest
+thing if a fix had *departed* from what the review prescribed, and none did.
+
+---
+
 ## Verification — Phase 2b-2c-3a
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4365,6 +4415,95 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-2c-3b is complete, and with it 2b-2c and the whole of 2b.**
+`docs/decisions/2b-2c-3b-notes.md` is the record; the aggregate code review is
+`docs/reviews/phase-2b-2c-3b-code.md`, and it returned **`READINESS: NOT READY`** on a High finding.
+**All four of its findings were fixed before the commit.** The design consult
+(`docs/reviews/phase-2b-2c-3-design.md`) covers the whole of 2b-2c-3, was **not re-commissioned**,
+and carries the owner's ruling overriding its Q2 appended at the end.
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 1007 tests, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **738**.)
+
+**Every command Phase 2b was scoped to deliver now exists.** Eleven `#[tauri::command]`s, five of
+which write a user's file: `move_match`, `save_match`, `create_match`, `delete_match` and now
+`save_raw_document`. All five go through **one** tail, `run_one_save`, which now carries a
+`SaveContent` rather than a slice of edits, and through **one** entry point that writes,
+`espansoconfig_core::persist::save_document`.
+
+**The next step is Phase 2c — the editing UI.** Its scope in the split table above: the draft model,
+the small editor (literal trigger · `replace` · label · word boundary), new / duplicate / delete /
+move, the conflict UI, draft-level undo and restore from backup. **It is far too large for one
+phase and must be split before any of it is written**, by the same rule every earlier split used — a
+dependency order, by failure mode. A fresh session's first act is that split, not code.
+
+**What 2c inherits, and the first item is now the largest single debt in the project.**
+
+1. **Nothing has ever been drawn.** The standing "never been drawn" list is now: the thirty-two
+   `code.draftError.*` strings, `code.commandError.draftRefused`, the eight `code.editError.*`
+   sentences, `code.commandError.documentHasNoMatchList`, the two `code.presentationNote.*`
+   sentences, `code.findingCode.documentDoesNotParse`, `code.saveError.replacementRequiresBackups`
+   and the six `browser.rawSave.*` keys. **Five commands can write a user's file and no screen calls
+   any of them.** The first phase of 2c owes the look.
+2. **`workspace.svelte.ts` wires two of the five writing commands.** `moveMatch` (since 2b-2a) and
+   now `saveRawDocument` (forced into existence by the 3b review's Medium). `saveMatch`,
+   `createMatch` and `deleteMatch` are **not** there. Note `saveRawDocument`'s wiring **cannot be
+   copied** for the other three and vice versa: `adoptTheDocumentOnDisk` re-points a selection **by
+   identity**, and a replacement has no identity to re-point with, so it re-resolves positionally
+   and checks the result.
+3. **`() => {}` still satisfies `ReloadAfterRawSave`, and no type can force `RawSaveOutcome.reload`
+   to be *read*.** What is closed is forgetting the obligation, discharging it on the wrong arm, and
+   discharging it too late. A caller importing `src/lib/ipc/commands.ts` directly can still opt out;
+   only review catches that. Recorded as hole 7.2 of the 3b notes rather than overclaimed.
+4. **A re-read that fails after a committed replacement leaves the file unprojected** — reported,
+   but absent from `views` rather than marked unreadable, because `loadFailures` is only filled by
+   `open()`. Hole 7.3 of the 3b notes.
+5. **`SaveError::ReplacementRequiresBackups` is unreachable from the command layer**, because
+   `with_open` always hands a real `BackupSession`. That is the intended arrangement — the refusal
+   exists to make forgetting impossible — but the only coverage is the core's.
+6. **221+ Spanish values are checked only by heuristic** (no sentence byte-identical to its English
+   counterpart, placeholders matching). Nothing establishes that any of them is idiomatic.
+7. **The real configuration has never had a whole-document replacement applied to it**, and still
+   exercises neither `create_match` nor `delete_match`. The real-corpus sweeps cover moves and field
+   edits only.
+8. **A move still leaves the identical doubled blank line at its origin and says nothing about it**
+   (2b-2c-2 hole 6.2); **`create_match` still derives `End` from `view.matches.len()`** (hole 6.8);
+   **`verify_items` speaks `verify_field`'s vocabulary** (2b-2c-1 hole 3) and a deletion can still
+   report a refusal whose sentence is about a move (2b-2c-2 hole 6.4); three
+   `code.diagnosticCode.*` observations remain recorded as non-defects (`2b-2b-3-notes.md` §7.5).
+
+**What 2c must not revisit, inherited from every phase before it.**
+
+- **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's
+  file.** Never call `replace_file_atomically` or `replace_locked_file` from a command — **the lock
+  is not reentrant, so the process hangs silently and forever.**
+- **`run_one_save` is the single copy of this layer's cache-coherency policy.** A sixth writing
+  command calls it; it does not copy it.
+- **A planning-time refusal goes in the `Err` channel; a transactional one does not** (D1).
+  **A committed write is never afterwards reported as an `Err`** (D2) — **and the 3b review found
+  that invariant broken in TypeScript, so it binds the boundary layer too, not just Rust.**
+- **An empty batch still goes through the transaction** (D3), and so does a replacement whose text
+  equals the file's, which is a `Saved` with `committed: false`.
+- **Every variant of a wire enum used as an error operand serializes as an object** (D5).
+- **A raw save MAY write text the YAML parser rejects** — the owner's settled ruling. Never refused,
+  never silent: the acknowledgement protocol is what makes it safe.
+- No `force` flag, no acknowledgement bypass, no caching of "the findings I last issued", no wire
+  path accepted back as a target. `committed: false` and `backup: None` are legal on a success.
+- **Nothing in this project renders a Svelte component in an automated test**, so a claim about a
+  screen needs **a reading of a screen**, re-taken after any change to a component
+  (`docs/decisions/1c-1-notes.md` §10 records the technique; `1c-2b-2b-2-notes.md` §6.1 records the
+  WKWebView constraint — one plan per launch, into a fresh bundle path).
+- **The UI shows a scalar's source text as written, never an inferred type** (D2u). Moving a match
+  between files or between sequences is refused (D2r). A move may not be combined with any other
+  edit in one batch (R25).
+
+---
+
 **Phase 2b-2c-3a is complete.** `docs/decisions/2b-2c-3a-notes.md` is the record; the aggregate code
 review is `docs/reviews/phase-2b-2c-3a-code.md`, and it returned **`READINESS: NOT READY`** on a High
 finding that was **fixed before the commit**. The design consult
@@ -5579,9 +5718,14 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`docs/reviews/phase-2b-2c-1-design.md`](docs/reviews/phase-2b-2c-1-design.md) **§Q6** | **Where 2b-2c-3 starts.** `save_raw_document` is a **`SaveRequest` variant for whole text, never a full-span `DocumentEdit`** — recorded two phases early and still not built. A whole text is not a span replacement and may not claim the patch engine's locality invariants |
+| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **Where 2c starts, and the only place a writing command is wired to real state.** `moveMatch` (2b-2a) and `saveRawDocument` (2b-2c-3b) are in `BrowserCommands`; `saveMatch`, `createMatch` and `deleteMatch` are **not**. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
+| [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The eleven wrappers, five of which write.** `saveRawDocument` is the only one that does not return `CommandResult<SaveResult>`: it returns **`RawSaveOutcome`**, whose success arm always carries the `SaveResult` **plus** a required `reload` discriminant (`notOwed` / `done` / `failed`). That shape exists because the 3b review found **D2 broken in TypeScript** — a rejecting reload callback threw past the return type and hid a *committed* write. **A sixth writing wrapper inherits the rule, not the shape**: whatever it returns, a committed write may never come back as a rejection or an error |
+| [`src/lib/browser/rawSave.ts`](src/lib/browser/rawSave.ts) | The Q8 presentation model, in the tested layer rather than in a component. `describeRawSave` puts **"this replaces the entire document"** first in every model — the mode's identity, not a warning — then the owner's ruling when the candidate does not parse: espanso will not load the file, the parser's position **or the explicit no-position case**, and the choice. **`saveAnyway` is withheld for verdicts no acknowledgement can move.** `detail` is the parser's own message: carried, never localized, and deliberately not rendered |
+| [`docs/decisions/2b-2c-3b-notes.md`](docs/decisions/2b-2c-3b-notes.md) | Nine decisions with their reasons and the fix round. **§2.2 is the one to read before adding a writing command**: a raw save takes **no `view_at`**, because a replacement turns nothing into a position and — in consult Q7's scenario exactly — the session's cache still holds the loaded revision, so a pre-check would *pass*. Only the transaction's locked read sees it, and `SaveResult::Conflict` is strictly richer than `IdentityStaleRevision` |
+| [`docs/reviews/phase-2b-2c-3b-code.md`](docs/reviews/phase-2b-2c-3b-code.md) | The review that returned **NOT READY** and was obeyed. **Its High is the precedent worth keeping**: an invariant stated for Rust (*a committed write is never afterwards reported as an `Err`*) had been broken at the TypeScript boundary, where no Rust test could see it. Its two Lows are the recurring shape — a test that read the cache while claiming to read the disk, and one that compared three operands while naming four |
+| [`docs/reviews/phase-2b-2c-1-design.md`](docs/reviews/phase-2b-2c-1-design.md) **§Q6** | The answer 2b-2c-3 was built to, **now built**: `save_raw_document` is a **`SaveRequest` variant for whole text, never a full-span `DocumentEdit`**. A whole text is not a span replacement and does not claim the patch engine's locality invariants |
 | [`src-tauri/src/save.rs`](src-tauri/src/save.rs) | **`PresentationNote` is a tagged union as of 2b-2c-2** — `ScalarRestyled` (the old struct's four operands) plus `DoubledSequenceSeparation { edit }`, both struct variants so both cross as one-key objects. The reshape was free because `notes` still has **no reader**; it will not be free again. `SaveResult::Saved` is unchanged otherwise, and `moved: None` is a raw save's permanent answer |
-| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The ten commands, and the four that write.** `create_match` and `delete_match` are the model for 2b-2c-3's shape: check the projection's revision **before** resolving anything positional, resolve through `MatchId` only, build exactly one primitive, and hand it to `save_document` — **which stays the only entry point that writes.** `after_a_save` centralizes D2, and its return type is what stops a post-commit refresh failure becoming an `Err`. **A raw save has no match to re-mint, so it is the first command whose `moved` is structurally `None`** |
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The eleven commands, and the five that write.** All five end in **one** `run_one_save`, which now takes a **`SaveContent`** rather than a slice of edits — that block is this layer's single cache-coherency policy (commit / conflict-after-the-lock / refusal / failure-with-eviction) and it was four copies before the `35a9e9e` cleanup round. **A sixth writing command calls it; it does not copy it.** The four edit-shaped commands check the projection's revision **before** resolving anything positional and resolve through `MatchId` only; `save_raw_document` deliberately does not, and §2.2 of the 3b notes is why. `after_a_save` centralizes D2, and its return type is what stops a post-commit refresh failure becoming an `Err`. **A raw save has no match to re-mint, so its `moved` is structurally `None`** |
 | [`docs/decisions/2b-2c-2-notes.md`](docs/decisions/2b-2c-2-notes.md) | Eight decisions with their reasons, the refusal taxonomy, and eight holes. **§6.2 is the one to read before touching a move**: a move leaves the identical doubled blank line at its origin and says nothing about it, and closing that would change an already-shipped command's documented behaviour. §6.8 is the projection count `End` is derived from |
 | [`docs/reviews/phase-2b-2c-2-code.md`](docs/reviews/phase-2b-2c-2-code.md) | The review that returned **NOT READY** and was obeyed. Its Medium is the precedent worth keeping: *"a backend test cannot make the UI not surprised"* — pinning a silent outcome in a test is not the same as disclosing it to the user, and plan §6.2 asks for the second |
 | [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **`DocumentEdit` has six variants**, and `InsertItem`/`RemoveItem` now have callers. `insert_item()` takes **`at: ItemPlacement { Front, After(usize), End }`**, not the old `Option<usize>`; an implicit-null `matches:` accepts `Front` and `End` and **refuses every `After(_)`**. `plan_item_removal` detects the doubled blank separation itself — **`lift_item()` is untouched**, which is what keeps a move silent. `RemoveItem` addresses **the item**, not `(sequence, index)`. `editable_sequence_item()`, `lift_item()` and `leading_comment_block_start()` are shared by the move and the removal — **change one and both change**, which is the point. `InsertItem` has **no "before the first item" form**; append and move, or derive the front the way `plan_move` does |
@@ -5756,7 +5900,25 @@ _Updated at each phase boundary._
 | **2b-2c-2** | **`8d223fc`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-2 cleanup** | **`35a9e9e`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-3a** | **`3375e98`** | ✅ pushed to `origin/main` | clean |
+| **2b-2c-3b** | **`PENDING`** | ⏳ | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`PENDING` is Phase 2b-2c-3b **including its review fix round** — the phase was held open until all
+four findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
+defects: neither the wrapper that turned a **committed** write into a rejected promise when the
+caller's reload happened to fail, nor the invalidation obligation that a `() => {}` discharged, nor
+the dispatcher test that read the cache while claiming to read the disk, nor the
+acknowledgement-mismatch test that compared three operands and named four. It contains
+`save_raw_document` with `save_one_raw_document` and the generalized `run_one_save` in
+`src-tauri/src/commands.rs`, the registration in `main.rs`, the retabulated
+`dispatch_check.rs` and `wire_contract.rs`, the new `src/lib/browser/rawSave.ts` with its
+presentation model, `RawSaveOutcome` and `saveRawDocument` in `src/lib/ipc/commands.ts`,
+`BrowserState.saveRawDocument` with `forgetTheReplacedDocument` and `adoptTheReplacedDocument` in
+`src/lib/browser/workspace.svelte.ts`, six new `browser.rawSave.*` keys in each dictionary,
+`docs/decisions/2b-2c-3b-notes.md` and the review file. **It is the first commit in which this
+application can replace a user's whole file, and it closes 2b-2c and with it 2b: all eleven
+commands exist.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command
+will run. **A fresh session starting Phase 2c should start from this commit or later.**
 
 `3375e98` is Phase 2b-2c-3a **including both of its review fix rounds** — the phase was held open
 until the High and the Medium were closed, so, as with every phase since `8989c16`, no commit holds

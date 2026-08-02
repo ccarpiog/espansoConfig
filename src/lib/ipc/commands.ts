@@ -1,5 +1,5 @@
 /**
- * The ten workspace commands, typed.
+ * The eleven workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,22 +17,34 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## Four of them write
+ * ## Five of them write
  *
- * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3; and
- * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2. They are the only
- * functions in this application that can change a file on disk, and what each
- * answers with is a {@link SaveResult} in the value channel rather than a thrown
- * error: a save that was refused, and a save that found the file had moved on,
- * are **outcomes** and not failures.
+ * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3;
+ * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2; and
+ * {@link saveRawDocument}, since 2b-2c-3b. They are the only functions in this
+ * application that can change a file on disk, and what each answers with is a
+ * {@link SaveResult} in the value channel rather than a thrown error: a save
+ * that was refused, and a save that found the file had moved on, are
+ * **outcomes** and not failures.
+ *
+ * ## The fifth is not an edit, and its signature says so
+ *
+ * {@link saveRawDocument} replaces a file's **whole text**. It carries none of
+ * the locality guarantee the other four keep, and — unlike them — a successful
+ * commit invalidates *every* identity in that file at once rather than handing
+ * one back. That obligation is not a paragraph here: it is the wrapper's last
+ * parameter, which has no default and no `undefined` in its type, so a caller
+ * that has nowhere to put the reload cannot compile.
+ *
+ * It is also the one wrapper that does **not** answer a {@link CommandResult}.
+ * Its answer is a {@link RawSaveOutcome}, because a committed write and a failed
+ * reload are two facts and this boundary must be able to state both — see the
+ * function's own comment for why collapsing them broke `PROGRESS.md` D2.
  *
  * ## What is deliberately absent
  *
- * `save_raw_document`. A whole document's text is not a byte-span replacement,
- * and the one Rust entry point that writes a file takes a list of edits and
- * nothing else — so it needs a change to that entry point rather than a wrapper
- * here. A wrapper would be a standing invitation to call something that is not
- * there.
+ * `validate_match`. It has no phase yet, and a wrapper would be a standing
+ * invitation to call something that is not there.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -76,11 +88,120 @@ export const COMMAND_NAMES = [
   'move_match',
   'save_match',
   'create_match',
-  'delete_match'
+  'delete_match',
+  'save_raw_document'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
 export type CommandName = (typeof COMMAND_NAMES)[number];
+
+/**
+ * Everything a committed whole-document replacement made stale.
+ *
+ * Deliberately **not** a wire type: Rust answers a {@link SaveResult} exactly as
+ * it does for the other four writing commands (design consult Q3), and this is
+ * what {@link saveRawDocument} derives from it for the one caller obligation the
+ * wire cannot express.
+ */
+export interface RawSaveInvalidation {
+  /** The file that was replaced. Every {@link MatchId} in it is now stale. */
+  readonly document: DocumentId;
+  /**
+   * The revision the file holds now — the caller's new base revision.
+   *
+   * The value to reload against, and the value to send with the next save.
+   */
+  readonly revision: ContentRevision;
+}
+
+/**
+ * What a caller must do when a raw save commits.
+ *
+ * **The mechanism, not a reminder.** After `committed: true` every
+ * {@link MatchId} the caller holds for that file resolves to
+ * `identityStaleRevision`, and unlike a move, a save, a creation or a deletion
+ * there is **no** single match to answer with: `moved` is `null` permanently and
+ * by construction, so nothing in the answer can be followed across the save.
+ * Phase 2b-2c-3a recorded that this obligation "is represented in no type — a
+ * caller that ignores it compiles", and this type is what closes that.
+ *
+ * {@link saveRawDocument} takes one of these as a **required** argument and
+ * calls it itself, awaiting it before resolving. So the obligation cannot be
+ * dropped by forgetting it, cannot be dropped by handling the wrong arm, and
+ * cannot be discharged after the caller has already acted on the result.
+ *
+ * What it cannot force is a body that does something: `() => {}` type-checks,
+ * and this parameter is **not** what the running application relies on. The
+ * invalidation the real path performs belongs to the module that owns the
+ * projections — `createBrowserState` in `../browser/workspace.svelte`, whose
+ * `saveRawDocument` passes its own — and this parameter is what keeps the
+ * boundary drivable by a test that has no such state.
+ *
+ * A body that throws or rejects does **not** fail the save: see
+ * {@link RawSaveOutcome}.
+ *
+ * @param invalidation - The file that was replaced and the revision it now
+ *   holds.
+ */
+export type ReloadAfterRawSave = (invalidation: RawSaveInvalidation) => void | Promise<void>;
+
+/**
+ * What became of the reload a committed raw save owes.
+ *
+ * **Three states rather than two**, because "the reload did not run" and "the
+ * reload ran and failed" are different things for a window to be in and only one
+ * of them means the screen is out of step with the file.
+ *
+ * - `notOwed` — nothing was written, or the bytes were already what the file
+ *   held, so no identity went stale and no reload was due.
+ * - `done` — the reload was called and returned.
+ * - `failed` — the reload was called and threw or rejected. **The save still
+ *   committed.** The window is now drawing projections of bytes that are gone,
+ *   which is a real problem and a different one from a failed write.
+ */
+export type RawSaveReload =
+  | { readonly kind: 'notOwed' }
+  | { readonly kind: 'done' }
+  | { readonly kind: 'failed'; readonly failure: IpcFailure };
+
+/**
+ * What {@link saveRawDocument} answers: the save's own outcome, and the reload's.
+ *
+ * **The one wrapper on this boundary that does not answer a
+ * {@link CommandResult}**, and the reason is `PROGRESS.md` D2: *a committed write
+ * is never afterwards reported as an `Err`.* The first version of this wrapper
+ * `await`ed the caller's reload inside a promise typed
+ * `Promise<CommandResult<SaveResult>>`, so a reload that rejected threw **out of
+ * the wrapper** — hiding a `Saved` the file on disk already reflects and
+ * inviting the caller to retry a write that had happened. That is the invariant
+ * the Rust side is built around, broken in TypeScript.
+ *
+ * So the two facts are carried side by side. The failure arm is unchanged and
+ * means the *command* failed; the success arm always carries the
+ * {@link SaveResult} the transaction really reached, and
+ * {@link RawSaveOutcome.reload} says separately what happened to the
+ * invalidation. Neither is optional, so neither can be read as absent.
+ *
+ * **What this does not do is force the caller to look at `reload`.** No
+ * TypeScript type can require a property to be read. What it does is make the
+ * failure survive as a value on the answer instead of as a thrown thing that
+ * destroys the answer.
+ */
+export type RawSaveOutcome =
+  | {
+      /** The discriminant: the command itself succeeded. */
+      readonly ok: true;
+      /** How the save ended, exactly as the transaction reported it. */
+      readonly value: SaveResult;
+      /** What became of the invalidation that a commit owes. */
+      readonly reload: RawSaveReload;
+    }
+  | {
+      /** The discriminant: the command itself failed. */
+      readonly ok: false;
+      /** Why it failed. */
+      readonly failure: IpcFailure;
+    };
 
 /**
  * Invokes one command and classifies whatever comes back.
@@ -444,3 +565,118 @@ export async function deleteMatch(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('delete_match', { id, baseRevision, acknowledgement });
 } // End of function deleteMatch()
+
+/**
+ * Replaces one file's whole text with the text given, and saves it.
+ *
+ * **The fifth function in this application that writes a user's file, and the
+ * only one that is not an edit.** It goes through the same save transaction as
+ * the other four and through nothing else: the file is locked, read and hashed
+ * under that lock, its bytes replaced, reparsed, projected, checked, backed up
+ * and replaced atomically, all before this promise resolves.
+ *
+ * ## It replaces the entire document, and an interface must say so
+ *
+ * The other four promise that every byte outside the span they edited comes out
+ * identical. **This one promises nothing of the kind.** What it promises is
+ * narrower and exact: the submitted text is committed byte for byte — no
+ * reformatting, no newline normalisation, no BOM added or removed, no final
+ * newline supplied, no re-indentation. Presenting it as an edit to part of the
+ * file would be a false statement about what was written; `describeRawSave` in
+ * `../browser/rawSave` is the model that says it correctly, in both languages.
+ *
+ * ## A text espanso's YAML cannot read is written, once the person says so
+ *
+ * Deliberately, and by the owner's ruling: refusing would mean this application
+ * cannot repair a file that is *already* broken, which is the most valuable
+ * thing a raw editor does. So a candidate the parser rejects comes back as
+ * `refused` carrying a `DocumentDoesNotParse` finding, and calling again with
+ * that exact finding acknowledged **commits it**. The finding is bound to the
+ * text it is about, so consent collected for one broken draft cannot be spent on
+ * another: edit the text and the same acknowledgement is refused again. There is
+ * still no force flag.
+ *
+ * ## Every identity for that file is stale, and there is none to hand back
+ *
+ * `saved.moved` is `null` permanently. A move, a save, a creation and a deletion
+ * each act on one snippet and can say where it went; a replacement rewrites the
+ * whole file, so **all** of them are stale at once. That is why `reload` is a
+ * required argument rather than a sentence in this comment: it is called, and
+ * awaited, exactly when `committed` is `true`. It is not, on its own, what makes
+ * the invalidation happen — a no-op body type-checks, so the running
+ * application's path goes through `createBrowserState`'s own `saveRawDocument`,
+ * which owns the projections and supplies the body itself.
+ *
+ * It is **not** called for `committed: false` — a text identical to what the
+ * file already held is not written, so nothing became stale — and not for
+ * `conflict`, where nothing was written either and the fresh projection of what
+ * the file really holds is carried in the answer's own `disk` field for the
+ * caller to adopt.
+ *
+ * ## A reload that fails cannot unwrite the file
+ *
+ * The answer is a {@link RawSaveOutcome} rather than a `CommandResult`, and this
+ * is the whole reason. The reload runs after the bytes are on disk, so its
+ * failure says nothing about whether the save happened; letting it reject this
+ * promise would have hidden a committed `Saved` behind an exception and invited
+ * a retry of a write that already happened, which is exactly what
+ * `PROGRESS.md` D2 forbids. It is caught, classified onto
+ * {@link RawSaveOutcome.reload}, and neither swallowed nor allowed to escape.
+ *
+ * @param document - The file to replace, by the identity this window holds.
+ *   Never a path: a path on this wire is display text, and two different
+ *   filenames can render to one string.
+ * @param baseRevision - The revision the file held when its text was loaded into
+ *   the editor. **The only thing standing between this call and silently
+ *   overwriting whatever changed the file since**, so it must be the revision the
+ *   editor really loaded, never one re-read just before saving.
+ * @param text - The file's whole new text, committed exactly as given.
+ * @param acknowledgement - The suspicions already shown to a person, by content.
+ *   Pass `{ accepted: [] }` on a first attempt.
+ * @param reload - What to do once the file has been replaced. Called with the
+ *   file and its new revision, and awaited, on `committed: true` only. Its own
+ *   failure is reported on the answer and never as a rejection of this promise.
+ * @returns How the save ended and what became of the reload, or a failure —
+ *   `noWorkspaceOpen`, `unknownDocument`, or `saveFailed`.
+ */
+export async function saveRawDocument(
+  document: DocumentId,
+  baseRevision: ContentRevision,
+  text: string,
+  acknowledgement: Acknowledgement,
+  reload: ReloadAfterRawSave
+): Promise<RawSaveOutcome> {
+  const answer = await call<SaveResult>('save_raw_document', {
+    document,
+    baseRevision,
+    text,
+    acknowledgement
+  });
+  if (!answer.ok) {
+    return answer;
+  }
+  if (!(answer.value.outcome === 'saved' && answer.value.committed)) {
+    // Nothing was written, so no identity went stale and there is no obligation
+    // to discharge. Saying so with its own arm keeps "did not run" apart from
+    // "ran and worked", which a boolean would have collapsed.
+    return { ok: true, value: answer.value, reload: { kind: 'notOwed' } };
+  }
+  try {
+    // Awaited rather than fired: a caller that reloads asynchronously must have
+    // finished before this promise resolves, or the code after the `await` would
+    // run against the projections this commit has just invalidated — which is
+    // the exact failure the parameter exists to prevent.
+    await reload({ document, revision: answer.value.revision });
+  } catch (raw: unknown) {
+    // **The file is written and stays written.** `classifyFailure` never throws
+    // and never returns `undefined`, so this arm always has something to carry,
+    // and what it carries goes on the answer beside the committed `Saved` rather
+    // than in place of it.
+    return {
+      ok: true,
+      value: answer.value,
+      reload: { kind: 'failed', failure: classifyFailure(raw) }
+    };
+  }
+  return { ok: true, value: answer.value, reload: { kind: 'done' } };
+} // End of function saveRawDocument()

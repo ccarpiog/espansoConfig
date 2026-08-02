@@ -16,6 +16,13 @@ import {
   type OptionGroupName
 } from '../browser/detail';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
+import {
+  rawSaveChoiceKey,
+  rawSaveMessageKey,
+  rawSaveMessageParams,
+  type RawSaveChoice,
+  type RawSaveMessage
+} from '../browser/rawSave';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
@@ -369,6 +376,36 @@ export function tVariableKind(kind: VariableKind): string {
 export function tSelectionNotice(notice: SelectionNotice): string {
   return translate(locale.current, selectionNoticeKey(notice));
 } // End of function tSelectionNotice()
+
+/**
+ * Renders one line the raw editor says about replacing a whole file.
+ *
+ * The accessor over `describeRawSave`'s model, here for `tSelectionNotice`'s
+ * reason: a component that wrote `t(rawSaveMessageKey(message))` would be
+ * turning a code into a key in markup, which CLAUDE.md section 2 forbids and
+ * `scripts/lint/built-translation-keys.ts` refuses.
+ *
+ * **The parser's own message is not among these.** `DocumentDoesNotParse.detail`
+ * comes from `saphyr-parser` and cannot be translated; the sentence around it
+ * is, and this is that sentence.
+ *
+ * @param message - A line of the raw-save model.
+ * @returns The translated sentence, with its position substituted when it has
+ *   one.
+ */
+export function tRawSaveMessage(message: RawSaveMessage): string {
+  return translate(locale.current, rawSaveMessageKey(message), rawSaveMessageParams(message));
+} // End of function tRawSaveMessage()
+
+/**
+ * Renders one thing the person may do about a refused raw save.
+ *
+ * @param choice - What the model offers.
+ * @returns The translated label.
+ */
+export function tRawSaveChoice(choice: RawSaveChoice): string {
+  return translate(locale.current, rawSaveChoiceKey(choice));
+} // End of function tRawSaveChoice()
 
 /**
  * Renders what kind of node a value is, in the current language.

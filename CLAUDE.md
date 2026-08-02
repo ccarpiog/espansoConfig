@@ -138,6 +138,13 @@ window.** 2a built the whole save transaction in Rust with no caller (plan §6.6
 2b-1 put its types on the wire with no command behind them; **2b-2a registered `move_match`, the
 seventh `#[tauri::command]` and the first that is not read-only.**
 
+**2b is complete as of 2b-2c-3b: eleven commands exist and five of them write** — `move_match`,
+`save_match`, `create_match`, `delete_match` and `save_raw_document`. **All five end in one
+`run_one_save`** in `src-tauri/src/commands.rs`, which carries a `SaveContent` and holds this
+layer's single cache-coherency policy; a sixth writing command **calls it rather than copying it**,
+because it was four copies once. **The next phase is 2c, the editing UI, and it must be split
+before any of it is written.**
+
 **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's file.**
 Never call `replace_file_atomically` or `replace_locked_file` from a command, and never from inside the
 transaction — **the lock is not reentrant, so the process hangs silently and forever.** A save is
@@ -145,12 +152,20 @@ refused, not forced: findings go out and the acknowledged subset comes back, mat
 multiset**. **There is no `force` flag and adding one would undo the design.** `committed: false` and
 `backup: None` are both legal on a *success*.
 
-**2b-2 is split three ways because three of its six commands have no primitive behind them.**
-`DocumentEdit` has exactly four variants — scalar edit, mapping-field insert, mapping-field remove,
-same-sequence item move — so `create_match` (insert a sequence item), `delete_match` (remove one) and
-`save_raw_document` (replace a whole text) cannot be built until 2b-2c adds the primitives. Forcing
-them into existence by writing files outside `save_document` would bypass the lock, the revision check,
-the reparse, the validation verdict, the acknowledgement and the backup **while appearing to work**.
+**2b-2 was split three ways because three of its six commands had no primitive behind them**, and
+that is now discharged: 2b-2c-1 added `InsertItem` and `RemoveItem` to `DocumentEdit`, and 2b-2c-3a
+added `SaveContent::ReplaceText` beside `SaveContent::Edits` **inside** the one entry point that
+writes. The rule that forced the split still binds every later phase: **forcing a write into
+existence outside `save_document` bypasses the lock, the revision check, the reparse, the validation
+verdict, the acknowledgement and the backup — while appearing to work.**
+
+**A raw save may write text the YAML parser rejects.** That is the owner's settled ruling, not an
+oversight: refusing would mean this application cannot repair a file that is *already* broken. It is
+never refused and never silent — the candidate comes back with an acknowledgeable
+`DocumentDoesNotParse` finding **content-addressed to that exact text**, so consent collected for
+one draft cannot be spent on another. **A committed write is never afterwards reported as an error**,
+and that binds the TypeScript boundary too, not only Rust — `saveRawDocument` returns
+`RawSaveOutcome` precisely because a rejecting reload callback once hid a committed save.
 
 **The raw YAML viewer is a mode of the third pane**, and `documentStart` has **exactly one caller** —
 it is the only way a `bom` segment is produced, and a slice must never pass it. `src/lib/browser/`

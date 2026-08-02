@@ -125,6 +125,13 @@
   "browser.notice.unresolved": "This file changed on disk and could not be read again, so the selection was cleared.",
   "browser.notice.dismiss": "Dismiss",
 
+  "browser.rawSave.replacesWholeDocument": "Saving writes this file's whole text exactly as it appears here. This is not an edit to one snippet: the entire document is replaced.",
+  "browser.rawSave.willNotLoad": "espanso will not load this file until this is fixed.",
+  "browser.rawSave.stoppedAt": "The YAML reader stopped at line {line}, column {column}.",
+  "browser.rawSave.positionUnknown": "The YAML reader did not say where it stopped.",
+  "browser.rawSave.choice.saveAnyway": "Save anyway",
+  "browser.rawSave.choice.keepEditing": "Keep editing",
+
   "language.label": "Language",
   "language.followSystem": "Follow the system language",
   "language.english": "English",

@@ -1,11 +1,11 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
 //! Plan section 6.4's **read-only** set — `open_workspace`, `list_documents`,
-//! `get_document`, `get_match`, `document_text` and `reload_document` — and four
-//! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), and `create_match`
-//! and `delete_match` (2b-2c-2). Each is one line over a [`WorkspaceSession`]
-//! method, and each of the six read-only ones is one call into
-//! `crate::workspace`, which Phase 1a built to be wrapped this way.
+//! `get_document`, `get_match`, `document_text` and `reload_document` — and five
+//! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), `create_match` and
+//! `delete_match` (2b-2c-2), and `save_raw_document` (2b-2c-3b). Each is one line
+//! over a [`WorkspaceSession`] method, and each of the six read-only ones is one
+//! call into `crate::workspace`, which Phase 1a built to be wrapped this way.
 //!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
@@ -15,30 +15,36 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Four of the ten commands write, and they write the same way
+//! # Five of the eleven commands write, and they write the same way
 //!
-//! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, and 2b-2c-2
-//! `create_match` and `delete_match`. All four go through
+//! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
+//! and `delete_match`, and 2b-2c-3b `save_raw_document`. All five go through
 //! [`espansoconfig_core::persist::save_document`] and through nothing else:
 //! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
-//! **no command in this crate calls either**. `save_raw_document` is still
-//! absent, and the reason is not caution: a whole-document text is not a span
-//! replacement, and giving the one entry point that writes a second shape is a
-//! change to that entry point rather than a new caller of it. **Phase 2b-2c-3
-//! made that change in the core** — `SaveRequest::content` is now a
-//! [`espansoconfig_core::persist::SaveContent`], whose second arm is a whole
-//! replacement text — and deliberately registered no command over it; that is
-//! Phase 2b-2c-3b's.
+//! **no command in this crate calls either**. They also share [`run_one_save`],
+//! which is this layer's one cache-coherency policy rather than five agreeing
+//! copies of it.
 //!
-//! They differ in **who derives the edits**, and that is the whole of the
-//! difference. `move_match`, `create_match` and `delete_match` each build their
-//! own single primitive — an [`ItemMove`], an [`InsertItem`], a [`RemoveItem`] —
-//! because each is one operation with nothing to diff. `save_match` hands a
-//! [`MatchDraft`] to [`plan_match_edits`], which derives the **smallest** batch
-//! that realises it — or refuses by name, in which case nothing is attempted and
-//! the caller gets [`CommandError::DraftRefused`]. None of them ever combines two
-//! kinds of edit in one batch (`PROGRESS.md` R25).
+//! Four of them differ only in **who derives the edits**. `move_match`,
+//! `create_match` and `delete_match` each build their own single primitive — an
+//! [`ItemMove`], an [`InsertItem`], a [`RemoveItem`] — because each is one
+//! operation with nothing to diff. `save_match` hands a [`MatchDraft`] to
+//! [`plan_match_edits`], which derives the **smallest** batch that realises it —
+//! or refuses by name, in which case nothing is attempted and the caller gets
+//! [`CommandError::DraftRefused`]. None of them ever combines two kinds of edit
+//! in one batch (`PROGRESS.md` R25).
+//!
+//! **`save_raw_document` derives no edits at all**, and that is the one real
+//! difference on this surface. Phase 2b-2c-3a gave the single writing entry point
+//! a second content mode — `SaveRequest::content` is a
+//! [`espansoconfig_core::persist::SaveContent`], whose second arm is a whole
+//! replacement text — and 2b-2c-3b is the caller of it. A replacement carries
+//! **none** of the patch engine's locality guarantee: its promise is the exact
+//! submitted UTF-8 bytes and nothing more, and no string built on it may present
+//! it as an edit (design consult Q8). It is also the one save that may write text
+//! the YAML parser rejects, which the owner ruled on and the acknowledgement
+//! protocol — not a `force` flag — is what makes safe.
 //!
 //! # Three constraints this module inherits and does not drop
 //!
@@ -516,6 +522,72 @@ impl WorkspaceSession {
         })
     } // End of function delete_match()
 
+    /// Replaces one document's whole text with the text supplied.
+    ///
+    /// The fifth method in this crate that can write a user's file, and it writes
+    /// it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`]. It is the first that hands
+    /// it **no** [`DocumentEdit`] at all — the request is the bytes — and so the
+    /// first whose promise is not the patch engine's.
+    ///
+    /// # What it promises, which is narrower than every other save
+    ///
+    /// The exact submitted UTF-8 bytes are committed: no parser formatting, no
+    /// newline normalization, no BOM added or removed, no final newline supplied,
+    /// no re-indentation. That is *all*. **It is not a locality-preserving edit
+    /// and no string built on it may say it is** — calling the whole file "the
+    /// edited span" would make the guarantee every other command keeps vacuous
+    /// (design consult Q8). A caller presents it as *replacing the entire
+    /// document*.
+    ///
+    /// # A text the YAML parser rejects is written, once the user says so
+    ///
+    /// The owner's ruling, recorded in `docs/reviews/phase-2b-2c-3-design.md`:
+    /// refusing would mean this application cannot repair a file that is already
+    /// broken, which is the most valuable thing a raw editor does. So the parse
+    /// is **attempted and reported, never enforced**. A candidate the parser
+    /// rejects comes back as [`SaveResult::Refused`] carrying
+    /// [`espansoconfig_core::validate::FindingCode::DocumentDoesNotParse`], and
+    /// the same call with that exact finding acknowledged commits it.
+    ///
+    /// That finding is **content-addressed to the candidate** by its `revision`
+    /// operand, so consent collected for one broken text cannot be spent on
+    /// another. There is still no `force` flag and no bypass.
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// [`CommandError::NoWorkspaceOpen`], and the workspace's own refusal for a
+    /// document this session does not know. **Not a stale `base_revision`** —
+    /// see [`save_one_raw_document`], which is where that decision is written
+    /// down: a replacement addresses nothing positionally, so the check that
+    /// means something is the transaction's, taken under the write lock, and it
+    /// answers [`SaveResult::Conflict`] with the disk's own projection.
+    ///
+    /// # Its answer names nothing
+    ///
+    /// [`SaveResult::Saved::moved`] is **`None`**, permanently and by
+    /// construction. After `committed: true` **every** [`MatchId`] in the file is
+    /// stale and there is no single match to answer with, so a caller reloads the
+    /// document rather than following one identity across the save.
+    pub fn save_raw_document(
+        &self,
+        document: DocumentId,
+        base_revision: ContentRevision,
+        text: &str,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        self.with_open(|workspace, backups| {
+            save_one_raw_document(
+                workspace,
+                backups,
+                document,
+                base_revision,
+                text,
+                acknowledgement,
+            )
+        })
+    } // End of function save_raw_document()
+
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
     fn with_workspace<T>(
@@ -662,21 +734,30 @@ fn view_at(
     Ok(view)
 } // End of function view_at()
 
-/// Hands one derived batch to the save transaction, and brings the session's
-/// cache back in step with whatever happened.
+/// Hands one save's content to the transaction, and brings the session's cache
+/// back in step with whatever happened.
 ///
 /// **The tail every writing command shares, and the one place this layer's
-/// cache-coherency policy lives.** A fifth command that writes must call this
+/// cache-coherency policy lives.** A sixth command that writes must call this
 /// rather than copy it: the four outcomes below are not four independent
 /// decisions, they are one policy, and a copy of it drifts silently — the
 /// deletion command had already lost the comment explaining why `backups` is
 /// never `None` by the time this function was extracted.
 ///
+/// `content` is the whole of what the file should hold afterwards, in whichever
+/// of [`SaveContent`]'s two modes the caller derived. The parameter is the mode
+/// rather than a batch of edits because Phase 2b-2c-3b's `save_raw_document`
+/// has **no** batch to hand over and must still take this exact tail: it needs
+/// the same eviction rule, the same conflict payload and the same refusal
+/// channel as the four commands that do, and a second copy of them written for
+/// the raw mode is precisely the drift this function exists to stop.
+///
 /// `at` is *where the operation's match is afterwards*, and each caller computes
 /// it differently — [`after_a_save`] documents which is which, and why the
 /// difference is the reason an address is passed in rather than derived here.
 /// `None` says the operation has no single match to name, which is
-/// [`delete_one_match`]'s routine answer.
+/// [`delete_one_match`]'s routine answer and
+/// [`save_one_raw_document`]'s only possible one.
 ///
 /// # The four outcomes
 ///
@@ -701,7 +782,7 @@ fn run_one_save(
     backups: &BackupSession,
     document: DocumentId,
     base_revision: ContentRevision,
-    edits: &[DocumentEdit],
+    content: SaveContent<'_>,
     acknowledgement: &Acknowledgement,
     at: Option<&DocumentPath>,
 ) -> Result<SaveResult, CommandError> {
@@ -711,7 +792,7 @@ fn run_one_save(
     let request = SaveRequest {
         context: &context,
         base_revision,
-        content: SaveContent::Edits(edits),
+        content,
         acknowledgement,
         // Never `None`. See `WorkspaceSession::open`.
         backups: Some(backups),
@@ -769,7 +850,7 @@ fn move_one_match(
         backups,
         id.document,
         base_revision,
-        &edits,
+        SaveContent::Edits(&edits),
         acknowledgement,
         Some(&landed),
     )
@@ -841,7 +922,7 @@ fn save_one_match(
         backups,
         id.document,
         base_revision,
-        &edits,
+        SaveContent::Edits(&edits),
         acknowledgement,
         at.as_ref(),
     )
@@ -958,7 +1039,7 @@ fn create_one_match(
         backups,
         document,
         base_revision,
-        &edits,
+        SaveContent::Edits(&edits),
         acknowledgement,
         Some(&landed),
     )
@@ -1004,11 +1085,64 @@ fn delete_one_match(
         backups,
         id.document,
         base_revision,
-        &edits,
+        SaveContent::Edits(&edits),
         acknowledgement,
         None,
     )
 } // End of function delete_one_match()
+
+/// Hands one whole replacement text to the save transaction.
+///
+/// A free function for [`move_one_match`]'s reason, and the shortest of the
+/// five: there is nothing to plan. A replacement text **is** the request, so
+/// this resolves no identity, derives no batch and computes no landing address —
+/// it names the document, the revision the editor loaded and the bytes, and
+/// takes the shared tail.
+///
+/// # It deliberately does **not** take [`view_at`]
+///
+/// Every other writing command refuses a stale `base_revision` before the
+/// transaction, and the reason is written on [`view_at`]: each of them turns an
+/// identity into a **position** in a particular parse, and a stale identity does
+/// not name a missing entry — it names a different one, and succeeds. A
+/// replacement turns nothing into a position. Its request is self-contained,
+/// which leaves exactly one check worth taking and one place worth taking it:
+/// the transaction's own, against the bytes **under the write lock**.
+///
+/// That is not a weaker answer, it is the only one that can be right. The design
+/// consult's Q7 names the highest risk of this whole mode as *silently
+/// overwriting changes made after the raw editor loaded the file*, and in that
+/// scenario some other program wrote the file while this session was idle: the
+/// session's cached projection still holds the revision the editor loaded, so a
+/// pre-check against it would **pass**. Only the locked read can see it, and it
+/// reports [`SaveResult::Conflict`], which carries the projection of what the
+/// disk holds now — everything a raw editor needs to tell the user what
+/// happened, and strictly more than the two hex strings a pre-check could offer.
+///
+/// # Its answer names nothing
+///
+/// `at` is `None`, so [`after_a_save`] mints no identity. Not a defensive
+/// `None` and not a missing feature: a committed replacement invalidates **every**
+/// [`MatchId`] in the file at once and has no distinguished match to answer with,
+/// which is design-consult Q3's ruling and is permanent by construction.
+fn save_one_raw_document(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    document: DocumentId,
+    base_revision: ContentRevision,
+    text: &str,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    run_one_save(
+        workspace,
+        backups,
+        document,
+        base_revision,
+        SaveContent::ReplaceText(text),
+        acknowledgement,
+        None,
+    )
+} // End of function save_one_raw_document()
 
 /// Describes the disk side of a conflict, with a read taken **after** the lock
 /// was released.
@@ -1379,6 +1513,73 @@ pub fn delete_match(
     session.delete_match(id, base_revision, &acknowledgement)
 } // End of function delete_match()
 
+/// Replaces one document's whole text with the text supplied (plan section 6.4).
+///
+/// **The eleventh command, the fifth that can write a user's file, and the last
+/// of Phase 2b-2c.** With it, every command Phase 2b was scoped to deliver
+/// exists.
+///
+/// # Its arguments, and why each is the shape it is
+///
+/// - `document` — **the app's opaque identity**, not a wire path, for
+///   [`create_match`]'s reason: a
+///   [`espansoconfig_core::wire::WirePath`] renders lossily, so two distinct
+///   filenames can arrive as one string and a command that accepted one back as a
+///   target could write to the wrong file. It is a document rather than a match
+///   because a whole text has no match in it to name.
+/// - `base_revision` — the optimistic-concurrency token, and here it is the
+///   **only** thing standing between a raw editor and the file some other program
+///   changed while it was open. Unlike the four commands before it this one takes
+///   no pre-check against the session's projection, because a replacement
+///   addresses nothing positionally; the check that matters is the transaction's,
+///   taken under the write lock. See [`save_one_raw_document`].
+/// - `text` — the document's whole new text, committed byte for byte. Not a
+///   patch and not a diff: this command is the one place in the application whose
+///   promise is *these exact bytes*, and it keeps that promise by not touching
+///   them.
+/// - `acknowledgement` — the suspicions the caller has already shown someone, by
+///   content, exactly as for the other four. There is deliberately **no `force`
+///   flag**, and it is load-bearing here in a way it is nowhere else: a candidate
+///   the YAML parser rejects is *written*, and this is the machinery that makes
+///   that safe. The application does not refuse it and does not write it silently
+///   either — it reports `DocumentDoesNotParse` and the user confirms by content.
+///
+/// # It replaces the whole document, and a caller must say so
+///
+/// The mode's promise is the exact submitted UTF-8 bytes and nothing more: no
+/// parser formatting, no newline normalization, no BOM added or removed, no final
+/// newline supplied, no re-indentation. **It carries none of the locality
+/// guarantee the other four keep**, and no string built on this command may
+/// present it as an edit (design consult Q8).
+///
+/// # Every identity in that file is stale afterwards
+///
+/// [`SaveResult::Saved::moved`] is `None`, permanently: a committed replacement
+/// invalidates every [`MatchId`] in the document at once and has no single match
+/// to answer with (design consult Q3). On `committed: false` nothing became
+/// stale. The frontend wrapper in `src/lib/ipc/commands.ts` takes the reload as a
+/// **mandatory argument** so that obligation cannot be dropped by a caller that
+/// simply forgets it.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the workspace's own refusal for an
+/// unknown document before anything is attempted;
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures. A
+/// conflict and a refusal are **not** errors — see [`SaveResult`] — and neither
+/// is a text identical to what the file already holds: that is a `Saved` with
+/// `committed: false`.
+#[tauri::command]
+pub fn save_raw_document(
+    session: State<'_, WorkspaceSession>,
+    document: DocumentId,
+    base_revision: ContentRevision,
+    text: String,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.save_raw_document(document, base_revision, &text, &acknowledgement)
+} // End of function save_raw_document()
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1541,7 +1742,7 @@ mod tests {
     ///
     /// "Every" is the claim, so the body holds every one of them: `documents`,
     /// `document`, `text`, `reload` and `match_view` — the five that route
-    /// through [`WorkspaceSession::with_workspace`] — and the four that write,
+    /// through [`WorkspaceSession::with_workspace`] — and the five that write,
     /// which take the guard themselves. `open` is excluded because it is the
     /// method that opens one, and `set_menu_labels` is not a workspace command at
     /// all.
@@ -1605,10 +1806,19 @@ mod tests {
                 )
                 .err()
                 .map(|error| error.code()),
+            session
+                .save_raw_document(
+                    id,
+                    ContentRevision::of_bytes(b""),
+                    "matches: []\n",
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
         ];
         assert_eq!(
             refusals,
-            [Some("noWorkspaceOpen"); 9],
+            [Some("noWorkspaceOpen"); 10],
             "every session method that needs a workspace must refuse before one is open"
         );
     } // End of function every_command_refuses_before_a_workspace_is_open()
@@ -3778,6 +3988,501 @@ mod tests {
             [":one", ":two", ":greet"]
         );
     } // End of function a_suspicion_refuses_a_creation_until_the_findings_come_back()
+
+    // -----------------------------------------------------------------------
+    // save_raw_document — Phase 2b-2c-3b
+    // -----------------------------------------------------------------------
+
+    /// A file whose bytes an editor would want to be careful with.
+    ///
+    /// Hand-authored and neutral (CLAUDE.md section 1). It carries a leading
+    /// UTF-8 BOM, one CRLF pair among bare LFs, a **decomposed** `e`-acute, an
+    /// astral character and no final newline — five things an emitter,
+    /// normaliser or "tidy on save" would each have an opinion about, and none of
+    /// which a replacement may touch.
+    const DELICATE_YML: &str =
+        "\u{feff}matches:\r\n  - trigger: ':caf\u{65}\u{301}'\n    replace: \u{1f600}";
+
+    /// A text the YAML substrate rejects, and every candidate below that shares
+    /// its invalid prefix.
+    ///
+    /// The prefix is what makes the acknowledgement question sharp: the parser
+    /// stops in the same place for every text below, so the position operands
+    /// alone cannot tell them apart.
+    const BROKEN_PREFIX: &str = "matches: broken: here";
+
+    /// The identity and modification time of `<root>/match/base.yml`.
+    ///
+    /// **What a content revision cannot say.** A hash tells "the bytes are the
+    /// same"; it cannot tell *not written* from *rewritten with the same bytes*,
+    /// and every commit here installs a new inode by renaming a temporary file
+    /// over the target. So a test that means "nothing was written" observes this.
+    fn base_identity(dir: &TempDir) -> (u64, std::time::SystemTime) {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = fs::metadata(dir.path().join("match").join("base.yml")).expect("it exists");
+        (metadata.ino(), metadata.modified().expect("a mtime"))
+    }
+
+    /// The `Refused` arm's findings, or a panic naming what arrived instead.
+    fn expect_refused(
+        result: SaveResult,
+        what: &str,
+    ) -> Vec<espansoconfig_core::validate::Finding> {
+        match result {
+            SaveResult::Refused { findings, .. } => findings,
+            other => panic!("expected {what} to be refused, got {other:?}"),
+        }
+    }
+
+    /// Whether a finding is the parse rejection this mode can produce.
+    fn is_parse_rejection(finding: &espansoconfig_core::validate::Finding) -> bool {
+        matches!(
+            finding.code,
+            espansoconfig_core::validate::FindingCode::DocumentDoesNotParse { .. }
+        )
+    }
+
+    /// A replacement commits the exact bytes submitted, and names nothing.
+    ///
+    /// **Four claims in one, because they are one behaviour.** The submitted text
+    /// is what reaches the disk — byte for byte, with its BOM, its one CRLF, its
+    /// decomposition, its astral character and its missing final newline intact;
+    /// the answer carries no identity, because a replacement has no single match
+    /// to name; it discloses no presentation change, because it re-encodes
+    /// nothing; and the session serves the new bytes and the new projection
+    /// afterwards without a reload.
+    #[test]
+    fn a_raw_replacement_commits_the_submitted_bytes_and_names_nothing() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+
+        let result = session
+            .save_raw_document(id, before.revision, DELICATE_YML, &Acknowledgement::none())
+            .expect("the replacement is legal");
+        let (revision, moved) = match result {
+            SaveResult::Saved {
+                revision,
+                committed,
+                notes,
+                backup_taken,
+                moved,
+            } => {
+                assert!(committed, "the bytes differ, so the file is rewritten");
+                assert!(
+                    notes.is_empty(),
+                    "a replacement re-encodes nothing and has nothing to disclose: {notes:?}"
+                );
+                assert!(backup_taken, "the session must have copied the file first");
+                (revision, moved)
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        };
+        assert!(
+            moved.is_none(),
+            "a replacement invalidates every identity at once and names none: {moved:?}"
+        );
+        assert_ne!(revision, before.revision, "the file was rewritten");
+
+        // The bytes on disk, not a projection of them.
+        assert_eq!(
+            base_bytes(&dir),
+            DELICATE_YML,
+            "the submitted text must be committed exactly as submitted"
+        );
+        assert_eq!(
+            revision,
+            ContentRevision::of_bytes(DELICATE_YML.as_bytes()),
+            "the answered revision must be the revision of the bytes that were written"
+        );
+
+        // And the session is reading them, from both surfaces that could serve a
+        // stale parse.
+        assert_eq!(
+            session.text(id).expect("the bytes read"),
+            DELICATE_YML,
+            "the cache must have been brought back in step"
+        );
+        let after = session.document(id).expect("the file still reads");
+        assert_eq!(after.revision, revision);
+        // Written as escapes, because the trigger the fixture holds is the
+        // **decomposed** spelling and an editor that normalised this source file
+        // would otherwise turn the assertion into a different claim.
+        assert_eq!(triggers_of(&after), [":caf\u{65}\u{301}"]);
+    } // End of function a_raw_replacement_commits_the_submitted_bytes_and_names_nothing()
+
+    /// A text identical to what the file already holds is a success that writes
+    /// nothing.
+    ///
+    /// **Observed as the file's identity, not as a hash.** A content revision
+    /// cannot tell *not written* from *rewritten with the same bytes*, and every
+    /// commit renames a fresh temporary file over the target — so the inode and
+    /// the modification time are what say the file was left alone. The second
+    /// half saves a text that really differs and asserts that the identity *does*
+    /// change, so the check means something on this filesystem rather than being
+    /// a comparison that could never fail.
+    #[test]
+    fn a_byte_identical_replacement_is_a_success_that_writes_nothing() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+        let identity_before = base_identity(&dir);
+
+        let result = session
+            .save_raw_document(id, before.revision, BASE_YML, &Acknowledgement::none())
+            .expect("submitting what the file already holds is legal");
+        match result {
+            SaveResult::Saved {
+                revision,
+                committed,
+                backup_taken,
+                moved,
+                ..
+            } => {
+                assert!(!committed, "identical bytes are not rewritten");
+                assert!(!backup_taken, "nothing was replaced, so nothing was copied");
+                assert!(moved.is_none());
+                assert_eq!(
+                    revision, before.revision,
+                    "the file still holds those bytes"
+                );
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+        assert_eq!(
+            base_identity(&dir),
+            identity_before,
+            "a commit that was skipped must leave the file's own identity alone"
+        );
+
+        // Non-vacuity: a replacement that really changes the file does install a
+        // new inode, so the observation above can fail.
+        session
+            .save_raw_document(id, before.revision, DELICATE_YML, &Acknowledgement::none())
+            .expect("the replacement is legal");
+        assert_ne!(
+            base_identity(&dir).0,
+            identity_before.0,
+            "a real commit must be distinguishable from a skipped one"
+        );
+    } // End of function a_byte_identical_replacement_is_a_success_that_writes_nothing()
+
+    /// A raw save never overwrites bytes written after the editor loaded the
+    /// file.
+    ///
+    /// **Design consult Q7's named test, and the highest risk this whole mode
+    /// carries.** The scenario is the one a raw editor makes easy: a person opens
+    /// a file's text, goes away, something else — espanso, vim, a sync agent —
+    /// rewrites the file, and the person then presses save.
+    ///
+    /// Note what the session's own cache says at that moment: **nothing**. It
+    /// still holds the projection the editor loaded, so a pre-check against it
+    /// would *pass*. That is why `save_raw_document` deliberately does not take
+    /// one, and why the check that protects the user is the transaction's, taken
+    /// under the write lock. This test drives exactly that path.
+    ///
+    /// It asserts the outcome **and the disk**, because "reported a conflict" and
+    /// "wrote nothing" are two statements: the other writer's bytes are still
+    /// there, under the same inode, so no rename happened at all.
+    #[test]
+    fn a_stale_raw_save_never_overwrites_the_bytes_written_after_it_loaded() {
+        const OTHER_WRITER: &str = concat!(
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: rewritten by somebody else\n",
+        );
+        const CANDIDATE: &str = "matches:\n  - trigger: ':mine'\n    replace: my own text\n";
+
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+
+        // Something else replaces the file while this session is idle. The
+        // session is deliberately *not* told, which is the whole scenario.
+        fs::write(dir.path().join("match").join("base.yml"), OTHER_WRITER).unwrap();
+        let theirs = ContentRevision::of_bytes(OTHER_WRITER.as_bytes());
+        assert_eq!(
+            session.document(id).expect("the cache answers").revision,
+            before.revision,
+            "the premise: this session still believes the file holds what it loaded"
+        );
+        let identity_before = base_identity(&dir);
+
+        let result = session
+            .save_raw_document(id, before.revision, CANDIDATE, &Acknowledgement::none())
+            .expect("a conflict is an outcome, not a failure");
+        match result {
+            SaveResult::Conflict {
+                expected,
+                found,
+                disk_revision,
+                disk,
+            } => {
+                assert_eq!(expected, before.revision, "the base the editor loaded");
+                assert_eq!(found, theirs, "the bytes that refused the save");
+                assert_eq!(disk_revision, theirs, "the fresh read taken afterwards");
+                assert_eq!(
+                    triggers_of(&disk),
+                    [":one"],
+                    "the payload projects the other writer's file, which is what a raw \
+                     editor has to show"
+                );
+            }
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+
+        // The disk, which is the claim that matters: the other writer's bytes are
+        // untouched, and under the same inode, so nothing was renamed over them.
+        assert_eq!(
+            base_bytes(&dir),
+            OTHER_WRITER,
+            "a stale raw save must not overwrite the bytes written after it loaded"
+        );
+        assert_eq!(
+            base_identity(&dir),
+            identity_before,
+            "and must not have written the file at all"
+        );
+        assert_eq!(
+            session.document(id).expect("the file reads").revision,
+            theirs,
+            "the session is left reading the bytes the next save will be checked against"
+        );
+    } // End of function a_stale_raw_save_never_overwrites_the_bytes_written_after_it_loaded()
+
+    /// A candidate the YAML reader rejects is refused first and committed when
+    /// that finding comes back.
+    ///
+    /// **The owner's ruling, end to end through the command layer.** The consult
+    /// said not to write text the parser rejects; the owner reversed it, because
+    /// refusing means this application cannot repair a file that is already
+    /// broken. So the parse is a **fact the transaction reports**, not a gate:
+    /// first attempt refused with `DocumentDoesNotParse` and nothing written,
+    /// second attempt with that exact finding acknowledged **committed**.
+    ///
+    /// The last third is the reason the ruling exists: the file now on disk does
+    /// not parse, and it is still repairable — a further replacement with valid
+    /// text goes through, with no acknowledgement needed, because the *candidate*
+    /// is what is parsed rather than the target.
+    #[test]
+    fn an_unparseable_candidate_is_refused_and_then_committed_when_acknowledged() {
+        let broken = format!("{BROKEN_PREFIX}\nfirst\n");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+        let identity_before = base_identity(&dir);
+
+        let findings = expect_refused(
+            session
+                .save_raw_document(id, before.revision, &broken, &Acknowledgement::none())
+                .expect("a refusal is an outcome, not a failure"),
+            "a text the reader cannot read",
+        );
+        assert_eq!(findings.len(), 1);
+        assert!(
+            is_parse_rejection(&findings[0]),
+            "the refusal must be the parse rejection: {findings:?}"
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            BASE_YML,
+            "a refused replacement writes nothing"
+        );
+        assert_eq!(base_identity(&dir), identity_before);
+
+        // The same call, with exactly what it was shown, writes it.
+        let result = session
+            .save_raw_document(
+                id,
+                before.revision,
+                &broken,
+                &Acknowledgement::of(&findings),
+            )
+            .expect("the acknowledged replacement proceeds");
+        match result {
+            SaveResult::Saved {
+                committed, moved, ..
+            } => {
+                assert!(committed, "the acknowledged text is written");
+                assert!(moved.is_none());
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+        assert_eq!(base_bytes(&dir), broken, "the user's bytes reach the disk");
+
+        // And a file this application cannot parse is still a file it can repair:
+        // it crosses as a view rather than as an error, and the next replacement
+        // needs no acknowledgement because the *candidate* is what is parsed.
+        let unparseable = session.document(id).expect("a broken file is still a view");
+        assert!(!unparseable.parsed);
+        let repaired = session
+            .save_raw_document(id, unparseable.revision, BASE_YML, &Acknowledgement::none())
+            .expect("repairing a broken file is the point of this mode");
+        match repaired {
+            SaveResult::Saved {
+                committed,
+                backup_taken,
+                ..
+            } => {
+                assert!(committed, "the repair is written");
+                // Not `expect_saved`: this session has already copied this file,
+                // and a second copy is deliberately not taken. The first snapshot
+                // **is** the recoverable pre-commit image, and overwriting it
+                // would be worse than keeping it.
+                assert!(!backup_taken, "one session copies one file once");
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+        assert_eq!(base_bytes(&dir), BASE_YML);
+    } // End of function an_unparseable_candidate_is_refused_and_then_committed_when_acknowledged()
+
+    /// Consent collected for one broken text does not commit another.
+    ///
+    /// **The defect Phase 2b-2c-3a's review found, seen from the command layer.**
+    /// The two candidates share the invalid prefix and differ only after it, so
+    /// the parser stops at the same line, the same column and the same byte with
+    /// the same words — and the finding tells them apart only because it carries
+    /// the **candidate's own content revision**.
+    ///
+    /// The premise is asserted first, so the test cannot pass vacuously on a pair
+    /// that never collided: without it, a `line`/`column` that happened to differ
+    /// would make the refusal below prove nothing.
+    ///
+    /// **The premise is asserted operand by operand**, which is the 2b-2c-3b
+    /// review's fourth finding. Comparing the two whole codes for inequality is
+    /// not the same claim: it would still hold if the line, the column, the byte
+    /// offset or the parser's own message differed, and in that case the
+    /// `revision` operand would *not* be what tells the findings apart — so the
+    /// test would pass while measuring something other than what it is named
+    /// after. Each `revision` is compared against the hash of its **own**
+    /// candidate rather than only against the other, so "content-addressed to the
+    /// candidate" is asserted rather than inferred from a difference.
+    #[test]
+    fn an_acknowledgement_minted_for_another_candidate_does_not_commit_this_one() {
+        let first = format!("{BROKEN_PREFIX}\nfirst\n");
+        let second = format!("{BROKEN_PREFIX}\nsecond and longer\n");
+        assert_ne!(first, second, "the two candidates must really differ");
+
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+
+        let for_first = expect_refused(
+            session
+                .save_raw_document(id, before.revision, &first, &Acknowledgement::none())
+                .expect("a refusal is an outcome"),
+            "the first broken text",
+        );
+        let for_second = expect_refused(
+            session
+                .save_raw_document(id, before.revision, &second, &Acknowledgement::none())
+                .expect("a refusal is an outcome"),
+            "the second broken text",
+        );
+        // The premise: everything the parser said about the two is identical, and
+        // the revision each names is the hash of the text it is about.
+        let (one, two) = (&for_first[0], &for_second[0]);
+        assert_eq!(one.span, two.span);
+        assert_eq!(one.node, two.node);
+        assert_eq!(one.path, two.path);
+        let (
+            espansoconfig_core::validate::FindingCode::DocumentDoesNotParse {
+                revision: first_revision,
+                line: first_line,
+                column: first_column,
+                byte_index: first_byte,
+                detail: first_detail,
+            },
+            espansoconfig_core::validate::FindingCode::DocumentDoesNotParse {
+                revision: second_revision,
+                line: second_line,
+                column: second_column,
+                byte_index: second_byte,
+                detail: second_detail,
+            },
+        ) = (&one.code, &two.code)
+        else {
+            panic!(
+                "both refusals must be parse rejections, got {:?} and {:?}",
+                one.code, two.code
+            );
+        };
+        assert_eq!(first_line, second_line, "the parser stopped on one line");
+        assert_eq!(
+            first_column, second_column,
+            "the parser stopped in one column"
+        );
+        assert_eq!(first_byte, second_byte, "the parser stopped at one byte");
+        assert_eq!(
+            first_detail, second_detail,
+            "the parser said one thing about both"
+        );
+        // And the one operand that does differ, each checked against its own
+        // candidate rather than only against the other.
+        assert_eq!(
+            *first_revision,
+            ContentRevision::of_bytes(first.as_bytes()),
+            "the finding must name the candidate it is about"
+        );
+        assert_eq!(
+            *second_revision,
+            ContentRevision::of_bytes(second.as_bytes()),
+            "the finding must name the candidate it is about"
+        );
+        assert_ne!(
+            first_revision, second_revision,
+            "only the candidate's own revision can be telling these two apart"
+        );
+        let identity_before = base_identity(&dir);
+
+        // The first text's consent, spent on the second text.
+        let refused = expect_refused(
+            session
+                .save_raw_document(
+                    id,
+                    before.revision,
+                    &second,
+                    &Acknowledgement::of(&for_first),
+                )
+                .expect("a refusal is an outcome"),
+            "the second text carrying the first text's acknowledgement",
+        );
+        assert!(is_parse_rejection(&refused[0]));
+        assert_eq!(
+            base_bytes(&dir),
+            BASE_YML,
+            "consent for one text must not write another"
+        );
+        assert_eq!(base_identity(&dir), identity_before);
+
+        // And the right acknowledgement does commit, so the test cannot pass by
+        // refusing everything.
+        session
+            .save_raw_document(
+                id,
+                before.revision,
+                &second,
+                &Acknowledgement::of(&for_second),
+            )
+            .expect("the second text's own acknowledgement proceeds");
+        assert_eq!(base_bytes(&dir), second);
+    } // End of function an_acknowledgement_minted_for_another_candidate_does_not_commit_this_one()
 
     /// An address that does not end in a sequence position is not a move's end.
     ///

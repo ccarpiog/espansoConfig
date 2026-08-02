@@ -22,11 +22,12 @@
 //!
 //! Phase 2 opens the other direction. `commands::move_match` (2b-2a),
 //! `commands::save_match` (2b-2b-3), `commands::create_match` and
-//! `commands::delete_match` (both 2b-2c-2) are the four commands that can write a
-//! user's file, and every one of them does it through
-//! `espansoconfig_core::persist::save_document` and through nothing else — see
-//! `commands` for why there is exactly one entry point and why `save_raw_document`
-//! is still absent.
+//! `commands::delete_match` (both 2b-2c-2) and `commands::save_raw_document`
+//! (2b-2c-3b) are the five commands that can write a user's file, and every one
+//! of them does it through `espansoconfig_core::persist::save_document` and
+//! through nothing else — see `commands` for why there is exactly one entry
+//! point. The fifth is the last of Phase 2b-2c: with it, every command Phase 2b
+//! was scoped to deliver exists.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
@@ -60,7 +61,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the six read-only commands, the four that write, the menu command,
+/// Registers the six read-only commands, the five that write, the menu command,
 /// and the state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
@@ -71,12 +72,12 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// The first six are the read-only workspace surface — read a workspace, list
 /// its files, project one, project one match, read one's bytes, re-read one —
 /// and nothing in that half can write to the disk. `move_match`, `save_match`,
-/// `create_match` and `delete_match` can, and every one of them does it through
-/// `espansoconfig_core::persist::save_document` and through nothing else. The
-/// eleventh, `set_menu_labels`, writes nothing either: it hands the macOS menu
-/// the strings the frontend translated, because Tauri builds that menu in Rust
-/// and hardcoding either language here is what plan section 9 forbids. See
-/// `crate::menu`.
+/// `create_match`, `delete_match` and `save_raw_document` can, and every one of
+/// them does it through `espansoconfig_core::persist::save_document` and through
+/// nothing else. The twelfth, `set_menu_labels`, writes nothing either: it hands
+/// the macOS menu the strings the frontend translated, because Tauri builds that
+/// menu in Rust and hardcoding either language here is what plan section 9
+/// forbids. See `crate::menu`.
 ///
 /// `capabilities/default.json` stays at `"permissions": []`, **including for
 /// the menu**. A capability grants access to **plugin** commands — everything
@@ -85,7 +86,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the eleven is a plugin command. `core:menu`'s permissions exist for a
+/// none of the twelve is a plugin command. `core:menu`'s permissions exist for a
 /// frontend that builds menus through `@tauri-apps/api/menu`; this one does
 /// not, and asks Rust for a rebuild instead, so the empty permission list that
 /// Phase 1b-1's review narrowed to stays exactly as narrow and `core:default`
@@ -106,6 +107,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::save_match,
             commands::create_match,
             commands::delete_match,
+            commands::save_raw_document,
             menu::set_menu_labels,
         ])
 } // End of function register()

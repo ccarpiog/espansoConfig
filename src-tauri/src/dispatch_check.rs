@@ -1,4 +1,4 @@
-//! The eleven commands, invoked through the real dispatcher.
+//! The twelve commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -638,6 +638,142 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
         Some("matches:\n  - trigger: ':one'\n    replace: first\n")
     );
 } // End of function create_and_delete_match_are_reachable_and_their_arguments_deserialize()
+
+/// The fifth command that writes is reachable, and the text it is handed reaches
+/// the disk byte for byte.
+///
+/// **The measurement Phase 2b-2c-3b owes**, and it is four claims a direct call
+/// to [`crate::commands::WorkspaceSession::save_raw_document`] cannot make.
+///
+/// 1. **It is registered and the empty capability set does not block it.**
+/// 2. **A whole document's text deserializes off the wire as a bare JSON
+///    string** — the *inbound* half of the question
+///    `document_text_answers_every_synthetic_fixture_byte_for_byte` asks
+///    outbound. This is the first command whose **argument** is a file's own
+///    text, so the crossing has a direction nothing had measured: the sample
+///    carries a leading BOM, a CRLF pair, a decomposed `é`, an astral character
+///    and a final line with no newline after it, and what is compared is
+///    [`std::fs::read`] of the file afterwards.
+///
+///    **The bytes are read from the disk rather than asked for over the wire**,
+///    which is the 2b-2c-3b review's third finding. `document_text` may serve
+///    this session's cached text, so a version of this test that called it would
+///    have passed for a command that updated the cache without persisting
+///    anything — the one failure a claim about "the disk" exists to exclude. The
+///    temporary directory is bound for exactly that reason.
+/// 3. **`moved` is `null`** — over the dispatcher, where the field is written
+///    rather than omitted. A replacement has no single match to name, and this is
+///    the answer that says so rather than a caller inferring it.
+/// 4. **An unparseable candidate crosses as `refused` in the `Ok` channel**,
+///    carrying `DocumentDoesNotParse`, and handing that exact finding back
+///    **commits it**. That is the owner's ruling as a wire fact: the application
+///    neither refuses a broken file's repair nor writes it silently.
+#[test]
+fn save_raw_document_is_reachable_and_its_text_reaches_the_disk_unchanged() {
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir: dir,
+    } = opened_over_ipc("matches:\n  - trigger: ':one'\n    replace: first\n");
+    // The file every assertion below reads with `std::fs::read`, named once.
+    let target = dir.path().join("match").join("base.yml");
+
+    // Written as escapes so that no editor can normalise this source file into
+    // agreement with itself, exactly as the `document_text` sweep's sample is.
+    let candidate = "\u{feff}matches:\r\n  - trigger: ':caf\u{65}\u{301}'\n    replace: \u{1f600}";
+    let saved = invoke(
+        &webview,
+        "save_raw_document",
+        json!({
+            "document": document_id,
+            "baseRevision": view["revision"],
+            "text": candidate,
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the replacement is legal");
+    assert_eq!(
+        saved["outcome"], "saved",
+        "the outcome must be a flat discriminant, not a tag: {saved}"
+    );
+    assert_eq!(saved["committed"], true);
+    assert_eq!(saved["backup_taken"], true);
+    assert_eq!(
+        saved["notes"],
+        json!([]),
+        "a replacement re-encodes nothing, so it has nothing to disclose: {saved}"
+    );
+    assert!(
+        saved.get("moved").is_some(),
+        "the key must be present, not omitted: {saved}"
+    );
+    assert!(
+        saved["moved"].is_null(),
+        "a replacement has no single match to name: {saved}"
+    );
+
+    // The bytes on the disk, read from the disk: the BOM, the one CRLF pair, the
+    // decomposition and the missing final newline all survived the crossing.
+    // `document_text` is deliberately not what is asked — it may serve this
+    // session's cached text, and a cache is not a file.
+    assert_eq!(
+        fs::read(&target).expect("the file is readable"),
+        candidate.as_bytes(),
+        "the submitted text must be committed exactly as submitted"
+    );
+
+    // Then the owner's ruling, over the wire. A text the parser rejects is
+    // refused first, with a finding to show, and committed when that exact
+    // finding comes back.
+    let refreshed =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let broken = "matches: broken: here\n";
+    let request = json!({
+        "document": document_id,
+        "baseRevision": refreshed["revision"],
+        "text": broken,
+        "acknowledgement": { "accepted": [] },
+    });
+    let refusal =
+        invoke(&webview, "save_raw_document", request.clone()).expect("a refusal is a value");
+    assert_eq!(refusal["outcome"], "refused");
+    let findings = refusal["findings"]
+        .as_array()
+        .expect("a refusal carries its evidence")
+        .clone();
+    assert_eq!(findings.len(), 1);
+    assert!(
+        findings[0]["code"]["DocumentDoesNotParse"].is_object(),
+        "the finding must be the one the owner's ruling is about: {refusal}"
+    );
+    assert_eq!(
+        fs::read(&target).expect("the file is readable"),
+        candidate.as_bytes(),
+        "a refused replacement writes nothing"
+    );
+    assert!(!request.to_string().contains("force"));
+
+    let acknowledged = invoke(
+        &webview,
+        "save_raw_document",
+        json!({
+            "document": document_id,
+            "baseRevision": refreshed["revision"],
+            "text": broken,
+            "acknowledgement": { "accepted": findings },
+        }),
+    )
+    .expect("the acknowledged replacement proceeds");
+    assert_eq!(acknowledged["outcome"], "saved");
+    assert_eq!(acknowledged["committed"], true);
+    assert_eq!(
+        fs::read(&target).expect("the file is readable"),
+        broken.as_bytes(),
+        "the acknowledged text is what reaches the disk"
+    );
+} // End of function save_raw_document_is_reachable_and_its_text_reaches_the_disk_unchanged()
 
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
@@ -1349,7 +1485,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the eight commands.
+/// A page that is not this application cannot reach any of the twelve commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -1361,7 +1497,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All eleven are attempted, and the count is asserted against the registered
+/// **All twelve are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1440,6 +1576,18 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // The fifth, and by far the most destructive: it replaces a file's whole
+        // text with whatever it is handed. A navigated webview must not be able
+        // to overwrite the user's configuration with its own bytes.
+        (
+            "save_raw_document",
+            json!({
+                "document": 0,
+                "baseRevision": "0".repeat(64),
+                "text": "matches: []\n",
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1454,7 +1602,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 11, "the surface is eleven commands");
+    assert_eq!(attempted.len(), 12, "the surface is twelve commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)

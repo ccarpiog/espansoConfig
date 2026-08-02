@@ -13,9 +13,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
-import type { CommandResult } from '../ipc/commands';
+import { classifyFailure } from '../ipc/errors';
+import type { CommandResult, RawSaveOutcome, ReloadAfterRawSave } from '../ipc/commands';
 import type {
   Acknowledgement,
+  ContentRevision,
+  DocumentId,
   DocumentSummary,
   DocumentView,
   Finding,
@@ -126,6 +129,16 @@ interface Script {
    * acknowledgement built from them.
    */
   readonly moves?: readonly CommandResult<SaveResult>[];
+  /**
+   * What `save_raw_document` answers, in order.
+   *
+   * A list for the same reason `moves` is: the interesting case is a refusal
+   * followed by the same text with the acknowledgement built from its findings.
+   * The reload half of the answer is **not** scripted here — the stub below runs
+   * the wrapper's own rule over these, so a test that scripts a commit really
+   * drives the invalidation the state performs.
+   */
+  readonly raws?: readonly CommandResult<SaveResult>[];
 }
 
 /**
@@ -135,9 +148,11 @@ interface Script {
  * @returns The commands, with `vi.fn` wrappers so calls can be counted.
  */
 function scriptedCommands(script: Script = {}): BrowserCommands {
-  // How many moves have been answered. A move is the one command a test drives
-  // more than once with different answers, so its script is consumed in order.
+  // How many moves and how many raw saves have been answered. Those are the two
+  // commands a test drives more than once with different answers, so their
+  // scripts are consumed in order.
   let moves = 0;
+  let raws = 0;
   const documents =
     script.documents ??
     new Map<number, CommandResult<DocumentView>>([
@@ -183,7 +198,42 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
       return answer;
-    })
+    }),
+    saveRawDocument: vi.fn(
+      async (
+        document: DocumentId,
+        _baseRevision: ContentRevision,
+        _text: string,
+        _acknowledgement: Acknowledgement,
+        reload: ReloadAfterRawSave
+      ): Promise<RawSaveOutcome> => {
+        // The wrapper's own rule, repeated here rather than approximated: the
+        // reload runs on a commit and on nothing else, it is awaited, and a
+        // reload that throws leaves the committed result intact. A stub that
+        // simply returned the scripted answer would let a state test claim an
+        // invalidation the real boundary never triggers.
+        const answer: CommandResult<SaveResult> = script.raws?.[raws++] ?? {
+          ok: false,
+          failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+        };
+        if (!answer.ok) {
+          return answer;
+        }
+        if (!(answer.value.outcome === 'saved' && answer.value.committed)) {
+          return { ok: true, value: answer.value, reload: { kind: 'notOwed' } };
+        }
+        try {
+          await reload({ document, revision: answer.value.revision });
+        } catch (raw: unknown) {
+          return {
+            ok: true,
+            value: answer.value,
+            reload: { kind: 'failed', failure: classifyFailure(raw) }
+          };
+        }
+        return { ok: true, value: answer.value, reload: { kind: 'done' } };
+      }
+    ) // End of the scripted save_raw_document
   };
 } // End of function scriptedCommands()
 
@@ -1521,3 +1571,304 @@ describe('moving a snippet', () => {
     void moved;
   }); // End of the "base revision" case
 }); // End of the "moving a snippet" suite
+
+/**
+ * What `match/base.yml` projects to after its whole text was replaced.
+ *
+ * A **new revision**, a **new node** and a different snippet, because that is
+ * what a whole-document replacement really produces: nothing minted from the
+ * previous parse survives it, and there is no `moved` identity to follow.
+ *
+ * @returns The projection of the bytes a replacement wrote.
+ */
+function replacedDocument(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: 'rev-c',
+    matches: [
+      makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':only', label: 'The only one' })
+    ]
+  });
+} // End of function replacedDocument()
+
+/**
+ * A replacement that left the first snippet's own bytes exactly as they were.
+ *
+ * The other half of the re-resolution question: the file was rewritten, so every
+ * identity in it is new, and the snippet the user had selected is nonetheless
+ * still there and still spelled the same way.
+ *
+ * @returns The projection of the bytes such a replacement wrote.
+ */
+function replacedWithTheSameFirstSnippet(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: 'rev-c',
+    matches: [
+      makeMatch({ node: 50, document: 2, revision: 'rev-c', trigger: ':sig', label: 'Signature' })
+    ]
+  });
+} // End of function replacedWithTheSameFirstSnippet()
+
+/**
+ * A committed replacement, as the transaction would report it.
+ *
+ * `moved` is `null` and is not a defensive default: a whole-document replacement
+ * has no single snippet it acted on, so there is no identity for it to carry.
+ */
+const RAW_COMMITTED_VALUE: SaveResult = {
+  outcome: 'saved',
+  revision: 'rev-c',
+  committed: true,
+  notes: [],
+  backup_taken: true,
+  moved: null
+};
+
+/** That replacement, as the boundary would answer it. */
+const RAW_COMMITTED: CommandResult<SaveResult> = { ok: true, value: RAW_COMMITTED_VALUE };
+
+describe("replacing a file's whole text", () => {
+  it('forgets everything cached for the file and reads it again', async () => {
+    // **The invalidation the 2b-2c-3b review's Medium finding asked for**, and it
+    // is performed by this module rather than by whatever a caller passes: the
+    // state's own method takes four arguments and no callback, so there is
+    // nothing a caller could have supplied or forgotten.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    // What is on disk once the replacement has been written.
+    documents.set(2, { ok: true, value: replacedDocument() });
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('saved');
+    // The projection: the one that was written, not the one that was replaced.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    // The identity: dropped rather than re-pointed. A replacement answers
+    // `moved: null` permanently, so there is nothing to follow, and what sits at
+    // the held position is a different snippet.
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+    // The raw viewer's snapshot: of bytes that have just been replaced whole.
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+  }); // End of the "forgets everything cached" case
+
+  it('finds the selection again when the replacement did not change that snippet', async () => {
+    // Positional and **then checked** (R27): the identity is new, the position is
+    // where re-resolution looks, and the source slice is what decides that what it
+    // found is what was selected.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, { ok: true, value: replacedWithTheSameFirstSnippet() });
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    // Held, under the identity the **fresh** parse minted, never the one the
+    // selection was made with.
+    expect(state.selected?.id.node).toBe(50);
+    expect(state.selected?.id.revision).toBe('rev-c');
+    expect(state.notice).toBe('kept');
+  }); // End of the "selection survives" case
+
+  it('changes nothing on the screen when the text was already what the file held', async () => {
+    // `committed: false` is a documented success: no new revision exists, nothing
+    // went stale, and invalidating anyway would make this window discard
+    // projections that are still correct.
+    const unchanged: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-a',
+        committed: false,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({ raws: [unchanged] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('saved');
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+  }); // End of the "committed: false" case
+
+  it('reports a reload that failed and still answers with the committed save', async () => {
+    // **The 2b-2c-3b review's High finding, seen from the state.** The bytes are
+    // on disk; a reload that failed afterwards cannot unwrite them, so it must not
+    // turn a commit into a `null`. It is reported on the same channel every other
+    // failure of this state uses, and the committed outcome still comes back.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/base.yml', kind: 'NotFound' }
+    };
+    const reported: IpcFailure[] = [];
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      saveRawDocument: vi.fn(
+        async (): Promise<RawSaveOutcome> => ({
+          ok: true,
+          value: RAW_COMMITTED_VALUE,
+          reload: { kind: 'failed', failure }
+        })
+      )
+    };
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('saved');
+    expect(outcome?.outcome === 'saved' ? outcome.committed : null).toBe(true);
+    expect(reported).toEqual([failure]);
+    // A failed reload is not a failed workspace either.
+    expect(state.status).toBe('ready');
+    expect(state.failure).toBeNull();
+  }); // End of the "reload failed" case
+
+  it('takes the conflict projection as the one the next save is checked against', async () => {
+    const disk = replacedDocument();
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk
+      }
+    };
+    const commands = scriptedCommands({ raws: [conflict] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('conflict');
+    // Nothing was written by this call, and the answer already carried the parse
+    // of what the file really holds, so no second read was needed.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "conflict" case
+
+  it('re-reads the file when the failure says the rename may have completed', async () => {
+    // A replacement that failed after its rename means the file may already hold a
+    // **whole new text**, so nothing this window caches for it can be vouched for.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: { Write: { Io: { step: 'SyncDirectory', path: '/tmp/espanso/match/base.yml', kind: 'Interrupted', raw_os_error: 4 } } },
+        may_have_written: true
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ documents, raws: [{ ok: false, failure }] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, { ok: true, value: replacedDocument() });
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(outcome).toBeNull();
+    expect(reported).toEqual([failure]);
+    expect(state.status).toBe('ready');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(state.selected).toBeNull();
+  }); // End of the "failed save that may have written" case
+
+  it('leaves the file unprojected, and says so, when the re-read itself fails', async () => {
+    // The honest answer available here: this state cannot describe a file it could
+    // not read, and blanking the workspace over one file would be a bigger claim
+    // than the failure supports. What it must not do is keep the projection it
+    // just invalidated — those are the bytes the replacement destroyed.
+    const unreadable: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/base.yml', kind: 'PermissionDenied' }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    documents.set(2, { ok: false, failure: unreadable });
+    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    // The save committed and is answered as one.
+    expect(outcome?.outcome).toBe('saved');
+    expect(reported).toEqual([unreadable]);
+    // And the stale projection is gone rather than redrawn.
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.scopedDocument).toBeNull();
+  }); // End of the "re-read failed" case
+
+  it('sends the document, the base revision, the text and the acknowledgement, and no flag', async () => {
+    const commands = scriptedCommands({ raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    // The same byte-exact sample the boundary's own test uses: a BOM, a CRLF pair,
+    // a decomposed `e`-acute, an astral character and no final newline.
+    const text = '\u{feff}matches:\r\n  - trigger: ":caf\u{65}\u{301}"\n    replace: \u{1f600}';
+    await state.saveRawDocument(2, 'rev-a', text, NOTHING_ACKNOWLEDGED);
+
+    const call = vi.mocked(commands.saveRawDocument).mock.calls[0]!;
+    expect(call[0]).toBe(2);
+    expect(call[1]).toBe('rev-a');
+    expect(call[2]).toBe(text);
+    expect(call[3]).toEqual({ accepted: [] });
+    // The fifth argument is this module's own invalidation, not a caller's: the
+    // state's method has no such parameter for a caller to pass one through.
+    expect(typeof call[4]).toBe('function');
+    expect(JSON.stringify([call[0], call[1], call[2], call[3]])).not.toContain('force');
+  }); // End of the "arguments" case
+}); // End of the "replacing a file's whole text" suite
