@@ -310,11 +310,20 @@ this application, so the synthetic cases are that surface's only coverage.
 
 `addressed_item` answers `CommandError::MoveNotWithinOneSequence` for a match this projection cannot
 address as a sequence item, and `delete_match` reuses it. The code's own documentation is a negative
-claim about sequence membership and reads correctly; the **dictionary sentence** says
+claim about sequence membership and reads correctly; the **dictionary sentence** said
 *"espansoConfig moves a snippet only inside the list it is already in…"*, which is wrong for a
 deletion. It is unreachable through either command today — every projected match is an item of the
 one root `matches` sequence — so a second code was judged more expensive than the hole. A phase that
 makes it reachable owes the split.
+
+**Half-closed by the cleanup round (§10).** Three commands now raise this code — `create_match`
+reaches it through `placement_of` for an anchor that is not an item of the list, and `delete_match`
+through `addressed_item` — so a person pressing **delete** was being shown a sentence about
+**moving**, in both languages. Both sentences were rewritten to describe the *address* rather than
+the operation, and the Rust and TypeScript doc comments were corrected to say that three commands
+raise it. What is still open is the **name**: `MoveNotWithinOneSequence` is narrower than what the
+code means, and renaming it is a wire change. It is recorded as a follow-up in §6.11 rather than done
+in passing.
 
 ### 6.5 `NewMatch` is two fields, and espanso matches are not
 
@@ -348,6 +357,91 @@ not descended into — but it is a property of the projection rather than of the
 is the one number in this phase that the engine does not hand back. It only affects the identity
 answered in `moved`: a wrong count could not misplace a byte, because the placement the engine acts
 on is `ItemPlacement::End` and not the number.
+
+**Sharpened by the cleanup round (§10): "only the identity" is not "only cosmetic", and the failure
+mode has a name.** The count the command layer holds and the count the planner holds agree today for
+exactly one reason — the projection maps **1:1** over the sequence's items. Nothing enforces that. If
+the projection ever drops or merges an entry — a merge key, an anchor or alias item, a malformed item
+recorded whole rather than as one `MatchView` — the two counts diverge, the landing index points one
+slot off, and `after_a_save` looks up **a different existing snippet** at that path and mints its
+identity. The save is a **success**, the bytes are correct, and the answer is a `MatchId` naming a
+snippet the user never touched; the window then edits or deletes that one. Nothing fails. The
+identity simply lies, and there is no assertion anywhere that would catch it.
+
+The cleanup round narrowed the arithmetic to one spelling — `ItemPlacement::items_above` is now
+public and `create_one_match` calls it instead of re-implementing its three arms (§10) — but
+deliberately did **not** change where the *count* comes from, because the honest fix is a design
+change: the transaction already builds `PendingItem { inserted: Some((before, …)) }` while planning,
+so it can **report where the item landed** and the command can count nothing at all. That is its own
+step, with its own review.
+
+### 6.9 The doubled-separation note is wired to one of the two removal planners
+
+Found by the cleanup round (§10), recorded rather than fixed, because closing it changes what a save
+answers.
+
+`removal_doubles_a_blank_separation` is written **generally**, over *"a removal's runs"* — it reads
+`TriviaIndex::blank_runs` and asks whether a blank run ends where a deleted run starts and another
+begins where it ends. Nothing in it is about sequence items. But only `plan_item_removal` calls it;
+`plan_removal`, the **mapping-entry** removal planner, still hardcodes `note: None`.
+
+**This is reachable today, and not through some future command.** `save_match` → `plan_match_edits`
+emits a `FieldRemoval` whenever a draft clears a field (`DraftField::Remove`), and clearing a field
+that has a blank line above it and a blank line below it leaves the identical doubled gap a deletion
+leaves — with **no** disclosure. So plan §6.2's *never silently normalise* is kept for one removal
+primitive and broken for the other, and §6.1's whole argument applies unchanged to the half that is
+missing.
+
+The fix is not "call the same function from the second planner", because that would be the third
+place the condition is computed from runs. It is to compute the condition **where the runs are
+produced** and hand it to each planner as a fact, and to rename the variant to something
+operation-neutral — `DoubledBlankSeparation` — so that `plan_removal`, and the move when §6.2's half
+is decided, emit the same note rather than a near-duplicate of it. Both halves are wire changes: a
+new note on a save that answered none, and a renamed enum variant with its two dictionaries.
+
+### 6.10 `match_list_of` answers a weaker question than the model's, and re-spells the schema
+
+`MATCH_LIST_KEY = "matches"` and `LOADED_STREAM_DOCUMENT = 0` in `src-tauri/src/commands.rs` restate
+what `crates/espansoconfig-core/src/model/document.rs` already owns: `MATCH_FILE_KEYS` names the key,
+`project_match_file` decides what it means, and it already builds the very path the command
+reconstructs — `matches_path`, handed to `project_sequence` for every `MatchView`. Two spellings of
+one schema fact, in two crates, and the plan's architecture rule says which crate owns it.
+
+**The question the two ask is not the same, and the command's is weaker.** `match_list_of` succeeds
+whenever the decoded key exists in `top_level_keys`. The model distinguishes a `matches:` **modelled
+as a sequence** from a `matches:` **skipped by shape** (`skip_shape`, for a value that is not a
+sequence). So `documentHasNoMatchList` means *no key*, and a document whose `matches:` is a scalar or
+a mapping sails past the command's gate and is refused inside the transaction as
+`saveFailed { error: Patch(NotASequence { … }) }` — a typed refusal, so nothing is lost to a user,
+but the layer that exists to refuse what only it can see fails to see it.
+
+The fix is for `DocumentView` to **publish the match-list path**, set where `project_match_file`
+already computes it, plus a distinct state for *the key is there and is not a list*. The command then
+reads a fact instead of rebuilding one, and the third state gets its own code instead of arriving as
+a failed save.
+
+### 6.11 The wire vocabulary for a position is split in two
+
+`move_match` takes `after: Option<MatchId>`, where `null` means *the front*. `create_match` takes the
+three-valued `NewMatchPosition`, whose own documentation diagnoses the `Option` encoding as the trap
+it was built to avoid — and then leaves that trap in place next door. The result is that one boundary
+spells *where does this snippet go* two different ways, and the two disagree about what `null` is
+allowed to mean.
+
+**"Move to the bottom" has no spelling at all.** A window that wants it must find the file's last
+match itself and pass that identity as an anchor — which is exactly the positional reasoning
+`MatchId` exists to keep out of the window, reintroduced because the vocabulary is missing a word.
+
+The fix is one wire type — `MatchPosition`, three-valued, uniform-object-encoded — used by **both**
+commands, and `ItemMove` taking an `ItemPlacement` the way `InsertItem` already does. That makes the
+core's two item primitives agree about destinations as well, which is the same consolidation §6.9
+asks for on the note side.
+
+**The `MoveNotWithinOneSequence` rename belongs to this step** (§6.4). Three commands raise the code
+and only one of them moves anything; the sentences were corrected in the cleanup round, but the code
+itself is a wire value, shared by the Rust enum, the TypeScript union, the operand table, both
+dictionaries and every `@returns` that names it. Renaming it with the position vocabulary means one
+wire change instead of two.
 
 ---
 
@@ -438,3 +532,72 @@ The public core API accepted the invalid coordinate anyway, and now returns
 out-of-range anchor on a real sequence, which is the honest one here because zero items is exactly
 what an implicit null has. `Front` and `End` are still accepted and are still proven to produce the
 same bytes.
+
+---
+
+## 10. The cleanup round
+
+**Quality only, no behaviour change but one.** After commit `8d223fc` this phase's diff was read by
+**four independent code-quality reviews**, whose findings were deduplicated into one pass. Nothing
+here fixes a defect in bytes written to a user's file; every item is duplication, a claim a doc
+comment could no longer support, or a cost paid for nothing. The one intended user-visible change is
+the pair of sentences in §6.4.
+
+**What changed in the code:**
+
+1. **The save-transaction tail is one function.** `run_one_save` in `src-tauri/src/commands.rs`
+   replaces the ~28 lines that `move_one_match`, `save_one_match`, `create_one_match` and
+   `delete_one_match` each carried: the context clone, the `SaveRequest` literal, and the four-arm
+   `match save_document(request)`. Flagged by three of the four reviews, and the drift they predicted
+   had already started — `delete_one_match` had lost the *"Never `None`. See `WorkspaceSession::open`"*
+   comment its three twins carried. It is documented as the one place the cache-coherency policy
+   (evict on `may_have_written`) lives, and a fifth writing command must call it rather than copy it.
+2. **Two smaller repeats in the same four methods went with it.** `view_at` is the stale-revision
+   refusal, written once; each call site keeps its own explanatory comment, because the *reason* a
+   stale revision is fatal differs per operation. `WorkspaceSession::with_open` is `with_workspace`'s
+   sibling for the writing half, so the *no workspace is open* refusal and the guard destructure are
+   also written once.
+3. **`ItemPlacement::items_above` is public, and `create_one_match` calls it.** The command layer had
+   a hand-written three-arm match that was character-for-character the body of a function whose own
+   documentation claimed to be *"the one place the three cases are turned into it"* — a sentence the
+   copy made false. Flagged by all four reviews. `ItemMove::resulting_index` is public for exactly
+   this reason and `move_one_match` already used it, so the two item primitives now answer *where did
+   it land* the same way. **Where the count comes from did not change**; see §6.8.
+4. **`InsertItem::at(sequence, placement, fields)` is the primary constructor.** Both `insert_item`
+   in the core and `create_one_match` destructured an `ItemPlacement` only to pick one of three
+   constructors that stored the same value back. The three named constructors are kept — they read
+   well at their call sites and the test suite uses them heavily — as one-line sugar over `at`.
+5. **`anchor_index` is the one place an identity becomes an index.** `placement_of` claimed to be
+   that place while `move_one_match` ran the same three gates in the same order beside it. Its doc
+   comment now says what it does. Two sub-points were verified against the code before acting, and
+   both held: `placement_of`'s `document` parameter was `view.id` at its only call site and is gone,
+   and the explicit `anchor.document != document` check was **exactly** redundant —
+   `DocumentView::match_by_id` compares the same two operands first, and `From<IdentityError>` turns
+   its `WrongDocument` into a byte-identical `CommandError::IdentityWrongDocument`. It is removed
+   from both.
+6. **`PresentationNote::edit()` is deleted.** Zero callers anywhere in the workspace; both variants
+   already expose `edit` as a public field. Public API bought for a caller that does not exist.
+7. **The wire-contract tests read `patch/edit.rs` twice instead of four times.**
+   `variants_and_unit_variants_of` answers both questions from one read and one parse;
+   `unit_variants_of`, left with no callers, is gone.
+8. **`after_a_save` no longer clones a whole `DocumentView` per save.** A `DocumentView` owns every
+   trigger and every `replace` body of its file, and the clone existed only to end a borrow before
+   `workspace.evict` — so that two lines later one `MatchId` could be read out of it. A flag ends the
+   borrow just as well. `delete_one_match` passes `at: None`, so the clone was allocated and dropped
+   entirely unread on every deletion. The conditions are unchanged: `committed`, revision equality,
+   and eviction on a failed refresh.
+9. **The `moveNotWithinOneSequence` sentences describe the address, not the operation** (§6.4). Both
+   dictionaries, plus the Rust and TypeScript doc comments. The enum variant is **not** renamed; that
+   is a wire change and is recorded in §6.11.
+
+**What changed in the tests** (no test was deleted and no assertion was weakened): `expect_created`
+was collapsed into `expect_saved` with the operation parameterised, and four call sites that
+destructured `SaveResult::Saved` inline to re-assert the same three facts now route through it;
+`opened_on` replaces the four-line *tree, session, identity, projection* preamble twelve tests
+opened with; `tree_holding` and `base_bytes` moved up beside `open_session` and `id_of`, and
+`suspicious_tree()` is now `tree_holding(SUSPICIOUS_YML)`; and `opened_over_ipc` in
+`src-tauri/src/dispatch_check.rs` replaces the twenty-two-line mock-application preamble four tests
+opened with.
+
+**What was recorded rather than done:** §6.8's sharpening, and §6.9, §6.10 and §6.11. Each is a
+behaviour or design change that deserves its own step and its own review, not a cleanup pass.

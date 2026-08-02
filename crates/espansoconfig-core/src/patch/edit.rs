@@ -685,11 +685,24 @@ pub enum ItemPlacement {
 impl ItemPlacement {
     /// How many of the original items sit **above** the new one.
     ///
-    /// The number [`fold_item_expectations`] needs, and the one place the three
+    /// The number `fold_item_expectations` needs, and the one place the three
     /// cases are turned into it: `Front` is 0, `After(k)` is `k + 1`, and `End`
     /// is however many items the sequence has. A promotion answers 0 without
     /// asking, because the sequence it creates has no items yet.
-    fn items_above(self, items: usize) -> usize {
+    ///
+    /// **Public for [`ItemMove::resulting_index`]'s reason**, and it is the same
+    /// reason: a caller that has just committed an insertion needs to say *which
+    /// item is the new one*, and every identity minted from the previous revision
+    /// is stale, so "the one it asked for" is not an answer. The index the new
+    /// item takes **is** the number of original items above it, so this one
+    /// function answers both questions and a caller cannot hold a second copy of
+    /// the arithmetic that disagrees with the engine's.
+    ///
+    /// It is pure arithmetic and validates nothing. `items` is the sequence's own
+    /// item count; an `After(k)` naming an index the sequence does not have is
+    /// [`EditError::NoSuchDestinationItem`], raised by `plan_item_insertion`
+    /// against a document this function has never seen.
+    pub fn items_above(self, items: usize) -> usize {
         match self {
             ItemPlacement::Front => 0,
             ItemPlacement::After(index) => index + 1,
@@ -699,14 +712,31 @@ impl ItemPlacement {
 } // End of impl ItemPlacement
 
 impl InsertItem {
-    /// Builds an insertion that appends the item after the sequence's last item.
-    pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
+    /// Builds an insertion that writes the item at `placement`.
+    ///
+    /// **The primary constructor**, and the one a caller that already holds an
+    /// [`ItemPlacement`] wants: the three named constructors below are sugar over
+    /// it, so a caller with a placement in hand never has to take it apart and
+    /// put the same value back together again. Destructuring one only to choose
+    /// which constructor stores it unchanged reads as if the three cases differed
+    /// — and it is a third place the three cases are spelled out, which is two
+    /// more than [`ItemPlacement::items_above`] wants there to be.
+    pub fn at(
+        sequence: DocumentPath,
+        placement: ItemPlacement,
+        fields: Vec<(String, String)>,
+    ) -> InsertItem {
         InsertItem {
             sequence,
-            at: ItemPlacement::End,
+            at: placement,
             fields,
         }
-    } // End of function new()
+    } // End of function at()
+
+    /// Builds an insertion that appends the item after the sequence's last item.
+    pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
+        InsertItem::at(sequence, ItemPlacement::End, fields)
+    }
 
     /// Builds an insertion that writes the item after the sequence's `index`-th
     /// item, counted in the **original** document order.
@@ -715,24 +745,16 @@ impl InsertItem {
         index: usize,
         fields: Vec<(String, String)>,
     ) -> InsertItem {
-        InsertItem {
-            sequence,
-            at: ItemPlacement::After(index),
-            fields,
-        }
-    } // End of function after()
+        InsertItem::at(sequence, ItemPlacement::After(index), fields)
+    }
 
     /// Builds an insertion that writes the item above the sequence's first item.
     ///
     /// The destination is the start of that first item's own hull, which is the
     /// same offset [`ItemMove::to_front`] lands on, derived by the same call.
     pub fn to_front(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
-        InsertItem {
-            sequence,
-            at: ItemPlacement::Front,
-            fields,
-        }
-    } // End of function to_front()
+        InsertItem::at(sequence, ItemPlacement::Front, fields)
+    }
 
     /// The sequence the item joins.
     pub fn sequence(&self) -> &DocumentPath {
@@ -941,19 +963,6 @@ pub enum PresentationNote {
         edit: usize,
     },
 } // End of enum PresentationNote
-
-impl PresentationNote {
-    /// The position in the requested batch this note is about.
-    ///
-    /// The one reader that every variant answers, so a caller that only needs to
-    /// say *which* of its edits produced a note does not have to match on the tag.
-    pub fn edit(&self) -> usize {
-        match self {
-            PresentationNote::ScalarRestyled { edit, .. }
-            | PresentationNote::DoubledSequenceSeparation { edit } => *edit,
-        }
-    } // End of function edit()
-} // End of impl PresentationNote
 
 /// A candidate document that has been reparsed and verified.
 ///
@@ -2601,11 +2610,7 @@ pub fn insert_item(
     at: ItemPlacement,
     fields: &[(String, String)],
 ) -> Result<PatchedDocument, EditError> {
-    let edit = match at {
-        ItemPlacement::Front => InsertItem::to_front(sequence.clone(), fields.to_vec()),
-        ItemPlacement::After(index) => InsertItem::after(sequence.clone(), index, fields.to_vec()),
-        ItemPlacement::End => InsertItem::new(sequence.clone(), fields.to_vec()),
-    };
+    let edit = InsertItem::at(sequence.clone(), at, fields.to_vec());
     apply_edits(source, &[DocumentEdit::InsertItem(edit)])
 } // End of function insert_item()
 

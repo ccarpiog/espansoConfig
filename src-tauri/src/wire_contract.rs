@@ -1121,13 +1121,12 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// asserted here rather than assumed.
 #[test]
 fn every_draft_error_variant_crosses_as_an_object() {
-    let declared = crate::dictionary_contract::declared_variants_of("DraftError");
+    let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
         32,
         "DraftError declared 32 refusals when this check was written: {declared:?}"
     );
-    let bare = crate::dictionary_contract::unit_variants_of("DraftError");
     assert!(
         bare.is_empty(),
         "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
@@ -1184,13 +1183,12 @@ fn every_draft_error_variant_crosses_as_an_object() {
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
     for (name, count) in [("EditError", 36), ("SaveError", 9)] {
-        let declared = crate::dictionary_contract::declared_variants_of(name);
+        let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
             count,
             "{name} declared {count} variants when this check was written: {declared:?}"
         );
-        let bare = crate::dictionary_contract::unit_variants_of(name);
         assert!(
             bare.is_empty(),
             "a unit variant of {name} crosses as a bare string, which \

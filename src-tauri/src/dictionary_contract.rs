@@ -580,25 +580,37 @@ pub(crate) fn declared_variants_of(name: &str) -> BTreeSet<String> {
     declared_variants(&read_repository_file(entry.source), name)
 } // End of function declared_variants_of()
 
-/// The variants of one registered enum that declare **no** fields.
+/// One registered enum's declared variants, and the subset of them that declare
+/// **no** fields — both from a **single** read of the file that declares it.
 ///
-/// The twin of [`declared_variants_of`], reading the same [`CODE_ENUMS`] entry
-/// so that neither answer can be about a different file from the other. A unit
-/// variant is the one shape `serde`'s externally tagged representation writes as
-/// a bare JSON string instead of a one-key object, which
-/// `crate::wire_contract::every_draft_error_variant_crosses_as_an_object` needs
-/// to be able to ask about.
+/// A unit variant is the one shape `serde`'s externally tagged representation
+/// writes as a bare JSON string instead of a one-key object, which
+/// `crate::wire_contract::every_draft_error_variant_crosses_as_an_object` and its
+/// `EditError` twin need to be able to ask about. They ask it together with *how
+/// many variants there are*, always: the count is what makes the emptiness claim
+/// a claim about a known declaration rather than a vacuous one (`PROGRESS.md`,
+/// D2w).
+///
+/// Two accessors would read and parse the declaring source once each, and
+/// `EditError` lives in `crates/espansoconfig-core/src/patch/edit.rs`, which is
+/// over four hundred kilobytes. Nothing but test time is at stake, and it is free
+/// to stop spending. Reading the same [`CODE_ENUMS`] entry once also means
+/// neither answer can be about a different file from the other.
 ///
 /// # Panics
 ///
 /// When `name` is not a registered enum, exactly as [`declared_variants_of`].
-pub(crate) fn unit_variants_of(name: &str) -> BTreeSet<String> {
+pub(crate) fn variants_and_unit_variants_of(name: &str) -> (BTreeSet<String>, BTreeSet<String>) {
     let entry = CODE_ENUMS
         .iter()
         .find(|entry| entry.name == name)
         .unwrap_or_else(|| panic!("{name} is not registered in CODE_ENUMS"));
-    unit_variants(&read_repository_file(entry.source), name)
-} // End of function unit_variants_of()
+    let source = read_repository_file(entry.source);
+    (
+        declared_variants(&source, name),
+        unit_variants(&source, name),
+    )
+} // End of function variants_and_unit_variants_of()
 
 /// Every key of one dictionary file, read as JSON.
 fn dictionary_keys(relative: &str) -> BTreeSet<String> {

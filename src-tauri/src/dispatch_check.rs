@@ -216,6 +216,63 @@ fn synthetic_tree() -> TempDir {
     dir
 }
 
+/// A mock application with a one-file tree open, and that file already read.
+///
+/// **The two handles are owned**, so nothing in here borrows anything else: an
+/// [`App`] and a [`WebviewWindow`] can both be moved out of the function that
+/// built them. `_app` and `_dir` are never read again and are kept only because
+/// dropping either would take away, respectively, the runtime the window answers
+/// on and the files the session has open — which is why a caller must bind them
+/// rather than discard them with `..`.
+struct OverIpc {
+    /// The window every `invoke` goes through.
+    webview: WebviewWindow<MockRuntime>,
+    /// The one document's identity, as it crossed the wire.
+    document_id: Value,
+    /// That document's projection, as it crossed the wire.
+    view: Value,
+    /// The application, kept alive for as long as its window is used.
+    _app: App<MockRuntime>,
+    /// The tree, kept alive for as long as the session may read it.
+    _dir: TempDir,
+}
+
+/// A tree whose one match file holds `source`, opened over the real dispatcher.
+///
+/// The preamble every write-path test below began with, in one step: a temporary
+/// tree, the application built on the mock runtime exactly as `main()` builds it,
+/// its main window, then `open_workspace`, `list_documents` and `get_document`
+/// for the one row that comes back. All six are the fixture rather than the
+/// claim; each test states its own claim after them.
+fn opened_over_ipc(source: &str) -> OverIpc {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    fs::write(dir.path().join("match").join("base.yml"), source).unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let rows = invoke(&webview, "list_documents", json!({}))
+        .expect("the workspace is open")
+        .as_array()
+        .expect("a list of summaries")
+        .clone();
+    let document_id = rows[0]["id"].clone();
+    let view =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    OverIpc {
+        webview,
+        document_id,
+        view,
+        _app: app,
+        _dir: dir,
+    }
+} // End of function opened_over_ipc()
+
 /// All six read-only commands are reachable, in order, with `"permissions": []`.
 ///
 /// Half of the answer to the capability question — the menu command is the
@@ -321,29 +378,15 @@ fn the_six_read_only_commands_are_reachable_with_an_empty_capability_set() {
 ///    `get_match` **across the dispatcher** rather than only in Rust.
 #[test]
 fn move_match_is_reachable_and_answers_a_flat_outcome() {
-    let dir = TempDir::new().expect("temp dir");
-    fs::create_dir_all(dir.path().join("match")).unwrap();
-    fs::write(
-        dir.path().join("match").join("base.yml"),
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir,
+    } = opened_over_ipc(
         "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':two'\n    replace: second\n",
-    )
-    .unwrap();
-    let app = mock_app();
-    let webview = main_window(&app);
-    invoke(
-        &webview,
-        "open_workspace",
-        json!({ "root": dir.path().to_string_lossy() }),
-    )
-    .expect("the tree opens");
-    let rows = invoke(&webview, "list_documents", json!({}))
-        .expect("the workspace is open")
-        .as_array()
-        .expect("a list of summaries")
-        .clone();
-    let document_id = rows[0]["id"].clone();
-    let view =
-        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    );
     let held = view["matches"][1]["id"].clone();
 
     let answer = invoke(
@@ -412,29 +455,13 @@ fn move_match_is_reachable_and_answers_a_flat_outcome() {
 ///    findings to hand back.
 #[test]
 fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
-    let dir = TempDir::new().expect("temp dir");
-    fs::create_dir_all(dir.path().join("match")).unwrap();
-    fs::write(
-        dir.path().join("match").join("base.yml"),
-        "matches:\n  - trigger: ':one'\n    replace: first\n",
-    )
-    .unwrap();
-    let app = mock_app();
-    let webview = main_window(&app);
-    invoke(
-        &webview,
-        "open_workspace",
-        json!({ "root": dir.path().to_string_lossy() }),
-    )
-    .expect("the tree opens");
-    let rows = invoke(&webview, "list_documents", json!({}))
-        .expect("the workspace is open")
-        .as_array()
-        .expect("a list of summaries")
-        .clone();
-    let document_id = rows[0]["id"].clone();
-    let view =
-        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir,
+    } = opened_over_ipc("matches:\n  - trigger: ':one'\n    replace: first\n");
     let held = view["matches"][0]["id"].clone();
 
     let answer = invoke(
@@ -517,29 +544,13 @@ fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
 ///    "this build does not send one".
 #[test]
 fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
-    let dir = TempDir::new().expect("temp dir");
-    fs::create_dir_all(dir.path().join("match")).unwrap();
-    fs::write(
-        dir.path().join("match").join("base.yml"),
-        "matches:\n  - trigger: ':one'\n    replace: first\n",
-    )
-    .unwrap();
-    let app = mock_app();
-    let webview = main_window(&app);
-    invoke(
-        &webview,
-        "open_workspace",
-        json!({ "root": dir.path().to_string_lossy() }),
-    )
-    .expect("the tree opens");
-    let rows = invoke(&webview, "list_documents", json!({}))
-        .expect("the workspace is open")
-        .as_array()
-        .expect("a list of summaries")
-        .clone();
-    let document_id = rows[0]["id"].clone();
-    let view =
-        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir,
+    } = opened_over_ipc("matches:\n  - trigger: ':one'\n    replace: first\n");
 
     let created = invoke(
         &webview,
@@ -637,29 +648,15 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
 /// acknowledgement round trip impossible to build.
 #[test]
 fn a_refused_save_crosses_as_a_value_and_carries_its_findings() {
-    let dir = TempDir::new().expect("temp dir");
-    fs::create_dir_all(dir.path().join("match")).unwrap();
-    fs::write(
-        dir.path().join("match").join("base.yml"),
+    let OverIpc {
+        webview,
+        document_id: _document_id,
+        view,
+        _app,
+        _dir,
+    } = opened_over_ipc(
         "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':two'\n    replace: 'hello {{who}}'\n",
-    )
-    .unwrap();
-    let app = mock_app();
-    let webview = main_window(&app);
-    invoke(
-        &webview,
-        "open_workspace",
-        json!({ "root": dir.path().to_string_lossy() }),
-    )
-    .expect("the tree opens");
-    let rows = invoke(&webview, "list_documents", json!({}))
-        .expect("the workspace is open")
-        .as_array()
-        .expect("a list of summaries")
-        .clone();
-    let document_id = rows[0]["id"].clone();
-    let view =
-        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    );
 
     let request = json!({
         "id": view["matches"][1]["id"],

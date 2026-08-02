@@ -347,18 +347,16 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        let mut guard = self.lock();
-        let Some(Open { workspace, backups }) = guard.as_mut() else {
-            return Err(CommandError::NoWorkspaceOpen);
-        };
-        move_one_match(
-            workspace,
-            backups,
-            id,
-            after,
-            base_revision,
-            acknowledgement,
-        )
+        self.with_open(|workspace, backups| {
+            move_one_match(
+                workspace,
+                backups,
+                id,
+                after,
+                base_revision,
+                acknowledgement,
+            )
+        })
     } // End of function move_match()
 
     /// Writes one match's drafted values into its file.
@@ -406,18 +404,16 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        let mut guard = self.lock();
-        let Some(Open { workspace, backups }) = guard.as_mut() else {
-            return Err(CommandError::NoWorkspaceOpen);
-        };
-        save_one_match(
-            workspace,
-            backups,
-            id,
-            draft,
-            base_revision,
-            acknowledgement,
-        )
+        self.with_open(|workspace, backups| {
+            save_one_match(
+                workspace,
+                backups,
+                id,
+                draft,
+                base_revision,
+                acknowledgement,
+            )
+        })
     } // End of function save_match()
 
     /// Writes one new match into a document's top-level `matches` list.
@@ -465,19 +461,17 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        let mut guard = self.lock();
-        let Some(Open { workspace, backups }) = guard.as_mut() else {
-            return Err(CommandError::NoWorkspaceOpen);
-        };
-        create_one_match(
-            workspace,
-            backups,
-            document,
-            new_match,
-            position,
-            base_revision,
-            acknowledgement,
-        )
+        self.with_open(|workspace, backups| {
+            create_one_match(
+                workspace,
+                backups,
+                document,
+                new_match,
+                position,
+                base_revision,
+                acknowledgement,
+            )
+        })
     } // End of function create_match()
 
     /// Deletes one match from its file.
@@ -513,11 +507,9 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        let mut guard = self.lock();
-        let Some(Open { workspace, backups }) = guard.as_mut() else {
-            return Err(CommandError::NoWorkspaceOpen);
-        };
-        delete_one_match(workspace, backups, id, base_revision, acknowledgement)
+        self.with_open(|workspace, backups| {
+            delete_one_match(workspace, backups, id, base_revision, acknowledgement)
+        })
     } // End of function delete_match()
 
     /// Runs `action` against the open workspace, or refuses because there is
@@ -532,6 +524,31 @@ impl WorkspaceSession {
             Some(open) => action(&mut open.workspace),
         }
     } // End of function with_workspace()
+
+    /// Runs `action` against the open workspace **and its backup session**, or
+    /// refuses because there is none.
+    ///
+    /// [`WorkspaceSession::with_workspace`]'s sibling for the four methods that
+    /// write. It exists for the same reason that one does — the refusal for *no
+    /// workspace is open* is written once — and it hands out the two borrows
+    /// separately, which is what lets the planning free functions take a
+    /// `&mut Workspace` and a `&BackupSession` at the same time.
+    ///
+    /// **A writing method uses this one and not [`WorkspaceSession::with_workspace`]**,
+    /// because a save with no [`BackupSession`] is a save with no safety net:
+    /// [`espansoconfig_core::persist::SaveRequest::backups`] is an `Option` whose
+    /// `None` means *no backup at all*, and a method that could not reach the
+    /// session's would have nothing to pass but that.
+    fn with_open<T>(
+        &self,
+        action: impl FnOnce(&mut Workspace, &BackupSession) -> Result<T, CommandError>,
+    ) -> Result<T, CommandError> {
+        let mut guard = self.lock();
+        match guard.as_mut() {
+            None => Err(CommandError::NoWorkspaceOpen),
+            Some(Open { workspace, backups }) => action(workspace, backups),
+        }
+    } // End of function with_open()
 
     /// Locks the session, absorbing poisoning. See the module documentation.
     fn lock(&self) -> MutexGuard<'_, Option<Open>> {
@@ -572,6 +589,147 @@ fn addressed_item(view: &DocumentView, id: MatchId) -> Result<(DocumentPath, usi
     sequence_of(path).ok_or(CommandError::MoveNotWithinOneSequence)
 } // End of function addressed_item()
 
+/// The index the anchor `anchor` names in `sequence`, resolved against `view`.
+///
+/// **The one place an identity becomes an index.** Every writing command that
+/// takes an anchor — a move's `after`, a creation's
+/// [`NewMatchPosition::After`] — asks this, so an anchor cannot get one set of
+/// refusals on one path and another set on the next, and it cannot be resolved
+/// against two different parses.
+///
+/// # Errors
+///
+/// [`CommandError::IdentityWrongDocument`] for an anchor in another file, and
+/// [`CommandError::MoveNotWithinOneSequence`] for an anchor this projection
+/// cannot address as an item of `sequence`.
+///
+/// **The cross-document refusal is [`addressed_item`]'s**, not a check written
+/// here, and the two are the same answer rather than two answers that agree
+/// today: [`DocumentView::match_by_id`] compares the identity's document against
+/// the view's own before anything else, and `From<IdentityError>` turns that into
+/// exactly this code with exactly these operands. `PROGRESS.md` D2r — a move
+/// never crosses a file, and a snippet is created in one document for the same
+/// reason — is kept by that comparison, refused before anything is attempted,
+/// because there is no edit that could express the crossing.
+fn anchor_index(
+    view: &DocumentView,
+    sequence: &DocumentPath,
+    anchor: MatchId,
+) -> Result<usize, CommandError> {
+    let (anchor_sequence, at) = addressed_item(view, anchor)?;
+    if &anchor_sequence != sequence {
+        return Err(CommandError::MoveNotWithinOneSequence);
+    }
+    Ok(at)
+} // End of function anchor_index()
+
+/// The projection of `document`, refused unless it is the revision the caller
+/// drafted, moved, anchored or addressed against.
+///
+/// **The check every writing command takes first, written once.** A
+/// [`DocumentPath`] ending in an index is a *position*, and every one of the four
+/// commands turns an identity into one: a stale identity does not name a missing
+/// entry, it names a **different** one, and it succeeds. The refusal therefore
+/// happens before a batch is derived rather than being left to the transaction's
+/// own optimistic-concurrency check, which compares bytes and would let a
+/// well-formed edit of the wrong node through.
+///
+/// The reborrow is sound because [`Workspace::document_view`] already hands out a
+/// `&DocumentView` from a `&mut self`: the caller's mutable borrow of the
+/// workspace lasts exactly as long as it keeps using the view.
+///
+/// # Errors
+///
+/// [`CommandError::IdentityStaleRevision`], carrying the revision this session
+/// holds and the one the caller sent, plus the read model's own failure for a
+/// document that cannot be projected at all.
+fn view_at(
+    workspace: &mut Workspace,
+    document: DocumentId,
+    base_revision: ContentRevision,
+) -> Result<&DocumentView, CommandError> {
+    let view = workspace.document_view(document)?;
+    if view.revision != base_revision {
+        return Err(CommandError::IdentityStaleRevision {
+            expected: view.revision.to_hex(),
+            found: base_revision.to_hex(),
+        });
+    }
+    Ok(view)
+} // End of function view_at()
+
+/// Hands one derived batch to the save transaction, and brings the session's
+/// cache back in step with whatever happened.
+///
+/// **The tail every writing command shares, and the one place this layer's
+/// cache-coherency policy lives.** A fifth command that writes must call this
+/// rather than copy it: the four outcomes below are not four independent
+/// decisions, they are one policy, and a copy of it drifts silently — the
+/// deletion command had already lost the comment explaining why `backups` is
+/// never `None` by the time this function was extracted.
+///
+/// `at` is *where the operation's match is afterwards*, and each caller computes
+/// it differently — [`after_a_save`] documents which is which, and why the
+/// difference is the reason an address is passed in rather than derived here.
+/// `None` says the operation has no single match to name, which is
+/// [`delete_one_match`]'s routine answer.
+///
+/// # The four outcomes
+///
+/// - **committed, or committed nothing** — [`after_a_save`], which re-reads and
+///   mints the identity when there is one to mint;
+/// - **the file moved on under the lock** — [`conflict_after_the_lock`], which
+///   takes the second read the payload needs;
+/// - **the semantic gate declined** — [`SaveResult::Refused`], carrying the
+///   findings a caller hands back to make the same save proceed;
+/// - **anything else** — [`CommandError::SaveFailed`], and if the failure
+///   [`SaveError::may_have_written`] the cached parse is **evicted**: the rename
+///   may have completed, so the parse may describe bytes that are gone. Dropping
+///   it costs one reparse and stops the window showing a file that no longer
+///   exists in that form.
+///
+/// # Errors
+///
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures, and the
+/// workspace's own for a document context that cannot be read.
+fn run_one_save(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    document: DocumentId,
+    base_revision: ContentRevision,
+    edits: &[DocumentEdit],
+    acknowledgement: &Acknowledgement,
+    at: Option<&DocumentPath>,
+) -> Result<SaveResult, CommandError> {
+    // Cloned so that the immutable borrow of the workspace ends before the save;
+    // the context is a handful of fields from the directory walk, not a parse.
+    let context = workspace.document_context(document)?.clone();
+    let request = SaveRequest {
+        context: &context,
+        base_revision,
+        edits,
+        acknowledgement,
+        // Never `None`. See `WorkspaceSession::open`.
+        backups: Some(backups),
+    };
+    match save_document(request) {
+        Ok(saved) => Ok(after_a_save(workspace, document, at, saved)),
+        Err(SaveError::RevisionMismatch {
+            expected, found, ..
+        }) => conflict_after_the_lock(workspace, document, expected, found),
+        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
+            verdict: refusal.verdict,
+            findings: refusal.findings,
+        }),
+        Err(error) => {
+            if error.may_have_written() {
+                let _ = workspace.evict(document);
+            }
+            Err(CommandError::SaveFailed { error })
+        }
+    } // End of the match over the transaction's four outcomes
+} // End of function run_one_save()
+
 /// Plans and runs one move against an open workspace.
 ///
 /// A free function rather than a method so that the session's mutex guard is
@@ -585,35 +743,14 @@ fn move_one_match(
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
 ) -> Result<SaveResult, CommandError> {
-    let view = workspace.document_view(id.document)?;
-    if view.revision != base_revision {
-        // The caller is editing against a parse this session no longer holds. Its
-        // paths are positions in that parse, so planning against them would move
-        // whatever now occupies the position rather than what was selected.
-        return Err(CommandError::IdentityStaleRevision {
-            expected: view.revision.to_hex(),
-            found: base_revision.to_hex(),
-        });
-    }
+    // A caller editing against a parse this session no longer holds is refused
+    // here: its paths are positions in that parse, so planning against them would
+    // move whatever now occupies the position rather than what was selected.
+    let view = view_at(workspace, id.document, base_revision)?;
     let (sequence, from) = addressed_item(view, id)?;
-    let destination = match after {
-        None => None,
-        Some(anchor) => {
-            if anchor.document != id.document {
-                // D2r: a move never crosses a file. Refused here rather than
-                // attempted, because there is no edit that could express it.
-                return Err(CommandError::IdentityWrongDocument {
-                    expected: id.document.get(),
-                    found: anchor.document.get(),
-                });
-            }
-            let (anchor_sequence, at) = addressed_item(view, anchor)?;
-            if anchor_sequence != sequence {
-                return Err(CommandError::MoveNotWithinOneSequence);
-            }
-            Some(at)
-        }
-    };
+    let destination = after
+        .map(|anchor| anchor_index(view, &sequence, anchor))
+        .transpose()?;
 
     let edit = match destination {
         None => ItemMove::to_front(sequence.clone().with_index(from)),
@@ -621,40 +758,17 @@ fn move_one_match(
     };
     // Where the item will be afterwards, from the engine's own arithmetic rather
     // than from a second copy of it (`ItemMove::resulting_index`).
-    let landing = edit.resulting_index(from);
-    let landed = sequence.with_index(landing);
-    // Cloned so that the immutable borrow of the workspace ends before the save;
-    // the context is a handful of fields from the directory walk, not a parse.
-    let context = workspace.document_context(id.document)?.clone();
+    let landed = sequence.with_index(edit.resulting_index(from));
     let edits = [DocumentEdit::MoveItem(edit)];
-
-    let request = SaveRequest {
-        context: &context,
+    run_one_save(
+        workspace,
+        backups,
+        id.document,
         base_revision,
-        edits: &edits,
+        &edits,
         acknowledgement,
-        // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(backups),
-    };
-    match save_document(request) {
-        Ok(saved) => Ok(after_a_save(workspace, id.document, Some(&landed), saved)),
-        Err(SaveError::RevisionMismatch {
-            expected, found, ..
-        }) => conflict_after_the_lock(workspace, id.document, expected, found),
-        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
-            verdict: refusal.verdict,
-            findings: refusal.findings,
-        }),
-        Err(error) => {
-            if error.may_have_written() {
-                // The rename may have completed, so the cached parse may describe
-                // bytes that are gone. Dropping it costs one reparse and stops the
-                // window showing a file that no longer exists in that form.
-                let _ = workspace.evict(id.document);
-            }
-            Err(CommandError::SaveFailed { error })
-        }
-    }
+        Some(&landed),
+    )
 } // End of function move_one_match()
 
 /// Plans and runs one drafted match save against an open workspace.
@@ -704,16 +818,11 @@ fn save_one_match(
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
 ) -> Result<SaveResult, CommandError> {
-    let view = workspace.document_view(id.document)?;
-    if view.revision != base_revision {
-        // The caller drafted against a parse this session no longer holds. See
-        // `WorkspaceSession::save_match`: a stale index names a different entry
-        // rather than a missing one, so this is refused rather than attempted.
-        return Err(CommandError::IdentityStaleRevision {
-            expected: view.revision.to_hex(),
-            found: base_revision.to_hex(),
-        });
-    }
+    // A caller that drafted against a parse this session no longer holds is
+    // refused here. See `WorkspaceSession::save_match`: a stale index names a
+    // different entry rather than a missing one, so this is refused rather than
+    // attempted.
+    let view = view_at(workspace, id.document, base_revision)?;
     let found = view.match_by_id(id)?;
     // The match's own address, captured before the save because the projection it
     // comes from is about to be replaced. A scalar save does not relocate the
@@ -723,35 +832,15 @@ fn save_one_match(
     let at = found.path.clone();
     let edits =
         plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
-    // Cloned so that the immutable borrow of the workspace ends before the save.
-    let context = workspace.document_context(id.document)?.clone();
-
-    let request = SaveRequest {
-        context: &context,
+    run_one_save(
+        workspace,
+        backups,
+        id.document,
         base_revision,
-        edits: &edits,
+        &edits,
         acknowledgement,
-        // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(backups),
-    };
-    match save_document(request) {
-        Ok(saved) => Ok(after_a_save(workspace, id.document, at.as_ref(), saved)),
-        Err(SaveError::RevisionMismatch {
-            expected, found, ..
-        }) => conflict_after_the_lock(workspace, id.document, expected, found),
-        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
-            verdict: refusal.verdict,
-            findings: refusal.findings,
-        }),
-        Err(error) => {
-            if error.may_have_written() {
-                // The rename may have completed, so the cached parse may describe
-                // bytes that are gone — `move_one_match`'s reasoning, unchanged.
-                let _ = workspace.evict(id.document);
-            }
-            Err(CommandError::SaveFailed { error })
-        }
-    }
+        at.as_ref(),
+    )
 } // End of function save_one_match()
 
 /// The document's top-level `matches` list, or the refusal that it has none.
@@ -785,20 +874,21 @@ fn match_list_of(view: &DocumentView) -> Result<DocumentPath, CommandError> {
 
 /// Turns a wire position into the placement the patch engine takes.
 ///
-/// **The one place an identity becomes an index**, and the reason it is one
-/// place: an anchor resolved twice could be resolved against two different
-/// parses. Every refusal a move's anchor gets, a creation's anchor gets, by the
-/// same call ([`addressed_item`]) against the same projection.
+/// Two of the three values are the same word on both sides of the boundary; the
+/// third carries an identity, and turning that into an index is
+/// [`anchor_index`]'s job rather than a second resolution written here. So a
+/// creation's anchor gets exactly the refusals a move's anchor gets, from the
+/// same call against the same projection.
 ///
 /// # Errors
 ///
-/// [`CommandError::IdentityWrongDocument`] for an anchor in another file — a
-/// snippet is created in one document, exactly as a move stays in one
-/// (`PROGRESS.md` D2r) — and [`CommandError::MoveNotWithinOneSequence`] for an
-/// anchor this projection cannot address as an item of `sequence`.
+/// [`anchor_index`]'s, unchanged: [`CommandError::IdentityWrongDocument`] for an
+/// anchor in another file — a snippet is created in one document, exactly as a
+/// move stays in one (`PROGRESS.md` D2r) — and
+/// [`CommandError::MoveNotWithinOneSequence`] for an anchor this projection
+/// cannot address as an item of `sequence`.
 fn placement_of(
     view: &DocumentView,
-    document: DocumentId,
     sequence: &DocumentPath,
     position: &NewMatchPosition,
 ) -> Result<ItemPlacement, CommandError> {
@@ -806,17 +896,7 @@ fn placement_of(
         NewMatchPosition::Front {} => Ok(ItemPlacement::Front),
         NewMatchPosition::End {} => Ok(ItemPlacement::End),
         NewMatchPosition::After { anchor } => {
-            if anchor.document != document {
-                return Err(CommandError::IdentityWrongDocument {
-                    expected: document.get(),
-                    found: anchor.document.get(),
-                });
-            }
-            let (anchor_sequence, at) = addressed_item(view, *anchor)?;
-            if &anchor_sequence != sequence {
-                return Err(CommandError::MoveNotWithinOneSequence);
-            }
-            Ok(ItemPlacement::After(at))
+            Ok(ItemPlacement::After(anchor_index(view, sequence, *anchor)?))
         }
     } // End of the match over the three wire positions
 } // End of function placement_of()
@@ -846,67 +926,38 @@ fn create_one_match(
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
 ) -> Result<SaveResult, CommandError> {
-    let view = workspace.document_view(document)?;
-    if view.revision != base_revision {
-        // The caller chose an anchor in a parse this session no longer holds. An
-        // identity resolved against another parse names a position, and a position
-        // is not an identity.
-        return Err(CommandError::IdentityStaleRevision {
-            expected: view.revision.to_hex(),
-            found: base_revision.to_hex(),
-        });
-    }
+    // A caller that chose an anchor in a parse this session no longer holds is
+    // refused here: an identity resolved against another parse names a position,
+    // and a position is not an identity.
+    let view = view_at(workspace, document, base_revision)?;
     let sequence = match_list_of(view)?;
-    let placement = placement_of(view, document, &sequence, position)?;
+    let placement = placement_of(view, &sequence, position)?;
     // Where the new item will be: the index it takes is the number of original
-    // items above it, which is exactly what `ItemPlacement` says. The `End` arm
-    // counts the projection's matches, and that count is the sequence's own item
-    // count rather than an approximation of it — a `matches` entry the schema does
-    // not recognise still produces one `MatchView`, recorded by span and not
-    // descended into (`DiagnosticCode::MatchIsNotAMapping`), so positions never
-    // shift. A bare `matches:` projects zero of them and the promoted item lands
-    // at 0, which is the same answer.
-    let landing = match placement {
-        ItemPlacement::Front => 0,
-        ItemPlacement::After(at) => at + 1,
-        ItemPlacement::End => view.matches.len(),
-    };
-    let landed = sequence.clone().with_index(landing);
-    let edit = match placement {
-        ItemPlacement::Front => InsertItem::to_front(sequence, new_match.fields()),
-        ItemPlacement::After(at) => InsertItem::after(sequence, at, new_match.fields()),
-        ItemPlacement::End => InsertItem::new(sequence, new_match.fields()),
-    };
-    // Cloned so that the immutable borrow of the workspace ends before the save.
-    let context = workspace.document_context(document)?.clone();
-    let edits = [DocumentEdit::InsertItem(edit)];
-
-    let request = SaveRequest {
-        context: &context,
+    // items above it, which is the engine's own arithmetic
+    // (`ItemPlacement::items_above`) rather than a second copy of it. The count
+    // handed to it is the projection's matches, and that count is the sequence's
+    // own item count rather than an approximation of it — a `matches` entry the
+    // schema does not recognise still produces one `MatchView`, recorded by span
+    // and not descended into (`DiagnosticCode::MatchIsNotAMapping`), so positions
+    // never shift. A bare `matches:` projects zero of them and the promoted item
+    // lands at 0, which is the same answer.
+    let landed = sequence
+        .clone()
+        .with_index(placement.items_above(view.matches.len()));
+    let edits = [DocumentEdit::InsertItem(InsertItem::at(
+        sequence,
+        placement,
+        new_match.fields(),
+    ))];
+    run_one_save(
+        workspace,
+        backups,
+        document,
         base_revision,
-        edits: &edits,
+        &edits,
         acknowledgement,
-        // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(backups),
-    };
-    match save_document(request) {
-        Ok(saved) => Ok(after_a_save(workspace, document, Some(&landed), saved)),
-        Err(SaveError::RevisionMismatch {
-            expected, found, ..
-        }) => conflict_after_the_lock(workspace, document, expected, found),
-        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
-            verdict: refusal.verdict,
-            findings: refusal.findings,
-        }),
-        Err(error) => {
-            if error.may_have_written() {
-                // The rename may have completed, so the cached parse may describe
-                // bytes that are gone — `move_one_match`'s reasoning, unchanged.
-                let _ = workspace.evict(document);
-            }
-            Err(CommandError::SaveFailed { error })
-        }
-    }
+        Some(&landed),
+    )
 } // End of function create_one_match()
 
 /// Plans and runs one deletion against an open workspace.
@@ -937,44 +988,22 @@ fn delete_one_match(
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
 ) -> Result<SaveResult, CommandError> {
-    let view = workspace.document_view(id.document)?;
-    if view.revision != base_revision {
-        return Err(CommandError::IdentityStaleRevision {
-            expected: view.revision.to_hex(),
-            found: base_revision.to_hex(),
-        });
-    }
+    // A stale identity is refused before it can be turned into an index that
+    // still resolves — to a different snippet. See this function's own note above.
+    let view = view_at(workspace, id.document, base_revision)?;
     let (sequence, at) = addressed_item(view, id)?;
-    // Cloned so that the immutable borrow of the workspace ends before the save.
-    let context = workspace.document_context(id.document)?.clone();
     let edits = [DocumentEdit::RemoveItem(RemoveItem::new(
         sequence.with_index(at),
     ))];
-
-    let request = SaveRequest {
-        context: &context,
+    run_one_save(
+        workspace,
+        backups,
+        id.document,
         base_revision,
-        edits: &edits,
+        &edits,
         acknowledgement,
-        // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(backups),
-    };
-    match save_document(request) {
-        Ok(saved) => Ok(after_a_save(workspace, id.document, None, saved)),
-        Err(SaveError::RevisionMismatch {
-            expected, found, ..
-        }) => conflict_after_the_lock(workspace, id.document, expected, found),
-        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
-            verdict: refusal.verdict,
-            findings: refusal.findings,
-        }),
-        Err(error) => {
-            if error.may_have_written() {
-                let _ = workspace.evict(id.document);
-            }
-            Err(CommandError::SaveFailed { error })
-        }
-    }
+        None,
+    )
 } // End of function delete_one_match()
 
 /// Describes the disk side of a conflict, with a read taken **after** the lock
@@ -1066,22 +1095,29 @@ fn after_a_save(
     at: Option<&DocumentPath>,
     saved: SavedDocument,
 ) -> SaveResult {
-    let refreshed = match workspace.refresh(document) {
-        Ok(fresh) => Some(fresh.view.clone()),
-        Err(_) => None,
-    };
-    if refreshed.is_none() {
+    // A flag rather than a clone of the fresh view: the borrow only has to end
+    // before `evict`, and the answer taken out of it is one `MatchId`, while a
+    // `DocumentView` owns every trigger and every `replace` body of the file.
+    let mut lost = false;
+    let moved = match workspace.refresh(document) {
+        Ok(fresh) => at
+            .filter(|_| saved.committed && fresh.view.revision == saved.revision)
+            .and_then(|address| {
+                fresh
+                    .view
+                    .matches
+                    .iter()
+                    .find(|candidate| candidate.path.as_ref() == Some(address))
+                    .map(|candidate| candidate.id)
+            }),
+        Err(_) => {
+            lost = true;
+            None
+        }
+    }; // End of the match over the re-read that follows every save
+    if lost {
         let _ = workspace.evict(document);
     }
-    let moved = refreshed
-        .filter(|view| saved.committed && view.revision == saved.revision)
-        .zip(at)
-        .and_then(|(view, address)| {
-            view.matches
-                .iter()
-                .find(|candidate| candidate.path.as_ref() == Some(address))
-                .map(|candidate| candidate.id)
-        });
     SaveResult::Saved {
         revision: saved.revision,
         committed: saved.committed,
@@ -1345,7 +1381,7 @@ mod tests {
     use std::path::Path;
 
     use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft, NewMatch};
-    use espansoconfig_core::model::MatchId;
+    use espansoconfig_core::model::{DocumentView, MatchId};
     use espansoconfig_core::patch::PresentationNote;
     use espansoconfig_core::persist::Acknowledgement;
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
@@ -1390,6 +1426,19 @@ mod tests {
         dir
     } // End of function synthetic_tree()
 
+    /// A tree whose one match file holds `source`.
+    fn tree_holding(source: &str) -> TempDir {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(dir.path().join("match").join("base.yml"), source).unwrap();
+        dir
+    }
+
+    /// The bytes of `<root>/match/base.yml`.
+    fn base_bytes(dir: &TempDir) -> String {
+        fs::read_to_string(dir.path().join("match").join("base.yml")).expect("the file reads back")
+    }
+
     /// A session with the synthetic tree open.
     fn open_session(dir: &TempDir) -> WorkspaceSession {
         let session = WorkspaceSession::new();
@@ -1408,6 +1457,43 @@ mod tests {
             .unwrap_or_else(|| panic!("no document at {relative}"))
             .id
     }
+
+    /// Everything a one-file editing test starts from.
+    ///
+    /// Four values that always travel together, and none of them borrows another:
+    /// [`WorkspaceSession::document`] answers an **owned** [`DocumentView`], so a
+    /// helper can hand back the projection alongside the session it came from.
+    /// The temporary directory is here because it must outlive the session — a
+    /// `TempDir` deletes its tree when it drops.
+    struct Opened {
+        /// The tree, kept alive for as long as the test needs the files.
+        dir: TempDir,
+        /// A session with that tree open.
+        session: WorkspaceSession,
+        /// The identity of `match/base.yml`.
+        id: DocumentId,
+        /// That document's projection, read once before anything is written.
+        before: DocumentView,
+    }
+
+    /// A tree holding `source`, opened, with its one file already projected.
+    ///
+    /// The four lines every editing test below opened with. They are together
+    /// here because they are one step — *"a file that says this, ready to be
+    /// edited"* — and spelling it out thirteen times taught the shape of the
+    /// fixture rather than the claim under test.
+    fn opened_on(source: &str) -> Opened {
+        let dir = tree_holding(source);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        Opened {
+            dir,
+            session,
+            id,
+            before,
+        }
+    } // End of function opened_on()
 
     /// A match's `trigger` text, or an empty string.
     fn trigger_text(view: &espansoconfig_core::model::MatchView) -> &str {
@@ -1995,10 +2081,7 @@ mod tests {
 
     /// A tree whose one match file is [`SUSPICIOUS_YML`].
     fn suspicious_tree() -> TempDir {
-        let dir = TempDir::new().expect("temp dir");
-        fs::create_dir_all(dir.path().join("match")).unwrap();
-        fs::write(dir.path().join("match").join("base.yml"), SUSPICIOUS_YML).unwrap();
-        dir
+        tree_holding(SUSPICIOUS_YML)
     }
 
     /// The triggers of a document's matches, in projection order.
@@ -2010,7 +2093,20 @@ mod tests {
     }
 
     /// The `Saved` arm, or a panic naming what arrived instead.
-    fn expect_saved(result: SaveResult) -> (espansoconfig_core::ContentRevision, Option<MatchId>) {
+    ///
+    /// Answers the revision and the identity the command minted, and asserts on
+    /// the way past what **every** committing save of these tests shares: it
+    /// committed, it took a backup, and it changed no value's spelling. `what`
+    /// names the operation, so a failure says which kind of save broke the shared
+    /// claim rather than only that one did.
+    ///
+    /// A save that deliberately does **not** commit, or that owes a presentation
+    /// note, states its own three answers at its call site: they are the claim
+    /// under test there, not a shared background fact.
+    fn expect_saved(
+        result: SaveResult,
+        what: &str,
+    ) -> (espansoconfig_core::ContentRevision, Option<MatchId>) {
         match result {
             SaveResult::Saved {
                 revision,
@@ -2019,10 +2115,10 @@ mod tests {
                 backup_taken,
                 moved,
             } => {
-                assert!(committed, "a move always changes the file's bytes");
+                assert!(committed, "a {what} always changes the file's bytes");
                 assert!(
                     notes.is_empty(),
-                    "a move copies the item's own bytes and re-encodes no scalar"
+                    "a {what} needs no presentation change: {notes:?}"
                 );
                 assert!(backup_taken, "the session must have copied the file first");
                 (revision, moved)
@@ -2050,7 +2146,7 @@ mod tests {
         let result = session
             .move_match(held, None, before.revision, &Acknowledgement::none())
             .expect("the move is legal");
-        let (revision, moved) = expect_saved(result);
+        let (revision, moved) = expect_saved(result, "move");
         assert_ne!(revision, before.revision, "the file was rewritten");
 
         let moved = moved.expect("a committed move names the item it moved");
@@ -2222,6 +2318,7 @@ mod tests {
             session
                 .move_match(first, Some(last), before.revision, &Acknowledgement::none())
                 .expect("the move is legal"),
+            "move",
         );
 
         let after = session.document(id).expect("the file still reads");
@@ -2521,6 +2618,7 @@ mod tests {
             session
                 .move_match(held, None, before.revision, &acknowledgement)
                 .expect("the acknowledged move proceeds"),
+            "move",
         );
         assert!(moved.is_some());
         let after = session.document(id).expect("the file still reads");
@@ -2595,6 +2693,7 @@ mod tests {
                     &Acknowledgement::none(),
                 )
                 .expect("the move is legal"),
+            "move",
         );
         assert!(backups.is_dir(), "the first change writes a copy");
 
@@ -2692,25 +2791,7 @@ mod tests {
                 &Acknowledgement::none(),
             )
             .expect("the draft plans and the save runs");
-        let SaveResult::Saved {
-            revision,
-            committed,
-            notes,
-            backup_taken,
-            moved,
-        } = result
-        else {
-            panic!("expected a saved result");
-        };
-        assert!(
-            committed,
-            "the value really changed, so the file was written"
-        );
-        assert!(backup_taken, "the session must have copied the file first");
-        assert!(
-            notes.is_empty(),
-            "a plain value replaced by another plain value changes no presentation: {notes:?}"
-        );
+        let (revision, moved) = expect_saved(result, "scalar save");
         assert_ne!(revision, before.revision);
 
         let saved = moved.expect("a committed scalar save names the match it saved");
@@ -3010,19 +3091,6 @@ mod tests {
         "    replace: second\n",
     );
 
-    /// A tree whose one match file holds `source`.
-    fn tree_holding(source: &str) -> TempDir {
-        let dir = TempDir::new().expect("temp dir");
-        fs::create_dir_all(dir.path().join("match")).unwrap();
-        fs::write(dir.path().join("match").join("base.yml"), source).unwrap();
-        dir
-    }
-
-    /// The bytes of `<root>/match/base.yml`.
-    fn base_bytes(dir: &TempDir) -> String {
-        fs::read_to_string(dir.path().join("match").join("base.yml")).expect("the file reads back")
-    }
-
     /// The snippet these tests create, hand-authored and neutral.
     fn new_snippet() -> NewMatch {
         NewMatch {
@@ -3043,10 +3111,12 @@ mod tests {
     /// when the call was made.
     #[test]
     fn a_created_match_is_appended_and_answers_with_its_new_identity() {
-        let dir = tree_holding(TWO_SNIPPETS);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
         let held = before.matches[0].id;
 
         let result = session
@@ -3058,22 +3128,7 @@ mod tests {
                 &Acknowledgement::none(),
             )
             .expect("the creation is legal");
-        let SaveResult::Saved {
-            revision,
-            committed,
-            notes,
-            backup_taken,
-            moved,
-        } = result
-        else {
-            panic!("expected a saved result");
-        };
-        assert!(committed, "a creation always changes the file's bytes");
-        assert!(backup_taken, "the session must have copied the file first");
-        assert!(
-            notes.is_empty(),
-            "two plain values need no presentation change: {notes:?}"
-        );
+        let (revision, moved) = expect_saved(result, "creation");
         assert_ne!(revision, before.revision);
 
         assert_eq!(
@@ -3125,12 +3180,14 @@ mod tests {
             "  - trigger: ':one'\n",
             "    replace: first\n",
         );
-        let dir = tree_holding(source);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(source);
 
-        let (_, created) = expect_created(
+        let (_, created) = expect_saved(
             session
                 .create_match(
                     id,
@@ -3140,6 +3197,7 @@ mod tests {
                     &Acknowledgement::none(),
                 )
                 .expect("the creation is legal"),
+            "creation",
         );
         assert_eq!(
             base_bytes(&dir),
@@ -3171,13 +3229,15 @@ mod tests {
     /// the projection the caller was shown.
     #[test]
     fn a_created_match_after_an_anchor_lands_after_it() {
-        let dir = tree_holding(TWO_SNIPPETS);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
         let anchor = before.matches[0].id;
 
-        let (_, created) = expect_created(
+        let (_, created) = expect_saved(
             session
                 .create_match(
                     id,
@@ -3187,6 +3247,7 @@ mod tests {
                     &Acknowledgement::none(),
                 )
                 .expect("the creation is legal"),
+            "creation",
         );
         assert_eq!(
             base_bytes(&dir),
@@ -3229,16 +3290,18 @@ mod tests {
             "    params:\n",
             "      echo: hello\n",
         );
-        let dir = tree_holding(source);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(source);
         assert!(
             before.matches.is_empty(),
             "the fixture must start with no snippet, or it proves nothing"
         );
 
-        expect_created(
+        expect_saved(
             session
                 .create_match(
                     id,
@@ -3248,6 +3311,7 @@ mod tests {
                     &Acknowledgement::none(),
                 )
                 .expect("a bare key is promoted, not refused"),
+            "creation",
         );
         assert_eq!(
             base_bytes(&dir),
@@ -3277,10 +3341,12 @@ mod tests {
     fn a_document_with_no_matches_key_is_refused_by_name_and_writes_nothing() {
         const NO_LIST: &str =
             "global_vars:\n  - name: greeting\n    type: echo\n    params:\n      echo: hello\n";
-        let dir = tree_holding(NO_LIST);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(NO_LIST);
 
         let error = session
             .create_match(
@@ -3358,31 +3424,18 @@ mod tests {
             "  - trigger: ':three'\n",
             "    replace: third\n",
         );
-        let dir = tree_holding(source);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(source);
         let held = before.matches[1].id;
 
         let result = session
             .delete_match(held, before.revision, &Acknowledgement::none())
             .expect("the deletion is legal");
-        let SaveResult::Saved {
-            committed,
-            backup_taken,
-            notes,
-            moved,
-            ..
-        } = result
-        else {
-            panic!("expected a saved result");
-        };
-        assert!(committed);
-        assert!(backup_taken);
-        assert!(
-            notes.is_empty(),
-            "a removal re-encodes no scalar: {notes:?}"
-        );
+        let (_, moved) = expect_saved(result, "deletion");
         assert!(
             moved.is_none(),
             "a deleted snippet has no identity in the new revision"
@@ -3417,10 +3470,12 @@ mod tests {
     #[test]
     fn deleting_the_only_match_is_refused_by_the_engine() {
         const ONLY_ONE: &str = "matches:\n  - trigger: ':one'\n    replace: first\n";
-        let dir = tree_holding(ONLY_ONE);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id: _id,
+            before,
+        } = opened_on(ONLY_ONE);
 
         let error = session
             .delete_match(
@@ -3476,10 +3531,12 @@ mod tests {
     /// The **disclosure** those bytes owe is the test below this one.
     #[test]
     fn a_deletion_between_blank_separated_snippets_leaves_both_blank_lines() {
-        let dir = tree_holding(BLANK_SEPARATED);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id: _id,
+            before,
+        } = opened_on(BLANK_SEPARATED);
 
         session
             .delete_match(
@@ -3518,10 +3575,12 @@ mod tests {
     /// rather than a label every deletion carries.
     #[test]
     fn deletion_that_creates_doubled_separation_returns_a_layout_presentation_note() {
-        let dir = tree_holding(BLANK_SEPARATED);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id: _id,
+            before,
+        } = opened_on(BLANK_SEPARATED);
 
         let result = session
             .delete_match(
@@ -3593,10 +3652,12 @@ mod tests {
     /// be there.
     #[test]
     fn delete_match_never_deletes_the_item_at_a_stale_ids_old_path() {
-        let dir = tree_holding(TWO_SNIPPETS);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
         assert_eq!(triggers_of(&before), [":one", ":two"]);
         // B, and the revision it was minted from. Both go stale below.
         let held = before.matches[1].id;
@@ -3607,7 +3668,7 @@ mod tests {
         let stale_revision = before.revision;
 
         // X is created at the front and committed, so everything shifts down one.
-        expect_created(
+        expect_saved(
             session
                 .create_match(
                     id,
@@ -3617,6 +3678,7 @@ mod tests {
                     &Acknowledgement::none(),
                 )
                 .expect("the creation is legal"),
+            "creation",
         );
         let after_create = base_bytes(&dir);
         let refreshed = session.document(id).expect("the file still reads");
@@ -3664,10 +3726,12 @@ mod tests {
     /// `force` flag in either call.
     #[test]
     fn a_suspicion_refuses_a_creation_until_the_findings_come_back() {
-        let dir = tree_holding(TWO_SNIPPETS);
-        let session = open_session(&dir);
-        let id = id_of(&session, "match/base.yml");
-        let before = session.document(id).expect("the file reads");
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
         let suspicious = NewMatch {
             trigger: ":greet".to_owned(),
             replace: "hello {{nobody}}".to_owned(),
@@ -3693,7 +3757,7 @@ mod tests {
             "a refused save writes nothing"
         );
 
-        expect_created(
+        expect_saved(
             session
                 .create_match(
                     id,
@@ -3703,38 +3767,13 @@ mod tests {
                     &Acknowledgement::of(&findings),
                 )
                 .expect("the acknowledged creation proceeds"),
+            "creation",
         );
         assert_eq!(
             triggers_of(&session.document(id).expect("it reads")),
             [":one", ":two", ":greet"]
         );
     } // End of function a_suspicion_refuses_a_creation_until_the_findings_come_back()
-
-    /// The `Saved` arm of a creation, or a panic naming what arrived instead.
-    ///
-    /// Answers the revision and the created snippet's identity, and asserts on the
-    /// way past what every successful creation shares: it committed, it took a
-    /// backup, and it changed no value's spelling.
-    fn expect_created(result: SaveResult) -> (ContentRevision, Option<MatchId>) {
-        match result {
-            SaveResult::Saved {
-                revision,
-                committed,
-                notes,
-                backup_taken,
-                moved,
-            } => {
-                assert!(committed, "a creation always changes the file's bytes");
-                assert!(backup_taken, "the session must have copied the file first");
-                assert!(
-                    notes.is_empty(),
-                    "the rendered values need no presentation change: {notes:?}"
-                );
-                (revision, moved)
-            }
-            other => panic!("expected a saved result, got {other:?}"),
-        }
-    } // End of function expect_created()
 
     /// An address that does not end in a sequence position is not a move's end.
     ///

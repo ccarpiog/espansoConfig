@@ -197,16 +197,28 @@ pub enum CommandError {
     /// why this code exists to stop tomorrow's failure being silent rather than
     /// to describe one that happens.
     MenuBuildFailed,
-    /// A move's two ends could not be shown to be items of one sequence.
+    /// An address could not be shown to be an item of the sequence the operation
+    /// works in.
     ///
     /// **A negative claim, and the wording is deliberate.** It does not say the
-    /// destination is in a *different* sequence; it says this application could
-    /// not establish that it is in the *same* one. Three shapes reach it: a
-    /// destination whose address really does name another sequence, a match this
+    /// address is in a *different* sequence; it says this application could
+    /// not establish that it is in the *same* one. Three shapes reach it: an
+    /// address that really does name another sequence, a match this
     /// projection carries **no address for at all**, and an address that does not
     /// end in a sequence position. All three are the same refusal to a caller —
-    /// the move cannot be planned — and separating them would mean three codes
-    /// for one decision.
+    /// the operation cannot be planned — and separating them would mean three
+    /// codes for one decision.
+    ///
+    /// **Three commands raise it, not one.** `move_match` refuses a destination
+    /// with it, `create_match` refuses an anchor that is not an item of the list
+    /// the new snippet would join, and `delete_match` refuses a match it cannot
+    /// address as a sequence item — all three through `anchor_index` or
+    /// `addressed_item` in `crate::commands`. The variant's name still says
+    /// *move*, which is now narrower than what it means; renaming it is a wire
+    /// change and is recorded as a follow-up in
+    /// `docs/decisions/2b-2c-2-notes.md` rather than done in passing. The two
+    /// **sentences** a user reads were corrected, because a person pressing
+    /// delete was being told about moving.
     ///
     /// **`ItemMove` is same-sequence only** (`PROGRESS.md` D2r): the engine
     /// derives the moved bytes from the item's own envelope and writes them at a

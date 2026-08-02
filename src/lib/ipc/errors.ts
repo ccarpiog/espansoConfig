@@ -212,14 +212,19 @@ export interface MenuBuildFailedError {
 }
 
 /**
- * A move's two ends could not be shown to be items of one list.
+ * An address could not be shown to be an item of the list the operation works
+ * in.
  *
- * **A negative claim, and the wording follows it.** It does not say the
- * destination is in a *different* list; it says this application could not
- * establish that it is in the *same* one. A snippet moves only within the list it
- * is already in — moving between lists, or between files, is a different
- * operation whose questions about indentation and about what travels with the
- * snippet are unanswered.
+ * **A negative claim, and the wording follows it.** It does not say the address
+ * is in a *different* list; it says this application could not establish that it
+ * is in the *same* one.
+ *
+ * **Three commands raise it, not one.** `moveMatch` refuses a destination with
+ * it, `createMatch` an anchor that is not an item of the list the new snippet
+ * would join, and `deleteMatch` a snippet it cannot address as an item of one.
+ * The code's name still says *move*, which is narrower than what it means; it is
+ * kept because renaming it is a wire change, and the sentence a person reads was
+ * corrected instead.
  */
 export interface MoveNotWithinOneSequenceError {
   /** The discriminant. */

@@ -224,7 +224,7 @@
   "code.commandError.menuUnavailable": "No se ha podido actualizar el menú de la aplicación en el idioma elegido.",
   "code.commandError.invalidMenuLabels": "No se ha podido actualizar el menú de la aplicación porque esta ventana y el programa no coinciden en qué etiquetas de menú hacen falta.",
   "code.commandError.menuBuildFailed": "No se ha podido reconstruir el menú de la aplicación, así que sigue mostrando el idioma que tenía.",
-  "code.commandError.moveNotWithinOneSequence": "espansoConfig solo mueve un fragmento dentro de la lista en la que ya está, y no pudo determinar que el lugar que elegiste esté en esa lista.",
+  "code.commandError.moveNotWithinOneSequence": "espansoConfig no pudo determinar que el fragmento que elegiste sea un elemento de la lista de fragmentos de este archivo, así que no tiene ningún lugar de esa lista sobre el que actuar.",
   "code.commandError.documentHasNoMatchList": "Este archivo no tiene ninguna lista de fragmentos, así que no se le puede añadir uno nuevo. Añade primero una línea `matches:` al archivo, o elige otro archivo.",
   "code.commandError.draftRefused": "espansoConfig ni siquiera intentó este guardado: los cambios pedidos no se pueden escribir en este fragmento. Lo que informa junto a esto es el motivo.",
   "code.commandError.saveFailed": "espansoConfig no pudo llevar a cabo este guardado. Lo que informa junto a esto es el motivo.",
