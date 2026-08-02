@@ -5755,7 +5755,21 @@ _Updated at each phase boundary._
 | 2b-2c-1 | `95c1a0b` | ✅ pushed to `origin/main` | clean |
 | **2b-2c-2** | **`8d223fc`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-2 cleanup** | **`35a9e9e`** | ✅ pushed to `origin/main` | clean |
+| **2b-2c-3a** | **`3375e98`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`3375e98` is Phase 2b-2c-3a **including both of its review fix rounds** — the phase was held open
+until the High and the Medium were closed, so, as with every phase since `8989c16`, no commit holds
+the demonstrated defects: neither the replacement that destroyed a whole file with no recoverable
+image of it, nor the acknowledgement that consent for one unparseable text could spend on another.
+It contains `SaveContent` and the branch in `crates/espansoconfig-core/src/persist/save.rs`,
+`FindingCode::DocumentDoesNotParse` in `validate/mod.rs`, the new
+`crates/espansoconfig-core/tests/persist_raw_save.rs` (18 tests), the contract updates in
+`src-tauri/src/{dictionary_contract,wire_contract}.rs`, two new strings in each dictionary, the
+TypeScript mirror, the review, `docs/decisions/2b-2c-3a-notes.md` and this checkpoint.
+983 → 1001 tests. **It registers no command** — `save_raw_document` is 2b-2c-3b's — so `npm install`
+is not needed to verify it, but it still is before any frontend command. **A fresh session starting
+Phase 2b-2c-3b should start from `3375e98` or later.**
 
 `35a9e9e` is the cleanup round that followed the phase — four independent quality reviews (reuse,
 simplification, efficiency, altitude) of `8d223fc`, ten fixes applied, **983 tests still passing and
