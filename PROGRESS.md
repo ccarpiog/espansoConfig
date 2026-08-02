@@ -5174,7 +5174,19 @@ _Updated at each phase boundary._
 | 2b-2a | `c3fe5a6` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 | `8016a3b` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 code review | `f1bbad1` | ✅ pushed to `origin/main` | clean |
+| **2b-2b-3** | **`0cf7420`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`0cf7420` is Phase 2b-2b-3 **whole** — both Codex consultations, the one defect found and fixed
+before the review, the window reading, and this checkpoint. It contains `save_match` and
+`save_one_match` in `src-tauri/src/commands.rs` with `after_a_save` generalized to take an address,
+`CommandError::DraftRefused` in `src-tauri/src/error.rs`, `DraftError::MatchHasNoPath {}` in
+`crates/espansoconfig-core/src/draft/error.rs`, the 33 new keys in each dictionary, the wire types,
+`saveMatch` and `describeDraftError` in `src/lib/`, the two generalized contract tests in
+`src-tauri/src/{wire,dictionary}_contract.rs`, `docs/decisions/2b-2b-3-notes.md` and the two review
+files. **This is the first commit in which a user's edited match fields can be written to disk from
+a window's request.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command
+will run. **A fresh session starting Phase 2b-2c should start from `0cf7420` or later.**
 
 `c3fe5a6` is Phase 2b-2a **including its review fix round** — the phase was held open until all five
 findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
