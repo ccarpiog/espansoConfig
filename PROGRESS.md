@@ -4071,7 +4071,8 @@ review debt the previous checkpoint carried forward has been paid, its one findi
 the test suite.
 
 **One thing 2b-2b-3 inherits from that fix round, and it is a small obligation with a sharp edge.**
-`DraftError` gained a twelfth variant, `AmbiguousVariableKey { variable }`. It is **unreachable from
+`DraftError` gained a variant, `AmbiguousVariableKey { variable }` — the **twelfth** that carries an
+index and nothing else. It is **unreachable from
 any projected document today** — the hazard gate refuses the whole match first — and it still owes a
 `draftError` string in both languages like every other variant, because a code with no sentence is
 worse than a code with no caller. Write that sentence about *ambiguity*, not about something the user
@@ -4106,7 +4107,8 @@ accepted back as a target; and `committed: false` / `backup: None` are **not** f
 **What 2b-2b-2 established that 2b-2b-3 inherits unchanged:**
 
 - **An address below the match mapping is an index, never a key the owner wrote.** Seven
-  `DraftTarget` variants and eleven `DraftError` variants carry indices only. This is not a style
+  `DraftTarget` variants and **twelve** `DraftError` variants carry indices only — eleven as 2b-2b-2
+  shipped, plus `AmbiguousVariableKey` from its code review's fix round. This is not a style
   choice — a refusal crosses the process boundary and the owner's configuration is private
   (`CLAUDE.md` §1). A frontend that wants to show *which* param failed resolves the index against the
   projection it already holds.
