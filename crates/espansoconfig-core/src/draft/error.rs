@@ -317,6 +317,49 @@ pub enum DraftError {
         /// The variable's index in the projected `vars` list.
         index: usize,
     },
+    /// A drafted variable's **own** mapping writes one of the keys it models more
+    /// than once, so no path through that mapping names one node.
+    ///
+    /// The nested twin of [`DraftError::AmbiguousKey`], stated one level down and
+    /// refused for the same reason: paths are this engine's whole output, and a
+    /// path that names two nodes is not a path.
+    ///
+    /// **It is not a wrong-node write, and it is refused anyway.** The projection
+    /// claims the *first* occurrence of a repeated key and
+    /// `crate::patch::path::resolve` takes the first as well, so the bytes an edit
+    /// would rewrite are the bytes the interface displayed. espanso's own loader
+    /// reads the **last** occurrence, so the honest description of the state is
+    /// *the user would edit a value their expansion never reads* — silently, while
+    /// the identical shape one level up is refused by name. Naming it is the whole
+    /// point.
+    ///
+    /// **The address is the variable's index and nothing else.** A
+    /// [`crate::model::UnknownReason::RepeatedKey`] is only ever recorded for a key
+    /// espanso's schema fixes, so this one variant *could* have carried the key
+    /// text safely. It does not, because every address below the match mapping is
+    /// an index (2b-2b-2's decision D1) and a privacy rule with one exception is a
+    /// rule nobody can check (`CLAUDE.md` section 1).
+    ///
+    /// # No projected document reaches it today
+    ///
+    /// Stated here rather than only in the tests, because a later phase owes this
+    /// variant a dictionary string and would otherwise be writing a sentence for a
+    /// code no user can see. A repeated key raises
+    /// [`HazardKind::DuplicateMappingKey`] on the mapping that holds
+    /// it, and `TriviaIndex::disqualifying_hazard` counts a hazard on a
+    /// **descendant**, so a duplicate inside a variable disqualifies the whole match
+    /// and [`DraftError::MatchNotEditable`] is what a caller actually gets. This
+    /// variant is the *nested* answer standing behind that coarse one, for the same
+    /// reason `check_closed_surface` restates an invariant the planner already
+    /// enforces: the gate in front of it is a gate a later phase may narrow, and on
+    /// the day it does, the refusal has to already be here and already say which
+    /// variable. `one_match_with_its_duplicate_admitted` in `tests/draft_plan.rs`
+    /// **asserts** the gate still refuses first, so this paragraph cannot rot
+    /// quietly.
+    AmbiguousVariableKey {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
     /// The draft names one of a variable's three schema-known scalars and the
     /// projection holds no scalar for it.
     ///
@@ -508,6 +551,9 @@ impl fmt::Display for DraftError {
             }
             DraftError::VariableHasNoPath { index } => {
                 write!(formatter, "variable {index} has no path")
+            }
+            DraftError::AmbiguousVariableKey { variable } => {
+                write!(formatter, "variable {variable} writes a key twice")
             }
             DraftError::VariableFieldHasNoScalar { variable, .. } => {
                 write!(formatter, "variable {variable} holds no such scalar")

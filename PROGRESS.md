@@ -41,7 +41,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-1** | The **wire boundary for `persist`**: every save-transaction type serialized, with its two dictionary entries and the contracts that pin them | ✅ complete — after the review fix round below |
 | **2b-2a** | The **save spine and the first mutating command**: the acknowledgement deserialized · the app-owned `BackupSession` · the operation-neutral `SaveResult` · `move_match` · the first code outside the core that writes a user's file | ✅ complete — after the review fix round below |
 | **2b-2b-1** | **`MatchDraft`, `DraftField` and the minimal-diff engine** over the closed, schema-known scalar surface of one match, in the core, with **no command**: a field the draft leaves unchanged derives no edit, and neither does one whose drafted logical value already equals the projected one | ✅ complete — after the review fix round below |
-| **2b-2b-2** | **The open key surface** — `vars` and `form_fields`, whose keys are the form author's — in the core, with **no command**: an index-addressed draft over a nested open mapping, edit and remove only, and the two batch guards restated per mapping | ✅ complete. **The aggregate code review has not been run** — see the disposition below |
+| **2b-2b-2** | **The open key surface** — `vars` and `form_fields`, whose keys are the form author's — in the core, with **no command**: an index-addressed draft over a nested open mapping, edit and remove only, and the two batch guards restated per mapping | ✅ complete — after the review fix round below. **Its aggregate code review was run at the head of the next session** and its one finding is closed |
 | 2b-2b-3 … 2d | See the Phase 2 split below | ⬜️ **2b-2b-3 is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -2989,8 +2989,10 @@ rather than taken on report:
 
 **Four things it does *not* prove.**
 
-- **The aggregate code review was not run.** See the disposition below — this is a known, recorded
-  gap, not an omission discovered later.
+- **The aggregate code review was not run *in this phase's session*.** See the disposition below — it
+  was a known, recorded gap rather than an omission discovered later, and it was **discharged at the
+  head of the following session**: `docs/reviews/phase-2b-2b-2-open-key-code.md`, one finding, closed
+  in the fix round recorded under "Verification — Phase 2b-2b-2 code review" below.
 - **No screen was read**, and there is still no command, no IPC type and no i18n key for any of this.
   The four `code.diagnosticCode.*` strings 2b-1 corrected are now a debt **four** phases old.
 - **The real configuration holds zero `form_fields`.** Every claim about that surface rests on
@@ -2998,7 +3000,73 @@ rather than taken on report:
   unmodelled entries. 48 real `params` entries were swept; **0** real form-field options were.
 - **Four refusals are unreachable from any document** in either corpus — the hazard gate refuses the
   match first, or the projection never produces the state. Each test says so rather than implying
-  coverage.
+  coverage. **The code review's fix round made it five**, for the same reason and with the same
+  honesty: see below.
+
+---
+
+## Verification — Phase 2b-2b-2 code review
+
+The aggregate code review 2b-2b-2 owed, run at the head of the next session, plus its fix round.
+Every command was run **by the orchestrator**, each as its own invocation.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` (baseline, before any change) | ✅ **913 tests**, 0 failed — the checkpoint's figure reproduced exactly on a cold start |
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` (after the fix) | ✅ **917 tests across 21 binaries**, 0 failed (**+4**; `draft_plan.rs` 82 → 86) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo doc -p espansoconfig-core --no-deps` | ✅ **no new warning** — the pre-existing private-item links are unchanged and none is in `draft/error.rs` |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test draft_plan -- every_match_of_the_real_configuration` | ✅ **not a vacuous skip** — figures unchanged from 2b-2b-2: 65 matches, 65 empty batches, 417 intents, 0 refusals |
+| `rg -c '#\[tauri::command\]' src-tauri/src/` | ✅ `commands.rs:7`, `menu.rs:1` — still no command, as 2b-2b-2 requires |
+| `npm test` / `npm run check` / `npm run build` | **not run, and not needed** — no file under `src/` or `src-tauri/` is touched. Stated rather than implied, the way 2a-1's entry does |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1); no corpus fixture modified |
+
+**The review's one finding, and why the fix is worth having even though nothing can reach it.** Codex
+found that a variable's **own** mapping is audited by neither mechanism that refuses an ambiguous key:
+`nameable_key` is never consulted for a path composed from `VariableField::key()`, a literal, and
+`check_every_named_key_is_unique` only judges a mapping the planner recorded a `NestedKeys` for —
+which is the `params` mapping, never the variable's own. Both halves of that are true.
+
+**Its stated consequence is not, and the correction is the most useful thing the round produced.** A
+repeated key raises `HazardKind::DuplicateMappingKey` on the mapping holding it, and
+`TriviaIndex::disqualifying_hazard` counts a hazard on a **descendant** — so a duplicate inside a
+variable disqualifies the whole match, and `plan_match_edits`' third step refuses with
+`MatchNotEditable` before `plan_vars` is entered. There is no silent edit and no wrong-node write.
+The finding is therefore an **unnamed** ambiguity behind a coarser gate, not an unrefused one.
+
+It was closed anyway, for three reasons recorded in the review file: the masking gate is coarse (one
+duplicate anywhere makes a whole match uneditable) and Phase 2c is precisely the phase that will want
+to narrow it; this crate already restates invariants across layers on purpose (`draft/mod.rs`: the
+closed-surface invariant "is stated three times"); and the projection already held the answer in
+`variable.unknown_entries` and was simply not asked.
+
+**The unreachability is asserted, not just documented.** `AmbiguousVariableKey`'s doc comment carries a
+*"No projected document reaches it today"* section — placed at the variant because 2b-2b-3 owes it a
+dictionary string and would otherwise write a sentence for a code no user can see — and the test helper
+`one_match_with_its_duplicate_admitted` **asserts** `blocking_hazard == Some(DuplicateMappingKey)`
+before forcing the state. If a later phase narrows the gate, that assertion fails and the claim gets
+re-read instead of rotting.
+
+---
+
+## Phase 2b-2b-2 code review disposition
+
+[`docs/reviews/phase-2b-2b-2-open-key-code.md`](docs/reviews/phase-2b-2b-2-open-key-code.md) is the
+aggregate **code** review 2b-2b-2 owed and could not afford. It was run at the head of the following
+session against the written code, and the brief was narrowed deliberately — three questions, a named
+four-file scope, a 900-word cap and an explicit ban on web search — because the previous session's two
+Codex jobs on this phase had run 26 and 20 minutes and the first had to be cancelled with zero output
+events. **This one returned in 1 minute 53 seconds.** The three questions were the three places the
+2b-2b-2 checkpoint itself named as invisible to the 82 tests.
+
+| # | Finding | Disposition |
+|---|---|---|
+| Q1 | `plan_open_mapping`'s index-to-key resolution: is the index consumed against the same list, in the same order, the projection presented? | **NONE FOUND**, accepted and spot-checked. The index addresses the projected `&[FieldView]` unfiltered and unreordered; out-of-range refuses before a path is built; `nameable_key` refuses a non-scalar, undecoded or duplicated key |
+| Q2 | **The one finding.** A variable's own mapping is audited by neither `nameable_key` nor `check_every_named_key_is_unique`, so a repeated `name` / `type` / `inject_vars` / `params` key gets no refusal of its own | **Fixed**, and **downgraded twice while being verified**: not a wrong-node write (projection and resolver both take the first occurrence), and not even an unrefused one (the hazard gate refuses the whole match first). `DraftError::AmbiguousVariableKey { variable }` is the nested refusal, index-only per D1, unreachable today and documented as such |
+| Q3 | Does `check_closed_surface` admit a `DocumentPath` shape the seven/four enumeration did not intend? | **NONE FOUND**, accepted. The admitted set was re-derived from the code's suffix patterns rather than its comments, and the two agree |
 
 ---
 
@@ -3984,33 +4052,34 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2b-2b-2 is complete. Its design consult is closed; its aggregate code review is NOT, and
-that is the first thing the next session owes.** `docs/decisions/2b-2b-2-notes.md` is the record;
-the consult is `docs/reviews/phase-2b-2b-2-open-key-design.md` and the finding-by-finding
-disposition is the table above. **A match's open half can now be drafted, and nothing can call it.**
+**Phase 2b-2b-2 is complete and BOTH of its reviews are closed.** `docs/decisions/2b-2b-2-notes.md`
+is the record; the design consult is `docs/reviews/phase-2b-2b-2-open-key-design.md` and the code
+review is `docs/reviews/phase-2b-2b-2-open-key-code.md`, each with its own disposition table above.
+**A match's open half can now be drafted, and nothing can call it.**
 
 The exact first command a fresh session should run:
 
 ```sh
-cargo test --workspace          # expect 913 tests across 21 binaries, 0 failed
+cargo test --workspace          # expect 917 tests across 21 binaries, 0 failed
 ```
 
 (and `npm install` before any frontend command, as since 1b-1.)
 
-**Do this first, before starting 2b-2b-3.** Run one Codex review over the *written code* of 2b-2b-2 —
-`crates/espansoconfig-core/src/draft/{match_draft,error,plan,audit,mod}.rs` and the 82 tests in
-`crates/espansoconfig-core/tests/draft_plan.rs` — and write it to
-`docs/reviews/phase-2b-2b-2-open-key-code.md`. The design was reviewed; the code was not, and the
-policy asks for both. **Keep the brief small and cap the answer length**: two consecutive Codex jobs
-on this phase ran 26 and 20 minutes and the first had to be cancelled, so a large multi-question
-brief is the failure mode to avoid. The three places to point it at, because they are where a defect
-would be invisible to the test suite: `plan_open_mapping`'s resolution of an index to a key, the
-`NestedKeys` construction that feeds `check_every_named_key_is_unique`, and whether
-`check_closed_surface`'s seven admitted shapes have a gap the six over-deep paths do not cover.
+**The next step is Phase 2b-2b-3 — `save_match`, the command.** Nothing stands in front of it: the
+review debt the previous checkpoint carried forward has been paid, its one finding is fixed, and the
+2b-2b-2 code review found no other defect in the three places that checkpoint named as invisible to
+the test suite.
 
-**Then the next step is Phase 2b-2b-3 — `save_match`, the command.** It is the one that gives every
-line of 2b-2b-1 and 2b-2b-2 its first caller, and it carries four obligations that are already
-written down:
+**One thing 2b-2b-3 inherits from that fix round, and it is a small obligation with a sharp edge.**
+`DraftError` gained a twelfth variant, `AmbiguousVariableKey { variable }`. It is **unreachable from
+any projected document today** — the hazard gate refuses the whole match first — and it still owes a
+`draftError` string in both languages like every other variant, because a code with no sentence is
+worse than a code with no caller. Write that sentence about *ambiguity*, not about something the user
+can currently trigger, and do not let the unreachability tempt anyone into skipping it: the
+exhaustiveness check will demand it, and the check is right.
+
+**2b-2b-3 is the step that gives every line of 2b-2b-1 and 2b-2b-2 its first caller**, and it carries
+four obligations that are already written down:
 
 - **the `draftError` dictionary namespace in both languages**, and the deletion of the TEMPORARY
   `NOT_A_CODE` entry for `DraftError`. `the_temporary_draft_error_exclusion_expires_when_anything_names_it`

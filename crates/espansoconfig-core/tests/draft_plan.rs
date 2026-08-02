@@ -47,7 +47,7 @@ use espansoconfig_core::draft::{
     SequenceField, VariableDraft, VariableField,
 };
 use espansoconfig_core::model::{
-    DocumentContext, FieldView, MatchView, ScalarView, ValueKind, ValueView,
+    DocumentContext, FieldView, MatchView, ScalarView, UnknownReason, ValueKind, ValueView,
 };
 use espansoconfig_core::patch::{
     apply_edits, DocumentEdit, DocumentPath, FieldInsert, FieldRemoval, ItemMove, ScalarEdit,
@@ -1258,6 +1258,53 @@ const VARIABLE_MISSING_FIELDS: &str = r#"matches:
           format: '%Y'
 "#;
 
+/// Two variables, the **first** of which writes `name` twice.
+///
+/// The second is clean, so one fixture states both halves of the rule: the
+/// refusal is per variable, and the variable beside it still plans.
+const VARIABLE_WITH_A_REPEATED_NAME: &str = r#"matches:
+  - trigger: :a
+    replace: b
+    vars:
+      - name: first
+        type: date
+        name: second
+        params:
+          format: '%Y'
+      - name: other
+        type: date
+        params:
+          offset: 0
+"#;
+
+/// A variable that writes `params` twice — the **intermediate** segment case.
+const VARIABLE_WITH_A_REPEATED_PARAMS: &str = r#"matches:
+  - trigger: :a
+    replace: b
+    vars:
+      - name: v
+        type: date
+        params:
+          format: '%Y'
+        params:
+          offset: 0
+"#;
+
+/// A variable that writes an **unmodelled** key twice.
+///
+/// `note` is not one of the five keys the variable projection models, so both
+/// entries are recorded as *not modelled* rather than as a repeat, and the
+/// variable-level refusal must leave them alone.
+const VARIABLE_WITH_A_REPEATED_UNMODELLED_KEY: &str = r#"matches:
+  - trigger: :a
+    replace: b
+    vars:
+      - name: v
+        type: date
+        note: one
+        note: two
+"#;
+
 /// The path of one variable of the fixture's first match.
 fn variable_path(view: &MatchView, index: usize) -> DocumentPath {
     view.vars[index].path.clone().expect("a projected variable")
@@ -1852,6 +1899,173 @@ fn a_variable_with_no_path_is_refused() {
     );
 } // End of function a_variable_with_no_path_is_refused()
 
+/// One match of a fixture that writes a key twice, admitted by hand.
+///
+/// **The variable-level refusal is unreachable from any document that reaches the
+/// planner**, for the reason
+/// `two_entries_of_one_open_mapping_sharing_a_key_are_refused` already records: a
+/// repeated key raises `HazardKind::DuplicateMappingKey` on the mapping that holds
+/// it, and `TriviaIndex::disqualifying_hazard` counts a hazard on a **descendant**,
+/// so the gate refuses the whole match first. Forcing the state is the only honest
+/// way to reach the branch, and the branch is worth having: it is the one answer
+/// that says *which* variable is ambiguous, and the gate in front of it is a gate a
+/// later phase may narrow.
+fn one_match_with_its_duplicate_admitted(source: &str) -> MatchView {
+    let mut view = one_match(source);
+    assert_eq!(
+        view.blocking_hazard,
+        Some(HazardKind::DuplicateMappingKey),
+        "the gate refuses this match first, which is why the state is forced below"
+    );
+    view.blocking_hazard = None;
+    view.safely_editable = true;
+    view
+} // End of function one_match_with_its_duplicate_admitted()
+
+/// How many entries of one variable's mapping the projection called a repeat.
+fn repeated_keys_of(view: &MatchView, variable: usize) -> usize {
+    view.vars[variable]
+        .unknown_entries
+        .iter()
+        .filter(|entry| entry.reason == UnknownReason::RepeatedKey)
+        .count()
+} // End of function repeated_keys_of()
+
+/// **The match mapping's policy, one level down.** A variable whose own mapping
+/// writes `name` twice is refused by name, and the refusal carries the variable's
+/// index and nothing else.
+///
+/// What made the gap worth closing is that the edit would have *looked* right: the
+/// projection claims the first occurrence and the resolver takes the first, so the
+/// bytes rewritten are the bytes displayed. espanso reads the last, so the user
+/// would have edited a value their expansion never reads.
+#[test]
+fn a_variable_whose_mapping_writes_a_modelled_key_twice_is_refused_by_index() {
+    let view = one_match_with_its_duplicate_admitted(VARIABLE_WITH_A_REPEATED_NAME);
+    assert_eq!(view.vars.len(), 2, "two variables");
+    assert_eq!(
+        repeated_keys_of(&view, 0),
+        1,
+        "the projection recorded the second `name` as a repeat"
+    );
+    assert_eq!(
+        view.vars[0].name.as_ref().expect("a projected name").text,
+        "first",
+        "and it claimed the first occurrence, which is not the one espanso reads"
+    );
+
+    let draft =
+        MatchDraft::new().with_variable(VariableDraft::new(0).with(VariableField::Name, "third"));
+    assert_eq!(
+        plan_match_edits(&view, &draft),
+        Err(DraftError::AmbiguousVariableKey { variable: 0 })
+    );
+} // End of function a_variable_whose_mapping_writes_a_modelled_key_twice_is_refused_by_index()
+
+/// The refusal is **per variable**, not per document: the clean variable beside
+/// the ambiguous one still plans, and a draft that names no variable at all is
+/// untouched by the check.
+#[test]
+fn the_variable_level_refusal_is_per_variable_and_never_per_document() {
+    let view = one_match_with_its_duplicate_admitted(VARIABLE_WITH_A_REPEATED_NAME);
+    assert_eq!(
+        repeated_keys_of(&view, 1),
+        0,
+        "the second variable holds no duplicate"
+    );
+
+    let elsewhere = MatchDraft::new().with(MatchField::Replace, "c");
+    assert_eq!(
+        plan_match_edits(&view, &elsewhere)
+            .expect("a draft naming no variable plans")
+            .len(),
+        1,
+        "the ambiguous variable is not drafted, so the check never looks at it"
+    );
+
+    let clean =
+        MatchDraft::new().with_variable(VariableDraft::new(1).with(VariableField::Name, "renamed"));
+    let edits = plan_match_edits(&view, &clean).expect("the unambiguous variable plans");
+    assert_eq!(edits.len(), 1);
+    let DocumentEdit::Scalar(edit) = &edits[0] else {
+        panic!("a value that exists is rewritten, never inserted");
+    };
+    assert_eq!(edit.path(), &variable_path(&view, 1).with_key("name"));
+    assert_eq!(edit.value(), "renamed");
+} // End of function the_variable_level_refusal_is_per_variable_and_never_per_document()
+
+/// A repeated `params:` is refused too, and it is the case no later check could
+/// have caught: `params` is an **intermediate** segment of every path into that
+/// mapping, and `check_every_named_key_is_unique` reads a path's last named
+/// segment only.
+///
+/// Refused **whether or not anything inside `params` is drafted**, because a
+/// `VariableDraft` is an address the caller asserts and the ambiguity is a fact
+/// about the mapping rather than about the intents.
+#[test]
+fn a_variable_whose_mapping_writes_params_twice_is_refused() {
+    let view = one_match_with_its_duplicate_admitted(VARIABLE_WITH_A_REPEATED_PARAMS);
+    assert_eq!(
+        repeated_keys_of(&view, 0),
+        1,
+        "the projection recorded the second `params` as a repeat"
+    );
+    assert_eq!(
+        view.vars[0].params.len(),
+        1,
+        "and modelled only the first mapping's entries"
+    );
+
+    let drafts = [
+        // Nothing inside the variable is drafted at all.
+        MatchDraft::new().with_variable(VariableDraft::new(0)),
+        // One of the variable's own scalars.
+        MatchDraft::new().with_variable(VariableDraft::new(0).with(VariableField::Name, "w")),
+        // One entry of the ambiguous `params` mapping.
+        MatchDraft::new()
+            .with_variable(VariableDraft::new(0).with_param(EntryDraft::new(0).set("%Y-%m"))),
+    ];
+    for draft in drafts {
+        assert_eq!(
+            plan_match_edits(&view, &draft),
+            Err(DraftError::AmbiguousVariableKey { variable: 0 }),
+            "an ambiguous intermediate segment is refused however little is drafted"
+        );
+    } // End of the loop over the three drafts
+} // End of function a_variable_whose_mapping_writes_params_twice_is_refused()
+
+/// **The refusal is narrow.** A key the variable projection does not model,
+/// repeated, is recorded as *not modelled* twice rather than as a repeat, and this
+/// check leaves it alone: those entries are carried through every edit untouched
+/// and no path this engine composes goes near them.
+///
+/// The document is still refused in practice — the hazard gate answers first, as
+/// the helper above asserts — so what this pins is the *name* of the answer, which
+/// is the whole reason the variant exists.
+#[test]
+fn a_variable_whose_repeated_key_is_unmodelled_is_not_refused_by_the_variable_check() {
+    let view = one_match_with_its_duplicate_admitted(VARIABLE_WITH_A_REPEATED_UNMODELLED_KEY);
+    assert_eq!(
+        repeated_keys_of(&view, 0),
+        0,
+        "an unmodelled key is never recorded as a repeat"
+    );
+    assert_eq!(
+        view.vars[0].unknown_entries.len(),
+        2,
+        "both entries are carried, neither is discarded"
+    );
+
+    let draft =
+        MatchDraft::new().with_variable(VariableDraft::new(0).with(VariableField::Name, "w"));
+    let edits = plan_match_edits(&view, &draft).expect("the variable check does not fire");
+    assert_eq!(edits.len(), 1);
+    let DocumentEdit::Scalar(edit) = &edits[0] else {
+        panic!("a value that exists is rewritten, never inserted");
+    };
+    assert_eq!(edit.path(), &variable_path(&view, 0).with_key("name"));
+} // End of function a_variable_whose_repeated_key_is_unmodelled_is_not_refused_by_the_variable_check()
+
 // ---------------------------------------------------------------------------
 // D3 and D7 — two answers to one question, refused at intent level
 // ---------------------------------------------------------------------------
@@ -2441,6 +2655,7 @@ fn no_open_refusal_carries_a_key_the_owner_wrote() {
             length: 2,
         },
         DraftError::VariableHasNoPath { index: 0 },
+        DraftError::AmbiguousVariableKey { variable: 0 },
         DraftError::VariableFieldHasNoScalar {
             variable: 0,
             field: VariableField::Name,

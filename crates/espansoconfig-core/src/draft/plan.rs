@@ -473,6 +473,18 @@ impl OpenMapping {
 /// that index, so it is what should say where the index points.
 /// [`check_closed_surface`] reads the derived batch back and refuses anything
 /// the two disagree about.
+///
+/// # The order of the checks, per variable
+///
+/// It mirrors [`plan_match_edits`]'s own first three steps, one level down and in
+/// the same order: the index resolves ([`DraftError::TargetDoesNotExist`]), the
+/// variable has a path ([`DraftError::VariableHasNoPath`]), and then **no key of
+/// its own mapping is written twice** ([`check_no_key_of_the_variable_is_repeated`]).
+/// The ambiguity check is last of the three because the two before it are about
+/// whether the variable can be addressed at all, and first of everything else
+/// because nothing inside an ambiguous mapping may be planned — not a scalar, not
+/// a `params` entry, and not the intermediate `params:` segment a `params` path
+/// travels through.
 fn plan_vars(
     view: &MatchView,
     draft: &MatchDraft,
@@ -489,6 +501,7 @@ fn plan_vars(
             .path
             .clone()
             .ok_or(DraftError::VariableHasNoPath { index })?;
+        check_no_key_of_the_variable_is_repeated(variable, index)?;
         for field in VariableField::ALL {
             plan_variable_scalar(variable, drafted, &at, field, edits)?;
         } // End of the loop over the variable's schema-known scalars
@@ -502,6 +515,48 @@ fn plan_vars(
     } // End of the loop over the drafted variables
     Ok(())
 } // End of function plan_vars()
+
+/// Refuses a drafted variable whose own mapping writes a modelled key twice.
+///
+/// **The match mapping's policy, one level down.** [`plan_match_edits`] refuses a
+/// match whose mapping repeats a key before it plans anything for it, and neither
+/// of the two mechanisms that state that policy reaches a *variable's* mapping: a
+/// variable's schema-known paths are composed from [`VariableField::key`], a
+/// literal, so [`nameable_key`]'s duplicate gate is never consulted for them, and
+/// `check_every_named_key_is_unique` only judges a mapping the planner recorded
+/// a [`NestedKeys`] for — which is the `params` mapping, never the variable's own.
+///
+/// The two shapes this closes are one refusal because they have one cause. A
+/// repeated `name:`, `type:` or `inject_vars:` makes that scalar's path ambiguous;
+/// a repeated `params:` makes an **intermediate** segment ambiguous, which
+/// `check_every_named_key_is_unique` could not have caught either way because it
+/// reads a path's last named segment only.
+///
+/// The projection has already decided which is which:
+/// [`UnknownReason::RepeatedKey`] is recorded only for a key
+/// [`crate::model::VariableView`] models and an earlier entry already claimed. A
+/// key it does not model, repeated, is [`UnknownReason::NotModelled`] twice and is
+/// **not** refused here — those entries are carried through every edit untouched
+/// and no path this engine composes goes near them.
+///
+/// **No projected document reaches this refusal today**, because the hazard gate in
+/// [`plan_match_edits`]'s third step refuses the whole match first — the reason is
+/// written out at [`DraftError::AmbiguousVariableKey`], and
+/// `one_match_with_its_duplicate_admitted` in `tests/draft_plan.rs` asserts it still
+/// holds. This is the nested answer standing behind that coarse one.
+fn check_no_key_of_the_variable_is_repeated(
+    variable: &crate::model::VariableView,
+    index: usize,
+) -> Result<(), DraftError> {
+    let repeated = variable
+        .unknown_entries
+        .iter()
+        .any(|entry| entry.reason == UnknownReason::RepeatedKey);
+    if repeated {
+        return Err(DraftError::AmbiguousVariableKey { variable: index });
+    }
+    Ok(())
+} // End of function check_no_key_of_the_variable_is_repeated()
 
 /// Plans one of a variable's three schema-known scalars.
 ///
