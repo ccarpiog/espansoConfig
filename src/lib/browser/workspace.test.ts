@@ -14,7 +14,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
 import type { CommandResult } from '../ipc/commands';
-import type { DocumentSummary, DocumentView, MatchView, WorkspaceSummary } from '../ipc/types';
+import type {
+  Acknowledgement,
+  DocumentSummary,
+  DocumentView,
+  Finding,
+  MatchView,
+  SaveResult,
+  WorkspaceSummary
+} from '../ipc/types';
 import { diagnostic, makeDocument, makeMatch, makeSummary } from './fixtures';
 import { createBrowserState, type BrowserCommands } from './workspace.svelte';
 
@@ -110,6 +118,14 @@ interface Script {
   readonly reload?: CommandResult<DocumentView>;
   /** What `document_text` answers, keyed by identity. */
   readonly texts?: ReadonlyMap<number, CommandResult<string>>;
+  /**
+   * What `move_match` answers, in order.
+   *
+   * A list rather than a single answer, because the interesting case is two
+   * calls: a refusal that carries its findings, and then the same move with the
+   * acknowledgement built from them.
+   */
+  readonly moves?: readonly CommandResult<SaveResult>[];
 }
 
 /**
@@ -119,6 +135,9 @@ interface Script {
  * @returns The commands, with `vi.fn` wrappers so calls can be counted.
  */
 function scriptedCommands(script: Script = {}): BrowserCommands {
+  // How many moves have been answered. A move is the one command a test drives
+  // more than once with different answers, so its script is consumed in order.
+  let moves = 0;
   const documents =
     script.documents ??
     new Map<number, CommandResult<DocumentView>>([
@@ -155,6 +174,13 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
       const answer: CommandResult<string> = script.texts?.get(id) ?? {
         ok: true,
         value: `# text of document ${id}\n`
+      };
+      return answer;
+    }),
+    moveMatch: vi.fn(async () => {
+      const answer: CommandResult<SaveResult> = script.moves?.[moves++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
       return answer;
     })
@@ -1160,3 +1186,338 @@ describe('the raw viewer', () => {
     expect(state.fileText).toBeNull();
   });
 }); // End of the "raw viewer" suite
+
+/**
+ * The moved-document projection: the same two snippets, in the other order,
+ * under a new revision.
+ *
+ * A **new revision** and **new node identifiers**, because that is what a commit
+ * really produces: `MatchId` carries the revision it was minted from, so every
+ * identity held before the save stops resolving.
+ */
+function movedDocument(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: 'rev-b',
+    matches: [
+      makeMatch({ node: 30, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' }),
+      makeMatch({ node: 31, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' })
+    ]
+  });
+} // End of function movedDocument()
+
+/** A finding a refusal could carry and a caller could hand back. */
+function suspicion(): Finding {
+  return {
+    code: { ReferenceHasNoDeclaration: { name: 'who' } },
+    span: { start: 10, end: 20 },
+    node: 11,
+    path: null
+  };
+}
+
+/** An acknowledgement of nothing, which is what a first attempt sends. */
+const NOTHING_ACKNOWLEDGED: Acknowledgement = { accepted: [] };
+
+describe('moving a snippet', () => {
+  it('re-reads the file, re-points the selection and forgets the text it was showing', async () => {
+    const moved = movedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: true,
+        moved: moved.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, moves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(state.fileText).not.toBeNull();
+
+    // The commit is what the boundary answers, and the re-read is what it
+    // answers with afterwards.
+    documents.set(2, { ok: true, value: moved });
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('saved');
+    // The projection the list draws from is the one that was written.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    // The selection followed the snippet by the identity the command answered
+    // with, rather than staying at the position it used to occupy.
+    expect(state.selected?.id.node).toBe(31);
+    expect(state.selectedMatch?.label?.text).toBe('Signature');
+    expect(state.notice).toBeNull();
+    // And the raw viewer's snapshot was of bytes that have just been replaced,
+    // so it was dropped and read again rather than redrawn.
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+  }); // End of the "committed move" case
+
+  it('shows the findings of a refusal and writes nothing', async () => {
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: { outcome: 'refused', verdict: 'RefusedForUnacknowledgedSuspicions', findings: [suspicion()] }
+    };
+    const commands = scriptedCommands({ moves: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    expect(outcome).toEqual(refused.ok ? refused.value : null);
+    // Nothing was written, so nothing here moved: same projection, same
+    // selection, and no second read of the document.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(state.selected?.id.node).toBe(10);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "refused move" case
+
+  it('sends back exactly the findings a refusal carried, and no flag', async () => {
+    const shown = suspicion();
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: { outcome: 'refused', verdict: 'RefusedForUnacknowledgedSuspicions', findings: [shown] }
+    };
+    const moved = movedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: moved.matches[1]!.id
+      }
+    };
+    const commands = scriptedCommands({ moves: [refused, saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const first = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+    expect(first?.outcome).toBe('refused');
+    const findings = first?.outcome === 'refused' ? first.findings : [];
+    await state.moveMatch(baseDocument().matches[0]!, null, { accepted: findings });
+
+    // The second call carried the findings back by content, unchanged. There is
+    // no boolean anywhere in either call.
+    const calls = vi.mocked(commands.moveMatch).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![3]).toEqual({ accepted: [] });
+    expect(calls[1]![3]).toEqual({ accepted: [shown] });
+    expect(JSON.stringify(calls[1])).not.toContain('force');
+  }); // End of the "acknowledgement round trip" case
+
+  it('takes the conflict projection as the one the next save is checked against', async () => {
+    const disk = movedDocument();
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-b',
+        disk_revision: 'rev-b',
+        disk
+      }
+    };
+    const commands = scriptedCommands({ moves: [conflict] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    expect(outcome?.outcome).toBe('conflict');
+    // The disk side replaced the parse the caller was editing against, without a
+    // second command: the conflict already carried it.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    // The selection was made against bytes that are gone, and the snippet at its
+    // position is a different one, so it is dropped with a notice rather than
+    // silently re-pointed (R27).
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "conflict" case
+
+  it('reports a failed save and changes nothing on the screen', async () => {
+    // **The fixture fails at the rename**, which is the step that means the
+    // rename did *not* happen: `may_have_written` is `false`, so nothing this
+    // window shows of the file has been invalidated. The case where it did is the
+    // test below, and the two exist as a pair.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: { Write: { Io: { step: 'Rename', path: '/tmp/espanso/match/base.yml', kind: 'PermissionDenied', raw_os_error: 13 } } },
+        may_have_written: false
+      }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ moves: [{ ok: false, failure }] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    expect(outcome).toBeNull();
+    expect(reported).toEqual([failure]);
+    // A save that failed is not a workspace that failed: the window still shows
+    // the configuration it was showing.
+    expect(state.status).toBe('ready');
+    expect(state.failure).toBeNull();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    // Nothing was written, so nothing was re-read: three reads for the load and
+    // one text read for the viewer, and no more of either.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+  }); // End of the "failed save" case
+
+  it('re-reads the file when the failure says the rename may have completed', async () => {
+    // **The other side of `may_have_written`, and the finding the review of Phase
+    // 2b-2a filed as High.** The rename succeeded and the directory sync failed,
+    // so the file may already hold the moved snippet: the command layer drops its
+    // own cached parse in exactly this case, and a window that assumed nothing had
+    // happened would go on drawing the pre-save order and the pre-save text.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: { Write: { Io: { step: 'SyncDirectory', path: '/tmp/espanso/match/base.yml', kind: 'Interrupted', raw_os_error: 4 } } },
+        may_have_written: true
+      }
+    };
+    const moved = movedDocument();
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ documents, moves: [{ ok: false, failure }] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    // What is on disk after the rename that did complete.
+    documents.set(2, { ok: true, value: moved });
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    // It is still a failure and is still reported as one.
+    expect(outcome).toBeNull();
+    expect(reported).toEqual([failure]);
+    expect(state.status).toBe('ready');
+    // And the screen now describes the file as it may now be, rather than as it
+    // was: the projection was re-read and the raw snapshot was dropped and taken
+    // again.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    // The selection was made against bytes that may be gone, and no identity was
+    // answered for it, so it is repaired the ordinary way rather than kept.
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "failed save that may have written" case
+
+  it('leaves the screen alone when a save commits nothing', async () => {
+    // **`committed: false` is a success, not a failure.** Moving one of two
+    // byte-identical snippets produces a byte-identical candidate, and a candidate
+    // equal to what the file already holds is not written — every rename installs
+    // a new inode and drops eight classes of metadata for nothing. Both gates
+    // still ran, no identity went stale, and the revision is the one this state
+    // was already projecting, so there is nothing here to re-read.
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-a',
+        committed: false,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({ moves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    const outcome = await state.moveMatch(baseDocument().matches[0]!, null, NOTHING_ACKNOWLEDGED);
+
+    // A success, answered as one.
+    expect(outcome?.outcome).toBe('saved');
+    // The selection is where it was, with no notice: nothing was invalidated, so
+    // presenting a repair would be this application inventing an event.
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    // And neither the projection nor the text was fetched again.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+  }); // End of the "committed: false" case
+
+  it('refuses a snippet whose document this state does not hold', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    // Document 9 was never listed, so there is no base revision to send. The
+    // command is not called at all, which is the assertion: inventing a base
+    // revision would turn a move into a move of whatever now sits at the
+    // position.
+    const stranger = makeMatch({ node: 99, document: 9, trigger: ':nowhere' });
+    expect(await state.moveMatch(stranger, null, NOTHING_ACKNOWLEDGED)).toBeNull();
+    expect(commands.moveMatch).not.toHaveBeenCalled();
+  }); // End of the "unknown document" case
+
+  it('sends the revision of the projection it is editing against', async () => {
+    const moved = movedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: true,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({ moves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const base = baseDocument();
+    await state.moveMatch(base.matches[0]!, base.matches[1]!, NOTHING_ACKNOWLEDGED);
+
+    const call = vi.mocked(commands.moveMatch).mock.calls[0]!;
+    expect(call[0]).toEqual(base.matches[0]!.id);
+    expect(call[1]).toEqual(base.matches[1]!.id);
+    expect(call[2]).toBe('rev-a');
+    void moved;
+  }); // End of the "base revision" case
+}); // End of the "moving a snippet" suite

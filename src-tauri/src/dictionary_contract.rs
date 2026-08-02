@@ -130,6 +130,13 @@ impl CodeEnum {
 /// `DecodeError` and `NodeKind`. One variant serialized without its string is a
 /// failure of this module, which is why none of them could land alone.
 ///
+/// **Two were added by Phase 2b-2a**, and each arrived by the route this table
+/// exists to catch. `NotReencodable` is the `reason` of a
+/// `PresentationNote`, which a successful save now carries out — an enum that had
+/// lived entirely inside the emitter until the moment a result type carried it.
+/// `SaveResult` is the shell type `move_match` answers with, and it is the first
+/// entry declared in `src-tauri/` beside `CommandError`.
+///
 /// **`NodeKind` moved here from [`NOT_A_CODE`] in the same change**, and the
 /// exclusion it left is the shape of the rule: its reason was *"a substrate
 /// detail the read projection never carries"*, which stopped being true the
@@ -273,6 +280,14 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/emit/decode.rs",
         name: "DecodeError",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/emit/choose.rs",
+        name: "NotReencodable",
+    },
+    CodeEnum {
+        source: "src-tauri/src/save.rs",
+        name: "SaveResult",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -292,7 +307,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 12),
+    ("commandError", 14),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -317,6 +332,8 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("invariantViolation", 5),
     ("pathError", 9),
     ("decodeError", 5),
+    ("notReencodable", 8),
+    ("saveResult", 3),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.

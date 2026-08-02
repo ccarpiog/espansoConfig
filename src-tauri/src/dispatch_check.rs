@@ -300,6 +300,164 @@ fn the_six_read_only_commands_are_reachable_with_an_empty_capability_set() {
     assert_eq!(reloaded["revision"], view["revision"]);
 } // End of function the_six_read_only_commands_are_reachable_with_an_empty_capability_set()
 
+/// The one command that writes is reachable, and its answer is a flat outcome.
+///
+/// **The measurement Phase 2b-2a owes**, and it is three claims a direct call to
+/// [`crate::commands::WorkspaceSession::move_match`] cannot make.
+///
+/// 1. **It is registered and the empty capability set does not block it.** A
+///    command absent from `generate_handler!` comes back as the dispatcher's
+///    rejection *string*; an ACL denial does the same. Both are told from a real
+///    answer by the answer being a JSON object with an `outcome`.
+/// 2. **Its arguments deserialize from the shapes the frontend really sends** —
+///    a whole `MatchId` for `id`, a `null` for `after`, a **camelCase**
+///    `baseRevision` for the snake_case parameter Tauri renames, and an
+///    `Acknowledgement` that arrives as `{ "accepted": [] }` and goes through
+///    that type's hand-written `Deserialize`. A wrong argument name is refused
+///    inside Tauri's command macro, in English, with no code — which is what
+///    `set_menu_labels` was changed to avoid at 1b-2b.
+/// 3. **`SaveResult` crosses flat**, with `outcome` beside its operands rather
+///    than as a one-key object, and the identity it answers with resolves through
+///    `get_match` **across the dispatcher** rather than only in Rust.
+#[test]
+fn move_match_is_reachable_and_answers_a_flat_outcome() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    fs::write(
+        dir.path().join("match").join("base.yml"),
+        "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':two'\n    replace: second\n",
+    )
+    .unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let rows = invoke(&webview, "list_documents", json!({}))
+        .expect("the workspace is open")
+        .as_array()
+        .expect("a list of summaries")
+        .clone();
+    let document_id = rows[0]["id"].clone();
+    let view =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let held = view["matches"][1]["id"].clone();
+
+    let answer = invoke(
+        &webview,
+        "move_match",
+        json!({
+            "id": held,
+            "after": Value::Null,
+            "baseRevision": view["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the move is legal");
+
+    assert_eq!(
+        answer["outcome"], "saved",
+        "the outcome must be a flat discriminant, not a tag: {answer}"
+    );
+    assert_eq!(answer["committed"], true);
+    assert_eq!(answer["backup_taken"], true);
+    assert_eq!(answer["notes"], json!([]));
+    assert!(
+        answer["moved"].is_object(),
+        "a committed move names the item it moved: {answer}"
+    );
+    assert_ne!(answer["revision"], view["revision"]);
+
+    // The identity the command minted resolves, across the dispatcher, to the
+    // snippet that moved — and the one held before the save does not.
+    let found = invoke(&webview, "get_match", json!({ "id": answer["moved"] }))
+        .expect("the answered identity resolves");
+    assert_eq!(found["trigger"]["trigger"]["text"], ":two");
+    let stale = invoke(&webview, "get_match", json!({ "id": held }))
+        .expect_err("an identity from the previous revision must not resolve");
+    assert_eq!(
+        stale.get("code").and_then(Value::as_str),
+        Some("identityStaleRevision"),
+        "the refusal must be our typed code: {stale}"
+    );
+
+    // And the file really moved, on the disk rather than in a projection.
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some("matches:\n  - trigger: ':two'\n    replace: second\n  - trigger: ':one'\n    replace: first\n")
+    );
+} // End of function move_match_is_reachable_and_answers_a_flat_outcome()
+
+/// A save refused by the semantic gate crosses in the **`Ok`** channel.
+///
+/// The distinction the whole result type is built on, measured at the boundary:
+/// a refusal is an outcome the caller acts on, not a rejection. If it were an
+/// `Err`, `invoke` would reject and `classifyFailure` would file it under a code
+/// with no findings attached, which is exactly the shape that would make the
+/// acknowledgement round trip impossible to build.
+#[test]
+fn a_refused_save_crosses_as_a_value_and_carries_its_findings() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    fs::write(
+        dir.path().join("match").join("base.yml"),
+        "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':two'\n    replace: 'hello {{who}}'\n",
+    )
+    .unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let rows = invoke(&webview, "list_documents", json!({}))
+        .expect("the workspace is open")
+        .as_array()
+        .expect("a list of summaries")
+        .clone();
+    let document_id = rows[0]["id"].clone();
+    let view =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+
+    let request = json!({
+        "id": view["matches"][1]["id"],
+        "after": Value::Null,
+        "baseRevision": view["revision"],
+        "acknowledgement": { "accepted": [] },
+    });
+    let refusal = invoke(&webview, "move_match", request.clone()).expect("a refusal is a value");
+    assert_eq!(refusal["outcome"], "refused");
+    assert_eq!(refusal["verdict"], "RefusedForUnacknowledgedSuspicions");
+    let findings = refusal["findings"]
+        .as_array()
+        .expect("a refusal carries its evidence")
+        .clone();
+    assert_eq!(findings.len(), 1);
+
+    // The round trip: the findings go back exactly as they arrived, and the same
+    // move proceeds. Nothing anywhere in either request is a flag.
+    assert!(!request.to_string().contains("force"));
+    let acknowledged = invoke(
+        &webview,
+        "move_match",
+        json!({
+            "id": view["matches"][1]["id"],
+            "after": Value::Null,
+            "baseRevision": view["revision"],
+            "acknowledgement": { "accepted": findings },
+        }),
+    )
+    .expect("the acknowledged move proceeds");
+    assert_eq!(acknowledged["outcome"], "saved");
+} // End of function a_refused_save_crosses_as_a_value_and_carries_its_findings()
+
 /// The directory holding the committed, hand-authored corpus.
 ///
 /// The **synthetic** corpus only. `crates/espansoconfig-core/tests/corpus/real/`
@@ -959,7 +1117,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the seven commands.
+/// A page that is not this application cannot reach any of the eight commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -971,7 +1129,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All seven are attempted, and the count is asserted against the registered
+/// **All eight are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1005,6 +1163,18 @@ fn a_remote_origin_is_refused() {
         // user's configuration back out of the application.
         ("document_text", json!({ "id": 0 })),
         ("reload_document", json!({ "id": 0 })),
+        // The one command that can write a user's file, and so the one whose
+        // refusal matters most after `document_text`'s: a navigated webview must
+        // not be able to rearrange the user's snippets.
+        (
+            "move_match",
+            json!({
+                "id": identity,
+                "after": Value::Null,
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1019,7 +1189,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 7, "the surface is seven commands");
+    assert_eq!(attempted.len(), 8, "the surface is eight commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)
@@ -1146,10 +1316,9 @@ fn the_main_thread_step_reports_what_the_work_answered() {
     );
 
     let failed = crate::menu::on_main_thread(&handle, || Err(()));
-    assert_eq!(
-        failed,
-        Err(crate::error::CommandError::MenuBuildFailed),
-        "work that answered Err must not be reported as a menu that was installed"
+    assert!(
+        matches!(failed, Err(crate::error::CommandError::MenuBuildFailed)),
+        "work that answered Err must not be reported as a menu that was installed: {failed:?}"
     );
 
     // Non-vacuity: the closure really ran, on whatever thread the runtime chose,

@@ -22,6 +22,8 @@
  * A type alone would be invisible to both.
  */
 
+import type { SaveError } from './types';
+
 /**
  * Every code the Rust side may put in a rejection.
  *
@@ -44,7 +46,9 @@ export const COMMAND_ERROR_CODES = [
   'identityNoSuchMatch',
   'menuUnavailable',
   'invalidMenuLabels',
-  'menuBuildFailed'
+  'menuBuildFailed',
+  'moveNotWithinOneSequence',
+  'saveFailed'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -205,6 +209,61 @@ export interface MenuBuildFailedError {
   readonly code: 'menuBuildFailed';
 }
 
+/**
+ * A move's two ends could not be shown to be items of one list.
+ *
+ * **A negative claim, and the wording follows it.** It does not say the
+ * destination is in a *different* list; it says this application could not
+ * establish that it is in the *same* one. A snippet moves only within the list it
+ * is already in — moving between lists, or between files, is a different
+ * operation whose questions about indentation and about what travels with the
+ * snippet are unanswered.
+ */
+export interface MoveNotWithinOneSequenceError {
+  /** The discriminant. */
+  readonly code: 'moveNotWithinOneSequence';
+}
+
+/**
+ * A save was attempted and did not commit, for a reason the save transaction
+ * itself reports.
+ *
+ * **The typed failure travels whole**, rather than being flattened into codes of
+ * its own: `SaveError` has its own dictionary namespace and its own accessor
+ * (`tSaveError`), and flattening would lose the nesting that carries
+ * `WriteError`'s step — the one thing that says whether the file may have been
+ * replaced.
+ *
+ * **Two outcomes of a save are deliberately not here.** A stale base revision and
+ * a refusal by the semantic gate resolve as a {@link SaveResult}, in the value
+ * channel, because both are expected answers rather than errors.
+ */
+export interface SaveFailedError {
+  /** The discriminant. */
+  readonly code: 'saveFailed';
+  /** Why the save did not commit, exactly as the save transaction reports it. */
+  readonly error: SaveError;
+  /**
+   * Whether this attempt's replacement of the file had already happened when it
+   * failed.
+   *
+   * **The save transaction's own predicate, evaluated in Rust**, not something
+   * this side derives from `error`. Deriving it would mean a second list of write
+   * steps in TypeScript, and a list kept in step by hand is a list that drifts
+   * the first time a step is added. Read it with {@link mayHaveWritten} rather
+   * than by hand, so the one question has one spelling here too.
+   *
+   * `true` means the file may already hold what the save was writing: whatever
+   * this window is showing of that file — its snippets and its raw text — is a
+   * picture of bytes that may be gone, and both have to be read again. `false`
+   * means this attempt did not replace it.
+   *
+   * **Neither answer is a claim about what the file holds now.** Another program
+   * can have written it since; this says only what *this* attempt got as far as.
+   */
+  readonly may_have_written: boolean;
+}
+
 /** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
@@ -218,7 +277,9 @@ export type CommandError =
   | IdentityNoSuchMatchError
   | MenuUnavailableError
   | InvalidMenuLabelsError
-  | MenuBuildFailedError;
+  | MenuBuildFailedError
+  | MoveNotWithinOneSequenceError
+  | SaveFailedError;
 
 /**
  * Where the developer string of an unexpected failure is kept.
@@ -327,8 +388,51 @@ export function reportIpcFailure(failure: IpcFailure): void {
   console.warn(CONSOLE_PREFIX, failure.kind, developerDetail(failure));
 } // End of function reportIpcFailure()
 
-/** The three JSON shapes an operand of a {@link CommandError} can take. */
-export type OperandShape = 'string' | 'number' | 'stringArray';
+/**
+ * Whether a failed command may already have replaced the file it was writing.
+ *
+ * **The one spelling of the question on this side**, and the reason it is a
+ * function rather than a property read at each call site: the answer decides
+ * whether a screen showing that file is out of date, and a caller that got it
+ * wrong would leave the window drawing bytes that are gone. The Rust side reaches
+ * the same decision from the same value — `CommandError::SaveFailed` writes the
+ * save transaction's own `may_have_written` — so the two agree by construction
+ * rather than by two lists of write steps kept in step by hand.
+ *
+ * `false` for every other failure, including one that is not a command error at
+ * all: nothing else on this boundary writes a file.
+ *
+ * **Not a claim about what the file holds now.** It says this attempt got as far
+ * as replacing it; another program can have written it since.
+ *
+ * @param failure - A classified IPC failure.
+ * @returns Whether the file may hold what the save was writing.
+ */
+export function mayHaveWritten(failure: IpcFailure): boolean {
+  return (
+    failure.kind === 'command' &&
+    failure.error.code === 'saveFailed' &&
+    failure.error.may_have_written
+  );
+} // End of function mayHaveWritten()
+
+/**
+ * The JSON shapes an operand of a {@link CommandError} can take.
+ *
+ * `'object'` is deliberately the weakest of them, and it exists for one operand:
+ * the whole `SaveError` a {@link SaveFailedError} carries. {@link isCommandError}
+ * can say that operand is present and is an object, and no more — validating a
+ * nested wire enum inside a type guard would mean reimplementing nine variants
+ * here, in a place nothing checks against Rust. What keeps that payload honest is
+ * the `SaveError` union in `./types`, which `wire_contract.rs` compares against
+ * what `serde` writes.
+ *
+ * `'boolean'` exists for that same variant's `may_have_written`, and checking it
+ * matters more than checking most: it is the one operand this application
+ * *branches on*, and an absent one reads as `undefined`, which is falsy — the
+ * quiet version of exactly the bug the operand was added to fix.
+ */
+export type OperandShape = 'string' | 'number' | 'boolean' | 'stringArray' | 'object';
 
 /**
  * The operands each code carries, and the JSON shape of each one.
@@ -358,7 +462,9 @@ export const COMMAND_ERROR_OPERANDS = {
   identityNoSuchMatch: { node: 'number' },
   menuUnavailable: {},
   invalidMenuLabels: { missing: 'stringArray', unexpected: 'stringArray' },
-  menuBuildFailed: {}
+  menuBuildFailed: {},
+  moveNotWithinOneSequence: {},
+  saveFailed: { error: 'object', may_have_written: 'boolean' }
 } as const;
 
 /**
@@ -374,8 +480,12 @@ function hasShape(value: unknown, shape: OperandShape): boolean {
       return typeof value === 'string';
     case 'number':
       return typeof value === 'number';
+    case 'boolean':
+      return typeof value === 'boolean';
     case 'stringArray':
       return Array.isArray(value) && value.every((item) => typeof item === 'string');
+    case 'object':
+      return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 } // End of function hasShape()
 
@@ -525,6 +635,13 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'menuUnavailable':
     case 'invalidMenuLabels':
     case 'menuBuildFailed':
+    // A move refused before it was attempted, and a save that failed, both
+    // leave the selection exactly where it was: neither says the identity the
+    // caller holds has stopped naming a snippet. A *successful* save does say
+    // that, and it is not an error — `SaveResult.moved` carries the new
+    // identity, and there is nothing here for that path to classify.
+    case 'moveNotWithinOneSequence':
+    case 'saveFailed':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.

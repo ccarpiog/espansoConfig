@@ -224,6 +224,8 @@
   "code.commandError.menuUnavailable": "No se ha podido actualizar el menú de la aplicación en el idioma elegido.",
   "code.commandError.invalidMenuLabels": "No se ha podido actualizar el menú de la aplicación porque esta ventana y el programa no coinciden en qué etiquetas de menú hacen falta.",
   "code.commandError.menuBuildFailed": "No se ha podido reconstruir el menú de la aplicación, así que sigue mostrando el idioma que tenía.",
+  "code.commandError.moveNotWithinOneSequence": "espansoConfig solo mueve un fragmento dentro de la lista en la que ya está, y no pudo determinar que el lugar que elegiste esté en esa lista.",
+  "code.commandError.saveFailed": "espansoConfig no pudo llevar a cabo este guardado. Lo que informa junto a esto es el motivo.",
 
   "code.workspaceError.discovery": "No se ha podido abrir la carpeta de configuración de espanso.",
   "code.workspaceError.unknownDocument": "Esta ventana no tiene abierto ningún archivo con ese identificador.",
@@ -451,5 +453,18 @@
   "code.decodeError.unknownEscape": "Un valor entre comillas dobles usa una secuencia de escape que YAML no define.",
   "code.decodeError.malformedNumericEscape": "Un escape \\x, \\u o \\U está cortado, o no es hexadecimal.",
   "code.decodeError.invalidCodePoint": "Un escape nombra un valor que no es un carácter.",
-  "code.decodeError.trailingBackslash": "Un valor entre comillas dobles termina con una barra invertida suelta."
+  "code.decodeError.trailingBackslash": "Un valor entre comillas dobles termina con una barra invertida suelta.",
+
+  "code.notReencodable.foldedStyle": "Este valor está escrito como bloque de texto plegado, así que dónde estaban sus saltos de línea no se puede recuperar solo a partir del valor.",
+  "code.notReencodable.foldedFlowScalar": "Este valor ocupa varias líneas, y el valor por sí solo no registra dónde estaban los saltos.",
+  "code.notReencodable.nonCanonicalEscaping": "Este valor entre comillas dobles usa secuencias de escape, y más de una grafía se lee como el mismo texto.",
+  "code.notReencodable.nonCanonicalBlankLine": "Este bloque de texto tiene una línea de espacios donde YAML lee una línea vacía, así que esos espacios no se pueden recuperar a partir del valor.",
+  "code.notReencodable.mixedLineBreaks": "Este bloque de texto mezcla dos tipos de fin de línea, y un solo tipo no puede reproducir ambos.",
+  "code.notReencodable.bareCarriageReturn": "Este bloque de texto usa un retorno de carro suelto como fin de línea, algo que el valor no registra.",
+  "code.notReencodable.synthesisedFinalBreak": "Este bloque de texto termina el archivo sin salto de línea final, así que el valor lleva un salto que el archivo no tiene.",
+  "code.notReencodable.undecodable": "Este valor no se pudo volver a leer, así que no se pudo conservar su grafía.",
+
+  "code.saveResult.saved": "espansoConfig terminó este guardado.",
+  "code.saveResult.conflict": "Este archivo cambió después de leerse, así que no se escribió nada.",
+  "code.saveResult.refused": "espansoConfig no escribió este archivo por lo que encontró en el resultado."
 }

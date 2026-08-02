@@ -36,6 +36,7 @@ mod menu;
 mod menu_contract;
 #[cfg(test)]
 mod rust_source;
+mod save;
 #[cfg(test)]
 mod wire_contract;
 
@@ -91,6 +92,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::get_match,
             commands::document_text,
             commands::reload_document,
+            commands::move_match,
             menu::set_menu_labels,
         ])
 } // End of function register()

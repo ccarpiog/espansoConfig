@@ -24,8 +24,10 @@ import {
   developerDetail,
   identityRecovery,
   isCommandError,
+  mayHaveWritten,
   type CommandError,
   type CommandErrorCode,
+  type IpcFailure,
   type OperandShape
 } from './errors';
 
@@ -51,8 +53,12 @@ function valueOfShape(shape: OperandShape): unknown {
       return 'x';
     case 'number':
       return 1;
+    case 'boolean':
+      return true;
     case 'stringArray':
       return ['/nowhere'];
+    case 'object':
+      return { DocumentIsReadOnly: { path: '/nowhere/packages/one.yml' } };
   }
 } // End of function valueOfShape()
 
@@ -128,6 +134,48 @@ describe('isCommandError()', () => {
     // against the code list, so a code added to one and not the other cannot
     // leave the guard silently permitting everything for it.
     expect(Object.keys(COMMAND_ERROR_OPERANDS).sort()).toEqual([...COMMAND_ERROR_CODES].sort());
+  });
+});
+
+describe('mayHaveWritten()', () => {
+  /**
+   * A failed save, with the answer the Rust predicate gave for it.
+   *
+   * @param answer - What `SaveError::may_have_written` returned.
+   * @returns The failure as it arrives from the boundary.
+   */
+  function saveFailure(answer: boolean): IpcFailure {
+    return {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: {
+          Write: {
+            Io: {
+              step: answer ? 'SyncDirectory' : 'Rename',
+              path: '/nowhere/match/base.yml',
+              kind: 'Interrupted',
+              raw_os_error: 4
+            }
+          }
+        },
+        may_have_written: answer
+      }
+    };
+  } // End of function saveFailure()
+
+  it('reads the answer the save transaction gave, both ways', () => {
+    // The operand, and **only** the operand: deriving the answer from the nested
+    // step would be a second list of write steps on this side of the boundary,
+    // and a list kept in step by hand is one that drifts.
+    expect(mayHaveWritten(saveFailure(true))).toBe(true);
+    expect(mayHaveWritten(saveFailure(false))).toBe(false);
+  });
+
+  it('is false for every failure that is not a save', () => {
+    expect(mayHaveWritten({ kind: 'command', error: STALE })).toBe(false);
+    expect(mayHaveWritten({ kind: 'command', error: NO_SUCH_MATCH })).toBe(false);
+    expect(mayHaveWritten(classifyFailure('Command move_match not allowed by ACL'))).toBe(false);
   });
 });
 

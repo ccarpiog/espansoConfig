@@ -41,34 +41,41 @@ import {
   getDocument,
   getMatch,
   listDocuments,
+  moveMatch,
   openWorkspace,
   reloadDocument
 } from '../ipc/commands';
 import type { CommandResult } from '../ipc/commands';
-import { reportIpcFailure } from '../ipc/errors';
+import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 import type {
+  Acknowledgement,
+  ContentRevision,
   DocumentId,
   DocumentSummary,
   DocumentView,
   MatchId,
   MatchView,
+  SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
 import type { SelectionNotice } from './notices';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
-import { positionOf, repairSelection, selectMatch } from './selection';
+import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
 import type { SidebarModel, SidebarSelection } from './sidebar';
 import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './sidebar';
 
 /**
  * The commands the browser needs, as one injectable object.
  *
- * Exactly the read-only surface of `../ipc/commands`, with the same signatures.
- * Nothing that writes a file appears here, because nothing that writes a file
- * exists yet.
+ * The six read-only commands of `../ipc/commands`, with the same signatures, and
+ * — since Phase 2b-2a — the one that writes. {@link BrowserCommands.moveMatch} is
+ * the only member that can change a file on disk, and it is here for the same
+ * reason the others are: a test that cannot run Tauri still has to be able to
+ * drive a refusal, a conflict and a commit and watch what this state does about
+ * each.
  */
 export interface BrowserCommands {
   /**
@@ -117,6 +124,21 @@ export interface BrowserCommands {
    * @returns The file's text, or a failure.
    */
   documentText(id: DocumentId): Promise<CommandResult<string>>;
+  /**
+   * Moves one snippet within the list it is in, and saves the file.
+   *
+   * @param id - The snippet to move, by identity.
+   * @param after - The snippet it should follow, or `null` for the top.
+   * @param baseRevision - The revision the caller believes the file holds.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure.
+   */
+  moveMatch(
+    id: MatchId,
+    after: MatchId | null,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
 }
 
 /** The real boundary, for the running application. */
@@ -126,7 +148,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   getDocument,
   getMatch,
   reloadDocument,
-  documentText
+  documentText,
+  moveMatch
 };
 
 /** Where the workspace load has got to. */
@@ -268,6 +291,35 @@ export interface BrowserState {
    * @param on - Whether the file's text should be showing.
    */
   showFileText(on: boolean): Promise<void>;
+  /**
+   * Moves one snippet inside the list it is in, and saves the file.
+   *
+   * **The one entry point on this state that changes a file.** Everything else
+   * here reads.
+   *
+   * What comes back is the outcome, and all three of its arms are answers rather
+   * than failures: `saved`, `conflict` — the file moved on, and nothing was
+   * written — and `refused`, which carries the findings to show and to hand back.
+   * `null` means the command itself failed; the reason went to the reporter, as
+   * every other failure on this state does.
+   *
+   * On a committed save this refreshes the document's projection, drops the raw
+   * viewer's held text, and re-points the selection at the identity the command
+   * answered with — because a commit invalidates every identity this state holds
+   * for that file.
+   *
+   * @param match - The snippet to move.
+   * @param after - The snippet it should follow, or `null` for the top of the
+   *   list.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended, or `null` when the command failed.
+   */
+  moveMatch(
+    match: MatchView,
+    after: MatchView | null,
+    acknowledgement: Acknowledgement
+  ): Promise<SaveResult | null>;
 }
 
 /**
@@ -782,6 +834,143 @@ export function createBrowserState(
         return;
       }
       await readFileText();
-    } // End of function showFileText()
+    }, // End of function showFileText()
+
+    async moveMatch(
+      match: MatchView,
+      after: MatchView | null,
+      acknowledgement: Acknowledgement
+    ): Promise<SaveResult | null> {
+      const view = views.find((held) => held.id === match.id.document);
+      if (view === undefined) {
+        // Nothing on this state describes that document, so there is no base
+        // revision to send. Refusing here rather than inventing one is the same
+        // rule the command applies: a base that is not the parse the caller was
+        // editing against turns a move into a move of whatever now sits at the
+        // position.
+        return null;
+      }
+      const answer = await commands.moveMatch(
+        match.id,
+        after === null ? null : after.id,
+        view.revision,
+        acknowledgement
+      );
+      if (!answer.ok) {
+        // A save that failed is not a workspace that failed, so the window keeps
+        // showing the configuration it was showing — but *which* bytes it is
+        // showing of this one file is a different question, and `mayHaveWritten`
+        // is the only thing that answers it. A failure after the rename means the
+        // file may already hold the moved snippet: the command layer drops its own
+        // cached parse in exactly that case, and a window that did not do the same
+        // would go on drawing the pre-save order and the pre-save text over a file
+        // that has moved on.
+        report(answer.failure);
+        if (mayHaveWritten(answer.failure)) {
+          forgetFileText();
+          await adoptTheDocumentOnDisk(match.id.document, null);
+          await readFileText();
+        }
+        return null;
+      }
+
+      if (answer.value.outcome === 'saved') {
+        // **A `Saved` does not mean the bytes changed.** `committed: false` is a
+        // documented success: a candidate byte-identical to what the file already
+        // held is not written, because every rename installs a new inode for
+        // nothing — and moving one of two identical snippets produces exactly
+        // that. What makes this screen out of date is therefore not the arm but
+        // one of two facts: the file was rewritten, or the revision the
+        // transaction ended on is not the one this state was projecting, which is
+        // a file some other program changed under the lock's two reads.
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          // The snapshot the raw viewer holds is of a file that no longer exists
+          // in that form. This is `forgetFileText`'s fourth caller and the first
+          // one that is about a *write*.
+          forgetFileText();
+          await adoptTheDocumentOnDisk(match.id.document, answer.value.moved);
+          await readFileText();
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        // Nothing was written, and the command has already refreshed its own
+        // cache from the disk. Taking the projection it handed back keeps this
+        // state describing the same bytes the next save will be checked against.
+        // The viewer's snapshot is of the bytes the *caller* read, which are not
+        // the ones on disk, so it goes too.
+        forgetFileText();
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return answer.value;
+    } // End of function moveMatch()
   };
+
+  /**
+   * Re-reads a document whose bytes this state can no longer vouch for, and
+   * re-points the selection.
+   *
+   * The projection is fetched rather than assumed: a commit invalidates every
+   * identity this state holds for that file, and `views` still describes the bytes
+   * that were replaced. `moved` is the identity the command minted in the new
+   * revision, and it is `null` whenever the command could not establish one — or
+   * whenever there is no such identity to have, which is the case for **a save
+   * that failed after its rename**. In both cases the selection is repaired the
+   * ordinary way, by looking for it.
+   *
+   * A re-read that itself fails is reported and leaves the projection alone. That
+   * is the honest answer available here: this state cannot describe a file it
+   * could not read, and blanking the workspace over one file would be a bigger
+   * claim than the failure supports.
+   *
+   * @param document - The file that was, or may have been, written.
+   * @param moved - The moved snippet's identity in the new revision, or `null`.
+   */
+  async function adoptTheDocumentOnDisk(
+    document: DocumentId,
+    moved: MatchId | null
+  ): Promise<void> {
+    const fresh = await commands.getDocument(document);
+    if (!fresh.ok) {
+      report(fresh.failure);
+      return;
+    }
+    installView(fresh.value);
+    if (moved !== null && selected !== null && selected.document === document) {
+      const position = positionOf(fresh.value, moved);
+      if (position !== null) {
+        selected = selectMatch(fresh.value, position);
+        notice = null;
+        return;
+      }
+    }
+    repairAfter(fresh.value);
+  } // End of function adoptTheDocumentOnDisk()
+
+  /**
+   * Puts the selection back in a projection that has just replaced the one it
+   * was made against.
+   *
+   * `reresolve` is positional **and then checks**: a different snippet at the
+   * held position is `differentMatch` and drops the selection with a notice,
+   * never a silent re-point (`PROGRESS.md` R27). After a move that is the
+   * expected answer for every selection except the moved one, which
+   * {@link adoptTheDocumentOnDisk} has already re-pointed by identity.
+   *
+   * @param view - The projection now in place.
+   */
+  function repairAfter(view: DocumentView): void {
+    if (selected === null || selected.document !== view.id) {
+      return;
+    }
+    const found = reresolve(selected, view);
+    if (found.outcome === 'sameMatch') {
+      selected = found.selected;
+      notice = 'kept';
+      return;
+    }
+    selected = null;
+    notice = found.outcome;
+  } // End of function repairAfter()
 } // End of function createBrowserState()

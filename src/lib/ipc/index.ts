@@ -14,6 +14,7 @@ export {
   getDocument,
   getMatch,
   listDocuments,
+  moveMatch,
   openWorkspace,
   reloadDocument
 } from './commands';
@@ -30,6 +31,7 @@ export {
   classifyFailure,
   identityRecovery,
   isCommandError,
+  mayHaveWritten,
   reportIpcFailure
 } from './errors';
 export type {
@@ -44,11 +46,13 @@ export type {
   IpcFailure,
   MenuBuildFailedError,
   MenuUnavailableError,
+  MoveNotWithinOneSequenceError,
   NoWorkspaceOpenError,
   NotADirectoryError,
   NotUtf8Error,
   OperandShape,
   ReselectionOutcome,
+  SaveFailedError,
   SelectionRecovery,
   UnexpectedFailure,
   UnknownDocumentError
@@ -84,7 +88,12 @@ export type {
   MatchOptions,
   MatchView,
   NodeId,
+  NotReencodable,
+  NotReencodableName,
   PathSegment,
+  PresentationNote,
+  SaveResult,
+  SaveResultName,
   ScalarStyle,
   ScalarView,
   TriggerKind,

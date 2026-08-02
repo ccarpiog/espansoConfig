@@ -224,6 +224,8 @@
   "code.commandError.menuUnavailable": "The application menu could not be updated in the language you chose.",
   "code.commandError.invalidMenuLabels": "The application menu could not be updated, because this window and the application disagree about which menu labels it needs.",
   "code.commandError.menuBuildFailed": "The application menu could not be rebuilt, so it is still showing the language it had.",
+  "code.commandError.moveNotWithinOneSequence": "espansoConfig moves a snippet only inside the list it is already in, and it could not establish that the place you chose is in that list.",
+  "code.commandError.saveFailed": "espansoConfig could not carry this save through. What it reports beside this is the reason.",
 
   "code.workspaceError.discovery": "The espanso configuration folder could not be opened.",
   "code.workspaceError.unknownDocument": "This window has no file open with that identifier.",
@@ -451,5 +453,18 @@
   "code.decodeError.unknownEscape": "A double-quoted value uses an escape sequence YAML does not define.",
   "code.decodeError.malformedNumericEscape": "A \\x, \\u or \\U escape is cut short, or is not hexadecimal.",
   "code.decodeError.invalidCodePoint": "An escape names a value that is not a character.",
-  "code.decodeError.trailingBackslash": "A double-quoted value ends with a dangling backslash."
+  "code.decodeError.trailingBackslash": "A double-quoted value ends with a dangling backslash.",
+
+  "code.notReencodable.foldedStyle": "This value is written as a folded text block, so where its line breaks were is not recoverable from the value alone.",
+  "code.notReencodable.foldedFlowScalar": "This value runs across several lines, and the value alone does not record where the breaks were.",
+  "code.notReencodable.nonCanonicalEscaping": "This double-quoted value uses escape sequences, and more than one spelling reads back as the same text.",
+  "code.notReencodable.nonCanonicalBlankLine": "This text block has a line of spaces where YAML reads an empty line, so those spaces are not recoverable from the value.",
+  "code.notReencodable.mixedLineBreaks": "This text block mixes two kinds of line ending, and one ending cannot reproduce both.",
+  "code.notReencodable.bareCarriageReturn": "This text block uses a bare carriage return as a line ending, which the value does not record.",
+  "code.notReencodable.synthesisedFinalBreak": "This text block ends the file with no final line break, so the value carries a break the file does not.",
+  "code.notReencodable.undecodable": "This value could not be read back at all, so its spelling could not be kept.",
+
+  "code.saveResult.saved": "espansoConfig finished this save.",
+  "code.saveResult.conflict": "This file changed after it was read, so nothing was written.",
+  "code.saveResult.refused": "espansoConfig did not write this file, because of what it found in the result."
 }

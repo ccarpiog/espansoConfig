@@ -1,5 +1,5 @@
 /**
- * The six read-only commands, typed.
+ * The seven workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,23 +17,35 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
+ * ## One of them writes
+ *
+ * {@link moveMatch}, since Phase 2b-2a. It is the only function in this
+ * application that can change a file on disk, and what it answers with is a
+ * {@link SaveResult} in the value channel rather than a thrown error: a save that
+ * was refused, and a save that found the file had moved on, are **outcomes** and
+ * not failures.
+ *
  * ## What is deliberately absent
  *
- * Every mutating command. `save_match`, `create_match`, `delete_match`,
- * `move_match`, `save_raw_document` and `validate_match` are Phase 2, and the
- * save transaction they need does not exist. A wrapper here would be a
- * standing invitation to call one.
+ * `save_match`, `create_match`, `delete_match` and `save_raw_document`. The first
+ * needs a minimal-diff engine that does not exist yet; the other three need core
+ * primitives for inserting a sequence item, removing one, and replacing a whole
+ * document's text, and none of the three exists. A wrapper here would be a
+ * standing invitation to call something that is not there.
  */
 
 import { invoke } from '@tauri-apps/api/core';
 
 import { classifyFailure, type IpcFailure } from './errors';
 import type {
+  Acknowledgement,
+  ContentRevision,
   DocumentId,
   DocumentSummary,
   DocumentView,
   MatchId,
   MatchView,
+  SaveResult,
   WorkspaceSummary
 } from './types';
 
@@ -56,7 +68,8 @@ export const COMMAND_NAMES = [
   'get_document',
   'get_match',
   'document_text',
-  'reload_document'
+  'reload_document',
+  'move_match'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -196,3 +209,55 @@ export async function documentText(id: DocumentId): Promise<CommandResult<string
 export async function reloadDocument(id: DocumentId): Promise<CommandResult<DocumentView>> {
   return call<DocumentView>('reload_document', { id });
 } // End of function reloadDocument()
+
+/**
+ * Moves one snippet within the list it is in, and saves the file.
+ *
+ * **The only function in this application that writes a user's file.** It goes
+ * through the save transaction and through nothing else: the file is locked,
+ * read and hashed under that lock, patched, reparsed, projected, checked, backed
+ * up and replaced atomically, all before this promise resolves.
+ *
+ * ## What it answers, and why a refusal is not a rejection
+ *
+ * A {@link SaveResult} with three arms. `saved` means the transaction ran to the
+ * end. `conflict` means the file no longer held what `baseRevision` claimed, and
+ * **nothing was written**. `refused` means the semantic gate found something and
+ * declined: show `findings`, and — if the person says so — call again with an
+ * {@link Acknowledgement} holding exactly the findings they were shown. Only the
+ * things that are neither of those reject, and a save that failed rejects with
+ * `saveFailed` carrying the transaction's own typed reason.
+ *
+ * ## Every identity you hold is stale afterwards
+ *
+ * A {@link MatchId} records the revision it was minted from, so a successful
+ * commit invalidates every one of them for that file. `saved.moved` is the moved
+ * snippet's identity **in the new revision**; the one passed in as `id` will now
+ * answer `identityStaleRevision`. The document's cached projection is refreshed
+ * on the Rust side before this resolves, so a following {@link getDocument} or
+ * {@link documentText} sees the new bytes without an explicit reload.
+ *
+ * There is deliberately **no force flag.** The acknowledgement is matched against
+ * findings recomputed from the file under the lock, as an exact multiset, so two
+ * equal suspicions need two acknowledged copies.
+ *
+ * @param id - The snippet to move, by identity.
+ * @param after - The snippet it should be written after, by identity, or `null`
+ *   to put it at the top of the list. An identity rather than a position: a
+ *   position re-points itself the moment anything above it is deleted.
+ * @param baseRevision - The revision the caller believes the file holds. Checked
+ *   against this session's projection and again against the bytes under the write
+ *   lock.
+ * @param acknowledgement - The suspicions already shown to a person, by content.
+ *   Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `moveNotWithinOneSequence`, or `saveFailed`.
+ */
+export async function moveMatch(
+  id: MatchId,
+  after: MatchId | null,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('move_match', { id, after, baseRevision, acknowledgement });
+} // End of function moveMatch()

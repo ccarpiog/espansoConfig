@@ -429,6 +429,27 @@ impl Workspace {
         self.by_path.get(path).copied()
     }
 
+    /// Everything about one document that does not come from its own bytes.
+    ///
+    /// The value [`crate::persist::SaveRequest::context`] needs, and the reason
+    /// this accessor exists: a save has to be given the **absolute path, the file
+    /// kind and the identity this session already resolved**, and a caller that
+    /// rebuilt a [`DocumentContext`] of its own could disagree with the one the
+    /// projection was made against — most sharply about
+    /// [`crate::discovery::FileKind::Package`], which is what makes a document
+    /// read-only.
+    ///
+    /// Costs no parse and no read: the context comes from the directory walk.
+    ///
+    /// # Errors
+    ///
+    /// [`WorkspaceError::UnknownDocument`] for an identity this session does not
+    /// hold.
+    pub fn document_context(&self, id: DocumentId) -> Result<&DocumentContext, WorkspaceError> {
+        let position = self.position_of(id)?;
+        Ok(&self.entries[position].context)
+    } // End of function document_context()
+
     /// How many times any document has been parsed in this session.
     ///
     /// Instrumentation, and the observable half of the cache's contract: two

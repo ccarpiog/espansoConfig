@@ -66,7 +66,8 @@ pub use node::{
     TagSpelling,
 };
 pub use preamble::DocumentPreamble;
-use serde::{Deserialize, Serialize};
+use serde::de::{Error as DeError, Unexpected};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub use trivia::{
     BlankRun, CommentAttachment, CommentOwner, Hazard, HazardKind, OwnershipRule, Punctuation,
@@ -78,14 +79,64 @@ pub use trivia::{
 /// Byte offsets, not character offsets: the corpus contains Spanish accents and
 /// `⌘`/`⌥`/`⇧` symbols, so a character-indexed span would silently disagree
 /// with `&source[span]`.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+///
+/// # It arrives from outside, and the invariant survives the crossing
+///
+/// [`serde::Deserialize`] is **hand-written and routes through
+/// [`ByteSpan::new`]**, because a derive fills the two fields directly and would
+/// therefore admit `{"start":20,"end":10}` — a value [`ByteSpan::new`] refuses
+/// and [`ByteSpan::len`] cannot survive. That shape is reachable: a span is an
+/// operand of [`crate::validate::Finding`], and a finding travels *inwards*
+/// inside a [`crate::persist::Acknowledgement`] since Phase 2b-2a. The impl is
+/// the same arrangement [`crate::persist::Acknowledgement`]'s own hand-written
+/// one has, for the same reason — the invariant is a property of every value of
+/// the type, not a check one constructor happens to make.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ByteSpan {
     /// First byte of the span.
     pub start: usize,
     /// One past the last byte of the span.
     pub end: usize,
+}
+
+impl<'de> Deserialize<'de> for ByteSpan {
+    /// Reads `{ "start": …, "end": … }` and **refuses** an inverted span.
+    ///
+    /// # An error rather than a repair, deliberately
+    ///
+    /// Clamping, swapping or zeroing an inverted span would all produce a span
+    /// this crate would then act on — and the acknowledgement it arrived in is
+    /// compared against findings recomputed under the lock, so a repaired span
+    /// would silently stop matching and refuse the save a second time with no
+    /// statement of why. A caller that sent `20..10` is confused about something,
+    /// and the honest answer is that this is not a value of this type.
+    ///
+    /// The refusal is a `serde` error, which for a command argument means Tauri's
+    /// own English rejection rather than a [`crate::validate::FindingCode`] — the
+    /// same thing every malformed argument on this boundary already produces, and
+    /// the reason `set_menu_labels` takes an untyped envelope. It is not worth a
+    /// code of its own: no interface this application ships can build one, because
+    /// every span it hands back came out of a finding this application wrote.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<ByteSpan, D::Error> {
+        /// The two fields as they arrive, before the invariant is applied.
+        #[derive(Deserialize)]
+        struct Wire {
+            /// First byte of the span, unchecked.
+            start: usize,
+            /// One past the last byte of the span, unchecked.
+            end: usize,
+        }
+        let Wire { start, end } = Wire::deserialize(deserializer)?;
+        if end < start {
+            return Err(DeError::invalid_value(
+                Unexpected::Unsigned(u64::try_from(end).unwrap_or(u64::MAX)),
+                &"a ByteSpan end at or after its start",
+            ));
+        }
+        // Through the constructor rather than beside it: one enforcement point,
+        // and the assertion there can no longer be reached from this direction.
+        Ok(ByteSpan::new(start, end))
+    } // End of function deserialize() for ByteSpan
 }
 
 impl ByteSpan {
@@ -313,6 +364,49 @@ mod tests {
         assert!(outer.contains(outer));
         assert!(!outer.contains(ByteSpan::new(5, 11)));
     }
+
+    /// A span that arrives inverted is refused rather than repaired.
+    ///
+    /// The invariant [`ByteSpan::new`] enforces, checked from the direction a
+    /// derive would have left open: a finding travels inwards inside an
+    /// acknowledgement, so `{"start":20,"end":10}` is a payload a caller can
+    /// really send, and a value of this type carrying it would underflow the
+    /// moment anything asked for its length. The empty span is asserted legal in
+    /// the same test, because a refusal that also rejected `7..7` would be a
+    /// different and wrong rule.
+    #[test]
+    fn a_deserialized_byte_span_cannot_be_inverted() {
+        let ordinary: ByteSpan =
+            serde_json::from_str(r#"{"start":10,"end":20}"#).expect("a well-ordered span reads");
+        assert_eq!(ordinary, ByteSpan::new(10, 20));
+        assert_eq!(ordinary.len(), 10);
+
+        let empty: ByteSpan =
+            serde_json::from_str(r#"{"start":7,"end":7}"#).expect("an empty span is legal");
+        assert!(empty.is_empty());
+
+        let inverted = serde_json::from_str::<ByteSpan>(r#"{"start":20,"end":10}"#);
+        assert!(
+            inverted.is_err(),
+            "an inverted span must not exist as a value of this type: {inverted:?}"
+        );
+    } // End of function a_deserialized_byte_span_cannot_be_inverted()
+
+    /// The round trip is the identity for every span this crate can build.
+    #[test]
+    fn a_byte_span_survives_the_round_trip() {
+        for span in [
+            ByteSpan::new(0, 0),
+            ByteSpan::new(3, 3),
+            ByteSpan::new(0, 97),
+        ] {
+            let json = serde_json::to_string(&span).expect("a span serializes");
+            assert_eq!(
+                serde_json::from_str::<ByteSpan>(&json).expect("and reads back"),
+                span
+            );
+        }
+    } // End of function a_byte_span_survives_the_round_trip()
 
     #[test]
     fn chomping_follows_the_trailing_newline_table() {

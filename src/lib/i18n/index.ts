@@ -34,9 +34,11 @@ import type {
   MatchBadge,
   MoveSeam,
   NodeKind,
+  NotReencodable,
   PathError,
   RotationOutcome,
   SaveError,
+  SaveResult,
   SaveVerdict,
   ScalarStyle,
   SyntaxError,
@@ -69,8 +71,10 @@ import {
   describeMoveSeam,
   describeNodeKind,
   describePathError,
+  describeNotReencodable,
   describeRotationOutcome,
   describeSaveError,
+  describeSaveResult,
   describeSaveVerdict,
   describeScalarStyle,
   describeSyntaxError,
@@ -123,8 +127,10 @@ export {
   describeMoveSeam,
   describeNodeKind,
   describePathError,
+  describeNotReencodable,
   describeRotationOutcome,
   describeSaveError,
+  describeSaveResult,
   describeSaveVerdict,
   describeScalarStyle,
   describeSyntaxError,
@@ -149,8 +155,10 @@ export {
   moveSeamKey,
   nodeKindKey,
   pathErrorKey,
+  notReencodableKey,
   rotationOutcomeKey,
   saveErrorKey,
+  saveResultKey,
   saveVerdictKey,
   scalarStyleKey,
   syntaxErrorKey,
@@ -656,3 +664,31 @@ export function tBackupError(error: BackupError): string {
 export function tSaveError(error: SaveError): string {
   return describeSaveError(locale.current, error);
 } // End of function tSaveError()
+
+/**
+ * Renders why a value's spelling could not be kept, in the current language.
+ *
+ * The reason a {@link tSaveError} never has to give: a presentation note is not a
+ * failure, and this sentence says what changed about the *spelling* of a value
+ * rather than about its content.
+ *
+ * @param reason - A `NotReencodable` as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tNotReencodable(reason: NotReencodable): string {
+  return describeNotReencodable(locale.current, reason);
+} // End of function tNotReencodable()
+
+/**
+ * Renders how a save ended, in the current language.
+ *
+ * One sentence for the outcome. A refused save's verdict and findings have
+ * {@link tSaveVerdict} and {@link tFindingCode} of their own; how much of that a
+ * screen shows is that screen's decision.
+ *
+ * @param result - A save result as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tSaveResult(result: SaveResult): string {
+  return describeSaveResult(locale.current, result);
+} // End of function tSaveResult()

@@ -45,6 +45,7 @@ const {
   getDocument,
   getMatch,
   listDocuments,
+  moveMatch,
   openWorkspace,
   reloadDocument
 } = commands;
@@ -64,38 +65,44 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the six wire names, in order, and export no seventh wrapper', async () => {
+  it('call the seven wire names, in order, and export no eighth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
-    // objected to: calling six known wrappers says nothing about whether a
-    // seventh exists. The second reads the module's exports rather than the six
-    // names this file already knows, so a wrapper added for a mutating command
-    // fails here even though nothing calls it.
+    // objected to: calling the known wrappers says nothing about whether another
+    // exists. The second reads the module's exports rather than the names this
+    // file already knows, so a wrapper added for a mutating command fails here
+    // even though nothing calls it.
     await openWorkspace(null);
     await listDocuments();
     await getDocument(1);
     await getMatch(IDENTITY);
     await documentText(1);
     await reloadDocument(1);
+    await moveMatch(IDENTITY, null, 'a'.repeat(64), { accepted: [] });
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'documentText',
       'getDocument',
       'getMatch',
       'listDocuments',
+      'moveMatch',
       'openWorkspace',
       'reloadDocument'
     ]);
-  }); // End of the "call the six wire names" case
+  }); // End of the "call the seven wire names" case
 
-  it('exports no wrapper for any of the six Phase 2 mutating commands', () => {
-    // `save_match` and its five siblings need the save transaction, which does
-    // not exist. `wire_contract.rs` asserts their absence from the registered
-    // Rust surface; this asserts it on the side that would have to call them.
+  it('exports no wrapper for any of the five Phase 2 commands that do not exist', () => {
+    // `save_match` needs a minimal-diff engine, and the other four need core
+    // primitives for inserting a sequence item, removing one and replacing a
+    // whole document's text — none of which exists. `wire_contract.rs` asserts
+    // their absence from the registered Rust surface; this asserts it on the side
+    // that would have to call them.
+    //
+    // `moveMatch` left this list at Phase 2b-2a, which is the only way a name may
+    // leave it: the command exists and is registered.
     const forbidden = [
       'saveMatch',
       'createMatch',
       'deleteMatch',
-      'moveMatch',
       'saveRawDocument',
       'validateMatch'
     ];
@@ -105,7 +112,25 @@ describe('the command wrappers', () => {
         name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
       );
     }
-  }); // End of the "exports no wrapper for any of the six" case
+  }); // End of the "exports no wrapper for any of the five" case
+
+  it('sends a move as identities, a base revision and an acknowledgement', async () => {
+    // The one command that writes, and the three things about its arguments that
+    // are decisions rather than plumbing: the destination is an **identity**
+    // rather than a position, the base revision travels beside it, and the
+    // acknowledgement is a list of findings. A `force` flag would undo the whole
+    // design, and its absence is asserted rather than assumed.
+    const anchor = { document: 3, revision: 'a'.repeat(64), node: 17 };
+    await moveMatch(IDENTITY, anchor, 'a'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('move_match');
+    expect(calls[0]?.args).toEqual({
+      id: IDENTITY,
+      after: anchor,
+      baseRevision: 'a'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
+  }); // End of the "move arguments" case
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

@@ -12,7 +12,7 @@
 //! [`VariableView::declared_type`] as source text, and an unrecognised spelling
 //! becomes [`VariableKind::Unrecognised`] rather than being coerced.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::project::Projector;
 use crate::model::{DiagnosticCode, FieldView, MappingScan, ScalarView, UnknownEntry, ValueView};
@@ -26,7 +26,15 @@ const MODELLED_KEYS: [&str; 5] = ["name", "type", "params", "inject_vars", "depe
 /// Which of espanso's nine variable types a `type` field names.
 ///
 /// A classification of the field's text, never of a YAML scalar's type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+///
+/// **It deserializes as well as serializes, since Phase 2b-2a**, and the reason
+/// is one level up: it is an operand of
+/// [`crate::validate::FindingCode::VariableMissingRequiredParam`], so an
+/// acknowledgement travelling *back* from the interface carries one. Reading a
+/// kind back in is a claim about a wire word, never about a YAML value — the
+/// classification of a document's own text still happens exactly once, in
+/// [`VariableKind::from_text`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VariableKind {
     /// `date` — `format`, `offset`, `tz`, `locale`.
     Date,

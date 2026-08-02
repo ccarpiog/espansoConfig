@@ -39,7 +39,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2a-3a** | **Metadata preservation across the rename**: plan §7 row 11's unpaid half · the ACL and the extended attributes · the temp file's own identity | ✅ complete — after the review fix round below |
 | **2a-3b** | **Backups and rotation**: plan §6.6 step 13 · the copy taken before the first modification of each file per session · the ten-batch retention · the only destructive operation in the crate | ✅ complete — after the review fix round below. **2a-3 is closed, and with it 2a** |
 | **2b-1** | The **wire boundary for `persist`**: every save-transaction type serialized, with its two dictionary entries and the contracts that pin them | ✅ complete — after the review fix round below |
-| 2b-2 … 2d | See the Phase 2 split below | ⬜️ **2b-2 is next** |
+| **2b-2a** | The **save spine and the first mutating command**: the acknowledgement deserialized · the app-owned `BackupSession` · the operation-neutral `SaveResult` · `move_match` · the first code outside the core that writes a user's file | ✅ complete — after the review fix round below |
+| 2b-2b … 2d | See the Phase 2 split below | ⬜️ **2b-2b is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -71,7 +72,40 @@ exists.
 | Sub-phase | Scope |
 |---|---|
 | **2b-1** | The **wire boundary**: `Serialize` on `SaveError`, `SaveVerdict`, `SaveRefusal`, `Acknowledgement`, `Finding`, `FindingCode`, `FindingClass`, `WriteError`, `WriteStep`, `TargetDifference`, `EditError`, `BackupError`, `BackupStep`, `BackupRecord`, `Rotation`, `RotationOutcome`; the `code.` namespaces in both dictionaries; the dictionary-contract and wire-contract extensions; the typed frontend mirror and its `describe*`/`t*` accessors. **No `#[tauri::command]` is registered** |
-| **2b-2** | The **six mutating commands** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document` — each returning `SaveResult`, each carrying an optimistic-concurrency token, `SaveResult::Conflict` on the wire, the app-owned `BackupSession`, and the first call to `forgetFileText()` |
+| **2b-2** | The **six mutating commands** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document` — each returning `SaveResult`, each carrying an optimistic-concurrency token, `SaveResult::Conflict` on the wire, the app-owned `BackupSession`, and the first call to `forgetFileText()`. **Split into 2b-2a / 2b-2b / 2b-2c** (below) |
+
+**2b-2 is split into 2b-2a / 2b-2b / 2b-2c**, and this split was forced by a fact rather than
+chosen for convenience: **three of the six commands have no core primitive behind them.**
+`reload_document` has existed since 1b-2a, so 2b-2 owed five. Of those five, `DocumentEdit` has
+**exactly four variants** — `Scalar`, `InsertField` and `RemoveField` (all **mapping**-scoped) and
+`MoveItem` (a whole sequence item, **same sequence only**) — so:
+
+- **`create_match` needs a primitive that inserts a whole sequence item.** There is none.
+- **`delete_match` needs one that removes a whole sequence item.** `RemoveField` removes a mapping
+  entry, which is not the same thing.
+- **`save_raw_document` needs a way to save an arbitrary whole-document text.** `SaveRequest` takes
+  a list of `DocumentEdit`s and nothing else, and `save_document` is the **only** entry point that
+  may write a user's file.
+
+The Codex consultation that confirmed this (`docs/reviews/phase-2b-2a-save-spine.md` is the later
+review; the design consult is summarised in `docs/decisions/2b-2a-notes.md`) named the failure mode
+in as many words: *the most likely mistake is forcing the planned six-command surface into existence
+by inventing writes outside the supported core model — especially implementing `save_raw_document`,
+sequence-item creation, or deletion through direct filesystem writes or whole-document replacement*,
+which would bypass the single lock, the revision check, the full reparse, the validation verdict, the
+acknowledgement handling, the backup policy and the atomic commit in one stroke, **while appearing to
+work**. So the missing primitives are built as primitives, in the core, before any command reaches
+for them.
+
+The cut is otherwise the usual one — a dependency order, by failure mode. The three sub-phases fail
+in three different ways: 2b-2a fails as a **protocol** mistake, 2b-2b as a **byte-preservation**
+mistake, 2b-2c as a **missing-primitive** mistake.
+
+| Sub-phase | Scope |
+|---|---|
+| **2b-2a** | The **spine plus one vertical slice**: `Deserialize` on the acknowledgement graph, the app-owned `BackupSession`, the operation-neutral `SaveResult` (`Saved` / `Conflict` / `Refused`, all in the `Ok` channel), cache coherence after a commit, the first call to `forgetFileText()`, and **`move_match`** — the one command the core already supports end to end |
+| **2b-2b** | **`MatchDraft`, the minimal-diff engine and `save_match`**: a draft is a *desired state*, and Rust derives the `DocumentEdit` batch by diffing it against the projection. **A field the draft leaves unchanged must produce no edit at all** — rewriting an unchanged scalar can change its spelling and emit a `PresentationNote`, which is a byte-preservation failure wearing a success's clothes. `SaveResult::Saved::notes` gets its first producer here |
+| **2b-2c** | **The two missing core primitives and the three commands over them**: sequence-item insert and sequence-item remove in `patch/`, with the comment-ownership, indentation and block-scalar answers 0c-3a/0c-3b-1 had to give for mappings; then `create_match`, `delete_match` and `save_raw_document`. **`save_raw_document` needs its own answer** — a whole-document text is not a span replacement, and giving `save_document` one is a change to the one entry point that writes |
 
 **2a-3 is split into 2a-3a / 2a-3b**, by the same cut every earlier split used — a dependency order,
 not a convenience. 2a-3 was handed *two* pieces of work, and only one of them is step 13. The other is
@@ -2180,6 +2214,42 @@ re-attribution — *"the exact areas decoded-tree equality cannot observe"*.
 
 ---
 
+## Phase 2b-2a review disposition
+
+The review is
+[`docs/reviews/phase-2b-2a-save-spine.md`](docs/reviews/phase-2b-2a-save-spine.md), taken over the
+whole uncommitted change (26 modified files plus `src-tauri/src/save.rs` and the notes doc).
+**Five findings, no blocking one. Nothing was declined**; the finding-by-finding record is
+`docs/decisions/2b-2a-notes.md` §11.
+
+The shape of the round is worth keeping, because it is the shape this project keeps producing:
+**two were defects and three were tests that passed vacuously.** A test that cannot fail is the
+recurring failure mode here, and three of five is the highest proportion yet.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | **High** | Every `saveFailed` left the frontend projection and the raw-text snapshot untouched — **including when the nested `WriteError` says the rename may already have completed**, which is exactly the case the Rust side evicts its cache for. The rename succeeds, then the directory sync or the read-back fails, and the window keeps showing the pre-save order and the pre-save bytes of a file that already holds the moved snippet | **Real, and the two sides of the boundary disagreed.** Closed by making the wire carry the answer rather than letting the frontend re-derive it: `CommandError::SaveFailed` now writes a second operand, `may_have_written`, **computed in the serializer by calling the core's own `SaveError::may_have_written()`**. It is not a field, so nothing can set it wrongly, and there is no list of `WriteStep` names in TypeScript that could drift from the Rust one. `mayHaveWritten()` in `errors.ts` is the single frontend spelling. The old test's fixture failed at `Rename` — which explicitly means the rename did **not** happen — so it passed against the defect; it is kept, with its meaning now stated, and a new test fails *after* the rename |
+| 2 | Medium | `ByteSpan`'s derived `Deserialize` fills `start` and `end` directly, bypassing `ByteSpan::new`'s `start <= end` invariant. `{"span":{"start":20,"end":10}}` deserialized into an acknowledgement, and a later `len()` underflows | **Real.** Hand-written `Deserialize` routing through `ByteSpan::new`; an inverted span is a **deserialization error, not a repair**, because a repaired span silently stops matching the recomputed findings and every save would then be refused twice with no explanation. Two tests, one of them the review's exact payload. The rest of the newly-deserializable graph was audited for the same shape — a public constructor enforcing something a derive skips — and `ByteSpan` was the only one |
+| 3 | Medium | The conflict test could not discriminate the honesty rule it was named for: its fixture makes `found` and `disk_revision` equal, so an implementation that wrongly set `disk_revision = found` while refreshing `disk` separately would still pass | **Real, and a test defect rather than a code defect** — the production construction was already correct. The payload is now built in one named place, `conflict_after_the_lock`, and a new test drives a **real** refusal through `move_match` for `found`, replaces the file again, and then calls the builder — the interleaving itself. Setting `disk_revision: found` fails it. **The interleaving is not reachable through the command** (both reads are inside one synchronous call), which is why the rule is pinned below the command; recorded as a hole rather than papered over |
+| 4 | Low | The frontend treated every `Saved` arm as though bytes had changed, though `committed: false` is a documented **success** — moving one of two byte-identical snippets produces a byte-identical candidate and nothing is written | **Real as an overstatement.** The branch now acts on `committed \|\| revision !== view.revision` rather than on the arm, the comment was corrected, and a new browser test covers `committed: false` — written as a success, because it is one |
+| 5 | Low | `a_move_leaves_the_bytes_it_did_not_move_alone` did not prove byte identity outside the move, despite its name. A command that changed `replace: first` to another **same-length** value while preserving the leading comment, the trigger count, the unmodelled-key count and the total length passed every assertion | **Real, and it was checking proxies for the one property this whole project rests on.** It now derives the expected post-move text from the pre-move text and compares the file **byte for byte**. Confirmed by a throwaway `first`→`worst` corruption: all four old assertions passed and the byte comparison caught it |
+
+**Four of the five fixes were confirmed by breaking the code, watching the new test fail, and
+restoring** — findings 1 to 5 excluding none; the fifth was confirmed by the corruption test above.
+That is the standard this project's review rounds should keep: a fix for a vacuous test is worth
+nothing unless someone has seen the replacement fail.
+
+**What the review confirmed rather than faulted**, recorded because it is the expensive half to
+re-establish: production writes remain centralised in `save_document`; `covers_all` consumes
+distinct matches, so the acknowledgement really is an exact multiset; there is no `force` bypass
+anywhere; `move_match` accepts identities and never a wire path; it sends exactly one same-sequence
+`MoveItem` and nothing else; backups are always supplied; and the moved identity is resolved at
+`resulting_index` against a refreshed matching revision. Dropping `Clone`/`PartialEq`/`Eq` from
+`CommandError` was judged reasonable, and the six rewritten assertions lost no discrimination
+because `NoWorkspaceOpen` is operand-free.
+
+---
+
 ## Phase 2b-1 review disposition
 
 The review ran as **two** files rather than one, and the reason is itself a finding worth keeping. The
@@ -2853,6 +2923,54 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2b-2a
+
+Every command below was run by the orchestrator **after** the review fix round, each as its own
+invocation, not taken on any worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo build --workspace` | ✅ built |
+| `cargo test --workspace` | ✅ **828 tests across 20 binaries**, 0 failed (**+30** on 2b-1's 798: 25 in the first pass, 5 more in the review fix round) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test persist_save -- saving_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, 13 committed, **0 refusals** |
+| `npm test` | ✅ 28 files, **685 tests** (681 before the fix round, 671 at 2b-1) |
+| `npm run check` | ✅ 375 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `rg -c '#\[tauri::command\]' src-tauri/src/` | ✅ `commands.rs:7`, `menu.rs:1` — **exactly one command added**, and it is `move_match` |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1); no corpus fixture modified |
+
+**What this phase proves, and it is a first.** Before it, every `#[tauri::command]` in this
+application was read-only and the code that could destroy a file had no caller outside its own
+tests. `move_match` is the first path by which a window can change a user's file, and it is proven
+end to end: a move commits, its returned identity resolves in the new revision through `get_match`,
+the identity that was passed in comes back as `identityStaleRevision`, the session serves the new
+bytes from both surfaces that could have served a stale parse, a stale `base_revision` produces the
+conflict arm, an unacknowledged suspicion refuses the move until the findings are serialized and
+handed back, and the bytes the move did not touch are compared **byte for byte** against a text
+derived independently of the command.
+
+**Three things it does *not* prove, each recorded because it will be tempting to assume otherwise.**
+
+- **No screen was read.** Nothing in this project renders a Svelte component in an automated test,
+  so the frontend suite passing says nothing about what a window shows. `move_match` has no user
+  interface at all yet — 2c owns that — and **the first phase that opens a window still owes the
+  look at the four `code.diagnosticCode.*` strings 2b-1 corrected**, which is now a debt two phases
+  old.
+- **The conflict payload's honesty rule is pinned below the command**, not through it. Both reads
+  happen inside one synchronous call, so no test can interleave a third writer between them; the
+  rule is discriminated against `conflict_after_the_lock` directly.
+- **The cross-*sequence* refusal is unreachable through `move_match`.** Every match a `DocumentView`
+  holds is an item of the one `matches` sequence at the root of stream document 0, so two matches of
+  one file are always siblings. The check exists to keep D2r true the day the projection grows a
+  second sequence; it is exercised against addresses. The cross-**document** case is reachable and
+  is tested.
 
 ---
 
@@ -3690,6 +3808,112 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-2a is complete and its review is closed.** `docs/decisions/2b-2a-notes.md` is the record;
+§11 is the finding-by-finding disposition and §14 is what 2b-2b and 2b-2c inherit. **This application
+can now write a user's file from a window** — `move_match` is the seventh `#[tauri::command]` and the
+first that is not read-only.
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 828 tests across 20 binaries, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1 — `node_modules/` is gitignored and
+`package-lock.json` is committed, so `npm ci` reproduces the pinned tree exactly.)
+
+**The next step is Phase 2b-2b — `MatchDraft`, the minimal-diff engine and `save_match`.** Read the
+2b-2 split table above first: **2b-2 was split three ways, and the reason is a fact about the core,
+not a preference.** `create_match`, `delete_match` and `save_raw_document` have **no primitive behind
+them** and are deferred to 2b-2c along with the primitives they need. Do not reach for them.
+
+**The one rule 2b-2b exists to get right, and it is the whole sub-phase.** A `MatchDraft` is a
+*desired state*, and Rust derives the `DocumentEdit` batch by diffing it against the projection. **A
+field the draft leaves unchanged must produce no edit at all.** Rewriting an unchanged scalar is not
+a harmless no-op: it can change the scalar's spelling and emit a `PresentationNote`, which is a
+byte-preservation failure wearing a success's clothes, and it is the failure mode this sub-phase is
+cut out to fail at loudly. Diff against the projection associated with **`base_revision`**, and emit
+nothing where the projected value already equals the drafted one **even if its YAML spelling
+differs**. The draft must be able to say *unchanged*, *set* and *remove* distinctly wherever all
+three are meaningful, or the diff is ambiguous and will guess.
+
+**Why the draft, and not an edit list from the frontend.** It was considered and rejected: an
+untrusted caller handing over spans and edit kinds would put preservation-critical structure in the
+one place this project cannot check, and would let it route around the mapping-scoping and the four
+supported operations. Trusted Rust derives the batch. Recorded so it is not re-litigated.
+
+**Everything 2b-2a built that 2b-2b uses unchanged**, and none of it is 2b-2b's to redesign:
+
+- **`SaveResult` is document-level and operation-neutral** — `Saved` / `Conflict` / `Refused`, all
+  three in the **`Ok` channel**, because a conflict and a refusal are expected actionable outcomes
+  rather than errors. It is **flat**, like `CommandError`, and what it carries keeps the core's own
+  convention. `save_match` returns the same type; it does not get its own.
+- **`SaveResult::Saved::notes` gets its first producer here.** `PresentationNote` and
+  `NotReencodable` are already on the wire with their eight dictionary entries and **no caller** —
+  1b-1's shape repeated deliberately. A move re-encodes no scalar; a draft diff will.
+- **`moved: MatchId | null` is a fact, never a failure.** It is `null` when the operation had no
+  single match, when the commit was skipped, **or when the post-commit read disagrees with the
+  revision the transaction established** — meaning another writer reached the file in between.
+- **The conflict payload carries `expected`, `found` *and* `disk_revision`**, and the three are not
+  interchangeable: `found` is what the **locked** read saw and refused on, `disk_revision` is the
+  **fresh read taken after the lock was released**. When they differ the file changed again. No
+  string may present them as descriptions of the same bytes. `base` and `draft` are **not** on the
+  wire — a deviation from plan §6.4, recorded in `2b-2a-notes.md` §4.
+- **`CommandError::SaveFailed` carries a second operand, `may_have_written`**, computed in the
+  serializer by calling the core's own `SaveError::may_have_written()`. It is **not a field**, so
+  there is no second list of `WriteStep` names anywhere to drift. `mayHaveWritten()` in
+  `src/lib/ipc/errors.ts` is the single frontend spelling, and `true` means forget the cached text
+  and re-read.
+- **`ByteSpan` has a hand-written `Deserialize`** routing through `ByteSpan::new`; an inverted span
+  is a **deserialization error**, not a repair. `Acknowledgement`'s is hand-written too and
+  re-applies `of()`'s filter. Do not replace either with a derive.
+- **`WorkspaceSession` owns an `Open { workspace, backups }`.** The `BackupSession` is constructed
+  with the workspace and threaded through every save; **no code path in this crate passes
+  `backups: None`**, and if the constructor ever becomes fallible the decision is already written on
+  `WorkspaceSession::open` — a save whose safety net cannot be put in place must **refuse**.
+- **Cache coherence is the command layer's job**, and `save_document` deliberately does not reach
+  into `Workspace`. A committed save refreshes; a conflict refreshes and *that same projection is the
+  `disk` payload*, so one read serves both; a failure that may have written **evicts**.
+
+**Five things 2b-2b must not do.**
+
+- **Do not add a `force` flag**, or any acknowledgement bypass. Findings go out, the acknowledged
+  subset comes back, matched as an **exact multiset** — `[A, A]` differs from `[A]`, and
+  `Acknowledgement::covers_all` consumes matches rather than testing membership.
+- **Do not let the command layer cache "the findings I last issued" to police acknowledgements.**
+  It cannot prove a human saw anything, it goes stale across reloads and concurrent windows, and
+  intersecting sets destroys duplicate multiplicity. Enforcing presentation is the **UI's**
+  obligation.
+- **Do not call `replace_file_atomically` or `replace_locked_file` from a command**, or from inside
+  the transaction — the lock is **not reentrant** and the process hangs silently and forever.
+  `save_document` is the only entry point that may write a user's file.
+- **Do not accept a wire path back as a target.** Every path crosses as a lossy `String`; two
+  distinct non-UTF-8 filenames can render identically. Target by `DocumentId` / `MatchId`.
+- **Do not present `committed: false` or `backup: None` as failures.** Both are legal on a success,
+  for four documented reasons each.
+
+**Two holes 2b-2a opened that a later phase owns**, beyond the ones listed in the verification
+section above:
+
+- **`move_match` holds the session mutex across the whole save** — a lock, two parses, a validation,
+  a backup copy and a rename — and every command is synchronous on the main thread. A slow disk
+  blocks the window. This was theoretical before 2b-2a; it is not now, and Phase 2's debounced
+  editing will make it worse.
+- **A committed save writes two files** — the target and, on a first modification, one backup — and
+  if the rename then fails, `discard_backup` unrecords the copy but a file may remain. Unchanged
+  from 2a-3b hole 2, now reachable from a command.
+
+**Two debts that no test can discharge, both carried forward and both now older.**
+
+- **The four `code.diagnosticCode.*` strings 2b-1 corrected have still not been seen on a screen.**
+  CLAUDE.md's rule is that a claim about a screen needs a reading of a screen. 2b-2a opened no
+  window, so the next phase that does still owes the look.
+- **170 Spanish values are checked only by heuristic** — non-blank, non-identical to their English
+  twin, in placeholder agreement with it. 2b-2a added thirteen more. Nothing establishes that any of
+  them is idiomatic.
+
+---
+
 **Phase 2b-1 is complete and its review is closed.** `docs/decisions/2b-1-notes.md` is the record; §7 is
 the finding-by-finding disposition of both reviews and §4 is what 2b-2 inherits. The save transaction's
 types now cross the IPC wire — **18 enums / 157 variants and 7 structs**, each with a `code.` namespace
@@ -4287,7 +4511,8 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`docs/reviews/phase-1b-2b-dictionaries-and-menu.md`](docs/reviews/phase-1b-2b-dictionaries-and-menu.md) | The Phase 1b-2b review, dispositioned above. Its two High findings were both real: six wire-visible enums deferred to 1c with no strings at all, and an "exhaustiveness" check that failed open on two valid Rust syntaxes and on any new enum. Its finding 4 is the sharpest — the `detail` guard was a name scanner, and `JSON.stringify` names no identifier |
 | [`docs/decisions/1b-2a-notes.md`](docs/decisions/1b-2a-notes.md) | Phase 1b-2a's decision record: what crosses and what does not (§1), the synchronous-command/mutex trade (§2), the error representation (§3), **R27 corrected** (§4), the capability argument then its execution (§5), the hand-written mirror and the check that guards it (§6), **why the lint proves nothing here** (§7), what the phase got wrong on the way (§8), **the four remaining coverage holes with owners named** (§9), the thirteen disabling experiments and which six are reproducible (§11), what 1b-2b inherits (§12), the JSDoc exemption decided rather than left open (§14), the review disposition (§15) and the numeric-field audit (§16) |
 | [`docs/reviews/phase-1b-2a-ipc-surface.md`](docs/reviews/phase-1b-2a-ipc-surface.md) | The Phase 1b-2a review, dispositioned above. Its two High findings were both real: a **false identity claim** repeated in three files and in this checkpoint, and a serialization failure that could deliver prose to the webview. Its finding 5 is the sharpest — a scope-creep oracle that could not detect the scope creep it was named for |
-| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | The five read-only document commands over a `WorkspaceSession` holding `Workspace` behind a std `Mutex`, **synchronous** so no guard can cross an `.await`. Registered in [`src-tauri/src/main.rs`](src-tauri/src/main.rs)'s `generate_handler!` alongside `menu::set_menu_labels`. **No mutating command exists and a test enforces it** |
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | The six read-only document commands **and, since 2b-2a, `move_match`** — over a `WorkspaceSession` holding `Open { workspace, backups }` behind a std `Mutex`, **synchronous** so no guard can cross an `.await`. Registered in [`src-tauri/src/main.rs`](src-tauri/src/main.rs)'s `generate_handler!` alongside `menu::set_menu_labels`. The mutex is held across the **whole** save, on the main thread — 2b-2a hole 5. `conflict_after_the_lock` is the one place a conflict payload is built |
+| [`src-tauri/src/save.rs`](src-tauri/src/save.rs) | **`SaveResult` — the operation-neutral wire result**, `Saved` / `Conflict` / `Refused`, all three in the `Ok` channel because a conflict and a refusal are outcomes rather than errors. **Flat**, like `CommandError`; what it carries keeps the core's own convention. Document-level on purpose: the plan's `Saved { revision, match_id }` is match-shaped, and `save_raw_document` will have no match while `move_match` has no draft |
 | [`src/lib/i18n/dictionaries.ts`](src/lib/i18n/dictionaries.ts) | **The i18n enforcement point.** `TranslationKey = keyof typeof en`, and `const spanish: ExactDictionary<typeof es> = es` is the binding that makes a missing *or* surplus Spanish key a compile error. `translate()` interpolates `{placeholder}` and leaves an unknown one verbatim on purpose |
 | [`docs/decisions/1b-1-notes.md`](docs/decisions/1b-1-notes.md) | Phase 1b-1's decision record: the pinned versions and why each is exact (§1), what the typed key union enforces and the four disabling experiments that verify both directions (§2), what the types cannot see (§2 end), the runtime checks and the **exception list by key** (§3), locale detection and the override policy (§4), the architecture rule's new check (§5), what the Tauri shell deliberately does not contain (§6), **what the hardcoded-string check cannot see (§7)**, the strings deliberately left untranslated (§8), **the eight coverage holes stated as holes (§9)**, and what 1b-2 inherits (§10) |
 | [`scripts/lint/hardcoded-strings.ts`](scripts/lint/hardcoded-strings.ts) | The markup scan behind R31. Read §7 of the notes before trusting a clean run: it sees `.svelte` markup and **not** `<script>` bodies, `{'literal'}`, `.ts` constants or props. Its blind spots are why the review found an English sentence in `Info.plist` that no check could ever have seen |

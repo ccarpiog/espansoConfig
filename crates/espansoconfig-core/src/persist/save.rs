@@ -76,26 +76,28 @@
 //! variant serialized without its string, so half the enum on the wire is worse
 //! than none of it.
 //!
-//! **No `#[tauri::command]` calls any of this yet.** The boundary exists before
-//! the commands that will cross it, exactly as Phase 1b-1 shipped the whole i18n
-//! layer with no command behind it.
+//! **Phase 2b-2a gave it its first caller.** `move_match` in
+//! `src-tauri/src/commands.rs` is the one `#[tauri::command]` that reaches this
+//! function, with exactly one [`DocumentEdit::MoveItem`] and nothing beside it
+//! (`PROGRESS.md` R25).
 //!
-//! [`Acknowledgement`] serializes and does **not** deserialize, which is stated
-//! rather than left to be discovered: an acknowledgement is content-addressed and
-//! has to travel *back in*. Phase 2b-1's review removed the one obstruction that
-//! was a **type** rather than a decision —
-//! [`crate::validate::FindingCode::VariableMissingRequiredParam`] now carries an
-//! owned [`String`] — but [`serde::Deserialize`] is still absent from [`Finding`],
-//! [`crate::syntax::ByteSpan`] and [`crate::model::VariableKind`], and 2b-2 must
-//! compare what arrives against freshly recomputed findings as an exact
-//! **multiset**, so `[A, A]` differs from `[A]`.
-//! `docs/decisions/2b-1-notes.md` records it as this phase's open hole.
+//! [`Acknowledgement`] **deserializes as of Phase 2b-2a**, because an
+//! acknowledgement is content-addressed and has to travel *back in*. Phase 2b-1's
+//! review removed the one obstruction that was a **type** rather than a decision
+//! — [`crate::validate::FindingCode::VariableMissingRequiredParam`] carries an
+//! owned [`String`] — and the rest of the payload graph now derives
+//! [`serde::Deserialize`] too. The comparison [`verdict`] makes was **already an
+//! exact multiset** before this phase ([`Acknowledgement::covers_all`], which
+//! consumes each match), so `[A, A]` differs from `[A]`; what 2b-2a added is a
+//! test that drives that distinction through a *deserialized* acknowledgement,
+//! which is the shape a caller can now build.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde::de::Deserializer;
 use serde::ser::{SerializeStructVariant, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{DocumentContext, DocumentView};
 use crate::patch::{
@@ -134,10 +136,49 @@ use crate::ContentRevision;
 /// no longer covers anything, and the save is refused again. That strictness is
 /// the point: the second call re-reads, re-patches and re-validates, and what
 /// the user agreed to has to still be what the transaction is about to write.
+///
+/// # It arrives from outside, since Phase 2b-2a
+///
+/// [`serde::Deserialize`] is **hand-written and routes through
+/// [`Acknowledgement::of`]**, which is the only reason it is not a derive: a
+/// derive would fill [`Acknowledgement::accepted`] with whatever arrived,
+/// including an [`FindingClass::EditorModelError`], and the type's own
+/// documentation two paragraphs up says it holds suspicions and nothing else.
+/// The filter is not a security boundary — [`verdict`] refuses an error however
+/// much is acknowledged — it is the invariant staying true of every value of the
+/// type, so that [`Acknowledgement::len`] cannot come to mean two things.
+///
+/// **Deserializing one establishes nothing about it.** Anything can be written
+/// into a JSON array; what makes an acknowledgement mean something is that
+/// [`verdict`] matches it against findings recomputed from the candidate under
+/// the lock. `docs/decisions/2b-1-notes.md` section 4 states the corollary: the
+/// core cannot know that a human saw a finding, so enforcing presentation is the
+/// user interface's obligation.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Acknowledgement {
     /// The suspicions the caller accepted, in the order it supplied them.
     accepted: Vec<Finding>,
+}
+
+impl<'de> Deserialize<'de> for Acknowledgement {
+    /// Reads `{ "accepted": [ … ] }` and re-applies [`Acknowledgement::of`]'s
+    /// filter to what arrives.
+    ///
+    /// The wire shape is exactly what the `Serialize` derive writes, so the value
+    /// round-trips; what does not round-trip is a hand-built payload holding a
+    /// finding of a class this type does not carry, and that is deliberate. See
+    /// the type's own documentation for why the filter is an invariant rather
+    /// than a check.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Acknowledgement, D::Error> {
+        /// The wire shape, with no invariant of its own.
+        #[derive(Deserialize)]
+        struct Wire {
+            /// Whatever the caller sent, unfiltered.
+            accepted: Vec<Finding>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Acknowledgement::of(&wire.accepted))
+    } // End of function deserialize() for Acknowledgement
 }
 
 impl Acknowledgement {
@@ -1305,6 +1346,135 @@ mod tests {
         assert!(both.covers_all(&candidate));
         assert_eq!(verdict(&candidate, &both), SaveVerdict::Proceed);
     } // End of function two_equal_suspicions_are_not_covered_by_one_acknowledgement()
+
+    /// **The multiset distinction survives the wire, in both directions.**
+    ///
+    /// The test above proves the *policy* counts occurrences; this one proves it
+    /// still counts them when the acknowledgement was **built by `serde` from
+    /// JSON** rather than by [`Acknowledgement::of`] in this process. That is the
+    /// only shape a Phase 2b-2 command ever sees, and it is a separate claim: a
+    /// `Deserialize` that collapsed the list — into a set, or through a
+    /// `HashSet`, or by deduplicating "identical" entries — would leave every
+    /// assertion above green and would let one acknowledgement wave two
+    /// occurrences past. The one-copy payload is asserted to **refuse** and the
+    /// two-copy payload to **proceed**, so the test fails from either side.
+    #[test]
+    fn a_deserialized_acknowledgement_still_counts_occurrences() {
+        let candidate = vec![a_suspicion("who"), a_suspicion("who")];
+        assert_eq!(
+            candidate[0], candidate[1],
+            "the fixture is only about multiplicity if the two really are equal"
+        );
+
+        let one = serde_json::to_string(&Acknowledgement::of(&candidate[..1]))
+            .expect("an acknowledgement serializes");
+        let two = serde_json::to_string(&Acknowledgement::of(&candidate))
+            .expect("an acknowledgement serializes");
+        assert_ne!(
+            one, two,
+            "the two payloads must differ, or the wire has already lost the count"
+        );
+
+        let one: Acknowledgement = serde_json::from_str(&one).expect("and reads back");
+        let two: Acknowledgement = serde_json::from_str(&two).expect("and reads back");
+        assert_eq!(one.len(), 1);
+        assert_eq!(two.len(), 2);
+        assert_eq!(
+            verdict(&candidate, &one),
+            SaveVerdict::RefusedForUnacknowledgedSuspicions,
+            "one acknowledged copy must not cover two equal suspicions"
+        );
+        assert_eq!(verdict(&candidate, &two), SaveVerdict::Proceed);
+    } // End of function a_deserialized_acknowledgement_still_counts_occurrences()
+
+    /// An acknowledgement read from the wire holds only what the type admits.
+    ///
+    /// [`Acknowledgement::of`] drops everything that is not a suspicion, and the
+    /// hand-written `Deserialize` re-applies that filter rather than trusting the
+    /// payload. Without it a caller could put an [`FindingClass::EditorModelError`]
+    /// into the array and [`Acknowledgement::len`] would report a finding the
+    /// value cannot acknowledge — the verdict would still refuse, and the type
+    /// would still be lying about itself.
+    #[test]
+    fn a_deserialized_acknowledgement_drops_what_it_cannot_acknowledge() {
+        let payload = serde_json::to_string(&serde_json::json!({
+            "accepted": [
+                serde_json::to_value(an_error()).expect("a finding serializes"),
+                serde_json::to_value(a_suspicion("who")).expect("a finding serializes"),
+            ]
+        }))
+        .expect("the payload serializes");
+
+        let acknowledgement: Acknowledgement =
+            serde_json::from_str(&payload).expect("the payload reads back");
+        assert_eq!(acknowledgement.len(), 1);
+        assert!(!acknowledgement.covers(&an_error()));
+        assert!(acknowledgement.covers(&a_suspicion("who")));
+        assert_eq!(
+            verdict(&[an_error()], &acknowledgement),
+            SaveVerdict::RefusedForEditorModelErrors
+        );
+    } // End of function a_deserialized_acknowledgement_drops_what_it_cannot_acknowledge()
+
+    /// Every operand of a finding survives the round trip.
+    ///
+    /// The acknowledgement is matched by [`Finding`]'s own equality — the code,
+    /// its operands, the span, the node and the path — so a payload that lost any
+    /// of them would silently stop matching and every save would be refused
+    /// twice. The fixture carries all four, and the assertion is equality of the
+    /// whole value rather than of its code.
+    #[test]
+    fn a_finding_survives_the_round_trip_with_all_four_of_its_parts() {
+        let index = SyntaxIndex::parse("matches:\n  - trigger: ':one'\n").expect("a parse");
+        let original = Finding {
+            code: FindingCode::VariableMissingRequiredParam {
+                kind: crate::model::VariableKind::Shell,
+                param: "cmd".to_owned(),
+            },
+            span: Some(crate::syntax::ByteSpan::new(4, 19)),
+            node: Some(index.nodes()[0].id),
+            path: Some(crate::patch::DocumentPath::root(0).with_key("matches")),
+        };
+        let json = serde_json::to_string(&original).expect("a finding serializes");
+        let read: Finding = serde_json::from_str(&json).expect("and reads back");
+        assert_eq!(read, original);
+        assert_eq!(read.class(), FindingClass::EditorModelError);
+    } // End of function a_finding_survives_the_round_trip_with_all_four_of_its_parts()
+
+    /// An acknowledgement carrying an inverted span is refused at the boundary.
+    ///
+    /// The review of Phase 2b-2a found the hole this closes: every other test on
+    /// this path builds its payload with `serde` from a finding this crate made,
+    /// so all of them use a well-ordered [`crate::syntax::ByteSpan`] and none of
+    /// them could see that the derive filled the two fields directly. The payload
+    /// below is the one the review wrote out, and an accepted `20..10` would be a
+    /// span retained as a suspicion whose `len()` underflows.
+    ///
+    /// It asserts the well-ordered twin is accepted first, so the test cannot pass
+    /// by refusing every payload of this shape.
+    #[test]
+    fn an_acknowledgement_cannot_carry_an_inverted_span() {
+        let payload = |start: usize, end: usize| {
+            serde_json::json!({
+                "accepted": [{
+                    "code": { "ReferenceHasNoDeclaration": { "name": "x" } },
+                    "span": { "start": start, "end": end },
+                    "node": null,
+                    "path": null
+                }]
+            })
+        };
+
+        let well_ordered: Acknowledgement = serde_json::from_value(payload(10, 20))
+            .expect("a payload whose span is well ordered must still read back");
+        assert_eq!(well_ordered.len(), 1);
+
+        let inverted = serde_json::from_value::<Acknowledgement>(payload(20, 10));
+        assert!(
+            inverted.is_err(),
+            "an inverted span must not reach an acknowledgement: {inverted:?}"
+        );
+    } // End of function an_acknowledgement_cannot_carry_an_inverted_span()
 
     /// An acknowledgement of more copies than the candidate produces still
     /// proceeds: the multiset match is *every candidate suspicion is covered*,

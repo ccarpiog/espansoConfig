@@ -1349,6 +1349,167 @@ export type SaveError =
   | { readonly Backup: BackupError }
   | { readonly Write: WriteError };
 
+/** The name of every {@link NotReencodable} variant. */
+export type NotReencodableName =
+  | 'FoldedStyle'
+  | 'FoldedFlowScalar'
+  | 'NonCanonicalEscaping'
+  | 'NonCanonicalBlankLine'
+  | 'MixedLineBreaks'
+  | 'BareCarriageReturn'
+  | 'SynthesisedFinalBreak'
+  | 'Undecodable';
+
+/**
+ * Why a value could not be written back in exactly the spelling it had.
+ *
+ * **Not a failure.** Each names a presentation that is genuinely lossy in the
+ * reading direction, so "read it, then write it again" cannot be the identity
+ * however the writer is built. It is the `reason` of a {@link PresentationNote}.
+ */
+export type NotReencodable =
+  | 'FoldedStyle'
+  | 'FoldedFlowScalar'
+  | 'NonCanonicalEscaping'
+  | 'NonCanonicalBlankLine'
+  | 'MixedLineBreaks'
+  | 'BareCarriageReturn'
+  | 'SynthesisedFinalBreak'
+  | { readonly Undecodable: DecodeError };
+
+/**
+ * A change of *spelling* an edit had to make, reported rather than performed
+ * silently.
+ *
+ * Plan section 6.2 — never silently normalise. A note says the value's spelling
+ * changed as well as its content: a folded block rewritten as a literal one, a
+ * plain value quoted because its new content is no longer plain-safe. Every note
+ * is about bytes **inside** the edited value; everything outside it is
+ * byte-identical either way.
+ */
+export interface PresentationNote {
+  /**
+   * The edit's position in the batch that was requested.
+   *
+   * An index into the list of edits the command sent, **not** an identifier. It
+   * means nothing to a caller that did not send that list.
+   */
+  readonly edit: number;
+  /** The style the value was written in. */
+  readonly from: ScalarStyle;
+  /** The style it is written in now. */
+  readonly to: ScalarStyle;
+  /** Why the old spelling could not be reproduced, when a reason is known. */
+  readonly reason: NotReencodable | null;
+}
+
+/** The discriminant of every {@link SaveResult} arm. */
+export type SaveResultName = 'saved' | 'conflict' | 'refused';
+
+/**
+ * The save ran to the end: both gates passed and the transaction returned facts.
+ *
+ * **It does not say the file is now what you asked for.** The write lock excludes
+ * only this application's own writers, so espanso, an editor or a sync agent can
+ * replace the file between the transaction's last look and this value reaching
+ * the screen.
+ */
+export interface SavedResult {
+  /** Which arm this is. */
+  readonly outcome: 'saved';
+  /**
+   * The revision the file held when the transaction last looked at it — the new
+   * base revision to send with the next save.
+   */
+  readonly revision: ContentRevision;
+  /**
+   * Whether the file was actually rewritten.
+   *
+   * **`false` is a success.** A result byte-identical to what the file already
+   * held is not written, because replacing a file drops metadata and buys
+   * nothing. Both gates still ran.
+   */
+  readonly committed: boolean;
+  /** Spelling changes the edit had to make, for the interface to surface. */
+  readonly notes: readonly PresentationNote[];
+  /**
+   * Whether this save wrote a pre-save copy of the file.
+   *
+   * **`false` is a success**: no copy was asked for, nothing was rewritten, or
+   * this session had already copied this file. A `true` is **not** a promise that
+   * the file can be recovered — only ten sessions' worth of copies are kept — and
+   * no message may say otherwise.
+   */
+  readonly backup_taken: boolean;
+  /**
+   * The affected snippet's identity **in the new revision**, when the command had
+   * one.
+   *
+   * **Every {@link MatchId} held before a save is stale afterwards**, because an
+   * identity records the revision it was minted from. `null` when the command
+   * acted on no single snippet, when nothing was committed, or when the file
+   * changed again between the write and the read that followed it — in which case
+   * the document has to be read again.
+   */
+  readonly moved: MatchId | null;
+}
+
+/**
+ * The file did not hold what the request was based on, and **nothing was
+ * written**.
+ *
+ * ## Two revisions, and they are two observations
+ *
+ * {@link ConflictResult.found} is what the file held **under the write lock** —
+ * the bytes that refused the save. {@link ConflictResult.disk_revision} is a
+ * **fresh read taken afterwards**, once the lock was released, because the save
+ * transaction reports a stale base without handing back any bytes. They are
+ * usually equal and they need not be: when they differ, the file changed again in
+ * between, and nothing here may present the two as descriptions of the same
+ * bytes.
+ */
+export interface ConflictResult {
+  /** Which arm this is. */
+  readonly outcome: 'conflict';
+  /** The revision the request was based on. */
+  readonly expected: ContentRevision;
+  /** The revision the locked read found — the bytes that refused the save. */
+  readonly found: ContentRevision;
+  /** The revision of the fresh read taken after the refusal. */
+  readonly disk_revision: ContentRevision;
+  /**
+   * The projection of that fresh read: what the file holds, as far as a read
+   * taken after the refusal can say.
+   */
+  readonly disk: DocumentView;
+}
+
+/**
+ * The semantic gate refused, and **nothing was written**.
+ *
+ * The expected, actionable second half of a save that found something: show the
+ * findings, and — if the person says so, and only for the ones that can be
+ * acknowledged at all — call again with an {@link Acknowledgement} built from
+ * exactly these.
+ */
+export interface RefusedResult {
+  /** Which arm this is. */
+  readonly outcome: 'refused';
+  /** Which arm of the policy refused. */
+  readonly verdict: SaveVerdict;
+  /** **Every** finding the result produced, of both classes, in report order. */
+  readonly findings: readonly Finding[];
+}
+
+/**
+ * How one save ended.
+ *
+ * **Document-level, not match-shaped**, and flat rather than externally tagged.
+ * The three arms are the three outcomes that are *a save* rather than a failure;
+ * everything else rejects with a {@link CommandError}. Switch on `outcome`.
+ */
+export type SaveResult = SavedResult | ConflictResult | RefusedResult;
+
 // ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------

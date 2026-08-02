@@ -53,20 +53,26 @@
 //!   of bytes rather than of a projection.
 //! - **Not a type resolver** (D2u). Every value it reads is
 //!   [`crate::model::ScalarView::text`] — source text as written.
-//! - **On the wire since Phase 2b-1, in one direction.** [`Finding`],
-//!   [`FindingCode`] and [`FindingClass`] serialize, and every variant of the
-//!   two enums has a `code.` entry in **both** `src/lib/i18n/en.json` and
-//!   `es.json` — `src-tauri/src/dictionary_contract.rs` fails the build without
-//!   them, which is why the derives and the strings landed in one change.
-//!   Nothing here **deserializes**, and that is a real gap rather than an
-//!   oversight: an acknowledgement has to arrive *from* the interface, and
-//!   [`serde::Deserialize`] is still absent from [`Finding`], [`ByteSpan`] and
-//!   [`crate::model::VariableKind`]. The one *type-level* obstruction is gone —
-//!   [`FindingCode::VariableMissingRequiredParam`]'s `param` is an owned
-//!   [`String`] since Phase 2b-1's review, not a `&'static str` `serde` could
-//!   never read back into — but which direction 2b-2 takes, and how it compares
-//!   what arrives, is that sub-phase's decision
-//!   (`docs/decisions/2b-1-notes.md`).
+//! - **On the wire since Phase 2b-1, and in both directions since Phase
+//!   2b-2a.** [`Finding`], [`FindingCode`] and [`FindingClass`] serialize, and
+//!   every variant of the two enums has a `code.` entry in **both**
+//!   `src/lib/i18n/en.json` and `es.json` —
+//!   `src-tauri/src/dictionary_contract.rs` fails the build without them, which
+//!   is why the derives and the strings landed in one change.
+//!   [`Finding`] and [`FindingCode`] now also **deserialize**, because an
+//!   acknowledgement has to arrive *from* the interface and it is a list of
+//!   findings. The whole payload graph reads back: [`ByteSpan`],
+//!   [`crate::syntax::NodeId`], [`DocumentPath`] and
+//!   [`crate::model::VariableKind`].
+//!
+//!   **Reading a finding back in establishes nothing about it.** A caller can
+//!   construct any finding it likes and hand it over as acknowledged; what makes
+//!   the acknowledgement mean something is that
+//!   [`crate::persist::verdict`] compares it against findings this module
+//!   **recomputed** from the candidate, as an exact multiset. Nothing here, and
+//!   nothing in `crate::persist`, can establish that a human saw one — enforcing
+//!   presentation is the user interface's obligation
+//!   (`docs/decisions/2b-1-notes.md` section 4).
 //!
 //! # What a successful regex compile here does and does not prove
 //!
@@ -85,7 +91,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{
     ContentKind, DocumentView, MatchView, ScalarView, TriggerKind, ValueKind, ValueView,
@@ -159,7 +165,7 @@ impl fmt::Display for FindingClass {
 /// Plan section 9: *"Rust returns error codes and structured data, never
 /// user-facing prose."* Nothing here is a sentence. Every operand is either a
 /// number, an enum this crate owns, or **text the file itself supplied**.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindingCode {
     /// Rule 1. The match has none of `replace`, `form`, `markdown`, `html` and
     /// `image_path`, so nothing says what it expands to.
@@ -335,7 +341,7 @@ impl fmt::Display for FindingCode {
 /// because a diagnostic describes *the file as read* and a finding describes
 /// *a candidate about to be written*. Both are on the wire; only the diagnostic
 /// is ever produced by a read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
     /// What was noticed.
     pub code: FindingCode,

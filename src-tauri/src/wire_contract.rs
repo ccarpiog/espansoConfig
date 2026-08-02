@@ -54,12 +54,14 @@ use serde_json::Value;
 
 use espansoconfig_core::discovery::FileKind;
 use espansoconfig_core::emit::DecodeError;
+use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
     ContentKind, Diagnostic, DiagnosticCode, DocumentContext, DocumentShape, DocumentView,
     MatchBadge, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
 };
 use espansoconfig_core::patch::{
-    DocumentPath, EditError, MoveSeam, PathError, PathSegment, VerificationFailure,
+    DocumentPath, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
+    VerificationFailure,
 };
 use espansoconfig_core::persist::{
     Acknowledgement, BackupError, BackupRecord, BackupStep, Rotation, RotationOutcome, SaveError,
@@ -443,11 +445,28 @@ fn operand_shapes(group: &str) -> BTreeMap<String, String> {
 } // End of function operand_shapes()
 
 /// The shape name `errors.ts` uses for a JSON operand.
+///
+/// `object` arrived at Phase 2b-2a with `CommandError::SaveFailed`, whose first
+/// operand is a whole `SaveError`. It is deliberately the **weakest** shape in
+/// the table — `isCommandError` can say the operand is there and is an object,
+/// and nothing more — because validating a nested wire enum at the guard would
+/// mean reimplementing `SaveError`'s nine variants in a runtime check. What keeps
+/// that payload honest is the union check over `type SaveError` a few tests up,
+/// not this.
+///
+/// `boolean` arrived with the same variant's **second** operand,
+/// `may_have_written`, which is the core's own predicate evaluated at
+/// serialization time rather than a field (`crate::error::CommandError`). It is
+/// the one operand on this boundary a frontend *branches on to decide what to do
+/// with the screen*, so the guard checking its type is the difference between
+/// "the file may have been replaced" and `undefined`, which is falsy.
 fn shape_of(value: &Value) -> String {
     match value {
         Value::String(_) => "string".to_owned(),
         Value::Number(_) => "number".to_owned(),
+        Value::Bool(_) => "boolean".to_owned(),
         Value::Array(items) if items.iter().all(Value::is_string) => "stringArray".to_owned(),
+        Value::Object(_) => "object".to_owned(),
         other => panic!("{other} is not a shape the operand table can describe"),
     }
 }
@@ -497,16 +516,22 @@ pub(crate) fn registered_commands() -> BTreeSet<String> {
         .collect()
 } // End of function registered_commands()
 
-/// The six mutating commands Phase 2 owns and this phase must not ship.
+/// The mutating commands Phase 2 owns and this phase must not ship.
 ///
 /// Named here so that a check can assert their absence rather than a comment
-/// asserting an intention. `crate::commands` names the same six in prose; this
+/// asserting an intention. `crate::commands` names the same ones in prose; this
 /// is the version that can fail.
-const FORBIDDEN_COMMANDS: [&str; 6] = [
+///
+/// **`move_match` left this list at Phase 2b-2a**, which is the only way a name
+/// may leave it: the command exists, is registered, and writes a user's file
+/// through `espansoconfig_core::persist::save_document`. The five that remain are
+/// still absent, and three of them are absent for a reason stronger than
+/// sequencing — the core has no primitive for inserting a sequence item, removing
+/// one, or replacing a whole document's text.
+const FORBIDDEN_COMMANDS: [&str; 5] = [
     "save_match",
     "create_match",
     "delete_match",
-    "move_match",
     "save_raw_document",
     "validate_match",
 ];
@@ -1096,26 +1121,30 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// forbidden-name assertion below is unaffected — and is checked all the same,
 /// because that is the point of writing it as a check.
 #[test]
-fn the_registered_commands_are_the_read_only_six_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_seven_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
-    let read_only = const_array_members(&frontend, "COMMAND_NAMES");
+    let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
         &read_without_comments("src/lib/ipc/menu.ts"),
         "MENU_COMMAND_NAMES",
     );
     assert_eq!(
-        read_only.len(),
-        6,
-        "the read-only surface is six commands: {read_only:?}"
+        workspace.len(),
+        7,
+        "the workspace surface is six read-only commands and one that writes: {workspace:?}"
+    );
+    assert!(
+        workspace.contains("move_match"),
+        "the one mutating command must be declared where the frontend can call it"
     );
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
-    let declared: BTreeSet<String> = read_only.union(&menu).cloned().collect();
+    let declared: BTreeSet<String> = workspace.union(&menu).cloned().collect();
     let registered = registered_commands();
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        7,
-        "Phase 1c-2b-2a registers six read-only commands and one menu command, and no more: {registered:?}"
+        8,
+        "Phase 2b-2a registers seven workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1123,7 +1152,59 @@ fn the_registered_commands_are_the_read_only_six_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_read_only_six_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_seven_and_the_menu_command()
+
+/// The three outcomes of a save are declared exactly as Rust writes them.
+///
+/// `SaveResult` is **flat** — one `outcome` discriminant plus operands — rather
+/// than externally tagged like the core's own enums, so it is checked here rather
+/// than folded into [`save_transaction_enums`], whose whole machinery reads a
+/// one-key object as a variant name. The three claims are the ones that can drift
+/// independently: the name union, each outcome's own operand set, and the union
+/// that ties the three interfaces together.
+#[test]
+fn every_save_outcome_declares_exactly_what_rust_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let results = crate::save::every_save_result();
+
+    let rust: BTreeSet<String> = results
+        .iter()
+        .map(|result| result.outcome().to_owned())
+        .collect();
+    assert_eq!(rust.len(), 3, "three outcomes: {rust:?}");
+    assert_same_names(
+        "type SaveResultName",
+        &rust,
+        &union_members(&source, "SaveResultName"),
+    );
+
+    // Every outcome's interface, by the same naming convention `errors.ts` uses
+    // for an error code: the discriminant capitalised, plus a noun.
+    for result in &results {
+        let outcome = result.outcome();
+        let mut characters = outcome.chars();
+        let first = characters.next().expect("an outcome is never empty");
+        let interface = format!(
+            "{}{}Result",
+            first.to_ascii_uppercase(),
+            characters.as_str()
+        );
+        let written = json_keys(&json_of(result));
+        assert!(
+            written.contains("outcome"),
+            "{interface} must carry the discriminant it is told apart by"
+        );
+        assert_same_names(
+            &format!("interface {interface}"),
+            &written,
+            &interface_fields(&source, &interface),
+        );
+        assert!(
+            union_body(&source, "SaveResult").contains(&interface),
+            "type SaveResult does not include {interface}"
+        );
+    } // End of the loop over the three outcomes
+} // End of function every_save_outcome_declares_exactly_what_rust_writes()
 
 /// A scalar arrives as text, never as a parsed value (D2u).
 ///
@@ -1372,6 +1453,24 @@ fn decode_error_samples() -> Vec<DecodeError> {
         DecodeError::TrailingBackslash,
     ]
 } // End of function decode_error_samples()
+
+/// One value of every [`NotReencodable`] variant.
+///
+/// On the wire since Phase 2b-2a, as [`PresentationNote::reason`]: a successful
+/// save carries its presentation notes out, and plan section 6.2's *never
+/// silently normalise* is only kept if the note reaches a person.
+fn not_reencodable_samples() -> Vec<NotReencodable> {
+    vec![
+        NotReencodable::FoldedStyle,
+        NotReencodable::FoldedFlowScalar,
+        NotReencodable::NonCanonicalEscaping,
+        NotReencodable::NonCanonicalBlankLine,
+        NotReencodable::MixedLineBreaks,
+        NotReencodable::BareCarriageReturn,
+        NotReencodable::SynthesisedFinalBreak,
+        NotReencodable::Undecodable(DecodeError::TrailingBackslash),
+    ]
+} // End of function not_reencodable_samples()
 
 /// One value of every [`InvariantViolation`] variant.
 fn invariant_violation_samples() -> Vec<InvariantViolation> {
@@ -1819,6 +1918,15 @@ fn save_transaction_structs() -> Vec<(&'static str, Value)> {
         ),
         ("Finding", json_of(&a_finding())),
         (
+            "PresentationNote",
+            json_of(&PresentationNote {
+                edit: 0,
+                from: ScalarStyle::Plain,
+                to: ScalarStyle::SingleQuoted,
+                reason: Some(NotReencodable::FoldedStyle),
+            }),
+        ),
+        (
             "SaveRefusal",
             json_of(&SaveRefusal {
                 verdict: SaveVerdict::RefusedForUnacknowledgedSuspicions,
@@ -1921,6 +2029,10 @@ fn save_transaction_enums() -> Vec<(&'static str, Vec<Value>)> {
             "SaveError",
             save_error_samples().iter().map(json_of).collect(),
         ),
+        (
+            "NotReencodable",
+            not_reencodable_samples().iter().map(json_of).collect(),
+        ),
     ]
 } // End of function save_transaction_enums()
 
@@ -1964,8 +2076,9 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 157,
-        "Phase 2b-1 put 157 variants on the wire; this list now holds {variants}"
+        variants, 165,
+        "Phase 2b-1 put 157 variants on the wire and Phase 2b-2a added NotReencodable's \
+         eight; this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
 
@@ -2046,9 +2159,10 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (94, 11, 52),
+        (94, 12, 59),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
-         variants on this wire; a struct variant that became a skip is a hole"
+         variants on this wire, and Phase 2b-2a's NotReencodable added one \
+         newtype and seven unit ones; a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2326,7 +2440,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 157,
+        checked, 165,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

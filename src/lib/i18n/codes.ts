@@ -82,11 +82,15 @@ import type {
   MatchBadge,
   MoveSeam,
   NodeKind,
+  NotReencodable,
+  NotReencodableName,
   PathError,
   PathErrorName,
   RotationOutcome,
   SaveError,
   SaveErrorName,
+  SaveResult,
+  SaveResultName,
   SaveVerdict,
   ScalarStyle,
   SyntaxError,
@@ -833,6 +837,32 @@ export function saveErrorKey(name: SaveErrorName): TranslationKey {
 } // End of function saveErrorKey()
 
 /**
+ * The dictionary key for one reason a value's spelling could not be kept.
+ *
+ * @param name - The variant name of a `NotReencodable`.
+ * @returns The key holding that reason's sentence.
+ */
+export function notReencodableKey(name: NotReencodableName): TranslationKey {
+  return `code.notReencodable.${uncapitalize(name)}`;
+} // End of function notReencodableKey()
+
+/**
+ * The dictionary key for one way a save ended.
+ *
+ * **The only key builder whose input is already lowercase.** `SaveResult` is flat
+ * rather than externally tagged, so what arrives is the discriminant `saved`,
+ * `conflict` or `refused` — which is the Rust variant name already uncapitalised,
+ * and `src-tauri/src/save.rs` asserts that the two coincide. Passing it through
+ * {@link uncapitalize} anyway keeps one formula in this file rather than two.
+ *
+ * @param name - The `outcome` of a `SaveResult`.
+ * @returns The key holding that outcome's sentence.
+ */
+export function saveResultKey(name: SaveResultName): TranslationKey {
+  return `code.saveResult.${uncapitalize(name)}`;
+} // End of function saveResultKey()
+
+/**
  * The noun phrase one kind of YAML construct reads as.
  *
  * @param locale - The dictionary to read from.
@@ -1066,3 +1096,36 @@ export function describeSaveError(locale: Locale, error: SaveError): string {
   const key = saveErrorKey(wireVariantName<SaveErrorName>(error));
   return translate(locale, key, scalarOperands(wireVariantOperands(error)));
 } // End of function describeSaveError()
+
+/**
+ * The sentence one unkeepable spelling reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A `NotReencodable` as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeNotReencodable(locale: Locale, reason: NotReencodable): string {
+  const key = notReencodableKey(wireVariantName<NotReencodableName>(reason));
+  return translate(locale, key, scalarOperands(wireVariantOperands(reason)));
+} // End of function describeNotReencodable()
+
+/**
+ * The sentence one save outcome reads as.
+ *
+ * **One sentence per outcome, and nothing is unwrapped here.** A `refused` result
+ * carries a verdict and its findings, each of which has its own accessor
+ * ({@link describeSaveVerdict}, {@link describeFindingCode}); a caller that wants
+ * those sentences asks for them. Folding them in would decide, for every screen
+ * at once, how much a person is shown.
+ *
+ * **The register the whole family keeps.** None of these three says the file is
+ * safe, that a change cannot be lost, or what espanso will do with the result.
+ * The write lock excludes only this application's own writers.
+ *
+ * @param locale - The dictionary to read from.
+ * @param result - A save result as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeSaveResult(locale: Locale, result: SaveResult): string {
+  return translate(locale, saveResultKey(result.outcome));
+} // End of function describeSaveResult()

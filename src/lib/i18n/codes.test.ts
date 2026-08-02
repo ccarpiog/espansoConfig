@@ -279,7 +279,13 @@ const COMMAND_ERRORS = [
   { code: 'identityNoSuchMatch', node: 3 },
   { code: 'menuUnavailable' },
   { code: 'invalidMenuLabels', missing: ['quit'], unexpected: ['renamed_last_week'] },
-  { code: 'menuBuildFailed' }
+  { code: 'menuBuildFailed' },
+  { code: 'moveNotWithinOneSequence' },
+  {
+    code: 'saveFailed',
+    error: { DocumentIsReadOnly: { path: '/nowhere/packages/one.yml' } },
+    may_have_written: false
+  }
 ] as const satisfies readonly CommandError[];
 
 // Each of the following is `never` when the table above it names every member of
@@ -364,7 +370,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 12,
+      commandErrors: 14,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,

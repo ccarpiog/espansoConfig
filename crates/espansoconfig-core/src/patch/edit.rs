@@ -502,6 +502,32 @@ impl ItemMove {
     pub fn destination(&self) -> Option<usize> {
         self.after
     }
+
+    /// Where the item ends up, counted in the sequence **after** it has been
+    /// taken out, given that it started at `from`.
+    ///
+    /// **The one spelling of the arithmetic**, and it is public because a caller
+    /// that has just committed a move needs to say *which item is the moved one
+    /// now* — every identity minted from the previous revision is stale, so
+    /// "wherever it was" is not an answer. [`plan_move`] calls this rather than
+    /// repeating the two cases, so a caller and the engine cannot disagree about
+    /// where the item went.
+    ///
+    /// An anchor **above** the item keeps its index, because removing the item
+    /// does not move anything before it; an anchor **below** it loses one. The
+    /// front is index 0 whatever `from` was.
+    ///
+    /// It is pure arithmetic and validates nothing: an anchor index the sequence
+    /// does not have is [`EditError::NoSuchDestinationItem`], and an answer equal
+    /// to `from` is [`EditError::MoveChangesNothing`]. Both are [`plan_move`]'s
+    /// to make, against a document this function has never seen.
+    pub fn resulting_index(&self, from: usize) -> usize {
+        match self.after {
+            None => 0,
+            Some(anchor) if anchor < from => anchor + 1,
+            Some(anchor) => anchor,
+        }
+    } // End of function resulting_index()
 } // End of impl ItemMove
 
 /// One requested change of any kind, for [`apply_edits`].
@@ -573,7 +599,17 @@ pub struct Replacement {
 /// double-quoted scalar re-escaped canonically, a plain scalar requoted because
 /// the new value is no longer plain-safe. Every note describes bytes **inside**
 /// the edited scalar; bytes outside it are byte-identical either way.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **On the wire since Phase 2b-2a**, as the `notes` of a successful save
+/// (`SaveResult::Saved` in `src-tauri/src/save.rs`). Plan section 6.2's rule —
+/// never silently normalise — is only kept if the note reaches a person, and a
+/// note that stops at the Rust boundary is a note nobody reads.
+///
+/// [`PresentationNote::edit`] is a **position in the requested batch**, not an
+/// identifier: it indexes the `edits` slice the caller handed
+/// [`apply_edits`], and it means nothing to a caller that did not send that
+/// slice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PresentationNote {
     /// Position of the edit in the requested batch.
     pub edit: usize,
@@ -3025,24 +3061,19 @@ fn plan_move(
         });
     };
     // Where the item ends up, counted in the sequence **after** it has been taken
-    // out: an anchor above it keeps its index, one below it loses one.
-    let to = match edit.destination() {
-        None => 0,
-        Some(anchor) => {
-            if anchor >= items.len() {
-                return Err(EditError::NoSuchDestinationItem {
-                    edit: position,
-                    sequence: sequence.id,
-                    items: items.len(),
-                });
-            }
-            if anchor < from {
-                anchor + 1
-            } else {
-                anchor
-            }
+    // out. The arithmetic itself is `ItemMove::resulting_index`, so that a caller
+    // asking "which item is the moved one now?" after the commit gets its answer
+    // from this same expression rather than from a second copy of it.
+    if let Some(anchor) = edit.destination() {
+        if anchor >= items.len() {
+            return Err(EditError::NoSuchDestinationItem {
+                edit: position,
+                sequence: sequence.id,
+                items: items.len(),
+            });
         }
-    };
+    }
+    let to = edit.resulting_index(from);
     if to == from {
         return Err(EditError::MoveChangesNothing {
             edit: position,

@@ -133,6 +133,25 @@ failures, zero findings, every file's text rendered and all 65 snippets rendered
 It names three things it does not cover; the sharpest is that the real configuration produces **zero**
 unmodelled entries, so synthetic fixtures are that surface's only coverage, permanently.
 
+**Phase 2 — editing — is under way, and since 2b-2a this application can write a user's file from a
+window.** 2a built the whole save transaction in Rust with no caller (plan §6.6, all thirteen steps);
+2b-1 put its types on the wire with no command behind them; **2b-2a registered `move_match`, the
+seventh `#[tauri::command]` and the first that is not read-only.**
+
+**`espansoconfig_core::persist::save_document` is the only entry point that may write a user's file.**
+Never call `replace_file_atomically` or `replace_locked_file` from a command, and never from inside the
+transaction — **the lock is not reentrant, so the process hangs silently and forever.** A save is
+refused, not forced: findings go out and the acknowledged subset comes back, matched as an **exact
+multiset**. **There is no `force` flag and adding one would undo the design.** `committed: false` and
+`backup: None` are both legal on a *success*.
+
+**2b-2 is split three ways because three of its six commands have no primitive behind them.**
+`DocumentEdit` has exactly four variants — scalar edit, mapping-field insert, mapping-field remove,
+same-sequence item move — so `create_match` (insert a sequence item), `delete_match` (remove one) and
+`save_raw_document` (replace a whole text) cannot be built until 2b-2c adds the primitives. Forcing
+them into existence by writing files outside `save_document` would bypass the lock, the revision check,
+the reparse, the validation verdict, the acknowledgement and the backup **while appearing to work**.
+
 **The raw YAML viewer is a mode of the third pane**, and `documentStart` has **exactly one caller** —
 it is the only way a `bom` segment is produced, and a slice must never pass it. `src/lib/browser/`
 holds what a test can reach (`rawDocument.ts`); the component gets the walk.

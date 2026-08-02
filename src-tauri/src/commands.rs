@@ -1,10 +1,10 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
-//! Plan section 6.4's **read-only** set, and nothing else: `open_workspace`,
-//! `list_documents`, `get_document`, `get_match`, `document_text` and
-//! `reload_document`. Each is one line over a [`WorkspaceSession`] method, and
-//! each of those is one call into `crate::workspace`, which Phase 1a built to be
-//! wrapped this way.
+//! Plan section 6.4's **read-only** set — `open_workspace`, `list_documents`,
+//! `get_document`, `get_match`, `document_text` and `reload_document` — and, as
+//! of Phase 2b-2a, one command that writes: `move_match`. Each is one line over a
+//! [`WorkspaceSession`] method, and each of the six read-only ones is one call
+//! into `crate::workspace`, which Phase 1a built to be wrapped this way.
 //!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
@@ -14,13 +14,24 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
+//! # The seventh command writes, and it is the only one
+//!
+//! Phase 2b-2a adds `move_match`. It goes through
+//! [`espansoconfig_core::persist::save_document`] and through nothing else:
+//! `replace_file_atomically` and `replace_locked_file` take finished bytes,
+//! validate nothing, and the second one deadlocks if the lock is taken twice, so
+//! **no command in this crate calls either**. `save_match`, `create_match`,
+//! `delete_match` and `save_raw_document` are still absent, and the reason is not
+//! caution: the core has no primitive for inserting a sequence item, removing
+//! one, or replacing a whole document's text, and inventing one at this layer
+//! would be an edit engine outside the crate that owns the fidelity rules.
+//!
 //! # Three constraints this module inherits and does not drop
 //!
-//! - **No mutating command exists.** Saving is Phase 2 and the save transaction
-//!   it needs is not written. `save_match`, `create_match`, `delete_match`,
-//!   `move_match`, `save_raw_document` and `validate_match` are deliberately
-//!   absent; a command that writes a file must not appear here before that
-//!   transaction does.
+//! - **One writer, one entry point.** Every byte this application puts on a
+//!   user's disk goes through the save transaction, with a
+//!   [`espansoconfig_core::persist::BackupSession`] this layer owns and never
+//!   omits.
 //! - **`Workspace` takes `&mut self`** where it fills its cache, so the state
 //!   registered with Tauri holds it behind a [`Mutex`].
 //! - **Rust returns codes, never prose** (plan section 9). Every failure
@@ -59,34 +70,79 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::State;
 
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
+use espansoconfig_core::patch::{DocumentEdit, DocumentPath, ItemMove};
+use espansoconfig_core::persist::{
+    save_document, Acknowledgement, BackupSession, SaveError, SaveRequest, SavedDocument,
+};
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
-use espansoconfig_core::DocumentId;
+use espansoconfig_core::{ContentRevision, DocumentId};
 
 use crate::error::CommandError;
+use crate::save::SaveResult;
+
+/// One open configuration directory, and the session state that belongs to it.
+///
+/// The two travel together because they have the same lifetime and the same
+/// scope: a [`BackupSession`] is *"which files this editing session has already
+/// copied, and which batch folder its copies go in"*, and both questions are
+/// about the directory that is open. Opening another one replaces both.
+#[derive(Debug)]
+struct Open {
+    /// The configuration directory, its file list and its parse cache.
+    workspace: Workspace,
+    /// Where this session's pre-save copies go — plan section 6.6 step 13.
+    ///
+    /// **Owned here because the core cannot own it.**
+    /// [`espansoconfig_core::persist::SaveRequest::backups`] is an `Option` and
+    /// `None` means *no backup at all*; the core deliberately holds no session
+    /// state of its own, so a save with no safety net is what happens if this
+    /// layer forgets. It does not forget: every save goes through
+    /// [`WorkspaceSession::move_match`], which passes `Some(&self.backups)`, and
+    /// there is no code path in this crate that passes `None`.
+    backups: BackupSession,
+}
 
 /// The one piece of state this application manages.
 ///
-/// Holds at most one open [`Workspace`]. `None` before the first successful
+/// Holds at most one [`Open`] workspace. `None` before the first successful
 /// `open_workspace`, and every other command answers
 /// [`CommandError::NoWorkspaceOpen`] until then — rather than opening one
 /// implicitly, which would make "which directory am I looking at?" a question
 /// with an answer nobody asked for.
 #[derive(Debug, Default)]
 pub struct WorkspaceSession {
-    workspace: Mutex<Option<Workspace>>,
+    open: Mutex<Option<Open>>,
 }
 
 impl WorkspaceSession {
     /// An empty session, with no workspace open.
     pub fn new() -> WorkspaceSession {
         WorkspaceSession {
-            workspace: Mutex::new(None),
+            open: Mutex::new(None),
         }
     }
 
     /// Locates a configuration directory and opens it.
     ///
     /// Parses nothing: [`Workspace::discover`] enumerates and stops.
+    ///
+    /// # The backup session is created here, and cannot fail
+    ///
+    /// [`BackupSession::rooted_at`] is **infallible by construction**: it
+    /// canonicalises the configuration root where that succeeds, keeps it as
+    /// spelled where it does not, and **creates no directory at all** — a session
+    /// that never saves anything leaves no trace on disk. So there is no
+    /// "the backup session could not be created" branch to decide a policy for,
+    /// and this layer never has an occasion to pass
+    /// [`espansoconfig_core::persist::SaveRequest::backups`] a `None`.
+    ///
+    /// **That is a property of today's constructor, not a law**, and the decision
+    /// if it ever changes is written down rather than left to whoever meets it:
+    /// a save whose safety net cannot be put in place must **refuse**, exactly as
+    /// [`espansoconfig_core::persist::SaveError::Backup`] refuses one whose copy
+    /// cannot be written. Silently saving with `backups: None` would make an
+    /// unread field the only thing between a user and a destructive operation
+    /// performed without the copy that exists to survive it.
     ///
     /// # Errors
     ///
@@ -98,8 +154,9 @@ impl WorkspaceSession {
     pub fn open(&self, root: Option<&Path>) -> Result<WorkspaceSummary, CommandError> {
         let workspace = Workspace::discover(root)?;
         let summary = workspace.summary();
+        let backups = BackupSession::rooted_at(workspace.root());
         let mut guard = self.lock();
-        *guard = Some(workspace);
+        *guard = Some(Open { workspace, backups });
         Ok(summary)
     } // End of function open()
 
@@ -192,6 +249,60 @@ impl WorkspaceSession {
         self.with_workspace(|workspace| Ok(workspace.refresh(id)?.view.clone()))
     }
 
+    /// Moves one match within its own sequence and saves the file.
+    ///
+    /// **The only method in this crate that can write a user's file**, and it
+    /// writes it exactly one way: through
+    /// [`espansoconfig_core::persist::save_document`], with exactly one
+    /// [`DocumentEdit::MoveItem`] and nothing beside it. `PROGRESS.md` R25 —
+    /// a move may not be combined with any other edit in one batch, because the
+    /// move's verification is not compositional.
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// - a `base_revision` that is not the revision this session's projection
+    ///   holds — [`CommandError::IdentityStaleRevision`], because a path resolved
+    ///   against one parse and applied to another names a **position**, and a
+    ///   position is not an identity
+    ///   (`a_document_path_is_positional_so_a_deletion_repoints_it`);
+    /// - an `after` naming another **document** —
+    ///   [`CommandError::IdentityWrongDocument`] (`PROGRESS.md` D2r);
+    /// - an `after` that cannot be shown to sit in the **same sequence** as the
+    ///   moved item — [`CommandError::MoveNotWithinOneSequence`].
+    ///
+    /// # What it answers with
+    ///
+    /// [`SaveResult`], in the `Ok` channel, for the three outcomes that are a
+    /// save rather than a failure: it committed, the file had moved on, or the
+    /// semantic gate refused. Everything else is a [`CommandError`], the
+    /// transaction's own typed failures inside
+    /// [`CommandError::SaveFailed`].
+    ///
+    /// **The answer carries the moved match's identity in the new revision**,
+    /// because a commit invalidates every [`MatchId`] the caller holds: an
+    /// identity records the revision it was minted from, so the one that named
+    /// this match a moment ago now resolves to `identityStaleRevision`.
+    pub fn move_match(
+        &self,
+        id: MatchId,
+        after: Option<MatchId>,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        let mut guard = self.lock();
+        let Some(Open { workspace, backups }) = guard.as_mut() else {
+            return Err(CommandError::NoWorkspaceOpen);
+        };
+        move_one_match(
+            workspace,
+            backups,
+            id,
+            after,
+            base_revision,
+            acknowledgement,
+        )
+    } // End of function move_match()
+
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
     fn with_workspace<T>(
@@ -201,17 +312,225 @@ impl WorkspaceSession {
         let mut guard = self.lock();
         match guard.as_mut() {
             None => Err(CommandError::NoWorkspaceOpen),
-            Some(workspace) => action(workspace),
+            Some(open) => action(&mut open.workspace),
         }
     } // End of function with_workspace()
 
     /// Locks the session, absorbing poisoning. See the module documentation.
-    fn lock(&self) -> MutexGuard<'_, Option<Workspace>> {
-        self.workspace
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+    fn lock(&self) -> MutexGuard<'_, Option<Open>> {
+        self.open.lock().unwrap_or_else(PoisonError::into_inner)
     }
 } // End of impl WorkspaceSession
+
+/// The sequence a path's last segment indexes, and that index.
+///
+/// `None` when the path does not end in a sequence position, which is the only
+/// shape [`ItemMove`] can move: an item of a block sequence. A `matches[2]`
+/// answers `(matches, 2)`.
+fn sequence_of(path: &DocumentPath) -> Option<(DocumentPath, usize)> {
+    let (last, head) = path.segments().split_last()?;
+    let index = last.as_index()?;
+    Some((
+        DocumentPath::new(path.document_index(), head.to_vec()),
+        index,
+    ))
+} // End of function sequence_of()
+
+/// The address of the match `id` names, and the sequence it is an item of.
+///
+/// # Errors
+///
+/// The identity refusals, unchanged from [`WorkspaceSession::match_view`], and
+/// [`CommandError::MoveNotWithinOneSequence`] for a match this projection cannot
+/// address as a sequence item. The second is a **negative** claim and is worded
+/// as one: the refusal is *this could not be shown to be an item of a sequence*,
+/// which covers a match with no path at all as honestly as it covers one whose
+/// path ends in a key.
+fn addressed_item(view: &DocumentView, id: MatchId) -> Result<(DocumentPath, usize), CommandError> {
+    let found = view.match_by_id(id)?;
+    let path = found
+        .path
+        .as_ref()
+        .ok_or(CommandError::MoveNotWithinOneSequence)?;
+    sequence_of(path).ok_or(CommandError::MoveNotWithinOneSequence)
+} // End of function addressed_item()
+
+/// Plans and runs one move against an open workspace.
+///
+/// A free function rather than a method so that the session's mutex guard is
+/// destructured once, at the call site, and the workspace and the backup session
+/// arrive here as two independent borrows.
+fn move_one_match(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    id: MatchId,
+    after: Option<MatchId>,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    let view = workspace.document_view(id.document)?;
+    if view.revision != base_revision {
+        // The caller is editing against a parse this session no longer holds. Its
+        // paths are positions in that parse, so planning against them would move
+        // whatever now occupies the position rather than what was selected.
+        return Err(CommandError::IdentityStaleRevision {
+            expected: view.revision.to_hex(),
+            found: base_revision.to_hex(),
+        });
+    }
+    let (sequence, from) = addressed_item(view, id)?;
+    let destination = match after {
+        None => None,
+        Some(anchor) => {
+            if anchor.document != id.document {
+                // D2r: a move never crosses a file. Refused here rather than
+                // attempted, because there is no edit that could express it.
+                return Err(CommandError::IdentityWrongDocument {
+                    expected: id.document.get(),
+                    found: anchor.document.get(),
+                });
+            }
+            let (anchor_sequence, at) = addressed_item(view, anchor)?;
+            if anchor_sequence != sequence {
+                return Err(CommandError::MoveNotWithinOneSequence);
+            }
+            Some(at)
+        }
+    };
+
+    let edit = match destination {
+        None => ItemMove::to_front(sequence.clone().with_index(from)),
+        Some(at) => ItemMove::after(sequence.clone().with_index(from), at),
+    };
+    // Where the item will be afterwards, from the engine's own arithmetic rather
+    // than from a second copy of it (`ItemMove::resulting_index`).
+    let landing = edit.resulting_index(from);
+    // Cloned so that the immutable borrow of the workspace ends before the save;
+    // the context is a handful of fields from the directory walk, not a parse.
+    let context = workspace.document_context(id.document)?.clone();
+    let edits = [DocumentEdit::MoveItem(edit)];
+
+    let request = SaveRequest {
+        context: &context,
+        base_revision,
+        edits: &edits,
+        acknowledgement,
+        // Never `None`. See `WorkspaceSession::open`.
+        backups: Some(backups),
+    };
+    match save_document(request) {
+        Ok(saved) => Ok(after_a_save(
+            workspace,
+            id.document,
+            &sequence,
+            landing,
+            saved,
+        )),
+        Err(SaveError::RevisionMismatch {
+            expected, found, ..
+        }) => conflict_after_the_lock(workspace, id.document, expected, found),
+        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
+            verdict: refusal.verdict,
+            findings: refusal.findings,
+        }),
+        Err(error) => {
+            if error.may_have_written() {
+                // The rename may have completed, so the cached parse may describe
+                // bytes that are gone. Dropping it costs one reparse and stops the
+                // window showing a file that no longer exists in that form.
+                let _ = workspace.evict(id.document);
+            }
+            Err(CommandError::SaveFailed { error })
+        }
+    }
+} // End of function move_one_match()
+
+/// Describes the disk side of a conflict, with a read taken **after** the lock
+/// was released.
+///
+/// [`save_document`] reports a stale base as `SaveError::RevisionMismatch` and
+/// hands back **no bytes**, so the disk side has to be *described* by a second
+/// observation — and that observation is a different one. `found` is the revision
+/// the locked read saw, the bytes that refused the save;
+/// [`SaveResult::Conflict::disk_revision`] is the revision of the fresh read this
+/// function takes. They are usually equal and they need not be: when they differ,
+/// the file changed **again** in between, and neither this application nor any
+/// string it shows may present the two as descriptions of the same bytes.
+///
+/// **The one place the payload is built**, so the rule cannot be half-kept by a
+/// later command: `disk` and `disk_revision` come out of a single refresh here,
+/// and `found` is passed in from the error rather than re-derived. The refresh
+/// also leaves the session's cache describing the bytes the next save will be
+/// checked against, which is why the read serves both purposes.
+///
+/// # Errors
+///
+/// The refresh's own failure, unchanged: a file that cannot be re-read has no
+/// disk side to describe, and inventing one would be worse than refusing.
+fn conflict_after_the_lock(
+    workspace: &mut Workspace,
+    document: DocumentId,
+    expected: ContentRevision,
+    found: ContentRevision,
+) -> Result<SaveResult, CommandError> {
+    let disk = Box::new(workspace.refresh(document)?.view.clone());
+    Ok(SaveResult::Conflict {
+        expected,
+        found,
+        disk_revision: disk.revision,
+        disk,
+    })
+} // End of function conflict_after_the_lock()
+
+/// Brings the session's cache back in step with the file, and names the moved
+/// match in the revision that now exists.
+///
+/// **Cache coherence is this layer's job**, and the core says so: `save_document`
+/// hands back *facts* and deliberately does not reach into
+/// [`Workspace`]. Without this, a `get_document`, `get_match` or `document_text`
+/// after a successful save would be served the parse of the bytes the save
+/// replaced.
+///
+/// The re-read is [`Workspace::refresh`], which reparses only when the bytes
+/// changed. A read that fails leaves the entry **evicted** rather than stale: a
+/// missing parse costs the next caller a read, and a stale one is this
+/// application showing a file it no longer has.
+///
+/// [`SaveResult::Saved::moved`] is minted only when the commit happened **and**
+/// the fresh read agrees with the revision the transaction established. When it
+/// does not, some other writer reached the file in between, and the position the
+/// move wrote to is no longer known to hold what was written there.
+fn after_a_save(
+    workspace: &mut Workspace,
+    document: DocumentId,
+    sequence: &DocumentPath,
+    landing: usize,
+    saved: SavedDocument,
+) -> SaveResult {
+    let refreshed = match workspace.refresh(document) {
+        Ok(fresh) => Some(fresh.view.clone()),
+        Err(_) => None,
+    };
+    if refreshed.is_none() {
+        let _ = workspace.evict(document);
+    }
+    let moved = refreshed
+        .filter(|view| saved.committed && view.revision == saved.revision)
+        .and_then(|view| {
+            let landed = sequence.clone().with_index(landing);
+            view.matches
+                .iter()
+                .find(|candidate| candidate.path.as_ref() == Some(&landed))
+                .map(|candidate| candidate.id)
+        });
+    SaveResult::Saved {
+        revision: saved.revision,
+        committed: saved.committed,
+        notes: saved.notes,
+        backup_taken: saved.backup.is_some(),
+        moved,
+    }
+} // End of function after_a_save()
 
 /// Opens an espanso configuration directory (plan section 6.4).
 ///
@@ -273,17 +592,60 @@ pub fn reload_document(
     session.reload(id)
 }
 
+/// Moves one match within its own sequence and saves the file (plan section
+/// 6.4).
+///
+/// **The first command in this application that can write a user's file.**
+///
+/// # Its arguments, and why each is the shape it is
+///
+/// - `id` — the match to move, by identity. Not a path: a
+///   [`espansoconfig_core::patch::DocumentPath`] is a **position**, and deleting
+///   an earlier match re-points one at a different snippet.
+/// - `after` — the match the moved one is written **after**, by identity, or
+///   `null` for the front of the sequence. An identity rather than an index, for
+///   the same reason, and rather than a path because a path on this wire is
+///   display text: `crate::wire_contract` records that two distinct filenames can
+///   render to one string, so **a command that accepts a wire path back as a
+///   target is a bug**. Everything here is named by `DocumentId` and `NodeId`.
+/// - `base_revision` — the optimistic-concurrency token. It is checked twice, and
+///   neither check makes the other redundant: here against the parse this session
+///   holds, and inside the transaction against the **bytes under the write lock**.
+/// - `acknowledgement` — the suspicions the caller has already shown someone, by
+///   content. There is deliberately **no `force` flag**: the findings travel out
+///   of a refusal and the acknowledged subset travels back in, matched as an
+///   exact multiset, and a boolean would let a caller wave past findings nobody
+///   looked at.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes, and
+/// [`CommandError::MoveNotWithinOneSequence`] before anything is attempted;
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures. A
+/// conflict and a refusal are **not** errors — see [`SaveResult`].
+#[tauri::command]
+pub fn move_match(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    after: Option<MatchId>,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.move_match(id, after, base_revision, &acknowledgement)
+} // End of function move_match()
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
 
     use espansoconfig_core::model::MatchId;
+    use espansoconfig_core::persist::Acknowledgement;
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
     use tempfile::TempDir;
 
     use super::WorkspaceSession;
-    use crate::error::CommandError;
+    use crate::save::SaveResult;
 
     /// A match file with two snippets and one unrecognised key.
     ///
@@ -395,30 +757,31 @@ mod tests {
     fn every_command_refuses_before_a_workspace_is_open() {
         let session = WorkspaceSession::new();
         let id = DocumentId(0);
-        assert_eq!(
-            session.documents().expect_err("nothing is open"),
-            CommandError::NoWorkspaceOpen
-        );
-        assert_eq!(
-            session.document(id).expect_err("nothing is open"),
-            CommandError::NoWorkspaceOpen
-        );
-        assert_eq!(
-            session.text(id).expect_err("nothing is open"),
-            CommandError::NoWorkspaceOpen
-        );
-        assert_eq!(
-            session.reload(id).expect_err("nothing is open"),
-            CommandError::NoWorkspaceOpen
-        );
         let identity = MatchId {
             document: id,
             revision: ContentRevision::of_bytes(b""),
             node: first_node_of("a: b"),
         };
+        let refusals = [
+            session.documents().err().map(|error| error.code()),
+            session.document(id).err().map(|error| error.code()),
+            session.text(id).err().map(|error| error.code()),
+            session.reload(id).err().map(|error| error.code()),
+            session.match_view(identity).err().map(|error| error.code()),
+            session
+                .move_match(
+                    identity,
+                    None,
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
+        ];
         assert_eq!(
-            session.match_view(identity).expect_err("nothing is open"),
-            CommandError::NoWorkspaceOpen
+            refusals,
+            [Some("noWorkspaceOpen"); 6],
+            "every session method that needs a workspace must refuse before one is open"
         );
     } // End of function every_command_refuses_before_a_workspace_is_open()
 
@@ -874,6 +1237,731 @@ mod tests {
             .expect("a path operand is a string")
             .contains('\u{fffd}'));
     } // End of function a_non_utf8_root_is_a_typed_refusal_that_serializes()
+
+    // -----------------------------------------------------------------------
+    // Phase 2b-2a — the one command that writes
+    // -----------------------------------------------------------------------
+
+    /// A file whose second match holds an unresolved `{{reference}}`.
+    ///
+    /// Hand-authored and neutral. The reference is what makes the semantic gate
+    /// report a `SuspiciousButPermitted` finding, which is the only way to reach
+    /// the refusal-then-acknowledgement path from a command.
+    const SUSPICIOUS_YML: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "  - trigger: ':two'\n",
+        "    replace: 'hello {{who}}'\n",
+    );
+
+    /// A tree whose one match file is [`SUSPICIOUS_YML`].
+    fn suspicious_tree() -> TempDir {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(dir.path().join("match").join("base.yml"), SUSPICIOUS_YML).unwrap();
+        dir
+    }
+
+    /// The triggers of a document's matches, in projection order.
+    fn triggers_of(view: &espansoconfig_core::model::DocumentView) -> Vec<String> {
+        view.matches
+            .iter()
+            .map(|found| trigger_text(found).to_owned())
+            .collect()
+    }
+
+    /// The `Saved` arm, or a panic naming what arrived instead.
+    fn expect_saved(result: SaveResult) -> (espansoconfig_core::ContentRevision, Option<MatchId>) {
+        match result {
+            SaveResult::Saved {
+                revision,
+                committed,
+                notes,
+                backup_taken,
+                moved,
+            } => {
+                assert!(committed, "a move always changes the file's bytes");
+                assert!(
+                    notes.is_empty(),
+                    "a move copies the item's own bytes and re-encodes no scalar"
+                );
+                assert!(backup_taken, "the session must have copied the file first");
+                (revision, moved)
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+    } // End of function expect_saved()
+
+    /// A move puts the item where it was asked to, and the identity it answers
+    /// with resolves.
+    ///
+    /// **The whole point of the returned identity.** A commit invalidates every
+    /// `MatchId` the caller holds, so this asserts both halves: the one that was
+    /// passed in is refused afterwards with `identityStaleRevision`, and the one
+    /// that came back resolves through `get_match` to the snippet that moved.
+    #[test]
+    fn a_move_answers_with_an_identity_that_resolves_in_the_new_revision() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        assert_eq!(triggers_of(&before), [":one", ":two"]);
+        let held = before.matches[1].id;
+
+        let result = session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("the move is legal");
+        let (revision, moved) = expect_saved(result);
+        assert_ne!(revision, before.revision, "the file was rewritten");
+
+        let moved = moved.expect("a committed move names the item it moved");
+        let found = session
+            .match_view(moved)
+            .expect("the identity the command answered with must resolve");
+        assert_eq!(trigger_text(&found), ":two");
+        assert_eq!(
+            found.id, moved,
+            "the projection agrees the identity is its own"
+        );
+
+        let stale = session
+            .match_view(held)
+            .expect_err("the identity held before the save is minted from the old revision");
+        assert_eq!(stale.code(), "identityStaleRevision");
+    } // End of function a_move_answers_with_an_identity_that_resolves_in_the_new_revision()
+
+    /// The bytes on disk really moved, and the session's cache says so without a
+    /// reload.
+    ///
+    /// **Cache coherence, from both surfaces that could serve a stale parse.**
+    /// `get_document` and `document_text` are asked *after* the move and *before*
+    /// any `reload_document`; a command layer that left the cache alone would
+    /// answer both with the file as it was, which on a screen is indistinguishable
+    /// from a move that did not happen.
+    #[test]
+    fn a_committed_move_leaves_the_session_reading_the_new_bytes() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let text_before = session.text(id).expect("the bytes read");
+        let held = before.matches[1].id;
+
+        session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("the move is legal");
+
+        let after = session.document(id).expect("the file still reads");
+        assert_eq!(
+            triggers_of(&after),
+            [":two", ":one"],
+            "the projection served from the cache must be the one that was written"
+        );
+        let text_after = session.text(id).expect("the bytes read");
+        assert_ne!(text_after, text_before);
+        assert_eq!(
+            text_after,
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            "what the session serves must be what is on disk"
+        );
+        assert_eq!(
+            after.revision,
+            espansoconfig_core::ContentRevision::of_bytes(text_after.as_bytes())
+        );
+    } // End of function a_committed_move_leaves_the_session_reading_the_new_bytes()
+
+    /// A block-sequence document split into everything above its items and the
+    /// items themselves.
+    ///
+    /// An item is its own `- ` line plus every line under it until the next item
+    /// begins, which for a two-space block sequence of mappings is exactly the
+    /// envelope a move relocates. Splitting a document this way and putting the
+    /// pieces back in another order is *the move*, spelled without the engine that
+    /// performs it — which is what lets a test state the expected bytes rather than
+    /// restate whatever came out.
+    ///
+    /// It reads the source with `split_inclusive`, so every line keeps its own
+    /// terminator and a document with no final newline reassembles unchanged.
+    /// The answer is everything above the first item, then one string per item.
+    fn split_into_items(source: &str) -> (String, Vec<String>) {
+        let mut head = String::new();
+        let mut items: Vec<String> = Vec::new();
+        for line in source.split_inclusive('\n') {
+            if line.starts_with("  - ") {
+                items.push(line.to_owned());
+            } else if let Some(current) = items.last_mut() {
+                current.push_str(line);
+            } else {
+                head.push_str(line);
+            }
+        } // End of the loop over the document's lines
+        (head, items)
+    } // End of function split_into_items()
+
+    /// Everything the move did not touch comes out byte-identical.
+    ///
+    /// CLAUDE.md section 3, checked at this layer rather than assumed from the
+    /// core's own sweeps — and checked **as bytes**, which is the review of Phase
+    /// 2b-2a's Low finding. The earlier version of this test counted triggers,
+    /// counted the unmodelled key, looked at the first line and compared the file's
+    /// length, all of which a command that rewrote `replace: first` to another
+    /// value of the same length would have passed. The expectation is now derived
+    /// from the pre-move text and the move itself: the two item envelopes, put back
+    /// in the other order under the same head, and compared to the file on disk
+    /// byte for byte.
+    #[test]
+    fn a_move_leaves_the_bytes_it_did_not_move_alone() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        // The move, performed on the text rather than on the file: the second
+        // envelope first, then the first, under the head neither of them owns.
+        let (head, items) = split_into_items(BASE_YML);
+        assert_eq!(
+            items.len(),
+            2,
+            "the fixture is two items or this proves little"
+        );
+        assert_eq!(
+            format!("{head}{}{}", items[0], items[1]),
+            BASE_YML,
+            "the split must be lossless, or the expectation below is not the file"
+        );
+        let expected = format!("{head}{}{}", items[1], items[0]);
+        assert_ne!(
+            expected, BASE_YML,
+            "the fixture must exercise a move that changes the bytes"
+        );
+
+        session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("the move is legal");
+
+        let on_disk = fs::read_to_string(dir.path().join("match").join("base.yml"))
+            .expect("the file reads back");
+        assert_eq!(
+            on_disk, expected,
+            "every byte outside the moved item must be exactly what it was"
+        );
+        // And what the session serves is those same bytes, so the assertion is
+        // about the file rather than about one reader of it.
+        assert_eq!(session.text(id).expect("the bytes read"), expected);
+    } // End of function a_move_leaves_the_bytes_it_did_not_move_alone()
+
+    /// A move after a named anchor lands after that anchor.
+    ///
+    /// The `to_front` case is covered above; this is the other constructor, and it
+    /// is the one whose destination index has to be derived from an identity
+    /// rather than sent as a number.
+    #[test]
+    fn a_move_after_an_anchor_lands_after_that_anchor() {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(
+            dir.path().join("match").join("base.yml"),
+            concat!(
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':two'\n",
+                "    replace: second\n",
+                "  - trigger: ':three'\n",
+                "    replace: third\n",
+            ),
+        )
+        .unwrap();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let first = before.matches[0].id;
+        let last = before.matches[2].id;
+
+        let (_, moved) = expect_saved(
+            session
+                .move_match(first, Some(last), before.revision, &Acknowledgement::none())
+                .expect("the move is legal"),
+        );
+
+        let after = session.document(id).expect("the file still reads");
+        assert_eq!(triggers_of(&after), [":two", ":three", ":one"]);
+        let moved = moved.expect("a committed move names the item it moved");
+        assert_eq!(
+            trigger_text(&session.match_view(moved).expect("it resolves")),
+            ":one",
+            "the answered identity must be the moved snippet, not the one at its old position"
+        );
+    } // End of function a_move_after_an_anchor_lands_after_that_anchor()
+
+    /// A destination in another file is refused before anything is attempted.
+    ///
+    /// `PROGRESS.md` D2r: `ItemMove` is same-sequence only, and a move never
+    /// crosses a file. The refusal has to be **typed and early** — the assertion
+    /// that the file is byte-identical afterwards is what says "not attempted"
+    /// rather than "attempted and rolled back", which no filesystem could offer.
+    #[test]
+    fn a_destination_in_another_document_is_refused_and_writes_nothing() {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(dir.path().join("match").join("base.yml"), BASE_YML).unwrap();
+        fs::write(
+            dir.path().join("match").join("other.yml"),
+            "matches:\n  - trigger: ':elsewhere'\n    replace: elsewhere\n",
+        )
+        .unwrap();
+        let session = open_session(&dir);
+        let here = id_of(&session, "match/base.yml");
+        let there = id_of(&session, "match/other.yml");
+        let mine = session.document(here).expect("the file reads");
+        let theirs = session.document(there).expect("the file reads");
+
+        let error = session
+            .move_match(
+                mine.matches[0].id,
+                Some(theirs.matches[0].id),
+                mine.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("a move never crosses a file");
+        assert_eq!(error.code(), "identityWrongDocument");
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML,
+            "a refused move must not have written anything"
+        );
+        assert_eq!(
+            session.document(here).expect("the file reads").revision,
+            mine.revision,
+            "and must not have disturbed the cache"
+        );
+    } // End of function a_destination_in_another_document_is_refused_and_writes_nothing()
+
+    /// A base revision that is not this session's parse is refused before the
+    /// lock is taken.
+    ///
+    /// The projection's own paths are **positions in that parse**, so planning a
+    /// move against a base the session does not hold would move whatever now
+    /// occupies the position. Distinguished from the conflict below, which is
+    /// about the *disk* rather than about the cache.
+    #[test]
+    fn a_base_revision_that_is_not_the_sessions_parse_is_refused() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let error = session
+            .move_match(
+                view.matches[1].id,
+                None,
+                espansoconfig_core::ContentRevision::of_bytes(b"not this file"),
+                &Acknowledgement::none(),
+            )
+            .expect_err("a base the session does not hold is refused");
+        assert_eq!(error.code(), "identityStaleRevision");
+    } // End of function a_base_revision_that_is_not_the_sessions_parse_is_refused()
+
+    /// A file replaced under the session's feet answers with the conflict arm.
+    ///
+    /// **What this pins, and what it deliberately cannot.** One external writer
+    /// replaces the file, the save refuses, and the payload describes the disk:
+    /// `expected` is the base the caller sent, `found` and `disk_revision` are both
+    /// the replacement's, and the session is left reading the other writer's bytes
+    /// rather than its own stale parse.
+    ///
+    /// It does **not** discriminate the honesty rule, and the review of Phase
+    /// 2b-2a is why that is written here rather than claimed away: nothing writes
+    /// between the refusal and the refresh in this fixture, so `found` and
+    /// `disk_revision` are equal and an implementation that set one from the other
+    /// would pass. The interleaving that tells them apart is not reachable through
+    /// `move_match` — both observations happen inside one synchronous call — so it
+    /// is pinned one level down, against the function that builds the payload, in
+    /// `a_conflict_describes_the_refusing_read_and_the_fresh_read_separately`.
+    #[test]
+    fn a_file_replaced_under_the_session_answers_with_a_conflict() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        // Another writer — vim, espanso, a sync agent — replaces the file after
+        // this session parsed it and before the save runs.
+        const REPLACED: &str = concat!(
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: rewritten by somebody else\n",
+            "  - trigger: ':two'\n",
+            "    replace: second\n",
+        );
+        fs::write(dir.path().join("match").join("base.yml"), REPLACED).unwrap();
+
+        let result = session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("a conflict is an outcome, not a failure");
+        let replaced = espansoconfig_core::ContentRevision::of_bytes(REPLACED.as_bytes());
+        match result {
+            SaveResult::Conflict {
+                expected,
+                found,
+                disk_revision,
+                disk,
+            } => {
+                assert_eq!(expected, before.revision, "the base the caller sent");
+                assert_eq!(found, replaced, "the bytes that refused the save");
+                assert_eq!(disk_revision, replaced, "the fresh read taken afterwards");
+                assert_eq!(disk.revision, disk_revision);
+                assert_eq!(
+                    disk.matches.len(),
+                    2,
+                    "the disk side is a projection of the fresh read"
+                );
+            }
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            REPLACED,
+            "a conflict must leave the other writer's bytes alone"
+        );
+        assert_eq!(
+            session.document(id).expect("the file reads").revision,
+            replaced,
+            "and must leave the session reading them"
+        );
+    } // End of function a_file_replaced_under_the_session_answers_with_a_conflict()
+
+    /// A conflict's two revisions really are two observations, and the payload
+    /// says which is which.
+    ///
+    /// **The honesty rule, discriminated.** The test above cannot do it: `found`
+    /// comes from a read taken under the write lock and `disk_revision` from a read
+    /// taken after it was released, both inside one synchronous `move_match`, so no
+    /// caller of that command can put a writer between them. What *is* reachable is
+    /// the function that builds the payload — and feeding it the `found` a real
+    /// refusal produced, against a disk that has since moved on again, is exactly
+    /// the interleaving, with nothing invented: the refusal below is a real one,
+    /// driven through `move_match`, and its `found` is carried across untouched.
+    ///
+    /// Three assertions, each ruling out one wrong implementation: `found` and
+    /// `disk_revision` **differ**, so a payload that set one from the other fails;
+    /// `disk_revision` is `disk`'s own revision, so a payload that refreshed the
+    /// projection separately from the revision beside it fails; and `disk` projects
+    /// the **third** text, so a payload that described the bytes that refused the
+    /// save fails.
+    #[test]
+    fn a_conflict_describes_the_refusing_read_and_the_fresh_read_separately() {
+        const REFUSING: &str = concat!(
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: rewritten by somebody else\n",
+            "  - trigger: ':two'\n",
+            "    replace: second\n",
+        );
+        // The third text: a different writer again, and a different **shape**, so
+        // the projection can be told apart from the one that refused the save.
+        const LATER: &str = concat!(
+            "matches:\n",
+            "  - trigger: ':only'\n",
+            "    replace: written after the lock was released\n",
+        );
+
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        // A first external writer replaces the file, so the save is refused. The
+        // `found` this produces is a real locked read's, not a fixture's.
+        fs::write(dir.path().join("match").join("base.yml"), REFUSING).unwrap();
+        let refusal = session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("a conflict is an outcome, not a failure");
+        let (expected, found) = match refusal {
+            SaveResult::Conflict {
+                expected, found, ..
+            } => (expected, found),
+            other => panic!("expected a conflict, got {other:?}"),
+        };
+        assert_eq!(
+            found,
+            espansoconfig_core::ContentRevision::of_bytes(REFUSING.as_bytes()),
+            "the premise: `found` is the revision of the bytes that refused the save"
+        );
+
+        // A second external writer replaces it again, in the window this command
+        // has between releasing the lock and taking its fresh read.
+        fs::write(dir.path().join("match").join("base.yml"), LATER).unwrap();
+        let later = espansoconfig_core::ContentRevision::of_bytes(LATER.as_bytes());
+        assert_ne!(
+            found, later,
+            "the fixture must exercise a file that moved twice"
+        );
+
+        let payload = session
+            .with_workspace(|workspace| {
+                super::conflict_after_the_lock(workspace, id, expected, found)
+            })
+            .expect("the fresh read succeeds");
+        match payload {
+            SaveResult::Conflict {
+                expected: base,
+                found: refusing,
+                disk_revision,
+                disk,
+            } => {
+                assert_eq!(base, before.revision, "the base the caller sent");
+                assert_eq!(refusing, found, "the bytes that refused, carried unchanged");
+                assert_ne!(
+                    refusing, disk_revision,
+                    "the two revisions describe two reads and must not be one value twice"
+                );
+                assert_eq!(disk_revision, later, "the fresh read is the later bytes");
+                assert_eq!(
+                    disk.revision, disk_revision,
+                    "the top-level revision must be the revision of the projection beside it"
+                );
+                assert_eq!(
+                    triggers_of(&disk),
+                    [":only"],
+                    "the projection must be of the fresh read, not of the bytes that refused"
+                );
+            }
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+    } // End of function a_conflict_describes_the_refusing_read_and_the_fresh_read_separately()
+
+    /// A suspicion refuses the move, and the acknowledgement it hands back lets
+    /// the same move through.
+    ///
+    /// **The content-addressed acknowledgement, end to end through the command
+    /// layer.** The findings travel out of the refusal, the caller sends exactly
+    /// those back, and the second call proceeds. There is no flag anywhere on this
+    /// path, and the acknowledgement crosses `serde` in both directions because
+    /// that is the only shape a real caller can produce.
+    #[test]
+    fn a_suspicion_refuses_the_move_until_the_findings_come_back() {
+        let dir = suspicious_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        let refused = session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("a refusal is an outcome, not a failure");
+        let findings = match refused {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(
+                    verdict,
+                    espansoconfig_core::persist::SaveVerdict::RefusedForUnacknowledgedSuspicions
+                );
+                assert!(!findings.is_empty(), "a refusal carries its evidence");
+                findings
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            SUSPICIOUS_YML,
+            "a refused save writes nothing"
+        );
+
+        // The round trip a real caller makes: the findings were serialized to the
+        // interface, and the acknowledgement arrives as JSON.
+        let payload = serde_json::json!({ "accepted": findings });
+        let acknowledgement: Acknowledgement =
+            serde_json::from_value(payload).expect("an acknowledgement reads back");
+        assert_eq!(acknowledgement.len(), findings.len());
+
+        let (_, moved) = expect_saved(
+            session
+                .move_match(held, None, before.revision, &acknowledgement)
+                .expect("the acknowledged move proceeds"),
+        );
+        assert!(moved.is_some());
+        let after = session.document(id).expect("the file still reads");
+        assert_eq!(triggers_of(&after), [":two", ":one"]);
+    } // End of function a_suspicion_refuses_the_move_until_the_findings_come_back()
+
+    /// A move of a package file is refused, and it is the transaction that
+    /// refuses it.
+    ///
+    /// The one condition this layer deliberately does **not** re-check: a Hub
+    /// package is read-only, `save_document` refuses it before the lock is taken,
+    /// and the refusal arrives here as the typed failure it is rather than as a
+    /// second opinion this crate formed.
+    #[test]
+    fn a_package_file_is_refused_by_the_transaction() {
+        let dir = TempDir::new().expect("temp dir");
+        let package = dir.path().join("match").join("packages").join("demo");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("package.yml"), BASE_YML).unwrap();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/packages/demo/package.yml");
+        let view = session.document(id).expect("the file reads");
+
+        let error = session
+            .move_match(
+                view.matches[1].id,
+                None,
+                view.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("a package file is not editable here");
+        assert_eq!(error.code(), "saveFailed");
+        let json = serde_json::to_value(&error).expect("the error serializes");
+        assert!(
+            json["error"]["DocumentIsReadOnly"].is_object(),
+            "the transaction's own typed reason must travel whole: {json}"
+        );
+        assert_eq!(
+            fs::read_to_string(package.join("package.yml")).unwrap(),
+            BASE_YML
+        );
+    } // End of function a_package_file_is_refused_by_the_transaction()
+
+    /// The session takes a backup before its first change to a file, and only
+    /// then.
+    ///
+    /// **The `BackupSession` this layer owns, observed rather than argued.** The
+    /// first move reports `backup_taken: true` and leaves a copy under
+    /// `.espansoconfig-backups`; the second reports `false`, because the rule is
+    /// *before the first modification of each file per session* and this session
+    /// has already copied it. A `false` there is a success, not a failure — and a
+    /// `true` on the second call would mean every save was copying the file it had
+    /// just written.
+    #[test]
+    fn the_session_copies_a_file_before_its_first_change_and_not_again() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let backups = dir.path().join(".espansoconfig-backups");
+        assert!(
+            !backups.exists(),
+            "an open workspace that has saved nothing leaves no trace on disk"
+        );
+
+        let first = session.document(id).expect("the file reads");
+        let (revision, _) = expect_saved(
+            session
+                .move_match(
+                    first.matches[1].id,
+                    None,
+                    first.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the move is legal"),
+        );
+        assert!(backups.is_dir(), "the first change writes a copy");
+
+        let second = session.document(id).expect("the file still reads");
+        assert_eq!(second.revision, revision);
+        match session
+            .move_match(
+                second.matches[1].id,
+                None,
+                second.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the second move is legal")
+        {
+            SaveResult::Saved {
+                committed,
+                backup_taken,
+                ..
+            } => {
+                assert!(committed);
+                assert!(
+                    !backup_taken,
+                    "the session had already copied this file, which is the rule rather than a failure"
+                );
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+    } // End of function the_session_copies_a_file_before_its_first_change_and_not_again()
+
+    /// A move that would change nothing is refused by the patch engine.
+    ///
+    /// Asking for a snippet to be written after itself has no destination index
+    /// that differs from where it already is, and the engine says so rather than
+    /// rewriting the file to itself. It arrives here as `saveFailed` carrying the
+    /// engine's own code, which is what "the typed failure travels whole" means.
+    #[test]
+    fn a_move_that_changes_nothing_is_refused_by_the_engine() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let held = view.matches[1].id;
+
+        let error = session
+            .move_match(held, Some(held), view.revision, &Acknowledgement::none())
+            .expect_err("a move to where it already is has nothing to do");
+        assert_eq!(error.code(), "saveFailed");
+        let json = serde_json::to_value(&error).expect("the error serializes");
+        assert!(
+            json["error"]["Patch"]["MoveChangesNothing"].is_object(),
+            "the engine's own reason must survive the crossing: {json}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML
+        );
+    } // End of function a_move_that_changes_nothing_is_refused_by_the_engine()
+
+    /// An address that does not end in a sequence position is not a move's end.
+    ///
+    /// The pure half of `CommandError::MoveNotWithinOneSequence`, and the reason
+    /// it is tested here rather than through the command: **every match a
+    /// projection holds is an item of the one `matches` sequence at the root of
+    /// stream document 0**, so two matches of one file are always siblings and the
+    /// cross-sequence branch cannot be reached through `move_match` today. That is
+    /// a fact about the projection, not a guarantee about the check, so the check
+    /// is exercised where it can be — against the addresses themselves.
+    #[test]
+    fn only_an_address_ending_in_a_position_names_a_sequence_item() {
+        use espansoconfig_core::patch::DocumentPath;
+
+        let item = DocumentPath::root(0).with_key("matches").with_index(2);
+        assert_eq!(
+            super::sequence_of(&item),
+            Some((DocumentPath::root(0).with_key("matches"), 2))
+        );
+
+        // A field of a match, not an item of a sequence.
+        let field = DocumentPath::root(0)
+            .with_key("matches")
+            .with_index(2)
+            .with_key("replace");
+        assert_eq!(super::sequence_of(&field), None);
+        // The root itself.
+        assert_eq!(super::sequence_of(&DocumentPath::root(0)), None);
+        // Two items of the same sequence share a container; two of different
+        // sequences do not, which is the comparison the refusal is made of.
+        let sibling = DocumentPath::root(0).with_key("matches").with_index(5);
+        let stranger = DocumentPath::root(0).with_key("global_vars").with_index(0);
+        assert_eq!(
+            super::sequence_of(&item).map(|(sequence, _)| sequence),
+            super::sequence_of(&sibling).map(|(sequence, _)| sequence)
+        );
+        assert_ne!(
+            super::sequence_of(&item).map(|(sequence, _)| sequence),
+            super::sequence_of(&stranger).map(|(sequence, _)| sequence)
+        );
+        // And a second stream document is a different sequence even under the
+        // same key, which is what `document_index` is carried for.
+        let elsewhere = DocumentPath::root(1).with_key("matches").with_index(0);
+        assert_ne!(
+            super::sequence_of(&item).map(|(sequence, _)| sequence),
+            super::sequence_of(&elsewhere).map(|(sequence, _)| sequence)
+        );
+    } // End of function only_an_address_ending_in_a_position_names_a_sequence_item()
 
     /// The pure resolver refuses to invent a configuration directory.
     ///

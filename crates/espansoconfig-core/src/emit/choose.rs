@@ -17,6 +17,8 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::emit::decode::{block_synthesises_a_final_break, decode, DecodeError};
 use crate::emit::plan::{
     requires_double_quoted_escape, LiteralBlockPlan, ScalarContext, ScalarPlan,
@@ -367,7 +369,13 @@ fn looks_like_a_date(value: &str) -> bool {
 /// identity no matter how the emitter is written. Naming them is what lets the
 /// corpus property test assert byte-identity on everything else instead of
 /// quietly excusing whatever happens not to match.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **On the wire since Phase 2b-2a**, because it is
+/// [`crate::patch::PresentationNote::reason`] and a successful save carries its
+/// notes out. Externally tagged like every other core wire enum, and every
+/// variant owes a `code.notReencodable.*` entry in **both** dictionaries —
+/// `src-tauri/src/dictionary_contract.rs` fails the build without one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum NotReencodable {
     /// A `>` folded scalar. Folding replaces line breaks with spaces, so the
     /// source layout is not recoverable from the value, and this crate never

@@ -54,13 +54,26 @@ use serde::{Serialize, Serializer};
 
 use espansoconfig_core::discovery::DiscoveryError;
 use espansoconfig_core::model::IdentityError;
+use espansoconfig_core::persist::SaveError;
 use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::WorkspaceError;
 
-/// Everything a read-only command may fail with.
+/// Everything a command may fail with.
 ///
 /// Serializes as `{ "code": …, … operands }`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # Why it is not `Clone`, `PartialEq` or `Eq` since Phase 2b-2a
+///
+/// [`CommandError::SaveFailed`] carries a whole
+/// [`espansoconfig_core::persist::SaveError`], which reaches down to an
+/// [`io::Error`] — a type that is neither cloneable nor comparable, and for a
+/// good reason: two I/O failures with the same kind are not the same event.
+/// The derives were dropped rather than replaced by hand-written impls, because
+/// a hand-written `PartialEq` here would have to invent an equality for
+/// `io::Error` and every test that used it would then be asserting on that
+/// invention. Tests match on the variant, or on
+/// [`CommandError::code`], both of which say what they mean.
+#[derive(Debug)]
 pub enum CommandError {
     /// A command was called before any workspace was opened.
     ///
@@ -183,6 +196,78 @@ pub enum CommandError {
     /// why this code exists to stop tomorrow's failure being silent rather than
     /// to describe one that happens.
     MenuBuildFailed,
+    /// A move's two ends could not be shown to be items of one sequence.
+    ///
+    /// **A negative claim, and the wording is deliberate.** It does not say the
+    /// destination is in a *different* sequence; it says this application could
+    /// not establish that it is in the *same* one. Three shapes reach it: a
+    /// destination whose address really does name another sequence, a match this
+    /// projection carries **no address for at all**, and an address that does not
+    /// end in a sequence position. All three are the same refusal to a caller —
+    /// the move cannot be planned — and separating them would mean three codes
+    /// for one decision.
+    ///
+    /// **`ItemMove` is same-sequence only** (`PROGRESS.md` D2r): the engine
+    /// derives the moved bytes from the item's own envelope and writes them at a
+    /// point in the *same* sequence. Moving between sequences — or between files
+    /// — is a different operation, with its own questions about indentation,
+    /// ownership and what travels with the item, and none of them is answered.
+    /// The refusal happens **before** anything is attempted rather than deep
+    /// inside the patch engine.
+    ///
+    /// It carries no operand. The addresses involved are
+    /// [`espansoconfig_core::patch::DocumentPath`]s, which are positions rather
+    /// than prose, and no message this application shows interpolates one.
+    ///
+    /// **Its cross-sequence half is unreachable through `move_match` as the
+    /// projection stands today**, and that is recorded rather than papered over:
+    /// every match an [`espansoconfig_core::model::DocumentView`] holds is an item
+    /// of the one `matches` sequence at the root of stream document 0, so two
+    /// matches of one file are always siblings. The cross-**document** case is
+    /// reachable and is [`CommandError::IdentityWrongDocument`]. The check exists
+    /// because it is what keeps the guarantee true the day the projection grows a
+    /// second sequence, and a guarantee with no code is a comment.
+    MoveNotWithinOneSequence,
+    /// A save was attempted and did not commit, for a reason the transaction
+    /// itself reports.
+    ///
+    /// **The typed failure travels whole.** Flattening
+    /// [`espansoconfig_core::persist::SaveError`]'s nine variants into nine codes
+    /// here would duplicate a vocabulary that already has its own dictionary
+    /// namespace and its own accessor (`describeSaveError` in
+    /// `src/lib/i18n/codes.ts`), and it would lose the nesting Phase 2b-1 kept on
+    /// purpose: `WriteError::may_have_written` is computed from a `WriteStep`
+    /// that a flattened copy would drop, and it is the one question whose answer
+    /// changes what a caller does next.
+    ///
+    /// **Two of the transaction's outcomes are deliberately not here.** A stale
+    /// base revision is `SaveResult::Conflict` and a refusal by the semantic gate
+    /// is `SaveResult::Refused` — both are expected, actionable answers rather
+    /// than errors, and both live in the `Ok` channel. See `crate::save`.
+    ///
+    /// # It writes a second operand it does not store
+    ///
+    /// `may_have_written` is
+    /// [`espansoconfig_core::persist::SaveError::may_have_written`] **evaluated at
+    /// serialization time**, not a field. The review of Phase 2b-2a found the two
+    /// sides of the boundary disagreeing about exactly this question: this crate
+    /// evicts its cached parse when the predicate is true, and the frontend went
+    /// on showing the pre-save order and the pre-save bytes because it had no way
+    /// to ask. It could have derived the answer from the nested `WriteStep`, and
+    /// that is precisely what must not happen — a second list of steps in
+    /// TypeScript is a list that drifts from the `match` in `write.rs` the first
+    /// time a step is added. Carrying the predicate's own answer makes the two
+    /// sides agree **by construction**, and there is no field to set wrongly
+    /// because there is no field.
+    ///
+    /// **It is not a claim about what the file holds now.** It says this call's
+    /// rename had already committed when the failure happened — another process
+    /// can have written the file since. `WriteStep::after_rename` states the same
+    /// limit at the bottom of the same computation.
+    SaveFailed {
+        /// Why the save did not commit, exactly as the core reports it.
+        error: SaveError,
+    },
 } // End of enum CommandError
 
 impl CommandError {
@@ -207,6 +292,8 @@ impl CommandError {
             CommandError::MenuUnavailable => "menuUnavailable",
             CommandError::InvalidMenuLabels { .. } => "invalidMenuLabels",
             CommandError::MenuBuildFailed => "menuBuildFailed",
+            CommandError::MoveNotWithinOneSequence => "moveNotWithinOneSequence",
+            CommandError::SaveFailed { .. } => "saveFailed",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -260,6 +347,14 @@ impl Serialize for CommandError {
                 out.serialize_field("unexpected", unexpected)?;
             }
             CommandError::MenuBuildFailed => {}
+            CommandError::MoveNotWithinOneSequence => {}
+            CommandError::SaveFailed { error } => {
+                out.serialize_field("error", error)?;
+                // Computed here rather than carried, so that the answer on the
+                // wire is the core's own predicate and not a copy of it. See the
+                // variant's documentation.
+                out.serialize_field("may_have_written", &error.may_have_written())?;
+            }
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -271,7 +366,8 @@ impl CommandError {
         match self {
             CommandError::NoWorkspaceOpen
             | CommandError::MenuUnavailable
-            | CommandError::MenuBuildFailed => 0,
+            | CommandError::MenuBuildFailed
+            | CommandError::MoveNotWithinOneSequence => 0,
             CommandError::ConfigDirNotFound { .. }
             | CommandError::NotADirectory { .. }
             | CommandError::UnknownDocument { .. }
@@ -280,7 +376,10 @@ impl CommandError {
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
             | CommandError::IdentityStaleRevision { .. }
-            | CommandError::InvalidMenuLabels { .. } => 2,
+            | CommandError::InvalidMenuLabels { .. }
+            // One field, two operands: `may_have_written` is derived rather than
+            // stored. See the variant's documentation.
+            | CommandError::SaveFailed { .. } => 2,
         }
     } // End of function operand_count()
 }
@@ -338,6 +437,12 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
             unexpected: vec!["renamed_last_week".to_owned()],
         },
         CommandError::MenuBuildFailed,
+        CommandError::MoveNotWithinOneSequence,
+        CommandError::SaveFailed {
+            error: SaveError::DocumentIsReadOnly {
+                path: std::path::PathBuf::from("/nowhere/match/packages/one/package.yml"),
+            },
+        },
     ]
 } // End of function every_command_error()
 
@@ -598,6 +703,8 @@ mod tests {
             ("menuUnavailable", vec![]),
             ("invalidMenuLabels", vec!["missing", "unexpected"]),
             ("menuBuildFailed", vec![]),
+            ("moveNotWithinOneSequence", vec![]),
+            ("saveFailed", vec!["error", "may_have_written"]),
         ];
         for (error, (code, operands)) in every_command_error().iter().zip(expected) {
             let value = serde_json::to_value(error).expect("a command error must serialize");
@@ -612,6 +719,61 @@ mod tests {
             );
         } // End of the loop over the variants and their expected operands
     } // End of function every_variant_serializes_as_a_code_plus_its_declared_operands()
+
+    /// A failed save says on the wire whether its rename may have completed.
+    ///
+    /// **The finding the review of Phase 2b-2a filed as High, as a test.** This
+    /// crate evicts its cached parse when
+    /// [`espansoconfig_core::persist::SaveError::may_have_written`] is true, and
+    /// before this operand the frontend had no way to reach the same decision — so
+    /// the window went on showing the pre-save order and the pre-save bytes while
+    /// the file on disk may already have held the moved snippet.
+    ///
+    /// The fixtures are the two sides of `WriteStep::after_rename`: a failure at
+    /// the rename itself, which means the rename did **not** happen, and one at the
+    /// directory sync, which is after it. A serializer that wrote a constant would
+    /// fail one of the two, and the expectation is taken from the core's own
+    /// predicate rather than written out, so this cannot drift from it either.
+    #[test]
+    fn a_save_failure_says_whether_its_rename_may_have_completed() {
+        use espansoconfig_core::persist::{SaveError, WriteError, WriteStep};
+
+        let cases = [
+            (WriteStep::Rename, false),
+            (WriteStep::SyncDirectory, true),
+            (WriteStep::ReadBack, true),
+        ];
+        for (step, after_the_rename) in cases {
+            let inner = SaveError::Write(WriteError::Io {
+                step,
+                path: PathBuf::from("/nowhere/match/base.yml"),
+                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            });
+            assert_eq!(
+                inner.may_have_written(),
+                after_the_rename,
+                "the fixture's premise: {step} is {} the rename",
+                if after_the_rename { "after" } else { "before" }
+            );
+            let error = CommandError::SaveFailed { error: inner };
+            let json = serde_json::to_value(&error).expect("a command error must serialize");
+            assert_eq!(json["code"], "saveFailed");
+            assert_eq!(
+                json["may_have_written"], after_the_rename,
+                "the operand must be the core's own predicate: {json}"
+            );
+        } // End of the loop over the steps on either side of the rename
+
+        // And a refusal that never reached the write at all is `false` without
+        // any `WriteError` to compute it from.
+        let read_only = CommandError::SaveFailed {
+            error: espansoconfig_core::persist::SaveError::DocumentIsReadOnly {
+                path: PathBuf::from("/nowhere/match/packages/one/package.yml"),
+            },
+        };
+        let json = serde_json::to_value(&read_only).expect("a command error must serialize");
+        assert_eq!(json["may_have_written"], false);
+    } // End of function a_save_failure_says_whether_its_rename_may_have_completed()
 
     /// An `io::Error`'s message never reaches the wire; its kind does.
     ///

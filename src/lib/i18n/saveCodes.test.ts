@@ -34,9 +34,11 @@ import {
   describeInvariantViolation,
   describeMoveSeam,
   describeNodeKind,
+  describeNotReencodable,
   describePathError,
   describeRotationOutcome,
   describeSaveError,
+  describeSaveResult,
   describeSaveVerdict,
   describeSyntaxError,
   describeTargetDifference,
@@ -44,6 +46,7 @@ import {
   describeWriteError,
   describeWriteStep
 } from './codes';
+import { makeDocument } from '../browser/fixtures';
 import { LOCALES } from './locale';
 import type { Locale } from './locale';
 
@@ -52,6 +55,14 @@ const SPAN = { start: 3, end: 11 } as const;
 
 /** A path as it crosses the boundary: a lossy string, never an object. */
 const PATH = '/nowhere/match/base.yml';
+
+/**
+ * The projection a conflict carries.
+ *
+ * Neutral and synthetic, and built by the browser's own fixture module so this
+ * file does not become a second, drifting description of a `DocumentView`.
+ */
+const DISK = makeDocument({ id: 2, relativePath: 'match/base.yml' });
 
 /**
  * One rendering per accessor, in one locale.
@@ -108,6 +119,37 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
     [
       'SaveError.nested',
       describeSaveError(locale, { Write: { TempFileChangedDuringWrite: { path: PATH } } })
+    ],
+    ['NotReencodable', describeNotReencodable(locale, 'MixedLineBreaks')],
+    ['NotReencodable.nested', describeNotReencodable(locale, { Undecodable: 'TrailingBackslash' })],
+    [
+      'SaveResult.saved',
+      describeSaveResult(locale, {
+        outcome: 'saved',
+        revision: 'a'.repeat(64),
+        committed: true,
+        notes: [],
+        backup_taken: true,
+        moved: null
+      })
+    ],
+    [
+      'SaveResult.conflict',
+      describeSaveResult(locale, {
+        outcome: 'conflict',
+        expected: 'a'.repeat(64),
+        found: 'b'.repeat(64),
+        disk_revision: 'b'.repeat(64),
+        disk: DISK
+      })
+    ],
+    [
+      'SaveResult.refused',
+      describeSaveResult(locale, {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: []
+      })
     ]
   ];
 } // End of function renderings()
@@ -124,6 +166,27 @@ describe('the save-transaction accessors', () => {
       expect(rendered, label).not.toContain('[object Object]');
     }
   }); // End of the "render a sentence" case
+
+  it.each(LOCALES)('say nothing about a save that this application can establish in %s', (
+    locale
+  ) => {
+    // The register `docs/reviews/phase-2b-1-strings.md` set, applied to the three
+    // sentences 2b-2a added. None may promise that a change cannot be lost, that
+    // a file is recoverable, or what espanso will do with the result: the write
+    // lock excludes only this application's own writers, and backups are kept for
+    // ten sessions.
+    const saved = describeSaveResult(locale, {
+      outcome: 'saved',
+      revision: 'a'.repeat(64),
+      committed: true,
+      notes: [],
+      backup_taken: true,
+      moved: null
+    });
+    for (const claim of ['espanso ', 'recuperab', 'recover', 'safe', 'seguro', 'a salvo']) {
+      expect(saved.toLowerCase(), `${locale}:${claim}`).not.toContain(claim.toLowerCase());
+    }
+  }); // End of the "register" case
 
   it.each(LOCALES)('substitute the operands a message names in %s', (locale) => {
     expect(describeSaveError(locale, { TargetNotUtf8: { path: PATH, offset: 12 } })).toContain(PATH);
