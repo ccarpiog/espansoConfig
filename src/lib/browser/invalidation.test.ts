@@ -19,7 +19,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { RawSaveInvalidation } from '../ipc/commands';
+import type { RawSaveInvalidation, RawSaveReload } from '../ipc/commands';
+import type { IpcFailure } from '../ipc/errors';
 import type { ConflictResult, ContentRevision, SavedResult, SaveResult } from '../ipc/types';
 import { makeDocument, makeMatch } from './fixtures';
 import {
@@ -37,6 +38,22 @@ const AFTER: ContentRevision = 'b'.repeat(64);
 
 /** The document every case here saves. */
 const DOCUMENT = 7;
+
+/**
+ * What the issuer's own invalidation did, for the cases that are not about it.
+ *
+ * A required argument since Phase 2c-1b rather than an optional one: the issuer
+ * always knows, and a default would be this module inventing an answer for a
+ * caller that forgot. `done` is the ordinary case; the suite at the end drives
+ * the other two.
+ */
+const ISSUER_DONE: RawSaveReload = { kind: 'done' };
+
+/** A classified failure, for the arms that carry one. */
+const FAILURE: IpcFailure = {
+  kind: 'command',
+  error: { code: 'io', path: '/nowhere/match/base.yml', kind: 'NotFound' }
+};
 
 /**
  * A save that ran to the end.
@@ -82,9 +99,12 @@ function open(result: SaveResult): {
   readonly forgotten: readonly RawSaveInvalidation[];
 } {
   const forgotten: RawSaveInvalidation[] = [];
-  const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, result), (invalidation) => {
-    forgotten.push(invalidation);
-  });
+  const opening = openWholeDocumentSave(
+    sealWholeDocumentSave(DOCUMENT, result, ISSUER_DONE),
+    (invalidation) => {
+      forgotten.push(invalidation);
+    }
+  );
   return { opening, forgotten };
 } // End of function open()
 
@@ -94,7 +114,7 @@ describe('the seal, against every escape the review found', () => {
     // symbol. A symbol key is private only at the TypeScript-name level: all
     // three of these recover one. The payload is in a `WeakMap` now, so the
     // object is an empty frozen husk.
-    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true));
+    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE);
     expect(Object.keys(sealed)).toEqual([]);
     expect(Object.getOwnPropertySymbols(sealed)).toEqual([]);
     expect(Reflect.ownKeys(sealed)).toEqual([]);
@@ -105,7 +125,7 @@ describe('the seal, against every escape the review found', () => {
     // Spread copies enumerable symbol properties, which is how the first version
     // leaked through a copy. There is nothing to copy, and neither the spread nor
     // the clone is the object the map is keyed by, so neither can be opened.
-    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true));
+    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE);
     const spread = { ...sealed };
     expect(Reflect.ownKeys(spread)).toEqual([]);
     expect(JSON.stringify(sealed)).toBe('{}');
@@ -116,14 +136,14 @@ describe('the seal, against every escape the review found', () => {
   }); // End of the "survives a spread and a clone" case
 
   it('is frozen, so nothing can be attached to it either', () => {
-    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true));
+    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE);
     expect(Object.isFrozen(sealed)).toBe(true);
   });
 
   it('is one-shot: a second open is refused rather than served', () => {
     // Otherwise a caller could open it once with a real invalidation and again,
     // later, with a no-op — which is the same hole with an extra step.
-    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true));
+    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE);
     const first = openWholeDocumentSave(sealed, () => {});
     expect(first.kind).toBe('opened');
     let calledAgain = false;
@@ -175,7 +195,7 @@ describe('when the invalidation is owed', () => {
     // after the caller had the result would leave a window in which the screen
     // reads projections the commit destroyed.
     let seenBeforeReturn = false;
-    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true)), () => {
+    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE), () => {
       seenBeforeReturn = true;
     });
     expect(seenBeforeReturn).toBe(true);
@@ -188,7 +208,7 @@ describe('an invalidation that throws', () => {
     // `PROGRESS.md` D2: a committed write is never afterwards reported as an
     // error. The review found this module breaking it — the same defect
     // 2b-2c-3b's fix round found in `saveRawDocument`, made one layer up.
-    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true)), () => {
+    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE), () => {
       throw new Error('state invalidation failed');
     });
     expect(opening.kind).toBe('opened');
@@ -200,7 +220,7 @@ describe('an invalidation that throws', () => {
   }); // End of the "never replaces the committed outcome" case
 
   it('classifies the throw through the same channel every other failure uses', () => {
-    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true)), () => {
+    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE), () => {
       throw new Error('state invalidation failed');
     });
     if (opening.kind !== 'opened' || opening.invalidation.kind !== 'failed') {
@@ -213,7 +233,7 @@ describe('an invalidation that throws', () => {
   }); // End of the "classifies the throw" case
 
   it('still consumed the seal, so the failure cannot be retried into a second read', () => {
-    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true));
+    const sealed = sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE);
     openWholeDocumentSave(sealed, () => {
       throw new Error('state invalidation failed');
     });
@@ -254,13 +274,53 @@ describe('when it is not owed, and why not', () => {
   });
 }); // End of the "when it is not owed" suite
 
+describe("the issuer's own invalidation, carried rather than stranded", () => {
+  // The 2c-1b review's third finding: the invalidation that can really fail on the
+  // running path is the **issuer's**, which runs before any of this, and its
+  // failure used to reach the developer console and no screen at all.
+
+  it('hands back what the issuer reported, arm for arm', () => {
+    for (const issuer of [
+      { kind: 'notOwed' },
+      { kind: 'done' },
+      { kind: 'failed', failure: FAILURE }
+    ] satisfies readonly RawSaveReload[]) {
+      const opening = openWholeDocumentSave(
+        sealWholeDocumentSave(DOCUMENT, saved(true), issuer),
+        () => {}
+      );
+      expect(opening).toMatchObject({ kind: 'opened', issuerInvalidation: issuer });
+    } // End of the loop over the three arms
+  }); // End of the "hands back what the issuer reported" case
+
+  it('keeps it apart from what the openeritself did', () => {
+    // Two acts at two moments. A single field would make "which of the two
+    // failed?" unanswerable, and the answer decides nothing for a person but
+    // everything for whoever reads the report afterwards.
+    const opening = openWholeDocumentSave(
+      sealWholeDocumentSave(DOCUMENT, saved(true), { kind: 'failed', failure: FAILURE }),
+      () => {}
+    );
+    expect(opening).toMatchObject({
+      kind: 'opened',
+      invalidation: { kind: 'done' },
+      issuerInvalidation: { kind: 'failed' }
+    });
+    // And the save is still a committed save, which is the whole point.
+    expect(opening.kind === 'opened' && opening.outcome.outcome).toBe('saved');
+  }); // End of the "keeps it apart" case
+}); // End of the "issuer's own invalidation" suite
+
 describe('what the seal still does not force', () => {
   it('accepts a body that does nothing, and this is the residue', () => {
     // Written down rather than claimed closed, exactly as `2b-2c-3b-notes.md`
     // section 7.2 did for `ReloadAfterRawSave`: no TypeScript signature can
     // require a body to act. What the seal forces is that the routine is
     // **called** — there is no path to the outcome that does not pass through it.
-    const opening = openWholeDocumentSave(sealWholeDocumentSave(DOCUMENT, saved(true)), () => {});
+    const opening = openWholeDocumentSave(
+      sealWholeDocumentSave(DOCUMENT, saved(true), ISSUER_DONE),
+      () => {}
+    );
     expect(opening).toMatchObject({ kind: 'opened', invalidation: { kind: 'done' } });
-  });
+  }); // End of the "body that does nothing" case
 }); // End of the "what the seal still does not force" suite

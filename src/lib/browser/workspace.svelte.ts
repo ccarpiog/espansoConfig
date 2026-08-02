@@ -46,7 +46,12 @@ import {
   reloadDocument,
   saveRawDocument
 } from '../ipc/commands';
-import type { CommandResult, RawSaveOutcome, ReloadAfterRawSave } from '../ipc/commands';
+import type {
+  CommandResult,
+  RawSaveOutcome,
+  RawSaveReload,
+  ReloadAfterRawSave
+} from '../ipc/commands';
 import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 import type {
@@ -60,6 +65,7 @@ import type {
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
+import { sealWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import type { SelectionNotice } from './notices';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
@@ -179,6 +185,43 @@ export const REAL_COMMANDS: BrowserCommands = {
 export type BrowserStatus = 'loading' | 'ready' | 'failed';
 
 /**
+ * What {@link BrowserState.saveRawDocument} answers.
+ *
+ * **Two arms, and the second is not "nothing happened".** The first version of
+ * this method answered `SealedWholeDocumentSave | null`, and the 2c-1b review was
+ * right that `null` collapses two different facts: a command that never reached
+ * the file, and a write that **may already have replaced it**. A save that fails
+ * after its rename carries `may_have_written: true`, and a screen that renders
+ * every `null` as *nothing was written* states the opposite of what the disk may
+ * hold — which is `PROGRESS.md` D2 broken from the other side.
+ *
+ * The reason it is not a `CommandResult` is the same as `RawSaveOutcome`'s: a
+ * failure here is a fact about **this window**, and the failure itself has already
+ * gone to the reporter. What the caller needs back is not the reason but whether
+ * the file may have changed under it.
+ */
+export type RawSaveAnswer =
+  | {
+      /** The discriminant: the transaction answered, and the outcome is sealed. */
+      readonly kind: 'sealed';
+      /** How the save ended, readable only by discharging the invalidation. */
+      readonly sealed: SealedWholeDocumentSave;
+    }
+  | {
+      /** The discriminant: the command failed and there is no outcome at all. */
+      readonly kind: 'failed';
+      /**
+       * Whether the file may already hold the submitted text.
+       *
+       * `mayHaveWritten` in `../ipc/errors` is the question, and it is `true` for
+       * a failure at or after the rename. **A screen must not say "nothing was
+       * written" for one of these**: this window cannot tell, and saying either
+       * thing definitely would be a guess about the user's file.
+       */
+      readonly mayHaveWritten: boolean;
+    };
+
+/**
  * One file the load could not read, and which file it was.
  *
  * **The identity is carried rather than recovered.** Before 1c-2b-1 this was a
@@ -265,6 +308,33 @@ export interface BrowserState {
    * makes such a file's text reachable.
    */
   readonly fileTextTarget: DocumentSummary | null;
+  /**
+   * The revision {@link BrowserState.fileText} was **paired with**, or `null`.
+   *
+   * **What the raw editor takes its base revision from, and why it is not read off
+   * the projection at the moment the editor opens.** `document_text` answers a
+   * string and no revision, so the two come from separate reads; this is the
+   * revision the file's projection held at the instant that text read *started*,
+   * captured then and moved only when the text is.
+   *
+   * The 2c-1b review found the naive version of this wrong, and it is worth being
+   * exact about how. Reading the projection's revision when the editor opens looks
+   * equivalent and is not: `installView` can replace a projection without the
+   * viewer re-reading — stale-identity recovery does exactly that — so the editor
+   * could pair text from revision R0 with a base of R1 and **commit over R1's
+   * bytes**. Capturing the revision with the read closes that, and `installView`
+   * now drops a snapshot whose projection it replaces, so the pair is refreshed
+   * rather than merely made consistent.
+   *
+   * What is still asserted rather than proven: the pair is two reads, and the
+   * capture happens **before** the text read. That bounds the error to one
+   * direction — the revision is the older of the two, so a file that moved between
+   * them is refused as a conflict — and it does not eliminate it; see
+   * `docs/decisions/2c-1b-notes.md` section 8.1.
+   *
+   * `null` when there is no text, or for a file the load could not project.
+   */
+  readonly fileTextRevision: ContentRevision | null;
   /** Whether the raw viewer is showing rather than the selected snippet. */
   readonly fileTextShown: boolean;
   /**
@@ -275,6 +345,29 @@ export interface BrowserState {
    * so a file this app cannot decode never draws as an empty one.
    */
   readonly fileText: RawDocumentText | null;
+  /**
+   * What this window last read of **one named document's** text, or `null`.
+   *
+   * {@link BrowserState.fileText} answers about whatever the viewer is pointed at,
+   * which is the wrong question for the raw editor: an editor open on file A must
+   * be able to show and to load the version on disk for **A** even when the rest
+   * of the window has moved to file B. That is the 2c-1b review's fifth finding —
+   * without it, a conflict on A while the pane points elsewhere leaves *Reload
+   * disk version* permanently disabled, losing one of the eight requirements of
+   * `docs/decisions/2c-split-notes.md` section 6.
+   *
+   * Two sources, in this order: the text captured when a save of that document
+   * **conflicted**, which is the version that refused the save and therefore the
+   * one the conflict is about; and otherwise the viewer's own snapshot, when the
+   * viewer happens to hold that document. `null` when this window holds neither.
+   *
+   * A method rather than a field because the question names a document. It reads
+   * reactive state, so a `$derived` over it re-runs when either source moves.
+   *
+   * @param document - The file to ask about.
+   * @returns What this window holds of that file's text, or `null`.
+   */
+  rawTextOf(document: DocumentId): RawDocumentText | null;
   /**
    * Opens a configuration directory and loads every file that holds matches.
    *
@@ -363,9 +456,33 @@ export interface BrowserState {
    * selection is looked for the ordinary way and dropped with a notice when what
    * is at its position is not what was selected (R27).
    *
-   * `null` means the command itself failed; a reload that failed after a commit
-   * is **not** a failure of the save and does not produce one — it is reported on
-   * the failure channel and the committed outcome still comes back.
+   * A command that failed answers the `failed` arm of {@link RawSaveAnswer}, which
+   * carries whether the file **may already hold the submitted text**; a reload that
+   * failed after a commit is **not** a failure of the save and does not produce
+   * one — it is reported on the failure channel, carried on the seal, and the
+   * committed outcome still comes back.
+   *
+   * **The answer is sealed** (`docs/decisions/2c-1a-notes.md` section 4.2, decided
+   * at 2c-1b). `sealWholeDocumentSave` is called *here*, in the adapter that
+   * issued the save and therefore knows which document it was about, so the
+   * pairing of a document with a result happens once instead of being re-asserted
+   * by every caller that wants to describe it. Three things follow, and the last
+   * is the one worth stating plainly:
+   *
+   * - `describeWholeDocumentSave` in `./saveOutcome` takes a
+   *   `WholeDocumentOutcome`, which only the seal produces, so a caller cannot
+   *   accidentally present a whole-document replacement with the edit describer
+   *   and lose the *this replaces the entire document* disclosure;
+   * - the seal carries **what this state's own invalidation did**, so a committed
+   *   save whose re-projection failed reaches a screen as *the file was written
+   *   and this window is out of step* rather than as a clean success with a line
+   *   in the developer console;
+   * - the seal's callback is **not** what invalidates this state's cache. That has
+   *   already happened by the time a caller can open it: the closure below is
+   *   passed to the command, which calls it before its promise resolves, which is
+   *   the only moment early enough (`docs/decisions/2b-2c-3b-notes.md` section 3).
+   *   What the seal forces is that a caller cannot read the outcome without
+   *   running a routine of its own.
    *
    * @param document - The file to replace, by the identity this window holds.
    * @param baseRevision - The revision the file held when the text being replaced
@@ -375,14 +492,15 @@ export interface BrowserState {
    * @param text - The file's whole new text, committed exactly as given.
    * @param acknowledgement - The suspicions already shown to a person; pass
    *   `{ accepted: [] }` on a first attempt.
-   * @returns How the save ended, or `null` when the command failed.
+   * @returns The sealed outcome, or a failure that says whether the file may
+   *   already have been written.
    */
   saveRawDocument(
     document: DocumentId,
     baseRevision: ContentRevision,
     text: string,
     acknowledgement: Acknowledgement
-  ): Promise<SaveResult | null>;
+  ): Promise<RawSaveAnswer>;
 }
 
 /**
@@ -414,6 +532,20 @@ export function createBrowserState(
   // and a mismatch is the `loading` arm rather than the previous file's text.
   let fileTextAnswer = $state<CommandResult<string> | null>(null);
   let fileTextDocument = $state<DocumentId | null>(null);
+  // **The revision the projection held when that read started**, captured before
+  // the command was called and never afterwards. It is what makes the text and a
+  // revision a *pair* rather than two facts a caller happens to read together —
+  // the 2c-1b review's first finding, which is that `installView` can move the
+  // projection under a held snapshot without moving the snapshot.
+  let fileTextRevision = $state<ContentRevision | null>(null);
+  // The disk text of a document whose save conflicted, kept **by document** and
+  // not by whatever the viewer is pointed at. The conflict UI has to be able to
+  // offer the version on disk for the file being edited even when the rest of the
+  // window has moved somewhere else, which is the review's fifth finding.
+  let conflictText = $state<{
+    readonly document: DocumentId;
+    readonly answer: CommandResult<string>;
+  } | null>(null);
 
   // The three generation counters. None is `$state`: nothing renders them, and
   // they are read only by the request that took one, immediately after its own
@@ -492,6 +624,17 @@ export function createBrowserState(
    * all three describing bytes that are no longer on disk, which is what the
    * 1c-1 review found. The replacement is in place, so file order is kept.
    *
+   * **It also drops the raw viewer's snapshot of that same file**, which is the
+   * second half of the 2c-1b review's first finding. A held snapshot was taken
+   * against the projection this call is replacing; leaving it in place leaves the
+   * viewer drawing bytes from one revision beside a snippet list drawn from
+   * another, and — since 2c-1b — offers an *Edit* whose starting text and starting
+   * revision come from two different reads. `readFileText` skips a re-read when
+   * the document identity is unchanged, so nothing else on this path would have
+   * asked for the file again. Every caller that installs a projection already
+   * calls `readFileText` afterwards, so dropping it here is what makes them
+   * re-read rather than what leaves them empty.
+   *
    * @param next - The projection just read from disk.
    */
   function installView(next: DocumentView): void {
@@ -500,6 +643,9 @@ export function createBrowserState(
     // in a document that was projected — but appending is the right answer for
     // a document that was skipped at load and has now been read.
     views = index === -1 ? [...views, next] : views.map((view, at) => (at === index ? next : view));
+    if (fileTextDocument === next.id) {
+      forgetFileText();
+    }
   } // End of function installView()
 
   /**
@@ -532,6 +678,10 @@ export function createBrowserState(
     fileTextGeneration += 1;
     fileTextAnswer = null;
     fileTextDocument = null;
+    // The captured revision belongs to the answer, not to the file, so it goes
+    // with it: a revision left behind would be one half of a pair whose other
+    // half no longer exists.
+    fileTextRevision = null;
   } // End of function forgetFileText()
 
   /**
@@ -571,6 +721,13 @@ export function createBrowserState(
     const generation = ++fileTextGeneration;
     fileTextDocument = target.id;
     fileTextAnswer = null;
+    // **Captured here, before the read, and never re-read afterwards.** This is
+    // the revision the text will be paired with, and taking it first is what
+    // bounds the error: a file that moves between the two reads makes the pair's
+    // revision the *older* one, which the save gate refuses as a conflict.
+    // Reading it after the text would make it the newer one, and a single
+    // external write would then be committed over.
+    const captured = viewOf(target.id)?.revision ?? null;
     const answer = await commands.documentText(target.id);
     if (generation !== fileTextGeneration) {
       // A later toggle, click or workspace load has moved the viewer on. This
@@ -578,6 +735,7 @@ export function createBrowserState(
       return;
     }
     fileTextAnswer = answer;
+    fileTextRevision = captured;
     if (!answer.ok) {
       // The user sees the typed refusal in the pane; the developer sees it in
       // the console, on the one channel every other failure of this state uses.
@@ -688,6 +846,15 @@ export function createBrowserState(
     get fileTextTarget(): DocumentSummary | null {
       return fileTextTarget();
     },
+    get fileTextRevision(): ContentRevision | null {
+      // Guarded exactly as `fileText` is, and for the same reason: a revision
+      // that outlived the answer it was captured with is half a pair.
+      if (!fileTextShown) {
+        return null;
+      }
+      const target = fileTextTarget();
+      return target !== null && target.id === fileTextDocument ? fileTextRevision : null;
+    },
     get fileTextShown(): boolean {
       return fileTextShown;
     },
@@ -710,6 +877,20 @@ export function createBrowserState(
       // because the invariant it depends on lives in a different function.
       return documentTextState(target.id === fileTextDocument ? fileTextAnswer : null);
     },
+
+    rawTextOf(document: DocumentId): RawDocumentText | null {
+      const captured = conflictText;
+      if (captured !== null && captured.document === document) {
+        return documentTextState(captured.answer);
+      }
+      // The viewer's own snapshot, and only when it is really about this file.
+      // `loading` is deliberately not answered here: a read in flight for the
+      // viewer says nothing about a document the caller named, and a caller that
+      // is not the viewer has no reason to be told to wait for it.
+      return fileTextDocument === document && fileTextAnswer !== null
+        ? documentTextState(fileTextAnswer)
+        : null;
+    }, // End of function rawTextOf()
 
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
@@ -974,14 +1155,24 @@ export function createBrowserState(
       baseRevision: ContentRevision,
       text: string,
       acknowledgement: Acknowledgement
-    ): Promise<SaveResult | null> {
+    ): Promise<RawSaveAnswer> {
+      // A capture from an earlier conflict describes a file this call is about to
+      // move on from, so it goes before anything else does.
+      conflictText = null;
       // **The invalidation is this module's, not the caller's.** The wrapper's
       // parameter cannot make a body do anything — `() => {}` type-checks — so
       // what closes the obligation on the running path is that the state which
       // owns the cache is the thing that passes one. The closure below is the
       // only production caller of that parameter.
+      //
+      // Its own failure is **kept**, not merely reported. `adoptTheReplacedDocument`
+      // answers the failure of the re-read rather than swallowing it, because a
+      // committed save this window could not re-project is a window out of step
+      // with a file that really was rewritten — and until the 2c-1b review that
+      // fact reached the developer console and no screen.
+      let reprojection: IpcFailure | null = null;
       const invalidate: ReloadAfterRawSave = async (invalidation) => {
-        await adoptTheReplacedDocument(invalidation.document);
+        reprojection = await adoptTheReplacedDocument(invalidation.document);
       };
       const answer = await commands.saveRawDocument(
         document,
@@ -995,22 +1186,34 @@ export function createBrowserState(
         // failed, but `mayHaveWritten` decides whether this window is still
         // describing the file correctly. A replacement that failed after its
         // rename means the file may already hold a *whole new text*, so nothing
-        // cached for it can be vouched for.
+        // cached for it can be vouched for — and the caller is told, because a
+        // screen that renders this as "nothing was written" states the opposite of
+        // what the disk may hold.
         report(answer.failure);
-        if (mayHaveWritten(answer.failure)) {
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
           await adoptTheReplacedDocument(document);
         }
-        return null;
+        return { kind: 'failed', mayHaveWritten: written };
       }
-      if (answer.reload.kind === 'failed') {
-        // **The write committed and the window could not be brought back into
-        // step.** It is reported rather than turned into a failed save, because
-        // the bytes really are on disk and telling the caller otherwise would
-        // invite a retry of a write that already happened (D2). Everything
-        // cached for the file has already been forgotten by then, so what is on
-        // screen is incomplete rather than wrong.
-        report(answer.reload.failure);
+      // **The write committed and the window could not be brought back into
+      // step.** It is reported rather than turned into a failed save, because the
+      // bytes really are on disk and telling the caller otherwise would invite a
+      // retry of a write that already happened (D2). Everything cached for the
+      // file has already been forgotten by then, so what is on screen is
+      // incomplete rather than wrong — and *that* is what the seal now carries, so
+      // a screen can say it.
+      //
+      // Two sources, one status. `answer.reload` is `failed` when the closure
+      // above **threw**; `reprojection` is non-null when it returned a typed
+      // failure instead. Both mean the same thing to a person.
+      const thrown = answer.reload.kind === 'failed' ? answer.reload.failure : null;
+      const stale: IpcFailure | null = thrown ?? reprojection;
+      if (thrown !== null) {
+        report(thrown);
       }
+      const invalidated: RawSaveReload =
+        stale === null ? answer.reload : { kind: 'failed', failure: stale };
       // **There is no `outOfDate` arm here, and a move's is not missing.** A move
       // compares the revision the transaction ended on against the one this state
       // was projecting, because a `committed: false` there can still mean some
@@ -1028,8 +1231,12 @@ export function createBrowserState(
         installView(answer.value.disk);
         repairAfter(answer.value.disk);
         await readFileText();
+        await captureTheDiskText(document);
       }
-      return answer.value;
+      // Sealed here and nowhere else: this is the one place that knows which
+      // document was aimed at, what the transaction answered, and what this
+      // state's own invalidation made of it.
+      return { kind: 'sealed', sealed: sealWholeDocumentSave(document, answer.value, invalidated) };
     } // End of function saveRawDocument()
   };
 
@@ -1123,14 +1330,22 @@ export function createBrowserState(
    * blanking the workspace over one file would be a bigger claim than the failure
    * supports.
    *
+   * **The failure is answered as well as reported**, which is the 2c-1b review's
+   * third finding. A committed save this window could not re-project leaves the
+   * person looking at a screen that is out of step with a file that really was
+   * rewritten, and returning `void` left that fact with nowhere to go but the
+   * developer console. It is still not an error: the caller carries it *beside*
+   * the committed outcome and never in place of one.
+   *
    * @param document - The file whose whole text was replaced.
+   * @returns The failure of the re-read, or `null` when it succeeded.
    */
-  async function adoptTheReplacedDocument(document: DocumentId): Promise<void> {
+  async function adoptTheReplacedDocument(document: DocumentId): Promise<IpcFailure | null> {
     const held = forgetTheReplacedDocument(document);
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
-      return;
+      return fresh.failure;
     }
     installView(fresh.value);
     if (held !== null) {
@@ -1147,7 +1362,39 @@ export function createBrowserState(
       }
     }
     await readFileText();
+    return null;
   } // End of function adoptTheReplacedDocument()
+
+  /**
+   * Keeps the disk text of a document whose save conflicted, by that document.
+   *
+   * **Not the viewer's snapshot.** The raw editor may be open on file A while the
+   * rest of the window points at file B, and the conflict state has to be able to
+   * show the version on disk for A and to offer to load it — the fifth of the
+   * eight requirements of `docs/decisions/2c-split-notes.md` section 6. Keying on
+   * the viewer's target loses that affordance the moment the person clicks
+   * elsewhere, which is the 2c-1b review's fifth finding.
+   *
+   * The viewer's own answer is reused when it happens to be about the same file,
+   * so the ordinary case costs no second read; the second read happens only when
+   * the window really is looking somewhere else.
+   *
+   * @param document - The file whose save conflicted.
+   */
+  async function captureTheDiskText(document: DocumentId): Promise<void> {
+    if (fileTextDocument === document && fileTextAnswer !== null) {
+      conflictText = { document, answer: fileTextAnswer };
+      return;
+    }
+    const answer = await commands.documentText(document);
+    conflictText = { document, answer };
+    if (!answer.ok) {
+      // The typed refusal is what the conflict state draws in place of the disk
+      // version, and the developer sees it on the one channel every other failure
+      // of this state uses.
+      report(answer.failure);
+    }
+  } // End of function captureTheDiskText()
 
   /**
    * Puts the selection back in a projection that has just replaced the one it

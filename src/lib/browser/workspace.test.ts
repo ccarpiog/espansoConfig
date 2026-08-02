@@ -27,7 +27,51 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import { diagnostic, makeDocument, makeMatch, makeSummary } from './fixtures';
-import { createBrowserState, type BrowserCommands } from './workspace.svelte';
+import {
+  openWholeDocumentSave,
+  type InvalidationStatus,
+  type WholeDocumentOutcome
+} from './invalidation';
+import { createBrowserState, type BrowserCommands, type RawSaveAnswer } from './workspace.svelte';
+
+/**
+ * Opens what the state's raw save answered.
+ *
+ * The state **seals** its answer as of Phase 2c-1b, so a test that wants the
+ * outcome has to discharge the invalidation to get at it — which is the whole
+ * point of the seal. The callback is a no-op here on purpose: the invalidation
+ * these cases are about is the state's *own*, which the command already ran before
+ * this value existed, and every assertion below is about what that invalidation
+ * did to the state.
+ *
+ * @param answer - What `saveRawDocument` answered.
+ * @returns How the save ended, or `null` when the command failed.
+ */
+function outcomeOf(answer: RawSaveAnswer): WholeDocumentOutcome | null {
+  if (answer.kind !== 'sealed') {
+    return null;
+  }
+  const opening = openWholeDocumentSave(answer.sealed, () => undefined);
+  return opening.kind === 'opened' ? opening.outcome : null;
+} // End of function outcomeOf()
+
+/**
+ * What the state's own invalidation made of one raw save.
+ *
+ * Carried on the seal since the 2c-1b review's third finding, so that a committed
+ * save this window could not re-project reaches a screen as *out of step* rather
+ * than as a clean success with a line in the developer console.
+ *
+ * @param answer - What `saveRawDocument` answered.
+ * @returns The status, or `null` when the command failed.
+ */
+function issuerInvalidationOf(answer: RawSaveAnswer): InvalidationStatus | null {
+  if (answer.kind !== 'sealed') {
+    return null;
+  }
+  const opening = openWholeDocumentSave(answer.sealed, () => undefined);
+  return opening.kind === 'opened' ? opening.issuerInvalidation : null;
+} // End of function issuerInvalidationOf()
 
 /** A workspace summary of a two-file configuration. */
 const SUMMARY: WorkspaceSummary = {
@@ -1651,7 +1695,9 @@ describe("replacing a file's whole text", () => {
 
     // What is on disk once the replacement has been written.
     documents.set(2, { ok: true, value: replacedDocument() });
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const outcome = outcomeOf(
+      await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)
+    );
 
     expect(outcome?.outcome).toBe('saved');
     // The projection: the one that was written, not the one that was replaced.
@@ -1714,7 +1760,9 @@ describe("replacing a file's whole text", () => {
     await state.select(baseDocument().matches[0]!);
     await state.showFileText(true);
 
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const outcome = outcomeOf(
+      await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)
+    );
 
     expect(outcome?.outcome).toBe('saved');
     expect(state.selected?.id.node).toBe(10);
@@ -1747,7 +1795,9 @@ describe("replacing a file's whole text", () => {
     const state = createBrowserState(commands, (next) => reported.push(next));
     await state.open(null);
 
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const outcome = outcomeOf(
+      await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)
+    );
 
     expect(outcome?.outcome).toBe('saved');
     expect(outcome?.outcome === 'saved' ? outcome.committed : null).toBe(true);
@@ -1775,7 +1825,9 @@ describe("replacing a file's whole text", () => {
     state.show({ kind: 'document', id: 2 });
     await state.select(baseDocument().matches[0]!);
 
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const outcome = outcomeOf(
+      await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)
+    );
 
     expect(outcome?.outcome).toBe('conflict');
     // Nothing was written by this call, and the answer already carried the parse
@@ -1810,15 +1862,51 @@ describe("replacing a file's whole text", () => {
     await state.select(baseDocument().matches[0]!);
 
     documents.set(2, { ok: true, value: replacedDocument() });
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
 
-    expect(outcome).toBeNull();
+    // **The 2c-1b review's second finding.** This is not "nothing was written": the
+    // rename may have completed, so the file may already hold the candidate, and a
+    // caller that collapsed this into a bare `null` had no way to say so. The
+    // failure is typed and carries the one fact a screen needs.
+    expect(answer).toEqual({ kind: 'failed', mayHaveWritten: true });
+    expect(outcomeOf(answer)).toBeNull();
     expect(reported).toEqual([failure]);
     expect(state.status).toBe('ready');
     expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40]);
     expect(commands.getDocument).toHaveBeenCalledTimes(4);
     expect(state.selected).toBeNull();
   }); // End of the "failed save that may have written" case
+
+  it('says a failure before the rename wrote nothing, because that one it can tell', async () => {
+    // The other half of the same finding: the two arms have to be distinguishable,
+    // or the typed failure buys nothing over the `null` it replaced.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: {
+          Write: {
+            Io: {
+              step: 'CreateTempFile',
+              path: '/tmp/espanso/match/base.yml',
+              kind: 'PermissionDenied',
+              raw_os_error: 13
+            }
+          }
+        },
+        may_have_written: false
+      }
+    };
+    const commands = scriptedCommands({ raws: [{ ok: false, failure }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(answer).toEqual({ kind: 'failed', mayHaveWritten: false });
+    // Nothing was re-read either: there is nothing this window has to forget.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "failure before the rename" case
 
   it('leaves the file unprojected, and says so, when the re-read itself fails', async () => {
     // The honest answer available here: this state cannot describe a file it could
@@ -1841,15 +1929,194 @@ describe("replacing a file's whole text", () => {
     state.show({ kind: 'document', id: 2 });
 
     documents.set(2, { ok: false, failure: unreadable });
-    const outcome = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
 
-    // The save committed and is answered as one.
-    expect(outcome?.outcome).toBe('saved');
+    // **The 2c-1b review's third finding.** The save committed and is answered as
+    // one — and the fact that this window could not read the file back travels
+    // *with* that answer, so a screen can say the window is out of step. Before the
+    // fix it reached the developer channel and stopped there, and the person saw a
+    // clean "the file was written".
+    expect(issuerInvalidationOf(answer)).toMatchObject({ kind: 'failed' });
+    expect(outcomeOf(answer)).toBeNull(); // the seal is one-shot; opened just above
     expect(reported).toEqual([unreadable]);
     // And the stale projection is gone rather than redrawn.
     expect(state.scopedMatches).toEqual([]);
     expect(state.scopedDocument).toBeNull();
   }); // End of the "re-read failed" case
+
+  it('says the invalidation succeeded when the file really was re-read', async () => {
+    // The oracle for the case above: a status that were always `failed` would pass
+    // it and mean nothing.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    documents.set(2, { ok: true, value: replacedDocument() });
+    const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(issuerInvalidationOf(answer)).toEqual({ kind: 'done' });
+  }); // End of the "invalidation succeeded" case
+
+  it('answers a sealed outcome, which carries nothing until it is opened and opens once', async () => {
+    // **Phase 2c-1b's answer to hole 4.2 of `2c-1a-notes.md`**: the pairing of a
+    // document with a result happens here, in the adapter that issued the save and
+    // therefore knows both, instead of at every caller that wants to describe it.
+    // What that buys is checked rather than asserted in prose: the value carries
+    // nothing a caller can read, and it opens exactly once.
+    const commands = scriptedCommands({ raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(answer.kind).toBe('sealed');
+    if (answer.kind !== 'sealed') {
+      return;
+    }
+    const sealed = answer.sealed;
+    expect(Reflect.ownKeys(sealed)).toEqual([]);
+    expect(JSON.stringify(sealed)).toBe('{}');
+
+    const invalidations: DocumentId[] = [];
+    const opened = openWholeDocumentSave(sealed, (invalidation) => {
+      invalidations.push(invalidation.document);
+    });
+    expect(opened.kind).toBe('opened');
+    expect(opened.kind === 'opened' ? opened.outcome.outcome : null).toBe('saved');
+    expect(opened.kind === 'opened' ? opened.document : null).toBe(2);
+    expect(invalidations).toEqual([2]);
+    // And what this state's own invalidation made of it travels with the outcome
+    // rather than only reaching the console.
+    expect(opened.kind === 'opened' ? opened.issuerInvalidation : null).toEqual({ kind: 'done' });
+
+    // A second open is refused rather than served with a no-op callback.
+    expect(openWholeDocumentSave(sealed, () => undefined).kind).toBe('alreadyOpened');
+  }); // End of the "sealed outcome" case
+
+  it('never pairs a held snapshot with a revision installed under it', async () => {
+    // **The 2c-1b review's first finding, and the one that could lose a file.**
+    // The viewer holds text T0 at revision `rev-a`. Stale-identity recovery
+    // installs a fresh projection at `rev-b`, and `readFileText` used to skip the
+    // re-read because the document identity had not changed — so *Edit* paired T0
+    // with `rev-b`, the save's revision check passed, and the bytes some other
+    // process had written were overwritten by an edit of text nobody had seen.
+    //
+    // Two things close it, and both are asserted: the revision is captured **with**
+    // the read rather than read off the projection later, and installing a
+    // projection drops a snapshot taken against the one it replaces.
+    const reparsed = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' })
+      ]
+    });
+    const texts = new Map<number, CommandResult<string>>([
+      [2, { ok: true, value: 'the text at rev-a\n' }]
+    ]);
+    const commands = scriptedCommands({
+      texts,
+      match: {
+        ok: false,
+        failure: {
+          kind: 'command',
+          error: { code: 'identityStaleRevision', expected: 'rev-b', found: 'rev-a' }
+        }
+      },
+      reload: { ok: true, value: reparsed }
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    expect(state.fileText).toEqual({ kind: 'text', text: 'the text at rev-a\n' });
+    expect(state.fileTextRevision).toBe('rev-a');
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+    // What the other process wrote, which the recovery is about to project.
+    texts.set(2, { ok: true, value: 'the text at rev-b\n' });
+    await state.select(state.scopedMatches[0]!);
+
+    // The projection moved, so the snapshot moved with it rather than staying
+    // behind to be paired with the new revision.
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: 'the text at rev-b\n' });
+    expect(state.fileTextRevision).toBe('rev-b');
+  }); // End of the "held snapshot and installed revision" case
+
+  it('pairs the revision the projection held when the read started, not the one it holds now', async () => {
+    // The capture half on its own. `document_text` answers no revision, so the two
+    // come from separate reads; taking the projection's revision *after* the text
+    // would make it the newer of the two, and a single external write between them
+    // would then be committed over. Taken before, the pair's revision is the older
+    // one and the save gate refuses it as a conflict.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+
+    expect(state.fileTextRevision).toBe(baseDocument().revision);
+    // Closing the viewer drops the pair whole: a revision that outlived its text
+    // is half of a claim.
+    await state.showFileText(false);
+    expect(state.fileText).toBeNull();
+    expect(state.fileTextRevision).toBeNull();
+  }); // End of the "captured revision" case
+
+  it('keeps the disk text of a conflicted save by document, not by what the pane shows', async () => {
+    // **The 2c-1b review's fifth finding.** The editor may be open on file 2 while
+    // the rest of the window points at file 3, and the conflict state still has to
+    // be able to show the version on disk and to offer to load it — one of the
+    // eight requirements of `2c-split-notes.md` section 6. Keyed on the viewer's
+    // target, that affordance vanished on a click somewhere else.
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk: replacedDocument()
+      }
+    };
+    const commands = scriptedCommands({ raws: [conflict] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    // The window is looking at document 3; the save is of document 2.
+    state.show({ kind: 'document', id: 3 });
+    await state.showFileText(true);
+
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
+    // And the viewer is untouched: it is still showing the file it was showing.
+    expect(state.fileTextTarget?.id).toBe(3);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 3\n' });
+  }); // End of the "disk text by document" case
+
+  it('answers nothing for a document this window holds no text of', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    expect(state.rawTextOf(2)).toBeNull();
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
+    expect(state.rawTextOf(3)).toBeNull();
+  }); // End of the "no text held" case
 
   it('sends the document, the base revision, the text and the acknowledgement, and no flag', async () => {
     const commands = scriptedCommands({ raws: [RAW_COMMITTED] });

@@ -72,11 +72,12 @@
  *    that the routine is **called** — there is no path to the outcome that does
  *    not pass through it.
  * 2. **A caller can decline to seal**, and the document it seals with is its own
- *    assertion. `commands.saveRawDocument` and `BrowserState.saveRawDocument`
- *    still answer unsealed values, and `sealWholeDocumentSave(documentB, resultOfA)`
- *    is a call this module cannot detect. What it does is put that pairing in one
- *    place — the adapter that issued the save and therefore knows both — instead
- *    of leaving a `scope` string to be re-asserted at every describer.
+ *    assertion. `commands.saveRawDocument` still answers an unsealed value, and
+ *    `sealWholeDocumentSave(documentB, resultOfA, …)` is a call this module cannot
+ *    detect. What it does is put that pairing in one place — the adapter that
+ *    issued the save and therefore knows both — instead of leaving a `scope`
+ *    string to be re-asserted at every describer. Since Phase 2c-1b that adapter
+ *    is `BrowserState.saveRawDocument`, which is the only production caller.
  * 3. **A failure that may have written is not covered.** A save that fails after
  *    its rename may have replaced the file, and there is no revision to hand back
  *    for it. `mayHaveWritten` in `../ipc/errors` is that question, and
@@ -171,6 +172,8 @@ interface SealedBox {
   readonly document: DocumentId;
   /** The outcome, unreachable until the seal is opened. */
   readonly outcome: WholeDocumentOutcome;
+  /** What the issuer's own invalidation already did, before the seal existed. */
+  readonly issuerInvalidation: RawSaveReload;
 }
 
 /**
@@ -214,20 +217,46 @@ function asWholeDocumentOutcome(result: SaveResult): WholeDocumentOutcome {
  * save knows both; everything downstream reads them off the seal rather than
  * being told again.
  *
+ * ## The issuer's own invalidation travels with it
+ *
+ * A committed replacement is invalidated **twice over**, at two different moments
+ * and by two different pieces of code, and only the first of them is early enough
+ * to be safe. The adapter that issues the save passes its own routine to
+ * `saveRawDocument`, which calls it before its promise resolves; the opener's
+ * callback runs later, when someone asks to read the outcome. So by the time a
+ * seal can be opened, the cache invalidation has already happened or already
+ * failed — and if it **failed**, the person is looking at a window that is out of
+ * step with a file this application really did rewrite.
+ *
+ * The 2c-1b review found that fact stranded: the workspace reported it to the
+ * developer channel and nothing carried it to a screen, so a committed save whose
+ * re-projection failed drew a clean *the file was written*. It is a required
+ * argument here, rather than optional with a benign default, because the issuer
+ * always knows it and a default would be this type inventing a `notOwed` for a
+ * caller that simply forgot.
+ *
  * @param document - The file the save was aimed at. It is carried because a
  *   `SaveResult` does not name the document it is about, and the invalidation has
  *   to.
  * @param result - How the save ended, exactly as the transaction reported it.
+ * @param issuerInvalidation - What the issuer's **own** invalidation did.
+ *   `notOwed` when nothing was written, `done` when the caches were refreshed,
+ *   `failed` when they could not be — which never means the save failed.
  * @returns The sealed outcome, whose only use is {@link openWholeDocumentSave}.
  */
 export function sealWholeDocumentSave(
   document: DocumentId,
-  result: SaveResult
+  result: SaveResult,
+  issuerInvalidation: RawSaveReload
 ): SealedWholeDocumentSave {
   // An empty frozen object: it is a key, and it is nothing else. The cast gives
   // it the phantom brand, which exists only in the type system.
   const sealed = Object.freeze({}) as SealedWholeDocumentSave;
-  SEALS.set(sealed, { document, outcome: asWholeDocumentOutcome(result) });
+  SEALS.set(sealed, {
+    document,
+    outcome: asWholeDocumentOutcome(result),
+    issuerInvalidation
+  });
   return sealed;
 } // End of function sealWholeDocumentSave()
 
@@ -264,6 +293,16 @@ export type WholeDocumentSaveOpening =
        * what threw is this window's own forgetting.
        */
       readonly invalidation: InvalidationStatus;
+      /**
+       * What became of the **issuer's** invalidation, which ran earlier.
+       *
+       * A separate field rather than one merged with the above, because they are
+       * two different acts at two different moments and a single field would make
+       * "which of the two failed?" unanswerable. Both mean the same thing to a
+       * person — *the file was written and this window is out of step* — so a
+       * screen that draws either draws it once.
+       */
+      readonly issuerInvalidation: InvalidationStatus;
     }
   | {
       /** The discriminant: this seal has been opened before and holds nothing. */
@@ -308,7 +347,12 @@ export function openWholeDocumentSave(
   // Deleted before the callback runs, so a `forget` that re-enters this function
   // with the same seal cannot be served either.
   SEALS.delete(sealed);
-  const opened = { kind: 'opened', document: box.document, outcome: box.outcome } as const;
+  const opened = {
+    kind: 'opened',
+    document: box.document,
+    outcome: box.outcome,
+    issuerInvalidation: box.issuerInvalidation
+  } as const;
   const invalidation = invalidationOf(box.document, box.outcome);
   if (invalidation === null) {
     return { ...opened, invalidation: { kind: 'notOwed' } };

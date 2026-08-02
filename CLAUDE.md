@@ -145,15 +145,35 @@ layer's single cache-coherency policy; a sixth writing command **calls it rather
 because it was four copies once.
 
 **Phase 2c — the editing UI — is split into ten sub-phases**
-(`docs/decisions/2c-split-notes.md`), and **2c-1a is complete: the draft spine exists and nothing
-draws it.** Three of the split's rules bind every later sub-phase. **Undo is not a sub-phase** —
-the draft state shape had to express it in 2c-1a or be rewritten under two editors later. **A
-projection-based copy is not a duplicate** — it drops comments, key order and scalar spelling, so
-calling it *Duplicate* breaks the preservation promise in the one place nobody checks (2c-3c).
-And **every sub-phase of 2c owes three kinds of evidence**: model tests, a **mounted-component
-test** (new to this project, taken deliberately in 2c-1b — `vite.config.ts` has held that decision
-open since 1b-1), and a manual window reading. **2c-1b is next**, and it is the first screen in
-this project that can write a user's file.
+(`docs/decisions/2c-split-notes.md`), and **it is complete through 2c-1b: this application can now
+be used to write a user's file from a window.** Three of the split's rules bind every later
+sub-phase. **Undo is not a sub-phase** — the draft state shape had to express it in 2c-1a or be
+rewritten under two editors later. **A projection-based copy is not a duplicate** — it drops
+comments, key order and scalar spelling, so calling it *Duplicate* breaks the preservation promise
+in the one place nobody checks (2c-3c). And **every sub-phase of 2c owes three kinds of evidence**:
+model tests, a **mounted-component test** (taken deliberately in 2c-1b — `vite.config.ts` had held
+that decision open since 1b-1), and a manual window reading. **2c-2, the small editor, is next.**
+
+**A `<textarea>`'s value is the HTML *API value*, and it has every line break normalized to LF.**
+2c-1b's window reading caught this: one keystroke in a CRLF document rewrote every line ending, the
+save wrote it, and the screen said *"exactly the text that was sent"* — this project's central
+promise broken on the one screen that writes, past 883 passing tests, `svelte-check` and two Codex
+passes. **The raw editor now refuses any text containing a `\r`** rather than reconstructing one:
+`file-comments-and-mixed-endings.yml` has exactly two CRLF lines among bare-LF ones, so re-applying
+a dominant convention would reformat lines the user never touched. **The refusal does not
+generalize** — every later editor that drafts through a `<textarea>` or an `<input>` meets the same
+normalization and must decide it deliberately.
+
+**A green test suite is not a screen, and 2c-1b is the proof.** Nothing in this project renders a
+Svelte component in an automated test except the files that opt into jsdom by docblock, and a
+mounted test proves a handler fires, not that a window draws. **A window reading is re-taken after
+any change to a component** — 2c-1b took two for exactly that reason.
+
+**The jsdom decision is scoped, not retroactive**: `environment: 'node'` stays the default and the
+existing six components are not back-filled. **`resolve.conditions` in `vite.config.ts` is set
+conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
+unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
+**server** build with nothing failing. **154 modules is a regression guard**; check it.
 
 **A whole-document save outcome arrives sealed, and the seal is one-shot.**
 `openWholeDocumentSave(sealed, forget)` in `src/lib/browser/invalidation.ts` is the only way to

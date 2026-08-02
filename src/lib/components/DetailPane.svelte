@@ -11,10 +11,14 @@
     type ValueLine
   } from '../browser/detail';
   import type { RawDocumentText } from '../browser/rawDocument';
+  import { rawEditorRefusal } from '../browser/rawEditor';
   import type { BrowserState } from '../browser/workspace.svelte';
+  import type { ContentRevision, DocumentSummary } from '../ipc/types';
+  import RawEditor from './RawEditor.svelte';
   import SourceText from './SourceText.svelte';
   import {
     t,
+    tRawEditorRefusal,
     tContentKind,
     tDetailField,
     tHazard,
@@ -125,9 +129,82 @@
    * cannot reach. A refusal is different — the mutation entry point really does
    * refuse (`EditError::Refused`), and the snippet list already carries the
    * `Not editable` badge for the same fact. What this pane adds is the *reason*.
+   *
+   * **The raw *editor* is a third subject of this pane, and it outranks the other
+   * two while it is open.** Phase 2c-1b makes the raw viewer's file editable, and
+   * an editor holding unsaved text may not be dismissed by a click somewhere else
+   * in the window: the `{#if}` below therefore tests `editing` **before** it tests
+   * the viewer or the selection, so moving the sidebar leaves the editor where it
+   * is rather than discarding a draft silently. Leaving is the editor's own
+   * control, and it asks before discarding anything.
+   *
+   * **The base revision is the one captured with the text, never one read now.**
+   * `document_text` answers a string and no revision, so the two come from
+   * different reads, and reading the projection's revision *at the moment the
+   * editor opens* is the version of this that the 2c-1b review found wrong: a
+   * projection can be replaced under a held snapshot, so the editor could pair text
+   * from one revision with a base from a later one and commit over it.
+   * `BrowserState.fileTextRevision` is the revision that was captured when that
+   * text read started, and it states in full both what that forces and what it
+   * still does not.
    */
 
   const { browser }: { browser: BrowserState } = $props();
+
+  /** What one open editing session is over: which file, from which revision. */
+  interface EditingSession {
+    /** The file being edited. */
+    readonly file: DocumentSummary;
+    /** The revision its text was drafted from. */
+    readonly baseRevision: ContentRevision;
+    /** Its whole text at that moment. */
+    readonly text: string;
+  }
+
+  // `$state.raw`: an editing session is captured once and replaced whole, and
+  // nothing reads through it reactively.
+  let editing = $state.raw<EditingSession | null>(null);
+
+  /**
+   * What this window holds of the **edited file's** text, or `null`.
+   *
+   * **The disk version, and never the draft.** On a conflict the workspace re-reads
+   * the file and keeps that text by document, so this is what some other writer
+   * left; the editor shows it beside the draft and can load it in place of one,
+   * behind a confirmation.
+   *
+   * `browser.rawTextOf(id)` rather than `browser.fileText`, which is the 2c-1b
+   * review's fifth finding: `fileText` answers about whatever the *viewer* is
+   * pointed at, so an editor open on file A while the sidebar shows file B got
+   * `null` and its *Reload disk version* control stayed permanently disabled —
+   * losing one of the eight requirements of `docs/decisions/2c-split-notes.md`
+   * section 6 to a click somewhere else in the window.
+   */
+  const diskTextForEditor = $derived(
+    editing === null ? null : browser.rawTextOf(editing.file.id)
+  );
+
+  /**
+   * Opens the editor over the file's text as it is on screen right now.
+   *
+   * @param file - The file the viewer is pointed at.
+   * @param baseRevision - The revision captured when that text was read. Never one
+   *   read now: see this file's own note, and `BrowserState.fileTextRevision`.
+   * @param shown - What the viewer is showing of its text.
+   */
+  function startEditing(
+    file: DocumentSummary,
+    baseRevision: ContentRevision,
+    shown: RawDocumentText
+  ): void {
+    // A file of zero characters is editable; a file whose text could not be read
+    // at all is not, because there would be nothing to send but an invention.
+    const text = shown.kind === 'text' ? shown.text : shown.kind === 'empty' ? '' : null;
+    if (text === null) {
+      return;
+    }
+    editing = { file, baseRevision, text };
+  } // End of function startEditing()
 </script>
 
 {#snippet scalarText(display: ScalarDisplay)}
@@ -260,7 +337,7 @@
     </div>
   {/if}
 
-  {#if browser.fileTextTarget !== null}
+  {#if browser.fileTextTarget !== null && editing === null}
     <p class="toggle">
       <button type="button" onclick={() => void browser.showFileText(!browser.fileTextShown)}>
         {browser.fileTextShown
@@ -270,9 +347,21 @@
     </p>
   {/if}
 
-  {#if browser.fileText !== null && browser.fileTextTarget !== null}
+  {#if editing !== null}
+    {@const open = editing}
+    <RawEditor
+      file={open.file}
+      baseRevision={open.baseRevision}
+      text={open.text}
+      diskText={diskTextForEditor}
+      save={(document, baseRevision, text, acknowledgement) =>
+        browser.saveRawDocument(document, baseRevision, text, acknowledgement)}
+      close={() => (editing = null)}
+    />
+  {:else if browser.fileText !== null && browser.fileTextTarget !== null}
     {@const view = browser.fileText}
     {@const file = browser.fileTextTarget}
+    {@const captured = browser.fileTextRevision}
 
     <dl>
       <dt>{t('browser.detail.file')}</dt>
@@ -282,6 +371,27 @@
     <section>
       <h2>{t('browser.detail.section.fileText')}</h2>
       <p class="kind">{t('browser.detail.fileTextScope')}</p>
+      {#if file.read_only}
+        <p class="kind">{t('browser.rawEditor.readOnlyFile')}</p>
+      {:else if captured === null}
+        <p class="kind">{t('browser.rawEditor.notProjected')}</p>
+      {:else if view.kind === 'text' && rawEditorRefusal(view.text) !== null}
+        {@const refused = rawEditorRefusal(view.text)}
+        <!-- The *Edit* control is withdrawn rather than opening into a dead end,
+             and the reason is on screen. `startRawEditor` refuses the same texts,
+             so this is a control that matches the model rather than a second
+             opinion about it. -->
+        {#if refused !== null}
+          <p class="kind">{tRawEditorRefusal(refused)}</p>
+        {/if}
+      {:else if view.kind === 'text' || view.kind === 'empty'}
+        {@const base = captured}
+        <p class="toggle">
+          <button type="button" onclick={() => startEditing(file, base, view)}>
+            {t('browser.rawEditor.open')}
+          </button>
+        </p>
+      {/if}
       {@render fileText(view)}
     </section>
   {:else if browser.selectedMatch !== null}

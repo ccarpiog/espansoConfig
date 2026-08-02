@@ -16,6 +16,7 @@ import {
   type OptionGroupName
 } from '../browser/detail';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
+import { rawEditorRefusalKey, type RawEditorRefusal } from '../browser/rawEditor';
 import {
   rawSaveChoiceKey,
   rawSaveMessageKey,
@@ -412,6 +413,21 @@ export function tRawSaveMessage(message: RawSaveMessage): string {
 export function tRawSaveChoice(choice: RawSaveChoice): string {
   return translate(locale.current, rawSaveChoiceKey(choice));
 } // End of function tRawSaveChoice()
+
+/**
+ * Renders why the raw editor will not open a file at all.
+ *
+ * The accessor over `rawEditorRefusal`'s answer, here for `tRawSaveMessage`'s
+ * reason: a component that wrote `t(rawEditorRefusalKey(refusal))` would be
+ * turning a code into a key in markup, which CLAUDE.md section 2 forbids and
+ * `scripts/lint/built-translation-keys.ts` refuses.
+ *
+ * @param refusal - Why the editor will not open.
+ * @returns The translated sentence.
+ */
+export function tRawEditorRefusal(refusal: RawEditorRefusal): string {
+  return translate(locale.current, rawEditorRefusalKey(refusal));
+} // End of function tRawEditorRefusal()
 
 /**
  * Renders one line a save outcome shows, in the current language.

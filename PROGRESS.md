@@ -49,7 +49,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2c-3b** | **`save_raw_document`, the eleventh `#[tauri::command]` and the fifth that writes**: the whole-text request off the wire, the mandatory `BackupSession`, `run_one_save` generalized to carry a `SaveContent` so all five writers share one tail, `moved: null` by construction, the Q8 presentation model in both languages, and the **full identity invalidation** moved into the state that owns the cache | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on a High finding; **all four findings were fixed before the commit**. **2b-2c is closed, and with it 2b: every command Phase 2b was scoped to deliver exists** |
 | **2c split** | **Phase 2c cut into ten sub-phases**, by dependency order and failure mode, after a design consult that changed four of the seven things it was asked about | ✅ complete — `docs/decisions/2c-split-notes.md` is the cut; `docs/reviews/phase-2c-split-design.md` is the consult |
 | **2c-1a** | The **draft spine**, with no editor and no screen: `Draft<T>` with undo expressible rather than addable, the one-shot **sealed** whole-document invalidation, and the save-outcome presentation model for all three arms | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on three High findings; **all eight were fixed before the commit** |
-| 2c-1b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-1b is next** |
+| **2c-1b** | The **raw editor**, the one vertical slice: the raw pane made editable and saveable over `saveRawDocument`, the three arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state, this project's **first mounted-component test**, and the **first window reading of a screen that writes** | ✅ complete — after **three** review fix rounds below. The aggregate review returned **NOT READY** on three High findings; **all six were fixed**, and then the window reading found **two real defects the whole test suite had passed over**, and a second Codex pass on those two fixes returned **NOT READY** again on one more. **All nine were fixed before the commit** |
+| 2c-2 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-2 is next** |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -1297,6 +1298,63 @@ the same words rather than softened, and the honesty rule they produced is now t
 every 2c fix round: **where TypeScript cannot force something, say so in the same sentence that
 describes what it does force.**
 
+### Phase 2c-1b — the raw editor, and the first screen that writes a user's file
+
+**Five commands could write a user's file and no screen called any of them. Now one does.** The raw
+YAML viewer of 1c-2b-2b-2 became an editor: `rawEditor.ts` holds the whole state machine as a value
+and `RawEditor.svelte` is a thin walk over it, which is the standing idiom — `src/lib/browser/`
+holds what a test can reach, the component gets the walk. **No Rust: `cargo test --workspace` is
+1007, unchanged, and run to prove it.**
+
+**It reuses 2c-1a wholesale rather than restating it.** The drafted value is a `Draft<T>` with
+dirty, undo and redo derived; the three arms come from `describeWholeDocumentSave`; the
+`DocumentDoesNotParse` refusal is presented by `rawSave.ts`; consent is produced only by
+`acknowledgeRefusal` and withdrawn the instant the text changes, with a sentence saying why.
+
+**Hole 4.2 of 2c-1a is decided: sealed.** `BrowserState.saveRawDocument` answers a
+`SealedWholeDocumentSave`, because `describeWholeDocumentSave` accepts only what the seal produces
+— the alternative was every call site re-asserting the document/result pairing, which is what the
+seal exists to stop. What it did **not** buy is written down beside what it did: the seal's callback
+is not the cache invalidation, which the workspace already performs, earlier and correctly.
+
+**This project's first mounted-component test, and the jsdom decision `vite.config.ts` had held open
+since 1b-1.** It is scoped, not retroactive: `environment: 'node'` stays the default, the component
+files opt in by docblock, and the existing six components are **not** back-filled. A first attempt
+at `resolve.conditions` silently broke the production build — that option *replaces* Vite's
+defaults, so `vite build` went 154→180 modules and pulled in Svelte's server build. **154 modules is
+now a regression guard**, checked on every round.
+
+**The window reading is the reason this phase is honest, and it is why the rule exists.** Two real
+defects survived 883 passing tests, `svelte-check` and two Codex passes, and were caught only by
+looking at a running window:
+
+1. **CRLF was silently normalized.** A `<textarea>`'s value is the HTML **API value**, which the
+   specification defines as having every line break normalized to LF — so the first keystroke in a
+   CRLF file rewrote every line ending, the save wrote it, and the panel said *"exactly the text
+   that was sent"*. **That is this project's central promise broken on the one screen that writes.**
+   `crlf-line-endings.yml` exists to pin exactly this, and **no test in the project contained a
+   single `\r`.**
+2. ***Copy my text* did not copy**, on the one control that exists to keep a draft from being lost
+   before the person discards it.
+
+**(1) was fixed as a refusal, not a reconstruction** (D13 of the notes). Reconstruct-on-save is
+named and refused: `file-comments-and-mixed-endings.yml` has exactly **two** CRLF lines among
+bare-LF ones, so re-applying a dominant convention would reformat lines the user never touched —
+the same violation wearing a different hat. The cost is stated rather than hidden: **a CRLF file
+now cannot be repaired in the one editor that can repair a broken file.**
+
+**The refusal is structural.** The drafted value is a branded `RoundTripText` whose only constructor
+applies the check, so a bare `string` no longer type-checks into a draft, a submission, a history
+step or a candidate; all three doors mint one or refuse; and `beginSave` re-checks anyway, because a
+brand is a cast at bottom and that is the last line before a wire that replaces a user's file.
+
+**Three of the nine findings were a document claiming a guarantee the code did not give** — the
+same class that produced two of 2c-1a's eight. The third occurrence was D13's own first version,
+asserting that TypeScript forced what only a `<textarea>`'s behaviour happened to make true. D13 is
+now written in three named categories: what the type system enforces, what the run-time guards
+enforce, and **what merely happens to be true of the current component path** — that last written as
+no guarantee at all.
+
 ---
 
 ## Decisions (and why — this is what a fresh session cannot re-derive)
@@ -2158,6 +2216,55 @@ write is what is on disk would be wrong for the same reason.
 | R35 | **Nothing establishes that a Spanish string is Spanish.** The dictionary suite checks key parity, placeholder parity and non-identity with the English value — a translation reading `"Sprache"` passes every one | Accepted, and the *claim* was corrected rather than the code: the suite is named for the untranslated-value heuristic it is, per the review's finding 5, and the `"Sprache"` counterexample is written into the notes and the module doc comments so the boundary cannot be forgotten. Closing this needs reviewed expected translations or a bilingual review gate — a process, not a test — and the cost grows with every phase, since 1c is almost entirely user-facing strings. Two smaller relatives named with it: the duplicate-key scanner compares **key text** rather than decoded escapes, and `webview-floor.test.ts` pins the esbuild target against the plist floor for *consistency* only — esbuild constrains syntax, not library APIs, so a newly used API with a higher baseline than the target would still slip through. `Object.hasOwn` was exactly that shape. |
 | R33 | **TypeScript is pinned to 6.0.3, one major behind 7.0.2**, because `svelte-check@4.7.4` declares `typescript: ^5 \|\| ^6` | Accepted and dated. The whole i18n guarantee is a *compile-time* one, so the version that compiles it is load-bearing: an upgrade that changes how `Record<Exclude<keyof T, TranslationKey>, never>` behaves would weaken `ExactDictionary` silently. The four disabling experiments of `1b-1-notes.md` §2 are the tripwire — **re-run them after any TypeScript or `svelte-check` upgrade**, because they are the only thing that would notice. |
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
+
+---
+
+## Phase 2c-1b review disposition
+
+**Three rounds, nine findings, and the sharpest two were found by neither of the reviews.** The
+mandatory once-per-phase adversarial review is `docs/reviews/phase-2c-1b-code.md`; the second pass
+on the reading's fixes is appended to the same file. Both returned **`READINESS: NOT READY`**.
+**All nine were fixed before the commit**, so — as with every phase since `8989c16` — no commit
+holds a demonstrated defect.
+
+**Round 1 — the aggregate review. Three High, three Medium.**
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 1 | **High** | **Stale text could be paired with a newer revision and silently overwrite another program's write.** `installView` replaced the projection at revision R1 while `readFileText` skipped its re-read because the document ID was unchanged, so *Edit* paired text T0 with R1, the revision check passed, and T1 was overwritten. **Wider than the notes' own revert-then-restore argument**, which it falsified | `readFileText` captures the projection's revision **before** the text read and answers it as `BrowserState.fileTextRevision`; `installView` drops a snapshot whose projection it replaces. The notes' §5 was rewritten — the old argument reasoned about two reads and the defect was a third event |
+| 2 | **High** | **A failure carrying `may_have_written: true` was drawn as "nothing was written".** Rename succeeds, a later step fails; the file may already hold the candidate. That is *a committed write reported as not-written* | `BrowserState.saveRawDocument` answers a typed `RawSaveAnswer` whose `failed` arm carries `mayHaveWritten`, and an **indeterminate** arm is drawn instead, in both languages |
+| 3 | **High** | **A committed save whose re-projection failed was drawn as a clean success.** The workspace reported the reload failure only to the developer channel and sealed only the `SaveResult`, so the editor could not draw *window out of step* | `adoptTheReplacedDocument` returns its failure; `sealWholeDocumentSave` takes it as a required third argument; `applySave` appends `windowOutOfStep` beside the saved arm. Hole 8.3 **deleted rather than reworded** — it had stopped being a hole |
+| 4 | Medium | **Closing the editor mid-save let an authorized write commit with its outcome drawn nowhere**, under a dialog saying the changes had not been written | Close and discard-confirm are refused while a save is in flight, a sentence says the save cannot be stopped, and a dialog raised before a save is withdrawn when one starts |
+| 5 | Medium | **The conflict read the disk text from the pane's *current* target**, so an editor open on file A while the sidebar pointed elsewhere lost *Reload disk version* entirely — one of the eight §6 requirements | `captureTheDiskText` captures **by document**, read through `BrowserState.rawTextOf(id)` |
+| 6 | Medium | **The phase had no window reading**, which `2c-split-notes.md` §7 requires of every 2c sub-phase | Taken. It is §9 of the notes — and it found findings 7 and 8 |
+
+**Round 2 — what the window reading found, which no review and no test did.**
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 7 | **High** | **CRLF silently normalized.** Three CRLF endings went in and none came out, while the panel said *"exactly the text that was sent"* | A **refusal**, structural: `RoundTripText`, a branded string whose only constructor applies the CR check. Reconstruct-on-save named and refused (D13) |
+| 8 | Medium | ***Copy my text* never copied**, on the conflict's destructive step | `copyBySelecting`: an offscreen carrier text area, `document.execCommand('copy')`, no new dependency, with the existing disclosure still firing when both routes fail |
+
+**Round 3 — Codex on those two fixes. One High, one Medium.**
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 9 | **High** | **The CR invariant was not total and D13 claimed it was.** `editText` accepted any string without the check, so `editText(session, "a\rb")` then `beginSave` produced a candidate carrying a CR. Unreachable from the running screen, because a `<textarea>` never emits one — but *that* is a fact about a component, not a guarantee, and the record had written it as a type-system claim | The check moved into the brand's constructor and is applied at all three doors plus `beginSave`. **D13 rewritten into three named categories**: what TypeScript enforces, what the guards enforce, and what merely happens to be true of the current path |
+| 10 | Medium | **`copyBySelecting` could throw out of its own cleanup**, so an unguarded `previous.focus()` swallowed *both* disclosures — silence on the one control that exists to keep a draft from being lost | Removal and focus restoration are independently non-throwing through one named `quietly`, the function always returns a boolean, and the previous **selection** is snapshotted and restored beside the active element |
+
+**The reading was then re-taken**, because the fixes changed three files and a claim about a screen
+needs a reading of a screen. It confirmed the refusal on screen in both languages, the LF twin still
+opening, and the fixture's 375 bytes and thirteen CRLF endings **`cmp`-identical after every one of
+five launches**.
+
+**One reading result was withdrawn rather than kept.** The first run measured
+`navigator.clipboard.writeText` rejecting and concluded the shipped WKWebView refuses it. The
+re-take established the confounder — `document.hasFocus()` false throughout, `lsappinfo front` =
+`loginwindow`, `CGSSessionScreenIsLocked = true`; the machine's screen was locked, and both
+clipboard routes are gated on a focused document. **The question is open and needs a human at an
+unlocked machine** (hole 8.12). D14 survives on its merits — a second route costing no dependency —
+with the claim corrected rather than the code. The source comment asserting the withdrawn
+measurement was corrected too.
 
 ---
 
@@ -3142,6 +3249,53 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-1b
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was re-run after **every one of the three fix rounds**; the table records the
+final run.
+
+| Command | Result |
+|---|---|
+| `npm test` | **894 passed, 35 files** (821 before the phase; 868 / 883 / 892 at the three fix rounds) |
+| `npm run check` | 388 files, **0 errors, 0 warnings, 0 files with problems** |
+| `npm run build` | exit 0, **154 modules** — the regression guard, see below |
+| `cargo test --workspace` | **1007 passed, 0 failed** — *unchanged*, and run to prove it |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `git status --short --untracked-files=all` | changes only under `src/lib/`, `docs/`, `vite.config.ts` and the two package files; **no probe artefact, nothing under `crates/` or `src-tauri/`** |
+
+**The baseline was verified before the phase, not assumed**: `npm test` 821 passed / 33 files and
+`cargo test --workspace` 1007 passed were both run at the head of the session, so the +73 frontend
+tests are measured against numbers this session observed.
+
+**154 modules is a regression guard, not decoration.** A first attempt at the jsdom decision set
+`resolve.conditions` unconditionally; that option *replaces* Vite's defaults, so the production
+build silently went to 180 modules and pulled in Svelte's **server** build. Nothing failed. The
+module count is checked on every round because it is the only cheap signal that the test and
+production resolution paths have not diverged again.
+
+**`cargo test --workspace` is in the table although this phase wrote no Rust** — that is the point
+of running it. 2c-1b's claim is that the raw editor needed zero new Rust, and an unchanged 1007 is
+the evidence.
+
+**What this table does not establish, and cannot — and this phase is the proof.** The window
+reading found **two real defects that 883 passing tests, `svelte-check` and two Codex passes had
+all sailed past**, one of which silently rewrote every line ending in a user's file. A green table
+is not a screen. The three kinds of evidence `2c-split-notes.md` §7 requires were all taken:
+model tests, this project's **first mounted-component tests**, and **two window readings** — the
+second because the first one's findings changed three components, and a claim about a screen needs
+a reading of a screen.
+
+**Three things the readings did not reach**, recorded as holes rather than rounded up: the
+indeterminate `mayHaveWritten` arm (it needs a failure in the microseconds between rename and
+read-back), `windowOutOfStep`, and `committed: false` from this screen — the last unreachable by
+design, and read rather than merely argued. Whether the shipped WKWebView refuses
+`navigator.clipboard` is **unsettled**, not answered: the machine's screen was locked for both
+runs. It needs a human at an unlocked machine.
 
 ---
 
@@ -4612,6 +4766,77 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2c-1b is complete: this application can now be used to write a user's file from a window.**
+`docs/decisions/2c-1b-notes.md` is the record (1417 lines; §9 is the window readings). The aggregate
+code review is `docs/reviews/phase-2c-1b-code.md`, and it returned **`READINESS: NOT READY`** twice —
+once on the phase, once on the fixes the window reading forced. **All nine findings were fixed
+before the commit.** The cut this phase implements is `docs/decisions/2c-split-notes.md`, produced
+by the consult `docs/reviews/phase-2c-split-design.md`; **do not re-commission that consult for
+2c-2** — it covers the whole of 2c.
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 894 passed, 35 files
+```
+
+(`cargo test --workspace` still expects **1007**, and this phase wrote no Rust.)
+
+**The next step is Phase 2c-2 — the small editor**: literal trigger · `replace` · label · word
+boundary, over `MatchDraft` and `save_match`, extending undo coverage to per-field editing. Its
+scope is in the 2c split table above, and it **fails as a draft-versus-projection mistake** — which
+is the one thing 2c-1b could not test, because a raw candidate is one exact string and a field
+candidate is *derived*.
+
+**What 2c-1b built that 2c-2 must not redesign, and the one thing it must not copy.**
+
+- **`Draft<T>` is generic and already carries a structured case.** 2c-1b drafts a `string`, where
+  the snapshot is nearly the identity. **2c-2 drafts a structured `MatchDraft`, which is the case
+  2c-1a's `{ same, snapshot }` rules and unconditional deep-freezing were built for** — the review
+  demonstrated the aliasing defect concretely. Use `structuredDraftRules<T>()`; do not invent a
+  shallower one.
+- **The three arms, the acknowledgement round trip and the conflict state are drawn once, in
+  `rawEditor.ts` + `RawEditor.svelte`.** 2c-2 uses `describeEditSave`, **not**
+  `describeWholeDocumentSave`, and its outcome is **not** sealed — a field edit invalidates no
+  identity. Read `saveOutcome.ts` before writing a second presenter, and extract rather than copy.
+- **`RoundTripText` is the raw editor's brand and does not generalize.** A field editor's values
+  pass through `<input>` and `<textarea>` too, so **the CRLF question returns in a different
+  shape**: a `replace` block scalar drafted through a text area is subject to the identical API-value
+  normalization. **Decide it deliberately in 2c-2; do not assume the brand covers it.** This is the
+  single most likely way 2c-2 breaks the preservation promise.
+- **`BrowserState.saveRawDocument`'s wiring cannot be copied for `saveMatch`.** `saveRawDocument`
+  re-resolves positionally because a replacement has no identity to re-point with;
+  `adoptTheDocumentOnDisk` re-points **by identity**. `saveMatch`, `createMatch` and `deleteMatch`
+  are still **not** wired into `workspace.svelte.ts` — only `moveMatch` and `saveRawDocument` are.
+- **The mounted-component harness exists and is scoped.** `environment: 'node'` stays the default
+  and files opt in by docblock. **Do not back-fill the existing six components**, and **do not let
+  `npm run build` leave 154 modules** — that number is the guard that the test and production
+  resolution paths have not diverged.
+
+**What 2c-2 owes, beyond its own scope.**
+
+1. **The three kinds of evidence of `2c-split-notes.md` §7**, all three: model tests, mounted
+   component tests, and **a window reading**. 2c-1b is this project's proof that the third is not
+   ceremony — it caught two real defects that 883 passing tests, `svelte-check` and two Codex
+   passes had all missed, one of which silently rewrote every line ending in a user's file.
+2. **A window reading is re-taken after any change to a component.** 2c-1b took two for that
+   reason. Budget for it.
+3. **The strings still never drawn.** 2c-1b drew the raw-save subset. The thirty-two
+   `code.draftError.*`, the eight `code.editError.*`, `code.commandError.draftRefused` and
+   `code.commandError.documentHasNoMatchList` remain on the list — `save_match` is the command
+   that produces most of them.
+4. **Two questions 2c-1b left open for a human**, neither blocking: whether the shipped WKWebView
+   refuses `navigator.clipboard` (both readings ran against a locked screen, which fully explains
+   the failure — hole 8.12), and whether the CRLF **refusal** is the right long-term product call
+   or whether an editing surface that does not read its value back through a `<textarea>` should be
+   built (D13 is written so it can be built on top). **The refusal forecloses nothing.**
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" further down still binds**,
+unchanged, except that inherited item 1 is now partly paid: a screen calls one of the five writing
+commands.
+
+---
+
 **Phase 2c-1a is complete: the draft spine exists and nothing draws it.**
 `docs/decisions/2c-1a-notes.md` is the record; the aggregate code review is
 `docs/reviews/phase-2c-1a-draft-spine.md`, and it returned **`READINESS: NOT READY`** on three
@@ -6041,6 +6266,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/rawEditor.ts`](src/lib/browser/rawEditor.ts) | **The editor's whole state machine as a value, and the model 2c-2's field editor should follow** — the component is a thin walk over it, which is what let the protocol be tested at all. Its drafted value is `RoundTripText`, a **branded** string whose only constructor applies the carriage-return check, so a bare `string` cannot type-check into a draft, a submission, a history step or a candidate; all three doors mint one or refuse, and `beginSave` re-checks because **a brand is a cast at bottom** and that is the last line before a wire that replaces a user's file. **The brand does not generalize to 2c-2**: a `replace` block scalar drafted through a `<textarea>` meets the identical API-value normalization, and that must be decided deliberately rather than assumed covered |
+| [`src/lib/components/RawEditor.svelte`](src/lib/components/RawEditor.svelte) | **The first screen in this project that writes a user's file**, and the only component with a mounted test. Read `copyBySelecting` before writing any clipboard code: `navigator.clipboard` is not sufficient on its own here, the carrier must be **offscreen rather than `hidden`** (an unrendered element cannot hold a selection), and every step of putting the screen back is separately non-throwing — because the first version restored focus in an unguarded `finally`, so a throw there produced **no** disclosure at all, neither success nor failure, on the one control that exists to keep a draft from being lost |
+| [`docs/decisions/2c-1b-notes.md`](docs/decisions/2c-1b-notes.md) **§9** | **The two window readings, and the reason this project's third kind of evidence is not ceremony.** They found two real defects that 883 passing tests, `svelte-check` and two Codex passes had all sailed past — one of which silently rewrote every line ending in a user's file. §9.11 is the re-take, taken because the fixes changed three components. **§13 is the honesty rule's third occurrence in one phase**: a decision record asserting a guarantee the code did not give. D13 is the corrected shape to copy — three named categories, one of them *what merely happens to be true of the current component path*, written as no guarantee at all |
+| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default, component test files opt in by docblock, the existing six components are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **154 modules is the regression guard**; check it on every round |
 | [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **Where 2c starts, and the only place a writing command is wired to real state.** `moveMatch` (2b-2a) and `saveRawDocument` (2b-2c-3b) are in `BrowserCommands`; `saveMatch`, `createMatch` and `deleteMatch` are **not**. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The eleven wrappers, five of which write.** `saveRawDocument` is the only one that does not return `CommandResult<SaveResult>`: it returns **`RawSaveOutcome`**, whose success arm always carries the `SaveResult` **plus** a required `reload` discriminant (`notOwed` / `done` / `failed`). That shape exists because the 3b review found **D2 broken in TypeScript** — a rejecting reload callback threw past the return type and hid a *committed* write. **A sixth writing wrapper inherits the rule, not the shape**: whatever it returns, a committed write may never come back as a rejection or an error |
 | [`src/lib/browser/rawSave.ts`](src/lib/browser/rawSave.ts) | The Q8 presentation model, in the tested layer rather than in a component. `describeRawSave` puts **"this replaces the entire document"** first in every model — the mode's identity, not a warning — then the owner's ruling when the candidate does not parse: espanso will not load the file, the parser's position **or the explicit no-position case**, and the choice. **`saveAnyway` is withheld for verdicts no acknowledgement can move.** `detail` is the parser's own message: carried, never localized, and deliberately not rendered |

@@ -279,7 +279,15 @@ describe('the source of the pane that renders these arms', () => {
     // and a presence check passes while the *toggle* is keyed on the selection
     // — which is experiment M, and it fired nothing until this assertion was
     // written this way.
-    expect(source).toContain('{#if browser.fileTextTarget !== null}\n    <p class="toggle">');
+    //
+    // The second conjunct arrived with Phase 2c-1b and is a different claim: the
+    // toggle is **withdrawn while the raw editor is open**, because it would
+    // otherwise close the viewer out from under an editor holding unsaved text.
+    // It is asserted here rather than in a test of its own so that the two facts
+    // about this one condition stay in one place.
+    expect(source).toContain(
+      '{#if browser.fileTextTarget !== null && editing === null}\n    <p class="toggle">'
+    );
     expect(source).toContain('browser.showFileText(!browser.fileTextShown)');
-  });
+  }); // End of the "toggle keyed on the target" case
 }); // End of the "source of the pane" suite
