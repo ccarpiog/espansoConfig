@@ -281,6 +281,7 @@ const COMMAND_ERRORS = [
   { code: 'invalidMenuLabels', missing: ['quit'], unexpected: ['renamed_last_week'] },
   { code: 'menuBuildFailed' },
   { code: 'moveNotWithinOneSequence' },
+  { code: 'documentHasNoMatchList', document: 4 },
   // The variant Rust's own `every_command_error()` samples, and for its reason:
   // it is one of the twelve that address something below the match mapping, and
   // `variable` is a position in the projected `vars` list, so the sample
@@ -375,7 +376,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 15,
+      commandErrors: 16,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,

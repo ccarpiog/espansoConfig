@@ -1,5 +1,5 @@
 /**
- * The eight workspace commands, typed.
+ * The ten workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,21 +17,22 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## Two of them write
+ * ## Four of them write
  *
- * {@link moveMatch}, since Phase 2b-2a, and {@link saveMatch}, since 2b-2b-3.
- * They are the only functions in this application that can change a file on
- * disk, and what each answers with is a {@link SaveResult} in the value channel
- * rather than a thrown error: a save that was refused, and a save that found the
- * file had moved on, are **outcomes** and not failures.
+ * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3; and
+ * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2. They are the only
+ * functions in this application that can change a file on disk, and what each
+ * answers with is a {@link SaveResult} in the value channel rather than a thrown
+ * error: a save that was refused, and a save that found the file had moved on,
+ * are **outcomes** and not failures.
  *
  * ## What is deliberately absent
  *
- * `create_match`, `delete_match` and `save_raw_document`. Each needs a core
- * primitive that does not exist — inserting a sequence item, removing one, and
- * replacing a whole document's text — and `espansoconfig_core::patch::DocumentEdit`
- * has none of the three. A wrapper here would be a standing invitation to call
- * something that is not there.
+ * `save_raw_document`. A whole document's text is not a byte-span replacement,
+ * and the one Rust entry point that writes a file takes a list of edits and
+ * nothing else — so it needs a change to that entry point rather than a wrapper
+ * here. A wrapper would be a standing invitation to call something that is not
+ * there.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -46,6 +47,8 @@ import type {
   MatchDraft,
   MatchId,
   MatchView,
+  NewMatch,
+  NewMatchPosition,
   SaveResult,
   WorkspaceSummary
 } from './types';
@@ -71,7 +74,9 @@ export const COMMAND_NAMES = [
   'document_text',
   'reload_document',
   'move_match',
-  'save_match'
+  'save_match',
+  'create_match',
+  'delete_match'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -325,3 +330,117 @@ export async function saveMatch(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('save_match', { id, draft, baseRevision, acknowledgement });
 } // End of function saveMatch()
+
+/**
+ * Writes one new snippet into a file's list, and saves the file.
+ *
+ * **The third function in this application that writes a user's file**, and it
+ * goes through the same save transaction as {@link moveMatch} and
+ * {@link saveMatch} and through nothing else: the file is locked, read and hashed
+ * under that lock, patched, reparsed, projected, checked, backed up and replaced
+ * atomically, all before this promise resolves.
+ *
+ * ## The snippet's content is closed, and its keys are not the caller's
+ *
+ * A {@link NewMatch} carries two values and nothing else, and both are required:
+ * a trigger with no body is not a usable espanso snippet and this application
+ * does not create one. Their **spelling** in the file — plain, quoted, or a text
+ * block — is Rust's decision, made by the same encoder every other value goes
+ * through, so a value holding a `#`, a line break or a leading `*` is written
+ * correctly rather than injected. Nothing here composes a YAML key.
+ *
+ * ## It targets the file's own snippet list
+ *
+ * The file is named by the identity this window holds for it, never by a path: a
+ * path on this wire is display text, and two different filenames can render to
+ * one string. The list is the file's top-level snippet list, and a file that has
+ * none rejects with `documentHasNoMatchList` **before anything is attempted** — a
+ * refusal to change the request, not a save to retry. A file whose list line has
+ * nothing under it is not that case: the first snippet of such a file is created
+ * normally.
+ *
+ * ## `saved.moved` is the created snippet
+ *
+ * This is the one command whose answer a caller cannot derive for itself, because
+ * the snippet did not exist when the call was made. Every {@link MatchId} held
+ * for this file is stale after a successful commit; `saved.moved` is the new
+ * snippet's identity in the new revision. There is deliberately **no force
+ * flag**.
+ *
+ * @param document - The file to write into, by the identity this window holds.
+ * @param newMatch - What the new snippet says: a trigger and a body.
+ * @param position - Where it goes in the list — `{ Front: {} }`, `{ End: {} }` or
+ *   `{ After: { anchor } }` naming the snippet it follows **by identity**.
+ * @param baseRevision - The revision the caller believes the file holds, and the
+ *   revision the anchor identity was minted from.
+ * @param acknowledgement - The suspicions already shown to a person, by content.
+ *   Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `moveNotWithinOneSequence`, `documentHasNoMatchList`, or `saveFailed`.
+ */
+export async function createMatch(
+  document: DocumentId,
+  newMatch: NewMatch,
+  position: NewMatchPosition,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('create_match', {
+    document,
+    newMatch,
+    position,
+    baseRevision,
+    acknowledgement
+  });
+} // End of function createMatch()
+
+/**
+ * Deletes one snippet from its file, and saves the file.
+ *
+ * **The fourth function in this application that writes a user's file**, and the
+ * only one that takes something away. It goes through the same save transaction
+ * as the other three and through nothing else.
+ *
+ * ## What goes with the snippet
+ *
+ * Its own leading comment block and its inline comment, because a comment
+ * describing something that is no longer there is worse than no comment. A
+ * comment the file owns — one separated from every snippet by a blank line —
+ * stays exactly where it is, byte for byte, and so does every byte of the
+ * snippets around it.
+ *
+ * **Deleting the last snippet of a file is refused**, and rejects with
+ * `saveFailed` carrying the engine's own reason. Emptying the list would mean
+ * either writing an empty list or leaving the list line with nothing under it,
+ * and those are two different files from the one the person has. Offer to delete
+ * the file instead, or say so; do not retry.
+ *
+ * ## Its answer names nothing, and that is the answer
+ *
+ * `saved.moved` is `null` after a successful deletion, because the snippet that
+ * was deleted has no identity in the new revision. It is **not** a neighbour's
+ * identity: `moved` means *where the snippet you acted on is now*, and filling it
+ * with whatever this window might select next would put a position back into the
+ * one field that exists to replace positions with identities. Re-read the
+ * document and choose.
+ *
+ * Every {@link MatchId} held for this file is stale afterwards. There is
+ * deliberately **no force flag**.
+ *
+ * @param id - The snippet to delete, by identity.
+ * @param baseRevision - The revision the caller believes the file holds. A stale
+ *   one is refused rather than resolved, because the address a deletion resolves
+ *   to is a **position**, and a stale identity's old position may now hold a
+ *   different snippet.
+ * @param acknowledgement - The suspicions already shown to a person, by content.
+ *   Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `moveNotWithinOneSequence`, or `saveFailed`.
+ */
+export async function deleteMatch(
+  id: MatchId,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('delete_match', { id, baseRevision, acknowledgement });
+} // End of function deleteMatch()

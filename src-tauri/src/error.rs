@@ -229,6 +229,35 @@ pub enum CommandError {
     /// because it is what keeps the guarantee true the day the projection grows a
     /// second sequence, and a guarantee with no code is a comment.
     MoveNotWithinOneSequence,
+    /// The document holds no top-level `matches:` key, so there is no list for a
+    /// new snippet to join.
+    ///
+    /// **A planning-time refusal, in the `Err` channel** for
+    /// [`CommandError::MoveNotWithinOneSequence`]'s reason: nothing was
+    /// attempted, no transaction ran, no finding was produced, and no
+    /// acknowledgement could ever change the answer. The caller has to change the
+    /// request — pick another file, or write the key — rather than confirm it.
+    ///
+    /// # Why creation refuses instead of writing the key
+    ///
+    /// `espansoconfig_core::patch::InsertItem` may synthesize **exactly one flat
+    /// block-mapping sequence item at a sequence-item boundary**, and that
+    /// sentence is the whole licence it has. Adding a `matches:` entry to the
+    /// root mapping is a different edit, and it would have to choose where in the
+    /// file the new key goes, what indentation the sequence takes and which of
+    /// the document's comments the key lands among — three layout decisions no
+    /// primitive may make on the user's behalf.
+    ///
+    /// **A bare `matches:` with no value is not this refusal.** An implicit null
+    /// is promoted into its first block-sequence item by the primitive itself, so
+    /// creating the first snippet of a file that already names the key works; this
+    /// code means the key is not there at all. A file that did not parse reaches
+    /// it too, and honestly: nothing can be said about the keys of a document the
+    /// substrate rejected.
+    DocumentHasNoMatchList {
+        /// The document that was asked, by its session-local identity.
+        document: u64,
+    },
     /// A draft could not be turned into an edit batch, so **no save was
     /// attempted at all**.
     ///
@@ -345,6 +374,7 @@ impl CommandError {
             CommandError::InvalidMenuLabels { .. } => "invalidMenuLabels",
             CommandError::MenuBuildFailed => "menuBuildFailed",
             CommandError::MoveNotWithinOneSequence => "moveNotWithinOneSequence",
+            CommandError::DocumentHasNoMatchList { .. } => "documentHasNoMatchList",
             CommandError::DraftRefused { .. } => "draftRefused",
             CommandError::SaveFailed { .. } => "saveFailed",
         }
@@ -401,6 +431,9 @@ impl Serialize for CommandError {
             }
             CommandError::MenuBuildFailed => {}
             CommandError::MoveNotWithinOneSequence => {}
+            CommandError::DocumentHasNoMatchList { document } => {
+                out.serialize_field("document", document)?;
+            }
             CommandError::DraftRefused { error } => {
                 out.serialize_field("error", error)?;
             }
@@ -428,6 +461,7 @@ impl CommandError {
             | CommandError::NotADirectory { .. }
             | CommandError::UnknownDocument { .. }
             | CommandError::IdentityNoSuchMatch { .. }
+            | CommandError::DocumentHasNoMatchList { .. }
             // One operand, and it is the core's whole refusal: a `DraftError`
             // has no second question to answer the way `SaveFailed` does.
             | CommandError::DraftRefused { .. } => 1,
@@ -497,6 +531,7 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
         },
         CommandError::MenuBuildFailed,
         CommandError::MoveNotWithinOneSequence,
+        CommandError::DocumentHasNoMatchList { document: 4 },
         // The one variant that carries an index below the match mapping, chosen
         // over the eleven simpler ones so that the enumeration exercises the
         // privacy rule as well as the shape: `variable` is a position in the
@@ -770,6 +805,7 @@ mod tests {
             ("invalidMenuLabels", vec!["missing", "unexpected"]),
             ("menuBuildFailed", vec![]),
             ("moveNotWithinOneSequence", vec![]),
+            ("documentHasNoMatchList", vec!["document"]),
             ("draftRefused", vec!["error"]),
             ("saveFailed", vec!["error", "may_have_written"]),
         ];

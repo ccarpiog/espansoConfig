@@ -449,6 +449,11 @@ pub struct SavedDocument {
     pub replacements: Vec<Replacement>,
     /// Presentation changes the patch had to make, for the caller to surface
     /// (plan section 6.2: never silently normalise).
+    ///
+    /// Two kinds, and neither is a failure: a scalar whose spelling changed as
+    /// well as its value, and a sequence-item removal that left the blank lines
+    /// on both sides of the item next to each other. Never a move's — see
+    /// [`PresentationNote::DoubledSequenceSeparation`].
     pub notes: Vec<PresentationNote>,
     /// Every finding the semantic gate reported about the candidate.
     ///

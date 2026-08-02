@@ -48,6 +48,7 @@ export const COMMAND_ERROR_CODES = [
   'invalidMenuLabels',
   'menuBuildFailed',
   'moveNotWithinOneSequence',
+  'documentHasNoMatchList',
   'draftRefused',
   'saveFailed'
 ] as const;
@@ -226,6 +227,32 @@ export interface MoveNotWithinOneSequenceError {
 }
 
 /**
+ * The file holds no snippet list, so a new snippet has nothing to join.
+ *
+ * **Not a failed save — no save was attempted.** Nothing was written, no
+ * transaction ran, and no acknowledgement could change the answer: the request
+ * itself cannot be represented, so the person has to change what they asked for.
+ * Offering *acknowledge and retry* in front of it would be a button that can
+ * never work.
+ *
+ * **A file whose `matches:` line has nothing under it is not this.** An empty
+ * list of that shape is turned into its first entry by the save itself, so
+ * creating the first snippet of a file that already names the list works. This
+ * code means the line is not there at all — and a file that could not be read as
+ * YAML reaches it too, honestly: nothing can be said about the contents of a file
+ * that did not parse.
+ *
+ * The honest offer to make beside it is *add the list*, or *choose another file*
+ * — never a retry of the same request.
+ */
+export interface DocumentHasNoMatchListError {
+  /** The discriminant. */
+  readonly code: 'documentHasNoMatchList';
+  /** The file that was asked, by the identity this window holds for it. */
+  readonly document: number;
+}
+
+/**
  * A draft could not be turned into an edit batch, so **no save was attempted**.
  *
  * **Not a {@link SaveResult} refusal, and the difference decides the interface.**
@@ -340,6 +367,7 @@ export type CommandError =
   | InvalidMenuLabelsError
   | MenuBuildFailedError
   | MoveNotWithinOneSequenceError
+  | DocumentHasNoMatchListError
   | DraftRefusedError
   | SaveFailedError;
 
@@ -526,6 +554,7 @@ export const COMMAND_ERROR_OPERANDS = {
   invalidMenuLabels: { missing: 'stringArray', unexpected: 'stringArray' },
   menuBuildFailed: {},
   moveNotWithinOneSequence: {},
+  documentHasNoMatchList: { document: 'number' },
   draftRefused: { error: 'object' },
   saveFailed: { error: 'object', may_have_written: 'boolean' }
 } as const;
@@ -698,13 +727,17 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'menuUnavailable':
     case 'invalidMenuLabels':
     case 'menuBuildFailed':
-    // A move refused before it was attempted, a draft refused before anything
-    // was attempted at all, and a save that failed all leave the selection
-    // exactly where it was: none of them says the identity the caller holds has
-    // stopped naming a snippet. A *successful* save does say that, and it is not
-    // an error — `SaveResult.moved` carries the new identity, and there is
-    // nothing here for that path to classify.
+    // A move refused before it was attempted, a creation refused because the
+    // file names no list, a draft refused before anything was attempted at all,
+    // and a save that failed all leave the selection exactly where it was: none
+    // of them says the identity the caller holds has stopped naming a snippet. A
+    // *successful* save does say that, and it is not an error — `SaveResult.moved`
+    // carries the new identity, and there is nothing here for that path to
+    // classify. A successful **deletion** says it too, and says it by answering
+    // `moved: null`; that is an outcome rather than an error, so it is not this
+    // function's to classify either.
     case 'moveNotWithinOneSequence':
+    case 'documentHasNoMatchList':
     case 'draftRefused':
     case 'saveFailed':
       return { action: 'none' };

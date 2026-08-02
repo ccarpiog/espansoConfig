@@ -82,16 +82,25 @@ pub enum SaveResult {
         ///
         /// **Always empty for a move**, and that is a property of the operation
         /// rather than of this field: a move copies the item's own bytes verbatim
-        /// and re-encodes no scalar, so there is no presentation to change.
+        /// and re-encodes no scalar, so there is no presentation to change. It
+        /// stays empty even where a move leaves the same doubled blank line a
+        /// deletion discloses — the detection is at the `RemoveItem` planning
+        /// level precisely so that this sentence remains true
+        /// (`docs/decisions/2b-2c-2-notes.md` section 6.2).
         ///
-        /// **`save_match` fills it**, and Phase 2b-2b-3 is where it acquired its
-        /// first producer. A drafted save re-encodes every scalar it rewrites, and
-        /// the emitter may have to spell the new value in a style the file did not
-        /// use — a plain scalar whose new text would parse as something else has
-        /// to be quoted, and a value with a line break in it has to become a block
-        /// — so each such edit reports what changed and, where the old spelling
-        /// could not have been reproduced byte for byte even without an edit, an
-        /// [`espansoconfig_core::emit::NotReencodable`] saying why.
+        /// **Two producers, and each fills it with a different variant of
+        /// [`PresentationNote`].** `save_match` was the first, at Phase 2b-2b-3: a
+        /// drafted save re-encodes every scalar it rewrites, and the emitter may
+        /// have to spell the new value in a style the file did not use — a plain
+        /// scalar whose new text would parse as something else has to be quoted,
+        /// and a value with a line break in it has to become a block — so each
+        /// such edit reports what changed as a `ScalarRestyled`, and, where the old
+        /// spelling could not have been reproduced byte for byte even without an
+        /// edit, an [`espansoconfig_core::emit::NotReencodable`] saying why.
+        /// `delete_match` is the second: removing a snippet from between two
+        /// blank-separated siblings leaves both blank lines — the correct bytes,
+        /// because neither blank line belonged to the snippet — and reports a
+        /// `DoubledSequenceSeparation` rather than collapsing one of them.
         ///
         /// It is never a refusal. A note is this application telling the user
         /// about a change it made and was not asked for, which plan section 6.2
@@ -299,7 +308,7 @@ pub(crate) fn every_save_result() -> Vec<SaveResult> {
         SaveResult::Saved {
             revision: view.revision,
             committed: true,
-            notes: vec![PresentationNote {
+            notes: vec![PresentationNote::ScalarRestyled {
                 edit: 0,
                 from: espansoconfig_core::ScalarStyle::Plain,
                 to: espansoconfig_core::ScalarStyle::SingleQuoted,

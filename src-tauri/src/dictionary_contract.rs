@@ -160,6 +160,15 @@ impl CodeEnum {
 /// exclusion is a claim about what crosses the boundary, and it expires when the
 /// boundary moves.
 ///
+/// **`PresentationNote` joined at Phase 2b-2c-2's fix round**, and it arrived by
+/// changing shape rather than by crossing a boundary it had not crossed before.
+/// It was a struct — one scalar's spelling — and a struct has no variants to give
+/// keys to, so nothing here owned it. Generalising it into a tagged union so that
+/// a deletion could disclose the doubled blank line it leaves made it an enum a
+/// screen renders, and therefore a namespace: `scalarRestyled` is the sentence the
+/// old struct never had, and `doubledSequenceSeparation` is the one the whole
+/// change exists for.
+///
 /// **`DraftError` moved here from [`NOT_A_CODE`] at Phase 2b-2b-3**, on the same
 /// rule and by the route the entry itself predicted: `save_match` is the first
 /// caller `espansoconfig_core::draft` has ever had, so a refusal that could not
@@ -318,6 +327,10 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/draft/error.rs",
         name: "DraftError",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/edit.rs",
+        name: "PresentationNote",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -337,7 +350,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 15),
+    ("commandError", 16),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -365,6 +378,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("notReencodable", 8),
     ("saveResult", 3),
     ("draftError", 32),
+    ("presentationNote", 2),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -432,6 +446,14 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          with the same spelling on the wire: it names `name`, `type` or \
          `inject_vars` inside one variable, which espanso spells one way and \
          which `every_variable_field_serializes_as_its_espanso_key` pins",
+    ),
+    (
+        "NewMatchPosition",
+        "a protocol tag, not a code, exactly as `DraftField` is: `Front`, \
+         `After` and `End` travel *into* a command as where the caller wants a \
+         new snippet put, and are never rendered. What a screen shows is the \
+         list itself, and the wire form carries no operand a sentence could be \
+         built from beyond a `MatchId`",
     ),
     (
         "DraftTarget",
@@ -1031,8 +1053,13 @@ fn every_typescript_wire_union_has_a_namespace() {
       // read as a structural type and skipped by the guard above. Nothing is lost:
       // its variant names live in `DraftErrorName`, which is examined, and whose
       // `Name` suffix is stripped to find the `draftError` namespace.
+      //
+      // Forty-four since Phase 2b-2c-2's fix round: `PresentationNote` stopped
+      // being an interface and became a tagged union with a `PresentationNoteName`
+      // beside it. The value union is skipped for `DraftError`'s reason — every
+      // member is a one-key object — and the `Name` union is the one counted here.
     assert!(
-        checked >= 43,
+        checked >= 44,
         "only {checked} unions were examined, so this scan is not reading {WIRE_TYPES}"
     );
     assert_eq!(

@@ -37,6 +37,7 @@ import type {
   NodeKind,
   NotReencodable,
   PathError,
+  PresentationNote,
   RotationOutcome,
   SaveError,
   SaveResult,
@@ -74,6 +75,7 @@ import {
   describeNodeKind,
   describePathError,
   describeNotReencodable,
+  describePresentationNote,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -131,6 +133,7 @@ export {
   describeNodeKind,
   describePathError,
   describeNotReencodable,
+  describePresentationNote,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -160,6 +163,7 @@ export {
   nodeKindKey,
   pathErrorKey,
   notReencodableKey,
+  presentationNoteKey,
   rotationOutcomeKey,
   saveErrorKey,
   saveResultKey,
@@ -682,6 +686,21 @@ export function tSaveError(error: SaveError): string {
 export function tNotReencodable(reason: NotReencodable): string {
   return describeNotReencodable(locale.current, reason);
 } // End of function tNotReencodable()
+
+/**
+ * Renders one presentation change a successful save made, in the current
+ * language.
+ *
+ * The sentence that keeps plan section 6.2 — never silently normalise — true on a
+ * screen. It reports a change the save *made*, so it belongs beside the value or
+ * the list it is about and never in an error toast: the save succeeded.
+ *
+ * @param note - A `PresentationNote` as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tPresentationNote(note: PresentationNote): string {
+  return describePresentationNote(locale.current, note);
+} // End of function tPresentationNote()
 
 /**
  * Renders how a save ended, in the current language.

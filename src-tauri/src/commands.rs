@@ -1,10 +1,11 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
 //! Plan section 6.4's **read-only** set — `open_workspace`, `list_documents`,
-//! `get_document`, `get_match`, `document_text` and `reload_document` — and, as
-//! of Phase 2b-2a, one command that writes: `move_match`. Each is one line over a
-//! [`WorkspaceSession`] method, and each of the six read-only ones is one call
-//! into `crate::workspace`, which Phase 1a built to be wrapped this way.
+//! `get_document`, `get_match`, `document_text` and `reload_document` — and four
+//! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), and `create_match`
+//! and `delete_match` (2b-2c-2). Each is one line over a [`WorkspaceSession`]
+//! method, and each of the six read-only ones is one call into
+//! `crate::workspace`, which Phase 1a built to be wrapped this way.
 //!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
@@ -14,24 +15,26 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Two of the eight commands write, and they write the same way
+//! # Four of the ten commands write, and they write the same way
 //!
-//! Phase 2b-2a added `move_match` and Phase 2b-2b-3 adds `save_match`. Both go
-//! through [`espansoconfig_core::persist::save_document`] and through nothing
-//! else: `replace_file_atomically` and `replace_locked_file` take finished bytes,
+//! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, and 2b-2c-2
+//! `create_match` and `delete_match`. All four go through
+//! [`espansoconfig_core::persist::save_document`] and through nothing else:
+//! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
-//! **no command in this crate calls either**. `create_match`, `delete_match` and
-//! `save_raw_document` are still absent, and the reason is not caution: the core
-//! has no primitive for inserting a sequence item, removing one, or replacing a
-//! whole document's text, and inventing one at this layer would be an edit engine
-//! outside the crate that owns the fidelity rules.
+//! **no command in this crate calls either**. `save_raw_document` is still
+//! absent, and the reason is not caution: a whole-document text is not a span
+//! replacement, `SaveRequest` takes a list of edits and nothing else, and giving
+//! the one entry point that writes a second shape is a change to that entry point
+//! rather than a new caller of it.
 //!
-//! The two differ in **who derives the edits**, and that is the whole of the
-//! difference. `move_match` builds its own single [`ItemMove`], because a move is
-//! one primitive and there is nothing to diff. `save_match` hands a
+//! They differ in **who derives the edits**, and that is the whole of the
+//! difference. `move_match`, `create_match` and `delete_match` each build their
+//! own single primitive — an [`ItemMove`], an [`InsertItem`], a [`RemoveItem`] —
+//! because each is one operation with nothing to diff. `save_match` hands a
 //! [`MatchDraft`] to [`plan_match_edits`], which derives the **smallest** batch
 //! that realises it — or refuses by name, in which case nothing is attempted and
-//! the caller gets [`CommandError::DraftRefused`]. Neither ever combines the two
+//! the caller gets [`CommandError::DraftRefused`]. None of them ever combines two
 //! kinds of edit in one batch (`PROGRESS.md` R25).
 //!
 //! # Three constraints this module inherits and does not drop
@@ -75,11 +78,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use espansoconfig_core::draft::{plan_match_edits, MatchDraft};
+use espansoconfig_core::draft::{plan_match_edits, MatchDraft, NewMatch};
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
-use espansoconfig_core::patch::{DocumentEdit, DocumentPath, ItemMove};
+use espansoconfig_core::patch::{
+    DocumentEdit, DocumentPath, InsertItem, ItemMove, ItemPlacement, RemoveItem,
+};
 use espansoconfig_core::persist::{
     save_document, Acknowledgement, BackupSession, SaveError, SaveRequest, SavedDocument,
 };
@@ -88,6 +94,48 @@ use espansoconfig_core::{ContentRevision, DocumentId};
 
 use crate::error::CommandError;
 use crate::save::SaveResult;
+
+/// The one key a match list lives under, in the document's root mapping.
+///
+/// Written once, here, because two spellings of it would be two answers to
+/// *"which list does a new snippet join?"*. The path resolver compares **decoded**
+/// keys, so a document that writes `"matches":` in quotes is found by this too.
+const MATCH_LIST_KEY: &str = "matches";
+
+/// The stream document espanso loads.
+///
+/// A YAML file may hold several documents; espanso reads the first, and the read
+/// model projects only that one (`DocumentView::stream_documents` reports the
+/// rest). Every path this module builds therefore starts at document 0.
+const LOADED_STREAM_DOCUMENT: usize = 0;
+
+/// Where a newly created snippet goes in its file's list.
+///
+/// **Three-valued, because the list has three interesting places** and a
+/// two-valued `Option` would have to make one of them unreachable. It is the wire
+/// counterpart of [`ItemPlacement`], and the difference between the two is the
+/// difference this whole boundary is built on: a placement names a **position**
+/// in the sequence, and this names an **identity**. A caller sends the snippet it
+/// can see, and Rust turns it into an index against the parse it holds.
+///
+/// Every variant is a struct variant, including the two with no operands, so the
+/// enum crosses `serde`'s externally tagged representation as a **uniform object**
+/// — `{"Front":{}}`, never the bare string `"Front"` a unit variant would produce.
+/// That is the same rule `DraftError` follows and for the same reason
+/// (`docs/decisions/2b-2b-3-notes.md` D5): one shape per wire enum is what lets a
+/// frontend type-guard it without a special case per variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewMatchPosition {
+    /// Above the file's first snippet.
+    Front {},
+    /// Directly after the snippet this identity names.
+    After {
+        /// The snippet the new one is written after.
+        anchor: MatchId,
+    },
+    /// After the file's last snippet.
+    End {},
+}
 
 /// One open configuration directory, and the session state that belongs to it.
 ///
@@ -372,6 +420,106 @@ impl WorkspaceSession {
         )
     } // End of function save_match()
 
+    /// Writes one new match into a document's top-level `matches` list.
+    ///
+    /// The third method in this crate that can write a user's file, and it writes
+    /// it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`], with exactly one
+    /// [`DocumentEdit::InsertItem`].
+    ///
+    /// # It targets one list, named by the schema
+    ///
+    /// The document's **top-level `matches` value**, and nothing else. Not a wire
+    /// path — `crate::wire_contract` records that two distinct filenames can
+    /// render to one string, so a command that accepts a wire path back as a
+    /// target is a bug — and not an arbitrary sequence, because a new snippet
+    /// belongs in the list espanso reads.
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// - a `base_revision` that is not the revision this session's projection
+    ///   holds — [`CommandError::IdentityStaleRevision`]. Load-bearing for the
+    ///   same reason as a move's: `position` names an **anchor by identity**, and
+    ///   resolving one against another parse would anchor the new snippet to
+    ///   whatever now occupies that node;
+    /// - an anchor naming another **document** —
+    ///   [`CommandError::IdentityWrongDocument`];
+    /// - an anchor this projection cannot address as an item of the same list —
+    ///   [`CommandError::MoveNotWithinOneSequence`];
+    /// - a document with **no `matches:` key at all** —
+    ///   [`CommandError::DocumentHasNoMatchList`]. A *bare* `matches:` is not this
+    ///   refusal: the primitive promotes an implicit null into its first item, so
+    ///   the first snippet of a file that already names the key can be created.
+    ///
+    /// # What it answers with
+    ///
+    /// [`SaveResult`], in the `Ok` channel, exactly as the two commands before it
+    /// — and [`SaveResult::Saved::moved`] is the **created** match's identity in
+    /// the new revision, which is the one thing a caller cannot derive for itself:
+    /// the snippet did not exist when the call was made.
+    pub fn create_match(
+        &self,
+        document: DocumentId,
+        new_match: &NewMatch,
+        position: &NewMatchPosition,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        let mut guard = self.lock();
+        let Some(Open { workspace, backups }) = guard.as_mut() else {
+            return Err(CommandError::NoWorkspaceOpen);
+        };
+        create_one_match(
+            workspace,
+            backups,
+            document,
+            new_match,
+            position,
+            base_revision,
+            acknowledgement,
+        )
+    } // End of function create_match()
+
+    /// Deletes one match from its file.
+    ///
+    /// The fourth method in this crate that can write a user's file, and it writes
+    /// it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`], with exactly one
+    /// [`DocumentEdit::RemoveItem`].
+    ///
+    /// # What travels with the snippet
+    ///
+    /// The primitive's answer, not this layer's: the item's own leading comment
+    /// block and its inline comment go with it, and a comment the blank-line rule
+    /// gives to the **file** stays exactly where it is. Deleting the only item of
+    /// a list is refused by the engine
+    /// (`EditError::RemovalWouldEmptyTheSequence`), because writing `matches: []`
+    /// would synthesize a collection and leaving `matches:` bare would turn a list
+    /// into YAML null; it arrives here inside [`CommandError::SaveFailed`].
+    ///
+    /// # Its answer names nothing
+    ///
+    /// [`SaveResult::Saved::moved`] is **`None`**, and this is the first command
+    /// for which that is the routine correct answer rather than a defensive one:
+    /// the match it deleted has no identity in the new revision, by construction.
+    /// It is deliberately **not** a neighbour's identity — `moved` means *the new
+    /// identity of the match acted upon*, and overloading it with which snippet a
+    /// window should select next would re-introduce positional identity through a
+    /// field whose whole purpose is to replace it. A caller re-reads the document
+    /// and chooses.
+    pub fn delete_match(
+        &self,
+        id: MatchId,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        let mut guard = self.lock();
+        let Some(Open { workspace, backups }) = guard.as_mut() else {
+            return Err(CommandError::NoWorkspaceOpen);
+        };
+        delete_one_match(workspace, backups, id, base_revision, acknowledgement)
+    } // End of function delete_match()
+
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
     fn with_workspace<T>(
@@ -605,6 +753,229 @@ fn save_one_match(
         }
     }
 } // End of function save_one_match()
+
+/// The document's top-level `matches` list, or the refusal that it has none.
+///
+/// **Reads the projection rather than the syntax tree**, because the projection
+/// is what the caller was shown and what this session already holds:
+/// [`DocumentView::top_level_keys`] is every key of the loaded stream document,
+/// decoded, which is exactly the comparison
+/// `espansoconfig_core::patch::resolve_full` makes when it walks the same path.
+///
+/// A document that did not parse has no top-level keys at all and is refused
+/// here, honestly: nothing can be said about the keys of a document the substrate
+/// rejected, and a save planned against one would be planned against nothing.
+///
+/// # Errors
+///
+/// [`CommandError::DocumentHasNoMatchList`] — see the variant for why creation
+/// refuses instead of writing the key.
+fn match_list_of(view: &DocumentView) -> Result<DocumentPath, CommandError> {
+    let named = view
+        .top_level_keys
+        .iter()
+        .any(|key| key.text == MATCH_LIST_KEY);
+    if !named {
+        return Err(CommandError::DocumentHasNoMatchList {
+            document: view.id.get(),
+        });
+    }
+    Ok(DocumentPath::root(LOADED_STREAM_DOCUMENT).with_key(MATCH_LIST_KEY))
+} // End of function match_list_of()
+
+/// Turns a wire position into the placement the patch engine takes.
+///
+/// **The one place an identity becomes an index**, and the reason it is one
+/// place: an anchor resolved twice could be resolved against two different
+/// parses. Every refusal a move's anchor gets, a creation's anchor gets, by the
+/// same call ([`addressed_item`]) against the same projection.
+///
+/// # Errors
+///
+/// [`CommandError::IdentityWrongDocument`] for an anchor in another file — a
+/// snippet is created in one document, exactly as a move stays in one
+/// (`PROGRESS.md` D2r) — and [`CommandError::MoveNotWithinOneSequence`] for an
+/// anchor this projection cannot address as an item of `sequence`.
+fn placement_of(
+    view: &DocumentView,
+    document: DocumentId,
+    sequence: &DocumentPath,
+    position: &NewMatchPosition,
+) -> Result<ItemPlacement, CommandError> {
+    match position {
+        NewMatchPosition::Front {} => Ok(ItemPlacement::Front),
+        NewMatchPosition::End {} => Ok(ItemPlacement::End),
+        NewMatchPosition::After { anchor } => {
+            if anchor.document != document {
+                return Err(CommandError::IdentityWrongDocument {
+                    expected: document.get(),
+                    found: anchor.document.get(),
+                });
+            }
+            let (anchor_sequence, at) = addressed_item(view, *anchor)?;
+            if &anchor_sequence != sequence {
+                return Err(CommandError::MoveNotWithinOneSequence);
+            }
+            Ok(ItemPlacement::After(at))
+        }
+    } // End of the match over the three wire positions
+} // End of function placement_of()
+
+/// Plans and runs one creation against an open workspace.
+///
+/// A free function for [`move_one_match`]'s reason, and its steps are the same
+/// four in the same order: resolve the projection, refuse a `base_revision` that
+/// is not this session's, derive **one** edit, and hand it to the transaction.
+///
+/// # The primitive is not pre-planned here
+///
+/// Everything [`InsertItem`] can refuse — a flow sequence, a bare key whose
+/// trivia is ambiguous, a sequence whose items disagree about their column — is
+/// refused **inside the transaction**, under the lock and against the bytes the
+/// transaction read, and arrives as [`CommandError::SaveFailed`]. Asking the
+/// planner a second time here would resolve the document twice and let this layer
+/// and the transaction disagree about a file that changed in between. What this
+/// layer refuses is only what it alone can see: the identities, and whether the
+/// document names a match list at all.
+fn create_one_match(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    document: DocumentId,
+    new_match: &NewMatch,
+    position: &NewMatchPosition,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    let view = workspace.document_view(document)?;
+    if view.revision != base_revision {
+        // The caller chose an anchor in a parse this session no longer holds. An
+        // identity resolved against another parse names a position, and a position
+        // is not an identity.
+        return Err(CommandError::IdentityStaleRevision {
+            expected: view.revision.to_hex(),
+            found: base_revision.to_hex(),
+        });
+    }
+    let sequence = match_list_of(view)?;
+    let placement = placement_of(view, document, &sequence, position)?;
+    // Where the new item will be: the index it takes is the number of original
+    // items above it, which is exactly what `ItemPlacement` says. The `End` arm
+    // counts the projection's matches, and that count is the sequence's own item
+    // count rather than an approximation of it — a `matches` entry the schema does
+    // not recognise still produces one `MatchView`, recorded by span and not
+    // descended into (`DiagnosticCode::MatchIsNotAMapping`), so positions never
+    // shift. A bare `matches:` projects zero of them and the promoted item lands
+    // at 0, which is the same answer.
+    let landing = match placement {
+        ItemPlacement::Front => 0,
+        ItemPlacement::After(at) => at + 1,
+        ItemPlacement::End => view.matches.len(),
+    };
+    let landed = sequence.clone().with_index(landing);
+    let edit = match placement {
+        ItemPlacement::Front => InsertItem::to_front(sequence, new_match.fields()),
+        ItemPlacement::After(at) => InsertItem::after(sequence, at, new_match.fields()),
+        ItemPlacement::End => InsertItem::new(sequence, new_match.fields()),
+    };
+    // Cloned so that the immutable borrow of the workspace ends before the save.
+    let context = workspace.document_context(document)?.clone();
+    let edits = [DocumentEdit::InsertItem(edit)];
+
+    let request = SaveRequest {
+        context: &context,
+        base_revision,
+        edits: &edits,
+        acknowledgement,
+        // Never `None`. See `WorkspaceSession::open`.
+        backups: Some(backups),
+    };
+    match save_document(request) {
+        Ok(saved) => Ok(after_a_save(workspace, document, Some(&landed), saved)),
+        Err(SaveError::RevisionMismatch {
+            expected, found, ..
+        }) => conflict_after_the_lock(workspace, document, expected, found),
+        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
+            verdict: refusal.verdict,
+            findings: refusal.findings,
+        }),
+        Err(error) => {
+            if error.may_have_written() {
+                // The rename may have completed, so the cached parse may describe
+                // bytes that are gone — `move_one_match`'s reasoning, unchanged.
+                let _ = workspace.evict(document);
+            }
+            Err(CommandError::SaveFailed { error })
+        }
+    }
+} // End of function create_one_match()
+
+/// Plans and runs one deletion against an open workspace.
+///
+/// A free function for [`move_one_match`]'s reason. It addresses the item through
+/// [`addressed_item`] — the move's own four gates, so a deletion and a relocation
+/// cannot disagree about which snippets are addressable — and issues exactly one
+/// [`RemoveItem`], which is that move's lift half in the core's own shared code.
+///
+/// # The address is resolved against the revision the caller sent, and that is the
+/// point
+///
+/// A [`DocumentPath`] ending in an index is a **position**. The revision check
+/// above is therefore not an optimisation of the transaction's own: it is what
+/// stops a stale identity being turned into an index that still resolves — to a
+/// different snippet. `delete_match_never_deletes_the_item_at_a_stale_ids_old_path`
+/// is that claim as a test.
+///
+/// # Nothing is named afterwards
+///
+/// `at` is `None`, so [`after_a_save`] mints no identity. See
+/// [`WorkspaceSession::delete_match`] for why a neighbour's is not offered
+/// instead.
+fn delete_one_match(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    id: MatchId,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    let view = workspace.document_view(id.document)?;
+    if view.revision != base_revision {
+        return Err(CommandError::IdentityStaleRevision {
+            expected: view.revision.to_hex(),
+            found: base_revision.to_hex(),
+        });
+    }
+    let (sequence, at) = addressed_item(view, id)?;
+    // Cloned so that the immutable borrow of the workspace ends before the save.
+    let context = workspace.document_context(id.document)?.clone();
+    let edits = [DocumentEdit::RemoveItem(RemoveItem::new(
+        sequence.with_index(at),
+    ))];
+
+    let request = SaveRequest {
+        context: &context,
+        base_revision,
+        edits: &edits,
+        acknowledgement,
+        // Never `None`. See `WorkspaceSession::open`.
+        backups: Some(backups),
+    };
+    match save_document(request) {
+        Ok(saved) => Ok(after_a_save(workspace, id.document, None, saved)),
+        Err(SaveError::RevisionMismatch {
+            expected, found, ..
+        }) => conflict_after_the_lock(workspace, id.document, expected, found),
+        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
+            verdict: refusal.verdict,
+            findings: refusal.findings,
+        }),
+        Err(error) => {
+            if error.may_have_written() {
+                let _ = workspace.evict(id.document);
+            }
+            Err(CommandError::SaveFailed { error })
+        }
+    }
+} // End of function delete_one_match()
 
 /// Describes the disk side of a conflict, with a read taken **after** the lock
 /// was released.
@@ -875,18 +1246,112 @@ pub fn save_match(
     session.save_match(id, &draft, base_revision, &acknowledgement)
 } // End of function save_match()
 
+/// Writes one new match into a document's `matches` list (plan section 6.4).
+///
+/// **The ninth command, and the third that can write a user's file.**
+///
+/// # Its arguments, and why each is the shape it is
+///
+/// - `document` — **the app's opaque identity**, not a wire path. A
+///   [`espansoconfig_core::wire::WirePath`] renders lossily, so two distinct
+///   filenames can arrive as one string; a command that accepted one back as a
+///   target could write to the wrong file. This is the one mutating command whose
+///   target is a document rather than a match, because the match it acts on does
+///   not exist yet.
+/// - `new_match` — a closed [`NewMatch`], **both fields mandatory**. Not a
+///   [`MatchDraft`]: a draft can express twenty-two fields and four collections,
+///   and creation synthesizes exactly one flat mapping of scalars, so taking one
+///   would advertise a structure this command cannot spell. Not a list of
+///   key/value pairs either — `docs/decisions/2b-2b-2-notes.md` decision D1
+///   forbids this engine emitting a key no schema fixes.
+/// - `position` — [`NewMatchPosition`], three-valued, naming its anchor by
+///   **identity**. An index would be a position in a parse the caller may no
+///   longer hold, which is the mistake `move_match` avoids the same way.
+/// - `base_revision` — the optimistic-concurrency token, checked twice for
+///   [`move_match`]'s reason and load-bearing here in the same one as a move's:
+///   the anchor is resolved against this session's projection.
+/// - `acknowledgement` — the suspicions the caller has already shown someone, by
+///   content. There is deliberately **no `force` flag**.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes,
+/// [`CommandError::MoveNotWithinOneSequence`] for an anchor that is not an item
+/// of this list, and [`CommandError::DocumentHasNoMatchList`] for a file that
+/// does not name `matches` at all — all before anything is attempted;
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures, which
+/// is where every refusal the insertion primitive makes arrives. A conflict and a
+/// refusal are **not** errors — see [`SaveResult`].
+#[tauri::command]
+pub fn create_match(
+    session: State<'_, WorkspaceSession>,
+    document: DocumentId,
+    new_match: NewMatch,
+    position: NewMatchPosition,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.create_match(
+        document,
+        &new_match,
+        &position,
+        base_revision,
+        &acknowledgement,
+    )
+} // End of function create_match()
+
+/// Deletes one match from its file (plan section 6.4).
+///
+/// **The tenth command, and the fourth that can write a user's file.**
+///
+/// # Its arguments
+///
+/// `id`, `base_revision` and `acknowledgement`, and nothing else: a deletion has
+/// no destination and no content. The identity is the match to delete, for
+/// [`move_match`]'s reason — a
+/// [`espansoconfig_core::patch::DocumentPath`] is a **position**, and deleting an
+/// earlier match re-points one at a different snippet, which is precisely the
+/// mistake this command could make most expensively.
+///
+/// # It answers with no identity, and that is the correct answer
+///
+/// [`SaveResult::Saved::moved`] is `None` after a successful deletion. The match
+/// that was deleted has no identity in the new revision, and a neighbour's is not
+/// offered in its place: `moved` means *the new identity of the match acted
+/// upon*, and filling it with whatever a window might select next would make a
+/// field that exists to replace positional identity carry one. The caller
+/// re-reads the document.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes before anything is
+/// attempted; [`CommandError::SaveFailed`] for the transaction's own typed
+/// failures — including **deleting the only snippet of a file**, which the engine
+/// refuses by name rather than turning the list into `[]` or into YAML null. A
+/// conflict and a refusal are **not** errors.
+#[tauri::command]
+pub fn delete_match(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.delete_match(id, base_revision, &acknowledgement)
+} // End of function delete_match()
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
 
-    use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft};
+    use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft, NewMatch};
     use espansoconfig_core::model::MatchId;
+    use espansoconfig_core::patch::PresentationNote;
     use espansoconfig_core::persist::Acknowledgement;
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
     use tempfile::TempDir;
 
-    use super::WorkspaceSession;
+    use super::{NewMatchPosition, WorkspaceSession};
     use crate::save::SaveResult;
 
     /// A match file with two snippets and one unrecognised key.
@@ -986,9 +1451,10 @@ mod tests {
     ///
     /// "Every" is the claim, so the body holds every one of them: `documents`,
     /// `document`, `text`, `reload` and `match_view` — the five that route
-    /// through [`WorkspaceSession::with_workspace`]. `open` is excluded because
-    /// it is the method that opens one, and `set_menu_labels` is not a
-    /// workspace command at all.
+    /// through [`WorkspaceSession::with_workspace`] — and the four that write,
+    /// which take the guard themselves. `open` is excluded because it is the
+    /// method that opens one, and `set_menu_labels` is not a workspace command at
+    /// all.
     ///
     /// `text` was missing until the review of Phase 1c-2b-2a found the name
     /// outrunning the body. The defect it exists to catch is a method that
@@ -1019,10 +1485,40 @@ mod tests {
                 )
                 .err()
                 .map(|error| error.code()),
+            session
+                .create_match(
+                    id,
+                    &NewMatch {
+                        trigger: ":one".to_owned(),
+                        replace: "first".to_owned(),
+                    },
+                    &NewMatchPosition::End {},
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
+            session
+                .delete_match(
+                    identity,
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
+            session
+                .save_match(
+                    identity,
+                    &MatchDraft::default(),
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
         ];
         assert_eq!(
             refusals,
-            [Some("noWorkspaceOpen"); 6],
+            [Some("noWorkspaceOpen"); 9],
             "every session method that needs a workspace must refuse before one is open"
         );
     } // End of function every_command_refuses_before_a_workspace_is_open()
@@ -2423,9 +2919,12 @@ mod tests {
             1,
             "one edit changed one value's spelling: {notes:?}"
         );
-        assert_eq!(notes[0].edit, 0, "the note names its edit's position");
+        let PresentationNote::ScalarRestyled { edit, from, to, .. } = &notes[0] else {
+            panic!("a re-encoded scalar reports a restyling, got {notes:?}");
+        };
+        assert_eq!(*edit, 0, "the note names its edit's position");
         assert_ne!(
-            notes[0].from, notes[0].to,
+            from, to,
             "a note is only worth sending when the spelling really changed"
         );
 
@@ -2434,9 +2933,14 @@ mod tests {
             .as_array()
             .expect("notes is a list on the wire");
         assert_eq!(crossed.len(), 1, "the note must reach the wire: {json}");
-        assert_eq!(crossed[0]["edit"], 0);
-        assert_eq!(crossed[0]["from"], "Plain");
-        assert_eq!(crossed[0]["to"], "Literal");
+        let payload = &crossed[0]["ScalarRestyled"];
+        assert!(
+            payload.is_object(),
+            "every note crosses as a one-key object (D5): {json}"
+        );
+        assert_eq!(payload["edit"], 0);
+        assert_eq!(payload["from"], "Plain");
+        assert_eq!(payload["to"], "Literal");
     } // End of function a_saved_draft_reports_the_presentation_change_it_had_to_make()
 
     /// A suspicion refuses the save until the findings come back, and the same
@@ -2487,6 +2991,750 @@ mod tests {
             other => panic!("expected a saved result, got {other:?}"),
         }
     } // End of function a_suspicion_refuses_a_drafted_save_until_the_findings_come_back()
+
+    // -----------------------------------------------------------------------
+    // Phase 2b-2c-2 — the two commands that change a list's length
+    // -----------------------------------------------------------------------
+
+    /// A two-snippet file, hand-authored and neutral, written by these tests.
+    ///
+    /// Separate from [`BASE_YML`] because the creation and deletion cases state
+    /// their expected output **as a whole document literal**, and a fixture
+    /// carrying an unmodelled key would put a line in every one of those
+    /// literals that has nothing to do with what is under test.
+    const TWO_SNIPPETS: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "  - trigger: ':two'\n",
+        "    replace: second\n",
+    );
+
+    /// A tree whose one match file holds `source`.
+    fn tree_holding(source: &str) -> TempDir {
+        let dir = TempDir::new().expect("temp dir");
+        fs::create_dir_all(dir.path().join("match")).unwrap();
+        fs::write(dir.path().join("match").join("base.yml"), source).unwrap();
+        dir
+    }
+
+    /// The bytes of `<root>/match/base.yml`.
+    fn base_bytes(dir: &TempDir) -> String {
+        fs::read_to_string(dir.path().join("match").join("base.yml")).expect("the file reads back")
+    }
+
+    /// The snippet these tests create, hand-authored and neutral.
+    fn new_snippet() -> NewMatch {
+        NewMatch {
+            trigger: ":new".to_owned(),
+            replace: "a new snippet".to_owned(),
+        }
+    }
+
+    /// A creation lands at the end, writes exactly the expected file, and names
+    /// the snippet it created.
+    ///
+    /// **Four claims, and the fourth is the one no caller can make for itself.**
+    /// The whole file is stated as a literal rather than as a proxy, so a save
+    /// that rewrote a quote, an indent or a line ending anywhere fails; the two
+    /// existing snippets come out byte-identical, which is `CLAUDE.md` section 3
+    /// at this layer; the identity held before the save stops resolving; and the
+    /// identity that comes back is the **created** snippet, which did not exist
+    /// when the call was made.
+    #[test]
+    fn a_created_match_is_appended_and_answers_with_its_new_identity() {
+        let dir = tree_holding(TWO_SNIPPETS);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+
+        let result = session
+            .create_match(
+                id,
+                &new_snippet(),
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the creation is legal");
+        let SaveResult::Saved {
+            revision,
+            committed,
+            notes,
+            backup_taken,
+            moved,
+        } = result
+        else {
+            panic!("expected a saved result");
+        };
+        assert!(committed, "a creation always changes the file's bytes");
+        assert!(backup_taken, "the session must have copied the file first");
+        assert!(
+            notes.is_empty(),
+            "two plain values need no presentation change: {notes:?}"
+        );
+        assert_ne!(revision, before.revision);
+
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':two'\n",
+                "    replace: second\n",
+                "  - trigger: ':new'\n",
+                "    replace: a new snippet\n",
+            ),
+            "every byte of the two existing snippets must survive unchanged"
+        );
+
+        let created = moved.expect("a committed creation names the snippet it created");
+        assert_eq!(
+            trigger_text(&session.match_view(created).expect("it resolves")),
+            ":new"
+        );
+        assert_eq!(
+            session
+                .match_view(held)
+                .expect_err("the identity held before the save is stale")
+                .code(),
+            "identityStaleRevision"
+        );
+        assert_eq!(
+            triggers_of(&session.document(id).expect("it reads")),
+            [":one", ":two", ":new"]
+        );
+    } // End of function a_created_match_is_appended_and_answers_with_its_new_identity()
+
+    /// A creation at the front lands above the first snippet **and above its own
+    /// comment**.
+    ///
+    /// The front destination is the first item's whole ownership hull, so a
+    /// comment describing that snippet stays with it rather than being adopted by
+    /// the arrival. The fixture's comment is the assertion: a front insertion
+    /// derived as "the line after `matches:`" would put the new snippet between
+    /// `# about the first one` and the snippet it describes, and the literal below
+    /// would fail.
+    #[test]
+    fn a_created_match_at_the_front_lands_above_the_first_snippet_and_its_comment() {
+        let source = concat!(
+            "matches:\n",
+            "  # about the first one\n",
+            "  - trigger: ':one'\n",
+            "    replace: first\n",
+        );
+        let dir = tree_holding(source);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let (_, created) = expect_created(
+            session
+                .create_match(
+                    id,
+                    &new_snippet(),
+                    &NewMatchPosition::Front {},
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the creation is legal"),
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "matches:\n",
+                "  - trigger: ':new'\n",
+                "    replace: a new snippet\n",
+                "  # about the first one\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+            ),
+            "the comment belongs to the snippet below it and must not change hands"
+        );
+        assert_eq!(
+            trigger_text(
+                &session
+                    .match_view(created.expect("a committed creation names one"))
+                    .expect("it resolves")
+            ),
+            ":new",
+            "the answered identity must be the created snippet, not the one it displaced"
+        );
+    } // End of function a_created_match_at_the_front_lands_above_the_first_snippet_and_its_comment()
+
+    /// A creation after a named anchor lands after that anchor.
+    ///
+    /// The anchor is an **identity**, and this is the case where a position would
+    /// have been the tempting encoding: the index Rust uses is derived here, from
+    /// the projection the caller was shown.
+    #[test]
+    fn a_created_match_after_an_anchor_lands_after_it() {
+        let dir = tree_holding(TWO_SNIPPETS);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let anchor = before.matches[0].id;
+
+        let (_, created) = expect_created(
+            session
+                .create_match(
+                    id,
+                    &new_snippet(),
+                    &NewMatchPosition::After { anchor },
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the creation is legal"),
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':new'\n",
+                "    replace: a new snippet\n",
+                "  - trigger: ':two'\n",
+                "    replace: second\n",
+            )
+        );
+        assert_eq!(
+            trigger_text(
+                &session
+                    .match_view(created.expect("a committed creation names one"))
+                    .expect("it resolves")
+            ),
+            ":new"
+        );
+    } // End of function a_created_match_after_an_anchor_lands_after_it()
+
+    /// A file whose `matches:` line has no value at all gets its first snippet.
+    ///
+    /// **The case that makes a fresh espanso file usable**, and the one that
+    /// separates the two shapes a caller cannot tell apart from a screen: a bare
+    /// key is an implicit null, which the insertion primitive promotes into its
+    /// first block-sequence item, while a file with no key at all is refused by
+    /// name below. The bytes around it — a second top-level key and the comment
+    /// above them — are stated whole.
+    #[test]
+    fn a_created_match_promotes_a_bare_matches_key() {
+        let source = concat!(
+            "# A synthetic match file.\n",
+            "matches:\n",
+            "global_vars:\n",
+            "  - name: greeting\n",
+            "    type: echo\n",
+            "    params:\n",
+            "      echo: hello\n",
+        );
+        let dir = tree_holding(source);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        assert!(
+            before.matches.is_empty(),
+            "the fixture must start with no snippet, or it proves nothing"
+        );
+
+        expect_created(
+            session
+                .create_match(
+                    id,
+                    &new_snippet(),
+                    &NewMatchPosition::End {},
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("a bare key is promoted, not refused"),
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "# A synthetic match file.\n",
+                "matches:\n",
+                "  - trigger: ':new'\n",
+                "    replace: a new snippet\n",
+                "global_vars:\n",
+                "  - name: greeting\n",
+                "    type: echo\n",
+                "    params:\n",
+                "      echo: hello\n",
+            ),
+            "the promotion writes one item and touches nothing else"
+        );
+    } // End of function a_created_match_promotes_a_bare_matches_key()
+
+    /// A file that names no `matches` key at all is refused **by name**, and
+    /// nothing is attempted.
+    ///
+    /// The refusal is a planning-time one, so it is an `Err` rather than a
+    /// `SaveResult`: no transaction ran, no lock was taken, no finding was
+    /// produced, and no acknowledgement could ever change the answer. The absent
+    /// backup folder is what says the transaction never started.
+    #[test]
+    fn a_document_with_no_matches_key_is_refused_by_name_and_writes_nothing() {
+        const NO_LIST: &str =
+            "global_vars:\n  - name: greeting\n    type: echo\n    params:\n      echo: hello\n";
+        let dir = tree_holding(NO_LIST);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let error = session
+            .create_match(
+                id,
+                &new_snippet(),
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("there is no list for the snippet to join");
+        assert_eq!(error.code(), "documentHasNoMatchList");
+        let json = serde_json::to_value(&error).expect("the refusal serializes");
+        assert_eq!(json["document"], id.get());
+
+        assert_eq!(base_bytes(&dir), NO_LIST);
+        assert!(
+            !dir.path().join(".espansoconfig-backups").exists(),
+            "no transaction ran, so no file was copied"
+        );
+    } // End of function a_document_with_no_matches_key_is_refused_by_name_and_writes_nothing()
+
+    /// An anchor in another file is refused before anything is attempted.
+    ///
+    /// A snippet is created in one document, exactly as a move stays in one
+    /// (`PROGRESS.md` D2r). The assertion that both files are byte-identical
+    /// afterwards is what says "not attempted" rather than "attempted and rolled
+    /// back", which no filesystem could offer.
+    #[test]
+    fn an_anchor_in_another_document_is_refused_for_a_creation() {
+        const ELSEWHERE: &str = "matches:\n  - trigger: ':elsewhere'\n    replace: elsewhere\n";
+        let dir = tree_holding(TWO_SNIPPETS);
+        fs::write(dir.path().join("match").join("other.yml"), ELSEWHERE).unwrap();
+        let session = open_session(&dir);
+        let here = id_of(&session, "match/base.yml");
+        let there = id_of(&session, "match/other.yml");
+        let mine = session.document(here).expect("the file reads");
+        let theirs = session.document(there).expect("the file reads");
+
+        let error = session
+            .create_match(
+                here,
+                &new_snippet(),
+                &NewMatchPosition::After {
+                    anchor: theirs.matches[0].id,
+                },
+                mine.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("an anchor never crosses a file");
+        assert_eq!(error.code(), "identityWrongDocument");
+        assert_eq!(base_bytes(&dir), TWO_SNIPPETS);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("other.yml")).unwrap(),
+            ELSEWHERE
+        );
+    } // End of function an_anchor_in_another_document_is_refused_for_a_creation()
+
+    /// A deletion removes one snippet, leaves every other byte alone, and names
+    /// **nothing**.
+    ///
+    /// `moved: None` is the routine correct answer here rather than a defensive
+    /// one: the snippet that was deleted has no identity in the new revision. It
+    /// is deliberately not a neighbour's — see
+    /// [`WorkspaceSession::delete_match`].
+    #[test]
+    fn a_deleted_match_leaves_every_other_byte_alone_and_names_nothing() {
+        let source = concat!(
+            "# A synthetic match file.\n",
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: first\n",
+            "  # about the second one\n",
+            "  - trigger: ':two'\n",
+            "    replace: second  # a note of its own\n",
+            "  - trigger: ':three'\n",
+            "    replace: third\n",
+        );
+        let dir = tree_holding(source);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        let result = session
+            .delete_match(held, before.revision, &Acknowledgement::none())
+            .expect("the deletion is legal");
+        let SaveResult::Saved {
+            committed,
+            backup_taken,
+            notes,
+            moved,
+            ..
+        } = result
+        else {
+            panic!("expected a saved result");
+        };
+        assert!(committed);
+        assert!(backup_taken);
+        assert!(
+            notes.is_empty(),
+            "a removal re-encodes no scalar: {notes:?}"
+        );
+        assert!(
+            moved.is_none(),
+            "a deleted snippet has no identity in the new revision"
+        );
+
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "# A synthetic match file.\n",
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':three'\n",
+                "    replace: third\n",
+            ),
+            "the snippet's own leading comment and inline comment go with it, and \
+             nothing else moves"
+        );
+        assert_eq!(
+            triggers_of(&session.document(id).expect("it reads")),
+            [":one", ":three"],
+            "the cache must describe the bytes that were written"
+        );
+    } // End of function a_deleted_match_leaves_every_other_byte_alone_and_names_nothing()
+
+    /// Deleting the only snippet of a file is refused by the engine.
+    ///
+    /// By design, and the refusal travels whole: emptying the list would mean
+    /// writing `matches: []` — a collection this crate synthesizes for nobody — or
+    /// leaving `matches:` bare, which is YAML null. Neither is "remove one
+    /// existing item". The UI owes the user a sentence here, not a failed save.
+    #[test]
+    fn deleting_the_only_match_is_refused_by_the_engine() {
+        const ONLY_ONE: &str = "matches:\n  - trigger: ':one'\n    replace: first\n";
+        let dir = tree_holding(ONLY_ONE);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let error = session
+            .delete_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("a list cannot be emptied by removing one item");
+        assert_eq!(error.code(), "saveFailed");
+        let json = serde_json::to_value(&error).expect("the error serializes");
+        assert!(
+            json["error"]["Patch"]["RemovalWouldEmptyTheSequence"].is_object(),
+            "the engine's own reason must survive both tags: {json}"
+        );
+        assert_eq!(base_bytes(&dir), ONLY_ONE);
+    } // End of function deleting_the_only_match_is_refused_by_the_engine()
+
+    /// A document whose three snippets are separated by one blank line each.
+    ///
+    /// Synthetic and neutral (CLAUDE.md section 1). Shared by the two tests below
+    /// so that the bytes they disagree about cannot be two different documents.
+    const BLANK_SEPARATED: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "\n",
+        "  - trigger: ':two'\n",
+        "    replace: second\n",
+        "\n",
+        "  - trigger: ':three'\n",
+        "    replace: third\n",
+    );
+
+    /// What `BLANK_SEPARATED` holds once its middle snippet is deleted.
+    const BLANK_SEPARATED_AFTER: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "\n",
+        "\n",
+        "  - trigger: ':three'\n",
+        "    replace: third\n",
+    );
+
+    /// A deletion between blank-separated snippets leaves **both** blank lines.
+    ///
+    /// `docs/decisions/2b-2c-1-notes.md` hole 5, seen from the command a person
+    /// actually presses. A blank line beside a snippet is not the snippet's, and
+    /// deciding which of the two runs to collapse is a layout decision no
+    /// primitive may make — so the bytes below are the expected ones rather than a
+    /// defect, and they are pinned here so that a UI cannot meet them by surprise.
+    ///
+    /// The **disclosure** those bytes owe is the test below this one.
+    #[test]
+    fn a_deletion_between_blank_separated_snippets_leaves_both_blank_lines() {
+        let dir = tree_holding(BLANK_SEPARATED);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        session
+            .delete_match(
+                before.matches[1].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the deletion is legal");
+        assert_eq!(
+            base_bytes(&dir),
+            BLANK_SEPARATED_AFTER,
+            "both blank lines survive, because neither belonged to the snippet"
+        );
+    } // End of function a_deletion_between_blank_separated_snippets_leaves_both_blank_lines()
+
+    /// **The doubled separation is disclosed, not collapsed.**
+    ///
+    /// Q6 of `docs/reviews/phase-2b-2c-2-design.md`, delivered: *preserve both
+    /// blank lines and emit a `PresentationNote` only when the deletion actually
+    /// creates the doubled separation*. Plan section 6.2 forbids this application
+    /// making an unrequested presentation change silently, and
+    /// `SaveResult::Saved::notes` is the channel it must travel on — a backend
+    /// test that only pinned the bytes could not make a UI *not surprised*.
+    ///
+    /// Both halves are asserted, because either alone would pass with the other
+    /// broken:
+    ///
+    /// 1. the bytes are byte-exact and the doubled gap is still there — a note
+    ///    emitted by an edit that quietly collapsed a blank line would be a note
+    ///    about the wrong thing;
+    /// 2. the note reaches `SaveResult::Saved` **and the wire**, as the one-key
+    ///    object every wire enum variant crosses as (D5).
+    ///
+    /// The negative is asserted too: the same deletion in a file with no blank
+    /// line beside it says nothing, so the note is a claim about this document
+    /// rather than a label every deletion carries.
+    #[test]
+    fn deletion_that_creates_doubled_separation_returns_a_layout_presentation_note() {
+        let dir = tree_holding(BLANK_SEPARATED);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let result = session
+            .delete_match(
+                before.matches[1].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the deletion is legal");
+        let SaveResult::Saved {
+            committed, notes, ..
+        } = &result
+        else {
+            panic!("expected a saved result, got {result:?}");
+        };
+        assert!(committed);
+        assert_eq!(
+            base_bytes(&dir),
+            BLANK_SEPARATED_AFTER,
+            "the note reports the layout the file really holds"
+        );
+        assert_eq!(
+            notes.as_slice(),
+            [PresentationNote::DoubledSequenceSeparation { edit: 0 }],
+            "the deletion owes exactly one disclosure: {notes:?}"
+        );
+
+        let json = serde_json::to_value(&result).expect("the result serializes");
+        let crossed = json["notes"]
+            .as_array()
+            .expect("notes is a list on the wire");
+        assert_eq!(crossed.len(), 1, "the note must reach the wire: {json}");
+        let payload = &crossed[0]["DoubledSequenceSeparation"];
+        assert!(
+            payload.is_object(),
+            "every note crosses as a one-key object (D5): {json}"
+        );
+        assert_eq!(payload["edit"], 0);
+
+        // The negative. `TWO_SNIPPETS` has no blank line between its snippets, so
+        // deleting one doubles nothing and there is nothing to disclose.
+        let tight = tree_holding(TWO_SNIPPETS);
+        let quiet = open_session(&tight);
+        let other = id_of(&quiet, "match/base.yml");
+        let read = quiet.document(other).expect("the file reads");
+        let plain = quiet
+            .delete_match(read.matches[0].id, read.revision, &Acknowledgement::none())
+            .expect("the deletion is legal");
+        let SaveResult::Saved { notes, .. } = &plain else {
+            panic!("expected a saved result, got {plain:?}");
+        };
+        assert!(
+            notes.is_empty(),
+            "a deletion that doubles nothing says nothing: {notes:?}"
+        );
+    } // End of function deletion_that_creates_doubled_separation_returns_a_layout_presentation_note()
+
+    /// **A stale identity never deletes whatever now occupies its old position.**
+    ///
+    /// The highest-risk mistake this phase could make, named by the design consult
+    /// and written as the test it asked for. A [`DocumentPath`] ending in an index
+    /// is a **position**: put a snippet at the front of a file and every snippet
+    /// below it shifts down one, so the path that named B a moment ago now names
+    /// A perfectly well. A `delete_match` that resolved a held identity's *path*
+    /// against the new parse would delete A and report success.
+    ///
+    /// The premise is asserted before the claim, so this cannot pass vacuously:
+    /// B's former path really does address A after the creation. Then the stale
+    /// call must refuse, and **every byte** of the post-creation file must still
+    /// be there.
+    #[test]
+    fn delete_match_never_deletes_the_item_at_a_stale_ids_old_path() {
+        let dir = tree_holding(TWO_SNIPPETS);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        assert_eq!(triggers_of(&before), [":one", ":two"]);
+        // B, and the revision it was minted from. Both go stale below.
+        let held = before.matches[1].id;
+        let held_path = before.matches[1]
+            .path
+            .clone()
+            .expect("a projected snippet has a path");
+        let stale_revision = before.revision;
+
+        // X is created at the front and committed, so everything shifts down one.
+        expect_created(
+            session
+                .create_match(
+                    id,
+                    &new_snippet(),
+                    &NewMatchPosition::Front {},
+                    stale_revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the creation is legal"),
+        );
+        let after_create = base_bytes(&dir);
+        let refreshed = session.document(id).expect("the file still reads");
+        assert_eq!(triggers_of(&refreshed), [":new", ":one", ":two"]);
+
+        // The premise, asserted rather than assumed: B's former path now names A.
+        let at_the_old_path = refreshed
+            .matches
+            .iter()
+            .find(|candidate| candidate.path.as_ref() == Some(&held_path))
+            .expect("the held path still resolves, which is the whole problem");
+        assert_eq!(
+            trigger_text(at_the_old_path),
+            ":one",
+            "if this is not the other snippet, the fixture stopped exercising the shift"
+        );
+
+        // The claim: the stale identity refuses, and nothing is written.
+        let error = session
+            .delete_match(held, stale_revision, &Acknowledgement::none())
+            .expect_err("an identity from the previous revision must not delete anything");
+        assert_eq!(
+            error.code(),
+            "identityStaleRevision",
+            "the refusal must be the re-resolve instruction, not a lookup miss: {error:?}"
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            after_create,
+            "every byte of the post-creation file must survive a refused deletion"
+        );
+        assert_eq!(
+            triggers_of(&session.document(id).expect("it reads")),
+            [":new", ":one", ":two"],
+            "and the snippet at the stale path must still be there"
+        );
+    } // End of function delete_match_never_deletes_the_item_at_a_stale_ids_old_path()
+
+    /// A creation refused by the semantic gate proceeds once its findings come
+    /// back.
+    ///
+    /// The acknowledgement protocol is the transaction's, and a creation inherits
+    /// it whole rather than re-implementing half of it. The new snippet's body
+    /// holds an unresolved reference, which is what the gate reports; there is no
+    /// `force` flag in either call.
+    #[test]
+    fn a_suspicion_refuses_a_creation_until_the_findings_come_back() {
+        let dir = tree_holding(TWO_SNIPPETS);
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let suspicious = NewMatch {
+            trigger: ":greet".to_owned(),
+            replace: "hello {{nobody}}".to_owned(),
+        };
+
+        let refusal = session
+            .create_match(
+                id,
+                &suspicious,
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome, not an error");
+        let findings = match refusal {
+            SaveResult::Refused { findings, .. } => findings,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(!findings.is_empty(), "a refusal carries its evidence");
+        assert_eq!(
+            base_bytes(&dir),
+            TWO_SNIPPETS,
+            "a refused save writes nothing"
+        );
+
+        expect_created(
+            session
+                .create_match(
+                    id,
+                    &suspicious,
+                    &NewMatchPosition::End {},
+                    before.revision,
+                    &Acknowledgement::of(&findings),
+                )
+                .expect("the acknowledged creation proceeds"),
+        );
+        assert_eq!(
+            triggers_of(&session.document(id).expect("it reads")),
+            [":one", ":two", ":greet"]
+        );
+    } // End of function a_suspicion_refuses_a_creation_until_the_findings_come_back()
+
+    /// The `Saved` arm of a creation, or a panic naming what arrived instead.
+    ///
+    /// Answers the revision and the created snippet's identity, and asserts on the
+    /// way past what every successful creation shares: it committed, it took a
+    /// backup, and it changed no value's spelling.
+    fn expect_created(result: SaveResult) -> (ContentRevision, Option<MatchId>) {
+        match result {
+            SaveResult::Saved {
+                revision,
+                committed,
+                notes,
+                backup_taken,
+                moved,
+            } => {
+                assert!(committed, "a creation always changes the file's bytes");
+                assert!(backup_taken, "the session must have copied the file first");
+                assert!(
+                    notes.is_empty(),
+                    "the rendered values need no presentation change: {notes:?}"
+                );
+                (revision, moved)
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+    } // End of function expect_created()
 
     /// An address that does not end in a sequence position is not a move's end.
     ///

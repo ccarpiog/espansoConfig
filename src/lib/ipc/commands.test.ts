@@ -1,5 +1,5 @@
 /**
- * The eight command wrappers, against a stubbed `invoke`.
+ * The ten command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -15,7 +15,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { MatchDraft } from './types';
+import type { MatchDraft, NewMatch } from './types';
 
 /** Every call the stubbed `invoke` received, in order. */
 const calls: Array<{ command: string; args: unknown }> = [];
@@ -43,6 +43,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 const commands = await import('./commands');
 const {
   COMMAND_NAMES,
+  createMatch,
+  deleteMatch,
   documentText,
   getDocument,
   getMatch,
@@ -61,6 +63,14 @@ const EXPORTED_FUNCTIONS = Object.entries(commands)
 
 /** A match identity, exactly as it would have arrived from Rust. */
 const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
+
+/**
+ * The content of a snippet to create — hand-authored and neutral.
+ *
+ * Both fields are required, so this is written out whole rather than spread from
+ * a partial: a trigger with no body is not a snippet this application creates.
+ */
+const NEW_MATCH: NewMatch = { trigger: ':new', replace: 'a new snippet' };
 
 /**
  * A draft that changes nothing, written out in full.
@@ -101,7 +111,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the eight wire names, in order, and export no ninth wrapper', async () => {
+  it('call the ten wire names, in order, and export no eleventh wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -115,8 +125,12 @@ describe('the command wrappers', () => {
     await reloadDocument(1);
     await moveMatch(IDENTITY, null, 'a'.repeat(64), { accepted: [] });
     await saveMatch(IDENTITY, UNCHANGED_DRAFT, 'a'.repeat(64), { accepted: [] });
+    await createMatch(1, NEW_MATCH, { End: {} }, 'a'.repeat(64), { accepted: [] });
+    await deleteMatch(IDENTITY, 'a'.repeat(64), { accepted: [] });
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
+      'createMatch',
+      'deleteMatch',
       'documentText',
       'getDocument',
       'getMatch',
@@ -126,25 +140,26 @@ describe('the command wrappers', () => {
       'reloadDocument',
       'saveMatch'
     ]);
-  }); // End of the "call the eight wire names" case
+  }); // End of the "call the ten wire names" case
 
-  it('exports no wrapper for any of the four Phase 2 commands that do not exist', () => {
-    // Each of the four needs a core primitive that does not exist — inserting a
-    // sequence item, removing one, replacing a whole document's text — and
-    // `DocumentEdit` has none of them. `wire_contract.rs` asserts their absence
+  it('exports no wrapper for either Phase 2 command that does not exist', () => {
+    // `saveRawDocument` needs a change to the one Rust entry point that writes a
+    // file — a whole document's text is not a byte-span replacement — and
+    // `validateMatch` has no phase yet. `wire_contract.rs` asserts their absence
     // from the registered Rust surface; this asserts it on the side that would
     // have to call them.
     //
-    // `moveMatch` left this list at Phase 2b-2a and `saveMatch` at 2b-2b-3, which
-    // is the only way a name may leave it: the command exists and is registered.
-    const forbidden = ['createMatch', 'deleteMatch', 'saveRawDocument', 'validateMatch'];
+    // `moveMatch` left this list at Phase 2b-2a, `saveMatch` at 2b-2b-3, and
+    // `createMatch` and `deleteMatch` at 2b-2c-2, which is the only way a name may
+    // leave it: the command exists and is registered.
+    const forbidden = ['saveRawDocument', 'validateMatch'];
     for (const name of forbidden) {
       expect(EXPORTED_FUNCTIONS).not.toContain(name);
       expect([...COMMAND_NAMES] as string[]).not.toContain(
         name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
       );
     }
-  }); // End of the "exports no wrapper for any of the four" case
+  }); // End of the "exports no wrapper for either" case
 
   it('sends a save as an identity, a whole draft, a base revision and an acknowledgement', async () => {
     // The second command that writes, and the three things about its arguments
@@ -194,6 +209,47 @@ describe('the command wrappers', () => {
     });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
   }); // End of the "move arguments" case
+
+  it('sends a creation as a document, a closed snippet, a position and a base revision', async () => {
+    // The third command that writes, and the three decisions in its arguments.
+    // The file is named by the identity this window holds, never by a path. The
+    // snippet is closed at two required values, so a caller cannot smuggle a key
+    // espanso's schema does not fix. The position is an **object** for every one
+    // of its three arms, including the two that carry nothing, because one wire
+    // shape per enum is what lets Rust and this side agree without a special case.
+    const anchor = { document: 3, revision: 'a'.repeat(64), node: 17 };
+    await createMatch(3, NEW_MATCH, { After: { anchor } }, 'c'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('create_match');
+    expect(calls[0]?.args).toEqual({
+      document: 3,
+      newMatch: NEW_MATCH,
+      position: { After: { anchor } },
+      baseRevision: 'c'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
+    // The two operand-less positions travel as objects rather than as bare
+    // strings, which is the half a Rust unit variant would have broken silently.
+    await createMatch(3, NEW_MATCH, { Front: {} }, 'c'.repeat(64), { accepted: [] });
+    await createMatch(3, NEW_MATCH, { End: {} }, 'c'.repeat(64), { accepted: [] });
+    const sent = calls.map((call) => (call.args as { position: unknown }).position);
+    expect(sent[1]).toEqual({ Front: {} });
+    expect(sent[2]).toEqual({ End: {} });
+  }); // End of the "creation arguments" case
+
+  it('sends a deletion as an identity, a base revision and an acknowledgement', async () => {
+    // The fourth command that writes, and the only one with nothing to say about
+    // where anything goes: a deletion has no destination and no content. What it
+    // must not gain is a path, a position, or a flag.
+    await deleteMatch(IDENTITY, 'd'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('delete_match');
+    expect(calls[0]?.args).toEqual({
+      id: IDENTITY,
+      baseRevision: 'd'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
+  }); // End of the "deletion arguments" case
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

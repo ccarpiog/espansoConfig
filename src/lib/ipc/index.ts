@@ -92,6 +92,7 @@ export type {
   NotReencodableName,
   PathSegment,
   PresentationNote,
+  PresentationNoteName,
   SaveResult,
   SaveResultName,
   ScalarStyle,

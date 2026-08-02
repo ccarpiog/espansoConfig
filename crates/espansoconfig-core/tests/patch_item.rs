@@ -36,7 +36,7 @@
 
 use espansoconfig_core::patch::{
     apply_edits, insert_item, move_item, remove_item, DocumentEdit, DocumentPath, EditError,
-    InsertItem, PatchedDocument, RemoveItem, Replacement,
+    InsertItem, ItemPlacement, PatchedDocument, PresentationNote, RemoveItem, Replacement,
 };
 
 // ---------------------------------------------------------------------------
@@ -335,6 +335,63 @@ fn a_crlf_document_removes_exactly_as_its_lf_twin_does() {
     } // End of the loop over the removal table
 } // End of function a_crlf_document_removes_exactly_as_its_lf_twin_does()
 
+/// A removal that leaves two blank separations adjacent says so.
+///
+/// Plan section 6.2 — never silently normalise — applied to a change the bytes
+/// alone cannot disclose. Deleting the middle item of `ONE_BLANK` leaves the
+/// blank line above it and the blank line below it next to each other, which is
+/// **correct**: neither belonged to the item, and collapsing either would delete
+/// trivia outside it. What the operation owes is the disclosure, and that is the
+/// note.
+///
+/// Three negatives sit beside the claim, because a detector that answered *yes*
+/// to everything would pass the claim on its own:
+///
+/// - a document with no blank line beside the item reports nothing;
+/// - removing the **first** item has nothing above it to double;
+/// - removing the **last** item has nothing below it.
+#[test]
+fn a_removal_between_blank_separated_items_reports_the_doubled_separation() {
+    let removed = remove_item(ONE_BLANK, &item(1)).expect("the removal applies");
+    assert_eq!(
+        removed.text(),
+        "matches:\n  - trigger: a\n\n\n  - trigger: c\n",
+        "both blank lines survive, because neither belonged to the item"
+    );
+    assert_eq!(
+        removed.notes(),
+        [PresentationNote::DoubledSequenceSeparation { edit: 0 }],
+        "the doubled separation is disclosed rather than collapsed"
+    );
+
+    for (what, source, at) in [
+        ("no blank line anywhere", TIGHT, 1),
+        ("nothing above the first item", ONE_BLANK, 0),
+        ("nothing below the last item", ONE_BLANK, 2),
+    ] {
+        let quiet = remove_item(source, &item(at)).expect("the removal applies");
+        assert!(quiet.notes().is_empty(), "{what}: {:?}", quiet.notes());
+    } // End of the loop over the removals that double nothing
+} // End of function a_removal_between_blank_separated_items_reports_the_doubled_separation()
+
+/// The **move** that lifts the same item still reports nothing.
+///
+/// `RemoveItem` and `ItemMove` share `lift_item`, so a move out of a
+/// blank-separated list leaves the identical two blank lines at its source. The
+/// detection is deliberately at the `RemoveItem` planning level and not inside
+/// the shared derivation, because `SaveResult::notes` is documented as **always
+/// empty for a move** and this is what keeps that a fact.
+/// `docs/decisions/2b-2c-2-notes.md` section 6.2 records the move's half as open.
+#[test]
+fn a_move_out_of_the_same_gap_still_reports_nothing() {
+    let moved = move_item(ONE_BLANK, &item(1), None).expect("the move applies");
+    assert!(
+        moved.notes().is_empty(),
+        "a move's notes are always empty: {:?}",
+        moved.notes()
+    );
+} // End of function a_move_out_of_the_same_gap_still_reports_nothing()
+
 // ---------------------------------------------------------------------------
 // Insertion
 // ---------------------------------------------------------------------------
@@ -347,7 +404,8 @@ fn field(key: &str, value: &str) -> (String, String) {
 #[test]
 fn appending_an_item_writes_it_after_the_last_one() {
     let fields = vec![field("trigger", "d"), field("replace", "D")];
-    let inserted = insert_item(TIGHT, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(TIGHT, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:\n  - trigger: a\n  - trigger: b\n  - trigger: c\n  - trigger: d\n    \
@@ -359,8 +417,8 @@ fn appending_an_item_writes_it_after_the_last_one() {
 #[test]
 fn inserting_after_the_first_item_writes_it_between_the_first_two() {
     let fields = vec![field("trigger", "x")];
-    let inserted =
-        insert_item(TIGHT, &sequence(), Some(0), &fields).expect("the insert must apply");
+    let inserted = insert_item(TIGHT, &sequence(), ItemPlacement::After(0), &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:\n  - trigger: a\n  - trigger: x\n  - trigger: b\n  - trigger: c\n"
@@ -368,12 +426,145 @@ fn inserting_after_the_first_item_writes_it_between_the_first_two() {
 } // End of function inserting_after_the_first_item_writes_it_between_the_first_two()
 
 #[test]
+fn inserting_at_the_front_writes_it_above_the_first_item() {
+    let fields = vec![field("trigger", "x"), field("replace", "X")];
+    let inserted =
+        insert_item(TIGHT, &sequence(), ItemPlacement::Front, &fields).expect("the insert applies");
+    assert_eq!(
+        inserted.text(),
+        "matches:\n  - trigger: x\n    replace: X\n  - trigger: a\n  - trigger: b\n  \
+         - trigger: c\n"
+    );
+    bytes_outside_the_replacements_match(TIGHT, inserted.text(), inserted.replacements());
+} // End of function inserting_at_the_front_writes_it_above_the_first_item()
+
+/// The front destination is the first item's **hull**, so that item's own
+/// leading comment block stays with it.
+///
+/// The whole reason [`ItemPlacement::Front`] reuses `plan_move`'s derivation
+/// rather than "the line after `matches:`": the comment describes the snippet it
+/// sits above, and an arrival that landed between the two would silently
+/// re-point it at a snippet nobody wrote it for. `OWNED_COMMENTS` gives every
+/// item a comment it owns, so the assertion is about which side of `# about a`
+/// the new item lands on.
+#[test]
+fn a_front_insertion_lands_above_the_first_items_own_comment_block() {
+    let fields = vec![field("trigger", "x")];
+    let inserted = insert_item(OWNED_COMMENTS, &sequence(), ItemPlacement::Front, &fields)
+        .expect("the insert applies");
+    assert_eq!(
+        inserted.text(),
+        "matches:\n  - trigger: x\n  # about a\n  - trigger: a\n  # about b\n  - trigger: b\n  \
+         # about c\n  - trigger: c\n"
+    );
+    bytes_outside_the_replacements_match(OWNED_COMMENTS, inserted.text(), inserted.replacements());
+} // End of function a_front_insertion_lands_above_the_first_items_own_comment_block()
+
+/// A front insertion agrees with the move that lands in the same place.
+///
+/// The architectural claim, pinned the way `a_removal_is_a_move_with_no_landing`
+/// pins its own: moving the last item to the front and inserting a new one at the
+/// front must put their bytes at the **same offset**, because both ask
+/// `removal_span` for the start of the first item's hull. A second derivation
+/// that drifted by one line would show up here as two different arrival offsets.
+#[test]
+fn a_front_insertion_lands_where_a_front_move_lands() {
+    let inserted = insert_item(
+        OWNED_COMMENTS,
+        &sequence(),
+        ItemPlacement::Front,
+        &[field("trigger", "x")],
+    )
+    .expect("the insert applies");
+    let moved = move_item(OWNED_COMMENTS, &item(2), None).expect("the move applies");
+    let arrival = moved
+        .replacements()
+        .iter()
+        .find(|replacement| !replacement.text.is_empty())
+        .expect("a move writes exactly one non-empty replacement");
+    assert_eq!(inserted.replacements().len(), 1);
+    assert_eq!(
+        inserted.replacements()[0].span.start,
+        arrival.span.start,
+        "the insertion and the move must derive one front offset, not two"
+    );
+} // End of function a_front_insertion_lands_where_a_front_move_lands()
+
+#[test]
+fn a_front_insertion_copies_the_documents_crlf_line_ending() {
+    let source = crlf(TIGHT);
+    let fields = vec![field("trigger", "x")];
+    let inserted = insert_item(&source, &sequence(), ItemPlacement::Front, &fields)
+        .expect("the insert applies");
+    assert_eq!(
+        inserted.text(),
+        crlf("matches:\n  - trigger: x\n  - trigger: a\n  - trigger: b\n  - trigger: c\n")
+    );
+    bytes_outside_the_replacements_match(&source, inserted.text(), inserted.replacements());
+} // End of function a_front_insertion_copies_the_documents_crlf_line_ending()
+
+/// A promotion has no first item, so the front and the end are one offset.
+///
+/// `matches:` with no value at all is promoted into its first block-sequence
+/// item, and there is no item for a placement to sit above or below. `Front` and
+/// `End` must therefore produce the same bytes — stated as an equality of
+/// documents rather than as an argument, because a `Front` branch that reached
+/// for `children.first()` on an empty child list would refuse instead.
+///
+/// **`After(_)` is not one of them**, and the twin below says why.
+#[test]
+fn front_and_end_promote_a_bare_key_to_the_same_bytes() {
+    let source = "matches:\nother: 1\n";
+    let fields = vec![field("trigger", "x")];
+    let expected = "matches:\n  - trigger: x\nother: 1\n";
+    for placement in [ItemPlacement::Front, ItemPlacement::End] {
+        let inserted = insert_item(source, &sequence(), placement, &fields)
+            .unwrap_or_else(|error| panic!("{placement:?} was refused: {error}"));
+        assert_eq!(inserted.text(), expected, "{placement:?}");
+    } // End of the loop over the two placements a promotion accepts
+} // End of function front_and_end_promote_a_bare_key_to_the_same_bytes()
+
+/// A promotion refuses every `After(_)`, because it has no item to name.
+///
+/// `ItemPlacement::After(k)` means *after the item at index `k` of the original
+/// sequence*, and an implicit-null value has zero items — so every anchor is out
+/// of range, including `After(0)`, which is the one an off-by-one would let
+/// through. Accepting it would make an invalid coordinate a third spelling of the
+/// promotion's single offset and would leave the public API answering a question
+/// the caller had no business asking.
+///
+/// The count in the refusal is asserted as well as its name: `items: 0` is what
+/// makes the sentence *"the sequence has no such item"* true rather than merely
+/// present.
+#[test]
+fn a_promotion_refuses_every_after_anchor() {
+    let source = "matches:\nother: 1\n";
+    let fields = vec![field("trigger", "x")];
+    for anchor in [0usize, 1, 7] {
+        let error = insert_item(source, &sequence(), ItemPlacement::After(anchor), &fields)
+            .expect_err("an implicit null has no item to sit after");
+        assert!(
+            matches!(
+                error,
+                EditError::NoSuchDestinationItem {
+                    edit: 0,
+                    items: 0,
+                    ..
+                }
+            ),
+            "After({anchor}): {error:?}"
+        );
+    } // End of the loop over the anchors a promotion cannot have
+} // End of function a_promotion_refuses_every_after_anchor()
+
+#[test]
 fn an_inserted_item_takes_the_column_the_sequence_already_uses() {
     // Four columns, not the renderer's two: the marker column is read off the
     // sequence's own dashes.
     let source = "matches:\n    - trigger: a\n";
     let fields = vec![field("trigger", "b")];
-    let inserted = insert_item(source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:\n    - trigger: a\n    - trigger: b\n"
@@ -384,7 +575,8 @@ fn an_inserted_item_takes_the_column_the_sequence_already_uses() {
 fn an_inserted_item_copies_the_documents_crlf_line_ending() {
     let source = crlf(TIGHT);
     let fields = vec![field("trigger", "d"), field("replace", "D")];
-    let inserted = insert_item(&source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(&source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         crlf(
@@ -400,7 +592,8 @@ fn a_bare_matches_key_is_promoted_into_its_first_item() {
     // two-column default — the third and last source of evidence.
     let source = "matches:\nother: 1\n";
     let fields = vec![field("trigger", "x")];
-    let inserted = insert_item(source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(inserted.text(), "matches:\n  - trigger: x\nother: 1\n");
 } // End of function a_bare_matches_key_is_promoted_into_its_first_item()
 
@@ -410,7 +603,8 @@ fn a_promotion_takes_its_step_from_the_documents_own_block_children() {
     // `matches` does too. A default of two would be visible here.
     let source = "vars:\n    - name: one\nmatches:\nother: 1\n";
     let fields = vec![field("trigger", "x")];
-    let inserted = insert_item(source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "vars:\n    - name: one\nmatches:\n    - trigger: x\nother: 1\n"
@@ -421,7 +615,8 @@ fn a_promotion_takes_its_step_from_the_documents_own_block_children() {
 fn a_promotion_keeps_the_inline_comment_on_the_key_line() {
     let source = "matches:  # a note on the key\nother: 1\n";
     let fields = vec![field("trigger", "x")];
-    let inserted = insert_item(source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:  # a note on the key\n  - trigger: x\nother: 1\n"
@@ -438,7 +633,8 @@ fn the_codec_and_not_this_test_decides_how_a_value_is_spelled() {
         field("label", "'quoted'"),
         field("replace", "line one\nline two\n"),
     ];
-    let inserted = insert_item(TIGHT, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(TIGHT, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:\n  - trigger: a\n  - trigger: b\n  - trigger: c\n  - trigger: '*star'\n    \
@@ -455,7 +651,8 @@ fn an_inserted_key_is_spelled_by_the_codec_too() {
     // something other than a string (`PROGRESS.md`, R16). Both decisions are the
     // codec's, and this test states what it chose rather than what it should.
     let fields = vec![field("*odd", "1")];
-    let inserted = insert_item(TIGHT, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(TIGHT, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert!(
         inserted.text().ends_with("  - '*odd': '1'\n"),
         "the key and the value must both be quoted: {}",
@@ -469,7 +666,7 @@ fn an_inserted_key_is_spelled_by_the_codec_too() {
 
 #[test]
 fn an_item_with_no_fields_is_refused() {
-    let error = insert_item(TIGHT, &sequence(), None, &[]).expect_err("must refuse");
+    let error = insert_item(TIGHT, &sequence(), ItemPlacement::End, &[]).expect_err("must refuse");
     assert!(
         matches!(error, EditError::InsertedItemHasNoFields { edit: 0 }),
         "{error:?}"
@@ -479,7 +676,8 @@ fn an_item_with_no_fields_is_refused() {
 #[test]
 fn two_fields_sharing_a_key_are_refused() {
     let fields = vec![field("trigger", "x"), field("trigger", "y")];
-    let error = insert_item(TIGHT, &sequence(), None, &fields).expect_err("must refuse");
+    let error =
+        insert_item(TIGHT, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
     assert!(
         matches!(
             error,
@@ -495,7 +693,8 @@ fn an_empty_key_and_a_key_holding_a_line_break_are_both_refused() {
         (0usize, vec![field("", "x")]),
         (1usize, vec![field("trigger", "x"), field("a\nb", "y")]),
     ] {
-        let error = insert_item(TIGHT, &sequence(), None, &fields).expect_err("must refuse");
+        let error =
+            insert_item(TIGHT, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
         assert!(
             matches!(error, EditError::InvalidInsertedFieldKey { edit: 0, field } if field == at),
             "{error:?}"
@@ -507,7 +706,8 @@ fn an_empty_key_and_a_key_holding_a_line_break_are_both_refused() {
 fn a_flow_sequence_is_refused_whether_it_is_empty_or_not() {
     for source in ["matches: []\n", "matches: [{trigger: a}]\n"] {
         let fields = vec![field("trigger", "x")];
-        let error = insert_item(source, &sequence(), None, &fields).expect_err("must refuse");
+        let error =
+            insert_item(source, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
         assert!(
             matches!(
                 error,
@@ -530,7 +730,8 @@ fn a_sequence_cannot_disagree_with_itself_about_its_dash_column() {
     // and a named refusal is cheaper than the guess it replaces.
     let source = "matches:\n  - trigger: a\n  - trigger: b\n    - trigger: c\n";
     let fields = vec![field("trigger", "x")];
-    let error = insert_item(source, &sequence(), None, &fields).expect_err("must refuse");
+    let error =
+        insert_item(source, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
     assert!(
         matches!(error, EditError::SourceDoesNotParse(_)),
         "{error:?}"
@@ -541,7 +742,8 @@ fn a_sequence_cannot_disagree_with_itself_about_its_dash_column() {
 fn a_standalone_comment_under_a_bare_key_makes_the_promotion_ambiguous() {
     let source = "matches:\n  # whose comment is this?\nother: 1\n";
     let fields = vec![field("trigger", "x")];
-    let error = insert_item(source, &sequence(), None, &fields).expect_err("must refuse");
+    let error =
+        insert_item(source, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
     assert!(
         matches!(
             error,
@@ -556,7 +758,8 @@ fn a_comment_a_blank_line_below_a_bare_key_is_not_ambiguous() {
     // Rule 2 gives it to the file, and the file keeps it wherever the item lands.
     let source = "matches:\n\n# the file's own note\n\nother: 1\n";
     let fields = vec![field("trigger", "x")];
-    let inserted = insert_item(source, &sequence(), None, &fields).expect("the insert must apply");
+    let inserted = insert_item(source, &sequence(), ItemPlacement::End, &fields)
+        .expect("the insert must apply");
     assert_eq!(
         inserted.text(),
         "matches:\n  - trigger: x\n\n# the file's own note\n\nother: 1\n"
@@ -567,7 +770,8 @@ fn a_comment_a_blank_line_below_a_bare_key_is_not_ambiguous() {
 fn a_path_that_names_no_sequence_is_refused() {
     let source = "matches: a scalar\n";
     let fields = vec![field("trigger", "x")];
-    let error = insert_item(source, &sequence(), None, &fields).expect_err("must refuse");
+    let error =
+        insert_item(source, &sequence(), ItemPlacement::End, &fields).expect_err("must refuse");
     assert!(
         matches!(error, EditError::NotASequence { edit: 0, .. }),
         "{error:?}"
@@ -577,7 +781,8 @@ fn a_path_that_names_no_sequence_is_refused() {
 #[test]
 fn an_anchor_index_the_sequence_does_not_have_is_refused() {
     let fields = vec![field("trigger", "x")];
-    let error = insert_item(TIGHT, &sequence(), Some(9), &fields).expect_err("must refuse");
+    let error =
+        insert_item(TIGHT, &sequence(), ItemPlacement::After(9), &fields).expect_err("must refuse");
     assert!(
         matches!(
             error,
@@ -758,8 +963,13 @@ fn a_removal_that_would_feed_a_block_scalar_is_refused_at_the_source_close() {
 fn every_applied_edit_hands_back_a_verified_document() {
     let removed: PatchedDocument = remove_item(TIGHT, &item(1)).expect("the removal must apply");
     assert!(removed.notes().is_empty(), "a removal renders nothing");
-    let inserted = insert_item(TIGHT, &sequence(), None, &[field("trigger", "d")])
-        .expect("the insert must apply");
+    let inserted = insert_item(
+        TIGHT,
+        &sequence(),
+        ItemPlacement::End,
+        &[field("trigger", "d")],
+    )
+    .expect("the insert must apply");
     assert!(
         inserted.notes().is_empty(),
         "a new item has no previous presentation to change"

@@ -225,6 +225,7 @@
   "code.commandError.invalidMenuLabels": "The application menu could not be updated, because this window and the application disagree about which menu labels it needs.",
   "code.commandError.menuBuildFailed": "The application menu could not be rebuilt, so it is still showing the language it had.",
   "code.commandError.moveNotWithinOneSequence": "espansoConfig moves a snippet only inside the list it is already in, and it could not establish that the place you chose is in that list.",
+  "code.commandError.documentHasNoMatchList": "This file has no snippet list, so a new snippet cannot be added to it. Add a `matches:` line to the file first, or choose another file.",
   "code.commandError.draftRefused": "espansoConfig did not attempt this save at all: the changes asked for cannot be written to this snippet. What it reports beside this is the reason.",
   "code.commandError.saveFailed": "espansoConfig could not carry this save through. What it reports beside this is the reason.",
 
@@ -472,6 +473,9 @@
   "code.notReencodable.bareCarriageReturn": "This text block uses a bare carriage return as a line ending, which the value does not record.",
   "code.notReencodable.synthesisedFinalBreak": "This text block ends the file with no final line break, so the value carries a break the file does not.",
   "code.notReencodable.undecodable": "This value could not be read back at all, so its spelling could not be kept.",
+
+  "code.presentationNote.scalarRestyled": "espansoConfig had to write this value in a different style from the one the file used, so its spelling changed as well as its content.",
+  "code.presentationNote.doubledSequenceSeparation": "Removing this snippet left the blank lines above it and the blank lines below it next to each other, so the file now has one longer run of blank lines where it had two separate gaps. Neither gap belonged to the snippet, so neither was removed.",
 
   "code.saveResult.saved": "espansoConfig finished this save.",
   "code.saveResult.conflict": "This file changed after it was read, so nothing was written.",

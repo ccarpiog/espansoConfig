@@ -73,6 +73,16 @@
 //! what the codec would re-emit. [`plan_match_edits`]'s own documentation gives
 //! the reason and the table of consequences.
 //!
+//! # The match that does not exist yet, since Phase 2b-2c-2
+//!
+//! [`NewMatch`] is what a match is **born** holding, and it is a second type
+//! rather than a mode of [`MatchDraft`] because the two answer different
+//! questions: a draft's `Unchanged` means *leave these bytes alone*, which a
+//! match with no bytes cannot mean. It is closed at two mandatory keys, spelled
+//! from [`MatchField`] so the schema fixes them, and it derives no batch of its
+//! own — [`crate::patch::InsertItem`] is the primitive, and this only says what
+//! goes in it.
+//!
 //! # What this module never does
 //!
 //! It writes nothing. It has no `force` flag, no acknowledgement and no path to
@@ -86,6 +96,7 @@ mod audit;
 mod error;
 mod field;
 mod match_draft;
+mod new_match;
 mod plan;
 
 pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
@@ -95,4 +106,5 @@ pub use match_draft::{
     DraftTarget, EntryDraft, FormFieldDraft, ItemDraft, MatchDraft, MatchField, SequenceField,
     VariableDraft, VariableField,
 };
+pub use new_match::NewMatch;
 pub use plan::plan_match_edits;

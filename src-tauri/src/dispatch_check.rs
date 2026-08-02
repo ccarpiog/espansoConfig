@@ -1,4 +1,4 @@
-//! The seven commands, invoked through the real dispatcher.
+//! The eleven commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -497,6 +497,136 @@ fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
         "a planning refusal has nothing to acknowledge: {refusal}"
     );
 } // End of function save_match_is_reachable_and_its_draft_deserializes_from_the_wire()
+
+/// The third and fourth commands that write are reachable, and their arguments
+/// deserialize from the shapes the frontend really sends.
+///
+/// **The measurement Phase 2b-2c-2 owes**, and it is four claims a direct call to
+/// [`crate::commands::WorkspaceSession::create_match`] cannot make.
+///
+/// 1. **Both are registered and the empty capability set does not block them.**
+/// 2. **`NewMatch` deserializes off the wire**, from an object naming exactly two
+///    keys — and an object missing one of them is refused *inside Tauri's command
+///    macro*, which is why a caller sends both or sends nothing.
+/// 3. **`NewMatchPosition` crosses as a one-key object for every arm**, including
+///    the two that carry nothing. `{"End":{}}` is the shape a Rust struct variant
+///    with empty braces produces; a unit variant would have wanted the bare string
+///    `"End"`, and a frontend cannot guess which from the type alone.
+/// 4. **A deletion answers `moved: null`** — over the dispatcher, where the field
+///    is written rather than omitted, so a caller can tell "no identity" from
+///    "this build does not send one".
+#[test]
+fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    fs::write(
+        dir.path().join("match").join("base.yml"),
+        "matches:\n  - trigger: ':one'\n    replace: first\n",
+    )
+    .unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let rows = invoke(&webview, "list_documents", json!({}))
+        .expect("the workspace is open")
+        .as_array()
+        .expect("a list of summaries")
+        .clone();
+    let document_id = rows[0]["id"].clone();
+    let view =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+
+    let created = invoke(
+        &webview,
+        "create_match",
+        json!({
+            "document": document_id,
+            "newMatch": { "trigger": ":new", "replace": "a new snippet" },
+            // The operand-less arm, as the object a struct variant writes.
+            "position": { "End": {} },
+            "baseRevision": view["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the creation is legal");
+    assert_eq!(
+        created["outcome"], "saved",
+        "the outcome must be a flat discriminant, not a tag: {created}"
+    );
+    assert_eq!(created["committed"], true);
+    assert!(
+        created["moved"].is_object(),
+        "a committed creation names the snippet it created: {created}"
+    );
+
+    // The bytes really changed, on the disk rather than in a projection, and the
+    // snippet that was already there is byte-identical.
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some(
+            "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':new'\n    \
+             replace: a new snippet\n"
+        )
+    );
+
+    // And the identity the creation minted resolves, across the dispatcher, to
+    // the snippet that was created.
+    let found = invoke(&webview, "get_match", json!({ "id": created["moved"] }))
+        .expect("the answered identity resolves");
+    assert_eq!(found["trigger"]["trigger"]["text"], ":new");
+
+    // A missing half of the snippet is refused at the boundary rather than
+    // written as a trigger with no body.
+    let refreshed =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    invoke(
+        &webview,
+        "create_match",
+        json!({
+            "document": document_id,
+            "newMatch": { "trigger": ":half" },
+            "position": { "Front": {} },
+            "baseRevision": refreshed["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect_err("a trigger with no body is not a snippet this application creates");
+
+    // Then the deletion, which answers with no identity at all.
+    let deleted = invoke(
+        &webview,
+        "delete_match",
+        json!({
+            "id": refreshed["matches"][1]["id"],
+            "baseRevision": refreshed["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the deletion is legal");
+    assert_eq!(deleted["outcome"], "saved");
+    assert_eq!(deleted["committed"], true);
+    assert!(
+        deleted.get("moved").is_some(),
+        "the key must be present, not omitted: {deleted}"
+    );
+    assert!(
+        deleted["moved"].is_null(),
+        "a deleted snippet has no identity in the new revision: {deleted}"
+    );
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some("matches:\n  - trigger: ':one'\n    replace: first\n")
+    );
+} // End of function create_and_delete_match_are_reachable_and_their_arguments_deserialize()
 
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
@@ -1234,7 +1364,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All nine are attempted, and the count is asserted against the registered
+/// **All eleven are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1291,6 +1421,28 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // The third command that can write a user's file, and the first that can
+        // add something to it that was never there: a navigated webview must not
+        // be able to write a snippet into the user's configuration.
+        (
+            "create_match",
+            json!({
+                "document": 0,
+                "newMatch": { "trigger": ":remote", "replace": "remote" },
+                "position": { "End": {} },
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
+        // The fourth, and the only one that can take something away.
+        (
+            "delete_match",
+            json!({
+                "id": identity,
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1305,7 +1457,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 9, "the surface is nine commands");
+    assert_eq!(attempted.len(), 11, "the surface is eleven commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)

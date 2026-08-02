@@ -370,9 +370,9 @@ fn looks_like_a_date(value: &str) -> bool {
 /// corpus property test assert byte-identity on everything else instead of
 /// quietly excusing whatever happens not to match.
 ///
-/// **On the wire since Phase 2b-2a**, because it is
-/// [`crate::patch::PresentationNote::reason`] and a successful save carries its
-/// notes out. Externally tagged like every other core wire enum, and every
+/// **On the wire since Phase 2b-2a**, because it is the `reason` of a
+/// [`crate::patch::PresentationNote::ScalarRestyled`] and a successful save
+/// carries its notes out. Externally tagged like every other core wire enum, and every
 /// variant owes a `code.notReencodable.*` entry in **both** dictionaries —
 /// `src-tauri/src/dictionary_contract.rs` fails the build without one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

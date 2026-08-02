@@ -36,6 +36,7 @@ import {
   describeNodeKind,
   describeNotReencodable,
   describePathError,
+  describePresentationNote,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -122,6 +123,16 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
     ],
     ['NotReencodable', describeNotReencodable(locale, 'MixedLineBreaks')],
     ['NotReencodable.nested', describeNotReencodable(locale, { Undecodable: 'TrailingBackslash' })],
+    [
+      'PresentationNote.scalar',
+      describePresentationNote(locale, {
+        ScalarRestyled: { edit: 0, from: 'Plain', to: 'Literal', reason: null }
+      })
+    ],
+    [
+      'PresentationNote.layout',
+      describePresentationNote(locale, { DoubledSequenceSeparation: { edit: 0 } })
+    ],
     [
       'SaveResult.saved',
       describeSaveResult(locale, {
@@ -218,6 +229,27 @@ describe('the save-transaction accessors', () => {
     });
     expect(nested).not.toContain('TempFileChangedDuringWrite');
   }); // End of the "ErrorKind and nested error" case
+
+  it.each(LOCALES)('tell the two presentation notes apart in %s', (locale) => {
+    // The whole reason `PresentationNote` became a tagged union: a deletion that
+    // leaves two blank lines next to each other is not a spelling change, and a
+    // note that rendered the spelling sentence for it would be telling a person
+    // something untrue about their file. The two sentences must therefore differ,
+    // and the layout one must not be about a value at all.
+    const restyled = describePresentationNote(locale, {
+      ScalarRestyled: { edit: 0, from: 'Plain', to: 'Literal', reason: null }
+    });
+    const layout = describePresentationNote(locale, {
+      DoubledSequenceSeparation: { edit: 0 }
+    });
+    expect(layout, locale).not.toBe(restyled);
+    for (const spelling of ['spelling', 'style', 'grafía', 'estilo']) {
+      expect(layout.toLowerCase(), `${locale}:${spelling}`).not.toContain(spelling);
+    }
+    // `edit` is a batch position and means nothing to the person reading this.
+    expect(layout, locale).not.toContain('0');
+    expect(restyled, locale).not.toContain('0');
+  }); // End of the "two presentation notes" case
 
   it.each(LOCALES)('never render a Rust variant name where a sentence belongs in %s', (locale) => {
     for (const [what, rendered] of renderings(locale)) {

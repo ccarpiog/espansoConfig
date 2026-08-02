@@ -88,6 +88,8 @@ import type {
   NotReencodableName,
   PathError,
   PathErrorName,
+  PresentationNote,
+  PresentationNoteName,
   RotationOutcome,
   SaveError,
   SaveErrorName,
@@ -849,6 +851,16 @@ export function notReencodableKey(name: NotReencodableName): TranslationKey {
 } // End of function notReencodableKey()
 
 /**
+ * The dictionary key for one presentation change a successful save had to make.
+ *
+ * @param name - The variant name of a `PresentationNote`.
+ * @returns The key holding that change's sentence.
+ */
+export function presentationNoteKey(name: PresentationNoteName): TranslationKey {
+  return `code.presentationNote.${uncapitalize(name)}`;
+} // End of function presentationNoteKey()
+
+/**
  * The dictionary key for one way a save ended.
  *
  * **The only key builder whose input is already lowercase.** `SaveResult` is flat
@@ -1110,6 +1122,27 @@ export function describeNotReencodable(locale: Locale, reason: NotReencodable): 
   const key = notReencodableKey(wireVariantName<NotReencodableName>(reason));
   return translate(locale, key, scalarOperands(wireVariantOperands(reason)));
 } // End of function describeNotReencodable()
+
+/**
+ * The sentence one presentation change reads as.
+ *
+ * **A disclosure, never a refusal.** A note travels on a save that *succeeded*,
+ * and says that the file's appearance changed in a way nobody asked for — a
+ * value's spelling, or the blank lines a deleted snippet left adjacent. It
+ * belongs beside the thing that changed, not in an error toast.
+ *
+ * No operand is interpolated. `edit` is a position in the batch the command sent,
+ * which is meaningless to the person reading the sentence; a caller that wants to
+ * name the value or the snippet resolves that index against what it is showing.
+ *
+ * @param locale - The dictionary to read from.
+ * @param note - A presentation note as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describePresentationNote(locale: Locale, note: PresentationNote): string {
+  const key = presentationNoteKey(wireVariantName<PresentationNoteName>(note));
+  return translate(locale, key, scalarOperands(wireVariantOperands(note)));
+} // End of function describePresentationNote()
 
 /**
  * The sentence one save outcome reads as.

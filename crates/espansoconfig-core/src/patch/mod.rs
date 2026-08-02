@@ -59,6 +59,14 @@
 //! fields, spelled by the existing codec, at a sequence-item boundary — plus the
 //! promotion of a bare `matches:` into its first item, without which that key
 //! could never be targeted as a sequence at all.
+//!
+//! **2b-2c-2 — [`ItemPlacement`], the insertion's third destination.** An
+//! insertion could go after a named item or after the last one, and had no
+//! spelling at all for *above the first* — the destination `create_match` needs
+//! to put a new snippet at the top of a file. It is a **planner** operation
+//! rather than an append-then-move, and it reuses [`ItemMove`]'s own front
+//! derivation: the start of the first item's hull, so that item's leading comment
+//! block stays with it.
 
 pub mod edit;
 pub mod path;
@@ -66,8 +74,8 @@ pub mod path;
 pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, insert_item, move_item,
     remove_field, remove_item, DocumentEdit, EditError, FieldInsert, FieldRemoval, InsertItem,
-    ItemMove, MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement, ScalarEdit,
-    VerificationFailure,
+    ItemMove, ItemPlacement, MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement,
+    ScalarEdit, VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

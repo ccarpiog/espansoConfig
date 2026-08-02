@@ -1416,31 +1416,39 @@ export type NotReencodable =
   | 'SynthesisedFinalBreak'
   | { readonly Undecodable: DecodeError };
 
+/** The name of every {@link PresentationNote} variant. */
+export type PresentationNoteName = 'ScalarRestyled' | 'DoubledSequenceSeparation';
+
 /**
- * A change of *spelling* an edit had to make, reported rather than performed
- * silently.
+ * A change to the file's *appearance* an edit had to make, reported rather than
+ * performed silently.
  *
- * Plan section 6.2 — never silently normalise. A note says the value's spelling
- * changed as well as its content: a folded block rewritten as a literal one, a
- * plain value quoted because its new content is no longer plain-safe. Every note
- * is about bytes **inside** the edited value; everything outside it is
- * byte-identical either way.
+ * Plan section 6.2 — never silently normalise. A note is never a refusal: it is
+ * this application telling a person about something it changed and was not asked
+ * to change.
+ *
+ * **Two kinds, and the tag is what tells them apart.** `ScalarRestyled` is about
+ * one value's spelling and is the shape this type had until Phase 2b-2c-2.
+ * `DoubledSequenceSeparation` is about the file's layout and has no value and no
+ * style anywhere in it, which is exactly why it could not be spelled as the
+ * first: deleting a snippet from between two blank-separated siblings leaves both
+ * blank lines — the correct bytes, because neither blank line belonged to the
+ * snippet — so what is owed is the disclosure and not a collapse.
+ *
+ * Every variant's `edit` is an index into the list of edits the command sent,
+ * **not** an identifier. It means nothing to a caller that did not send that
+ * list.
  */
-export interface PresentationNote {
-  /**
-   * The edit's position in the batch that was requested.
-   *
-   * An index into the list of edits the command sent, **not** an identifier. It
-   * means nothing to a caller that did not send that list.
-   */
-  readonly edit: number;
-  /** The style the value was written in. */
-  readonly from: ScalarStyle;
-  /** The style it is written in now. */
-  readonly to: ScalarStyle;
-  /** Why the old spelling could not be reproduced, when a reason is known. */
-  readonly reason: NotReencodable | null;
-}
+export type PresentationNote =
+  | {
+      readonly ScalarRestyled: {
+        readonly edit: number;
+        readonly from: ScalarStyle;
+        readonly to: ScalarStyle;
+        readonly reason: NotReencodable | null;
+      };
+    }
+  | { readonly DoubledSequenceSeparation: { readonly edit: number } };
 
 /** The discriminant of every {@link SaveResult} arm. */
 export type SaveResultName = 'saved' | 'conflict' | 'refused';
@@ -1469,7 +1477,13 @@ export interface SavedResult {
    * nothing. Both gates still ran.
    */
   readonly committed: boolean;
-  /** Spelling changes the edit had to make, for the interface to surface. */
+  /**
+   * Presentation changes the command had to make, for the interface to surface.
+   *
+   * **Always empty for a move.** A move copies the snippet's own bytes verbatim,
+   * and the doubled blank line it leaves behind is deliberately not reported —
+   * only a deletion discloses that one.
+   */
   readonly notes: readonly PresentationNote[];
   /**
    * Whether this save wrote a pre-save copy of the file.
@@ -1807,6 +1821,62 @@ export interface MatchDraft {
   /** Drafted entries of `form_fields`, by index in the projected list. */
   readonly form_fields: readonly FormFieldDraft[];
 }
+
+// ---------------------------------------------------------------------------
+// The creation surface — Phase 2b-2c-2
+// ---------------------------------------------------------------------------
+
+/**
+ * What a snippet that does not exist yet is born holding.
+ *
+ * **Closed at two keys, and both are required.** It is not a {@link MatchDraft}:
+ * a draft can express twenty-two fields and four lists, and creation writes
+ * exactly one flat mapping of two scalars, so accepting a draft would advertise a
+ * structure `createMatch` cannot produce and the caller would learn that from a
+ * refusal rather than from the type. It is not a list of key/value pairs either —
+ * the keys a save writes are fixed by espanso's schema, never composed by a
+ * caller.
+ *
+ * **`replace` is required**, on the ground that a trigger with no body is not a
+ * usable espanso snippet and this application should not create one. A later
+ * save can still change it, and can add another schema-known field beside it.
+ *
+ * Both values are **logical text**, not YAML. How each is spelled — plain,
+ * quoted, or a `|` block — is Rust's decision, made by the same encoder every
+ * other value this application writes goes through, so a value holding a `#`, a
+ * line break or a leading `*` is written correctly rather than injected.
+ */
+export interface NewMatch {
+  /** The literal text that fires the snippet — espanso's `trigger`. */
+  readonly trigger: string;
+  /** What the snippet expands to — espanso's `replace`. */
+  readonly replace: string;
+}
+
+/**
+ * Where a newly created snippet goes in its file's list.
+ *
+ * **Three places, spelled as three values.** A two-valued `anchor | null` would
+ * have to make one of *top*, *after this one* and *bottom* unreachable, and
+ * `moveMatch`'s `null` already means the top — so one encoding would have meant
+ * two different destinations depending on which command read it.
+ *
+ * An anchor is an **identity**, never a position, for the reason every address on
+ * this wire is: a position re-points itself the moment anything above it is
+ * deleted. Rust turns the identity into an index against the parse `baseRevision`
+ * names, and refuses if that parse is not the one this window holds.
+ *
+ * Every arm is an **object**, including the two that carry nothing —
+ * `{ Front: {} }` and `{ End: {} }`, never the bare strings a Rust unit variant
+ * would have produced. That uniformity is deliberate and is asserted on the Rust
+ * side: one shape per wire enum is what lets a value be recognised without a
+ * special case per variant. It is a protocol tag rather than a code, and is named
+ * on `NOT_A_CODE` in `src-tauri/src/dictionary_contract.rs` with that reason.
+ */
+export type NewMatchPosition =
+  | { readonly Front: Record<string, never> }
+  | { readonly After: { readonly anchor: MatchId } }
+  | { readonly End: Record<string, never> };
 
 /**
  * What a refusal is about, named by schema keys and by indices only.

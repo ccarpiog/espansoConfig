@@ -599,11 +599,19 @@ impl ItemMove {
 ///
 /// # Where the item goes
 ///
-/// [`InsertItem::after`] names the item the new one is written after, **by its
-/// index in the original sequence**; [`InsertItem::new`] appends after the
-/// sequence's last item. Every insertion is therefore "after an existing item",
-/// which is what makes the insertion point a single well-defined offset — the
-/// same reason [`FieldInsert`] does not offer "before the first entry".
+/// [`ItemPlacement`], which is three-valued and says so: after the last item,
+/// after a named one, or **above the first**. The front form joined it at Phase
+/// 2b-2c-2, when `create_match` needed *"put this snippet at the top of the
+/// file"* and `after: Option<usize>` could not spell it (`2b-2c-1-notes.md`,
+/// hole 6).
+///
+/// The front destination is derived exactly as [`plan_move`]'s is — the start of
+/// the first item's own **hull** — rather than being reconstructed by a caller,
+/// so a leading comment block belonging to that first item stays with it instead
+/// of being adopted by the new one. A mapping's [`FieldInsert`] still has no
+/// front form and still may not have one: a mapping's first entry may share its
+/// line with the `-` of a compact item, so there is no line to write above it,
+/// while a sequence item always begins its own line.
 ///
 /// # Where the indentation comes from
 ///
@@ -646,19 +654,56 @@ pub struct InsertItem {
     /// The sequence the item joins, or the implicit-null mapping value that is
     /// promoted into one.
     sequence: DocumentPath,
-    /// The item it is written after, by index in the **original** sequence.
-    /// `None` appends after the sequence's last item.
-    after: Option<usize>,
+    /// Where in that sequence the item is written.
+    at: ItemPlacement,
     /// The new item's fields, as decoded key/value pairs, in write order.
     fields: Vec<(String, String)>,
 }
+
+/// Where a new sequence item is written.
+///
+/// **Three-valued, and spelled as three values.** [`InsertItem`] carried an
+/// `after: Option<usize>` until Phase 2b-2c-2, where `None` meant *append*; that
+/// left no spelling at all for *above the first item*, which is exactly what
+/// "create a snippet at the top of this file" is. Widening the `Option` would
+/// have meant one value — `None` — meaning two different destinations depending
+/// on which edit read it, since [`ItemMove`]'s `None` already means the front.
+///
+/// Every variant names a position in the **original** sequence, because the
+/// batch is planned against the document as it stands. An index never means
+/// "after the item that will be there afterwards".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemPlacement {
+    /// Above the sequence's first item, at the start of that item's own hull.
+    Front,
+    /// After the item at this index in the **original** sequence.
+    After(usize),
+    /// After the sequence's last item.
+    End,
+}
+
+impl ItemPlacement {
+    /// How many of the original items sit **above** the new one.
+    ///
+    /// The number [`fold_item_expectations`] needs, and the one place the three
+    /// cases are turned into it: `Front` is 0, `After(k)` is `k + 1`, and `End`
+    /// is however many items the sequence has. A promotion answers 0 without
+    /// asking, because the sequence it creates has no items yet.
+    fn items_above(self, items: usize) -> usize {
+        match self {
+            ItemPlacement::Front => 0,
+            ItemPlacement::After(index) => index + 1,
+            ItemPlacement::End => items,
+        }
+    } // End of function items_above()
+} // End of impl ItemPlacement
 
 impl InsertItem {
     /// Builds an insertion that appends the item after the sequence's last item.
     pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
         InsertItem {
             sequence,
-            after: None,
+            at: ItemPlacement::End,
             fields,
         }
     } // End of function new()
@@ -672,20 +717,31 @@ impl InsertItem {
     ) -> InsertItem {
         InsertItem {
             sequence,
-            after: Some(index),
+            at: ItemPlacement::After(index),
             fields,
         }
     } // End of function after()
+
+    /// Builds an insertion that writes the item above the sequence's first item.
+    ///
+    /// The destination is the start of that first item's own hull, which is the
+    /// same offset [`ItemMove::to_front`] lands on, derived by the same call.
+    pub fn to_front(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
+        InsertItem {
+            sequence,
+            at: ItemPlacement::Front,
+            fields,
+        }
+    } // End of function to_front()
 
     /// The sequence the item joins.
     pub fn sequence(&self) -> &DocumentPath {
         &self.sequence
     }
 
-    /// The index of the item the new one is written after, or `None` for the end
-    /// of the sequence.
-    pub fn destination(&self) -> Option<usize> {
-        self.after
+    /// Where in that sequence the item is written.
+    pub fn placement(&self) -> ItemPlacement {
+        self.at
     }
 
     /// The new item's fields, as decoded key/value pairs, in write order.
@@ -822,33 +878,82 @@ pub struct Replacement {
 /// A presentation change an edit had to make, surfaced rather than performed
 /// silently (plan section 6.2: "never silently normalise").
 ///
-/// A note is *not* a failure. It says that the scalar's spelling changed as
-/// well as its value — a `>` folded block rewritten as `|`, an escaped
-/// double-quoted scalar re-escaped canonically, a plain scalar requoted because
-/// the new value is no longer plain-safe. Every note describes bytes **inside**
-/// the edited scalar; bytes outside it are byte-identical either way.
+/// A note is *not* a failure, and it is never a refusal. It is this application
+/// telling a person about a change to the file's appearance that they did not
+/// ask for and that the operation could not avoid.
+///
+/// **Two kinds, and the tag is what tells them apart.** Until Phase 2b-2c-2 this
+/// type was a struct — one scalar's spelling, and nothing else could be said with
+/// it. A deletion that leaves two consecutive blank lines is the same class of
+/// event and has no scalar and no [`ScalarStyle`] anywhere in it, so inventing a
+/// `from`/`to` pair for it would have been a lie in a field a screen renders. The
+/// answer is a tagged union: [`PresentationNote::ScalarRestyled`] keeps exactly
+/// the four operands the struct carried, and
+/// [`PresentationNote::DoubledSequenceSeparation`] carries only the edit it is
+/// about.
 ///
 /// **On the wire since Phase 2b-2a**, as the `notes` of a successful save
 /// (`SaveResult::Saved` in `src-tauri/src/save.rs`). Plan section 6.2's rule —
 /// never silently normalise — is only kept if the note reaches a person, and a
-/// note that stops at the Rust boundary is a note nobody reads.
+/// note that stops at the Rust boundary is a note nobody reads. Both variants are
+/// **struct** variants, so each crosses as a one-key object rather than as a bare
+/// JSON string (2b-2b-3's D5).
 ///
-/// [`PresentationNote::edit`] is a **position in the requested batch**, not an
-/// identifier: it indexes the `edits` slice the caller handed
-/// [`apply_edits`], and it means nothing to a caller that did not send that
-/// slice.
+/// Every variant's `edit` is a **position in the requested batch**, not an
+/// identifier: it indexes the `edits` slice the caller handed [`apply_edits`],
+/// and it means nothing to a caller that did not send that slice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PresentationNote {
-    /// Position of the edit in the requested batch.
-    pub edit: usize,
-    /// The style the scalar was written in.
-    pub from: ScalarStyle,
-    /// The style it is written in now.
-    pub to: ScalarStyle,
-    /// Why the old presentation could not be reproduced byte for byte, when
-    /// [`crate::emit::reencode_in_place`] could name a reason.
-    pub reason: Option<NotReencodable>,
-}
+pub enum PresentationNote {
+    /// A scalar's **spelling** changed as well as its value.
+    ///
+    /// A `>` folded block rewritten as `|`, an escaped double-quoted scalar
+    /// re-escaped canonically, a plain scalar requoted because the new value is
+    /// no longer plain-safe. This note describes bytes **inside** the edited
+    /// scalar; bytes outside it are byte-identical either way.
+    ScalarRestyled {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The style the scalar was written in.
+        from: ScalarStyle,
+        /// The style it is written in now.
+        to: ScalarStyle,
+        /// Why the old presentation could not be reproduced byte for byte, when
+        /// [`crate::emit::reencode_in_place`] could name a reason.
+        reason: Option<NotReencodable>,
+    },
+    /// Removing a sequence item left the blank lines on **both** sides of it
+    /// next to each other, so the document now holds one longer run of blank
+    /// lines where it held two separations.
+    ///
+    /// **The bytes are correct and are deliberately not collapsed.** A blank line
+    /// beside an item is not the item's — plan section 6.2's rule 2 reads it to
+    /// decide who owns a neighbouring comment — so deleting one of the two would
+    /// remove user-owned trivia from outside the item and re-attribute whatever
+    /// comment sat beside it. What the operation owes is the *disclosure*, which
+    /// is this note.
+    ///
+    /// Emitted by a [`RemoveItem`] only. An [`ItemMove`] leaves the identical
+    /// doubled blank at its source and says nothing about it, because
+    /// `SaveResult::notes` is documented as always empty for a move;
+    /// `docs/decisions/2b-2c-2-notes.md` section 6.2 records that half as open.
+    DoubledSequenceSeparation {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+    },
+} // End of enum PresentationNote
+
+impl PresentationNote {
+    /// The position in the requested batch this note is about.
+    ///
+    /// The one reader that every variant answers, so a caller that only needs to
+    /// say *which* of its edits produced a note does not have to match on the tag.
+    pub fn edit(&self) -> usize {
+        match self {
+            PresentationNote::ScalarRestyled { edit, .. }
+            | PresentationNote::DoubledSequenceSeparation { edit } => *edit,
+        }
+    } // End of function edit()
+} // End of impl PresentationNote
 
 /// A candidate document that has been reparsed and verified.
 ///
@@ -1239,7 +1344,12 @@ pub enum EditError {
         /// What its parent actually is.
         kind: NodeKind,
     },
-    /// [`ItemMove::after`] named an index the sequence does not have.
+    /// [`ItemMove::after`] or [`ItemPlacement::After`] named an index the
+    /// sequence does not have.
+    ///
+    /// **An implicit-null value raises it for every `After`**, with `items: 0`:
+    /// `matches:` with no value has no items, so the promotion that gives it its
+    /// first one has no anchor for a new item to sit after.
     NoSuchDestinationItem {
         /// Position of the edit in the requested batch.
         edit: usize,
@@ -2476,11 +2586,11 @@ pub fn move_item(
 
 /// Adds one new flat block-mapping item to a sequence, and verifies the result.
 ///
-/// `after` names the item the new one is written after, **by its index in the
-/// original sequence**; `None` appends after the last item. `fields` are decoded
-/// key/value pairs, spelled by [`crate::emit::choose_scalar`]. See [`InsertItem`]
-/// for the narrow exception this operation is, and for the one implicit-null
-/// value it may promote into a sequence.
+/// `at` says where the new item goes, in the **original** sequence's own
+/// coordinates ([`ItemPlacement`]). `fields` are decoded key/value pairs,
+/// spelled by [`crate::emit::choose_scalar`]. See [`InsertItem`] for the narrow
+/// exception this operation is, and for the one implicit-null value it may
+/// promote into a sequence.
 ///
 /// # Errors
 ///
@@ -2488,12 +2598,13 @@ pub fn move_item(
 pub fn insert_item(
     source: &str,
     sequence: &DocumentPath,
-    after: Option<usize>,
+    at: ItemPlacement,
     fields: &[(String, String)],
 ) -> Result<PatchedDocument, EditError> {
-    let edit = match after {
-        None => InsertItem::new(sequence.clone(), fields.to_vec()),
-        Some(index) => InsertItem::after(sequence.clone(), index, fields.to_vec()),
+    let edit = match at {
+        ItemPlacement::Front => InsertItem::to_front(sequence.clone(), fields.to_vec()),
+        ItemPlacement::After(index) => InsertItem::after(sequence.clone(), index, fields.to_vec()),
+        ItemPlacement::End => InsertItem::new(sequence.clone(), fields.to_vec()),
     };
     apply_edits(source, &[DocumentEdit::InsertItem(edit)])
 } // End of function insert_item()
@@ -3443,8 +3554,10 @@ struct PendingItem {
     /// must hold.
     ///
     /// A count rather than an anchor index, because that is the number the fold
-    /// needs and it is the same number for all three ways of asking: `after: Some(k)`
-    /// gives `k + 1`, `after: None` gives the item count, and a promotion gives 0.
+    /// needs and it is the same number for every way of asking:
+    /// [`ItemPlacement::items_above`] turns the three placements into it, and a
+    /// promotion gives 0 without asking, because the sequence it creates has no
+    /// items yet.
     inserted: Option<(usize, Vec<(String, String)>)>,
 }
 
@@ -4010,6 +4123,38 @@ fn block_the_source_close_would_feed(
     block_absorbing_a_line(source, index, envelope.hull.start, column)
 } // End of function block_the_source_close_would_feed()
 
+/// Whether deleting these runs would put two blank separations next to each other.
+///
+/// **Read off [`TriviaIndex::blank_runs`], never off the arithmetic.** A blank run
+/// is the ownership layer's own answer to *"which lines here are blank"*, and it
+/// is a gap-only answer — a whitespace-only line inside a block scalar's body is
+/// that scalar's content and is never a blank run — so this can never mistake a
+/// fragment of a value for a separation.
+///
+/// The question is asked **per deleted run**, because each run is one join the
+/// deletion opens. A blank run that ends exactly where a deleted run starts, and
+/// another that starts exactly where it ends, both survive the deletion — either
+/// they lie outside the hull, or they are part of a preserved region, and a
+/// deleted run covers neither — so after the splice they are adjacent, and the
+/// file holds one run of blank lines where it held two separations.
+///
+/// It reports the condition and nothing more. Collapsing either side would delete
+/// trivia outside the item and re-attribute whatever comment sat beside it, which
+/// is a layout decision no primitive may make.
+fn removal_doubles_a_blank_separation(trivia: &TriviaIndex, runs: &[ByteSpan]) -> bool {
+    runs.iter().any(|run| {
+        let above = trivia
+            .blank_runs()
+            .iter()
+            .any(|blank| blank.span.end == run.start);
+        let below = trivia
+            .blank_runs()
+            .iter()
+            .any(|blank| blank.span.start == run.end);
+        above && below
+    })
+} // End of function removal_doubles_a_blank_separation()
+
 /// Plans a sequence-item removal, or refuses it.
 ///
 /// **The lift half of [`plan_move`] with no landing**, and deliberately not one
@@ -4027,6 +4172,17 @@ fn block_the_source_close_would_feed(
 /// [`plan_removal`] emits a mapping entry's, so the comments and blank runs the
 /// item's envelope owns go with it and everything the surviving neighbours own
 /// comes out byte-identical.
+///
+/// # The one thing it says beyond the bytes
+///
+/// A removal between two blank-separated siblings leaves both blank lines, which
+/// is correct and is not collapsed — and it is a change to the file's appearance
+/// nobody asked for, so it is **disclosed** rather than performed silently
+/// ([`PresentationNote::DoubledSequenceSeparation`], plan section 6.2). The
+/// condition is read here, from [`removal_doubles_a_blank_separation`], and
+/// deliberately **not** inside [`lift_item`]: an [`ItemMove`] shares that call and
+/// leaves the identical doubled blank at its source, and `SaveResult::notes` is
+/// documented as always empty for a move.
 fn plan_item_removal(
     source: &str,
     index: &SyntaxIndex,
@@ -4052,6 +4208,8 @@ fn plan_item_removal(
     }
 
     let runs = envelope.runs;
+    let note = removal_doubles_a_blank_separation(trivia, &runs)
+        .then_some(PresentationNote::DoubledSequenceSeparation { edit: position });
     Ok(PlannedEdit {
         replacements: runs
             .iter()
@@ -4061,7 +4219,7 @@ fn plan_item_removal(
             })
             .collect(),
         permitted: runs.clone(),
-        note: None,
+        note,
         expectation: None,
         items: Some(PendingItem {
             edit: position,
@@ -4097,11 +4255,18 @@ fn plan_item_removal(
 /// 2. decide which of the two shapes it is — an existing block sequence, or the
 ///    one implicit-null mapping value this step may promote into one — and refuse
 ///    everything else ([`EditError::NotASequence`],
-///    [`EditError::FlowSequenceInsertionUnsupported`]);
+///    [`EditError::FlowSequenceInsertionUnsupported`]). A promotion additionally
+///    refuses every [`ItemPlacement::After`] with
+///    [`EditError::NoSuchDestinationItem`], because an implicit null has no item
+///    for an anchor to name;
 /// 3. validate the requested fields ([`EditError::InsertedItemHasNoFields`],
 ///    [`EditError::DuplicateInsertedField`],
 ///    [`EditError::InvalidInsertedFieldKey`]);
-/// 4. derive the marker column and the insertion point from the document;
+/// 4. derive the marker column and the insertion point from the document. A
+///    [`ItemPlacement::Front`] takes the start of the first item's own hull —
+///    [`removal_span`], the call [`plan_move`] makes for the same destination —
+///    and every other placement takes [`insertion_point`] past the anchor's
+///    extent;
 /// 5. render one item with [`crate::emit::choose_scalar`], the codec every other
 ///    edit in this module uses.
 fn plan_item_insertion(
@@ -4146,13 +4311,15 @@ fn plan_item_insertion(
                 });
             }
             let marker = sequence_marker_column(source, index, trivia, position, target)?;
-            let anchor = match edit.destination() {
-                None => *target.children.last().ok_or(EditError::NotASequence {
-                    edit: position,
-                    node: target.id,
-                    kind: target.kind,
-                })?,
-                Some(at) => *target.children.get(at).ok_or({
+            let no_items = EditError::NotASequence {
+                edit: position,
+                node: target.id,
+                kind: target.kind,
+            };
+            let anchor = match edit.placement() {
+                ItemPlacement::Front => *target.children.first().ok_or(no_items)?,
+                ItemPlacement::End => *target.children.last().ok_or(no_items)?,
+                ItemPlacement::After(at) => *target.children.get(at).ok_or({
                     EditError::NoSuchDestinationItem {
                         edit: position,
                         sequence: target.id,
@@ -4161,10 +4328,21 @@ fn plan_item_insertion(
                 })?,
             };
             let extent = trivia.subtree_extent(index, anchor);
-            let (point, at_end_of_file) = insertion_point(source, extent, position)?;
-            let before = edit
-                .destination()
-                .map_or(target.children.len(), |at| at + 1);
+            // The front lands at the start of the first item's own **hull**, the
+            // offset `plan_move` derives for its own front destination and by the
+            // same call — so a leading comment block belonging to that item stays
+            // above the arrival rather than being adopted by it. A hull start is a
+            // line start by construction, so it is never the unterminated end of
+            // the document.
+            let (point, at_end_of_file) = match edit.placement() {
+                ItemPlacement::Front => {
+                    (removal_span(source, index, position, extent)?.start, false)
+                }
+                ItemPlacement::After(_) | ItemPlacement::End => {
+                    insertion_point(source, extent, position)?
+                }
+            };
+            let before = edit.placement().items_above(target.children.len());
             (
                 marker,
                 point,
@@ -4173,6 +4351,22 @@ fn plan_item_insertion(
             )
         }
         NodeKind::Scalar if target.is_zero_width() => {
+            // `After(k)` names the item at index `k` of the **original**
+            // sequence, and an implicit null has no items at all: the promotion
+            // creates the first one. `Front` and `End` are both satisfied by the
+            // single offset the promotion writes at — there is nothing above or
+            // below to disagree about — but there is no anchor for an `After` to
+            // name, so every `After` is refused rather than silently treated as
+            // one of the other two. `sequence` is the implicit-null value the
+            // sequence would have been promoted from, which is the same node
+            // `PendingItem::sequence_id` records for a promotion.
+            if matches!(edit.placement(), ItemPlacement::After(_)) {
+                return Err(EditError::NoSuchDestinationItem {
+                    edit: position,
+                    sequence: target.id,
+                    items: 0,
+                });
+            }
             let (marker, point, at_end_of_file) =
                 promote_implicit_null(source, index, trivia, position, &resolved, body_offset)?;
             (marker, point, at_end_of_file, (0usize, Vec::new()))
@@ -5450,7 +5644,7 @@ fn presentation_note(
     if plan.style() == presentation.style && reason.is_none() {
         return None;
     }
-    Some(PresentationNote {
+    Some(PresentationNote::ScalarRestyled {
         edit: position,
         from: presentation.style,
         to: plan.style(),
@@ -7473,8 +7667,15 @@ mod tests {
         let path = DocumentPath::parse("replace").unwrap();
         let patched = apply_scalar_edit(source, &path, "one\ntwo\n").expect("applies");
         assert_eq!(patched.notes().len(), 1);
-        assert_eq!(patched.notes()[0].from, ScalarStyle::Plain);
-        assert_eq!(patched.notes()[0].to, ScalarStyle::DoubleQuoted);
+        assert_eq!(
+            patched.notes()[0],
+            PresentationNote::ScalarRestyled {
+                edit: 0,
+                from: ScalarStyle::Plain,
+                to: ScalarStyle::DoubleQuoted,
+                reason: None,
+            }
+        );
 
         // A single-line replacement leaves the comment where it is and keeps the
         // plain style.
@@ -7884,10 +8085,15 @@ mod tests {
         let path = DocumentPath::parse("replace").unwrap();
         let patched = apply_scalar_edit(source, &path, "one two\nthree\n").expect("applies");
         assert_eq!(patched.notes().len(), 1);
-        let note = &patched.notes()[0];
-        assert_eq!(note.from, ScalarStyle::Folded);
-        assert_eq!(note.to, ScalarStyle::Literal);
-        assert_eq!(note.reason, Some(NotReencodable::FoldedStyle));
+        assert_eq!(
+            patched.notes()[0],
+            PresentationNote::ScalarRestyled {
+                edit: 0,
+                from: ScalarStyle::Folded,
+                to: ScalarStyle::Literal,
+                reason: Some(NotReencodable::FoldedStyle),
+            }
+        );
 
         // An edit that keeps the presentation reports nothing.
         let plain = "a: one\n";

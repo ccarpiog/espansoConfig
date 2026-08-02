@@ -225,6 +225,7 @@
   "code.commandError.invalidMenuLabels": "No se ha podido actualizar el menú de la aplicación porque esta ventana y el programa no coinciden en qué etiquetas de menú hacen falta.",
   "code.commandError.menuBuildFailed": "No se ha podido reconstruir el menú de la aplicación, así que sigue mostrando el idioma que tenía.",
   "code.commandError.moveNotWithinOneSequence": "espansoConfig solo mueve un fragmento dentro de la lista en la que ya está, y no pudo determinar que el lugar que elegiste esté en esa lista.",
+  "code.commandError.documentHasNoMatchList": "Este archivo no tiene ninguna lista de fragmentos, así que no se le puede añadir uno nuevo. Añade primero una línea `matches:` al archivo, o elige otro archivo.",
   "code.commandError.draftRefused": "espansoConfig ni siquiera intentó este guardado: los cambios pedidos no se pueden escribir en este fragmento. Lo que informa junto a esto es el motivo.",
   "code.commandError.saveFailed": "espansoConfig no pudo llevar a cabo este guardado. Lo que informa junto a esto es el motivo.",
 
@@ -472,6 +473,9 @@
   "code.notReencodable.bareCarriageReturn": "Este bloque de texto usa un retorno de carro suelto como fin de línea, algo que el valor no registra.",
   "code.notReencodable.synthesisedFinalBreak": "Este bloque de texto termina el archivo sin salto de línea final, así que el valor lleva un salto que el archivo no tiene.",
   "code.notReencodable.undecodable": "Este valor no se pudo volver a leer, así que no se pudo conservar su grafía.",
+
+  "code.presentationNote.scalarRestyled": "espansoConfig tuvo que escribir este valor con un estilo distinto del que usaba el archivo, así que cambió su grafía además de su contenido.",
+  "code.presentationNote.doubledSequenceSeparation": "Al quitar este fragmento, las líneas en blanco de encima y las de debajo quedaron juntas, así que ahora el archivo tiene una sola serie de líneas en blanco más larga donde tenía dos huecos separados. Ninguno de los dos huecos era del fragmento, así que no se quitó ninguno.",
 
   "code.saveResult.saved": "espansoConfig terminó este guardado.",
   "code.saveResult.conflict": "Este archivo cambió después de leerse, así que no se escribió nada.",

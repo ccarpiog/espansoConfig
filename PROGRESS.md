@@ -44,7 +44,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2b-2** | **The open key surface** — `vars` and `form_fields`, whose keys are the form author's — in the core, with **no command**: an index-addressed draft over a nested open mapping, edit and remove only, and the two batch guards restated per mapping | ✅ complete — after the review fix round below. **Its aggregate code review was run at the head of the next session** and its one finding is closed |
 | **2b-2b-3** | **`save_match`, the command**: the draft deserialized off the wire, the batch handed to `save_document`, `SaveResult::Saved::notes` given its first producer, the `draftError` namespace in both languages, cache coherence and the frontend types — plus **the window reading four phases overdue** | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding**. **2b-2b is closed** |
 | **2b-2c-1** | **The two missing sequence-item primitives** — `InsertItem` and `RemoveItem` — in the core, with **no command**: a flat block-mapping item synthesized at a sequence-item boundary and spelled by the existing scalar codec, and a removal that is literally `ItemMove`'s lift half | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding in five of six categories** and one Low documentation finding, fixed |
-| 2b-2c-2 … 2d | See the Phase 2 split below | ⬜️ **2b-2c-2 is next** |
+| **2b-2c-2** | **`create_match` and `delete_match`, the ninth and tenth commands**, over those two primitives and through `save_document`: the closed `NewMatch`, the identity-addressed `NewMatchPosition`, a front insertion made a **planner** operation, and `PresentationNote` generalized into a tagged union so a deletion can disclose the blank line it doubles | ✅ complete — its design consult and its aggregate code review are both closed. The review returned **NOT READY** on one Medium finding; **both findings were fixed before the commit** and the verdict's condition discharged |
+| 2b-2c-3 … 2d | See the Phase 2 split below | ⬜️ **2b-2c-3 is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -2967,6 +2968,74 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2b-2c-2
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was run **twice** — once on the implementation and again after the review fix
+round — and the table records the second run.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **983 tests across 21 binaries**, 0 failed (**+24** on 2b-2c-1's 959: +20 for the two commands, +4 for the fix round) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte, and none was added |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test draft_plan -- every_match_of_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, 65 planned to an empty batch, 417 intents, **0 refusals**, unchanged by this phase |
+| `npm test` | ✅ 29 files, **700 tests**, 0 failed (+4 on 696: the new codes and the new union member) |
+| `npm run check` | ✅ 376 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `git status --short --untracked-files=all` | ✅ no path under `tests/corpus/real/` |
+
+**The baseline was re-established before the phase began**, not assumed: `cargo test --workspace` was
+run at `3160be2` and returned **959 across 22 result lines**, matching the previous checkpoint exactly.
+
+**Four claims were re-derived by the orchestrator rather than accepted from a worker or the reviewer.**
+
+1. **Nothing writes outside `save_document`.** `rg -n 'replace_file_atomically|replace_locked_file'
+   src-tauri/src/` returns exactly **one** line, and it is a doc comment. The non-reentrant lock is
+   not reachable from a command.
+2. **The headline test is not a proxy.**
+   `delete_match_never_deletes_the_item_at_a_stale_ids_old_path` asserts its own **premise** — that
+   B's former path now resolves to A — before asserting the refusal, then compares the whole
+   post-creation file byte for byte. A test that skipped the premise would pass even if the fixture
+   stopped exercising the shift.
+3. **The D5 check the design ruling was conditional on exists and observes a real value.**
+   `every_edit_error_variant_crosses_as_an_object` derives its variant lists by parsing the source
+   (36 `EditError`, 9 `SaveError`), asserts no unit variants, and then serializes a real
+   `SaveFailed{Patch(RemovalWouldEmptyTheSequence)}` and reads the operand through **both** tags.
+4. **The reshaped note breaks no existing reader.** `PresentationNote` changed from a struct to a
+   tagged union, and `save_match` already emits it — but no component reads `notes`
+   (`rg` over `src/lib` outside the types and tests finds only the accessors), and `svelte-check`
+   is clean, so the change has no consumer to break. It is a wire-format change made while the
+   field still has **no reader**, which is the only cheap moment it had.
+
+## Phase 2b-2c-2 review disposition
+
+Two consultations, both closed. The design consult was taken **before any line existed**
+(`docs/reviews/phase-2b-2c-2-design.md`); the aggregate code review was taken over the whole working
+tree **before the commit** (`docs/reviews/phase-2b-2c-2-code.md`), and it returned
+**READINESS: NOT READY**. That verdict was **accepted rather than dispositioned away**: both findings
+were fixed, re-verified, and the phase was not committed until they were.
+
+| # | Where | Ruling or finding | Disposition |
+|---|---|---|---|
+| Design Q1 | consult | `create_match` accepts a **closed** `NewMatch { trigger, replace }`, both mandatory — never a raw pair list, never a full `MatchDraft` | **Adopted.** The author-chosen-key ban settles the pair list on its own; a `MatchDraft` would advertise structure a flat item cannot spell |
+| Design Q1 | consult | *Reasoning corrected before it was acted on.* The consult justified the mandatory `replace` by claiming `save_match` could not later insert one. **That is false** — 2b-2b-2's D1 permits exactly one insertion, a schema-known scalar key into the match's own mapping | **Ruling kept, reason replaced**: a trigger with no body is not a usable espanso match. The incorrect reasoning appears in no comment or document |
+| Design Q2 | consult | The core gains an explicit **front** insertion reusing `plan_move`'s own derivation; not a command-layer reconstruction, not append-then-move | **Adopted.** R25 forbids a move in a batch with anything else, so append-then-move would cost two transactions, two backups and two acknowledgement rounds, and would leave an intermediate state on disk. `insert_item()`'s `after: Option<usize>` became `at: ItemPlacement`; the reviewer confirmed **no `None` call site silently became `Front`** |
+| Design Q3 | consult | Target the top-level `matches` value only, by opaque `DocumentId`; a file with **no `matches:` key at all** is refused by name in the `Err` channel; a **bare** `matches:` is still promoted | **Adopted** as `CommandError::DocumentHasNoMatchList` |
+| Design Q4 | consult | `delete_match` answers `moved: None` — routine, not defensive. No neighbour identity | **Adopted.** Returning a neighbour would overload `moved` with UI selection policy and re-introduce positional identity |
+| Design Q5 | consult | The eight `EditError` refusals arrive **wrapped** as `SaveFailed`; the command layer does **not** pre-plan the primitive | **Adopted.** Pre-planning would resolve the document twice and let the two layers disagree. The ruling was **conditional** on the object-shape contract test, which now exists |
+| Design Q6 | consult | A deletion that doubles a blank separation owes a `PresentationNote` | **Adopted after one refusal.** See Code 1 |
+| Design Q7 | consult | The named stale-identity test | **Adopted verbatim**, premise included |
+| Code 1 | review | **Medium, and the NOT READY** — the Q6 note was **not** emitted. The implementer's diagnosis was accepted as sound (the old `PresentationNote` was a scalar-*spelling* record with no honest `ScalarStyle` for "a deletion left two blank lines") but the deferral still left the user with no disclosure | **Fixed, not dispositioned.** `PresentationNote` became a tagged union — `ScalarRestyled` carrying the old four operands verbatim, plus `DoubledSequenceSeparation { edit }`. Detected in `plan_item_removal` via `removal_doubles_a_blank_separation`; **`lift_item()` and `ItemMove`'s output untouched**, so a move's `notes` stays empty and is now **pinned by a test** rather than only documented. **Neither blank line is collapsed** |
+| Code 2 | review | **Low** — `ItemPlacement::After(0)` was accepted against a bare implicit-null `matches:`, which has zero items, contradicting `After`'s own contract. A test codified the three placements as equivalent there, **including the nonexistent anchor** | **Fixed.** The implicit-null branch now returns `NoSuchDestinationItem { items: 0, … }` for every `After(_)`. The old test was **renamed** to `front_and_end_promote_a_bare_key_to_the_same_bytes` — its previous name asserted the very equivalence the finding says is wrong — and `a_promotion_refuses_every_after_anchor` was added beside it |
+| Code 3 | review | The single most valuable **missing** test, named | **Added**: `deletion_that_creates_doubled_separation_returns_a_layout_presentation_note` asserts the byte-exact doubled gap, the note in `SaveResult::Saved`, its one-key object on the wire, **and** the negative case |
+| Code 4–6 | review | **No finding** in the two commands' correctness, in the invariants (no write outside `save_document`, no `force`, no finding cache, R25, D2), or in i18n and wire-contract completeness | Each reported as an explicit "no finding", not left silent |
+| — | orchestrator | The reviewer noted it could not re-run the test and lint totals under its read-only constraint | **Discharged by the table above**, which is the orchestrator's own second run |
+
+---
+
 ## Verification — Phase 2b-2c-1
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4207,6 +4276,109 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-2c-2 is complete and both of its Codex consultations are closed.**
+`docs/decisions/2b-2c-2-notes.md` is the record; the design consult is
+`docs/reviews/phase-2b-2c-2-design.md` and the aggregate code review is
+`docs/reviews/phase-2b-2c-2-code.md`. **That review returned `READINESS: NOT READY`**, and the
+verdict was accepted rather than argued with: its Medium and its Low were both fixed and re-verified
+before the commit. **This application can now create and delete a user's snippets.**
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 983 tests across 21 binaries, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **700**.)
+
+**The next step is Phase 2b-2c-3 — `save_raw_document`, the eleventh `#[tauri::command]`, and the
+last of 2b-2c.** It is not a small step and it is not like the two before it.
+
+**Start from the answer 2b-2c-1's design consult already gave it** (`docs/reviews/phase-2b-2c-1-design.md`,
+Q6, recorded and deliberately not built): **a `SaveRequest` variant for whole text, never a full-span
+`DocumentEdit`.** A whole-document text is **not** a span replacement, so it may not claim the patch
+engine's locality invariants — the thing every other operation in this application is built to
+guarantee. Giving `save_document` a whole-text path is a change to **the one entry point that
+writes**, not a new caller of it, and that is the whole difficulty.
+
+**What 2b-2c-2 built that 2b-2c-3 must not redesign.**
+
+- **`PresentationNote` is now a tagged union**, `ScalarRestyled { edit, from, to, reason }` (the old
+  struct's four operands, unchanged) plus `DoubledSequenceSeparation { edit }`. Both arms are struct
+  variants, so both cross as one-key objects (D5). **A raw save re-encodes nothing and moves nothing,
+  so its `notes` should be empty** — but that is a claim to state and test, not to assume.
+- **`ItemPlacement { Front, After(usize), End }`** replaced `insert_item()`'s `after: Option<usize>`.
+  An implicit-null `matches:` accepts `Front` and `End` and **refuses every `After(_)`** with
+  `NoSuchDestinationItem { items: 0, … }`.
+- **`NewMatch { trigger, replace }` is closed and both fields are mandatory**, and
+  `NewMatchPosition`'s three arms are all struct variants so the position crosses as a uniform
+  object. `NewMatchPosition` is **not** a code and has no dictionary namespace.
+- **`CommandError::DocumentHasNoMatchList`** is the refusal for a file with no `matches:` key at all.
+  A **bare** `matches:` is promoted and is not this refusal.
+- **`every_edit_error_variant_crosses_as_an_object`** now covers `EditError` (36) and `SaveError` (9)
+  and derives its lists by parsing the source. **A new error enum on this boundary owes the same
+  check** — the pinned counts move with the enums.
+
+**What 2b-2c-3 inherits from every command before it, and none of it is its to revisit.**
+
+- **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's
+  file.** Never call `replace_file_atomically` or `replace_locked_file` from a command or from inside
+  the transaction — **the lock is not reentrant, so the process hangs silently and forever.** This is
+  the invariant a whole-text path is most likely to break, because a whole text *feels* like
+  something you could just write.
+- **A planning-time refusal goes in the `Err` channel; a transactional one does not** (D1).
+- **A committed write is never afterwards reported as an `Err`** (D2). A raw save has no single match,
+  so **`moved: None` is its permanent answer**, not a failure.
+- **An empty batch still goes through the transaction** (D3). A raw save whose text equals the file's
+  is a `Saved` with `committed: false`.
+- **Every variant of a wire enum used as an error operand serializes as an object** (D5).
+- No `force` flag, no acknowledgement bypass, no caching of "the findings I last issued", no wire path
+  accepted back as a target. `committed: false` and `backup: None` are **not** failures.
+
+**Three things 2b-2c-3 must decide, and none has been decided yet.**
+
+1. **What a raw save is checked against.** The other operations get their safety from the patch engine
+   proving the untouched bytes are untouched. A whole text has no untouched bytes to prove. So what
+   plays that role — a reparse that must succeed, a validation verdict, both, or an explicit
+   acknowledgement that the user is taking the wheel?
+2. **Whether a raw save may write a file the parser rejects.** `document_text` already answers valid
+   UTF-8 **or refuses** with a typed `NotUtf8 { path, offset }`; a file it cannot display cannot be
+   round-tripped through this command at all. Whether it may write text the *YAML* parser rejects is
+   a different question and a sharper one.
+3. **What it does to identities.** Every `MatchId` in the file is stale afterwards, and unlike a
+   create or a delete there is no single match to answer with.
+
+**Two debts this phase paid.**
+
+- **`SaveResult::Saved::notes` has a second producer**, and the first that is not a scalar
+  re-encoding. It still has **no reader** — which is why the union reshape was free, and it will not
+  be free again.
+- **A move's empty `notes` is now a tested property**, not just a documented one
+  (`a_move_out_of_the_same_gap_still_reports_nothing`).
+
+**The debts, retallied.**
+
+- **The thirty-two `code.draftError.*` strings, `code.commandError.draftRefused`, the eight
+  `code.editError.*` sentences, and now `code.commandError.documentHasNoMatchList` and the two
+  `code.presentationNote.*` sentences have never been drawn.** The first phase to build the editor
+  screen owes the look.
+- **213+ Spanish values are checked only by heuristic** — three more than at 2b-2c-1. Nothing
+  establishes that any is idiomatic.
+- **The real configuration exercises neither new command** (hole 6.3 of the notes). It is swept for
+  moves and for field edits; nothing has ever been created in it or deleted from it.
+- **A move leaves the identical doubled blank line at its origin and says nothing about it**
+  (hole 6.2). The removal side is closed; the move side is not, and closing it would change an
+  already-shipped command's documented "notes are always empty for a move".
+- **`create_match` derives `End` from `view.matches.len()`** (hole 6.8) — a projection count rather
+  than something the engine hands back. It can only affect the identity answered in `moved`, never
+  a byte.
+- **`verify_items` speaks `verify_field`'s vocabulary** (hole 3 of 2b-2c-1), and a deletion can still
+  report a refusal whose sentence is about a move (hole 6.4).
+- **Three `code.diagnosticCode.*` observations remain recorded as non-defects**
+  (`2b-2b-3-notes.md` §7.5).
+
+---
+
 **Phase 2b-2c-1 is complete and both of its Codex consultations are closed.**
 `docs/decisions/2b-2c-1-notes.md` is the record; the design consult is
 `docs/reviews/phase-2b-2c-1-design.md` and the aggregate code review is
@@ -5171,7 +5343,12 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
-| [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **`DocumentEdit` now has six variants**, and `InsertItem`/`RemoveItem` are the two 2b-2c-2 calls. `RemoveItem` addresses **the item**, not `(sequence, index)`. `editable_sequence_item()`, `lift_item()` and `leading_comment_block_start()` are shared by the move and the removal — **change one and both change**, which is the point. `InsertItem` has **no "before the first item" form**; append and move, or derive the front the way `plan_move` does |
+| [`docs/reviews/phase-2b-2c-1-design.md`](docs/reviews/phase-2b-2c-1-design.md) **§Q6** | **Where 2b-2c-3 starts.** `save_raw_document` is a **`SaveRequest` variant for whole text, never a full-span `DocumentEdit`** — recorded two phases early and still not built. A whole text is not a span replacement and may not claim the patch engine's locality invariants |
+| [`src-tauri/src/save.rs`](src-tauri/src/save.rs) | **`PresentationNote` is a tagged union as of 2b-2c-2** — `ScalarRestyled` (the old struct's four operands) plus `DoubledSequenceSeparation { edit }`, both struct variants so both cross as one-key objects. The reshape was free because `notes` still has **no reader**; it will not be free again. `SaveResult::Saved` is unchanged otherwise, and `moved: None` is a raw save's permanent answer |
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The ten commands, and the four that write.** `create_match` and `delete_match` are the model for 2b-2c-3's shape: check the projection's revision **before** resolving anything positional, resolve through `MatchId` only, build exactly one primitive, and hand it to `save_document` — **which stays the only entry point that writes.** `after_a_save` centralizes D2, and its return type is what stops a post-commit refresh failure becoming an `Err`. **A raw save has no match to re-mint, so it is the first command whose `moved` is structurally `None`** |
+| [`docs/decisions/2b-2c-2-notes.md`](docs/decisions/2b-2c-2-notes.md) | Eight decisions with their reasons, the refusal taxonomy, and eight holes. **§6.2 is the one to read before touching a move**: a move leaves the identical doubled blank line at its origin and says nothing about it, and closing that would change an already-shipped command's documented behaviour. §6.8 is the projection count `End` is derived from |
+| [`docs/reviews/phase-2b-2c-2-code.md`](docs/reviews/phase-2b-2c-2-code.md) | The review that returned **NOT READY** and was obeyed. Its Medium is the precedent worth keeping: *"a backend test cannot make the UI not surprised"* — pinning a silent outcome in a test is not the same as disclosing it to the user, and plan §6.2 asks for the second |
+| [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **`DocumentEdit` has six variants**, and `InsertItem`/`RemoveItem` now have callers. `insert_item()` takes **`at: ItemPlacement { Front, After(usize), End }`**, not the old `Option<usize>`; an implicit-null `matches:` accepts `Front` and `End` and **refuses every `After(_)`**. `plan_item_removal` detects the doubled blank separation itself — **`lift_item()` is untouched**, which is what keeps a move silent. `RemoveItem` addresses **the item**, not `(sequence, index)`. `editable_sequence_item()`, `lift_item()` and `leading_comment_block_start()` are shared by the move and the removal — **change one and both change**, which is the point. `InsertItem` has **no "before the first item" form**; append and move, or derive the front the way `plan_move` does |
 | [`crates/espansoconfig-core/tests/patch_item.rs`](crates/espansoconfig-core/tests/patch_item.rs) | The phase's acceptance evidence, and the model for any later sequence-item test. `lift_site_of_a_move()` applies a real `ItemMove`, discards its landing, splices the departures and compares the **bytes** against `RemoveItem`'s output — the architectural claim, pinned rather than asserted. The removal table crosses first/middle/last with blank-line and comment shapes, in LF **and** CRLF; it is the CRLF twin that found the latent ownership defect |
 | [`docs/reviews/phase-2b-2c-1-design.md`](docs/reviews/phase-2b-2c-1-design.md) | The design consult taken **before** the primitives were written. Seven rulings with a disposition table; Q6 is `save_raw_document`'s answer, **recorded and deliberately not built** — a `SaveRequest` variant, never a full-span `DocumentEdit`. 2b-2c-3 starts there |
 | [`docs/decisions/2b-2c-1-notes.md`](docs/decisions/2b-2c-1-notes.md) | Eight decisions with their reasons, the refusal taxonomy as a table, **§5 the latent CRLF ownership defect this phase found and fixed**, and **§6's nine holes** — of which 5 (a removal leaves both blank lines) and 6 (no insert-before-first) are the two 2b-2c-2 will feel first |

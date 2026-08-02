@@ -527,19 +527,14 @@ pub(crate) fn registered_commands() -> BTreeSet<String> {
 /// asserting an intention. `crate::commands` names the same ones in prose; this
 /// is the version that can fail.
 ///
-/// **`move_match` left this list at Phase 2b-2a and `save_match` at Phase
-/// 2b-2b-3**, which is the only way a name may leave it: the command exists, is
-/// registered, and writes a user's file through
-/// `espansoconfig_core::persist::save_document`. The four that remain are still
-/// absent, and three of them are absent for a reason stronger than sequencing —
-/// the core has no primitive for inserting a sequence item, removing one, or
-/// replacing a whole document's text.
-const FORBIDDEN_COMMANDS: [&str; 4] = [
-    "create_match",
-    "delete_match",
-    "save_raw_document",
-    "validate_match",
-];
+/// **`move_match` left this list at Phase 2b-2a, `save_match` at Phase 2b-2b-3,
+/// and `create_match` and `delete_match` at Phase 2b-2c-2**, which is the only
+/// way a name may leave it: the command exists, is registered, and writes a
+/// user's file through `espansoconfig_core::persist::save_document`. The two that
+/// remain are still absent, and `save_raw_document` is absent for a reason
+/// stronger than sequencing — a whole-document text is not a span replacement,
+/// and `SaveRequest` takes a list of edits and nothing else.
+const FORBIDDEN_COMMANDS: [&str; 2] = ["save_raw_document", "validate_match"];
 
 /// The single-quoted literals of `export const {name} = [ … ]`.
 ///
@@ -1161,6 +1156,76 @@ fn every_draft_error_variant_crosses_as_an_object() {
     );
 } // End of function every_draft_error_variant_crosses_as_an_object()
 
+/// Every `EditError` variant crosses as a JSON **object**, and so does every
+/// `SaveError` that could carry one.
+///
+/// **The premise Phase 2b-2c-2's design consult made its Q5 ruling conditional
+/// on.** `create_match` and `delete_match` deliberately do **not** pre-plan their
+/// primitive: the eight insertion and removal refusals are raised inside the
+/// transaction, under the lock, and reach a caller as
+/// `CommandError::SaveFailed { error: SaveError::Patch(EditError::…) }`. That is
+/// only a *typed* refusal on the wire if the whole chain keeps its shape, and the
+/// shape is what [`COMMAND_ERROR_OPERANDS`] pins with one word: `error: 'object'`.
+///
+/// Two levels can break it and both are asserted, because
+/// [`the_frontend_operand_table_is_the_operands_rust_writes`] can pin exactly one
+/// shape per code and `crate::error::every_command_error` holds one `SaveFailed`
+/// sample. A unit variant anywhere in either enum would cross as a **bare
+/// string**, `isCommandError` would reject the rejection, and a user would read
+/// the generic *something went wrong* instead of the sentence
+/// `code.editError.removalWouldEmptyTheSequence` that already exists for it in
+/// both dictionaries — which is precisely the refusal a person meets by trying to
+/// delete the last snippet of a file.
+///
+/// **Derived from the declarations, not from a list** (`PROGRESS.md`, D2w), so a
+/// unit variant added to either enum fails here rather than degrading a refusal
+/// in silence. The `serde` behaviour the assertions stand on is observed at the
+/// bottom rather than taken on trust.
+#[test]
+fn every_edit_error_variant_crosses_as_an_object() {
+    for (name, count) in [("EditError", 36), ("SaveError", 9)] {
+        let declared = crate::dictionary_contract::declared_variants_of(name);
+        assert_eq!(
+            declared.len(),
+            count,
+            "{name} declared {count} variants when this check was written: {declared:?}"
+        );
+        let bare = crate::dictionary_contract::unit_variants_of(name);
+        assert!(
+            bare.is_empty(),
+            "a unit variant of {name} crosses as a bare string, which \
+             COMMAND_ERROR_OPERANDS cannot declare beside the objects around it; give it \
+             empty braces: {bare:?}"
+        );
+    } // End of the loop over the two enums a failed save nests
+
+    // And the whole point of it, observed on the real value: a refusal raised by
+    // the insertion primitive inside the transaction arrives as a one-key object
+    // at both levels, matching the shape the frontend pins.
+    let refusal = CommandError::SaveFailed {
+        error: SaveError::Patch(EditError::RemovalWouldEmptyTheSequence {
+            edit: 0,
+            sequence: a_node(),
+        }),
+    };
+    let written = json_of(&refusal);
+    assert_eq!(written["code"], "saveFailed");
+    assert!(
+        written["error"]["Patch"]["RemovalWouldEmptyTheSequence"]["edit"].is_number(),
+        "the engine's own refusal must survive both tags: {written}"
+    );
+    let declared_shape = operand_table(&read_without_comments("src/lib/ipc/errors.ts"))
+        .remove("saveFailed")
+        .expect("COMMAND_ERROR_OPERANDS declares saveFailed")
+        .remove("error")
+        .expect("the saveFailed entry declares an error operand");
+    assert_eq!(
+        shape_of(&written["error"]),
+        declared_shape,
+        "the operand table and a nested patch refusal disagree: {written}"
+    );
+} // End of function every_edit_error_variant_crosses_as_an_object()
+
 /// The frontend's command names are the registered commands, both ways.
 ///
 /// The earlier version of this test built its `registered` set by filtering the
@@ -1188,8 +1253,14 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// both mutating names are asserted present rather than merely absent from that
 /// list: "the commands that write are the commands we meant to ship" is a claim
 /// with two sides, and only one of them is a list of names that must not appear.
+///
+/// Phase 2b-2c-2 adds `create_match` and `delete_match`, taking the workspace
+/// surface to ten and the whole to eleven. They are the third and fourth names to
+/// leave [`FORBIDDEN_COMMANDS`], and they leave it for the reason the list gives:
+/// each now has a core primitive behind it — `InsertItem` and `RemoveItem` —
+/// rather than being forced into existence by a write outside the transaction.
 #[test]
-fn the_registered_commands_are_the_workspace_eight_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_ten_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1198,10 +1269,10 @@ fn the_registered_commands_are_the_workspace_eight_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        8,
-        "the workspace surface is six read-only commands and two that write: {workspace:?}"
+        10,
+        "the workspace surface is six read-only commands and four that write: {workspace:?}"
     );
-    for mutating in ["move_match", "save_match"] {
+    for mutating in ["move_match", "save_match", "create_match", "delete_match"] {
         assert!(
             workspace.contains(mutating),
             "{mutating} writes a user's file and must be declared where the frontend can call it"
@@ -1213,8 +1284,8 @@ fn the_registered_commands_are_the_workspace_eight_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        9,
-        "Phase 2b-2b-3 registers eight workspace commands and one menu command, and no more: {registered:?}"
+        11,
+        "Phase 2b-2c-2 registers ten workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1222,7 +1293,7 @@ fn the_registered_commands_are_the_workspace_eight_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_eight_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_ten_and_the_menu_command()
 
 /// The three outcomes of a save are declared exactly as Rust writes them.
 ///
@@ -1541,6 +1612,26 @@ fn not_reencodable_samples() -> Vec<NotReencodable> {
         NotReencodable::Undecodable(DecodeError::TrailingBackslash),
     ]
 } // End of function not_reencodable_samples()
+
+/// One value of every [`PresentationNote`] variant.
+///
+/// A **tagged union since Phase 2b-2c-2**, and it is in this table rather than
+/// among the structs for that reason. `ScalarRestyled` is the shape the struct
+/// had; `DoubledSequenceSeparation` is what a deletion between two
+/// blank-separated siblings reports, and it carries only the edit it is about
+/// because there is no scalar anywhere in it and therefore no honest
+/// [`espansoconfig_core::ScalarStyle`] to name.
+fn presentation_note_samples() -> Vec<PresentationNote> {
+    vec![
+        PresentationNote::ScalarRestyled {
+            edit: 0,
+            from: ScalarStyle::Plain,
+            to: ScalarStyle::SingleQuoted,
+            reason: Some(NotReencodable::FoldedStyle),
+        },
+        PresentationNote::DoubledSequenceSeparation { edit: 0 },
+    ]
+} // End of function presentation_note_samples()
 
 /// One value of every [`InvariantViolation`] variant.
 fn invariant_violation_samples() -> Vec<InvariantViolation> {
@@ -2011,15 +2102,6 @@ fn save_transaction_structs() -> Vec<(&'static str, Value)> {
         ),
         ("Finding", json_of(&a_finding())),
         (
-            "PresentationNote",
-            json_of(&PresentationNote {
-                edit: 0,
-                from: ScalarStyle::Plain,
-                to: ScalarStyle::SingleQuoted,
-                reason: Some(NotReencodable::FoldedStyle),
-            }),
-        ),
-        (
             "SaveRefusal",
             json_of(&SaveRefusal {
                 verdict: SaveVerdict::RefusedForUnacknowledgedSuspicions,
@@ -2126,6 +2208,10 @@ fn save_transaction_enums() -> Vec<(&'static str, Vec<Value>)> {
             "NotReencodable",
             not_reencodable_samples().iter().map(json_of).collect(),
         ),
+        (
+            "PresentationNote",
+            presentation_note_samples().iter().map(json_of).collect(),
+        ),
     ]
 } // End of function save_transaction_enums()
 
@@ -2169,9 +2255,10 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 173,
+        variants, 175,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
-         eight and Phase 2b-2c-1 added EditError's eight sequence-item refusals; this \
+         eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals and \
+         Phase 2b-2c-2's fix round made PresentationNote a two-variant union; this \
          list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -2253,11 +2340,12 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (102, 12, 59),
+        (104, 12, 59),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
-         and seven unit ones, and Phase 2b-2c-1's eight sequence-item refusals \
-         are eight more struct ones; a struct variant that became a skip is a hole"
+         and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
+         eight more struct ones, and PresentationNote's two are the last two; a \
+         struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2535,7 +2623,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 173,
+        checked, 175,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()
