@@ -5900,10 +5900,10 @@ _Updated at each phase boundary._
 | **2b-2c-2** | **`8d223fc`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-2 cleanup** | **`35a9e9e`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-3a** | **`3375e98`** | ✅ pushed to `origin/main` | clean |
-| **2b-2c-3b** | **`PENDING`** | ⏳ | clean |
+| **2b-2c-3b** | **`d230352`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
 
-`PENDING` is Phase 2b-2c-3b **including its review fix round** — the phase was held open until all
+`d230352` is Phase 2b-2c-3b **including its review fix round** — the phase was held open until all
 four findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
 defects: neither the wrapper that turned a **committed** write into a rejected promise when the
 caller's reload happened to fail, nor the invalidation obligation that a `() => {}` discharged, nor
