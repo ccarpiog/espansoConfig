@@ -6225,6 +6225,34 @@ _Updated at each phase boundary._
 | **2b-2c-3a** | **`3375e98`** | ✅ pushed to `origin/main` | clean |
 | **2b-2c-3b** | **`d230352`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+| **2c split** | **`8b1c050`** | ✅ pushed to `origin/main` | clean |
+| **2c-1a** | **`25fcc40`** | ✅ pushed to `origin/main` | clean |
+
+`8b1c050` is **not a phase** — it is the **split of Phase 2c**, which the previous checkpoint made a
+fresh session's first act in as many words: *"A fresh session's first act is that split, not code."*
+No code was written. It contains `docs/decisions/2c-split-notes.md`, the design consult
+`docs/reviews/phase-2c-split-design.md`, the ten-row split table and its consult disposition in this
+file, and `CLAUDE.md` §6. **Four of the consult's seven answers changed the cut rather than
+confirming it**, so a session that reads only the earlier five-way proposal will build the wrong
+thing: undo stopped being a sub-phase, duplicate became one, the typed invalidation effect moved
+from 2c-3 to 2c-1a, and five sub-phases became ten. The baseline was verified before the split, not
+assumed — `cargo test --workspace` 1007 and `npm test` 738, both run.
+
+`25fcc40` is Phase 2c-1a **including its review fix round** — the phase was held open until all
+eight findings were closed, so, as with every phase since `8989c16`, no commit holds the
+demonstrated defects: neither the seal whose payload `Reflect.ownKeys` recovered and which could be
+opened a second time with a no-op, nor the invalidation callback whose exception replaced a
+**committed** save's outcome, nor the structured draft whose base, history and consent candidate
+were one aliased object that an in-place mutation moved all at once — **nor the two claims this
+project's own decision record made about guarantees the code did not give.** It contains
+`src/lib/browser/{draft,invalidation,saveOutcome}.ts` with their three test files, the
+behaviour-preserving extraction in `src/lib/browser/rawSave.ts`, twelve new keys in each dictionary
+with their accessors in `src/lib/i18n/index.ts`, `docs/decisions/2c-1a-notes.md`,
+`docs/reviews/phase-2c-1a-draft-spine.md`, `CLAUDE.md` §6 and this checkpoint. 738 → 821 frontend
+tests. **It touches no `.svelte` file and nothing under `crates/` or `src-tauri/`**, and
+`cargo test --workspace` was run anyway, unchanged at 1007, because that is the evidence for the
+claim. **A fresh session starting Phase 2c-1b should start from `25fcc40` or later.** As at 1b-1,
+`npm install` (or `npm ci`) is required before any frontend command will run.
 
 `d230352` is Phase 2b-2c-3b **including its review fix round** — the phase was held open until all
 four findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
