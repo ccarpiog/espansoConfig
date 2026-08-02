@@ -4307,7 +4307,7 @@ rulings. **Do not re-commission it.** Its rulings, in one line each:
 | Q | Ruling |
 |---|---|
 | Q1 | The substitute for the patch engine's proof is **both** a successful reparse **and** the existing validation/acknowledgement gate |
-| Q2 | **A raw save may not write text the YAML parser rejects.** See the flag below — this one is worth putting to the owner before it is built |
+| Q2 | ~~A raw save may not write text the YAML parser rejects~~ — **OVERRIDDEN BY THE OWNER, see below** |
 | Q3 | Keep `SaveResult`; `moved: None` |
 | Q4 | **One** core `save_document(SaveRequest)` entry point branching internally — not a second entry point beside it (the lock is not reentrant) |
 | Q5 | A raw save **does** fully participate in acknowledgement for validation findings |
@@ -4315,11 +4315,35 @@ rulings. **Do not re-commission it.** Its rulings, in one line each:
 | Q7 | The highest risk is **silently overwriting changes made after the raw editor loaded the file** |
 | Q8 | A raw save is **a separate replacement mode with a different promise**, not a locality-preserving edit |
 
-**Q2 deserves the owner's judgement before it is built, and the next session should ask rather than
-assume.** Refusing to write unparseable text means **this application cannot be used to repair a file
-that is already broken** — arguably the single most valuable thing a raw editor does, and this app
-already *displays* unparseable files (a broken file crosses as a view, never as an error). The
-consult ruled for refusing; that is defensible and it is not obviously right.
+**Q2 was put to the owner and the owner reversed it. This is a settled decision, not an open
+question — do not re-litigate it and do not re-commission a consult on it.**
+
+> **A raw save MAY write text the YAML parser rejects. Do not refuse to write it.**
+
+The tradeoff as it was put: refusing means **this application cannot be used to repair a file that is
+already broken**, which is arguably the single most valuable thing a raw editor does — and the app
+already *displays* unparseable files, since a broken file crosses as a view and never as an error.
+`docs/reviews/phase-2b-2c-3-design.md` carries the ruling in full, appended below the consult it
+overrides.
+
+**Three consequences, and the last one is an inference rather than the owner's words.**
+
+1. **Q1 narrows.** The reparse can no longer be a *gate* — failing it is no longer disqualifying. It
+   stays a **fact the transaction must establish and report**, because the answer is what the user is
+   told and what the workspace cache must do next.
+2. **Q5 now carries the weight.** The acknowledgement protocol is what makes the ruling safe: the app
+   does not refuse, and it does not write silently either. *"Refused, not forced"* was never
+   *"refused, full stop"* — it is **never written without the user meaning it**.
+3. **Silent or acknowledgeable? Assumed acknowledgeable.** The owner's ruling does not settle this.
+   The assumption follows plan §6.2 (nothing unrequested happens silently) and the fact that 2b-2c-2
+   has just paid to disclose a *doubled blank line* — a far smaller surprise than a file espanso will
+   refuse to load. **A phase that finds this assumption wrong should put it back to the owner rather
+   than quietly choosing the other reading.**
+
+Everything else in the consult stands: one `save_document` entry point branching internally (Q4 — the
+lock is not reentrant), `moved: None` (Q3), the backup and revision rules (Q6), the stale-revision
+test as the highest risk (Q7), and Q8's framing of a raw save as a **separate replacement mode with a
+different promise**.
 
 **The next step is Phase 2b-2c-3 — `save_raw_document`, the eleventh `#[tauri::command]`, and the
 last of 2b-2c.** It is not a small step and it is not like the two before it.

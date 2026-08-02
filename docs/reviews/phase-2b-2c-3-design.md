@@ -56,3 +56,53 @@ Calling the whole file the “edited span” would make the original guarantee v
 
 Codex session ID: 019fc31e-b172-7de2-be42-d211f6b396e2
 Resume in Codex: codex resume 019fc31e-b172-7de2-be42-d211f6b396e2
+
+---
+
+# Owner's ruling — Q2 is OVERRIDDEN
+
+**This section overrides the consult above. Anyone building Phase 2b-2c-3 follows this, not Q2.**
+
+The consult ruled *"Do not write text the YAML parser rejects."* The question was put to the owner
+before any line was written, with the tradeoff stated: refusing means **this application cannot be
+used to repair a file that is already broken**, which is arguably the single most valuable thing a
+raw editor does — and the app already *displays* unparseable files, since a broken file crosses as a
+view and never as an error.
+
+**The owner's ruling: do not refuse to write it.** A raw save may write text the YAML parser rejects.
+
+## What this changes, and what it does not
+
+- **Q2 is reversed.** An unparseable candidate is not a refusal. `save_raw_document` writes it.
+- **Q1 is narrowed by consequence.** The consult's substitute gate was "a successful reparse **and**
+  the validation verdict". The reparse can no longer be a *gate*, because failing it is no longer
+  disqualifying. It remains a **fact to be established and reported** — the transaction must still
+  attempt the parse, because the answer is what the user is told and what the workspace cache must
+  do next.
+- **Q5 is unchanged and now carries the weight.** A raw save still participates fully in the
+  acknowledgement protocol. **This is the mechanism that makes the owner's ruling safe**: the
+  application does not refuse, and it does not write silently either — it reports that the text does
+  not parse, and the user confirms by content, exactly as for any other finding. "Refused, not
+  forced" was never "refused, full stop"; it is "never written without the user meaning it".
+- **Everything else stands.** One `save_document` entry point branching internally (Q4 — the lock is
+  not reentrant), `moved: None` (Q3), the backup and revision rules (Q6), the stale-revision test as
+  the highest risk (Q7), and Q8's framing that a raw save is a **separate replacement mode with a
+  different promise** rather than a locality-preserving edit.
+
+## The one sub-decision this leaves, and the assumption taken
+
+Writing unparseable text could be **silent** or **acknowledgeable**. Nothing in the owner's ruling
+settles it, and the assumption taken is **acknowledgeable**, for a reason the project has already
+committed to elsewhere: plan §6.2 forbids this application making an unrequested change silently,
+`SaveResult::Refused` plus `Acknowledgement` is the machinery that exists for "this is risky, confirm
+by content", and Phase 2b-2c-2 has just finished paying to disclose a doubled blank line — a far
+smaller surprise than a file espanso will refuse to load.
+
+**A phase that finds this assumption wrong should put it back to the owner rather than quietly
+choosing the other reading.** The ruling above is theirs; this sub-decision is an inference from it.
+
+## What the UI then owes the user
+
+Not a blocked save. A sentence saying the file will not load in espanso until it is fixed, the
+parser's own position if it has one, and the choice — in both languages, through i18n, like every
+other user-facing string in this project.
