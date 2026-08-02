@@ -5338,8 +5338,23 @@ _Updated at each phase boundary._
 | 2b-2a | `c3fe5a6` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 | `8016a3b` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 code review | `f1bbad1` | ✅ pushed to `origin/main` | clean |
-| **2b-2b-3** | **`0cf7420`** | ✅ pushed to `origin/main` | clean |
+| 2b-2b-3 | `0cf7420` | ✅ pushed to `origin/main` | clean |
+| **2b-2c-1** | **`95c1a0b`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`95c1a0b` is Phase 2b-2c-1 **whole** — both Codex consultations, the one Low documentation finding
+fixed before the commit, and this checkpoint. It contains `InsertItem`, `RemoveItem` and the shared
+lift (`editable_sequence_item`, `lift_item`, `leading_comment_block_start`) in
+`crates/espansoconfig-core/src/patch/edit.rs`, the eight new `EditError` refusals with their
+sentences in both dictionaries and their member in `src/lib/ipc/types.ts`, the retabulated counts in
+`src-tauri/src/{wire,dictionary}_contract.rs`, the new
+`crates/espansoconfig-core/tests/patch_item.rs`, `docs/decisions/2b-2c-1-notes.md` and the two review
+files. **It is the first commit in which the patch engine can insert or remove a whole sequence item,
+and nothing calls either primitive.** It also carries a **latent-defect fix**: no CRLF document had
+ever had an entry's leading comment block counted as owned, so a CRLF removal or move of such an
+entry was wrongly refused — `ItemMove` is affected as well as the new removal. As at 1b-1,
+`npm install` (or `npm ci`) is required before any frontend command will run. **A fresh session
+starting Phase 2b-2c-2 should start from `95c1a0b` or later.**
 
 `0cf7420` is Phase 2b-2b-3 **whole** — both Codex consultations, the one defect found and fixed
 before the review, the window reading, and this checkpoint. It contains `save_match` and
