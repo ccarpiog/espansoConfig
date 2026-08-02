@@ -6456,6 +6456,7 @@ _Updated at each phase boundary._
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
 | **2c split** | **`8b1c050`** | ✅ pushed to `origin/main` | clean |
 | **2c-1a** | **`25fcc40`** | ✅ pushed to `origin/main` | clean |
+| **2c-1b** | **`fa72d45`** | ✅ pushed to `origin/main` | clean |
 
 `8b1c050` is **not a phase** — it is the **split of Phase 2c**, which the previous checkpoint made a
 fresh session's first act in as many words: *"A fresh session's first act is that split, not code."*
@@ -6466,6 +6467,15 @@ confirming it**, so a session that reads only the earlier five-way proposal will
 thing: undo stopped being a sub-phase, duplicate became one, the typed invalidation effect moved
 from 2c-3 to 2c-1a, and five sub-phases became ten. The baseline was verified before the split, not
 assumed — `cargo test --workspace` 1007 and `npm test` 738, both run.
+
+`fa72d45` is Phase 2c-1b **including all three of its fix rounds** — the phase was held open until
+every one of the nine findings was closed, so, as with every phase since `8989c16`, no commit holds
+a demonstrated defect. **Two of the nine were found by neither review**: the window reading caught
+them after 883 tests, `svelte-check` and two Codex passes had all passed, and one of them silently
+rewrote every line ending in a CRLF file while the screen said *"exactly the text that was sent"*.
+That is the strongest evidence this project has that a reading of a screen is not ceremony, and it
+is why 2c-2 must budget for one — and for a **re-take**, because a claim about a screen has to be
+re-read after any change to a component, which is why 2c-1b took two.
 
 `25fcc40` is Phase 2c-1a **including its review fix round** — the phase was held open until all
 eight findings were closed, so, as with every phase since `8989c16`, no commit holds the
