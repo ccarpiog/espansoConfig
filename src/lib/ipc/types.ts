@@ -1511,6 +1511,443 @@ export interface RefusedResult {
 export type SaveResult = SavedResult | ConflictResult | RefusedResult;
 
 // ---------------------------------------------------------------------------
+// The draft surface — Phase 2b-2b-3
+// ---------------------------------------------------------------------------
+
+/**
+ * What the visual editor wants one match to say, and why that can be refused.
+ *
+ * Every type below mirrors a `espansoconfig_core::draft` type, and this is the
+ * **first group on this wire that travels inwards**: a {@link MatchDraft} is
+ * deserialized by `save_match`, where every other type in this file is only ever
+ * written. Two consequences shape the whole group.
+ *
+ * 1. **A malformed draft must fail closed.** The Rust side reads a draft with
+ *    `deny_unknown_fields`, so a key it does not model is a deserialization
+ *    error rather than a silent no-op, and {@link DraftField} is an explicit
+ *    tri-state rather than a nullable value — see its own note for the failure
+ *    that shape exists to prevent.
+ * 2. **A refusal carries indices, never the owner's text.** Twelve
+ *    {@link DraftError} variants address something below the match mapping, and
+ *    every one of them does it with a **position in the projection** this window
+ *    already holds. That is not terseness: a refusal crosses the process
+ *    boundary and the configuration is private (CLAUDE.md section 1). A caller
+ *    that wants to name the failing field resolves the index against what it is
+ *    already showing, and nothing here should ever gain a field to save it the
+ *    trouble.
+ *
+ * The three field-identifier unions — {@link MatchField}, {@link SequenceField}
+ * and {@link VariableField} — are spelled as **espanso's own keys** rather than
+ * as Rust variant names, because that is what `serde` writes for them and
+ * because an espanso key is the same word in every language. They are named on
+ * `NOT_A_CODE` in `src-tauri/src/dictionary_contract.rs`, with a reason each, and
+ * that table is what exempts them from owning a `code.` dictionary namespace.
+ */
+
+/**
+ * One schema-known scalar field of a match, spelled as its espanso key.
+ *
+ * **A field identifier, not a code.** It crosses as the key itself —
+ * `uppercase_style`, never `UppercaseStyle` — so a screen that puts it beside a
+ * field is showing espanso's own spelling rather than a Rust identifier, and it
+ * therefore owes no dictionary entry. `every_match_field_serializes_as_its_espanso_key`
+ * in `crates/espansoconfig-core/tests/draft_plan.rs` pins the two spellings
+ * against each other, variant by variant.
+ */
+export type MatchField =
+  | 'trigger'
+  | 'regex'
+  | 'replace'
+  | 'markdown'
+  | 'html'
+  | 'image_path'
+  | 'form'
+  | 'label'
+  | 'comment'
+  | 'word'
+  | 'left_word'
+  | 'right_word'
+  | 'propagate_case'
+  | 'uppercase_style'
+  | 'force_mode'
+  | 'force_clipboard'
+  | 'paragraph'
+  | 'anchor';
+
+/**
+ * One schema-known sequence of strings a match may hold.
+ *
+ * A field identifier for {@link MatchField}'s reason, and pinned by
+ * `every_sequence_field_serializes_as_its_espanso_key`.
+ */
+export type SequenceField = 'triggers' | 'search_terms';
+
+/**
+ * One schema-known scalar field of a variable of `vars`.
+ *
+ * A field identifier for {@link MatchField}'s reason, and pinned by
+ * `every_variable_field_serializes_as_its_espanso_key`. `params` is absent on
+ * purpose: espanso does not fix its keys, so it is addressed by index
+ * ({@link EntryDraft}) rather than by name.
+ */
+export type VariableField = 'name' | 'type' | 'inject_vars';
+
+/**
+ * What the caller wants one field of a match to become: a **tri-state**.
+ *
+ * ## Why this is not `T | null | undefined`, and must never become it
+ *
+ * A draft has to say three different things about one field — *leave it alone*,
+ * *make it this*, and *take it away* — and the encoding that spells all three
+ * with `null` and `undefined` is the one this shape exists to refuse.
+ * `undefined`, a missing key and `null` are routinely collapsed into one another
+ * by form libraries, serializers and generated clients, and the state they
+ * collapse to is the **removal**. A field the user never touched would delete
+ * itself, silently, on a boundary nobody looks at.
+ *
+ * The three states are therefore three distinct tags, with no encoding shared
+ * between any two of them: `'Unchanged'`, `{ Set: value }` and `'Remove'`. A
+ * `null` where a tag belongs is a **deserialization error** in Rust rather than
+ * an unintended mutation — `a_null_draft_field_is_a_deserialization_error_and_never_a_removal`
+ * in `crates/espansoconfig-core` is that fact under test.
+ *
+ * ## An omitted field fails closed, twice over
+ *
+ * Rust reads an absent field as `Unchanged` (`#[serde(default)]` on every field
+ * of `MatchDraft`), which is the one collapse that is safe because it collapses
+ * towards *doing nothing*. This file is narrower still: **no property of a draft
+ * below is optional**, so a field left out of a draft literal is a compile error
+ * rather than a default nobody wrote down. A caller that means *leave this
+ * alone* says `'Unchanged'` and can be seen to have said it.
+ *
+ * @typeParam T - The logical value a `Set` carries. Always `string` today: the
+ *   drafted surface is the part of espanso's schema that holds text.
+ */
+export type DraftField<T> =
+  | 'Unchanged'
+  | { readonly Set: T }
+  | 'Remove';
+
+/**
+ * One drafted element of a string sequence, addressed by index.
+ *
+ * The index is a position in the **original** document — the projection the
+ * draft was built against — so it never means "wherever this ends up". That is
+ * why {@link import('./commands').saveMatch} sends a base revision beside the
+ * draft, and why a stale one is refused rather than applied.
+ */
+export interface ItemDraft {
+  /** The element's index in the original sequence. */
+  readonly index: number;
+  /**
+   * What the caller wants that element to become.
+   *
+   * `'Remove'` is refused: taking an element away changes the sequence's
+   * cardinality, and this surface makes no such change.
+   */
+  readonly value: DraftField<string>;
+}
+
+/**
+ * One drafted entry of an **open** mapping, addressed by its index in the
+ * projection.
+ *
+ * An open mapping is one espanso does not fix the keys of: a variable's `params`
+ * and the option mapping under one `form_fields` entry. The index is a position
+ * in the projected entry list, which is source order, so a caller names an entry
+ * it was **shown** rather than a key it composed.
+ *
+ * {@link EntryDraft.value} covers an entry whose value is a scalar and
+ * {@link EntryDraft.items} one whose value is a sequence of scalars. Drafting
+ * both on one entry is two answers to one question, and is refused by name
+ * (`EntryDraftsAScalarAndASequence`) rather than resolved by precedence.
+ */
+export interface EntryDraft {
+  /** The entry's index in the projected mapping. */
+  readonly index: number;
+  /** What the caller wants the entry's scalar value to become. */
+  readonly value: DraftField<string>;
+  /** Drafted elements of the entry's sequence value, by original index. */
+  readonly items: readonly ItemDraft[];
+}
+
+/**
+ * One drafted variable of `vars`, addressed by its index in the projection.
+ *
+ * The three schema-known scalars are named; everything else a variable holds is
+ * addressed positionally through {@link VariableDraft.params}. `depends_on` is
+ * deliberately absent — it is a sequence this surface does not draft.
+ *
+ * **An absent field is refused, never inserted.** Nothing below the match
+ * mapping is created by a draft.
+ */
+export interface VariableDraft {
+  /** The variable's index in the projected `vars` list. */
+  readonly index: number;
+  /** `name`. */
+  readonly name: DraftField<string>;
+  /** `type`. The wire key is espanso's, not the Rust field's `declared_type`. */
+  readonly type: DraftField<string>;
+  /** `inject_vars`. */
+  readonly inject_vars: DraftField<string>;
+  /** Drafted entries of the variable's `params` mapping. */
+  readonly params: readonly EntryDraft[];
+}
+
+/**
+ * One drafted entry of `form_fields`, addressed by its index in the projection.
+ *
+ * A `form_fields` entry's value is the option mapping espanso reads, so the only
+ * thing drafted here is {@link FormFieldDraft.options}. The entry itself is never
+ * removed: its value is a mapping, and this surface replaces no collection node
+ * and discards no subtree it never displayed.
+ */
+export interface FormFieldDraft {
+  /** The form field's index in the projected `form_fields` list. */
+  readonly index: number;
+  /** Drafted entries of that form field's own option mapping. */
+  readonly options: readonly EntryDraft[];
+}
+
+/**
+ * A caller's intent for one match, over the drafted surface.
+ *
+ * **One intention, not a script.** The Rust planner derives the *smallest* edit
+ * batch that realises it, so a field left `'Unchanged'` contributes no edit and
+ * cannot rewrite bytes nobody touched — its spelling, its quoting and the
+ * comments around it stay outside every span the save replaces. Field order
+ * implies nothing about edit order.
+ *
+ * Every property is required, for the reason {@link DraftField} gives: a field
+ * omitted by accident is a compile error here rather than a default nobody
+ * wrote.
+ */
+export interface MatchDraft {
+  /** `trigger`. */
+  readonly trigger: DraftField<string>;
+  /** `regex`. */
+  readonly regex: DraftField<string>;
+  /** `replace`. */
+  readonly replace: DraftField<string>;
+  /** `markdown`. */
+  readonly markdown: DraftField<string>;
+  /** `html`. */
+  readonly html: DraftField<string>;
+  /** `image_path`. */
+  readonly image_path: DraftField<string>;
+  /** `form`. */
+  readonly form: DraftField<string>;
+  /** `label`. */
+  readonly label: DraftField<string>;
+  /** `comment`. */
+  readonly comment: DraftField<string>;
+  /** `word`. */
+  readonly word: DraftField<string>;
+  /** `left_word`. */
+  readonly left_word: DraftField<string>;
+  /** `right_word`. */
+  readonly right_word: DraftField<string>;
+  /** `propagate_case`. */
+  readonly propagate_case: DraftField<string>;
+  /** `uppercase_style`. */
+  readonly uppercase_style: DraftField<string>;
+  /** `force_mode`. */
+  readonly force_mode: DraftField<string>;
+  /** `force_clipboard`. */
+  readonly force_clipboard: DraftField<string>;
+  /** `paragraph`. */
+  readonly paragraph: DraftField<string>;
+  /** `anchor`. */
+  readonly anchor: DraftField<string>;
+  /** Drafted elements of `triggers`, by index in the original document. */
+  readonly triggers: readonly ItemDraft[];
+  /** Drafted elements of `search_terms`, by index in the original document. */
+  readonly search_terms: readonly ItemDraft[];
+  /** Drafted variables of `vars`, by index in the projected list. */
+  readonly vars: readonly VariableDraft[];
+  /** Drafted entries of `form_fields`, by index in the projected list. */
+  readonly form_fields: readonly FormFieldDraft[];
+}
+
+/**
+ * What a refusal is about, named by schema keys and by indices only.
+ *
+ * **An address, not a code**, exactly as {@link PathSegment} is: everything it
+ * can name is rendered literally, and nothing in it is a sentence. The nested
+ * {@link MatchField}, {@link SequenceField} and {@link VariableField} are keys
+ * espanso's schema fixes and are safe to carry; the text of a key no schema
+ * fixes is the owner's private configuration and is **deliberately absent** from
+ * every variant. A variable, a `params` entry, a `form_fields` entry and one of
+ * its options are each named by their index in the projection — the same address
+ * the draft used to ask for them.
+ */
+export type DraftTarget =
+  | { readonly Field: MatchField }
+  | { readonly Item: { readonly field: SequenceField; readonly index: number } }
+  | { readonly Variable: { readonly index: number } }
+  | {
+      readonly VariableScalar: { readonly variable: number; readonly field: VariableField };
+    }
+  | { readonly Param: { readonly variable: number; readonly entry: number } }
+  | {
+      readonly ParamItem: {
+        readonly variable: number;
+        readonly entry: number;
+        readonly item: number;
+      };
+    }
+  | { readonly FormField: { readonly index: number } }
+  | { readonly FormFieldOption: { readonly field: number; readonly option: number } }
+  | {
+      readonly FormFieldOptionItem: {
+        readonly field: number;
+        readonly option: number;
+        readonly item: number;
+      };
+    };
+
+/** The name of every {@link DraftError} variant. */
+export type DraftErrorName =
+  | 'MatchHasNoPath'
+  | 'MatchNotEditable'
+  | 'AmbiguousKey'
+  | 'NotDecodable'
+  | 'NotAScalar'
+  | 'FieldHasAnUnmodelledShape'
+  | 'RemovalWouldDiscardUnshownStructure'
+  | 'TargetOwnsNoBytes'
+  | 'SequenceItemDoesNotExist'
+  | 'SequenceItemRemoval'
+  | 'SequenceItemDraftedTwice'
+  | 'NoInsertionAnchor'
+  | 'InsertionAnchorRemoved'
+  | 'InsertionAnchorIsInserted'
+  | 'InsertionAnchorNotInOriginal'
+  | 'SharedInsertionAnchor'
+  | 'RemovalContainsAnEdit'
+  | 'ScalarEditedTwice'
+  | 'OutsideTheClosedSurface'
+  | 'MoveIsNotADraftEdit'
+  | 'TargetDoesNotExist'
+  | 'VariableHasNoPath'
+  | 'AmbiguousVariableKey'
+  | 'VariableFieldHasNoScalar'
+  | 'EntryDraftsAScalarAndASequence'
+  | 'TargetIsNotNameable'
+  | 'TargetKeyIsAmbiguous'
+  | 'NestedValueIsACollection'
+  | 'NestedRemovalWouldDiscardUnshownStructure'
+  | 'NestedItemRemoval'
+  | 'TargetDraftedTwice'
+  | 'AmbiguousNestedKey';
+
+/**
+ * Why a draft could not be turned into an edit batch.
+ *
+ * **A planning-time refusal, and it is not a {@link SaveResult}.** No batch was
+ * derived, no transaction ran, and no acknowledgement can change the answer:
+ * the request itself cannot be represented, so the user has to change what they
+ * asked for. It arrives as `CommandError::DraftRefused` — see
+ * {@link import('./errors').DraftRefusedError}, which states what that means for
+ * how it should be presented.
+ *
+ * **Every operand is a position, a count, a shape or an espanso key.** Not one
+ * variant carries a byte of the owner's configuration, and adding a field to
+ * carry a key, a trigger or a value would undo the rule rather than improve the
+ * message (CLAUDE.md section 1).
+ *
+ * **Every member is an object, including the one that carries nothing.** Rust
+ * declares `MatchHasNoPath {}` as an empty *struct* variant rather than as a unit
+ * variant, so `serde` writes `{"MatchHasNoPath": {}}` and not the bare string a
+ * unit variant would produce. That uniformity is what lets
+ * {@link import('./errors').COMMAND_ERROR_OPERANDS} pin this reason's shape as
+ * `'object'` for all thirty-two rather than for thirty-one of them — see the
+ * JSDoc on {@link import('./errors').DraftRefusedError.error}. A new member added
+ * here as a bare string literal would be a member no refusal can produce.
+ */
+export type DraftError =
+  | { readonly MatchHasNoPath: Record<string, never> }
+  | { readonly MatchNotEditable: { readonly hazard: HazardKind | null } }
+  | { readonly AmbiguousKey: { readonly field: MatchField | null } }
+  | { readonly NotDecodable: { readonly target: DraftTarget } }
+  | { readonly NotAScalar: { readonly target: DraftTarget } }
+  | {
+      readonly FieldHasAnUnmodelledShape: {
+        readonly field: MatchField;
+        readonly found: ValueKind;
+      };
+    }
+  | {
+      readonly RemovalWouldDiscardUnshownStructure: {
+        readonly field: MatchField;
+        readonly found: ValueKind;
+      };
+    }
+  | { readonly TargetOwnsNoBytes: { readonly target: DraftTarget } }
+  | {
+      readonly SequenceItemDoesNotExist: {
+        readonly field: SequenceField;
+        readonly index: number;
+        readonly length: number;
+      };
+    }
+  | {
+      readonly SequenceItemRemoval: { readonly field: SequenceField; readonly index: number };
+    }
+  | {
+      readonly SequenceItemDraftedTwice: {
+        readonly field: SequenceField;
+        readonly index: number;
+        readonly first: number;
+        readonly second: number;
+      };
+    }
+  | { readonly NoInsertionAnchor: { readonly field: MatchField } }
+  | { readonly InsertionAnchorRemoved: { readonly edit: number } }
+  | { readonly InsertionAnchorIsInserted: { readonly edit: number } }
+  | { readonly InsertionAnchorNotInOriginal: { readonly edit: number } }
+  | { readonly SharedInsertionAnchor: { readonly first: number; readonly second: number } }
+  | { readonly RemovalContainsAnEdit: { readonly removal: number; readonly edit: number } }
+  | { readonly ScalarEditedTwice: { readonly first: number; readonly second: number } }
+  | { readonly OutsideTheClosedSurface: { readonly edit: number } }
+  | { readonly MoveIsNotADraftEdit: { readonly edit: number } }
+  | { readonly TargetDoesNotExist: { readonly target: DraftTarget; readonly length: number } }
+  | { readonly VariableHasNoPath: { readonly index: number } }
+  | { readonly AmbiguousVariableKey: { readonly variable: number } }
+  | {
+      readonly VariableFieldHasNoScalar: {
+        readonly variable: number;
+        readonly field: VariableField;
+      };
+    }
+  | { readonly EntryDraftsAScalarAndASequence: { readonly target: DraftTarget } }
+  | { readonly TargetIsNotNameable: { readonly target: DraftTarget } }
+  | {
+      readonly TargetKeyIsAmbiguous: { readonly target: DraftTarget; readonly other: number };
+    }
+  | {
+      readonly NestedValueIsACollection: {
+        readonly target: DraftTarget;
+        readonly found: ValueKind;
+      };
+    }
+  | {
+      readonly NestedRemovalWouldDiscardUnshownStructure: {
+        readonly target: DraftTarget;
+        readonly found: ValueKind;
+      };
+    }
+  | { readonly NestedItemRemoval: { readonly target: DraftTarget } }
+  | {
+      readonly TargetDraftedTwice: {
+        readonly target: DraftTarget;
+        readonly first: number;
+        readonly second: number;
+      };
+    }
+  | { readonly AmbiguousNestedKey: { readonly edit: number } };
+
+// ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
 

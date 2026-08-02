@@ -281,6 +281,11 @@ const COMMAND_ERRORS = [
   { code: 'invalidMenuLabels', missing: ['quit'], unexpected: ['renamed_last_week'] },
   { code: 'menuBuildFailed' },
   { code: 'moveNotWithinOneSequence' },
+  // The variant Rust's own `every_command_error()` samples, and for its reason:
+  // it is one of the twelve that address something below the match mapping, and
+  // `variable` is a position in the projected `vars` list, so the sample
+  // exercises the privacy rule as well as the shape (CLAUDE.md section 1).
+  { code: 'draftRefused', error: { AmbiguousVariableKey: { variable: 0 } } },
   {
     code: 'saveFailed',
     error: { DocumentIsReadOnly: { path: '/nowhere/packages/one.yml' } },
@@ -370,7 +375,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 14,
+      commandErrors: 15,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,

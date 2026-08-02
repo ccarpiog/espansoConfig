@@ -28,6 +28,10 @@
 //! - **The command error codes** and, for each of them, **the error interface
 //!   in `errors.ts` and the operand table `isCommandError` validates against**,
 //!   names *and* JSON kinds.
+//! - **That every `DraftError` variant crosses as an object**, read out of the
+//!   core's own declaration rather than out of a sample list. The operand table
+//!   pins one shape per code, and a unit variant among the thirty-two would make
+//!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
 //!   `MENU_COMMAND_NAMES` in both directions, plus an assertion that none of the
@@ -53,6 +57,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use espansoconfig_core::discovery::FileKind;
+use espansoconfig_core::draft::DraftError;
 use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
@@ -75,7 +80,7 @@ use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::{project_source, DocumentSummary, WorkspaceSummary};
 use espansoconfig_core::{ContentRevision, DocumentId, LineEnding, ScalarStyle};
 
-use crate::error::every_command_error;
+use crate::error::{every_command_error, CommandError};
 
 /// A synthetic match file exercising every shape the wire types describe.
 ///
@@ -522,14 +527,14 @@ pub(crate) fn registered_commands() -> BTreeSet<String> {
 /// asserting an intention. `crate::commands` names the same ones in prose; this
 /// is the version that can fail.
 ///
-/// **`move_match` left this list at Phase 2b-2a**, which is the only way a name
-/// may leave it: the command exists, is registered, and writes a user's file
-/// through `espansoconfig_core::persist::save_document`. The five that remain are
-/// still absent, and three of them are absent for a reason stronger than
-/// sequencing — the core has no primitive for inserting a sequence item, removing
-/// one, or replacing a whole document's text.
-const FORBIDDEN_COMMANDS: [&str; 5] = [
-    "save_match",
+/// **`move_match` left this list at Phase 2b-2a and `save_match` at Phase
+/// 2b-2b-3**, which is the only way a name may leave it: the command exists, is
+/// registered, and writes a user's file through
+/// `espansoconfig_core::persist::save_document`. The four that remain are still
+/// absent, and three of them are absent for a reason stronger than sequencing —
+/// the core has no primitive for inserting a sequence item, removing one, or
+/// replacing a whole document's text.
+const FORBIDDEN_COMMANDS: [&str; 4] = [
     "create_match",
     "delete_match",
     "save_raw_document",
@@ -1099,6 +1104,63 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
     } // End of the loop over every command error
 } // End of function the_frontend_operand_table_is_the_operands_rust_writes()
 
+/// Every `DraftError` variant crosses as a JSON **object**, never a bare string.
+///
+/// The check the operand table cannot make for itself.
+/// [`the_frontend_operand_table_is_the_operands_rust_writes`] derives each
+/// declared shape from what `serde` writes for a **sampled** variant, and
+/// `crate::error::every_command_error` holds one instance per code — so exactly
+/// one shape can ever be pinned for `draftRefused.error`, no matter how many
+/// variants `DraftError` has. `serde`'s externally tagged representation writes a
+/// unit variant as a bare string and everything else as a one-key object, so a
+/// single unit variant among the thirty-two would make the pinned `'object'`
+/// false for that one refusal: `isCommandError` would reject it, and the user
+/// would read the generic fallback instead of the sentence
+/// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
+///
+/// **Derived from the declaration, not from a list.** The variant set is parsed
+/// out of `crates/espansoconfig-core/src/draft/error.rs` — the vacuous-audit
+/// corollary (`PROGRESS.md`, D2w) — so a unit variant added there fails this test
+/// rather than silently degrading a refusal to "unexpected". `MatchHasNoPath {}`
+/// is the empty struct variant that shape rule exists for, and its JSON is
+/// asserted here rather than assumed.
+#[test]
+fn every_draft_error_variant_crosses_as_an_object() {
+    let declared = crate::dictionary_contract::declared_variants_of("DraftError");
+    assert_eq!(
+        declared.len(),
+        32,
+        "DraftError declared 32 refusals when this check was written: {declared:?}"
+    );
+    let bare = crate::dictionary_contract::unit_variants_of("DraftError");
+    assert!(
+        bare.is_empty(),
+        "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
+         declare beside the thirty-one objects; give it empty braces: {bare:?}"
+    );
+
+    // The `serde` behaviour the assertion above stands on, observed rather than
+    // taken on trust: an empty struct variant is written as a one-key object.
+    let refusal = json_of(&DraftError::MatchHasNoPath {});
+    assert_eq!(refusal, serde_json::json!({ "MatchHasNoPath": {} }));
+
+    // And the whole point of it: this refusal now matches the shape the frontend
+    // pins, which is what keeps its typed code rather than the generic fallback.
+    let declared_shape = operand_table(&read_without_comments("src/lib/ipc/errors.ts"))
+        .remove("draftRefused")
+        .expect("COMMAND_ERROR_OPERANDS declares draftRefused")
+        .remove("error")
+        .expect("the draftRefused entry declares an error operand");
+    let written = json_of(&CommandError::DraftRefused {
+        error: DraftError::MatchHasNoPath {},
+    });
+    assert_eq!(
+        shape_of(&written["error"]),
+        declared_shape,
+        "the operand table and the refusal with no operands disagree: {written}"
+    );
+} // End of function every_draft_error_variant_crosses_as_an_object()
+
 /// The frontend's command names are the registered commands, both ways.
 ///
 /// The earlier version of this test built its `registered` set by filtering the
@@ -1120,8 +1182,14 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// and the whole surface to seven. It reads a file and writes nothing, so the
 /// forbidden-name assertion below is unaffected — and is checked all the same,
 /// because that is the point of writing it as a check.
+///
+/// Phase 2b-2b-3 adds `save_match`, taking the workspace surface to eight and the
+/// whole to nine. It is the **second** name to leave [`FORBIDDEN_COMMANDS`], and
+/// both mutating names are asserted present rather than merely absent from that
+/// list: "the commands that write are the commands we meant to ship" is a claim
+/// with two sides, and only one of them is a list of names that must not appear.
 #[test]
-fn the_registered_commands_are_the_workspace_seven_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_eight_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1130,21 +1198,23 @@ fn the_registered_commands_are_the_workspace_seven_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        7,
-        "the workspace surface is six read-only commands and one that writes: {workspace:?}"
+        8,
+        "the workspace surface is six read-only commands and two that write: {workspace:?}"
     );
-    assert!(
-        workspace.contains("move_match"),
-        "the one mutating command must be declared where the frontend can call it"
-    );
+    for mutating in ["move_match", "save_match"] {
+        assert!(
+            workspace.contains(mutating),
+            "{mutating} writes a user's file and must be declared where the frontend can call it"
+        );
+    }
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
     let declared: BTreeSet<String> = workspace.union(&menu).cloned().collect();
     let registered = registered_commands();
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        8,
-        "Phase 2b-2a registers seven workspace commands and one menu command, and no more: {registered:?}"
+        9,
+        "Phase 2b-2b-3 registers eight workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1152,7 +1222,7 @@ fn the_registered_commands_are_the_workspace_seven_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_seven_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_eight_and_the_menu_command()
 
 /// The three outcomes of a save are declared exactly as Rust writes them.
 ///

@@ -80,9 +80,22 @@ pub enum SaveResult {
         /// Presentation changes the patch had to make, for the caller to surface
         /// (plan section 6.2: never silently normalise).
         ///
-        /// Empty for a move — a move copies the item's own bytes verbatim and
-        /// re-encodes no scalar — and the field is here because this type is
-        /// operation-neutral, not because `move_match` fills it.
+        /// **Always empty for a move**, and that is a property of the operation
+        /// rather than of this field: a move copies the item's own bytes verbatim
+        /// and re-encodes no scalar, so there is no presentation to change.
+        ///
+        /// **`save_match` fills it**, and Phase 2b-2b-3 is where it acquired its
+        /// first producer. A drafted save re-encodes every scalar it rewrites, and
+        /// the emitter may have to spell the new value in a style the file did not
+        /// use — a plain scalar whose new text would parse as something else has
+        /// to be quoted, and a value with a line break in it has to become a block
+        /// — so each such edit reports what changed and, where the old spelling
+        /// could not have been reproduced byte for byte even without an edit, an
+        /// [`espansoconfig_core::emit::NotReencodable`] saying why.
+        ///
+        /// It is never a refusal. A note is this application telling the user
+        /// about a change it made and was not asked for, which plan section 6.2
+        /// requires to be visible rather than silent.
         notes: Vec<PresentationNote>,
         /// Whether this save wrote a pre-save copy of the file.
         ///

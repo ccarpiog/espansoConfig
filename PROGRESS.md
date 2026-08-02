@@ -42,7 +42,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2a** | The **save spine and the first mutating command**: the acknowledgement deserialized · the app-owned `BackupSession` · the operation-neutral `SaveResult` · `move_match` · the first code outside the core that writes a user's file | ✅ complete — after the review fix round below |
 | **2b-2b-1** | **`MatchDraft`, `DraftField` and the minimal-diff engine** over the closed, schema-known scalar surface of one match, in the core, with **no command**: a field the draft leaves unchanged derives no edit, and neither does one whose drafted logical value already equals the projected one | ✅ complete — after the review fix round below |
 | **2b-2b-2** | **The open key surface** — `vars` and `form_fields`, whose keys are the form author's — in the core, with **no command**: an index-addressed draft over a nested open mapping, edit and remove only, and the two batch guards restated per mapping | ✅ complete — after the review fix round below. **Its aggregate code review was run at the head of the next session** and its one finding is closed |
-| 2b-2b-3 … 2d | See the Phase 2 split below | ⬜️ **2b-2b-3 is next** |
+| **2b-2b-3** | **`save_match`, the command**: the draft deserialized off the wire, the batch handed to `save_document`, `SaveResult::Saved::notes` given its first producer, the `draftError` namespace in both languages, cache coherence and the frontend types — plus **the window reading four phases overdue** | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding**. **2b-2b is closed** |
+| 2b-2c … 2d | See the Phase 2 split below | ⬜️ **2b-2c is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -2950,6 +2951,93 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2b-2b-3
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **927 tests across 21 binaries**, 0 failed (**+10** on 2b-2b-2's 917) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test draft_plan -- every_match_of_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, **65 planned to an empty batch**, 417 intents, **0 refusals**, unchanged by this phase |
+| `npm test` | ✅ 29 files, **696 tests**, 0 failed (**+11** on 685) |
+| `npm run check` | ✅ 376 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `rg -c '#\[tauri::command\]' src-tauri/src/` | ✅ `commands.rs:8`, `menu.rs:1` — **the eighth command**, and the second that writes |
+| `git status --short --untracked-files=all` | ✅ no real-corpus path appears (D1); no corpus fixture modified; **no probe scaffold left behind** |
+
+**One verification caught a failure a worker's report did not.** The step-C worker reported
+`cargo test --workspace` green; the orchestrator's own run came back **121 passed / 1 failed** —
+`every_typescript_wire_union_has_a_namespace` panicking with *"only 43 unions were examined"*. The
+non-vacuity floor had been set to the measured 44, and making `DraftError` uniformly object-shaped
+removed the only single-quoted member it had, so it stopped counting as a union at all. Fixed in
+place, with the reason written at the assertion (D6, `2b-2b-3-notes.md` §5). **This is the whole
+argument for re-running every gate rather than reading a report**, and it is the second time this
+project has been paid for it.
+
+**What this phase proves.** `save_match` exists, is registered, is reachable through the real
+dispatcher, and writes a user's file through `save_document` and nothing else. A drafted scalar
+change commits and re-mints an identity; a draft that changes nothing comes back `committed: false`
+as a **success**; a `DraftError` crosses as `draftRefused` carrying indices only; a stale
+`base_revision` is refused before any transaction is built; and a `PresentationNote` reaches
+`SaveResult::Saved::notes` — its **first producer** since 2b-1 put it on the wire.
+
+**Four things it does *not* prove.**
+
+- **No screen calls it.** There is a command, a typed wrapper and a compile-checked accessor, and no
+  component invokes any of them. The thirty-two `code.draftError.*` strings have never been drawn.
+- **The real configuration exercises none of the interesting path.** All 65 real matches plan to an
+  **empty** batch — the property 2b-2b-1 and 2b-2b-2 wanted, and the reason the real corpus says
+  nothing about a batch that is not empty.
+- **32 Spanish values were added and are checked only by heuristic**, like the 170+ before them.
+- **The clean review is weaker than it looks.** See the disposition below.
+
+---
+
+## Phase 2b-2b-3 review disposition
+
+Two Codex consultations, both recorded in full.
+
+| Consult | File | Outcome |
+|---|---|---|
+| Design, **before** implementation | [`docs/reviews/phase-2b-2b-3-design.md`](docs/reviews/phase-2b-2b-3-design.md) | Three rulings, all three adopted unchanged — D1/D2/D3 in `2b-2b-3-notes.md` §2 |
+| Aggregate code review, before the commit | [`docs/reviews/phase-2b-2b-3-code.md`](docs/reviews/phase-2b-2b-3-code.md) | **No finding at any severity**; readiness verdict for 2b-2c |
+
+**The design consult's three rulings were adopted as written**, and each is recorded with the
+argument *against* it rather than only the argument for:
+
+- **D1** — a `DraftError` is an `Err(CommandError::DraftRefused)`, not a `SaveResult` variant,
+  because it is planning-time and **non-overridable** where `SaveResult::Refused` is transactional
+  and overridable. The cost the consult named and the phase accepted: a draft refusal is an expected
+  domain outcome, so generic `Err` handling will render it as a toast unless the frontend routes
+  this code to inline form feedback. **That obligation is now owed by whichever phase builds the
+  editor screen.**
+- **D2** — a success re-mints its identity from the match's **own** projected path, so a match that
+  is not addressable as a sequence item is still editable. A committed write is never afterwards an
+  `Err`.
+- **D3** — an empty batch still goes to `save_document`, so the under-lock revision check is never
+  skipped.
+
+**The clean code review is honestly weaker than "no defects were present."** One real defect was
+found in this phase — `MatchHasNoPath` was the single unit variant of thirty-two and would have
+demoted a typed refusal to *unexpected failure* — and it was found **before** the review, by the
+orchestrator, reading a worker's own report rather than by any test. The review then looked at the
+repaired tree. A clean review of a tree whose one known defect has already been fixed is not the
+same evidence as a clean review of the tree as first written, and the review file says so at the
+top rather than leaving the reader to notice.
+
+**Why no test caught that defect, which is the part worth keeping.** Both halves of the contract
+were individually correct: the dictionary had the string, the exhaustiveness check passed, the
+operand-shape table matched its sample. Nothing anywhere asked whether **the sample was
+representative**. `every_draft_error_variant_crosses_as_an_object` now asks it, from the enum's
+parsed variant list rather than from a sample.
+
+---
+
 ## Verification — Phase 2b-2b-2
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on the
@@ -4052,6 +4140,86 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-2b-3 is complete and both of its Codex consultations are closed — and with it, 2b-2b.**
+`docs/decisions/2b-2b-3-notes.md` is the record; the design consult is
+`docs/reviews/phase-2b-2b-3-design.md` and the aggregate code review is
+`docs/reviews/phase-2b-2b-3-code.md`, which reported **no finding at any severity**. **This
+application can now write a match's edited fields to a user's file.**
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 927 tests across 21 binaries, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **696**.)
+
+**The next step is Phase 2b-2c — the two missing core primitives and the three commands over them.**
+Read the Phase 2 split table above first. Its scope, unchanged since it was written:
+
+- **sequence-item insert and sequence-item remove in `patch/`**, with the comment-ownership,
+  indentation and block-scalar answers 0c-3a and 0c-3b-1 had to give for *mappings*. These are the
+  two primitives whose absence is the reason `create_match`, `delete_match` and `save_raw_document`
+  do not exist. `DocumentEdit` has exactly four variants today — scalar edit, mapping-field insert,
+  mapping-field remove, same-sequence item move;
+- then **`create_match`, `delete_match` and `save_raw_document`** over them;
+- **`save_raw_document` needs its own answer, and it is not a small one.** A whole-document text is
+  **not** a span replacement, and `save_document` is the one entry point that writes. Giving it a
+  whole-text path is a change to that entry point, not a new caller of it.
+
+**What 2b-2c inherits from 2b-2b-3, and must not redesign.**
+
+- **A planning-time refusal goes in the `Err` channel; a transactional one does not** (D1). The new
+  commands will each have their own planning refusals — a `create_match` with no anchor, a
+  `delete_match` naming an item that is not one. They belong with `DraftRefused` and
+  `MoveNotWithinOneSequence`, **not** as new `SaveResult` variants, and for the recorded reason:
+  filing a non-overridable refusal beside an overridable one invites a frontend to offer an
+  acknowledgement that can never work.
+- **A committed write is never afterwards reported as an `Err`** (D2). If a post-commit
+  re-resolution fails, the answer is `moved: None` and a successful `SaveResult`. `delete_match`
+  will be the first command for which `None` is the *correct routine* answer rather than a defensive
+  one — the match it deleted has no identity in the new revision, by construction.
+- **An empty batch still goes through the transaction** (D3). Do not add a short-circuit for a
+  create or a delete that turns out to change nothing.
+- **`plan_match_edits` runs both batch guards itself** (D4, `2b-2b-3-notes.md` §3). Do not re-run
+  them at the command layer: the independence guard needs the original key lists, which only the
+  planner holds, and a copy assembled at the command layer is a weaker second statement wearing the
+  same name.
+- **Every variant of a wire enum used as an error operand must serialize as an object** (D5). A
+  single unit variant among thirty-one struct ones silently demotes a typed refusal to *unexpected
+  failure*, because the operand-shape table pins one shape per operand from one sample.
+  `every_draft_error_variant_crosses_as_an_object` now catches it for `DraftError`; **a new error
+  enum on this boundary owes the same check.**
+- **`NOT_A_CODE` is read from both directions** (D6). A union exempted on the Rust side is exempted
+  on the TypeScript side, from one table. The non-vacuity floor in
+  `every_typescript_wire_union_has_a_namespace` is **43** and moves with the file — a union added to
+  `types.ts` raises it, and one that stops carrying single-quoted members lowers it.
+
+**What 2b-2c must not do**, all inherited and none of it its own to revisit: no `force` flag or
+acknowledgement bypass; no caching of "the findings I last issued" to police acknowledgements; no
+call to `replace_file_atomically` or `replace_locked_file` from a command or from inside the
+transaction (**the lock is not reentrant — the process hangs silently and forever**); no wire path
+accepted back as a target; and `committed: false` / `backup: None` are **not** failures.
+
+**The debts, retallied.**
+
+- **The four `code.diagnosticCode.*` strings 2b-1 corrected have now been seen on a screen**, in
+  both languages, and all four were judged defensible. `docs/decisions/2b-2b-3-notes.md` §7 is the
+  reading, with §7.6 stating what it is *not* evidence of. **That debt is closed after five phases.**
+- **A new one opens in its place, and it is larger.** Thirty-two `code.draftError.*` strings and one
+  `code.commandError.draftRefused` were added in both languages and **have never been drawn**. So
+  has `SaveResult::Saved::notes`, which now has a producer and no reader. The first phase to build
+  the editor screen owes the look.
+- **202+ Spanish values are checked only by heuristic.** Nothing establishes that any is idiomatic.
+  The window reading judged **four** of them by eye and found them correct — which is four.
+- **Three `code.diagnosticCode.*` observations were recorded as non-defects**, not fixed
+  (`2b-2b-3-notes.md` §7.5): `{count}` has no plural rule and is safe only because the Rust guard is
+  `> 1`; the two `MatchHasSeveral*` sentences say *"This snippet"* on a file-level pane that does not
+  say which; and the key `…ContentForms` disagrees with both its own sentence and the Rust
+  `FindingCode::MatchHasSeveralContentFields`.
+
+---
+
 **Phase 2b-2b-2 is complete and BOTH of its reviews are closed.** `docs/decisions/2b-2b-2-notes.md`
 is the record; the design consult is `docs/reviews/phase-2b-2b-2-open-key-design.md` and the code
 review is `docs/reviews/phase-2b-2b-2-open-key-code.md`, each with its own disposition table above.
@@ -4843,6 +5011,12 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The eight commands, and the two that write.** `save_one_match` is the model 2b-2c's three new commands should follow: resolve the projection with **no lock held**, refuse a `base_revision` that is not that projection's, derive the batch (or refuse by name into the `Err` channel), and hand it to `save_document` **even when it is empty**. `after_a_save` takes `at: Option<&DocumentPath>` because its two callers compute the post-save address differently — a move by sequence-path-plus-landing-index, a save by the match's own unchanged path. **Neither command may call `replace_file_atomically` or `replace_locked_file`: the lock is not reentrant** |
+| [`src-tauri/src/error.rs`](src-tauri/src/error.rs) | `CommandError`, now nine codes. **`DraftRefused` is the pattern for a planning-time refusal** — it carries the core's own refusal *whole* rather than flattening its taxonomy into a second copy here, and `every_command_error()` samples the one variant that addresses something below the match mapping so the enumeration exercises the **privacy** rule and not just the shape |
+| [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | **`every_draft_error_variant_crosses_as_an_object` is the check 2b-2c must copy for any new error enum on this boundary.** The operand-shape table pins **one** shape per operand from **one** sample, so a single unit variant among struct ones silently demotes a typed refusal to *unexpected failure*. It derives its variant list by parsing the enum's source, not from a sample |
+| [`docs/decisions/2b-2b-3-notes.md`](docs/decisions/2b-2b-3-notes.md) | Phase 2b-2b-3's decision record: what was built (§1), **the three design rulings with the argument against each stated rather than only the argument for (§2)**, D4 — why the batch guards are *not* re-run at the command layer (§3), **D5 — every wire-enum error operand must serialize as an object, and why no test caught that it did not (§4)**, D6 — one exemption table read from both directions, and where the floor now stands (§5), the holes (§6), and **the window reading in full, with its judgement string by string and its "not evidence of" section (§7)** |
+| [`docs/reviews/phase-2b-2b-3-design.md`](docs/reviews/phase-2b-2b-3-design.md) | The design consult taken **before** `save_match` was written. Three rulings, all adopted: the `Err`-channel refusal, path-based identity re-minting, and the empty batch that still runs the transaction. Each is the answer 2b-2c's three commands inherit |
+| [`docs/reviews/phase-2b-2b-3-code.md`](docs/reviews/phase-2b-2b-3-code.md) | The aggregate code review. **No finding at any severity** — and the file's own header says why that is weaker evidence than it looks: the phase's one real defect was found *before* the review, by the orchestrator, and the review looked at the repaired tree |
 | [`crates/espansoconfig-core/src/draft/plan.rs`](crates/espansoconfig-core/src/draft/plan.rs) | **`plan_match_edits` — the whole minimal-diff rule, and `plan_scalar()` is three lines of it.** The guard order is the design: `!scalar.decoded` refuses **before** any comparison (its `text` is a raw source slice, not a logical value), then `scalar.text == value` returns `Ok(None)` — the interesting answer, meaning the file keeps its own spelling and no byte is touched. **Comparing what the codec would emit against the existing source text is never the right test**, however tempting: a codec may canonically emit `"hello"` where the file validly holds `'hello'`, and rewriting that is precisely the preservation bug. Step 4 is `check_no_index_is_drafted_twice`, and it runs **before** diffing because a no-op intent is erased before any batch exists (F1) |
 | [`crates/espansoconfig-core/src/draft/audit.rs`](crates/espansoconfig-core/src/draft/audit.rs) | The two guards over a **derived batch**: `check_closed_surface` (a batch may modify or remove existing addressable nodes and insert scalar-valued mapping entries; it may **never** change a sequence's cardinality or synthesize a collection) and `check_batch_independence` (the six batch hazards — anchoring on a key the batch removes or inserts, overlapping removal-and-edit, a scalar edited twice, an ambiguous decoded key, two insertions sharing one anchor). **Read the module doc before trusting them for anything**: they inspect *paths*, not nodes or original cardinality, and they share the planner's `from_key` vocabulary, so they are not independent validation of intent — a review finding, and the doc now says the three things they do not establish |
 | [`crates/espansoconfig-core/tests/draft_plan.rs`](crates/espansoconfig-core/tests/draft_plan.rs) | 54 tests, and **two of them are the phase**. `every_field_set_to_its_own_projected_value_derives_an_empty_batch_and_moves_no_byte` asserts its own **non-vacuity first** — all five scalar styles present among the eighteen fields, and no two fields decoding to the same string, so a planner reading one field's value while writing another's path is still caught. `every_match_of_the_real_configuration_drafts_to_an_empty_batch_or_a_named_refusal` runs the same property over **65 real matches and 303 intents** and skips cleanly when the corpus is absent; the synthetic twin never skips. `a_null_draft_field_is_a_deserialization_error_and_never_a_removal` is the one that keeps `DraftField` from being replaced by `Option<Option<T>>` |

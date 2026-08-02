@@ -393,6 +393,111 @@ fn move_match_is_reachable_and_answers_a_flat_outcome() {
     );
 } // End of function move_match_is_reachable_and_answers_a_flat_outcome()
 
+/// The second command that writes is reachable, and its draft deserializes from
+/// the shape the frontend really sends.
+///
+/// **The measurement Phase 2b-2b-3 owes**, and it is four claims a direct call to
+/// [`crate::commands::WorkspaceSession::save_match`] cannot make.
+///
+/// 1. **It is registered and the empty capability set does not block it.**
+/// 2. **A whole `MatchDraft` deserializes off the wire**, from a JSON object that
+///    names one field and omits the other twenty — every field carries
+///    `#[serde(default)]`, so an omitted one is `Unchanged` and contributes no
+///    edit. A draft that had to be sent whole would make every save a rewrite of
+///    every field.
+/// 3. **`DraftField` crosses externally tagged**, as `{ "Set": … }`, which is the
+///    one shape a frontend cannot guess from the Rust type alone.
+/// 4. **A refused draft crosses as `draftRefused` in the `Err` channel**, with the
+///    core's refusal whole underneath it — and, unlike a gate refusal, with no
+///    findings to hand back.
+#[test]
+fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
+    let dir = TempDir::new().expect("temp dir");
+    fs::create_dir_all(dir.path().join("match")).unwrap();
+    fs::write(
+        dir.path().join("match").join("base.yml"),
+        "matches:\n  - trigger: ':one'\n    replace: first\n",
+    )
+    .unwrap();
+    let app = mock_app();
+    let webview = main_window(&app);
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the tree opens");
+    let rows = invoke(&webview, "list_documents", json!({}))
+        .expect("the workspace is open")
+        .as_array()
+        .expect("a list of summaries")
+        .clone();
+    let document_id = rows[0]["id"].clone();
+    let view =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let held = view["matches"][0]["id"].clone();
+
+    let answer = invoke(
+        &webview,
+        "save_match",
+        json!({
+            "id": held,
+            // One field named, twenty omitted, and the omitted ones are
+            // `Unchanged` rather than absent values to be written.
+            "draft": { "replace": { "Set": "changed" } },
+            "baseRevision": view["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the draft plans and the save runs");
+
+    assert_eq!(
+        answer["outcome"], "saved",
+        "the outcome must be a flat discriminant, not a tag: {answer}"
+    );
+    assert_eq!(answer["committed"], true);
+    assert_eq!(answer["backup_taken"], true);
+    assert!(
+        answer["moved"].is_object(),
+        "a committed save names the match it saved: {answer}"
+    );
+
+    // Only the drafted value moved. The trigger the draft never mentioned is
+    // written exactly as it was, quotes included.
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some("matches:\n  - trigger: ':one'\n    replace: changed\n")
+    );
+
+    // And a draft the planner refuses is an `Err` carrying our own code, with
+    // the core's refusal whole underneath it and no findings anywhere.
+    let refreshed =
+        invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
+    let refusal = invoke(
+        &webview,
+        "save_match",
+        json!({
+            "id": refreshed["matches"][0]["id"],
+            "draft": { "search_terms": [{ "index": 0, "value": { "Set": "late" } }] },
+            "baseRevision": refreshed["revision"],
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect_err("a list this match does not have cannot be drafted into existence");
+    assert_eq!(
+        refusal.get("code").and_then(Value::as_str),
+        Some("draftRefused"),
+        "the refusal must be our typed code: {refusal}"
+    );
+    assert_eq!(refusal["error"]["SequenceItemDoesNotExist"]["length"], 0);
+    assert!(
+        refusal.get("findings").is_none(),
+        "a planning refusal has nothing to acknowledge: {refusal}"
+    );
+} // End of function save_match_is_reachable_and_its_draft_deserializes_from_the_wire()
+
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
 /// The distinction the whole result type is built on, measured at the boundary:
@@ -1129,7 +1234,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All eight are attempted, and the count is asserted against the registered
+/// **All nine are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1175,6 +1280,17 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // The second command that can write a user's file, and the one that can
+        // rewrite the *contents* of a snippet rather than only its position.
+        (
+            "save_match",
+            json!({
+                "id": identity,
+                "draft": {},
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1189,7 +1305,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 8, "the surface is eight commands");
+    assert_eq!(attempted.len(), 9, "the surface is nine commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)

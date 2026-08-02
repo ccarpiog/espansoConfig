@@ -53,13 +53,26 @@
 //! 3. **Is every enum that can reach a user registered at all?** This is the
 //!    review's third escape — a brand-new enum simply not added to
 //!    [`CODE_ENUMS`] left the expected key set unchanged, so everything passed
-//!    vacuously. It is now asked from **two** derived directions:
+//!    vacuously. It is now asked from **two** derived directions, and both of
+//!    them answer it against the **same** two tables:
 //!    [`every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code`] walks
 //!    both source trees and demands that every enum `serde` can write is either
-//!    a namespace or on [`NOT_A_CODE`] with a reason, and
-//!    [`every_typescript_wire_union_has_a_namespace`] demands the same of every
-//!    string-literal union `src/lib/ipc/types.ts` declares. Neither is a
+//!    a [`CODE_ENUMS`] namespace or on [`NOT_A_CODE`] with a reason, and
+//!    [`every_typescript_wire_union_has_a_namespace`] demands exactly that of
+//!    every string-literal union `src/lib/ipc/types.ts` declares. Neither is a
 //!    hand-maintained list of enums; both are derived from source.
+//!
+//!    **The TypeScript half consulted only the first of the two tables until
+//!    Phase 2b-2b-3**, which made the exemption mechanism half a mechanism: an
+//!    enum could be a named, reasoned non-code on the Rust side and still be
+//!    demanded to own a namespace the moment the frontend mirrored it. The three
+//!    field-identifier unions the draft surface put on the wire —
+//!    `MatchField`, `SequenceField` and `VariableField`, each of which
+//!    serializes as an espanso key rather than as a Rust variant name — are what
+//!    found it. The fix was to make the two directions read one table rather
+//!    than to add a second, hand-maintained exclusion list beside it; an
+//!    exempted union is still **counted** as examined, and how many there are is
+//!    asserted, so adding one stays a deliberate act.
 //!
 //! # What this check cannot see
 //!
@@ -86,7 +99,7 @@ use serde_json::Value;
 use crate::error::CommandError;
 use crate::rust_source::{
     declared_enums, declared_variants, mentions_identifier, modules_not_gated_by_cfg_test,
-    serializable_types,
+    serializable_types, unit_variants,
 };
 
 /// One enum whose variants owe a dictionary entry.
@@ -106,7 +119,7 @@ impl CodeEnum {
 
 /// Every enum whose variants can reach a user, and where its declaration is.
 ///
-/// Thirty of the thirty-four are on the wire in some form. The other four —
+/// All but four are on the wire in some form. Those four —
 /// `WorkspaceError`, `DiscoveryError`, `IdentityError` and `DocumentShape` as an
 /// operand — are here because a code with no string is worse than a code with no
 /// caller (`1b-2a-notes.md` section 9, hole 3): the first three never cross the
@@ -146,6 +159,16 @@ impl CodeEnum {
 /// moment `EditError::NotAScalar { kind: NodeKind }` reached the wire. An
 /// exclusion is a claim about what crosses the boundary, and it expires when the
 /// boundary moves.
+///
+/// **`DraftError` moved here from [`NOT_A_CODE`] at Phase 2b-2b-3**, on the same
+/// rule and by the route the entry itself predicted: `save_match` is the first
+/// caller `espansoconfig_core::draft` has ever had, so a refusal that could not
+/// previously be produced now crosses as `CommandError::DraftRefused`. Its
+/// exclusion was the only one ever marked TEMPORARY, and
+/// [`the_temporary_draft_error_exclusion_expires_when_anything_names_it`] is what
+/// made the deletion a build requirement rather than a note in a decision
+/// record — the exhaustiveness checks above would have passed with the exclusion
+/// left standing and the thirty-two sentences unwritten.
 const CODE_ENUMS: &[CodeEnum] = &[
     CodeEnum {
         source: "crates/espansoconfig-core/src/model/diagnostic.rs",
@@ -291,6 +314,10 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/save.rs",
         name: "SaveResult",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/draft/error.rs",
+        name: "DraftError",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -310,7 +337,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 14),
+    ("commandError", 15),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -337,6 +364,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
+    ("draftError", 32),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -352,6 +380,14 @@ const SCANNED_TREES: &[&str] = &["crates/espansoconfig-core/src", "src-tauri/src
 /// list is asserted in both directions below: an entry that stops being a
 /// serializable enum fails just as loudly as an enum that is neither registered
 /// nor listed. That is what stops it becoming a suppression list.
+///
+/// **It governs both derived directions, since Phase 2b-2b-3.** The key is the
+/// type's own name, which is the same word on both sides of the boundary because
+/// `src/lib/ipc/types.ts` spells every wire type with its Rust name verbatim, so
+/// [`every_typescript_wire_union_has_a_namespace`] consults this same table
+/// rather than a second list of its own. An exclusion is a claim about what
+/// reaches a screen, and a claim answered differently depending on which language
+/// asks is not one claim.
 const NOT_A_CODE: &[(&str, &str)] = &[
     (
         "ValueView",
@@ -406,22 +442,20 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          and every other operand is an index, deliberately, because an \
          author-chosen key's text is the owner's private configuration",
     ),
-    (
-        "DraftError",
-        "TEMPORARY, and the only entry here that is: Phase 2b-2b-1 built \
-         `espansoconfig_core::draft` with no caller, so nothing serializes a \
-         refusal yet. The sub-phase that gives it a command owes it a `draftError` \
-         namespace and both dictionaries in the same change, exactly as 2b-1 did \
-         for the save transaction, and must delete this entry then — which \
-         `the_temporary_draft_error_exclusion_expires_when_anything_names_it` \
-         makes a build failure rather than a hope",
-    ),
 ];
 
-/// The enum whose exclusion above is temporary, and the namespace it owes.
+/// The enum whose exclusion above was temporary, and the namespace it owed.
 ///
 /// Named once, so the expiry test and the failure message it prints cannot come
 /// to disagree about which entry they are talking about.
+///
+/// **The exclusion expired at Phase 2b-2b-3 and has been deleted**, which is the
+/// end state it was written for: `DraftError` is a [`CODE_ENUMS`] namespace now,
+/// and the checks above own it. The constant and
+/// [`the_temporary_draft_error_exclusion_expires_when_anything_names_it`] are
+/// kept rather than removed, because the test is written to **self-disable** when
+/// its entry is gone — it is a record of the mechanism and the template for the
+/// next temporary exclusion, and it costs one early return.
 const TEMPORARY_EXCLUSION: &str = "DraftError";
 
 /// The crate root, which is where this crate declares every module it has.
@@ -523,6 +557,26 @@ pub(crate) fn declared_variants_of(name: &str) -> BTreeSet<String> {
         .unwrap_or_else(|| panic!("{name} is not registered in CODE_ENUMS"));
     declared_variants(&read_repository_file(entry.source), name)
 } // End of function declared_variants_of()
+
+/// The variants of one registered enum that declare **no** fields.
+///
+/// The twin of [`declared_variants_of`], reading the same [`CODE_ENUMS`] entry
+/// so that neither answer can be about a different file from the other. A unit
+/// variant is the one shape `serde`'s externally tagged representation writes as
+/// a bare JSON string instead of a one-key object, which
+/// `crate::wire_contract::every_draft_error_variant_crosses_as_an_object` needs
+/// to be able to ask about.
+///
+/// # Panics
+///
+/// When `name` is not a registered enum, exactly as [`declared_variants_of`].
+pub(crate) fn unit_variants_of(name: &str) -> BTreeSet<String> {
+    let entry = CODE_ENUMS
+        .iter()
+        .find(|entry| entry.name == name)
+        .unwrap_or_else(|| panic!("{name} is not registered in CODE_ENUMS"));
+    unit_variants(&read_repository_file(entry.source), name)
+} // End of function unit_variants_of()
 
 /// Every key of one dictionary file, read as JSON.
 fn dictionary_keys(relative: &str) -> BTreeSet<String> {
@@ -888,7 +942,7 @@ fn the_temporary_draft_error_exclusion_expires_when_anything_names_it() {
     );
 } // End of function the_temporary_draft_error_exclusion_expires_when_anything_names_it()
 
-/// Every string-literal union of `types.ts` names a namespace that exists.
+/// Every string-literal union of `types.ts` owns a namespace or is exempt.
 ///
 /// The second half of the review's third escape, from the other side. A new wire
 /// enum has to be declared in `src/lib/ipc/types.ts` for the frontend to have a
@@ -900,11 +954,44 @@ fn the_temporary_draft_error_exclusion_expires_when_anything_names_it() {
 /// dropped, because `DiagnosticCodeName` is the *name set* of `DiagnosticCode`
 /// and shares its namespace. That rule is the one place a genuinely new enum
 /// called something-`Name` could hide, and it is small enough to say so.
+///
+/// # The exemption, and why it is not a loosening
+///
+/// A union on [`NOT_A_CODE`] is exempt — the **same** table
+/// [`every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code`] reads,
+/// keyed by the type's own name, which is the same word on both sides because
+/// `types.ts` mirrors the Rust names verbatim. Before Phase 2b-2b-3 this
+/// direction had no exemption at all, so a type could be a named, reasoned
+/// non-code in Rust and still be demanded to own a namespace the moment the
+/// frontend declared it: `MatchField`, `SequenceField` and `VariableField`
+/// serialize as espanso keys — `uppercase_style`, `search_terms`, `inject_vars`
+/// — which is precisely why they owe no sentence, and precisely what makes them
+/// string-literal unions this scan sees.
+///
+/// Three things keep that from being a hole:
+///
+/// - it is **one table, already written, already reasoned**, rather than a second
+///   list beside it that could disagree;
+/// - an exempted union is **counted as examined**, so it still holds the floor
+///   up, and how many exemptions the scan met is asserted exactly — adding a
+///   union to `types.ts` and its name to [`NOT_A_CODE`] cannot be done quietly;
+/// - the other direction still applies to it. `NOT_A_CODE` is asserted against
+///   the set of enums `serde` can actually write, so an entry that stopped being
+///   one fails there.
+///
+/// # What it still cannot see
+///
+/// A generic declaration. `declared_type_names` reads `export type X =` and skips
+/// `export type X<T> =` rather than guessing, so `DraftField<T>` — the drafted
+/// tri-state, and a `NOT_A_CODE` entry in its own right — is invisible here. It
+/// is covered by the Rust-side direction, which is where the enum is declared.
 #[test]
 fn every_typescript_wire_union_has_a_namespace() {
-    let source = crate::wire_contract::read_without_comments("src/lib/ipc/types.ts");
+    let source = crate::wire_contract::read_without_comments(WIRE_TYPES);
     let namespaces = registered_namespaces();
+    let excluded: BTreeMap<&str, &str> = NOT_A_CODE.iter().copied().collect();
     let mut checked = 0usize;
+    let mut exempted: Vec<String> = Vec::new();
     for name in crate::wire_contract::declared_type_names(&source) {
         // A union with no single-quoted member is a structural type — an
         // address, a value, a payload shape — and carries no variant name a
@@ -912,16 +999,51 @@ fn every_typescript_wire_union_has_a_namespace() {
         if crate::wire_contract::union_members(&source, &name).is_empty() {
             continue;
         }
-        let namespace = uncapitalize(name.strip_suffix("Name").unwrap_or(&name));
+        // A `…Name` union is the name set of the type it is named after, so the
+        // exemption and the namespace are both looked up under the base name.
+        let base = name.strip_suffix("Name").unwrap_or(&name);
+        checked += 1;
+        if let Some(reason) = excluded.get(base) {
+            assert!(
+                !reason.trim().is_empty(),
+                "the exclusion of {base} carries no reason, so {name} is exempt for none"
+            );
+            exempted.push(name.clone());
+            continue;
+        }
+        let namespace = uncapitalize(base);
         assert!(
             namespaces.contains(&namespace),
-            "src/lib/ipc/types.ts declares the wire enum {name}, whose members can \
-             reach a screen, and no CODE_ENUMS entry owns the {namespace} namespace"
+            "{WIRE_TYPES} declares the wire enum {name}, whose members can reach a \
+             screen, and no CODE_ENUMS entry owns the {namespace} namespace. If its \
+             members are not codes — a field identifier or an address, say — name it \
+             in NOT_A_CODE with a reason instead"
         );
-        checked += 1;
     } // End of the loop over the wire's TypeScript unions
+      // The floor is what stops the scan passing vacuously by failing to read the
+      // file, so it moves with the file. It stood at twelve against thirty-nine
+      // unions, which is a floor that had stopped biting; Phase 2b-2b-3's draft
+      // surface takes the count to forty-three and the floor with it.
+      //
+      // Forty-three rather than forty-four because `DraftError` is **not** among
+      // them. Making every one of its thirty-two variants serialize as a one-key
+      // object left the union with no single-quoted member at all, so it is now
+      // read as a structural type and skipped by the guard above. Nothing is lost:
+      // its variant names live in `DraftErrorName`, which is examined, and whose
+      // `Name` suffix is stripped to find the `draftError` namespace.
     assert!(
-        checked >= 12,
-        "only {checked} unions were examined, so this scan is not reading types.ts"
+        checked >= 43,
+        "only {checked} unions were examined, so this scan is not reading {WIRE_TYPES}"
+    );
+    assert_eq!(
+        exempted,
+        vec![
+            "MatchField".to_owned(),
+            "SequenceField".to_owned(),
+            "VariableField".to_owned()
+        ],
+        "the unions exempted by NOT_A_CODE changed. Every one of them is a field \
+         identifier that serializes as an espanso key; a new entry here is a claim \
+         that something else on this wire is not a code either"
     );
 } // End of function every_typescript_wire_union_has_a_namespace()

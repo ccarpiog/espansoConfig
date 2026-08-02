@@ -69,6 +69,8 @@ import type {
   DiagnosticCode,
   DiagnosticCodeName,
   DocumentShape,
+  DraftError,
+  DraftErrorName,
   EditError,
   EditErrorName,
   FileKind,
@@ -1129,3 +1131,44 @@ export function describeNotReencodable(locale: Locale, reason: NotReencodable): 
 export function describeSaveResult(locale: Locale, result: SaveResult): string {
   return translate(locale, saveResultKey(result.outcome));
 } // End of function describeSaveResult()
+
+// ---------------------------------------------------------------------------
+// The draft surface — Phase 2b-2b-3
+// ---------------------------------------------------------------------------
+
+/**
+ * The dictionary key for one reason a draft could not be planned.
+ *
+ * @param name - The variant name of a `DraftError`.
+ * @returns The key holding that reason's message.
+ */
+export function draftErrorKey(name: DraftErrorName): TranslationKey {
+  return `code.draftError.${uncapitalize(name)}`;
+} // End of function draftErrorKey()
+
+/**
+ * The sentence one refused draft reads as.
+ *
+ * **An actionable validation category, not an infrastructure failure.** A draft
+ * refusal is a planning-time answer — no batch, no transaction, and nothing an
+ * acknowledgement could change — so what this sentence belongs beside is the
+ * field the person was editing, never a generic error toast that offers a retry
+ * which can never succeed.
+ *
+ * **No operand of any of the thirty-two messages is interpolated, and that is
+ * the design rather than an omission.** Every address below the match mapping is
+ * an index into the projection this window already holds (CLAUDE.md section 1),
+ * and a caller that wants to name the failing variable, parameter or list item
+ * resolves that index against what it is showing. {@link scalarOperands} is
+ * still what feeds the substitution, so a message that ever does name an operand
+ * gets a string or a number and never a `DraftTarget` rendered as
+ * `[object Object]`.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A draft error as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeDraftError(locale: Locale, error: DraftError): string {
+  const key = draftErrorKey(wireVariantName<DraftErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeDraftError()

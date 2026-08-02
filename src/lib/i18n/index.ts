@@ -24,6 +24,7 @@ import type {
   ContentKind,
   DecodeError,
   DiagnosticCode,
+  DraftError,
   EditError,
   FileKind,
   FindingClass,
@@ -59,6 +60,7 @@ import {
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
+  describeDraftError,
   describeEditError,
   describeFileKind,
   describeFindingClass,
@@ -115,6 +117,7 @@ export {
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
+  describeDraftError,
   describeEditError,
   describeFileKind,
   describeFindingClass,
@@ -144,6 +147,7 @@ export {
   describeWriteStep,
   diagnosticCodeKey,
   documentShapeKey,
+  draftErrorKey,
   editErrorKey,
   fileKindKey,
   findingClassKey,
@@ -692,3 +696,27 @@ export function tNotReencodable(reason: NotReencodable): string {
 export function tSaveResult(result: SaveResult): string {
   return describeSaveResult(locale.current, result);
 } // End of function tSaveResult()
+
+// ---------------------------------------------------------------------------
+// The draft surface — Phase 2b-2b-3
+// ---------------------------------------------------------------------------
+//
+// One more accessor, for the one enum the draft surface put on the wire. It is
+// the first of this family with a command behind it: `save_match` rejects with
+// `draftRefused`, and this is what turns that rejection's reason into a sentence.
+
+/**
+ * Renders why a draft could not be planned, in the current language.
+ *
+ * **Not a failed save, and the interface should not present it as one.** No
+ * batch was derived and no transaction ran, so there is nothing to acknowledge
+ * and nothing to retry: this sentence belongs beside the field the person was
+ * editing. `identityRecovery` in `../ipc/errors` says the same thing about the
+ * selection — a refused draft leaves it exactly where it was.
+ *
+ * @param error - A draft error as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tDraftError(error: DraftError): string {
+  return describeDraftError(locale.current, error);
+} // End of function tDraftError()

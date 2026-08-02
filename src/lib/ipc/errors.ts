@@ -22,7 +22,7 @@
  * A type alone would be invisible to both.
  */
 
-import type { SaveError } from './types';
+import type { DraftError, SaveError } from './types';
 
 /**
  * Every code the Rust side may put in a rejection.
@@ -48,6 +48,7 @@ export const COMMAND_ERROR_CODES = [
   'invalidMenuLabels',
   'menuBuildFailed',
   'moveNotWithinOneSequence',
+  'draftRefused',
   'saveFailed'
 ] as const;
 
@@ -225,6 +226,66 @@ export interface MoveNotWithinOneSequenceError {
 }
 
 /**
+ * A draft could not be turned into an edit batch, so **no save was attempted**.
+ *
+ * **Not a {@link SaveResult} refusal, and the difference decides the interface.**
+ * A save refused by the semantic gate carries findings, and handing those
+ * findings back is what makes the same save proceed. This carries none, no
+ * transaction ran, and no acknowledgement can change the answer: the request
+ * itself cannot be represented, so the user has to change what they asked for.
+ * Putting an *acknowledge and retry* control in front of this would offer a
+ * button that can never work.
+ *
+ * **It is an actionable validation category, not an infrastructure failure.** A
+ * generic error toast is the wrong presentation for it: the honest one is inline
+ * feedback beside the field that was being edited.
+ *
+ * **The reason carries indices, never text the configuration owner wrote.** An
+ * address below the snippet's own keys is a position in the projection this
+ * window already holds — which variable, which parameter, which list item — so a
+ * caller that wants to name the failing field resolves the index against what it
+ * is already showing.
+ *
+ * **The reason travels whole**, as a `DraftError` rather than as thirty-two codes
+ * of its own: the enum has a `draftError` dictionary namespace and an accessor
+ * (`describeDraftError` in `src/lib/i18n/codes.ts`), and a second copy of its
+ * taxonomy here would be a second thing to keep in step.
+ */
+export interface DraftRefusedError {
+  /** The discriminant. */
+  readonly code: 'draftRefused';
+  /**
+   * Why the draft could not be planned, exactly as the core reports it.
+   *
+   * Externally tagged, and **uniformly an object**: all thirty-two variants
+   * arrive as a one-key object, because the only one that carries no operands is
+   * declared in Rust as an empty struct variant, `MatchHasNoPath {}`, rather than
+   * as a unit variant. `serde` writes it `{"MatchHasNoPath": {}}` instead of as
+   * the bare string a unit variant would have produced.
+   *
+   * **That uniformity is what makes `draftRefused: { error: 'object' }` a true
+   * statement about all thirty-two rather than about thirty-one.**
+   * {@link COMMAND_ERROR_OPERANDS} pins exactly one shape per operand, and
+   * `the_frontend_operand_table_is_the_operands_rust_writes` in
+   * `src-tauri/src/wire_contract.rs` derives that shape from what `serde` writes
+   * for a **sampled** variant — with one sample per code, so a second shape has
+   * nowhere to be declared. A mixed-shape externally tagged enum therefore cannot
+   * be pinned by this table at all: whichever variant went unrepresented would
+   * fail `hasShape`, fall out of {@link isCommandError}, and be classified as an
+   * unexpected failure — losing its typed code and rendering the generic fallback
+   * in place of the localized sentence its dictionary entry already holds.
+   *
+   * `every_draft_error_variant_crosses_as_an_object` in the same file keeps the
+   * uniformity true by reading the variant list out of
+   * `crates/espansoconfig-core/src/draft/error.rs`, so a unit variant added there
+   * fails the build. `MatchHasNoPath` itself stays documented as unreachable for a
+   * match reached through `matches` — the only way `save_match` reaches one — and
+   * this says nothing about when it occurs, only about the shape it would take.
+   */
+  readonly error: DraftError;
+}
+
+/**
  * A save was attempted and did not commit, for a reason the save transaction
  * itself reports.
  *
@@ -279,6 +340,7 @@ export type CommandError =
   | InvalidMenuLabelsError
   | MenuBuildFailedError
   | MoveNotWithinOneSequenceError
+  | DraftRefusedError
   | SaveFailedError;
 
 /**
@@ -464,6 +526,7 @@ export const COMMAND_ERROR_OPERANDS = {
   invalidMenuLabels: { missing: 'stringArray', unexpected: 'stringArray' },
   menuBuildFailed: {},
   moveNotWithinOneSequence: {},
+  draftRefused: { error: 'object' },
   saveFailed: { error: 'object', may_have_written: 'boolean' }
 } as const;
 
@@ -635,12 +698,14 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'menuUnavailable':
     case 'invalidMenuLabels':
     case 'menuBuildFailed':
-    // A move refused before it was attempted, and a save that failed, both
-    // leave the selection exactly where it was: neither says the identity the
-    // caller holds has stopped naming a snippet. A *successful* save does say
-    // that, and it is not an error — `SaveResult.moved` carries the new
-    // identity, and there is nothing here for that path to classify.
+    // A move refused before it was attempted, a draft refused before anything
+    // was attempted at all, and a save that failed all leave the selection
+    // exactly where it was: none of them says the identity the caller holds has
+    // stopped naming a snippet. A *successful* save does say that, and it is not
+    // an error — `SaveResult.moved` carries the new identity, and there is
+    // nothing here for that path to classify.
     case 'moveNotWithinOneSequence':
+    case 'draftRefused':
     case 'saveFailed':
       return { action: 'none' };
   }

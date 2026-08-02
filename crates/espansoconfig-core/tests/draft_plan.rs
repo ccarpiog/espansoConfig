@@ -640,7 +640,7 @@ fn a_match_with_no_path_is_refused() {
     let draft = MatchDraft::new().with(MatchField::Label, "another label");
     assert_eq!(
         plan_match_edits(&view, &draft),
-        Err(DraftError::MatchHasNoPath)
+        Err(DraftError::MatchHasNoPath {})
     );
 }
 

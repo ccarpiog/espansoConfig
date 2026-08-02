@@ -1,5 +1,5 @@
 /**
- * The seven workspace commands, typed.
+ * The eight workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,21 +17,21 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## One of them writes
+ * ## Two of them write
  *
- * {@link moveMatch}, since Phase 2b-2a. It is the only function in this
- * application that can change a file on disk, and what it answers with is a
- * {@link SaveResult} in the value channel rather than a thrown error: a save that
- * was refused, and a save that found the file had moved on, are **outcomes** and
- * not failures.
+ * {@link moveMatch}, since Phase 2b-2a, and {@link saveMatch}, since 2b-2b-3.
+ * They are the only functions in this application that can change a file on
+ * disk, and what each answers with is a {@link SaveResult} in the value channel
+ * rather than a thrown error: a save that was refused, and a save that found the
+ * file had moved on, are **outcomes** and not failures.
  *
  * ## What is deliberately absent
  *
- * `save_match`, `create_match`, `delete_match` and `save_raw_document`. The first
- * needs a minimal-diff engine that does not exist yet; the other three need core
- * primitives for inserting a sequence item, removing one, and replacing a whole
- * document's text, and none of the three exists. A wrapper here would be a
- * standing invitation to call something that is not there.
+ * `create_match`, `delete_match` and `save_raw_document`. Each needs a core
+ * primitive that does not exist — inserting a sequence item, removing one, and
+ * replacing a whole document's text — and `espansoconfig_core::patch::DocumentEdit`
+ * has none of the three. A wrapper here would be a standing invitation to call
+ * something that is not there.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -43,6 +43,7 @@ import type {
   DocumentId,
   DocumentSummary,
   DocumentView,
+  MatchDraft,
   MatchId,
   MatchView,
   SaveResult,
@@ -69,7 +70,8 @@ export const COMMAND_NAMES = [
   'get_match',
   'document_text',
   'reload_document',
-  'move_match'
+  'move_match',
+  'save_match'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -261,3 +263,65 @@ export async function moveMatch(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('move_match', { id, after, baseRevision, acknowledgement });
 } // End of function moveMatch()
+
+/**
+ * Writes one snippet's drafted values into its file.
+ *
+ * **The second function in this application that writes a user's file**, and it
+ * goes through the same save transaction as {@link moveMatch} and through
+ * nothing else: locked, read and hashed under that lock, patched, reparsed,
+ * projected, checked, backed up and replaced atomically, all before this promise
+ * resolves.
+ *
+ * ## The draft is one intention, not a list of changes
+ *
+ * A {@link MatchDraft} says what the whole snippet should hold. Rust derives the
+ * **smallest** edit batch that realises it, so a field left `'Unchanged'`
+ * produces no edit at all and cannot rewrite bytes nobody touched — that is what
+ * makes an unedited field's spelling, quoting and comments survive a save
+ * byte-for-byte. A field set to the value it already holds produces no edit
+ * either, and a save that derives none is a `saved` result with
+ * `committed: false`, which is a **success**.
+ *
+ * ## A refused draft is not a refused save
+ *
+ * Two different refusals reach a caller from here and they call for two
+ * different interfaces. `refused` in the {@link SaveResult} means the semantic
+ * gate found something in a candidate it had already built: show the findings,
+ * and call again with an {@link Acknowledgement} holding exactly those the person
+ * accepted. A rejection with `draftRefused` means the draft could not be turned
+ * into edits **at all** — no candidate, no transaction, and no acknowledgement
+ * that could ever change the answer. Route it to the field the person was
+ * editing, not to a generic error toast, and never offer to retry it.
+ *
+ * ## Positional addressing is why the base revision is load-bearing
+ *
+ * Everything below the snippet's own keys is drafted by **index into the
+ * projection** — which variable, which parameter, which list item. A stale
+ * revision would therefore let an index name a *different* entry rather than a
+ * missing one, so the draft must be planned against the projection the caller
+ * actually looked at. The optimistic-concurrency check inside the transaction,
+ * taken under the write lock, is what enforces that; a mismatch comes back as
+ * `conflict` with nothing written.
+ *
+ * Every {@link MatchId} held for this file is stale after a successful commit;
+ * `saved.moved` is this snippet's identity in the new revision. There is
+ * deliberately **no force flag**.
+ *
+ * @param id - The snippet to save, by identity.
+ * @param draft - What the snippet should say, as a whole.
+ * @param baseRevision - The revision the caller believes the file holds, and the
+ *   revision the draft's indices are positions in.
+ * @param acknowledgement - The suspicions already shown to a person, by content.
+ *   Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `draftRefused`, or `saveFailed`.
+ */
+export async function saveMatch(
+  id: MatchId,
+  draft: MatchDraft,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('save_match', { id, draft, baseRevision, acknowledgement });
+} // End of function saveMatch()

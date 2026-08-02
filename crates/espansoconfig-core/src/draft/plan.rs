@@ -99,7 +99,7 @@ pub fn plan_match_edits(
     view: &MatchView,
     draft: &MatchDraft,
 ) -> Result<Vec<DocumentEdit>, DraftError> {
-    let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath)?;
+    let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
     if let Some(repeated) = view
         .unknown_entries
         .iter()

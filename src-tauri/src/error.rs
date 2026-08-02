@@ -53,6 +53,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use espansoconfig_core::discovery::DiscoveryError;
+use espansoconfig_core::draft::DraftError;
 use espansoconfig_core::model::IdentityError;
 use espansoconfig_core::persist::SaveError;
 use espansoconfig_core::wire::WirePath;
@@ -228,6 +229,57 @@ pub enum CommandError {
     /// because it is what keeps the guarantee true the day the projection grows a
     /// second sequence, and a guarantee with no code is a comment.
     MoveNotWithinOneSequence,
+    /// A draft could not be turned into an edit batch, so **no save was
+    /// attempted at all**.
+    ///
+    /// # Why a refusal in the `Err` channel, when a save's refusal is not
+    ///
+    /// The two look alike and are not, and Phase 2b-2b-3's design consult
+    /// (`docs/reviews/phase-2b-2b-3-design.md`, Q1) settled it before the command
+    /// existed. A [`espansoconfig_core::draft::DraftError`] is a **planning-time**
+    /// failure: no batch was derived, no transaction ran, no lock was taken, no
+    /// finding was produced — and **no acknowledgement can ever change the
+    /// answer**. `SaveResult::Refused` is the opposite of all five: the
+    /// transaction evaluated a real candidate, the semantic gate declined it, and
+    /// the findings it carries are exactly what a caller hands back to make the
+    /// same save proceed.
+    ///
+    /// Filing them under one type would invite a frontend to put an *acknowledge
+    /// and retry* control in front of a refusal that retrying cannot move. The
+    /// analogue already on this enum is [`CommandError::MoveNotWithinOneSequence`],
+    /// which is the same shape for the same reason: the requested operation cannot
+    /// be represented, so the caller has to change the request rather than confirm
+    /// it.
+    ///
+    /// # The argument against, stated rather than won
+    ///
+    /// The consult named it and it is a real cost: a draft refusal is an
+    /// **expected domain outcome**, not an infrastructure failure, and returning
+    /// it through `Err` invites generic command-error handling to present it as an
+    /// exceptional failure — a toast in the corner — where the honest presentation
+    /// is inline feedback on the field the user was editing. The answer is that
+    /// the frontend must recognise this code as an **actionable validation
+    /// category** and route it to the form, not that the planning/transaction
+    /// distinction should be weakened to make a careless renderer look right.
+    ///
+    /// # It carries indices, never the owner's text
+    ///
+    /// Twelve of the [`espansoconfig_core::draft::DraftError`] variants address
+    /// something below the match mapping, and every one of them does it with an
+    /// **index**. That is not a style choice: this value crosses the process
+    /// boundary and the configuration is private (`CLAUDE.md` section 1). A
+    /// frontend that wants to name the failing field resolves the index against
+    /// the projection it already holds, and no dictionary string in either
+    /// language interpolates a key, a trigger or a value.
+    ///
+    /// The refusal travels **whole**, exactly as [`CommandError::SaveFailed`]'s
+    /// does, rather than being flattened into thirty-two codes here: the enum has
+    /// its own `draftError` dictionary namespace, and a second copy of its
+    /// taxonomy on this side is a second thing to keep in step.
+    DraftRefused {
+        /// Why the draft could not be planned, exactly as the core reports it.
+        error: DraftError,
+    },
     /// A save was attempted and did not commit, for a reason the transaction
     /// itself reports.
     ///
@@ -293,6 +345,7 @@ impl CommandError {
             CommandError::InvalidMenuLabels { .. } => "invalidMenuLabels",
             CommandError::MenuBuildFailed => "menuBuildFailed",
             CommandError::MoveNotWithinOneSequence => "moveNotWithinOneSequence",
+            CommandError::DraftRefused { .. } => "draftRefused",
             CommandError::SaveFailed { .. } => "saveFailed",
         }
     } // End of function code()
@@ -348,6 +401,9 @@ impl Serialize for CommandError {
             }
             CommandError::MenuBuildFailed => {}
             CommandError::MoveNotWithinOneSequence => {}
+            CommandError::DraftRefused { error } => {
+                out.serialize_field("error", error)?;
+            }
             CommandError::SaveFailed { error } => {
                 out.serialize_field("error", error)?;
                 // Computed here rather than carried, so that the answer on the
@@ -371,7 +427,10 @@ impl CommandError {
             CommandError::ConfigDirNotFound { .. }
             | CommandError::NotADirectory { .. }
             | CommandError::UnknownDocument { .. }
-            | CommandError::IdentityNoSuchMatch { .. } => 1,
+            | CommandError::IdentityNoSuchMatch { .. }
+            // One operand, and it is the core's whole refusal: a `DraftError`
+            // has no second question to answer the way `SaveFailed` does.
+            | CommandError::DraftRefused { .. } => 1,
             CommandError::Io { .. }
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
@@ -438,6 +497,13 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
         },
         CommandError::MenuBuildFailed,
         CommandError::MoveNotWithinOneSequence,
+        // The one variant that carries an index below the match mapping, chosen
+        // over the eleven simpler ones so that the enumeration exercises the
+        // privacy rule as well as the shape: `variable` is a position in the
+        // projected `vars` list and there is nowhere for a key text to hide.
+        CommandError::DraftRefused {
+            error: DraftError::AmbiguousVariableKey { variable: 0 },
+        },
         CommandError::SaveFailed {
             error: SaveError::DocumentIsReadOnly {
                 path: std::path::PathBuf::from("/nowhere/match/packages/one/package.yml"),
@@ -704,6 +770,7 @@ mod tests {
             ("invalidMenuLabels", vec!["missing", "unexpected"]),
             ("menuBuildFailed", vec![]),
             ("moveNotWithinOneSequence", vec![]),
+            ("draftRefused", vec!["error"]),
             ("saveFailed", vec!["error", "may_have_written"]),
         ];
         for (error, (code, operands)) in every_command_error().iter().zip(expected) {
@@ -774,6 +841,50 @@ mod tests {
         let json = serde_json::to_value(&read_only).expect("a command error must serialize");
         assert_eq!(json["may_have_written"], false);
     } // End of function a_save_failure_says_whether_its_rename_may_have_completed()
+
+    /// A refused draft crosses as its own code, carrying the core's refusal
+    /// whole and no text the owner wrote.
+    ///
+    /// Three claims, and the third is the one `CLAUDE.md` section 1 makes
+    /// non-negotiable. The code is `draftRefused` rather than `saveFailed`,
+    /// because nothing was saved and nothing was attempted. The operand is the
+    /// core's own externally tagged refusal rather than a flattened copy of it,
+    /// so the `draftError` dictionary namespace is what renders it. And every
+    /// operand under that tag is a number: the fixtures below are the two shapes
+    /// that could have carried a key — a nested mapping's repeated key, and a
+    /// variable's — and both address it by index.
+    #[test]
+    fn a_refused_draft_crosses_as_a_code_carrying_indices_only() {
+        use espansoconfig_core::draft::DraftError;
+
+        let cases = [
+            (
+                DraftError::AmbiguousVariableKey { variable: 4 },
+                "AmbiguousVariableKey",
+                "variable",
+            ),
+            (
+                DraftError::AmbiguousNestedKey { edit: 2 },
+                "AmbiguousNestedKey",
+                "edit",
+            ),
+        ];
+        for (refusal, variant, operand) in cases {
+            let rendered = refusal.to_string();
+            let error = CommandError::DraftRefused { error: refusal };
+            let json = serde_json::to_value(&error).expect("a command error must serialize");
+            assert_eq!(json["code"], "draftRefused");
+            assert!(
+                json["error"][variant][operand].is_number(),
+                "an address below the match mapping is an index: {json}"
+            );
+            let text = serde_json::to_string(&error).expect("a command error must serialize");
+            assert!(
+                !text.contains(&rendered),
+                "the developer rendering must not reach the wire: {text}"
+            );
+        } // End of the loop over the two refusals that could have carried a key
+    } // End of function a_refused_draft_crosses_as_a_code_carrying_indices_only()
 
     /// An `io::Error`'s message never reaches the wire; its kind does.
     ///

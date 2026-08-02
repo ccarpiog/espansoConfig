@@ -36,7 +36,21 @@ pub enum DraftError {
     ///
     /// Unreachable for a match reached through `matches`; refused rather than
     /// invented, because the alternative is a path that names something else.
-    MatchHasNoPath,
+    ///
+    /// **The empty braces are load-bearing.** Written as a unit variant this
+    /// would be the one variant of thirty-two that `serde` writes as a bare
+    /// JSON string rather than as a one-key object, and the frontend's
+    /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
+    /// one shape for the `error` operand of `CommandError::DraftRefused`. A
+    /// refusal that did not match the pinned shape would be classified as an
+    /// *unexpected* failure, losing its typed code and rendering a generic
+    /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
+    /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
+    /// an object" is true by construction rather than true of thirty-one cases
+    /// out of thirty-two. `every_draft_error_variant_crosses_as_an_object` in
+    /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
+    /// ever added here.
+    MatchHasNoPath {},
     /// The hazard gate refuses this match.
     ///
     /// `hazard` is the hazard the projection named, and `None` means the
@@ -492,7 +506,7 @@ impl fmt::Display for DraftError {
     /// A developer rendering, for logs and test output. Never shown to a user.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DraftError::MatchHasNoPath => formatter.write_str("the match has no path"),
+            DraftError::MatchHasNoPath {} => formatter.write_str("the match has no path"),
             DraftError::MatchNotEditable { .. } => {
                 formatter.write_str("the gate refuses the match")
             }

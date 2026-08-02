@@ -98,6 +98,43 @@ fn items_of(file: &syn::File) -> Vec<&Item> {
 /// When `source` declares no such enum — a rename or a moved file fails loudly
 /// rather than reporting an empty variant set.
 pub(crate) fn declared_variants(source: &str, name: &str) -> BTreeSet<String> {
+    variants_matching(source, name, |_| true)
+}
+
+/// Every variant of `enum <name>` in `source` that declares **no** fields.
+///
+/// The one distinction `serde`'s externally tagged representation turns into a
+/// difference of JSON *kind*: a unit variant crosses as a bare string, and a
+/// variant with fields — including an empty struct variant, `V {}` — crosses as
+/// a one-key object. A tagged union whose members disagree about that cannot be
+/// described by a single declared shape, which is why
+/// `crate::wire_contract::every_draft_error_variant_crosses_as_an_object` asks
+/// this question of `DraftError`.
+///
+/// A **tuple** variant is not a unit variant and is not reported here; it too
+/// crosses as a one-key object, and what is inside it is another type's problem.
+///
+/// # Panics
+///
+/// When `source` declares no such enum, exactly as [`declared_variants`] does.
+pub(crate) fn unit_variants(source: &str, name: &str) -> BTreeSet<String> {
+    variants_matching(source, name, |fields| matches!(fields, Fields::Unit))
+}
+
+/// The variants of `enum <name>` in `source` whose fields `accept` admits.
+///
+/// The shared body of [`declared_variants`] and [`unit_variants`], so that one
+/// reading of one declaration answers both questions and a moved file fails the
+/// same way for each.
+///
+/// # Panics
+///
+/// When `source` declares no such enum.
+fn variants_matching(
+    source: &str,
+    name: &str,
+    accept: impl Fn(&Fields) -> bool,
+) -> BTreeSet<String> {
     let file = parse(source, name);
     let declaration = items_of(&file)
         .into_iter()
@@ -109,9 +146,10 @@ pub(crate) fn declared_variants(source: &str, name: &str) -> BTreeSet<String> {
     declaration
         .variants
         .iter()
+        .filter(|variant| accept(&variant.fields))
         .map(|variant| variant.ident.to_string())
         .collect()
-} // End of function declared_variants()
+} // End of function variants_matching()
 
 /// Every field name declared by `struct <name>` in `source`.
 ///
@@ -405,6 +443,7 @@ fn type_name(declared: &syn::Type) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::string_literals;
+    use super::unit_variants;
     use super::{declared_enums, declared_fields, declared_variants, serializable_types};
     use super::{is_string_literal, mentions_identifier, modules_not_gated_by_cfg_test};
 
@@ -448,6 +487,28 @@ mod tests {
     fn a_missing_enum_is_a_failure_and_not_an_empty_set() {
         declared_variants("pub enum Present { A }", "Missing");
     }
+
+    /// The unit-variant reader separates the three field shapes.
+    ///
+    /// An **empty struct variant** is the case the whole distinction exists for:
+    /// `Empty {}` looks like a unit variant and is not one, and `serde` writes it
+    /// as a one-key object rather than as a bare string.
+    #[test]
+    fn a_unit_variant_is_told_apart_from_an_empty_struct_variant() {
+        let source = concat!(
+            "pub enum Shapes {\n",
+            "    Bare,\n",
+            "    Empty {},\n",
+            "    Named { count: usize },\n",
+            "    Tuple(usize),\n",
+            "    #[cfg(feature = \"x\")] AlsoBare,\n",
+            "}\n",
+        );
+        let mut bare: Vec<String> = unit_variants(source, "Shapes").into_iter().collect();
+        bare.sort();
+        assert_eq!(bare, vec!["AlsoBare", "Bare"]);
+        assert_eq!(declared_variants(source, "Shapes").len(), 5);
+    } // End of function a_unit_variant_is_told_apart_from_an_empty_struct_variant()
 
     /// The field reader stops at the declaration it was asked for.
     #[test]

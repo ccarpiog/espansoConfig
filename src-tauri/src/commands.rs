@@ -14,17 +14,25 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # The seventh command writes, and it is the only one
+//! # Two of the eight commands write, and they write the same way
 //!
-//! Phase 2b-2a adds `move_match`. It goes through
-//! [`espansoconfig_core::persist::save_document`] and through nothing else:
-//! `replace_file_atomically` and `replace_locked_file` take finished bytes,
+//! Phase 2b-2a added `move_match` and Phase 2b-2b-3 adds `save_match`. Both go
+//! through [`espansoconfig_core::persist::save_document`] and through nothing
+//! else: `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
-//! **no command in this crate calls either**. `save_match`, `create_match`,
-//! `delete_match` and `save_raw_document` are still absent, and the reason is not
-//! caution: the core has no primitive for inserting a sequence item, removing
-//! one, or replacing a whole document's text, and inventing one at this layer
-//! would be an edit engine outside the crate that owns the fidelity rules.
+//! **no command in this crate calls either**. `create_match`, `delete_match` and
+//! `save_raw_document` are still absent, and the reason is not caution: the core
+//! has no primitive for inserting a sequence item, removing one, or replacing a
+//! whole document's text, and inventing one at this layer would be an edit engine
+//! outside the crate that owns the fidelity rules.
+//!
+//! The two differ in **who derives the edits**, and that is the whole of the
+//! difference. `move_match` builds its own single [`ItemMove`], because a move is
+//! one primitive and there is nothing to diff. `save_match` hands a
+//! [`MatchDraft`] to [`plan_match_edits`], which derives the **smallest** batch
+//! that realises it — or refuses by name, in which case nothing is attempted and
+//! the caller gets [`CommandError::DraftRefused`]. Neither ever combines the two
+//! kinds of edit in one batch (`PROGRESS.md` R25).
 //!
 //! # Three constraints this module inherits and does not drop
 //!
@@ -69,6 +77,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::State;
 
+use espansoconfig_core::draft::{plan_match_edits, MatchDraft};
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{DocumentEdit, DocumentPath, ItemMove};
 use espansoconfig_core::persist::{
@@ -97,8 +106,9 @@ struct Open {
     /// `None` means *no backup at all*; the core deliberately holds no session
     /// state of its own, so a save with no safety net is what happens if this
     /// layer forgets. It does not forget: every save goes through
-    /// [`WorkspaceSession::move_match`], which passes `Some(&self.backups)`, and
-    /// there is no code path in this crate that passes `None`.
+    /// [`WorkspaceSession::move_match`] or [`WorkspaceSession::save_match`], each
+    /// of which passes `Some(&self.backups)`, and there is no code path in this
+    /// crate that passes `None`.
     backups: BackupSession,
 }
 
@@ -303,6 +313,65 @@ impl WorkspaceSession {
         )
     } // End of function move_match()
 
+    /// Writes one match's drafted values into its file.
+    ///
+    /// The second method in this crate that can write a user's file, and it
+    /// writes it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`], with a batch
+    /// [`plan_match_edits`] derived and nothing added to it here.
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// - a `base_revision` that is not the revision this session's projection
+    ///   holds — [`CommandError::IdentityStaleRevision`]. **Positional addressing
+    ///   makes this check load-bearing in a way key-addressing was not**: below
+    ///   the match mapping a draft names a variable, a `params` entry or a
+    ///   sequence element by *index*, and a stale index does not name a missing
+    ///   entry — it names a **different** one, and succeeds
+    ///   (`docs/decisions/2b-2b-2-notes.md` section 11);
+    /// - the identity refusals, unchanged from [`WorkspaceSession::match_view`];
+    /// - anything [`plan_match_edits`] will not derive a batch for —
+    ///   [`CommandError::DraftRefused`], carrying the core's refusal whole.
+    ///
+    /// # What it does not refuse
+    ///
+    /// **A draft that changes nothing.** It plans to an empty batch, and the empty
+    /// batch is still handed to the transaction rather than answered from the
+    /// cached view — see [`save_one_match`], which is where the reason is written
+    /// down.
+    ///
+    /// **A match that is not an item of a block sequence.** That is
+    /// [`WorkspaceSession::move_match`]'s refusal and not this one: a move changes
+    /// a sequence position and a scalar save does not, so a match addressed some
+    /// other way is still perfectly editable and
+    /// [`CommandError::MoveNotWithinOneSequence`] never appears on this path.
+    ///
+    /// # What it answers with
+    ///
+    /// [`SaveResult`], in the `Ok` channel, exactly as
+    /// [`WorkspaceSession::move_match`] does — and with the same three outcomes
+    /// meaning the same three things.
+    pub fn save_match(
+        &self,
+        id: MatchId,
+        draft: &MatchDraft,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        let mut guard = self.lock();
+        let Some(Open { workspace, backups }) = guard.as_mut() else {
+            return Err(CommandError::NoWorkspaceOpen);
+        };
+        save_one_match(
+            workspace,
+            backups,
+            id,
+            draft,
+            base_revision,
+            acknowledgement,
+        )
+    } // End of function save_match()
+
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
     fn with_workspace<T>(
@@ -405,6 +474,7 @@ fn move_one_match(
     // Where the item will be afterwards, from the engine's own arithmetic rather
     // than from a second copy of it (`ItemMove::resulting_index`).
     let landing = edit.resulting_index(from);
+    let landed = sequence.with_index(landing);
     // Cloned so that the immutable borrow of the workspace ends before the save;
     // the context is a handful of fields from the directory walk, not a parse.
     let context = workspace.document_context(id.document)?.clone();
@@ -419,13 +489,7 @@ fn move_one_match(
         backups: Some(backups),
     };
     match save_document(request) {
-        Ok(saved) => Ok(after_a_save(
-            workspace,
-            id.document,
-            &sequence,
-            landing,
-            saved,
-        )),
+        Ok(saved) => Ok(after_a_save(workspace, id.document, Some(&landed), saved)),
         Err(SaveError::RevisionMismatch {
             expected, found, ..
         }) => conflict_after_the_lock(workspace, id.document, expected, found),
@@ -444,6 +508,103 @@ fn move_one_match(
         }
     }
 } // End of function move_one_match()
+
+/// Plans and runs one drafted match save against an open workspace.
+///
+/// A free function for [`move_one_match`]'s reason: the session's mutex guard is
+/// destructured once, at the call site, so the workspace and the backup session
+/// arrive here as two independent borrows.
+///
+/// # The order of the steps is the contract
+///
+/// 1. **resolve the projection, with no lock held.** Planning reads a parse; it
+///    writes nothing and takes nothing;
+/// 2. **refuse a `base_revision` that is not this projection's.** The draft's
+///    addresses are positions in *that* parse, so a draft planned against one
+///    projection and applied to another edits whatever now occupies the position;
+/// 3. **derive the batch**, or refuse by name. [`plan_match_edits`] runs both
+///    batch guards itself as steps 7 and 8 of its own documented contract —
+///    `check_closed_surface` over the derived batch and `check_batch_independence`
+///    with the match mapping's keys **and** every nested open mapping's whole key
+///    list. They are deliberately **not** re-run here: the closed-surface half
+///    would be an identical second call, and the independence half needs the
+///    original key lists, which only the planner has. A copy of them assembled at
+///    this layer would be a *weaker* second statement wearing the same name;
+/// 4. **hand the batch to the transaction, even when it is empty.**
+///
+/// # Why an empty batch is still a save
+///
+/// Phase 2b-2b-3's design consult (`docs/reviews/phase-2b-2b-3-design.md`, Q3)
+/// settled this, and the tempting answer is the wrong one. A draft that changes
+/// nothing produces no edits, the candidate comes out byte-identical, and
+/// [`save_document`] answers `committed: false` — **a success**, not a failure.
+/// Short-circuiting to that success from the cached view would skip the
+/// optimistic-concurrency check the transaction takes **under the per-path
+/// lock**, and so would report success for a file that some other writer changed
+/// after step 2. The single authoritative save-result path is worth one wasted
+/// read.
+///
+/// There is no lock-ordering hazard in the sequence, and the consult says why:
+/// planning holds no lock at all, [`save_document`] alone takes one, and a
+/// concurrent modification between steps 2 and 4 becomes a
+/// [`SaveResult::Conflict`] rather than a wrong write.
+fn save_one_match(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    id: MatchId,
+    draft: &MatchDraft,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    let view = workspace.document_view(id.document)?;
+    if view.revision != base_revision {
+        // The caller drafted against a parse this session no longer holds. See
+        // `WorkspaceSession::save_match`: a stale index names a different entry
+        // rather than a missing one, so this is refused rather than attempted.
+        return Err(CommandError::IdentityStaleRevision {
+            expected: view.revision.to_hex(),
+            found: base_revision.to_hex(),
+        });
+    }
+    let found = view.match_by_id(id)?;
+    // The match's own address, captured before the save because the projection it
+    // comes from is about to be replaced. A scalar save does not relocate the
+    // match, so this is where it still is afterwards — which is why this path
+    // does not use `addressed_item` and never refuses a match that is not a
+    // sequence item.
+    let at = found.path.clone();
+    let edits =
+        plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
+    // Cloned so that the immutable borrow of the workspace ends before the save.
+    let context = workspace.document_context(id.document)?.clone();
+
+    let request = SaveRequest {
+        context: &context,
+        base_revision,
+        edits: &edits,
+        acknowledgement,
+        // Never `None`. See `WorkspaceSession::open`.
+        backups: Some(backups),
+    };
+    match save_document(request) {
+        Ok(saved) => Ok(after_a_save(workspace, id.document, at.as_ref(), saved)),
+        Err(SaveError::RevisionMismatch {
+            expected, found, ..
+        }) => conflict_after_the_lock(workspace, id.document, expected, found),
+        Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
+            verdict: refusal.verdict,
+            findings: refusal.findings,
+        }),
+        Err(error) => {
+            if error.may_have_written() {
+                // The rename may have completed, so the cached parse may describe
+                // bytes that are gone — `move_one_match`'s reasoning, unchanged.
+                let _ = workspace.evict(id.document);
+            }
+            Err(CommandError::SaveFailed { error })
+        }
+    }
+} // End of function save_one_match()
 
 /// Describes the disk side of a conflict, with a read taken **after** the lock
 /// was released.
@@ -482,8 +643,8 @@ fn conflict_after_the_lock(
     })
 } // End of function conflict_after_the_lock()
 
-/// Brings the session's cache back in step with the file, and names the moved
-/// match in the revision that now exists.
+/// Brings the session's cache back in step with the file, and names the match
+/// the operation acted on in the revision that now exists.
 ///
 /// **Cache coherence is this layer's job**, and the core says so: `save_document`
 /// hands back *facts* and deliberately does not reach into
@@ -496,15 +657,42 @@ fn conflict_after_the_lock(
 /// missing parse costs the next caller a read, and a stale one is this
 /// application showing a file it no longer has.
 ///
+/// # `at` is where the match is *afterwards*, and the two callers compute it
+/// differently
+///
+/// That difference is the whole reason this function takes an address rather than
+/// deriving one, and Phase 2b-2b-3's design consult
+/// (`docs/reviews/phase-2b-2b-3-design.md`, Q2) settled which is which.
+/// [`move_one_match`] passes its sequence path plus the landing index, because a
+/// move **changes** the item's position and the identity has to be re-minted
+/// wherever it landed. [`save_one_match`] passes the match's **own projected
+/// path** unchanged, because a scalar save does not relocate anything — so it
+/// must not be made to go through the sequence-item address, and a match this
+/// projection cannot address as a sequence item is still perfectly editable.
+///
+/// `None` says *this operation has no single match to name*, and the only caller
+/// that can produce it is a save of a match the projection carries no path for —
+/// which [`plan_match_edits`] refuses first, so it is a defensive branch rather
+/// than a reachable one. A whole-document write would be the honest producer of
+/// it, and there is no such command yet.
+///
+/// # A committed save that cannot be re-resolved is still a success
+///
 /// [`SaveResult::Saved::moved`] is minted only when the commit happened **and**
 /// the fresh read agrees with the revision the transaction established. When it
-/// does not, some other writer reached the file in between, and the position the
-/// move wrote to is no longer known to hold what was written there.
+/// does not, some other writer reached the file in between and the address is no
+/// longer known to hold what was written there. That is answered as `None` and
+/// **never** as an `Err`: the bytes are already on the disk, and reporting a
+/// failure for a save that succeeded invites a caller to retry a write that has
+/// already happened.
+///
+/// A skipped commit is `None` for a different and equally deliberate reason: no
+/// new revision exists, so there is no new identity to mint — and the caller's
+/// own identity, minted from the revision the file still holds, is still valid.
 fn after_a_save(
     workspace: &mut Workspace,
     document: DocumentId,
-    sequence: &DocumentPath,
-    landing: usize,
+    at: Option<&DocumentPath>,
     saved: SavedDocument,
 ) -> SaveResult {
     let refreshed = match workspace.refresh(document) {
@@ -516,11 +704,11 @@ fn after_a_save(
     }
     let moved = refreshed
         .filter(|view| saved.committed && view.revision == saved.revision)
-        .and_then(|view| {
-            let landed = sequence.clone().with_index(landing);
+        .zip(at)
+        .and_then(|(view, address)| {
             view.matches
                 .iter()
-                .find(|candidate| candidate.path.as_ref() == Some(&landed))
+                .find(|candidate| candidate.path.as_ref() == Some(address))
                 .map(|candidate| candidate.id)
         });
     SaveResult::Saved {
@@ -634,11 +822,65 @@ pub fn move_match(
     session.move_match(id, after, base_revision, &acknowledgement)
 } // End of function move_match()
 
+/// Writes one match's drafted values into its file (plan section 6.4).
+///
+/// **The eighth command, and the second that can write a user's file.**
+///
+/// # Its arguments, and why each is the shape it is
+///
+/// - `id` — the match to save, by identity, for the reason [`move_match`] gives:
+///   a [`espansoconfig_core::patch::DocumentPath`] is a **position**, and deleting
+///   an earlier match re-points one at a different snippet.
+/// - `draft` — what the user wants this match to say, as a whole. Not a list of
+///   changes: a [`MatchDraft`] is one intention, [`plan_match_edits`] derives the
+///   **smallest** batch that realises it, and a field the draft leaves
+///   [`espansoconfig_core::draft::DraftField::Unchanged`] contributes no edit and
+///   so cannot rewrite bytes nobody touched. Everything below the match mapping
+///   is addressed by **index** — a variable, a `params` entry, a `form_fields`
+///   entry, one of its options — and never by a key the caller composed.
+/// - `base_revision` — the optimistic-concurrency token, checked twice for
+///   [`move_match`]'s reason and load-bearing here in a further one: a draft's
+///   indices are positions in the projection it was built against, so a stale
+///   token would let an index name a **different** entry rather than a missing
+///   one. See [`WorkspaceSession::save_match`].
+/// - `acknowledgement` — the suspicions the caller has already shown someone, by
+///   content, exactly as for a move. There is deliberately **no `force` flag**.
+///
+/// # This command inserts nothing below the match mapping
+///
+/// A drafted variable, `params` entry, `form_fields` entry, option or sequence
+/// element the projection cannot resolve is **refused by name**, never created
+/// (`docs/decisions/2b-2b-2-notes.md` decision D1). Writing an author-chosen key
+/// would be the first key string this engine emits that no schema fixes, and it
+/// needs its own anchor machinery and its own review. Inserting a *schema-known
+/// scalar key into the match's own mapping* is the one insertion that does
+/// happen, and the closed-surface guard is what keeps that the only one.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes before anything is
+/// attempted; [`CommandError::DraftRefused`] when the draft cannot be turned into
+/// a batch, in which case **no transaction ran at all**; and
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures. A
+/// conflict and a refusal are **not** errors — see [`SaveResult`]. Neither is a
+/// save that changed nothing: that is a `Saved` with `committed: false`.
+#[tauri::command]
+pub fn save_match(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    draft: MatchDraft,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.save_match(id, &draft, base_revision, &acknowledgement)
+} // End of function save_match()
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
 
+    use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft};
     use espansoconfig_core::model::MatchId;
     use espansoconfig_core::persist::Acknowledgement;
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
@@ -1914,6 +2156,337 @@ mod tests {
             BASE_YML
         );
     } // End of function a_move_that_changes_nothing_is_refused_by_the_engine()
+
+    /// A draft that sets one scalar, with everything else left alone.
+    ///
+    /// Hand-authored and neutral, like every fixture in this module: a
+    /// `MatchDraft` whose every other field is `Unchanged`, which is what makes
+    /// the derived batch one edit rather than eighteen.
+    fn draft_replace(value: &str) -> MatchDraft {
+        MatchDraft {
+            replace: DraftField::Set(value.to_owned()),
+            ..MatchDraft::default()
+        }
+    }
+
+    /// A saved draft commits, rewrites only the value it names, and answers with
+    /// an identity that resolves in the revision that now exists.
+    ///
+    /// **Four claims, and the third is the one this whole application is for.**
+    /// The save commits; the identity it answers with resolves through
+    /// `get_match` while the one held before it does not; **every byte outside
+    /// the edited value survives** — the file comment, the untouched trigger, the
+    /// second snippet and its unmodelled key; and the identity is re-minted from
+    /// the match's **own** path rather than from a sequence position, which is
+    /// what lets a match that is not addressable as a sequence item be saved at
+    /// all.
+    #[test]
+    fn a_scalar_save_commits_and_answers_with_an_identity_that_resolves() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+
+        let result = session
+            .save_match(
+                held,
+                &draft_replace("changed"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the draft plans and the save runs");
+        let SaveResult::Saved {
+            revision,
+            committed,
+            notes,
+            backup_taken,
+            moved,
+        } = result
+        else {
+            panic!("expected a saved result");
+        };
+        assert!(
+            committed,
+            "the value really changed, so the file was written"
+        );
+        assert!(backup_taken, "the session must have copied the file first");
+        assert!(
+            notes.is_empty(),
+            "a plain value replaced by another plain value changes no presentation: {notes:?}"
+        );
+        assert_ne!(revision, before.revision);
+
+        let saved = moved.expect("a committed scalar save names the match it saved");
+        let found = session
+            .match_view(saved)
+            .expect("the identity the command answered with must resolve");
+        assert_eq!(trigger_text(&found), ":one");
+        let stale = session
+            .match_view(held)
+            .expect_err("the identity held before the save is minted from the old revision");
+        assert_eq!(stale.code(), "identityStaleRevision");
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML.replace("replace: first", "replace: changed"),
+            "everything outside the edited value must come out byte-identical"
+        );
+    } // End of function a_scalar_save_commits_and_answers_with_an_identity_that_resolves()
+
+    /// A draft that asks for the value already there is a **success** that writes
+    /// nothing.
+    ///
+    /// **`committed: false` is not a failure**, and the design consult's ruling Q3
+    /// is the other half of this test: the empty batch still goes to the
+    /// transaction, so the under-lock revision check still runs. What is asserted
+    /// here is everything that follows from it — the file is byte-identical, the
+    /// revision is the one the caller already had, no backup was taken because
+    /// nothing was replaced, and the caller's own identity is **still valid**,
+    /// which is why answering no new one costs it nothing.
+    #[test]
+    fn a_draft_that_changes_nothing_is_a_success_that_writes_no_bytes() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+
+        let result = session
+            .save_match(
+                held,
+                &draft_replace("first"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a draft that changes nothing is not an error");
+        match result {
+            SaveResult::Saved {
+                revision,
+                committed,
+                backup_taken,
+                moved,
+                ..
+            } => {
+                assert!(!committed, "there was nothing to write");
+                assert!(!backup_taken, "nothing was replaced, so nothing was copied");
+                assert_eq!(revision, before.revision);
+                assert!(moved.is_none(), "no new revision exists to mint one in");
+            }
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML
+        );
+        assert!(
+            !dir.path().join(".espansoconfig-backups").exists(),
+            "a save that wrote nothing leaves no trace on disk"
+        );
+        session
+            .match_view(held)
+            .expect("the caller's identity survives a save that did not commit");
+    } // End of function a_draft_that_changes_nothing_is_a_success_that_writes_no_bytes()
+
+    /// A draft the planner will not derive a batch for crosses as `draftRefused`,
+    /// and no transaction runs.
+    ///
+    /// **The distinction ruling Q1 settled, as a test.** A `DraftError` is a
+    /// planning-time refusal: it is an `Err` rather than a `SaveResult::Refused`,
+    /// it carries no findings for anyone to acknowledge, and the file is
+    /// untouched — no backup folder was even created, which is what says the
+    /// transaction never started.
+    ///
+    /// The fixture is a cardinality change the four primitives cannot express:
+    /// the match has no `search_terms` at all, so element 0 of it does not exist.
+    /// The refusal names the sequence and the index and **nothing else**.
+    #[test]
+    fn a_draft_the_planner_refuses_crosses_as_draft_refused_and_writes_nothing() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let draft = MatchDraft {
+            search_terms: vec![ItemDraft {
+                index: 0,
+                value: DraftField::Set("late".to_owned()),
+            }],
+            ..MatchDraft::default()
+        };
+
+        let error = session
+            .save_match(
+                before.matches[0].id,
+                &draft,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect_err("a sequence this match does not have cannot be drafted into existence");
+        assert_eq!(error.code(), "draftRefused");
+        let json = serde_json::to_value(&error).expect("the refusal serializes");
+        let refusal = &json["error"]["SequenceItemDoesNotExist"];
+        assert_eq!(refusal["field"], "search_terms");
+        assert_eq!(refusal["index"], 0);
+        assert_eq!(refusal["length"], 0);
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML
+        );
+        assert!(
+            !dir.path().join(".espansoconfig-backups").exists(),
+            "no transaction ran, so no file was copied"
+        );
+    } // End of function a_draft_the_planner_refuses_crosses_as_draft_refused_and_writes_nothing()
+
+    /// A `base_revision` that is not this session's parse is refused **before**
+    /// anything is planned.
+    ///
+    /// **Positional addressing is what makes this load-bearing** here in a way it
+    /// is not for a move. A draft names a variable, a `params` entry or a list
+    /// element by *index*, and an index resolved against the wrong parse does not
+    /// fail — it names a **different** entry and succeeds. So the refusal is not
+    /// an optimisation of the transaction's own check: it is what stops a draft
+    /// being planned against a projection it was never built from.
+    ///
+    /// The order matters as much as the refusal, and the second assertion is what
+    /// says so: the draft below is one the planner would *also* refuse, and the
+    /// code that comes back is the stale-revision one rather than
+    /// `draftRefused` — so nothing was planned at all.
+    #[test]
+    fn a_stale_base_revision_is_refused_before_a_draft_is_planned() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let held = view.matches[0].id;
+        let stale = ContentRevision::of_bytes(b"a file this session never read");
+        let draft = MatchDraft {
+            search_terms: vec![ItemDraft {
+                index: 0,
+                value: DraftField::Set("late".to_owned()),
+            }],
+            ..MatchDraft::default()
+        };
+
+        let error = session
+            .save_match(held, &draft, stale, &Acknowledgement::none())
+            .expect_err("a draft planned against another parse must not be applied");
+        assert_eq!(error.code(), "identityStaleRevision");
+        let json = serde_json::to_value(&error).expect("the refusal serializes");
+        assert_eq!(json["expected"], view.revision.to_hex());
+        assert_eq!(json["found"], stale.to_hex());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML
+        );
+    } // End of function a_stale_base_revision_is_refused_before_a_draft_is_planned()
+
+    /// A saved draft reports the presentation change it had to make.
+    ///
+    /// **`SaveResult::Saved::notes` gets its first producer at this phase.** The
+    /// field has been on the wire since 2b-1 with nothing to fill it: a move
+    /// copies the item's own bytes verbatim and re-encodes no scalar, so every
+    /// move answers with an empty list. A drafted save re-encodes what it
+    /// rewrites, and here the new value carries a line break, which no plain
+    /// scalar can hold — so the emitter has to spell it as a literal block and
+    /// says so rather than changing the shape of the file in silence (plan
+    /// section 6.2).
+    ///
+    /// The note is checked as a **fact about the crossing**: it survives
+    /// serialization with its position in the batch and both styles, which is
+    /// what a caller needs to say *which* value changed shape and how.
+    #[test]
+    fn a_saved_draft_reports_the_presentation_change_it_had_to_make() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let result = session
+            .save_match(
+                before.matches[0].id,
+                &draft_replace("one line\nand another\n"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the draft plans and the save runs");
+        let SaveResult::Saved {
+            committed, notes, ..
+        } = &result
+        else {
+            panic!("expected a saved result, got {result:?}");
+        };
+        assert!(committed);
+        assert_eq!(
+            notes.len(),
+            1,
+            "one edit changed one value's spelling: {notes:?}"
+        );
+        assert_eq!(notes[0].edit, 0, "the note names its edit's position");
+        assert_ne!(
+            notes[0].from, notes[0].to,
+            "a note is only worth sending when the spelling really changed"
+        );
+
+        let json = serde_json::to_value(&result).expect("the result serializes");
+        let crossed = json["notes"]
+            .as_array()
+            .expect("notes is a list on the wire");
+        assert_eq!(crossed.len(), 1, "the note must reach the wire: {json}");
+        assert_eq!(crossed[0]["edit"], 0);
+        assert_eq!(crossed[0]["from"], "Plain");
+        assert_eq!(crossed[0]["to"], "Literal");
+    } // End of function a_saved_draft_reports_the_presentation_change_it_had_to_make()
+
+    /// A suspicion refuses the save until the findings come back, and the same
+    /// draft then proceeds.
+    ///
+    /// **The acknowledgement protocol is the transaction's, not the command's**,
+    /// and this is what says a drafted save inherits it whole rather than
+    /// re-implementing half of it. There is no `force` flag in either call: the
+    /// findings travel out of the refusal and exactly those findings travel back
+    /// in, matched as a multiset.
+    #[test]
+    fn a_suspicion_refuses_a_drafted_save_until_the_findings_come_back() {
+        let dir = suspicious_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let held = view.matches[1].id;
+
+        let refusal = session
+            .save_match(
+                held,
+                &draft_replace("hello {{nobody}}"),
+                view.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome, not an error");
+        let findings = match refusal {
+            SaveResult::Refused { findings, .. } => findings,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(!findings.is_empty(), "a refusal carries its evidence");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            SUSPICIOUS_YML,
+            "a refused save writes nothing"
+        );
+
+        let acknowledged = session
+            .save_match(
+                held,
+                &draft_replace("hello {{nobody}}"),
+                view.revision,
+                &Acknowledgement::of(&findings),
+            )
+            .expect("the acknowledged save proceeds");
+        match acknowledged {
+            SaveResult::Saved { committed, .. } => assert!(committed),
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+    } // End of function a_suspicion_refuses_a_drafted_save_until_the_findings_come_back()
 
     /// An address that does not end in a sequence position is not a move's end.
     ///
