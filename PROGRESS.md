@@ -4603,6 +4603,24 @@ _Updated at each phase boundary._
 | 2a-3a | `cda72f3` | ✅ pushed to `origin/main` | clean |
 | 2a-3b | `7aab106` | ✅ pushed to `origin/main` | clean |
 | 2b-1 | `0229b14` | ✅ pushed to `origin/main` | clean |
+| 2b-2a | `c3fe5a6` | ✅ pushed to `origin/main` | clean |
+
+`c3fe5a6` is Phase 2b-2a **including its review fix round** — the phase was held open until all five
+findings were closed, so, as with every phase since `8989c16`, no commit holds the demonstrated
+defects: neither the window that kept showing a file's old order and old bytes after a save whose
+rename had already completed, nor the acknowledgement that accepted a span running from 20 to 10, nor
+the three tests that could not fail — the conflict test whose fixture made the two revisions equal, the
+`Saved` handling that no test exercised with `committed: false`, and the test named *leaves the bytes
+it did not move alone* that compared four proxies and never the bytes. It contains `src-tauri/src/save.rs`,
+`move_match` and the app-owned `BackupSession` in `src-tauri/src/commands.rs`, the two new
+`CommandError` variants and the derived `may_have_written` operand in `src-tauri/src/error.rs`, the
+`Deserialize` graph across `persist/save.rs`, `validate/mod.rs`, `model/variable.rs` and `syntax/mod.rs`,
+`ItemMove::resulting_index` in `patch/edit.rs`, `Workspace::document_context`, 13 new keys in each
+dictionary, the frontend boundary in `src/lib/ipc/` and `src/lib/browser/`, the review,
+`docs/decisions/2b-2a-notes.md`, `CLAUDE.md` §6 and this checkpoint. **This is the first commit in
+which anything outside `espansoconfig-core` can write a user's file. A fresh session starting Phase
+2b-2b should start from `c3fe5a6` or later.** As at 1b-1, `npm install` (or `npm ci`) is required
+before any frontend command will run.
 
 `7aab106` is Phase 2a-3b **including both its review fix round and the confirmation fix round** — the
 phase was held open until all eleven findings and the confirmation pass's one residue were closed, so,
