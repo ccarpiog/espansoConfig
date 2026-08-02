@@ -4997,6 +4997,7 @@ _Updated at each phase boundary._
 | 2b-1 | `0229b14` | ✅ pushed to `origin/main` | clean |
 | 2b-2a | `c3fe5a6` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 | `8016a3b` | ✅ pushed to `origin/main` | clean |
+| 2b-2b-2 code review | `f1bbad1` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
 
 `c3fe5a6` is Phase 2b-2a **including its review fix round** — the phase was held open until all five
@@ -5015,6 +5016,15 @@ dictionary, the frontend boundary in `src/lib/ipc/` and `src/lib/browser/`, the 
 which anything outside `espansoconfig-core` can write a user's file. A fresh session starting Phase
 2b-2b should start from `c3fe5a6` or later.** As at 1b-1, `npm install` (or `npm ci`) is required
 before any frontend command will run.
+
+`f1bbad1` is **not a phase** — it is the aggregate code review Phase 2b-2b-2 owed and could not
+afford, run at the head of the next session, plus the fix round for its one finding. It contains
+`docs/reviews/phase-2b-2b-2-open-key-code.md`, `DraftError::AmbiguousVariableKey` and
+`check_no_key_of_the_variable_is_repeated` in `crates/espansoconfig-core/src/draft/{error,plan}.rs`,
+four new tests with their shared helper in `crates/espansoconfig-core/tests/draft_plan.rs`, and this
+checkpoint. 913 → 917 tests. It touches no file under `src/` or `src-tauri/` and registers no command,
+so `npm install` is not needed to verify it. **With it, every phase from `8989c16` onward has both of
+its reviews closed, and a fresh session starting Phase 2b-2b-3 should start from `f1bbad1` or later.**
 
 `7aab106` is Phase 2a-3b **including both its review fix round and the confirmation fix round** — the
 phase was held open until all eleven findings and the confirmation pass's one residue were closed, so,
