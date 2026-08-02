@@ -45,7 +45,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2b-3** | **`save_match`, the command**: the draft deserialized off the wire, the batch handed to `save_document`, `SaveResult::Saved::notes` given its first producer, the `draftError` namespace in both languages, cache coherence and the frontend types — plus **the window reading four phases overdue** | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding**. **2b-2b is closed** |
 | **2b-2c-1** | **The two missing sequence-item primitives** — `InsertItem` and `RemoveItem` — in the core, with **no command**: a flat block-mapping item synthesized at a sequence-item boundary and spelled by the existing scalar codec, and a removal that is literally `ItemMove`'s lift half | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding in five of six categories** and one Low documentation finding, fixed |
 | **2b-2c-2** | **`create_match` and `delete_match`, the ninth and tenth commands**, over those two primitives and through `save_document`: the closed `NewMatch`, the identity-addressed `NewMatchPosition`, a front insertion made a **planner** operation, and `PresentationNote` generalized into a tagged union so a deletion can disclose the blank line it doubles | ✅ complete — its design consult and its aggregate code review are both closed. The review returned **NOT READY** on one Medium finding; **both findings were fixed before the commit** and the verdict's condition discharged |
-| 2b-2c-3 … 2d | See the Phase 2 split below | ⬜️ **2b-2c-3 is next** |
+| **2b-2c-3a** | **The whole-document-text replacement mode**, in the core, with **no command**: `SaveContent::ReplaceText` beside `SaveContent::Edits` inside the one entry point that writes, the parse demoted from a gate to a reported fact, and "does not parse" made an **acknowledgeable finding** so the owner's ruling is safe rather than silent | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on a High finding; **it was fixed before the commit** |
+| 2b-2c-3b … 2d | See the Phase 2 split below | ⬜️ **2b-2c-3b is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -125,7 +126,19 @@ wants dedicated tests rather than a mechanical preparation landed early.
 |---|---|
 | **2b-2c-1** | **The two primitives, in the core, with no command.** `InsertItem` synthesizes exactly one flat block-mapping sequence item with scalar fields, each spelled by the **existing** scalar codec; `RemoveItem` is literally `ItemMove`'s lift half with no landing, sharing the code and not merely agreeing with it. Eight named planning refusals, all struct variants on the wire |
 | **2b-2c-2** | **`create_match` and `delete_match`**, the eighth and ninth `#[tauri::command]`, over those primitives and through `save_document` |
-| **2b-2c-3** | **`save_raw_document`**: a `SaveRequest` variant, never a full-span `DocumentEdit`. A whole-document text is not a span replacement, so it may not claim the patch engine's locality invariants |
+| **2b-2c-3** | **`save_raw_document`**: a `SaveRequest` variant, never a full-span `DocumentEdit`. A whole-document text is not a span replacement, so it may not claim the patch engine's locality invariants. **Split into 2b-2c-3a / 2b-2c-3b** (below) |
+
+**2b-2c-3 is split into 2b-2c-3a / 2b-2c-3b**, by the same cut 2b-2c-1 → 2b-2c-2 used and for the
+same reason: the core mode is a change to **the one entry point that writes a user's file**, and a
+command built on top of a mode that is not yet proven would make a protocol mistake and a
+byte-preservation mistake indistinguishable. The split was not put to a fresh consult — the 2b-2c-3
+design consult already prescribes exactly this order in its own *"What I would build first"*: its
+steps 1–3 are the core mode, its steps 4–5 are the command and the UI boundary.
+
+| Sub-phase | Scope |
+|---|---|
+| **2b-2c-3a** | **The core mode, with no command.** `SaveContent::{Edits, ReplaceText}` as a field of `SaveRequest`; the branch **inside** `save_document` after the lock and the revision recheck; the parse attempted and reported rather than enforced; `FindingCode::DocumentDoesNotParse` as an **acknowledgeable** finding, content-addressed to the candidate; `SaveError::ReplacementRequiresBackups` before the lock |
+| **2b-2c-3b** | **`save_raw_document`, the eleventh `#[tauri::command]`**, over that mode: the whole-text request off the wire, the mandatory `BackupSession`, `moved: None`, and the **full identity invalidation** a committed replacement forces on the frontend — every `MatchId` in the file is stale afterwards |
 
 **2b-2b is split into 2b-2b-1 / 2b-2b-2 / 2b-2b-3**, and the cut is the usual one — a dependency
 order, by failure mode — but the fact that forced it is a property of espanso's own schema. A
@@ -2968,6 +2981,82 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2b-2c-3a
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was run **three times** — on the implementation and after each of the two
+review fix rounds — and the table records the third run.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **1001 tests**, 0 failed (**+18** on 2b-2c-2's 983: +13 for the mode, +3 for the backup fix round, +2 for the acknowledgement fix round) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte, and none was added |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test draft_plan -- every_match_of_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, 417 intents, **0 refusals**, unchanged by this phase |
+| `npm test` | ✅ 29 files, **702 tests**, 0 failed (+2 on 700) |
+| `npm run check` | ✅ 376 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `rg -c 'tauri::command' src-tauri/src/commands.rs` | ✅ **10**, unchanged — this phase registers no command |
+| `git status --short --untracked-files=all` | ✅ no path under `tests/corpus/real/` |
+
+**The baseline was re-established before the phase began**, not assumed: `cargo test --workspace`
+was run at `18195f8` and returned **983**, and `npm test` **700**, both matching the previous
+checkpoint exactly.
+
+**Five claims were re-derived by the orchestrator rather than accepted from a worker or the reviewer.**
+
+1. **No reentrancy path exists.** `rg -n 'lock_path\('` over the crate finds exactly **one**
+   production call (`persist/save.rs:1183`); the other two are in a `#[cfg(test)]` module.
+   `replace_locked_file` is called from exactly one place, inside the transaction, holding that
+   lock. `replace_file_atomically`, which takes the lock itself, is called from nowhere but its own
+   definition, and `src-tauri/` mentions both only in a doc comment.
+2. **The new refusal really is pre-lock.** `ReplacementRequiresBackups` is raised at `save.rs:1176`;
+   `lock_path` is at `save.rs:1183`. Read, not reported.
+3. **The byte-fidelity test is not a proxy.** It reads each of the 15 committed byte-exact fixtures,
+   submits its text, and compares `fs::read(target)` against the **original bytes**, pinning the
+   14-committed / 1-refused split so a fixture silently dropping out of the sweep fails the test.
+4. **The deadlock instrument is real.** `within()` spawns the work on its own thread and waits with
+   `recv_timeout`, so a second lock acquisition **fails** the test instead of hanging the suite.
+5. **The collision test cannot pass vacuously.** It asserts that *every operand the finding carried
+   before the fix round* — stopping point, span, node, path — is **equal** between the two
+   candidates, and only then that the findings differ. Remove the `revision` operand and the test
+   fails, which is what makes it a test of the fix rather than of the fixtures.
+
+## Phase 2b-2c-3a review disposition
+
+The design consult for the whole of 2b-2c-3 was taken **before any line of it existed** and was
+**not re-commissioned** (`docs/reviews/phase-2b-2c-3-design.md`, eight rulings, its Q2 overridden by
+the owner). The aggregate code review is `docs/reviews/phase-2b-2c-3a-code.md` and it returned
+**READINESS: NOT READY**. That verdict was **accepted rather than argued with**: the High and the
+Medium were both fixed and re-verified, and the phase was not committed until they were.
+
+**The first Codex review attempt hung** — `updatedAt` froze 87 seconds in while the job reported
+`running` for nine minutes. It was cancelled per the watchdog procedure and relaunched with a
+narrowed brief, which finished in 1m41s. **The hung attempt was not wasted**: its last captured
+message named the backup mismatch, and that lead was confirmed independently and fixed as round one
+before the second review ever ran.
+
+| # | Where | Ruling or finding | Disposition |
+|---|---|---|---|
+| Design Q1 | consult | The substitute for the patch engine's proof is a successful reparse **and** the validation/acknowledgement gate | **Adopted as narrowed by the owner's override.** The reparse can no longer be a gate, so it is a **fact established and reported**. Q5 carries the weight instead |
+| Design Q2 | owner | ~~Do not write text the parser rejects~~ — **OVERRIDDEN.** A raw save MAY write unparseable text | **Implemented as the owner ruled.** `an_already_broken_file_can_be_repaired_by_a_replacement` is the test that proves the point of the override |
+| Design Q3 | consult | Keep `SaveResult`; `moved: None` | Deferred to 2b-2c-3b, which is where `moved` exists. The core reports the facts a caller needs |
+| Design Q4 | consult | **One** entry point branching internally — the lock is not reentrant | **Adopted.** The mode is a **field** of `SaveRequest`, not a second function and not an enum over the whole request, so no caller can construct a raw save that skips the revision check by construction |
+| Design Q5 | consult | A raw save fully participates in acknowledgement | **Adopted, and it is the load-bearing decision** — it forced "does not parse" to be a `Finding` rather than the `CommandError` the consult had suggested, because a `CommandError` cannot be acknowledged |
+| Design Q6 | consult | No backup for a byte-identical result; **every committed raw replacement must have a recoverable pre-commit image** | **Not honoured by the implementation. Found and fixed as round one** — see Fix 1 |
+| Design Q7 | consult | The named stale-revision test | **Adopted verbatim**, with the bounded-timeout instrument the ruling asked for |
+| Design Q8 | consult | A raw save is a separate replacement mode with a **different promise** | **Adopted**, and the promise is stated on the `ReplaceText` variant itself, where a caller reads it |
+| Fix 1 | orchestrator | **The backup path was content-mode-neutral**, so a raw save with `backups: None` committed a whole-file replacement leaving **no recoverable image of the bytes it destroyed**. `every_byte_exact_fixture_is_committed_exactly_as_submitted` passed `None` and committed 14 of them, so **a test codified the wrong behaviour** — the same shape as 2b-2c-2's Low | **Fixed.** `SaveError::ReplacementRequiresBackups { path }`, a struct variant, raised **before the lock**, below the read-only check on purpose. Nine tests now pass a real session. **The two lookalike outcomes are distinguished and the distinction is tested**: a session that has *already* copied the file is Q6's recoverable image and still commits (`a_second_replacement_in_one_session_commits_with_no_second_copy` asserts the commit **and** that the first snapshot survives). Only a **missing** session is refused |
+| Code 1–4 | review | **No finding** in transaction ordering, reentrancy, byte fidelity, or the stale-revision defence. The reviewer confirmed the compared revision is the one read under the lock and that the TOCTOU window is closed for cooperating writers | Each reported as an explicit "no finding", not left silent |
+| Code 5 | review | **High, and the NOT READY** — an acknowledgement for one unparseable text could acknowledge a **different** one. `DocumentDoesNotParse` carried the parser's position and message but **no identity of the candidate**, so two texts sharing an invalid prefix and differing only after the failure point produced **identical** findings. The existing test could not catch it: it asserts `assert_ne!` on the two findings | **Fixed, not dispositioned.** The finding gained a `revision: ContentRevision` operand — the hash of the **submitted text** — so a different text is simply a different finding and the existing exact-multiset machinery does the binding. `Acknowledgement`'s shape, `covers_all` and the `Edits` mode are untouched. This **restores a property consult Q5 had assumed**: *"changing the text requires recomputing findings and matching a new exact multiset"* |
+| Code 6 | review | **Medium** — four tests assert proxies and would pass against a broken implementation | **All four fixed.** The byte-identical test now compares **inode and mtime** and pins that a real commit *does* change the inode; both `*_refused_before_anything_is_read` tests now delete the target and repeat the call, and were **renamed** to `*_is_refused_without_consulting_the_target` because a discarded read is invisible to a black-box test and the old names claimed more than they proved; the presentation-note test now asserts bytes at all four stages; the stale test matches the **typed** `RevisionMismatch` instead of `contains("holds")` |
+| — | worker | The brief asked for a test pinning that a **surplus** acknowledgement is *rejected*. The worker reported this **contradicts deliberate existing behaviour**: `a_surplus_acknowledgement_does_not_refuse` pins that extra acknowledged findings do not refuse — the rule is *every candidate suspicion is covered*, not *every acknowledgement is used* | **The worker was right and the brief was wrong.** Existing behaviour was left alone; the reading with teeth was pinned instead by `an_acknowledgement_of_findings_that_were_never_issued_commits_nothing`, whose second half exercises the surplus-plus-covering case so the two statements cannot be confused |
+| — | worker | The reviewer asked whether the new operand must appear as a dictionary placeholder | **Checked rather than assumed**: `every_save_transaction_placeholder_names_an_operand_serde_writes` is **one-directional** (placeholder → operand), so an opaque hash is **not** forced into a user-facing sentence. `saveCodes.test.ts` now asserts its **absence** from both renderings |
+
+---
+
 ## Verification — Phase 2b-2c-2
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4275,6 +4364,99 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**Phase 2b-2c-3a is complete.** `docs/decisions/2b-2c-3a-notes.md` is the record; the aggregate code
+review is `docs/reviews/phase-2b-2c-3a-code.md`, and it returned **`READINESS: NOT READY`** on a High
+finding that was **fixed before the commit**. The design consult
+(`docs/reviews/phase-2b-2c-3-design.md`) covers the whole of 2b-2c-3 and was **not re-commissioned**
+— **do not re-commission it for 3b either.**
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 1001 tests, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **702**.)
+
+**`save_document` can now replace a whole document, and nothing calls it.** That is the entire state
+of 2b-2c-3a: the mode exists, is proven, and has no caller outside tests.
+
+**The next step is Phase 2b-2c-3b — `save_raw_document`, the eleventh `#[tauri::command]`, and the
+last of 2b-2c.** With it, 2b-2c closes and every command Phase 2b was scoped to deliver exists.
+
+**What 2b-2c-3a built that 2b-2c-3b calls, and must not redesign.**
+
+- **`SaveContent<'a>` is a field of `SaveRequest`** — `content`, replacing `edits` — with arms
+  `Edits(&'a [DocumentEdit])` and `ReplaceText(&'a str)`. It is **core-only and not on the wire**;
+  3b decides what the *command* takes, which is not the same type.
+- **`SaveContent::ReplaceText` requires a backup session.** `SaveError::ReplacementRequiresBackups
+  { path }` is raised **before the lock** when `backups` is `None`. The command layer already owns a
+  `BackupSession`, so **pass it** — this refusal exists to make forgetting impossible, not to be
+  worked around. Note it also refuses a replacement that would have been byte-identical, which is
+  stricter than Q6's letter and was kept deliberately (`2b-2c-3a-notes.md` §5.1): a caller must be
+  able to know its request is well-formed **without reading the file**.
+- **`FindingCode::DocumentDoesNotParse { revision, line, column, byte_index, detail }`** is
+  **acknowledgeable** (class `SuspiciousButPermitted`) and **content-addressed to the candidate**.
+  The `revision` operand is what stops consent collected for one text being spent on another; it is
+  deliberately **not** in either dictionary sentence, and `saveCodes.test.ts` asserts its absence.
+  `line`, `column` and `byte_index` are all `Option` — a crate-internal syntax error yields the
+  finding with no position rather than withholding the user's bytes.
+- **`validate` does not and must not produce that code.** `every_finding_code_is_reachable` exempts
+  it from both sides: no fixture may produce it, and the exemption must still name a declared
+  variant.
+- **A replacement reports `notes: []` and exactly one whole-document `Replacement`** spanning
+  `0..source.len()`. The single span is a **byte-level statement, not a locality claim**.
+
+**What 2b-2c-3b owes, and the first is the one the consult flagged as unfinished.**
+
+1. **The full identity invalidation.** Consult Q3: after `committed: true` the frontend must
+   invalidate **all** cached projections and identities and reload the document — **every `MatchId`
+   in the file is stale**, and unlike a create or a delete there is no single match to answer with.
+   `moved: None` is the permanent answer. **The obligation is currently represented in no type**
+   (hole 6.2 of the notes): a caller that ignores it compiles. On `committed: false`, nothing
+   becomes stale.
+2. **`save_raw_document` must call `run_one_save`, not copy it.** That block is the cache-coherency
+   policy and it was four copies before the `35a9e9e` cleanup round.
+3. **The UI's own debt, from Q8**: a raw save must be presented as *replacing the entire document*,
+   not as an edit, and — from the owner's ruling — when the text does not parse the user gets **a
+   sentence saying espanso will not load the file until it is fixed, the parser's position if it has
+   one, and the choice**, in both languages. Not a blocked save.
+4. **`detail` is the parser's own message and cannot be localized.** The sentence around it is; the
+   fragment inside it is not. 3b is where that first becomes visible.
+
+**What 2b-2c-3b inherits from every command before it, and none of it is its to revisit.**
+
+- **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's
+  file.** Never call `replace_file_atomically` or `replace_locked_file` from a command — **the lock
+  is not reentrant, so the process hangs silently and forever.**
+- **A planning-time refusal goes in the `Err` channel; a transactional one does not** (D1).
+- **A committed write is never afterwards reported as an `Err`** (D2).
+- **An empty batch still goes through the transaction** (D3) — and so does a replacement whose text
+  equals the file's, which is a `Saved` with `committed: false`.
+- **Every variant of a wire enum used as an error operand serializes as an object** (D5).
+- No `force` flag, no acknowledgement bypass, no caching of "the findings I last issued", no wire
+  path accepted back as a target. `committed: false` and `backup: None` are **not** failures.
+
+**The debts, retallied.**
+
+- **The thirty-two `code.draftError.*` strings, `code.commandError.draftRefused`, the eight
+  `code.editError.*` sentences, `code.commandError.documentHasNoMatchList`, the two
+  `code.presentationNote.*` sentences and now `code.findingCode.documentDoesNotParse` and
+  `code.saveError.replacementRequiresBackups` have never been drawn.** The first phase to build the
+  editor screen owes the look — and 3b adds the raw editor to that list.
+- **215+ Spanish values are checked only by heuristic** — two more than at 2b-2c-2.
+- **The real configuration has never had a whole-document replacement applied to it**, and still
+  exercises neither `create_match` nor `delete_match` (hole 6.3 of 2b-2c-2, extended).
+- **A move leaves the identical doubled blank line at its origin and says nothing about it**
+  (2b-2c-2 hole 6.2). Unchanged.
+- **`create_match` derives `End` from `view.matches.len()`** (2b-2c-2 hole 6.8). Unchanged.
+- **`verify_items` speaks `verify_field`'s vocabulary** (2b-2c-1 hole 3), and a deletion can still
+  report a refusal whose sentence is about a move (2b-2c-2 hole 6.4).
+- **Three `code.diagnosticCode.*` observations remain recorded as non-defects**
+  (`2b-2b-3-notes.md` §7.5).
+
+---
 
 **Phase 2b-2c-2 is complete and both of its Codex consultations are closed.**
 `docs/decisions/2b-2c-2-notes.md` is the record; the design consult is

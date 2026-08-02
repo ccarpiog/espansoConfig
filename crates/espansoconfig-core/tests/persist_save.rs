@@ -56,7 +56,8 @@ use espansoconfig_core::patch::{
     apply_scalar_edit, path_to, DocumentEdit, DocumentPath, EditError, ScalarEdit,
 };
 use espansoconfig_core::persist::{
-    lock_path, save_document, Acknowledgement, SaveError, SaveRequest, SaveVerdict, WriteError,
+    lock_path, save_document, Acknowledgement, SaveContent, SaveError, SaveRequest, SaveVerdict,
+    WriteError,
 };
 use espansoconfig_core::validate::FindingClass;
 use espansoconfig_core::workspace::project_source;
@@ -148,7 +149,7 @@ fn save(
     save_document(SaveRequest {
         context: &context,
         base_revision: base,
-        edits,
+        content: SaveContent::Edits(edits),
         acknowledgement,
         // Backups are 2a-3b's, and every test in *this* binary is about the
         // transaction without them. `tests/persist_backup.rs` is where they are
@@ -921,7 +922,7 @@ fn a_package_file_is_refused_before_anything_is_read() {
     let error = save_document(SaveRequest {
         context: &context,
         base_revision: before,
-        edits: &[scalar_edit("matches[0].replace", NEW_VALUE)],
+        content: SaveContent::Edits(&[scalar_edit("matches[0].replace", NEW_VALUE)]),
         acknowledgement: &Acknowledgement::none(),
         backups: None,
     })

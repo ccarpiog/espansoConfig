@@ -46,6 +46,33 @@
 //! [`FindingClass`] therefore has exactly the two variants this module can
 //! produce. A class nothing emits is a claim nothing backs.
 //!
+//! # One code this module does not produce
+//!
+//! Phase 2b-2c-3 added [`FindingCode::DocumentDoesNotParse`], and **[`validate`]
+//! never returns it.** It is produced by [`crate::persist::save_document`]'s
+//! whole-text replacement mode, where the candidate is the caller's own bytes,
+//! the parse is a **fact to report** rather than a gate, and the owner's ruling
+//! is that such a text is written anyway once the user confirms it
+//! (`docs/reviews/phase-2b-2c-3-design.md`, the section overriding Q2).
+//!
+//! It lives in *this* enum for one reason: it has to be **acknowledgeable**, and
+//! the acknowledgement protocol
+//! ([`crate::persist::Acknowledgement::covers_all`]) is an exact multiset of
+//! [`Finding`]s and nothing else. A parallel channel beside the findings would be
+//! a second consent mechanism with none of this one's content-addressing.
+//!
+//! **And the content-addressing had to be put into the code itself.** A parse
+//! rejection's line, column, byte offset and message describe where the parser
+//! stopped, which is a property of the text's *invalid prefix* rather than of the
+//! whole text; two byte-distinct candidates sharing that prefix produce equal
+//! findings. So the variant carries the candidate's own [`ContentRevision`], and
+//! an acknowledgement of one broken text can no longer commit a different one.
+//! `tests/persist_raw_save.rs` builds exactly that colliding pair.
+//!
+//! `tests/validate_semantics.rs`'s reachability check names it as its one
+//! exemption rather than losing the check, and asserts that no fixture reaches
+//! it through [`validate`].
+//!
 //! # What this module is not
 //!
 //! - **Not structural well-formedness.** "Is the candidate still valid YAML,
@@ -99,6 +126,7 @@ use crate::model::{
 };
 use crate::patch::DocumentPath;
 use crate::syntax::{ByteSpan, NodeId};
+use crate::ContentRevision;
 
 /// The pattern espanso uses to find a `{{variable}}` reference in a template.
 ///
@@ -160,7 +188,13 @@ impl fmt::Display for FindingClass {
     }
 }
 
-/// What [`validate`] noticed, as a code plus its operands.
+/// What a save transaction noticed about a candidate, as a code plus its
+/// operands.
+///
+/// **Ten of the eleven are [`validate`]'s.** The eleventh,
+/// [`FindingCode::DocumentDoesNotParse`], is produced only by
+/// [`crate::persist::save_document`]'s whole-text replacement mode; the module
+/// documentation says why it lives here rather than beside that mode.
 ///
 /// Plan section 9: *"Rust returns error codes and structured data, never
 /// user-facing prose."* Nothing here is a sentence. Every operand is either a
@@ -229,15 +263,87 @@ pub enum FindingCode {
         /// from this variant and the pattern, not from this field.
         detail: String,
     },
+    /// **Not a rule about espanso, and not [`validate`]'s.** The candidate text
+    /// a whole-document replacement submitted is not YAML this crate can index.
+    ///
+    /// Produced only by [`crate::persist::save_document`]'s replacement mode.
+    /// Every other content mode reaches the semantic gate with a candidate the
+    /// patch engine has already reparsed, so the code is unreachable there by
+    /// construction.
+    ///
+    /// **It is [`FindingClass::SuspiciousButPermitted`], which is what makes the
+    /// owner's ruling both possible and safe.** The ruling is that a raw save may
+    /// write text the YAML parser rejects — refusing would mean this application
+    /// cannot repair an already-broken file, which is the most valuable thing a
+    /// raw editor does. The classification is not a convenience granted to make
+    /// that work: it is the honest one. This crate parses with `saphyr-parser`
+    /// and espanso does not, so *this parser rejected the text* is a claim about
+    /// this crate's substrate, never a proof that espanso will refuse the file —
+    /// the same asymmetry [`FindingCode::RegexDoesNotCompile`] is documented
+    /// with. The user is told, and confirms by content like any other suspicion.
+    ///
+    /// **[`Finding::span`] is `None` for it**, deliberately: a parse rejection is
+    /// a *position*, not a range of bytes the finding is about, and an empty span
+    /// would be a range claiming to be one. The position is these operands.
+    ///
+    /// **It names the candidate it is about, and that is what makes acknowledging
+    /// it safe.** See the `revision` operand: a position and a message describe
+    /// where a parser stopped, and two byte-distinct texts that share an invalid
+    /// prefix stop it in exactly the same place with exactly the same message. The
+    /// acknowledgement protocol matches findings as an exact multiset and knows
+    /// nothing else about them, so without an operand naming the bytes, consent
+    /// collected for one broken text would silently commit another.
+    DocumentDoesNotParse {
+        /// The [`ContentRevision`] of the **exact candidate** this finding is
+        /// about.
+        ///
+        /// **The operand that binds an acknowledgement to one text.** The other
+        /// three describe the parser's stopping point, and a stopping point is not
+        /// an identity: `a: b: c\nfirst\n` and `a: b: c\nsecond\n` are different
+        /// documents that fail at the same line, the same column, the same byte
+        /// and with the same message. An [`crate::persist::Acknowledgement`] is a
+        /// multiset of [`Finding`]s and has no other handle on *which* candidate
+        /// the user agreed to, so equal findings would mean transferable consent.
+        /// Hashing the candidate makes a different text a different finding, and
+        /// the existing exact-multiset machinery does the rest with no new
+        /// concept and no change to the protocol.
+        ///
+        /// **Never rendered.** It is an opaque digest, and no dictionary sentence
+        /// names it — the same rule `detail` follows for a different reason.
+        revision: ContentRevision,
+        /// Line the parser stopped at, as the substrate reported it, or `None`
+        /// when the failure carried no position — which is
+        /// [`crate::syntax::SyntaxError::Offset`] or
+        /// [`crate::syntax::SyntaxError::Invariant`], each a defect in this
+        /// crate rather than a property of the text, and neither a reason to
+        /// stop the user writing what they typed.
+        line: Option<usize>,
+        /// Column, as the substrate reported it, on the same terms as `line`.
+        column: Option<usize>,
+        /// The same position as a byte offset into the **submitted text**, when
+        /// it could be converted.
+        byte_index: Option<usize>,
+        /// The parser's own diagnostic, carried verbatim.
+        ///
+        /// **Developer-facing, and never a user-facing string**, exactly as
+        /// [`FindingCode::RegexDoesNotCompile`]'s is. No dictionary message
+        /// interpolates it.
+        detail: String,
+    },
 } // End of enum FindingCode
 
 impl FindingCode {
-    /// Every code [`validate`] can produce, by name.
+    /// Every code this enum declares, by name.
     ///
     /// Paired with [`FindingCode::name`], whose `match` is exhaustive: adding a
     /// variant is a compile error there and a length error here, so a code no
     /// fixture reaches cannot hide.
-    pub const ALL_NAMES: [&'static str; 10] = [
+    ///
+    /// **Ten of the eleven are [`validate`]'s**, and the eleventh —
+    /// [`FindingCode::DocumentDoesNotParse`] — is the save transaction's. The
+    /// reachability test that reads this table names it explicitly rather than
+    /// skipping any code it cannot produce.
+    pub const ALL_NAMES: [&'static str; 11] = [
         "MatchHasNoContentField",
         "MatchHasSeveralContentFields",
         "MatchHasNoTriggerField",
@@ -248,6 +354,7 @@ impl FindingCode {
         "DuplicateVariableName",
         "ReferenceHasNoDeclaration",
         "RegexDoesNotCompile",
+        "DocumentDoesNotParse",
     ];
 
     /// A stable identifier for this code, without its operands.
@@ -265,6 +372,7 @@ impl FindingCode {
             FindingCode::DuplicateVariableName { .. } => "DuplicateVariableName",
             FindingCode::ReferenceHasNoDeclaration { .. } => "ReferenceHasNoDeclaration",
             FindingCode::RegexDoesNotCompile { .. } => "RegexDoesNotCompile",
+            FindingCode::DocumentDoesNotParse { .. } => "DocumentDoesNotParse",
         }
     } // End of function name() for FindingCode
 
@@ -292,7 +400,13 @@ impl FindingCode {
     ///   on this crate's model of espanso's *scoping* rules — imports, form
     ///   synthesis, regex capture groups — which is a model, not a measurement.
     ///   [`validate`] already declines to report whenever it can see that the
-    ///   scope is open; this class covers the case where it cannot see that.
+    ///   scope is open; this class covers the case where it cannot see that;
+    /// - a candidate that **does not parse** is **suspicious**, and that is the
+    ///   honest classification rather than a lenient one: this crate parses with
+    ///   `saphyr-parser` and espanso does not, so a rejection here is a fact
+    ///   about this substrate. It is also the class that lets the owner's ruling
+    ///   hold — a raw save may write such a text, once the user has been told
+    ///   and has confirmed it by content.
     pub fn class(&self) -> FindingClass {
         match self {
             FindingCode::MatchHasNoContentField
@@ -304,7 +418,8 @@ impl FindingCode {
             | FindingCode::DuplicateVariableName { .. }
             | FindingCode::RegexDoesNotCompile { .. } => FindingClass::EditorModelError,
             FindingCode::VariableTypeNotRecognised { .. }
-            | FindingCode::ReferenceHasNoDeclaration { .. } => FindingClass::SuspiciousButPermitted,
+            | FindingCode::ReferenceHasNoDeclaration { .. }
+            | FindingCode::DocumentDoesNotParse { .. } => FindingClass::SuspiciousButPermitted,
         }
     } // End of function class() for FindingCode
 } // End of impl FindingCode
@@ -328,6 +443,18 @@ impl fmt::Display for FindingCode {
             FindingCode::RegexDoesNotCompile { detail } => {
                 write!(formatter, "regex does not compile: {detail}")
             }
+            FindingCode::DocumentDoesNotParse {
+                line,
+                column,
+                detail,
+                ..
+            } => match (line, column) {
+                (Some(line), Some(column)) => write!(
+                    formatter,
+                    "the submitted text does not parse at line {line} column {column}: {detail}"
+                ),
+                _ => write!(formatter, "the submitted text does not parse: {detail}"),
+            },
             other => formatter.write_str(other.name()),
         }
     } // End of function fmt() for FindingCode
@@ -1046,6 +1173,13 @@ mod tests {
                 name: String::new(),
             },
             FindingCode::RegexDoesNotCompile {
+                detail: String::new(),
+            },
+            FindingCode::DocumentDoesNotParse {
+                revision: crate::ContentRevision::of_bytes(b""),
+                line: None,
+                column: None,
+                byte_index: None,
                 detail: String::new(),
             },
         ];

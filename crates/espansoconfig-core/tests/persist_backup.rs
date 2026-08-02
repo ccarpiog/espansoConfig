@@ -67,8 +67,9 @@ use espansoconfig_core::patch::{
     apply_scalar_edit, path_to, DocumentEdit, DocumentPath, ScalarEdit,
 };
 use espansoconfig_core::persist::{
-    save_document, Acknowledgement, BackupSession, RotationOutcome, SaveError, SaveRequest,
-    SavedDocument, BACKUP_DIRECTORY_NAME, BATCHES_RETAINED, BATCH_MARKER_FORMAT, BATCH_MARKER_NAME,
+    save_document, Acknowledgement, BackupSession, RotationOutcome, SaveContent, SaveError,
+    SaveRequest, SavedDocument, BACKUP_DIRECTORY_NAME, BATCHES_RETAINED, BATCH_MARKER_FORMAT,
+    BATCH_MARKER_NAME,
 };
 use espansoconfig_core::{ContentRevision, DocumentId, SyntaxIndex};
 use std::path::{Component, Path, PathBuf};
@@ -142,7 +143,7 @@ fn save_with(
     save_document(SaveRequest {
         context: &context,
         base_revision: revision_on_disk(target),
-        edits,
+        content: SaveContent::Edits(edits),
         acknowledgement: &Acknowledgement::none(),
         backups: session,
     })

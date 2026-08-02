@@ -293,6 +293,7 @@
   "code.saveVerdict.refusedForUnacknowledgedSuspicions": "El resultado contiene algo que parece incorrecto. Guardarlo requiere tu confirmación previa.",
 
   "code.saveError.documentIsReadOnly": "{path} pertenece a un paquete instalado, así que espansoConfig no lo escribe.",
+  "code.saveError.replacementRequiresBackups": "Sustituir todo el texto de {path} requiere una copia de lo que el archivo contiene ahora, y este guardado se preparó sin ella, así que el archivo quedó como estaba.",
   "code.saveError.target": "espansoConfig no pudo acceder al archivo que se le pidió guardar, así que el archivo quedó como estaba.",
   "code.saveError.targetNotUtf8": "{path} no es UTF-8 válido en el byte {offset}, así que espansoConfig no puede editarlo como texto.",
   "code.saveError.revisionMismatch": "{path} cambió después de que espansoConfig lo leyera, así que el guardado se detuvo. Vuelve a cargar el archivo y repite el cambio.",
@@ -369,6 +370,7 @@
   "code.findingCode.duplicateVariableName": "Dos variables de este bloque se llaman «{name}», y espansoConfig no puede determinar qué definición se usaría.",
   "code.findingCode.referenceHasNoDeclaration": "El texto hace referencia a «{name}», y nada de lo que esta aplicación puede ver declara una variable con ese nombre.",
   "code.findingCode.regexDoesNotCompile": "Esta expresión regular no compiló con la versión que usa espansoConfig. espanso fija una anterior, de modo que ambas pueden discrepar.",
+  "code.findingCode.documentDoesNotParse": "El analizador de YAML de espansoConfig no puede leer este texto. Analiza con una biblioteca distinta de la que usa espanso, así que esto es un aviso y no un veredicto, pero un archivo que espanso no pueda leer no se carga.",
 
   "code.editError.sourceDoesNotParse": "El analizador de YAML de espansoConfig no pudo leer este archivo, así que no se puede localizar nada dentro de él.",
   "code.editError.unresolvable": "El lugar que nombra este cambio no existe en el archivo.",

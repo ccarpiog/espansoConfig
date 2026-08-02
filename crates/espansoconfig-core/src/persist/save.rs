@@ -81,6 +81,47 @@
 //! function, with exactly one [`DocumentEdit::MoveItem`] and nothing beside it
 //! (`PROGRESS.md` R25).
 //!
+//! # Two content modes, one transaction — Phase 2b-2c-3
+//!
+//! [`SaveRequest::content`] is a [`SaveContent`], and its two arms are the only
+//! two ways this application produces candidate bytes:
+//!
+//! - [`SaveContent::Edits`] — a batch of [`DocumentEdit`]s the patch engine
+//!   plans, splices and reparses. Every byte outside an edit's span is proved
+//!   identical, which is the guarantee the whole project is built on;
+//! - [`SaveContent::ReplaceText`] — a whole replacement text, used **as
+//!   submitted**. It does not go through [`apply_edits`] and no full-span
+//!   [`DocumentEdit`] is synthesized for it, because a whole-document text is not
+//!   a span replacement and must not claim the patch engine's locality
+//!   invariants. Its narrower promise is stated on [`SaveContent::ReplaceText`].
+//!
+//! **The branch is inside this function, and that is the whole reason it is one
+//! function.** [`crate::persist::lock_path`] is not reentrant, so a second public
+//! writing entry point beside [`save_document`] is a process that hangs silently
+//! and forever the first time one calls the other. The two modes diverge for
+//! exactly two statements — how the candidate is produced, and how its parse is
+//! reported — and then share the revision check, the validation, the
+//! acknowledgement, the backup and the atomic commit.
+//!
+//! **A replacement text that does not parse is written, not refused**
+//! (`docs/reviews/phase-2b-2c-3-design.md`, the owner's section overriding the
+//! consult's Q2). Refusing would mean this application cannot repair a file that
+//! is already broken. The parse is still attempted, because its answer is what
+//! the user is told and what a caller's cache must do next; a failure becomes
+//! [`crate::validate::FindingCode::DocumentDoesNotParse`], which is
+//! acknowledgeable exactly like any other suspicion. So the first attempt is
+//! refused for want of an acknowledgement and the second, carrying that exact
+//! finding, commits. *Refused, not forced* was never *refused, full stop*: it is
+//! **never written without the user meaning it**.
+//!
+//! **That finding names the candidate it is about.** It carries the submitted
+//! text's own [`ContentRevision`] beside the parser's position, because a position
+//! and a message are a property of the invalid *prefix*: two byte-distinct texts
+//! that differ only after the parser stopped produce otherwise-equal findings, and
+//! an [`Acknowledgement`] is an exact multiset of findings and nothing else.
+//! Without the hash, consent collected for one broken text would silently commit
+//! another — which is *forced*, wearing the protocol's clothes.
+//!
 //! [`Acknowledgement`] **deserializes as of Phase 2b-2a**, because an
 //! acknowledgement is content-addressed and has to travel *back in*. Phase 2b-1's
 //! review removed the one obstruction that was a **type** rather than a decision
@@ -101,14 +142,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{DocumentContext, DocumentView};
 use crate::patch::{
-    apply_edits, DocumentEdit, EditError, PresentationNote, Replacement, VerificationFailure,
+    apply_edits, DocumentEdit, EditError, PatchedDocument, PresentationNote, Replacement,
+    VerificationFailure,
 };
 use crate::persist::backup::{BackupError, BackupRecord, BackupSession};
 use crate::persist::write::{
     inspect_target, lock_path, replace_locked_file, InspectedTarget, WriteError,
 };
-use crate::syntax::{SyntaxError, SyntaxIndex, TriviaIndex};
-use crate::validate::{validate, Finding, FindingClass};
+use crate::syntax::{ByteSpan, SyntaxError, SyntaxIndex, TriviaIndex};
+use crate::validate::{validate, Finding, FindingClass, FindingCode};
 use crate::wire::WirePathRef;
 use crate::ContentRevision;
 
@@ -366,6 +408,56 @@ pub fn verdict(findings: &[Finding], acknowledgement: &Acknowledgement) -> SaveV
 // The request and its answer
 // ---------------------------------------------------------------------------
 
+/// How a save says what the file should hold afterwards.
+///
+/// **Two modes with two different promises**, and the difference is the reason
+/// this is an enum rather than an optional field. Both travel through the one
+/// [`save_document`] transaction, under the one lock, past the same revision
+/// check, the same semantic gate, the same acknowledgement and the same backup.
+///
+/// It is a **core** type and is not on the wire: a command builds one from
+/// whatever it deserialized, and nothing outside this crate serializes a request.
+#[derive(Debug, Clone, Copy)]
+pub enum SaveContent<'a> {
+    /// A batch of edits, in the protocol [`crate::patch::apply_edits`] defines.
+    ///
+    /// An empty batch is legal and produces a candidate identical to the source.
+    ///
+    /// **This mode carries the patch engine's guarantee**: every byte outside a
+    /// planned span comes out identical, and the engine reparses and verifies the
+    /// whole candidate before this transaction ever sees it.
+    Edits(&'a [DocumentEdit]),
+    /// A whole replacement text, written **exactly as submitted**.
+    ///
+    /// # The promise, which is narrower on purpose
+    ///
+    /// The exact submitted UTF-8 bytes are committed: no parser formatting, no
+    /// newline normalization, no BOM added or removed, no final newline
+    /// supplied, no re-indentation — no application-authored transformation of
+    /// any kind. That is *all* it promises.
+    ///
+    /// **It is not a locality-preserving edit and must never be described as
+    /// one.** Calling the whole file "the edited span" would make the patch
+    /// engine's guarantee vacuous. There are no untouched bytes to prove
+    /// untouched, so the transaction's safety comes from somewhere else: the
+    /// revision check under the lock, which is more load-bearing here than
+    /// anywhere else in this crate, and the acknowledgement protocol.
+    ///
+    /// **It never becomes a [`DocumentEdit`].** Synthesizing a full-span edit
+    /// would run these bytes through the engine's planner, its verification and
+    /// its presentation notes, and would let a mode with no locality claim
+    /// borrow the vocabulary of the mode that has one.
+    ///
+    /// A caller supplies the text including whatever BOM it is to have; nothing
+    /// here adds or removes one.
+    ///
+    /// **This arm requires a [`SaveRequest::backups`] session**, and a `None`
+    /// there is [`SaveError::ReplacementRequiresBackups`] before the lock is
+    /// taken. Nothing of the previous file survives a commit here, so the copy of
+    /// what it replaced is all a user is left with.
+    ReplaceText(&'a str),
+} // End of enum SaveContent
+
 /// Everything one save needs to know.
 ///
 /// A struct rather than five positional arguments, because four of them are
@@ -389,10 +481,11 @@ pub struct SaveRequest<'a> {
     /// refuses with [`SaveError::RevisionMismatch`] when it disagrees, before
     /// any edit is planned.
     pub base_revision: ContentRevision,
-    /// The changes to apply, in the batch protocol
-    /// [`crate::patch::apply_edits`] defines. An empty batch is legal and
-    /// produces a candidate identical to the source.
-    pub edits: &'a [DocumentEdit],
+    /// What the file should hold afterwards, and by which of the two routes.
+    ///
+    /// See [`SaveContent`]: the arms carry different promises, and the one this
+    /// field names decides which promise this save is entitled to make.
+    pub content: SaveContent<'a>,
     /// The suspicions the caller has already shown someone.
     ///
     /// Pass [`Acknowledgement::none`] on a first attempt.
@@ -410,6 +503,13 @@ pub struct SaveRequest<'a> {
     /// this call does not rewrite the target: see [`SaveError::Backup`]. A backup
     /// that is merely unnecessary — the session already copied this file, or the
     /// candidate turned out byte-identical — is not a failure and writes nothing.
+    ///
+    /// **`None` is legal for [`SaveContent::Edits`] and refused for
+    /// [`SaveContent::ReplaceText`]**, before the lock, as
+    /// [`SaveError::ReplacementRequiresBackups`]. An edit's commit can destroy
+    /// only the planned spans; a replacement's destroys the whole file, and the
+    /// design consult's Q6 rules that such a commit must leave a recoverable
+    /// pre-commit image behind.
     pub backups: Option<&'a BackupSession>,
 }
 
@@ -446,6 +546,14 @@ pub struct SavedDocument {
     pub text: String,
     /// Every byte-span replacement that produced it, in ascending span order,
     /// in **original-document** coordinates.
+    ///
+    /// **A [`SaveContent::ReplaceText`] save reports exactly one**, spanning the
+    /// whole original document. That is the truthful byte-level statement about
+    /// what happened — everything was replaced — and it is deliberately *not* a
+    /// locality claim: it is the assertion that there is no locality to claim.
+    /// The alternative, an empty list, would read as *nothing was replaced*,
+    /// which is the one thing it must not say. No [`DocumentEdit`] was
+    /// synthesized to produce it; this is a record of the outcome, not of a plan.
     pub replacements: Vec<Replacement>,
     /// Presentation changes the patch had to make, for the caller to surface
     /// (plan section 6.2: never silently normalise).
@@ -454,6 +562,12 @@ pub struct SavedDocument {
     /// well as its value, and a sequence-item removal that left the blank lines
     /// on both sides of the item next to each other. Never a move's — see
     /// [`PresentationNote::DoubledSequenceSeparation`].
+    ///
+    /// **Always empty for a [`SaveContent::ReplaceText`] save**, and that is a
+    /// property rather than an accident: such a save re-encodes no scalar and
+    /// moves no item, so there is no presentation change this application could
+    /// have authored. `tests/persist_raw_save.rs` asserts it rather than
+    /// assuming it.
     pub notes: Vec<PresentationNote>,
     /// Every finding the semantic gate reported about the candidate.
     ///
@@ -477,7 +591,9 @@ pub struct SavedDocument {
     /// `None` — which is **not** a failure — in four cases, each of them a
     /// decision recorded in `docs/decisions/2a-3b-notes.md`:
     ///
-    /// - [`SaveRequest::backups`] was `None`, so the caller asked for none;
+    /// - [`SaveRequest::backups`] was `None`, so the caller asked for none —
+    ///   which only a [`SaveContent::Edits`] save may ask for, since a
+    ///   replacement with no session is refused before the lock;
     /// - [`SavedDocument::committed`] is `false`, so nothing was rewritten and
     ///   there is nothing to have a pristine copy of;
     /// - this session had already copied this file, which is plan section 6.6's
@@ -532,6 +648,37 @@ pub enum SaveError {
     /// Refused **before the lock is taken**, because there is nothing to
     /// serialise against.
     DocumentIsReadOnly {
+        /// The path as the caller spelled it. Nothing was resolved.
+        path: PathBuf,
+    },
+    /// A [`SaveContent::ReplaceText`] save was set up with no
+    /// [`SaveRequest::backups`] session, so committing it would destroy every
+    /// byte of the file with no recoverable image of what it replaced.
+    ///
+    /// Refused **before the lock is taken**, beside
+    /// [`SaveError::DocumentIsReadOnly`] and for the same reason: nothing the
+    /// file holds changes the answer, so serialising against other writers buys
+    /// nothing and the target is never even opened.
+    ///
+    /// **It is a rule about the replacement mode alone.** `backups: None` stays
+    /// legal for [`SaveContent::Edits`], where the patch engine bounds what a
+    /// commit can destroy to the planned spans and every other byte of the
+    /// pre-edit file is still on disk afterwards. A replacement has no such
+    /// bound, which is why the design consult's Q6 rules that *every committed
+    /// raw replacement must have a recoverable pre-commit image* — and a caller
+    /// with no session cannot leave one.
+    ///
+    /// **A backup that is merely unnecessary is not this.** A session that has
+    /// already copied this file already holds the image plan section 6.6 asks
+    /// for — *before the **first** modification of each file per session* — so
+    /// `take_backup` answering `None` there is that rule working rather than a
+    /// missing image, and such a save commits. Only the **absence of a session**
+    /// is refused here, and `tests/persist_raw_save.rs` pins both sides.
+    ///
+    /// [`SaveError::is_refusal`] answers **`true`**: a check of this application
+    /// declined to write, and the caller retries it differently by supplying a
+    /// session.
+    ReplacementRequiresBackups {
         /// The path as the caller spelled it. Nothing was resolved.
         path: PathBuf,
     },
@@ -646,6 +793,7 @@ impl SaveError {
     pub fn may_have_written(&self) -> bool {
         match self {
             SaveError::DocumentIsReadOnly { .. }
+            | SaveError::ReplacementRequiresBackups { .. }
             | SaveError::Target(_)
             | SaveError::TargetNotUtf8 { .. }
             | SaveError::RevisionMismatch { .. }
@@ -684,9 +832,16 @@ impl SaveError {
     /// [`SaveError::Backup`] is a **failure**, not a refusal, for the same reason
     /// [`WriteError::Io`] is: the environment stopped an operation. That it
     /// happens to stop the save before the commit makes it safe, not a choice.
+    ///
+    /// [`SaveError::ReplacementRequiresBackups`] is a **refusal**, and the
+    /// distinction from [`SaveError::Backup`] beside it is exactly the one this
+    /// predicate exists to draw: no copy was attempted and no filesystem said no
+    /// — a policy of this application declined, and supplying a
+    /// [`BackupSession`] is the different retry.
     pub fn is_refusal(&self) -> bool {
         match self {
             SaveError::DocumentIsReadOnly { .. }
+            | SaveError::ReplacementRequiresBackups { .. }
             | SaveError::TargetNotUtf8 { .. }
             | SaveError::RevisionMismatch { .. }
             | SaveError::Patch(_)
@@ -766,12 +921,22 @@ impl Serialize for SaveError {
                 out.serialize_field("path", &WirePathRef(path))?;
                 out.end()
             }
+            SaveError::ReplacementRequiresBackups { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "SaveError",
+                    1,
+                    "ReplacementRequiresBackups",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
             SaveError::Target(error) => {
-                serializer.serialize_newtype_variant("SaveError", 1, "Target", error)
+                serializer.serialize_newtype_variant("SaveError", 2, "Target", error)
             }
             SaveError::TargetNotUtf8 { path, offset } => {
                 let mut out =
-                    serializer.serialize_struct_variant("SaveError", 2, "TargetNotUtf8", 2)?;
+                    serializer.serialize_struct_variant("SaveError", 3, "TargetNotUtf8", 2)?;
                 out.serialize_field("path", &WirePathRef(path))?;
                 out.serialize_field("offset", offset)?;
                 out.end()
@@ -782,19 +947,19 @@ impl Serialize for SaveError {
                 found,
             } => {
                 let mut out =
-                    serializer.serialize_struct_variant("SaveError", 3, "RevisionMismatch", 3)?;
+                    serializer.serialize_struct_variant("SaveError", 4, "RevisionMismatch", 3)?;
                 out.serialize_field("path", &WirePathRef(path))?;
                 out.serialize_field("expected", expected)?;
                 out.serialize_field("found", found)?;
                 out.end()
             }
             SaveError::Patch(error) => {
-                serializer.serialize_newtype_variant("SaveError", 4, "Patch", error)
+                serializer.serialize_newtype_variant("SaveError", 5, "Patch", error)
             }
             SaveError::CandidateParseDisagrees { path, error } => {
                 let mut out = serializer.serialize_struct_variant(
                     "SaveError",
-                    5,
+                    6,
                     "CandidateParseDisagrees",
                     2,
                 )?;
@@ -803,13 +968,13 @@ impl Serialize for SaveError {
                 out.end()
             }
             SaveError::Refused(refusal) => {
-                serializer.serialize_newtype_variant("SaveError", 6, "Refused", refusal)
+                serializer.serialize_newtype_variant("SaveError", 7, "Refused", refusal)
             }
             SaveError::Backup(error) => {
-                serializer.serialize_newtype_variant("SaveError", 7, "Backup", error)
+                serializer.serialize_newtype_variant("SaveError", 8, "Backup", error)
             }
             SaveError::Write(error) => {
-                serializer.serialize_newtype_variant("SaveError", 8, "Write", error)
+                serializer.serialize_newtype_variant("SaveError", 9, "Write", error)
             }
         }
     } // End of function serialize() for SaveError
@@ -822,6 +987,13 @@ impl fmt::Display for SaveError {
                 write!(
                     formatter,
                     "{} belongs to an installed package and is not editable here",
+                    path.display()
+                )
+            }
+            SaveError::ReplacementRequiresBackups { path } => {
+                write!(
+                    formatter,
+                    "replacing the whole of {} needs a backup session and none was supplied",
                     path.display()
                 )
             }
@@ -888,12 +1060,15 @@ impl std::error::Error for SaveError {
 /// 2. **read and compare** — the target's bytes are read *inside* the lock,
 ///    decoded as UTF-8 and hashed, and a hash that is not
 ///    [`SaveRequest::base_revision`] is [`SaveError::RevisionMismatch`];
-/// 3. **patch** — [`crate::patch::apply_edits`] against those bytes;
+/// 3. **patch** — [`crate::patch::apply_edits`] against those bytes, for
+///    [`SaveContent::Edits`]. For [`SaveContent::ReplaceText`] the candidate is
+///    the submitted text and this step does not run at all;
 /// 4. **reparse the whole candidate** — performed by that same call, whose
 ///    `verify` parses the candidate with [`SyntaxIndex::parse`] before a
 ///    [`crate::patch::PatchedDocument`] exists at all. There is deliberately no
 ///    second syntax gate here: two of them are two places to disagree about
-///    whether a candidate parsed;
+///    whether a candidate parsed. For [`SaveContent::ReplaceText`] there is no
+///    such prior parse, and step 5's is the only one — see below;
 /// 5. **project and validate the candidate** — a fresh [`SyntaxIndex::parse`]
 ///    and [`TriviaIndex::scan`], [`crate::model::DocumentView::project`], then
 ///    [`crate::validate::validate`]. The *candidate*, never the original: a
@@ -943,6 +1118,41 @@ impl std::error::Error for SaveError {
 /// can still replace the file between that read and this function returning.
 /// Nothing at this layer can close it (2a-1 notes D4).
 ///
+/// # A replacement text that does not parse is reported, not refused
+///
+/// For [`SaveContent::ReplaceText`] the step-5 parse is the **only** parse of
+/// the candidate, and it is a fact rather than a gate. A failure produces one
+/// [`crate::validate::FindingCode::DocumentDoesNotParse`] finding — a
+/// [`FindingClass::SuspiciousButPermitted`] one, carrying the parser's own
+/// position when it reported one — and validation is skipped, because there is
+/// no projection to validate. The verdict then does what it does for every other
+/// suspicion: it refuses the first attempt and proceeds on the second, when the
+/// caller hands that exact finding back as an [`Acknowledgement`].
+///
+/// **The finding carries the candidate's [`ContentRevision`]**, so *that exact
+/// finding* means *that exact text*. A caller cannot collect an acknowledgement
+/// for one unparseable text and spend it on another that happens to stop the
+/// parser in the same place — see [`does_not_parse`].
+///
+/// It is emphatically **not** [`SaveError::CandidateParseDisagrees`]. That
+/// variant means two calls to one parser contradicted each other about one
+/// candidate, which can only happen where a *prior* parse succeeded — inside
+/// [`apply_edits`]. A replacement text has no prior parse to contradict.
+///
+/// # A replacement with no backup session is refused before the lock
+///
+/// [`SaveContent::Edits`] may be saved with [`SaveRequest::backups`] set to
+/// `None`; [`SaveContent::ReplaceText`] may not, and asking is
+/// [`SaveError::ReplacementRequiresBackups`] raised beside the read-only check,
+/// before the target is opened. An edit's commit can destroy only the spans the
+/// engine planned, so what it replaced is largely still on disk; a replacement's
+/// destroys the file, so the design consult's Q6 requires a recoverable
+/// pre-commit image and a caller with no session cannot leave one.
+///
+/// A session that has **already copied** this file is not that case. It holds
+/// the image plan section 6.6 asks for, `take_backup` answers `None` because the
+/// first modification per session already happened, and the save commits.
+///
 /// # Errors
 ///
 /// See [`SaveError`], and [`SaveError::is_refusal`] for the distinction that
@@ -951,7 +1161,7 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     let SaveRequest {
         context,
         base_revision,
-        edits,
+        content,
         acknowledgement,
         backups,
     } = request;
@@ -961,6 +1171,23 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     // writers that are never allowed to exist.
     if context.kind.is_read_only() {
         return Err(SaveError::DocumentIsReadOnly {
+            path: context.path.clone(),
+        });
+    }
+
+    // Also before the lock, and for the replacement mode **only**: committing one
+    // destroys every byte of the file, so the design consult's Q6 requires a
+    // recoverable pre-commit image and a caller with no `BackupSession` cannot
+    // leave one. `SaveContent::Edits` is untouched — the patch engine bounds what
+    // a commit can destroy to the planned spans — and a session that has already
+    // copied this file is not this: that copy *is* the image, and such a save goes
+    // on to commit.
+    //
+    // It sits below the read-only check on purpose: a package file must not be
+    // written whatever the caller supplies, so that answer is the more
+    // fundamental one and the one worth reporting.
+    if matches!(content, SaveContent::ReplaceText(_)) && backups.is_none() {
+        return Err(SaveError::ReplacementRequiresBackups {
             path: context.path.clone(),
         });
     }
@@ -991,14 +1218,28 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
             offset: error.valid_up_to(),
         })?;
 
-    // Steps 3 and 4. `apply_edits` plans every edit against the original index,
+    // Steps 3 and 4, and **the only two statements the two content modes do not
+    // share**. `apply_edits` plans every edit against the original index,
     // splices, then reparses and verifies the whole candidate; a
-    // `PatchedDocument` cannot be built any other way.
-    let patched = apply_edits(source, edits).map_err(SaveError::Patch)?;
+    // `PatchedDocument` cannot be built any other way. A replacement text skips
+    // both steps by construction: there is nothing to plan against and nothing
+    // for a verification to compare with, so the submitted bytes *are* the
+    // candidate.
+    let produced = match content {
+        SaveContent::Edits(edits) => {
+            Candidate::Patched(apply_edits(source, edits).map_err(SaveError::Patch)?)
+        }
+        SaveContent::ReplaceText(text) => Candidate::Replaced(text),
+    };
 
-    // Step 5, over the candidate.
-    let candidate = patched.text();
-    let findings = findings_of(context, &target, candidate)?;
+    // Step 5, over the candidate. The edit branch treats a failed parse as a
+    // contradiction — `apply_edits` has already parsed these very bytes — and the
+    // replacement branch treats it as the finding the user acknowledges.
+    let candidate = produced.text();
+    let findings = match &produced {
+        Candidate::Patched(_) => findings_of(context, &target, candidate)?,
+        Candidate::Replaced(_) => findings_of_replacement(context, candidate),
+    };
     let verdict = verdict(&findings, acknowledgement);
     if !verdict.proceeds() {
         return Err(SaveError::Refused(SaveRefusal { verdict, findings }));
@@ -1048,17 +1289,65 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     };
 
     // Step 12: facts, not a cache write.
-    let text = patched.text().to_owned();
+    let (replacements, notes) = produced.outcome(source);
+    let text = produced.text().to_owned();
     Ok(SavedDocument {
         revision,
         text,
-        replacements: patched.replacements().to_vec(),
-        notes: patched.notes().to_vec(),
+        replacements,
+        notes,
         findings,
         committed,
         backup,
     })
 } // End of function save_document()
+
+/// The candidate bytes, and the provenance that decides what may be said about
+/// them.
+///
+/// Private, and it exists so that [`save_document`] branches **once**. A pair of
+/// `Option`s would leave the two modes representable together and would need an
+/// unreachable arm at every use; this cannot express *neither* or *both*.
+enum Candidate<'a> {
+    /// The patch engine planned, spliced and verified these bytes.
+    Patched(PatchedDocument),
+    /// The caller submitted these bytes and nothing has altered them.
+    Replaced(&'a str),
+}
+
+impl Candidate<'_> {
+    /// The candidate text, whichever mode produced it.
+    fn text(&self) -> &str {
+        match self {
+            Candidate::Patched(patched) => patched.text(),
+            Candidate::Replaced(text) => text,
+        }
+    }
+
+    /// What [`SavedDocument`] reports about how the candidate came to be:
+    /// its replacements and its presentation notes.
+    ///
+    /// The patched arm hands back the engine's own two lists. The replaced arm
+    /// reports **one** replacement covering the whole original document, and
+    /// **no** notes — see [`SavedDocument::replacements`] and
+    /// [`SavedDocument::notes`] for why each is the honest answer rather than the
+    /// convenient one. `source` is the original text, and is needed only for its
+    /// length: the span is the whole of it.
+    fn outcome(&self, source: &str) -> (Vec<Replacement>, Vec<PresentationNote>) {
+        match self {
+            Candidate::Patched(patched) => {
+                (patched.replacements().to_vec(), patched.notes().to_vec())
+            }
+            Candidate::Replaced(text) => (
+                vec![Replacement {
+                    span: ByteSpan::new(0, source.len()),
+                    text: (*text).to_owned(),
+                }],
+                Vec::new(),
+            ),
+        }
+    } // End of function outcome()
+} // End of impl Candidate
 
 /// Step 13's first half: copy the target as it stands, unless there is nothing
 /// to copy or nobody to copy it for.
@@ -1172,11 +1461,103 @@ fn findings_of(
             path: target.to_path_buf(),
             error,
         })?;
-    let trivia = TriviaIndex::scan(candidate, &index);
-    let revision = ContentRevision::of_bytes(candidate.as_bytes());
-    let view = DocumentView::project(context, candidate, revision, &index, &trivia);
-    Ok(validate(&view))
+    Ok(project_and_validate(context, candidate, &index))
 } // End of function findings_of()
+
+/// Step 5 for a [`SaveContent::ReplaceText`] candidate, where a failed parse is
+/// **the answer** rather than a contradiction.
+///
+/// The two differences from [`findings_of`] are the whole of what the owner's
+/// ruling changed. There is no earlier parse of these bytes to disagree with, so
+/// a rejection is not [`SaveError::CandidateParseDisagrees`]; and a rejection is
+/// not disqualifying, so it is not an error at all. It becomes one
+/// [`FindingCode::DocumentDoesNotParse`] finding, which
+/// [`FindingCode::class`] makes [`FindingClass::SuspiciousButPermitted`] and
+/// [`verdict`] therefore refuses until it is acknowledged by content.
+///
+/// **Validation is skipped when the parse fails**, because there is no
+/// projection to validate — not because the rules were waived. The finding says
+/// so: it is a claim about the text's shape, and this pass makes no claim about
+/// its espanso semantics at all.
+///
+/// No `target` argument, and its absence is deliberate: nothing on this path can
+/// produce a [`SaveError`], so there is no path to name.
+fn findings_of_replacement(context: &DocumentContext, candidate: &str) -> Vec<Finding> {
+    match SyntaxIndex::parse(candidate) {
+        Ok(index) => project_and_validate(context, candidate, &index),
+        Err(error) => vec![does_not_parse(candidate, &error)],
+    }
+} // End of function findings_of_replacement()
+
+/// The semantic gate over a candidate that has already been indexed.
+///
+/// Shared by both content modes so that a raw save and an edited one are judged
+/// by the same pass rather than by two that agree today.
+fn project_and_validate(
+    context: &DocumentContext,
+    candidate: &str,
+    index: &SyntaxIndex,
+) -> Vec<Finding> {
+    let trivia = TriviaIndex::scan(candidate, index);
+    let revision = ContentRevision::of_bytes(candidate.as_bytes());
+    let view = DocumentView::project(context, candidate, revision, index, &trivia);
+    validate(&view)
+} // End of function project_and_validate()
+
+/// Turns the parser's rejection of a submitted text into the acknowledgeable
+/// finding the user is shown.
+///
+/// [`SyntaxError::Parse`] is a rejection of the *text* and carries the
+/// substrate's own line, column and byte offset, which is what an editor needs
+/// to put a caret where the trouble is. The other two arms are defects in this
+/// crate rather than properties of the text — the type's own documentation says
+/// so — and they carry no position; they are reported through the same finding
+/// anyway, because the owner's ruling is that the user's bytes are never
+/// withheld from them over this crate's opinion of their shape.
+///
+/// [`Finding::span`] stays `None`: a rejection is a position, and an empty
+/// [`ByteSpan`] would be a range of bytes pretending to be one.
+///
+/// # The candidate's own hash is an operand, and the acknowledgement depends on it
+///
+/// `candidate` is here for one reason: its [`ContentRevision`] goes into the
+/// finding. The position and the message describe where the parser **stopped**,
+/// so they are a property of the text's invalid prefix rather than of the text —
+/// `matches: broken: here\nfirst` and `matches: broken: here\nsecond` are
+/// different documents that fail at the same line, the same column, the same byte
+/// and with the same words. [`Acknowledgement`] matches findings as an exact
+/// multiset and has no other handle on which candidate the user agreed to, so
+/// without this operand consent collected for one broken text would silently
+/// commit another. With it, a different text is a different finding and the
+/// existing machinery refuses — no new concept, and no change to the protocol.
+///
+/// It is the **submitted** text that is hashed, not the target's: the finding is
+/// about the candidate, and the candidate is what would be written.
+fn does_not_parse(candidate: &str, error: &SyntaxError) -> Finding {
+    let (line, column, byte_index, detail) = match error {
+        SyntaxError::Parse(failure) => (
+            Some(failure.line),
+            Some(failure.column),
+            failure.byte_index,
+            failure.detail.clone(),
+        ),
+        // The position is already in the operands for the arm that has one, so
+        // the whole `Display` is used only where there is nothing else to say.
+        SyntaxError::Offset(_) | SyntaxError::Invariant(_) => (None, None, None, error.to_string()),
+    };
+    Finding {
+        code: FindingCode::DocumentDoesNotParse {
+            revision: ContentRevision::of_bytes(candidate.as_bytes()),
+            line,
+            column,
+            byte_index,
+            detail,
+        },
+        span: None,
+        node: None,
+        path: None,
+    }
+} // End of function does_not_parse()
 
 #[cfg(test)]
 mod tests {

@@ -128,8 +128,8 @@ pub use backup::{
     OUTSIDE_CONFIG_ROOT,
 };
 pub use save::{
-    save_document, verdict, Acknowledgement, SaveError, SaveRefusal, SaveRequest, SaveVerdict,
-    SavedDocument,
+    save_document, verdict, Acknowledgement, SaveContent, SaveError, SaveRefusal, SaveRequest,
+    SaveVerdict, SavedDocument,
 };
 pub use write::{
     lock_path, replace_file_atomically, replace_locked_file, temp_file_name, PathWriteLock,

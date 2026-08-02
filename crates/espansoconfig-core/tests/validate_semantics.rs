@@ -1344,20 +1344,46 @@ fn every_fixture_is_listed_in_every_fixture() {
     }
 } // End of function every_fixture_is_listed_in_every_fixture()
 
-/// Every [`FindingCode`] variant is produced by some fixture.
+/// Every [`FindingCode`] variant this module can produce is produced by some
+/// fixture, and the one it cannot produce is **named** rather than skipped.
 ///
 /// `FindingCode::ALL_NAMES` is checked against an exhaustive `match` inside the
 /// crate, so adding a variant without a fixture fails here rather than becoming
 /// a code nothing can reach.
+///
+/// **`DocumentDoesNotParse` is the single exemption**, and it is one because the
+/// code is not a rule about espanso at all: `save_document`'s whole-text
+/// replacement mode produces it when the submitted text is not YAML this crate
+/// can index, and `validate` — which takes a projection, and therefore a
+/// document that already parsed — has no way to reach it. It lives in this enum
+/// because it must be acknowledgeable, and an acknowledgement is a multiset of
+/// `Finding`s. The exemption is asserted from both sides: no fixture reaches it,
+/// **and** it is really declared, so a renamed variant fails here.
+/// `tests/persist_raw_save.rs` is where it is proved reachable.
 #[test]
 fn every_finding_code_is_reachable() {
+    const NOT_VALIDATES: &str = "DocumentDoesNotParse";
+
     let mut seen: Vec<&str> = Vec::new();
     for source in every_fixture() {
         seen.extend(code_names(source));
     }
     seen.sort_unstable();
     seen.dedup();
-    let mut expected = FindingCode::ALL_NAMES.to_vec();
+    assert!(
+        !seen.contains(&NOT_VALIDATES),
+        "{NOT_VALIDATES} is the save transaction's code; validate must not produce it"
+    );
+
+    let mut expected: Vec<&str> = FindingCode::ALL_NAMES
+        .into_iter()
+        .filter(|name| *name != NOT_VALIDATES)
+        .collect();
+    assert_eq!(
+        expected.len(),
+        FindingCode::ALL_NAMES.len() - 1,
+        "the exemption names a code the enum no longer declares"
+    );
     expected.sort_unstable();
     assert_eq!(seen, expected, "a finding code no fixture produces");
 } // End of function every_finding_code_is_reachable()

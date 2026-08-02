@@ -293,6 +293,7 @@
   "code.saveVerdict.refusedForUnacknowledgedSuspicions": "The result contains something that looks wrong. Saving it needs your confirmation first.",
 
   "code.saveError.documentIsReadOnly": "{path} belongs to an installed package, so espansoConfig does not write it.",
+  "code.saveError.replacementRequiresBackups": "Replacing the whole text of {path} needs a copy of what the file holds now, and this save was set up without one, so the file was left as it was.",
   "code.saveError.target": "espansoConfig could not reach the file it was asked to save, so the file was left as it was.",
   "code.saveError.targetNotUtf8": "{path} is not valid UTF-8 at byte {offset}, so espansoConfig cannot edit it as text.",
   "code.saveError.revisionMismatch": "{path} changed after espansoConfig read it, so the save stopped. Reload the file and make the change again.",
@@ -369,6 +370,7 @@
   "code.findingCode.duplicateVariableName": "Two variables of this block are called “{name}”, and espansoConfig cannot tell which definition would be used.",
   "code.findingCode.referenceHasNoDeclaration": "The text refers to “{name}”, and nothing this app can see declares a variable of that name.",
   "code.findingCode.regexDoesNotCompile": "This regular expression did not compile under the version espansoConfig uses. espanso pins an older one, so the two can disagree.",
+  "code.findingCode.documentDoesNotParse": "espansoConfig’s YAML parser cannot read this text. It parses with a different library than espanso does, so this is a warning rather than a verdict — but a file espanso cannot read does not load.",
 
   "code.editError.sourceDoesNotParse": "espansoConfig’s YAML parser could not read this file, so nothing in it can be located.",
   "code.editError.unresolvable": "The place this change names does not exist in the file.",

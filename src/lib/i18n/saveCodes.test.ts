@@ -58,6 +58,15 @@ const SPAN = { start: 3, end: 11 } as const;
 const PATH = '/nowhere/match/base.yml';
 
 /**
+ * A content revision as it crosses the boundary: 64 lowercase hex characters.
+ *
+ * `DocumentDoesNotParse` carries one so that acknowledging a broken text
+ * acknowledges *that* text. It is opaque and no sentence names it, which is what
+ * the "keep the parser's own diagnostic out" case below asserts.
+ */
+const REVISION = 'c'.repeat(64);
+
+/**
  * The projection a conflict carries.
  *
  * Neutral and synthetic, and built by the browser's own fixture module so this
@@ -90,6 +99,18 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
       describeFindingCode(locale, { VariableTypeNotRecognised: { declared: 'global' } })
     ],
     ['FindingCode.unit', describeFindingCode(locale, 'MatchHasNoTriggerField')],
+    [
+      'FindingCode.doesNotParse',
+      describeFindingCode(locale, {
+        DocumentDoesNotParse: {
+          revision: REVISION,
+          line: 4,
+          column: 11,
+          byte_index: 52,
+          detail: "the substrate's own English diagnostic"
+        }
+      })
+    ],
     ['EditError', describeEditError(locale, { NoObservableLineEnding: { edit: 0, at: 12 } })],
     [
       'VerificationFailure',
@@ -229,6 +250,33 @@ describe('the save-transaction accessors', () => {
     });
     expect(nested).not.toContain('TempFileChangedDuringWrite');
   }); // End of the "ErrorKind and nested error" case
+
+  it.each(LOCALES)('keep the parser’s own diagnostic out of the sentence in %s', (locale) => {
+    // `detail` is the YAML substrate's prose in one language, exactly as
+    // `RegexDoesNotCompile.detail` is the `regex` crate's. It is a string, so
+    // `scalarOperands` would substitute it if a message named it; no message
+    // does, and this is what says so.
+    const parse = describeFindingCode(locale, {
+      DocumentDoesNotParse: {
+        revision: REVISION,
+        line: 4,
+        column: 11,
+        byte_index: 52,
+        detail: 'did not find expected key'
+      }
+    });
+    expect(parse, locale).not.toContain('did not find expected key');
+    // The position operands are optional on the wire — a failure this crate's own
+    // indexer produced carries none — so a message naming them would leave a
+    // visible brace for exactly the case a user is least able to interpret.
+    for (const absent of ['4', '11', '52']) {
+      expect(parse, `${locale}:${absent}`).not.toContain(absent);
+    }
+    // `revision` is the operand that binds an acknowledgement to one candidate.
+    // It is a 64-character digest and means nothing to a reader, so it is carried
+    // and never shown — the same rule, for the same reason `detail` follows it.
+    expect(parse, locale).not.toContain(REVISION);
+  }); // End of the "parser's own diagnostic" case
 
   it.each(LOCALES)('tell the two presentation notes apart in %s', (locale) => {
     // The whole reason `PresentationNote` became a tagged union: a deletion that

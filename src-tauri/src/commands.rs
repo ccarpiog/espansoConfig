@@ -24,9 +24,12 @@
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
 //! **no command in this crate calls either**. `save_raw_document` is still
 //! absent, and the reason is not caution: a whole-document text is not a span
-//! replacement, `SaveRequest` takes a list of edits and nothing else, and giving
-//! the one entry point that writes a second shape is a change to that entry point
-//! rather than a new caller of it.
+//! replacement, and giving the one entry point that writes a second shape is a
+//! change to that entry point rather than a new caller of it. **Phase 2b-2c-3
+//! made that change in the core** — `SaveRequest::content` is now a
+//! [`espansoconfig_core::persist::SaveContent`], whose second arm is a whole
+//! replacement text — and deliberately registered no command over it; that is
+//! Phase 2b-2c-3b's.
 //!
 //! They differ in **who derives the edits**, and that is the whole of the
 //! difference. `move_match`, `create_match` and `delete_match` each build their
@@ -87,7 +90,8 @@ use espansoconfig_core::patch::{
     DocumentEdit, DocumentPath, InsertItem, ItemMove, ItemPlacement, RemoveItem,
 };
 use espansoconfig_core::persist::{
-    save_document, Acknowledgement, BackupSession, SaveError, SaveRequest, SavedDocument,
+    save_document, Acknowledgement, BackupSession, SaveContent, SaveError, SaveRequest,
+    SavedDocument,
 };
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
 use espansoconfig_core::{ContentRevision, DocumentId};
@@ -707,7 +711,7 @@ fn run_one_save(
     let request = SaveRequest {
         context: &context,
         base_revision,
-        edits,
+        content: SaveContent::Edits(edits),
         acknowledgement,
         // Never `None`. See `WorkspaceSession::open`.
         backups: Some(backups),

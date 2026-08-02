@@ -1182,7 +1182,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 36), ("SaveError", 9)] {
+    for (name, count) in [("EditError", 36), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -1959,6 +1959,13 @@ fn finding_code_samples() -> Vec<FindingCode> {
         FindingCode::RegexDoesNotCompile {
             detail: "a third party's English diagnostic".to_owned(),
         },
+        FindingCode::DocumentDoesNotParse {
+            revision: a_revision(),
+            line: Some(4),
+            column: Some(11),
+            byte_index: Some(52),
+            detail: "the substrate's own English diagnostic".to_owned(),
+        },
     ]
 } // End of function finding_code_samples()
 
@@ -2043,6 +2050,7 @@ fn a_finding() -> Finding {
 fn save_error_samples() -> Vec<SaveError> {
     vec![
         SaveError::DocumentIsReadOnly { path: a_path() },
+        SaveError::ReplacementRequiresBackups { path: a_path() },
         SaveError::Target(WriteError::TargetMissing { path: a_path() }),
         SaveError::TargetNotUtf8 {
             path: a_path(),
@@ -2253,11 +2261,13 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 175,
+        variants, 177,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
-         eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals and \
-         Phase 2b-2c-2's fix round made PresentationNote a two-variant union; this \
-         list now holds {variants}"
+         eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
+         Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
+         Phase 2b-2c-3 added FindingCode::DocumentDoesNotParse and its fix round \
+         added SaveError::ReplacementRequiresBackups; this list now holds \
+         {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
 
@@ -2338,12 +2348,13 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (104, 12, 59),
+        (106, 12, 59),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
-         eight more struct ones, and PresentationNote's two are the last two; a \
-         struct variant that became a skip is a hole"
+         eight more struct ones, PresentationNote's two are two more, and \
+         Phase 2b-2c-3's DocumentDoesNotParse and ReplacementRequiresBackups are \
+         the last two; a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2621,7 +2632,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 175,
+        checked, 177,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

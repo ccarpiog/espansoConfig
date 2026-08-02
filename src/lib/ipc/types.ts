@@ -1132,7 +1132,8 @@ export type FindingCodeName =
   | 'VariableMissingRequiredParam'
   | 'DuplicateVariableName'
   | 'ReferenceHasNoDeclaration'
-  | 'RegexDoesNotCompile';
+  | 'RegexDoesNotCompile'
+  | 'DocumentDoesNotParse';
 
 /** What the semantic gate noticed about a candidate, as a code plus operands. */
 export type FindingCode =
@@ -1157,6 +1158,42 @@ export type FindingCode =
          *
          * Developer-facing, and never rendered: a localized message is built
          * from the code and the pattern, not from this.
+         */
+        readonly detail: string;
+      };
+    }
+  | {
+      /**
+       * The submitted text is not YAML this app can read.
+       *
+       * Produced only by a whole-document replacement, never by the semantic
+       * rules, and it is **acknowledgeable**: the app reports it and writes the
+       * text anyway once the user confirms, because refusing would mean an
+       * already-broken file could never be repaired here.
+       */
+      readonly DocumentDoesNotParse: {
+        /**
+         * The content revision of the exact text this finding is about.
+         *
+         * What binds an acknowledgement to one candidate. The position and the
+         * message describe where the parser stopped, so two different texts that
+         * share an invalid prefix produce the same ones; hand a finding back
+         * unchanged and it acknowledges that text and no other.
+         *
+         * Opaque, and never rendered.
+         */
+        readonly revision: ContentRevision;
+        /** Line the parser stopped at, or `null` when it reported no position. */
+        readonly line: number | null;
+        /** Column the parser stopped at, on the same terms as `line`. */
+        readonly column: number | null;
+        /** The same position as a byte offset into the submitted text, when known. */
+        readonly byte_index: number | null;
+        /**
+         * The parser's own diagnostic, carried verbatim.
+         *
+         * Developer-facing, and never rendered — the same rule
+         * `RegexDoesNotCompile.detail` follows.
          */
         readonly detail: string;
       };
@@ -1346,6 +1383,7 @@ export interface BackupRecord {
 /** The name of every {@link SaveError} variant. */
 export type SaveErrorName =
   | 'DocumentIsReadOnly'
+  | 'ReplacementRequiresBackups'
   | 'Target'
   | 'TargetNotUtf8'
   | 'RevisionMismatch'
@@ -1371,6 +1409,7 @@ export type SaveErrorName =
  */
 export type SaveError =
   | { readonly DocumentIsReadOnly: { readonly path: string } }
+  | { readonly ReplacementRequiresBackups: { readonly path: string } }
   | { readonly Target: WriteError }
   | { readonly TargetNotUtf8: { readonly path: string; readonly offset: number } }
   | {
