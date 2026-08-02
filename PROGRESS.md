@@ -4291,6 +4291,36 @@ cargo test --workspace          # expect 983 tests across 21 binaries, 0 failed
 
 (and `npm install` before any frontend command, as since 1b-1. `npm test` expects **700**.)
 
+The tree is at **`35a9e9e`**, which is the cleanup round, not the phase commit. Both are pushed.
+
+**A cleanup round ran after the phase commit and is already in** (`35a9e9e`). Four independent
+quality reviews — reuse, simplification, efficiency, altitude — converged on three duplications, now
+removed: the save-transaction tail is **one `run_one_save`** called by all four writing commands
+(with `view_at` and `with_open` beside it), the landing index comes from the engine's own
+**`ItemPlacement::items_above`**, and both anchor resolutions are **one `anchor_index`**.
+**`save_raw_document` must call `run_one_save`, not copy it** — that block is the cache-coherency
+policy, and it was four copies before this round.
+
+**The 2b-2c-3 design consult has already been taken** — `docs/reviews/phase-2b-2c-3-design.md`, eight
+rulings. **Do not re-commission it.** Its rulings, in one line each:
+
+| Q | Ruling |
+|---|---|
+| Q1 | The substitute for the patch engine's proof is **both** a successful reparse **and** the existing validation/acknowledgement gate |
+| Q2 | **A raw save may not write text the YAML parser rejects.** See the flag below — this one is worth putting to the owner before it is built |
+| Q3 | Keep `SaveResult`; `moved: None` |
+| Q4 | **One** core `save_document(SaveRequest)` entry point branching internally — not a second entry point beside it (the lock is not reentrant) |
+| Q5 | A raw save **does** fully participate in acknowledgement for validation findings |
+| Q6 | No backup for a byte-identical result; every committed raw replacement must have a recoverable pre-commit image; the revision check is **more** load-bearing here |
+| Q7 | The highest risk is **silently overwriting changes made after the raw editor loaded the file** |
+| Q8 | A raw save is **a separate replacement mode with a different promise**, not a locality-preserving edit |
+
+**Q2 deserves the owner's judgement before it is built, and the next session should ask rather than
+assume.** Refusing to write unparseable text means **this application cannot be used to repair a file
+that is already broken** — arguably the single most valuable thing a raw editor does, and this app
+already *displays* unparseable files (a broken file crosses as a view, never as an error). The
+consult ruled for refusing; that is defensible and it is not obviously right.
+
 **The next step is Phase 2b-2c-3 — `save_raw_document`, the eleventh `#[tauri::command]`, and the
 last of 2b-2c.** It is not a small step and it is not like the two before it.
 
@@ -5518,7 +5548,19 @@ _Updated at each phase boundary._
 | 2b-2b-3 | `0cf7420` | ✅ pushed to `origin/main` | clean |
 | 2b-2c-1 | `95c1a0b` | ✅ pushed to `origin/main` | clean |
 | **2b-2c-2** | **`8d223fc`** | ✅ pushed to `origin/main` | clean |
+| **2b-2c-2 cleanup** | **`35a9e9e`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`35a9e9e` is the cleanup round that followed the phase — four independent quality reviews (reuse,
+simplification, efficiency, altitude) of `8d223fc`, ten fixes applied, **983 tests still passing and
+none merged away**. It removes the four-way copy of the save tail (`run_one_save`, `view_at`,
+`with_open`), the hand-written landing arithmetic (`ItemPlacement::items_above` made public), the
+duplicated anchor resolution (`anchor_index`), a dead `PresentationNote::edit()`, a whole-projection
+clone on every save, and a redundant document check confirmed byte-identical to the one
+`match_by_id` already performs. **Its one user-facing change**: `moveNotWithinOneSequence`'s two
+sentences no longer say *moves*, because `create_match` and `delete_match` now raise it too and a
+user pressing delete was reading a sentence about moving in both languages. It also records four
+things deliberately **not** built, as holes 6.8–6.11.
 
 `8d223fc` is Phase 2b-2c-2 **whole** — its design consult, its aggregate code review, **both of that
 review's findings fixed before the commit**, and this checkpoint. 29 files, +3477/−246. It contains
