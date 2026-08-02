@@ -1819,6 +1819,29 @@ fn edit_error_samples() -> Vec<EditError> {
             block: a_node(),
             seam: MoveSeam::CarriedRunsJoin,
         },
+        EditError::NotASequence {
+            edit: 0,
+            node: a_node(),
+            kind: NodeKind::Mapping,
+        },
+        EditError::InsertedItemHasNoFields { edit: 0 },
+        EditError::DuplicateInsertedField { edit: 0, field: 1 },
+        EditError::InvalidInsertedFieldKey { edit: 0, field: 1 },
+        EditError::FlowSequenceInsertionUnsupported {
+            edit: 0,
+            sequence: a_node(),
+        },
+        EditError::InconsistentSequenceIndentation {
+            edit: 0,
+            sequence: a_node(),
+            expected: 2,
+            found: 4,
+        },
+        EditError::ImplicitNullSequenceHasAmbiguousTrivia { edit: 0, at: 12 },
+        EditError::RemovalWouldEmptyTheSequence {
+            edit: 0,
+            sequence: a_node(),
+        },
         EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
     ]
 } // End of function edit_error_samples()
@@ -2146,9 +2169,10 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 165,
-        "Phase 2b-1 put 157 variants on the wire and Phase 2b-2a added NotReencodable's \
-         eight; this list now holds {variants}"
+        variants, 173,
+        "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
+         eight and Phase 2b-2c-1 added EditError's eight sequence-item refusals; this \
+         list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
 
@@ -2229,10 +2253,11 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (94, 12, 59),
+        (102, 12, 59),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
-         variants on this wire, and Phase 2b-2a's NotReencodable added one \
-         newtype and seven unit ones; a struct variant that became a skip is a hole"
+         variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
+         and seven unit ones, and Phase 2b-2c-1's eight sequence-item refusals \
+         are eight more struct ones; a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2510,7 +2535,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 165,
+        checked, 173,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

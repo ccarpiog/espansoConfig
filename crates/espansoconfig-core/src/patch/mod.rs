@@ -47,14 +47,27 @@
 //! intended permutation, every construct the move did not name decodes to exactly
 //! what it decoded to before, and no comment changed hands. The full round-trip
 //! property test (R9) and the second YAML 1.1 oracle (R16) are step 0c-3b-2b.
+//!
+//! **2b-2c-1 — [`InsertItem`] and [`RemoveItem`], the sequence's own pair.**
+//! [`DocumentEdit`] had four variants and three of Phase 2b's six commands had no
+//! primitive behind them; two of the three now do. [`RemoveItem`] is
+//! **[`ItemMove`]'s lift half with no landing**, sharing the envelope derivation
+//! and the source-gap join as code rather than as an agreement, so a deletion can
+//! never take a different set of bytes from the ones a relocation takes.
+//! [`InsertItem`] is the one narrow exception to "no generic primitive may
+//! synthesize a collection": exactly one new flat block-mapping item with scalar
+//! fields, spelled by the existing codec, at a sequence-item boundary — plus the
+//! promotion of a bare `matches:` into its first item, without which that key
+//! could never be targeted as a sequence at all.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
-    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, move_item, remove_field,
-    DocumentEdit, EditError, FieldInsert, FieldRemoval, ItemMove, MoveSeam, PatchedDocument,
-    PresentationNote, Replacement, ScalarEdit, VerificationFailure,
+    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, insert_item, move_item,
+    remove_field, remove_item, DocumentEdit, EditError, FieldInsert, FieldRemoval, InsertItem,
+    ItemMove, MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement, ScalarEdit,
+    VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

@@ -43,7 +43,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2b-1** | **`MatchDraft`, `DraftField` and the minimal-diff engine** over the closed, schema-known scalar surface of one match, in the core, with **no command**: a field the draft leaves unchanged derives no edit, and neither does one whose drafted logical value already equals the projected one | ✅ complete — after the review fix round below |
 | **2b-2b-2** | **The open key surface** — `vars` and `form_fields`, whose keys are the form author's — in the core, with **no command**: an index-addressed draft over a nested open mapping, edit and remove only, and the two batch guards restated per mapping | ✅ complete — after the review fix round below. **Its aggregate code review was run at the head of the next session** and its one finding is closed |
 | **2b-2b-3** | **`save_match`, the command**: the draft deserialized off the wire, the batch handed to `save_document`, `SaveResult::Saved::notes` given its first producer, the `draftError` namespace in both languages, cache coherence and the frontend types — plus **the window reading four phases overdue** | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding**. **2b-2b is closed** |
-| 2b-2c … 2d | See the Phase 2 split below | ⬜️ **2b-2c is next** |
+| **2b-2c-1** | **The two missing sequence-item primitives** — `InsertItem` and `RemoveItem` — in the core, with **no command**: a flat block-mapping item synthesized at a sequence-item boundary and spelled by the existing scalar codec, and a removal that is literally `ItemMove`'s lift half | ✅ complete — its design consult and its aggregate code review are both closed, the latter with **no finding in five of six categories** and one Low documentation finding, fixed |
+| 2b-2c-2 … 2d | See the Phase 2 split below | ⬜️ **2b-2c-2 is next** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -108,7 +109,22 @@ mistake, 2b-2c as a **missing-primitive** mistake.
 |---|---|
 | **2b-2a** | The **spine plus one vertical slice**: `Deserialize` on the acknowledgement graph, the app-owned `BackupSession`, the operation-neutral `SaveResult` (`Saved` / `Conflict` / `Refused`, all in the `Ok` channel), cache coherence after a commit, the first call to `forgetFileText()`, and **`move_match`** — the one command the core already supports end to end |
 | **2b-2b** | **`MatchDraft`, the minimal-diff engine and `save_match`**: a draft is a *desired state*, and Rust derives the `DocumentEdit` batch by diffing it against the projection. **A field the draft leaves unchanged must produce no edit at all** — rewriting an unchanged scalar can change its spelling and emit a `PresentationNote`, which is a byte-preservation failure wearing a success's clothes. `SaveResult::Saved::notes` gets its first producer here. **Split into 2b-2b-1 / 2b-2b-2 / 2b-2b-3** (below) |
-| **2b-2c** | **The two missing core primitives and the three commands over them**: sequence-item insert and sequence-item remove in `patch/`, with the comment-ownership, indentation and block-scalar answers 0c-3a/0c-3b-1 had to give for mappings; then `create_match`, `delete_match` and `save_raw_document`. **`save_raw_document` needs its own answer** — a whole-document text is not a span replacement, and giving `save_document` one is a change to the one entry point that writes |
+| **2b-2c** | **The two missing core primitives and the three commands over them**: sequence-item insert and sequence-item remove in `patch/`, with the comment-ownership, indentation and block-scalar answers 0c-3a/0c-3b-1 had to give for mappings; then `create_match`, `delete_match` and `save_raw_document`. **`save_raw_document` needs its own answer** — a whole-document text is not a span replacement, and giving `save_document` one is a change to the one entry point that writes. **Split into 2b-2c-1 / 2b-2c-2 / 2b-2c-3** (below) |
+
+**2b-2c is split into 2b-2c-1 / 2b-2c-2 / 2b-2c-3**, and the cut was put to a design consult before
+any line of it was written (`docs/reviews/phase-2b-2c-1-design.md`, Q1) rather than chosen here and
+assumed correct. The consult confirmed it, including the two sub-decisions that were live: that
+`InsertItem` and `RemoveItem` belong **together** — they share the sequence layout, the envelope, the
+indentation and the comment-ownership machinery, so separating them would duplicate the design
+validation without isolating much risk — and that `save_raw_document` stays **last** despite being the
+one that changes `save_document`'s own signature, because its concurrency and validation behaviour
+wants dedicated tests rather than a mechanical preparation landed early.
+
+| Sub-phase | Scope |
+|---|---|
+| **2b-2c-1** | **The two primitives, in the core, with no command.** `InsertItem` synthesizes exactly one flat block-mapping sequence item with scalar fields, each spelled by the **existing** scalar codec; `RemoveItem` is literally `ItemMove`'s lift half with no landing, sharing the code and not merely agreeing with it. Eight named planning refusals, all struct variants on the wire |
+| **2b-2c-2** | **`create_match` and `delete_match`**, the eighth and ninth `#[tauri::command]`, over those primitives and through `save_document` |
+| **2b-2c-3** | **`save_raw_document`**: a `SaveRequest` variant, never a full-span `DocumentEdit`. A whole-document text is not a span replacement, so it may not claim the patch engine's locality invariants |
 
 **2b-2b is split into 2b-2b-1 / 2b-2b-2 / 2b-2b-3**, and the cut is the usual one — a dependency
 order, by failure mode — but the fact that forced it is a property of espanso's own schema. A
@@ -2951,6 +2967,57 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2b-2c-1
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | ✅ clean |
+| `cargo test --workspace` | ✅ **959 tests across 21 binaries**, 0 failed (**+32** on 2b-2b-3's 927 — exactly the new `tests/patch_item.rs`) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | ✅ **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | ✅ 17 passed — no fixture lost a distinguishing byte, and none was added |
+| `ESPANSOCONFIG_REQUIRE_REAL_CORPUS=1 … --test draft_plan -- every_match_of_the_real_configuration` | ✅ **not a vacuous skip** — 13 files, 65 matches, **65 planned to an empty batch**, 417 intents, **0 refusals**, unchanged by this phase |
+| `npm test` | ✅ 29 files, **696 tests**, 0 failed (unchanged — the eight new keys are covered by the existing parity sweeps) |
+| `npm run check` | ✅ 376 files, 0 errors, 0 warnings |
+| `npm run build` | ✅ built |
+| `git status --short --untracked-files=all` | ✅ no path under `tests/corpus/real/` |
+
+**The baseline was re-established before the phase began**, not assumed: `cargo test --workspace` was
+run at `0cf7420` and returned **927 across 21 binaries**, matching the previous checkpoint exactly.
+
+**Two claims were re-derived by the orchestrator rather than accepted from the worker or the reviewer.**
+
+1. **The CRLF fix.** `leading_comment_block_start` (`crates/espansoconfig-core/src/patch/edit.rs:6613`)
+   steps back over the **whole** terminator — two bytes for `\r\n`, one for a bare `\n` or `\r` —
+   before asking `line_start_of` for the line above. That is the defect's actual shape, and the fix
+   addresses it rather than papering over it.
+2. **The headline test is not a proxy.** `lift_site_of_a_move` in `tests/patch_item.rs` applies a real
+   `ItemMove`, discards the landing replacement, splices the departures itself, and compares the
+   resulting **bytes** against `RemoveItem`'s output — not two `Ok`s, not a summary.
+
+## Phase 2b-2c-1 review disposition
+
+Two consultations, both closed. The design consult was taken **before any line existed**
+(`docs/reviews/phase-2b-2c-1-design.md`); the aggregate code review was taken over the whole
+working tree **before the commit** (`docs/reviews/phase-2b-2c-1-code.md`).
+
+| # | Where | Ruling or finding | Disposition |
+|---|---|---|---|
+| Design Q1 | consult | The three-way cut; `InsertItem` and `RemoveItem` **paired**; `save_raw_document` last | **Adopted** — it is the split table above |
+| Design Q2 | consult | `InsertItem` takes a **flat list of scalar key/value pairs**, never caller-supplied YAML text and never an espanso-shaped seed | **Adopted.** Caller-supplied text would put preservation-critical structure in the untrusted caller — the same reason the frontend sends a `MatchDraft` and not an edit list (2b-2b). A typed seed would put espanso's schema inside the generic patch engine |
+| Design Q2 | consult | The "no synthesized collection" rule is **narrowed by an explicit exception**, not weakened | **Adopted verbatim** as the variant's doc comment |
+| Design Q3 | consult | Flow sequences refused; inconsistent indentation refused; a bare implicit-null `matches:` **promoted**, with a named refusal when its trivia is ambiguous | **Adopted**, error names included. Without the promotion the app could never create the first match in a fresh file |
+| Design Q4 | consult | `RemoveItem` is `ItemMove`'s lift half in **shared code**, not a second implementation that agrees | **Adopted**, and pinned by a test that compares the two outputs byte for byte |
+| Design Q5 | consult | Removing the only item is refused by name; the UI explains it | **Adopted.** `matches: []` would synthesize a collection; a bare `matches:` would turn a sequence into YAML null. Neither is "remove one existing item" |
+| Design Q6 | consult | A `SaveRequest` variant for whole text, never a full-span `DocumentEdit` | **Recorded for 2b-2c-3**, deliberately not built here |
+| Code 1 | review | **Low** — §5 of the notes claimed `crlf-line-endings.yml` has *no* entry or item with a leading comment block. It does: a two-line block at column zero above `matches:` | **Fixed**, after independent confirmation — `rg -n '#'` returns exactly lines 1–2 and `rg -n '^[a-zA-Z]'` returns exactly `3:matches:`, so the entry carrying that block is the root mapping's only one and is refused before any envelope is derived. §5 now makes the narrower true claim and names the block rather than denying it |
+| Code 2–6 | review | **No finding** in byte preservation, the `ItemMove` regression surface, vacuous tests, the refusals, or the wire additions | Each reported as an explicit "no findings", not left silent. The reviewer re-derived the two claims the brief singled out rather than accepting the implementer's framing |
+
+---
+
 ## Verification — Phase 2b-2b-3
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4140,6 +4207,99 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+**Phase 2b-2c-1 is complete and both of its Codex consultations are closed.**
+`docs/decisions/2b-2c-1-notes.md` is the record; the design consult is
+`docs/reviews/phase-2b-2c-1-design.md` and the aggregate code review is
+`docs/reviews/phase-2b-2c-1-code.md`, which reported **no finding in five of its six categories** and
+one Low documentation finding, since fixed. **The patch engine now has all six primitives it will
+ever need for matches** — and nothing calls the two new ones.
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 959 tests across 21 binaries, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **696**.)
+
+**The next step is Phase 2b-2c-2 — `create_match` and `delete_match`, the eighth and ninth
+`#[tauri::command]`.** Read the 2b-2c split table above first. `save_raw_document` is **2b-2c-3's**
+and must not be reached for here: it is not a span replacement, and giving `save_document` a
+whole-text path is a change to the one entry point that writes, not a new caller of it.
+
+**What 2b-2c-1 built that 2b-2c-2 calls, and must not redesign.**
+
+- **`InsertItem { sequence, after: Option<usize>, fields: Vec<(String, String)> }`** — one flat
+  block-mapping sequence item, scalar values only, each spelled by the **existing** scalar codec.
+  `after: None` appends last. **There is no "before the first item" form** (hole 6): `ItemMove` can go
+  to the front and `InsertItem` cannot, so a `create_match` that wants to insert at the top must
+  derive the destination the way `plan_move` derives its front, or append and then move.
+- **`RemoveItem`** addresses **the item**, not `(sequence, index)` (D1) — it is `ItemMove`'s lift half
+  in shared code, and `tests/patch_item.rs` compares the two outputs byte for byte. Do not add a
+  second removal path.
+- **Eight named refusals, all planning-time and all struct variants on the wire**:
+  `NotASequence`, `InsertedItemHasNoFields`, `DuplicateInsertedField`, `InvalidInsertedFieldKey`,
+  `FlowSequenceInsertionUnsupported`, `InconsistentSequenceIndentation`,
+  `ImplicitNullSequenceHasAmbiguousTrivia`, `RemovalWouldEmptyTheSequence`. Each already has its
+  sentence in both languages and its member in the TypeScript union.
+- **A bare `matches:` is promoted into its first block-sequence item.** That is what lets the app
+  create the first match in a fresh file. Its ambiguity guard is **one line deep** (hole 7) — it
+  refuses only when the line immediately below the bare key is a comment.
+
+**What 2b-2c-2 inherits from 2b-2b-3 and 2b-2a, unchanged and not its to revisit.**
+
+- **A planning-time refusal goes in the `Err` channel; a transactional one does not** (D1). A
+  `create_match` with no anchor and a `delete_match` naming something that is not an item belong with
+  `DraftRefused` and `MoveNotWithinOneSequence`, **not** as new `SaveResult` variants — filing a
+  non-overridable refusal beside an overridable one invites a frontend to offer an acknowledgement
+  that can never work.
+- **A committed write is never afterwards reported as an `Err`** (D2). If post-commit re-resolution
+  fails, the answer is `moved: None` and a successful `SaveResult`. **`delete_match` is the first
+  command for which `None` is the correct *routine* answer** rather than a defensive one — the match
+  it deleted has no identity in the new revision, by construction.
+- **An empty batch still goes through the transaction** (D3). No short-circuit.
+- **Every variant of a wire enum used as an error operand must serialize as an object** (D5). A single
+  unit variant among struct ones silently demotes a typed refusal to *unexpected failure*. A new error
+  enum on this boundary owes its own `every_*_variant_crosses_as_an_object` check.
+- **`NOT_A_CODE` is read from both directions** (D6), and the non-vacuity floor in
+  `every_typescript_wire_union_has_a_namespace` moves with `types.ts`.
+- `espansoconfig_core::persist::save_document` is **the only** entry point that may write a user's
+  file. Never call `replace_file_atomically` or `replace_locked_file` from a command or from inside
+  the transaction — **the lock is not reentrant, so the process hangs silently and forever.**
+
+**What 2b-2c-2 must not do**, all inherited: no `force` flag or acknowledgement bypass; no caching of
+"the findings I last issued"; no wire path accepted back as a target; and `committed: false` /
+`backup: None` are **not** failures.
+
+**Two things 2b-2c-2 will be the first to feel, both recorded as holes rather than discovered late.**
+
+- **A removal between blank-separated items leaves both blank lines** (hole 5). Removing the middle
+  item of a sequence with one blank line between each pair leaves **two** consecutive blank lines;
+  with two blanks it leaves four. That is the lift-site join rule applied literally — a blank line
+  beside an item is not the item's, and deciding which of two runs to collapse is a layout decision no
+  primitive may make. It is pinned as expected bytes, and **a UI that deletes matches will show it.**
+- **Deleting the last match of a file is refused**, by design (`RemovalWouldEmptyTheSequence`). The UI
+  owes the user a sentence, not a failed save.
+
+**The debts, retallied.**
+
+- **The thirty-two `code.draftError.*` strings, `code.commandError.draftRefused`, and now the eight
+  new `code.editError.*` sentences have never been drawn.** So has `SaveResult::Saved::notes`, which
+  has a producer and no reader. The first phase to build the editor screen owes the look.
+- **210+ Spanish values are checked only by heuristic** — eight more than at 2b-2b-3. Nothing
+  establishes that any is idiomatic.
+- **The real configuration exercises neither new primitive** (hole 2). It is swept for moves and for
+  field edits; nothing has ever been inserted into it or removed from it, so `tests/patch_item.rs` is
+  that surface's only coverage.
+- **`verify_items` speaks `verify_field`'s vocabulary** (hole 3): a sequence that lost an item reports
+  `EntryCountChanged` and an item that changed reports `SiblingChanged`, whose sentences say *entry*
+  and *block*. A user never sees it — a verification failure discards the candidate — but a phase that
+  surfaces these should split them.
+- **Three `code.diagnosticCode.*` observations remain recorded as non-defects**, not fixed
+  (`2b-2b-3-notes.md` §7.5).
+
+---
+
 **Phase 2b-2b-3 is complete and both of its Codex consultations are closed — and with it, 2b-2b.**
 `docs/decisions/2b-2b-3-notes.md` is the record; the design consult is
 `docs/reviews/phase-2b-2b-3-design.md` and the aggregate code review is
@@ -5011,6 +5171,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`crates/espansoconfig-core/src/patch/edit.rs`](crates/espansoconfig-core/src/patch/edit.rs) | **`DocumentEdit` now has six variants**, and `InsertItem`/`RemoveItem` are the two 2b-2c-2 calls. `RemoveItem` addresses **the item**, not `(sequence, index)`. `editable_sequence_item()`, `lift_item()` and `leading_comment_block_start()` are shared by the move and the removal — **change one and both change**, which is the point. `InsertItem` has **no "before the first item" form**; append and move, or derive the front the way `plan_move` does |
+| [`crates/espansoconfig-core/tests/patch_item.rs`](crates/espansoconfig-core/tests/patch_item.rs) | The phase's acceptance evidence, and the model for any later sequence-item test. `lift_site_of_a_move()` applies a real `ItemMove`, discards its landing, splices the departures and compares the **bytes** against `RemoveItem`'s output — the architectural claim, pinned rather than asserted. The removal table crosses first/middle/last with blank-line and comment shapes, in LF **and** CRLF; it is the CRLF twin that found the latent ownership defect |
+| [`docs/reviews/phase-2b-2c-1-design.md`](docs/reviews/phase-2b-2c-1-design.md) | The design consult taken **before** the primitives were written. Seven rulings with a disposition table; Q6 is `save_raw_document`'s answer, **recorded and deliberately not built** — a `SaveRequest` variant, never a full-span `DocumentEdit`. 2b-2c-3 starts there |
+| [`docs/decisions/2b-2c-1-notes.md`](docs/decisions/2b-2c-1-notes.md) | Eight decisions with their reasons, the refusal taxonomy as a table, **§5 the latent CRLF ownership defect this phase found and fixed**, and **§6's nine holes** — of which 5 (a removal leaves both blank lines) and 6 (no insert-before-first) are the two 2b-2c-2 will feel first |
 | [`src-tauri/src/commands.rs`](src-tauri/src/commands.rs) | **The eight commands, and the two that write.** `save_one_match` is the model 2b-2c's three new commands should follow: resolve the projection with **no lock held**, refuse a `base_revision` that is not that projection's, derive the batch (or refuse by name into the `Err` channel), and hand it to `save_document` **even when it is empty**. `after_a_save` takes `at: Option<&DocumentPath>` because its two callers compute the post-save address differently — a move by sequence-path-plus-landing-index, a save by the match's own unchanged path. **Neither command may call `replace_file_atomically` or `replace_locked_file`: the lock is not reentrant** |
 | [`src-tauri/src/error.rs`](src-tauri/src/error.rs) | `CommandError`, now nine codes. **`DraftRefused` is the pattern for a planning-time refusal** — it carries the core's own refusal *whole* rather than flattening its taxonomy into a second copy here, and `every_command_error()` samples the one variant that addresses something below the match mapping so the enumeration exercises the **privacy** rule and not just the shape |
 | [`src-tauri/src/wire_contract.rs`](src-tauri/src/wire_contract.rs) | **`every_draft_error_variant_crosses_as_an_object` is the check 2b-2c must copy for any new error enum on this boundary.** The operand-shape table pins **one** shape per operand from **one** sample, so a single unit variant among struct ones silently demotes a typed refusal to *unexpected failure*. It derives its variant list by parsing the enum's source, not from a sample |

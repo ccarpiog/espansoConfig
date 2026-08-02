@@ -216,6 +216,49 @@
 //! and a defect in the first is exactly what the second exists to catch
 //! (`PROGRESS.md`, R24).
 //!
+//! # Phase 2b-2c-1 — the sequence's own pair
+//!
+//! [`InsertItem`] and [`RemoveItem`]. Nothing about the engine changed: an
+//! insertion is still a replacement of a zero-width span, a removal is still a
+//! set of runs replaced by nothing, and both go through [`apply_edits`], the
+//! disjointness check, `splice` and `verify` unchanged. What is new is what they
+//! are *made of*.
+//!
+//! **[`RemoveItem`] is [`ItemMove`]'s lift half with no landing, as code.** The
+//! four gates are [`editable_sequence_item`], the envelope is [`lift_item`] and
+//! the join the deletion opens is [`block_the_source_close_would_feed`] — three
+//! functions [`plan_move`] calls as well, factored out of it rather than
+//! reimplemented beside it. A deletion that took a different set of bytes from the
+//! ones a relocation takes would be a second answer to the question `PROGRESS.md`
+//! D2o settled, and `a_removal_is_a_move_with_no_landing` in
+//! `tests/patch_item.rs` compares the two outputs so the claim is checked rather
+//! than asserted.
+//!
+//! **[`InsertItem`] is the one narrow exception to "no generic primitive may
+//! synthesize a collection"**, stated as an exception rather than by weakening the
+//! rule: exactly one new flat block-mapping sequence item with scalar fields, at a
+//! sequence-item boundary, every value spelled by [`crate::emit::choose_scalar`].
+//! It also promotes a bare `matches:` — an implicit null, and a zero-width scalar
+//! to the substrate (`PROGRESS.md`, R7) — into its first item, without which that
+//! key could never be targeted as a sequence at all. The marker column comes from
+//! the sequence's own dashes and the promotion's indentation step from the
+//! document's own block children; neither is ever a default while the document has
+//! anything to say.
+//!
+//! A verification layer came with them, and it is [`verify_field`]'s shape:
+//! [`verify_items`] re-resolves the sequence by its own path, requires the folded
+//! item count, compares every untouched item's subtree digest with itself, and
+//! requires an inserted item to be a flat mapping holding exactly the requested
+//! decoded fields — decoded twice, by the substrate and by
+//! [`crate::emit::decode`], exactly as an inserted entry is.
+//!
+//! One latent defect was found on the way and fixed:
+//! [`leading_comment_block_start`] used to step back **one byte** from a line
+//! start, which lands inside a `\r\n` and made the walk stop immediately, so no
+//! CRLF document ever had its leading comment block counted as owned. It was
+//! reachable by both [`item_own_lines`] and [`entry_owned_runs`], which is why the
+//! walk is now written once.
+//!
 //! # What is *not* here
 //!
 //! Cross-**document** and cross-**file** moves (plan section 8.4, a UI-phase
@@ -233,10 +276,10 @@ use crate::emit::{
     choose_scalar, decode, plain_scalar_is_ambiguous, preserve_scalar, reencode_in_place,
     DecodeError, NotReencodable, ScalarContext, ScalarPlan,
 };
-use crate::patch::path::{resolve, resolve_full, DocumentPath, PathError, PathSegment};
+use crate::patch::path::{resolve, resolve_full, DocumentPath, PathError, PathSegment, Resolved};
 use crate::syntax::{
-    ByteSpan, CollectionStyle, HazardKind, Node, NodeId, NodeKind, ScalarPresentation, ScalarStyle,
-    SyntaxError, SyntaxIndex, TriviaIndex,
+    ByteSpan, CollectionStyle, HazardKind, Node, NodeId, NodeKind, Punctuation, ScalarPresentation,
+    ScalarStyle, SyntaxError, SyntaxIndex, TriviaIndex, TriviaKind,
 };
 use crate::LineEnding;
 
@@ -530,6 +573,175 @@ impl ItemMove {
     } // End of function resulting_index()
 } // End of impl ItemMove
 
+/// One requested change: add a whole new **item** to a block sequence.
+///
+/// # The narrow exception, stated rather than the rule weakened
+///
+/// > No generic primitive may synthesize a collection. `InsertItem` may
+/// > synthesize exactly one new flat block-mapping sequence item with scalar
+/// > fields, at a sequence-item boundary.
+///
+/// That sentence is the whole licence, and every word of it is load-bearing.
+/// **One** item, so a caller cannot ask for a list. A **flat block mapping**, so
+/// nesting is impossible by construction — [`InsertItem::fields`] is a list of
+/// `(key, value)` pairs of decoded strings and there is no shape in which a value
+/// can be a collection. **Scalar** fields, every one of them spelled by
+/// [`crate::emit::choose_scalar`], the codec every other edit in this module
+/// uses; there is deliberately no second speller here, because a second speller
+/// is a second answer to "how is this value written". And **at a sequence-item
+/// boundary**, which is where [`insertion_point`] puts it: between two items'
+/// lines, never inside a node.
+///
+/// Caller-supplied YAML is not accepted, and that is the same decision the
+/// frontend boundary already makes for a match draft: spelling, indentation,
+/// structure and injection risk would move into the caller, which is exactly the
+/// place this crate exists to take them away from.
+///
+/// # Where the item goes
+///
+/// [`InsertItem::after`] names the item the new one is written after, **by its
+/// index in the original sequence**; [`InsertItem::new`] appends after the
+/// sequence's last item. Every insertion is therefore "after an existing item",
+/// which is what makes the insertion point a single well-defined offset — the
+/// same reason [`FieldInsert`] does not offer "before the first entry".
+///
+/// # Where the indentation comes from
+///
+/// **From the sequence's own items, and never from a default.** Every item's `-`
+/// marker must already sit at one column — the column the ownership layer
+/// records for that item's own [`crate::syntax::Punctuation::SequenceDash`] — and
+/// the new item is written at exactly that column, with its keys two columns
+/// further in. A sequence whose items disagree is refused with
+/// [`EditError::InconsistentSequenceIndentation`] rather than given a majority
+/// spelling: a majority is this crate deciding how the user's file should look.
+///
+/// The line ending is copied, never chosen ([`line_ending_before`]), exactly as
+/// [`FieldInsert`]'s is.
+///
+/// # The one collection this may bring into existence
+///
+/// A mapping entry written `matches:` with no value at all is an **implicit
+/// null**, and the substrate reports it as a zero-width scalar (`PROGRESS.md`,
+/// R7). Without an exception it could never be targeted as a sequence, so
+/// `InsertItem` **promotes** it into its first block-sequence item. The
+/// mapping-key indentation comes from the `matches:` line, the indentation step
+/// from the block children of the same surrounding mapping, then from the
+/// document's own dominant step, and only from the renderer's two-column default
+/// when the document offers no evidence at all. Any inline comment on the
+/// `matches:` line is preserved, because the insertion point is derived past it.
+///
+/// When the promotion would require deciding whether a **standalone comment**
+/// under the `matches:` line belongs to the absent value or to the next mapping
+/// entry, it is refused with
+/// [`EditError::ImplicitNullSequenceHasAmbiguousTrivia`].
+///
+/// # What is refused outright
+///
+/// A **flow** sequence, empty (`matches: []`) or not
+/// ([`EditError::FlowSequenceInsertionUnsupported`]). Converting flow to block
+/// would rewrite an existing collection's presentation, which is a change to
+/// bytes nobody asked about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsertItem {
+    /// The sequence the item joins, or the implicit-null mapping value that is
+    /// promoted into one.
+    sequence: DocumentPath,
+    /// The item it is written after, by index in the **original** sequence.
+    /// `None` appends after the sequence's last item.
+    after: Option<usize>,
+    /// The new item's fields, as decoded key/value pairs, in write order.
+    fields: Vec<(String, String)>,
+}
+
+impl InsertItem {
+    /// Builds an insertion that appends the item after the sequence's last item.
+    pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
+        InsertItem {
+            sequence,
+            after: None,
+            fields,
+        }
+    } // End of function new()
+
+    /// Builds an insertion that writes the item after the sequence's `index`-th
+    /// item, counted in the **original** document order.
+    pub fn after(
+        sequence: DocumentPath,
+        index: usize,
+        fields: Vec<(String, String)>,
+    ) -> InsertItem {
+        InsertItem {
+            sequence,
+            after: Some(index),
+            fields,
+        }
+    } // End of function after()
+
+    /// The sequence the item joins.
+    pub fn sequence(&self) -> &DocumentPath {
+        &self.sequence
+    }
+
+    /// The index of the item the new one is written after, or `None` for the end
+    /// of the sequence.
+    pub fn destination(&self) -> Option<usize> {
+        self.after
+    }
+
+    /// The new item's fields, as decoded key/value pairs, in write order.
+    pub fn fields(&self) -> &[(String, String)] {
+        &self.fields
+    }
+} // End of impl InsertItem
+
+/// One requested change: delete a whole **sequence item**, trivia and all.
+///
+/// # It is [`ItemMove`]'s lift half, with no landing
+///
+/// Not "the same idea as", and not "an implementation that agrees with": the
+/// envelope derivation is [`lift_item`] and the join the deletion opens is
+/// [`block_the_source_close_would_feed`], and [`plan_move`] calls both of those
+/// same functions. A removal that deleted a different set of bytes from the ones
+/// a move lifts would be a second answer to a question `PROGRESS.md` D2o already
+/// spent a whole phase on, and two answers are one more than the document has.
+///
+/// # What travels with it
+///
+/// Everything [`FieldRemoval`] takes for a mapping entry, derived by the same
+/// call: the ownership hull widened to whole lines, with the **file's** own
+/// comments and the blank runs beside them punched out. So the item's leading
+/// comment block and its inline comment go with it — leaving them behind would
+/// strand a comment describing something that is no longer there — while a
+/// comment the blank-line rule gives to the file stays exactly where it is,
+/// byte-identical, and so does every byte the surviving neighbours own.
+///
+/// # Removing the only item is refused, by name
+///
+/// [`EditError::RemovalWouldEmptyTheSequence`]. Writing `matches: []` in its
+/// place would synthesize a collection *and* choose a presentation for it;
+/// leaving `matches:` bare would turn a sequence into YAML null. Neither is
+/// "remove one existing item", and picking either would be this crate deciding
+/// what the user's file means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoveItem {
+    /// The sequence item to delete, addressed as `sequence[index]` — the same
+    /// one path shape [`ItemMove::item`] takes, because this is that operation's
+    /// lift half.
+    item: DocumentPath,
+}
+
+impl RemoveItem {
+    /// Builds a removal of the sequence item `item` names.
+    pub fn new(item: DocumentPath) -> RemoveItem {
+        RemoveItem { item }
+    }
+
+    /// The sequence item being deleted.
+    pub fn item(&self) -> &DocumentPath {
+        &self.item
+    }
+} // End of impl RemoveItem
+
 /// One requested change of any kind, for [`apply_edits`].
 ///
 /// The batch protocol is written once, over this enum, rather than once per
@@ -547,6 +759,10 @@ pub enum DocumentEdit {
     RemoveField(FieldRemoval),
     /// Relocate a whole sequence item inside its own sequence.
     MoveItem(ItemMove),
+    /// Add one new flat block-mapping item to a sequence.
+    InsertItem(InsertItem),
+    /// Delete one whole item from a sequence.
+    RemoveItem(RemoveItem),
 }
 
 impl From<ScalarEdit> for DocumentEdit {
@@ -570,6 +786,18 @@ impl From<FieldRemoval> for DocumentEdit {
 impl From<ItemMove> for DocumentEdit {
     fn from(edit: ItemMove) -> DocumentEdit {
         DocumentEdit::MoveItem(edit)
+    }
+}
+
+impl From<InsertItem> for DocumentEdit {
+    fn from(edit: InsertItem) -> DocumentEdit {
+        DocumentEdit::InsertItem(edit)
+    }
+}
+
+impl From<RemoveItem> for DocumentEdit {
+    fn from(edit: RemoveItem) -> DocumentEdit {
+        DocumentEdit::RemoveItem(edit)
     }
 }
 
@@ -931,6 +1159,25 @@ pub enum EditError {
     ///
     /// It costs the synthetic corpus one attempt, in the fixture written for it,
     /// and the real corpus nothing.
+    ///
+    /// # A second condition since Phase 2b-2c-1, and why it is the same variant
+    ///
+    /// [`plan_item_removal`] also reports it for the **source-gap join** a lift
+    /// opens: what followed the deleted item rises to sit under what preceded it,
+    /// and a line that lands at or past a block's body column directly under that
+    /// block's content becomes part of the value. The two conditions are the same
+    /// sentence read from either side of the deletion — *the bytes this removal
+    /// leaves behind would join a block scalar* — which is what this variant's own
+    /// summary line already said, and [`block_absorbing_a_line`] is the one
+    /// implementation both consult. A move reports the identical condition as
+    /// [`EditError::MoveWouldExtendABlockScalar`] at [`MoveSeam::SourceCloses`],
+    /// because a move has three other seams to tell it apart from.
+    ///
+    /// A **mapping entry's** removal does not ask it: its neighbours' keys all sit
+    /// at one column, shallower than any block body inside the entry above, so the
+    /// line that rises always ends the block instead of extending it. A sequence
+    /// item's next-door neighbour can be a leading comment block at a column the
+    /// user chose, and that is the case this reaches.
     RemovalWouldExtendABlockScalar {
         /// Position of the edit in the requested batch.
         edit: usize,
@@ -975,12 +1222,15 @@ pub enum EditError {
         /// The mapping that would be emptied.
         mapping: NodeId,
     },
-    /// A move named something that is not an item of a **block sequence**.
+    /// A move or a removal named something that is not an item of a **block
+    /// sequence**.
     ///
-    /// [`ItemMove`] relocates a sequence item, so its path must end in an index
-    /// segment whose parent is a sequence. A mapping entry is a different
-    /// operation — it has a key, and moving it is a question about key order
-    /// that this phase has not measured.
+    /// [`ItemMove`] relocates a sequence item and [`RemoveItem`] deletes one, so
+    /// the path must end in an index segment whose parent is a sequence — both go
+    /// through [`editable_sequence_item`], which is why they cannot disagree about
+    /// what is addressable. A mapping entry is a different operation: it has a
+    /// key, so removing it is [`FieldRemoval`] and moving it is a question about
+    /// key order that no phase has measured.
     NotASequenceItem {
         /// Position of the edit in the requested batch.
         edit: usize,
@@ -1162,6 +1412,143 @@ pub enum EditError {
         block: NodeId,
         /// Which of the joins the move creates would feed it.
         seam: MoveSeam,
+    },
+    /// An insertion or a removal named something that is not a **sequence**.
+    ///
+    /// [`InsertItem`] takes the sequence the item joins, so its path must name a
+    /// block sequence — or the one thing this step may promote into one, a
+    /// mapping value written with no value at all (`PROGRESS.md`, R7). A mapping,
+    /// a scalar with bytes of its own, or a sequence item is a different
+    /// operation.
+    NotASequence {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The node the path named.
+        node: NodeId,
+        /// What that node actually is.
+        kind: NodeKind,
+    },
+    /// The item to be inserted holds no fields at all.
+    ///
+    /// A block-mapping sequence item with no entries has no YAML spelling: `- `
+    /// alone is a null item, which is a different document rather than a smaller
+    /// one. The same reasoning [`EditError::LastEntryOfMapping`] makes about
+    /// emptying a mapping, made before anything is written rather than after.
+    InsertedItemHasNoFields {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+    },
+    /// Two of the inserted item's fields share a key.
+    ///
+    /// The item would be born with a duplicate mapping key, which makes every
+    /// path through it ambiguous (`PathError::DuplicateKey`) and raises
+    /// [`HazardKind::DuplicateMappingKey`] — so the item would be uneditable the
+    /// moment it landed. Carries the field's **position**, never its key text:
+    /// the real corpus is private (`CLAUDE.md` section 1).
+    DuplicateInsertedField {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Position of the offending field in the requested field list.
+        field: usize,
+    },
+    /// One of the inserted item's keys is not a key this step will write.
+    ///
+    /// Two shapes are refused, and both would produce something no caller means:
+    /// an **empty** key, which spells as `'': value` and reads as a mapping entry
+    /// with no name; and a key holding a **line break**, which has no block
+    /// spelling in key position ([`crate::emit::ScalarContext::can_hold_a_block_scalar`]
+    /// is false for a key) and would come back as a double-quoted `"a\nb"`.
+    ///
+    /// Carries the field's position, never its key text (`CLAUDE.md` section 1).
+    InvalidInsertedFieldKey {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Position of the offending field in the requested field list.
+        field: usize,
+    },
+    /// The sequence is bracket-delimited, or sits inside something that is.
+    ///
+    /// **A deliberate, documented refusal.** `matches: []` and
+    /// `triggers: [":a", ":b"]` have no line of their own to add an item to, so
+    /// inserting there is a question about commas and spacing rather than about
+    /// lines — and the tempting answer, rewriting the collection as a block one,
+    /// changes the presentation of bytes the user never asked about. It is the
+    /// same argument [`EditError::FlowCollection`] makes for a mapping entry,
+    /// named separately because an *empty* flow sequence is the shape a caller
+    /// most plausibly expects to be able to add to.
+    FlowSequenceInsertionUnsupported {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The flow sequence, or the sequence inside one.
+        sequence: NodeId,
+    },
+    /// The sequence's items do not all start at one column.
+    ///
+    /// An inserted item's indentation comes from its siblings and from nothing
+    /// else, so a sequence that cannot agree with itself about where its `-`
+    /// markers go has no answer to give. **Never a majority spelling**: a
+    /// majority is this crate choosing how the user's file should look, which is
+    /// the one thing it exists not to do. The twin of
+    /// [`EditError::InconsistentEntryIndentation`], measured on the ownership
+    /// layer's own dash positions rather than re-lexed.
+    ///
+    /// **Argued unreachable, and kept anyway.** YAML ends a block sequence at the
+    /// first line shallower than its items and reads a deeper `-` as content of
+    /// the item above it, so a document whose dashes disagree is not one sequence
+    /// and the substrate refuses it before this engine sees a node —
+    /// `a_sequence_cannot_disagree_with_itself_about_its_dash_column` in
+    /// `tests/patch_item.rs` is the record of that. It stays because "the
+    /// substrate always agrees" is a claim about a pre-1.0 dependency
+    /// (`PROGRESS.md`, R1), and a named refusal costs nothing while the guess it
+    /// replaces would cost a user their indentation.
+    InconsistentSequenceIndentation {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The sequence whose items disagree.
+        sequence: NodeId,
+        /// The column its first item's dash sits at.
+        expected: usize,
+        /// The column that disagreed with it.
+        found: usize,
+    },
+    /// Promoting this implicit null would have to decide who owns a comment.
+    ///
+    /// The one refusal the promotion carries. A mapping entry written `matches:`
+    /// with a **standalone comment** on the line below it is genuinely ambiguous:
+    /// under plan section 6.2's rule 1 that comment introduces whatever comes
+    /// next, and materialising a sequence under the key changes what comes next.
+    /// Deciding it either way would re-attribute a comment the user wrote, which
+    /// is precisely the change [`VerificationFailure::CommentOwnershipChanged`]
+    /// exists to catch after the fact — so it is refused before the fact instead.
+    ///
+    /// A comment separated by a **blank line** is not ambiguous: rule 2 gives it
+    /// to the file, and the file keeps it wherever the insertion lands.
+    ImplicitNullSequenceHasAmbiguousTrivia {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the new item would have gone.
+        at: usize,
+    },
+    /// Removing this item would leave the sequence with none.
+    ///
+    /// The sequence's counterpart of [`EditError::LastEntryOfMapping`], and it is
+    /// refused for the reason that one is: there is no way to spell the result
+    /// that is still "remove one existing item". Writing `matches: []` would
+    /// synthesize a collection **and** choose a presentation for it, which no
+    /// generic primitive may do; leaving `matches:` bare would turn the sequence
+    /// into YAML null, which changes what the file means rather than what it
+    /// contains. Emptying a sequence is a decision about the *entry that holds
+    /// it* — remove that instead.
+    ///
+    /// A **batch** lands here too, and by the same reasoning as
+    /// [`EditError::LastEntryOfMapping`]: two removals that are individually
+    /// legal can still take a two-item sequence down to none, and only the folded
+    /// claim knows how many removals one sequence received.
+    RemovalWouldEmptyTheSequence {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The sequence that would be emptied.
+        sequence: NodeId,
     },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
@@ -1771,6 +2158,50 @@ impl fmt::Display for EditError {
                  block scalar at node {}",
                 block.get()
             ),
+            EditError::NotASequence { edit, node, kind } => write!(
+                formatter,
+                "edit {edit}: node {} is a {kind:?}, not a block sequence",
+                node.get()
+            ),
+            EditError::InsertedItemHasNoFields { edit } => write!(
+                formatter,
+                "edit {edit}: a new sequence item must hold at least one field"
+            ),
+            EditError::DuplicateInsertedField { edit, field } => write!(
+                formatter,
+                "edit {edit}: field {field} of the new item repeats a key an earlier field holds"
+            ),
+            EditError::InvalidInsertedFieldKey { edit, field } => write!(
+                formatter,
+                "edit {edit}: field {field} of the new item has a key this step will not write"
+            ),
+            EditError::FlowSequenceInsertionUnsupported { edit, sequence } => write!(
+                formatter,
+                "edit {edit}: sequence {} is a flow collection, or inside one; inserting an item \
+                 there is refused",
+                sequence.get()
+            ),
+            EditError::InconsistentSequenceIndentation {
+                edit,
+                sequence,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "edit {edit}: sequence {} has item dashes at columns {expected} and {found}, so a \
+                 new item has no indentation to inherit",
+                sequence.get()
+            ),
+            EditError::ImplicitNullSequenceHasAmbiguousTrivia { edit, at } => write!(
+                formatter,
+                "edit {edit}: a standalone comment follows byte {at}, so promoting the empty value \
+                 there would have to decide who owns it"
+            ),
+            EditError::RemovalWouldEmptyTheSequence { edit, sequence } => write!(
+                formatter,
+                "edit {edit}: removing it would leave sequence {} with no items",
+                sequence.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -2043,6 +2474,46 @@ pub fn move_item(
     apply_edits(source, &[DocumentEdit::MoveItem(edit)])
 } // End of function move_item()
 
+/// Adds one new flat block-mapping item to a sequence, and verifies the result.
+///
+/// `after` names the item the new one is written after, **by its index in the
+/// original sequence**; `None` appends after the last item. `fields` are decoded
+/// key/value pairs, spelled by [`crate::emit::choose_scalar`]. See [`InsertItem`]
+/// for the narrow exception this operation is, and for the one implicit-null
+/// value it may promote into a sequence.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn insert_item(
+    source: &str,
+    sequence: &DocumentPath,
+    after: Option<usize>,
+    fields: &[(String, String)],
+) -> Result<PatchedDocument, EditError> {
+    let edit = match after {
+        None => InsertItem::new(sequence.clone(), fields.to_vec()),
+        Some(index) => InsertItem::after(sequence.clone(), index, fields.to_vec()),
+    };
+    apply_edits(source, &[DocumentEdit::InsertItem(edit)])
+} // End of function insert_item()
+
+/// Deletes the sequence item `item` names, returning the verified candidate.
+///
+/// A convenience over [`apply_edits`] with a single-element batch. See
+/// [`RemoveItem`] for what travels with the item and why it is [`ItemMove`]'s
+/// lift half rather than a second implementation of one.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn remove_item(source: &str, item: &DocumentPath) -> Result<PatchedDocument, EditError> {
+    apply_edits(
+        source,
+        &[DocumentEdit::RemoveItem(RemoveItem::new(item.clone()))],
+    )
+} // End of function remove_item()
+
 /// Applies a batch of edits of **any kind** to one document and verifies it.
 ///
 /// This is the batch protocol itself, and [`apply_scalar_edits`] is a wrapper
@@ -2073,6 +2544,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     let mut permitted = Vec::new();
     let mut notes = Vec::new();
     let mut expectations = Vec::new();
+    let mut sequences = Vec::new();
     let mut guards = Vec::new();
     let mut rewritten = Vec::new();
     let mut moves = Vec::new();
@@ -2084,6 +2556,12 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             }
             DocumentEdit::RemoveField(removal) => {
                 plan_removal(source, &index, &trivia, position, removal)?
+            }
+            DocumentEdit::InsertItem(insert) => {
+                plan_item_insertion(source, &index, &trivia, position, insert)?
+            }
+            DocumentEdit::RemoveItem(removal) => {
+                plan_item_removal(source, &index, &trivia, position, removal)?
             }
             DocumentEdit::MoveItem(relocation) => {
                 // A move is verified against the original document plus one
@@ -2106,6 +2584,9 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
         }
         if let Some(expectation) = planned.expectation {
             expectations.push(expectation);
+        }
+        if let Some(expectation) = planned.items {
+            sequences.push(expectation);
         }
         guards.extend(planned.guards);
         if let Some(node) = planned.rewritten {
@@ -2142,7 +2623,13 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     for guard in &guards {
         guard.check(source, &index, &trivia)?;
     }
+    // The nodes a **kept** sequence item may legitimately differ at. A scalar
+    // edit rewrites one; a structural edit rewrites a whole mapping. Collected
+    // before the field claims are folded, because folding consumes them.
+    let mut touched = rewritten.clone();
+    touched.extend(expectations.iter().map(|claim| claim.mapping_id));
     let expectations = fold_expectations(&index, expectations, &rewritten)?;
+    let sequences = fold_item_expectations(&index, sequences, &touched)?;
 
     let candidate = splice(source, &replacements);
     verify(
@@ -2155,6 +2642,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             trivia: &trivia,
             edits,
             fields: &expectations,
+            items: &sequences,
             moves: &moves,
         },
     )?;
@@ -2178,6 +2666,8 @@ struct PlannedEdit {
     note: Option<PresentationNote>,
     /// What `verify` must find in the candidate, for a structural edit.
     expectation: Option<PendingField>,
+    /// What `verify` must find in the candidate, for a sequence-item edit.
+    items: Option<PendingItem>,
     /// What `verify` must find in the candidate, for a move.
     moved: Option<MoveExpectation>,
     /// Checks on the planned spans, stated in terms of the **original** index.
@@ -2444,6 +2934,7 @@ fn plan_one(
         permitted: permitted_spans(node, presentation),
         note,
         expectation: None,
+        items: None,
         moved: None,
         guards: Vec::new(),
         rewritten: Some(resolved.value),
@@ -2731,6 +3222,7 @@ fn plan_insertion(
         permitted: vec![ByteSpan::new(point, point)],
         note: None,
         expectation: Some(expectation),
+        items: None,
         moved: None,
         guards: vec![StructuralGuard::Insertion { at: point }],
         rewritten: None,
@@ -2819,6 +3311,7 @@ fn plan_removal(
         permitted: runs.clone(),
         note: None,
         expectation: Some(expectation),
+        items: None,
         moved: None,
         guards: vec![StructuralGuard::Removal {
             runs,
@@ -2922,6 +3415,154 @@ struct RemovalEnvelope {
     runs: Vec<ByteSpan>,
 }
 
+/// One sequence-item edit's claim about the sequence it changes, before the
+/// splice.
+///
+/// Deliberately **not** the finished expectation, for the reason [`PendingField`]
+/// is not one: a batch may change one sequence more than once, and two
+/// independently-built expectations would each demand "one item more, or fewer,
+/// than before" and contradict each other. [`fold_item_expectations`] merges every
+/// claim about the same sequence into one ordered list of slots.
+struct PendingItem {
+    /// Position of the edit in the requested batch.
+    edit: usize,
+    /// The sequence the edit changes. Re-resolved against the candidate by its
+    /// own path — which is also how a **promotion** is checked, because the path
+    /// that named an implicit null in the original names the new sequence in the
+    /// candidate.
+    sequence: DocumentPath,
+    /// Its identifier in the **original** index, which is what groups claims.
+    /// For a promotion this is the zero-width scalar's, because there is no
+    /// sequence yet.
+    sequence_id: NodeId,
+    /// Its items in the original index, in source order. Empty for a promotion.
+    items: Vec<NodeId>,
+    /// The original index of an item being removed.
+    removed: Option<usize>,
+    /// How many original items sit **above** an inserted one, and the fields it
+    /// must hold.
+    ///
+    /// A count rather than an anchor index, because that is the number the fold
+    /// needs and it is the same number for all three ways of asking: `after: Some(k)`
+    /// gives `k + 1`, `after: None` gives the item count, and a promotion gives 0.
+    inserted: Option<(usize, Vec<(String, String)>)>,
+}
+
+/// One position of a sequence, as the batch intends it.
+enum ItemSlot {
+    /// An item the batch did not name, with the digest it had in the original
+    /// document — or `None` when another edit in the same batch legitimately
+    /// rewrites something inside it, exactly as [`FieldExpectation::siblings`]
+    /// records a sibling a scalar edit touches.
+    Kept(Option<String>),
+    /// The item an insertion writes: a flat mapping holding exactly these decoded
+    /// key/value pairs, in this order.
+    Inserted(Vec<(String, String)>),
+}
+
+/// What [`verify`] must find in the candidate for one changed sequence.
+///
+/// Recorded **before** the splice, from the original index, so the candidate is
+/// compared against what the document said rather than against what the planner
+/// believed.
+struct ItemExpectation {
+    /// Position of the first edit that changed this sequence.
+    edit: usize,
+    /// The sequence. Re-resolved against the candidate by its own path.
+    sequence: DocumentPath,
+    /// Every position the sequence must hold afterwards, in order.
+    slots: Vec<ItemSlot>,
+}
+
+/// Merges every claim about one sequence into a single ordered expectation.
+///
+/// # The fold is the byte layout, stated as positions
+///
+/// One pass over the **original** item positions, emitting the insertions
+/// anchored above each one and then the item itself unless a removal took it:
+///
+/// ```text
+/// for i in 0..=items:
+///     every insertion whose `before` count is i
+///     item i, unless it was removed
+/// ```
+///
+/// That is not an arbitrary convention — it is what the splice actually produces.
+/// An insertion's point is just past the anchor item's line and a removal's runs
+/// begin at the start of the removed item's first line, so an insertion anchored
+/// after an item that is **itself** removed lands exactly where that item was, and
+/// the loop gives that answer without a special case.
+///
+/// Two of the batches this arithmetic could describe never reach it, because
+/// [`apply_edits`] rejects two spans that **share a start**
+/// ([`EditError::OverlappingEdits`]): two insertions with the same `before` count,
+/// and an insertion anchored after item *k* when item *k + 1* is also being
+/// removed. The second is a real ambiguity rather than an over-strict rule — the
+/// new text could land before or after the deleted region, and nothing in the
+/// request says which.
+///
+/// # Errors
+///
+/// [`EditError::RemovalWouldEmptyTheSequence`] when the folded claims would leave
+/// a sequence with no items. Each removal was planned against the original item
+/// count, so only the folded claim can see two legal removals emptying a two-item
+/// sequence between them.
+fn fold_item_expectations(
+    index: &SyntaxIndex,
+    pending: Vec<PendingItem>,
+    touched: &[NodeId],
+) -> Result<Vec<ItemExpectation>, EditError> {
+    let mut folded: Vec<(NodeId, PendingItem, Vec<PendingItem>)> = Vec::new();
+    for claim in pending {
+        match folded
+            .iter_mut()
+            .find(|(id, _, _)| *id == claim.sequence_id)
+        {
+            Some(slot) => slot.2.push(claim),
+            None => folded.push((claim.sequence_id, claim, Vec::new())),
+        }
+    } // End of the loop that groups every claim by the sequence it changes
+
+    let mut expectations = Vec::new();
+    for (sequence_id, first, rest) in folded {
+        let claims: Vec<&PendingItem> = std::iter::once(&first).chain(rest.iter()).collect();
+        let items = first.items.clone();
+        let mut slots = Vec::new();
+        for at in 0..=items.len() {
+            for claim in &claims {
+                if let Some((before, fields)) = &claim.inserted {
+                    if *before == at {
+                        slots.push(ItemSlot::Inserted(fields.clone()));
+                    }
+                }
+            } // End of the loop over the insertions anchored above this position
+            let Some(item) = items.get(at) else {
+                continue;
+            };
+            if claims.iter().any(|claim| claim.removed == Some(at)) {
+                continue;
+            }
+            let inside = touched
+                .iter()
+                .any(|node| in_subtree(index, *item, *node) || *node == *item);
+            slots.push(ItemSlot::Kept((!inside).then(|| digest(index, *item))));
+        } // End of the loop that replays the batch over the original positions
+
+        if slots.is_empty() {
+            return Err(EditError::RemovalWouldEmptyTheSequence {
+                edit: first.edit,
+                sequence: sequence_id,
+            });
+        }
+        expectations.push(ItemExpectation {
+            edit: first.edit,
+            sequence: first.sequence.clone(),
+            slots,
+        });
+    } // End of the loop that turns each sequence's claims into one expectation
+    Ok(expectations)
+} // End of function fold_item_expectations()
+
 /// What [`verify`] must find in the candidate after a move.
 ///
 /// Recorded **before** the splice and derived from the original index, so the
@@ -3006,60 +3647,15 @@ fn plan_move(
     position: usize,
     edit: &ItemMove,
 ) -> Result<PlannedEdit, EditError> {
-    let resolved = resolve_full(index, edit.item()).map_err(|error| EditError::Unresolvable {
-        edit: position,
-        error,
-    })?;
-    let item = resolved.value;
-    let Some(parent) = resolved.parent else {
-        return Err(EditError::NotASequenceItem {
-            edit: position,
-            node: item,
-            kind: NodeKind::Document,
-        });
-    };
-    let sequence = index.node(parent).ok_or(EditError::MalformedSpan {
-        edit: position,
-        at: ByteSpan::default(),
-    })?;
-    if sequence.kind != NodeKind::Sequence {
-        return Err(EditError::NotASequenceItem {
-            edit: position,
-            node: item,
-            kind: sequence.kind,
-        });
-    }
-    // The gate, before anything is derived and before a byte is read.
-    if let Some(hazard) = trivia.disqualifying_hazard(index, sequence.id) {
-        return Err(EditError::Refused {
-            edit: position,
-            node: sequence.id,
-            hazard: hazard.kind,
-            at: hazard.span,
-        });
-    }
-    if sequence.collection_style == Some(CollectionStyle::Flow)
-        || is_inside_a_flow_collection(index, sequence)
-    {
-        return Err(EditError::FlowCollection {
-            edit: position,
-            node: sequence.id,
-        });
-    }
-    let sequence_path = containing_path(edit.item()).ok_or(EditError::NotASequenceItem {
-        edit: position,
-        node: item,
-        kind: sequence.kind,
-    })?;
+    let target = editable_sequence_item(index, trivia, position, edit.item())?;
+    let SequenceItem {
+        sequence,
+        path: sequence_path,
+        item,
+        index: from,
+    } = target;
 
     let items = &sequence.children;
-    let Some(from) = items.iter().position(|id| *id == item) else {
-        return Err(EditError::NotASequenceItem {
-            edit: position,
-            node: item,
-            kind: sequence.kind,
-        });
-    };
     // Where the item ends up, counted in the sequence **after** it has been taken
     // out. The arithmetic itself is `ItemMove::resulting_index`, so that a caller
     // asking "which item is the moved one now?" after the commit gets its answer
@@ -3081,13 +3677,9 @@ fn plan_move(
         });
     }
 
-    // The source half. Every refusal a removal makes, made here by the same call.
-    let envelope = removal_envelope(source, index, trivia, position, {
-        // A sequence item has no key half: the `-` that introduces it is trivia
-        // the item itself owns (`PROGRESS.md`, D2d), so one subtree extent is the
-        // whole of it.
-        trivia.subtree_extent(index, item)
-    })?;
+    // The source half. Every refusal a removal makes, made here by the same call
+    // [`RemoveItem`] makes.
+    let envelope = lift_item(source, index, trivia, position, item)?;
 
     // The destination half. The front of the sequence is the start of the first
     // item's own **hull**, so a leading comment block belonging to that item stays
@@ -3152,19 +3744,15 @@ fn plan_move(
 
     let body_offset = index.preamble().body_offset;
     // Seam 1 — the source closes. What followed the item rises to sit under what
-    // preceded it. When the removal preserves something, the preserved lines are
-    // what rises, and `removal_envelope` has already refused that case by name.
-    if envelope.preserved.is_empty() {
-        if let Some(column) = first_non_blank_column_from(source, envelope.hull.end, body_offset) {
-            if let Some(block) = block_absorbing_a_line(source, index, envelope.hull.start, column)
-            {
-                return Err(EditError::MoveWouldExtendABlockScalar {
-                    edit: position,
-                    block,
-                    seam: MoveSeam::SourceCloses,
-                });
-            }
-        }
+    // preceded it. This is the one seam a plain removal creates as well, so it is
+    // the same call [`plan_item_removal`] makes rather than a second statement of
+    // the condition.
+    if let Some(block) = block_the_source_close_would_feed(source, index, &envelope, body_offset) {
+        return Err(EditError::MoveWouldExtendABlockScalar {
+            edit: position,
+            block,
+            seam: MoveSeam::SourceCloses,
+        });
     }
     // Seam 2 — the arrival lands. The item's own first non-blank line comes to sit
     // under whatever precedes the destination.
@@ -3227,6 +3815,7 @@ fn plan_move(
         permitted,
         note: None,
         expectation: None,
+        items: None,
         moved: Some(MoveExpectation {
             edit: position,
             sequence: sequence_path,
@@ -3249,6 +3838,681 @@ fn plan_move(
         rewritten: None,
     })
 } // End of function plan_move()
+
+// ---------------------------------------------------------------------------
+// Sequence items: the lift both a move and a removal make, and the insert
+// ---------------------------------------------------------------------------
+
+/// A sequence item, resolved and checked exactly as a move checks one.
+///
+/// Factored out of [`plan_move`] when [`RemoveItem`] arrived, and factored out
+/// **whole**: the four gates, their order and the errors they report are the
+/// move's own, so a removal cannot come to a different conclusion about which
+/// items are addressable. That is the same argument [`removal_envelope`] makes
+/// for the envelope one step further down.
+struct SequenceItem<'index> {
+    /// The block sequence the item belongs to.
+    sequence: &'index Node,
+    /// The sequence's own path, for re-resolution against the candidate.
+    path: DocumentPath,
+    /// The item node in the **original** index.
+    item: NodeId,
+    /// Its position in the sequence's child list.
+    index: usize,
+}
+
+/// Resolves a sequence item and checks it is one this engine may lift.
+///
+/// The gates, in the order [`plan_move`] has always asked them and for the
+/// reasons it records:
+///
+/// 1. the path resolves, and names a node with a parent;
+/// 2. that parent is a **sequence**;
+/// 3. `TriviaIndex::disqualifying_hazard` says nothing about **the whole
+///    sequence** — lifting an item changes the sequence's own shape, so a hazard
+///    anywhere in it makes the change unreasonable locally, exactly as
+///    [`editable_mapping`] argues for an entry's mapping;
+/// 4. neither the sequence nor any ancestor is bracket-delimited;
+/// 5. the item really is one of the sequence's children.
+///
+/// # Errors
+///
+/// [`EditError::Unresolvable`], [`EditError::NotASequenceItem`],
+/// [`EditError::Refused`], [`EditError::FlowCollection`] and
+/// [`EditError::MalformedSpan`].
+fn editable_sequence_item<'index>(
+    index: &'index SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    path: &DocumentPath,
+) -> Result<SequenceItem<'index>, EditError> {
+    let resolved = resolve_full(index, path).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let item = resolved.value;
+    let Some(parent) = resolved.parent else {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: NodeKind::Document,
+        });
+    };
+    let sequence = index.node(parent).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    if sequence.kind != NodeKind::Sequence {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: sequence.kind,
+        });
+    }
+    // The gate, before anything is derived and before a byte is read.
+    if let Some(hazard) = trivia.disqualifying_hazard(index, sequence.id) {
+        return Err(EditError::Refused {
+            edit: position,
+            node: sequence.id,
+            hazard: hazard.kind,
+            at: hazard.span,
+        });
+    }
+    if sequence.collection_style == Some(CollectionStyle::Flow)
+        || is_inside_a_flow_collection(index, sequence)
+    {
+        return Err(EditError::FlowCollection {
+            edit: position,
+            node: sequence.id,
+        });
+    }
+    let sequence_path = containing_path(path).ok_or(EditError::NotASequenceItem {
+        edit: position,
+        node: item,
+        kind: sequence.kind,
+    })?;
+    let Some(at) = sequence.children.iter().position(|id| *id == item) else {
+        return Err(EditError::NotASequenceItem {
+            edit: position,
+            node: item,
+            kind: sequence.kind,
+        });
+    };
+    Ok(SequenceItem {
+        sequence,
+        path: sequence_path,
+        item,
+        index: at,
+    })
+} // End of function editable_sequence_item()
+
+/// The envelope a sequence item's **lift** takes.
+///
+/// **The one derivation, shared by [`plan_move`] and [`plan_item_removal`]**, and
+/// the reason [`RemoveItem`] is documented as a move's lift half rather than as
+/// something that happens to agree with one. A removal that deleted a different
+/// set of bytes from the ones a move relocates would be a second answer to the
+/// question `PROGRESS.md` D2o settled, and the whole point of a run-based
+/// envelope is that there is one.
+///
+/// A sequence item has **no key half**: the `-` that introduces it is trivia the
+/// item itself owns (`PROGRESS.md`, D2d), so one subtree extent is the whole of
+/// it, and [`removal_envelope`] does the rest — whole lines, the file's own
+/// comments and their blank runs punched out, and every residual shape refused by
+/// name.
+///
+/// # Errors
+///
+/// Everything [`removal_envelope`] refuses.
+fn lift_item(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    item: NodeId,
+) -> Result<RemovalEnvelope, EditError> {
+    removal_envelope(
+        source,
+        index,
+        trivia,
+        position,
+        trivia.subtree_extent(index, item),
+    )
+} // End of function lift_item()
+
+/// The block scalar the join a lift opens would feed, if there is one.
+///
+/// **The source-gap join, written once.** Lifting bytes out of a document makes
+/// what followed them rise to sit under what preceded them, and a line that lands
+/// at or past a block scalar's body column directly under that block's content
+/// stops being a line and becomes part of the value — a value nobody edited. The
+/// condition is [`block_absorbing_a_line`]'s, asked at the seam the lift creates.
+///
+/// Both callers ask it and each reports it in its own vocabulary:
+/// [`plan_move`] as [`EditError::MoveWouldExtendABlockScalar`] at
+/// [`MoveSeam::SourceCloses`], [`plan_item_removal`] as
+/// [`EditError::RemovalWouldExtendABlockScalar`]. The *condition* is shared; only
+/// the name of the operation that provoked it is not.
+///
+/// `None` when the envelope preserves something, because then the preserved lines
+/// are what rises and [`removal_envelope`] has already refused that case by name
+/// through [`block_scalar_the_kept_bytes_would_join`].
+fn block_the_source_close_would_feed(
+    source: &str,
+    index: &SyntaxIndex,
+    envelope: &RemovalEnvelope,
+    body_offset: usize,
+) -> Option<NodeId> {
+    if !envelope.preserved.is_empty() {
+        return None;
+    }
+    let column = first_non_blank_column_from(source, envelope.hull.end, body_offset)?;
+    block_absorbing_a_line(source, index, envelope.hull.start, column)
+} // End of function block_the_source_close_would_feed()
+
+/// Plans a sequence-item removal, or refuses it.
+///
+/// **The lift half of [`plan_move`] with no landing**, and deliberately not one
+/// line more than that. The order of the steps is the contract:
+///
+/// 1. address the item and ask the gate, through [`editable_sequence_item`] —
+///    the move's own four checks, in the move's own order;
+/// 2. establish that the sequence has an item to spare
+///    ([`EditError::RemovalWouldEmptyTheSequence`]);
+/// 3. derive the envelope, through [`lift_item`] — the move's own call;
+/// 4. refuse the one join the deletion opens, through
+///    [`block_the_source_close_would_feed`] — the move's own condition.
+///
+/// Each envelope run becomes its own replacement with empty text, exactly as
+/// [`plan_removal`] emits a mapping entry's, so the comments and blank runs the
+/// item's envelope owns go with it and everything the surviving neighbours own
+/// comes out byte-identical.
+fn plan_item_removal(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &RemoveItem,
+) -> Result<PlannedEdit, EditError> {
+    let target = editable_sequence_item(index, trivia, position, edit.item())?;
+    if target.sequence.children.len() < 2 {
+        return Err(EditError::RemovalWouldEmptyTheSequence {
+            edit: position,
+            sequence: target.sequence.id,
+        });
+    }
+
+    let envelope = lift_item(source, index, trivia, position, target.item)?;
+    let body_offset = index.preamble().body_offset;
+    if let Some(block) = block_the_source_close_would_feed(source, index, &envelope, body_offset) {
+        return Err(EditError::RemovalWouldExtendABlockScalar {
+            edit: position,
+            block,
+        });
+    }
+
+    let runs = envelope.runs;
+    Ok(PlannedEdit {
+        replacements: runs
+            .iter()
+            .map(|run| Replacement {
+                span: *run,
+                text: String::new(),
+            })
+            .collect(),
+        permitted: runs.clone(),
+        note: None,
+        expectation: None,
+        items: Some(PendingItem {
+            edit: position,
+            sequence: target.path,
+            sequence_id: target.sequence.id,
+            items: target.sequence.children.clone(),
+            removed: Some(target.index),
+            inserted: None,
+        }),
+        moved: None,
+        // The same guard a mapping entry's removal carries, with the item as both
+        // halves of the entry: a sequence item has no key. `RemovesTheEntry` is
+        // the kind that also bounds every run by [`entry_owned_runs`], which is
+        // the only layer that can see a deleted **blank** line — a move is bounded
+        // by `verify` instead, and a removal has no `verify`-side bound of its own.
+        guards: vec![StructuralGuard::Removal {
+            runs,
+            entry: (target.item, target.item),
+            kind: EnvelopeKind::RemovesTheEntry,
+        }],
+        rewritten: None,
+    })
+} // End of function plan_item_removal()
+
+/// Plans a sequence-item insertion, or refuses it.
+///
+/// The order of the checks is the contract, exactly as in [`plan_one`] and
+/// [`plan_insertion`]: address the target, **ask the gate**, establish that the
+/// shape is one this step understands, validate the request, and only then render
+/// anything.
+///
+/// 1. resolve the path and ask the gate about the node it names;
+/// 2. decide which of the two shapes it is — an existing block sequence, or the
+///    one implicit-null mapping value this step may promote into one — and refuse
+///    everything else ([`EditError::NotASequence`],
+///    [`EditError::FlowSequenceInsertionUnsupported`]);
+/// 3. validate the requested fields ([`EditError::InsertedItemHasNoFields`],
+///    [`EditError::DuplicateInsertedField`],
+///    [`EditError::InvalidInsertedFieldKey`]);
+/// 4. derive the marker column and the insertion point from the document;
+/// 5. render one item with [`crate::emit::choose_scalar`], the codec every other
+///    edit in this module uses.
+fn plan_item_insertion(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &InsertItem,
+) -> Result<PlannedEdit, EditError> {
+    let resolved =
+        resolve_full(index, edit.sequence()).map_err(|error| EditError::Unresolvable {
+            edit: position,
+            error,
+        })?;
+    let target = index.node(resolved.value).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    // The gate, before the shape is examined and before a byte is read. Asked on
+    // the target itself, which reaches its ancestors and its descendants
+    // (`TriviaIndex::disqualifying_hazard`), so a hazard in the surrounding
+    // mapping disqualifies a promotion too.
+    if let Some(hazard) = trivia.disqualifying_hazard(index, resolved.value) {
+        return Err(EditError::Refused {
+            edit: position,
+            node: resolved.value,
+            hazard: hazard.kind,
+            at: hazard.span,
+        });
+    }
+    check_inserted_fields(position, edit.fields())?;
+
+    let body_offset = index.preamble().body_offset;
+    let (marker, point, at_end_of_file, items) = match target.kind {
+        NodeKind::Sequence => {
+            if target.collection_style == Some(CollectionStyle::Flow)
+                || is_inside_a_flow_collection(index, target)
+            {
+                return Err(EditError::FlowSequenceInsertionUnsupported {
+                    edit: position,
+                    sequence: target.id,
+                });
+            }
+            let marker = sequence_marker_column(source, index, trivia, position, target)?;
+            let anchor = match edit.destination() {
+                None => *target.children.last().ok_or(EditError::NotASequence {
+                    edit: position,
+                    node: target.id,
+                    kind: target.kind,
+                })?,
+                Some(at) => *target.children.get(at).ok_or({
+                    EditError::NoSuchDestinationItem {
+                        edit: position,
+                        sequence: target.id,
+                        items: target.children.len(),
+                    }
+                })?,
+            };
+            let extent = trivia.subtree_extent(index, anchor);
+            let (point, at_end_of_file) = insertion_point(source, extent, position)?;
+            let before = edit
+                .destination()
+                .map_or(target.children.len(), |at| at + 1);
+            (
+                marker,
+                point,
+                at_end_of_file,
+                (before, target.children.clone()),
+            )
+        }
+        NodeKind::Scalar if target.is_zero_width() => {
+            let (marker, point, at_end_of_file) =
+                promote_implicit_null(source, index, trivia, position, &resolved, body_offset)?;
+            (marker, point, at_end_of_file, (0usize, Vec::new()))
+        }
+        _ => {
+            return Err(EditError::NotASequence {
+                edit: position,
+                node: target.id,
+                kind: target.kind,
+            })
+        }
+    };
+
+    // Copied from the document, never chosen: `LineEnding::detect`'s LF default
+    // is exactly the silent reformatting this crate exists to prevent (D2p).
+    let line_ending =
+        line_ending_before(source, point).ok_or(EditError::NoObservableLineEnding {
+            edit: position,
+            at: point,
+        })?;
+    let text = render_item(edit.fields(), marker, line_ending, at_end_of_file);
+
+    Ok(PlannedEdit {
+        replacements: vec![Replacement {
+            span: ByteSpan::new(point, point),
+            text,
+        }],
+        // The insertion point, and nothing else — derived from the anchor's
+        // ownership extent and the line it ends, so it is a syntax fact rather
+        // than a restatement of what is being written.
+        permitted: vec![ByteSpan::new(point, point)],
+        note: None,
+        expectation: None,
+        items: Some(PendingItem {
+            edit: position,
+            sequence: edit.sequence().clone(),
+            sequence_id: target.id,
+            items: items.1,
+            removed: None,
+            inserted: Some((items.0, edit.fields().to_vec())),
+        }),
+        moved: None,
+        guards: vec![StructuralGuard::Insertion { at: point }],
+        rewritten: None,
+    })
+} // End of function plan_item_insertion()
+
+/// Checks the fields a new item is to be born with.
+///
+/// Three refusals, all of them about the **request** rather than about the
+/// document, and all of them made before a column or an offset is derived. See
+/// [`EditError::InsertedItemHasNoFields`], [`EditError::DuplicateInsertedField`]
+/// and [`EditError::InvalidInsertedFieldKey`] for what each one costs.
+///
+/// # Errors
+///
+/// The three variants above, each carrying a **position** in the field list and
+/// never a key (`CLAUDE.md` section 1).
+fn check_inserted_fields(position: usize, fields: &[(String, String)]) -> Result<(), EditError> {
+    if fields.is_empty() {
+        return Err(EditError::InsertedItemHasNoFields { edit: position });
+    }
+    for (at, (key, _)) in fields.iter().enumerate() {
+        if key.is_empty() || key.contains(['\n', '\r']) {
+            return Err(EditError::InvalidInsertedFieldKey {
+                edit: position,
+                field: at,
+            });
+        }
+        if fields[..at].iter().any(|(seen, _)| seen == key) {
+            return Err(EditError::DuplicateInsertedField {
+                edit: position,
+                field: at,
+            });
+        }
+    } // End of the loop that checks every requested field
+    Ok(())
+} // End of function check_inserted_fields()
+
+/// The column every item of a block sequence puts its `-` at.
+///
+/// **Read off the ownership layer, never re-lexed.** Each item owns the
+/// [`crate::syntax::Punctuation::SequenceDash`] that introduces it
+/// (`PROGRESS.md`, D2d), so the column is a fact the trivia scanner already
+/// published; scanning the text for a `-` would be a second answer to a question
+/// that already has one, and it would get a compact `- - x` wrong.
+///
+/// # Errors
+///
+/// [`EditError::InconsistentSequenceIndentation`] when two items disagree, and
+/// [`EditError::MalformedSpan`] for a block sequence item with no dash at all,
+/// which is a bug in this crate rather than a document a user can write.
+fn sequence_marker_column(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    sequence: &Node,
+) -> Result<usize, EditError> {
+    let body_offset = index.preamble().body_offset;
+    let mut expected: Option<usize> = None;
+    for item in &sequence.children {
+        let dash = trivia
+            .items_owned_by(*item)
+            .find(|trivia| trivia.kind == TriviaKind::Punctuation(Punctuation::SequenceDash))
+            .ok_or(EditError::MalformedSpan {
+                edit: position,
+                at: sequence.span,
+            })?;
+        let found = column_of(source, dash.span.start, body_offset);
+        match expected {
+            None => expected = Some(found),
+            Some(column) if column != found => {
+                return Err(EditError::InconsistentSequenceIndentation {
+                    edit: position,
+                    sequence: sequence.id,
+                    expected: column,
+                    found,
+                })
+            }
+            Some(_) => {}
+        }
+    } // End of the loop over the sequence's item dashes
+    expected.ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: sequence.span,
+    })
+} // End of function sequence_marker_column()
+
+/// Where the first item of a promoted implicit-null mapping value goes.
+///
+/// The one place this module brings a collection into existence, and every number
+/// in it is read off the document rather than chosen. See [`InsertItem`] for the
+/// licence and [`EditError::ImplicitNullSequenceHasAmbiguousTrivia`] for the one
+/// shape it refuses.
+///
+/// Returns the `-` marker column, the offset to splice at, and whether that
+/// offset is the unterminated end of the document.
+///
+/// # Errors
+///
+/// [`EditError::NotASequence`] when the implicit null is not a mapping value —
+/// a bare `- ` sequence item is one too, and promoting *that* would nest a
+/// sequence inside a sequence, which is not "add an item";
+/// [`EditError::ImplicitNullSequenceHasAmbiguousTrivia`]; and everything
+/// [`insertion_point`] refuses.
+fn promote_implicit_null(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    resolved: &Resolved,
+    body_offset: usize,
+) -> Result<(usize, usize, bool), EditError> {
+    let (Some(key), Some(parent)) = (resolved.key, resolved.parent) else {
+        return Err(EditError::NotASequence {
+            edit: position,
+            node: resolved.value,
+            kind: index
+                .node(resolved.value)
+                .map_or(NodeKind::Document, |node| node.kind),
+        });
+    };
+    let key_node = index.node(key).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    let key_column = column_of(source, key_node.span.start, body_offset);
+    let step = indentation_step(source, index, trivia, parent, key);
+
+    // Past the key, its colon and any inline comment on the same line, to just
+    // after the break that terminates it — the same call an entry insertion makes.
+    let extent = entry_extent(index, trivia, key, resolved.value);
+    let (point, at_end_of_file) = insertion_point(source, extent, position)?;
+    if !at_end_of_file && a_standalone_comment_starts_at(source, point) {
+        return Err(EditError::ImplicitNullSequenceHasAmbiguousTrivia {
+            edit: position,
+            at: point,
+        });
+    }
+    Ok((key_column + step, point, at_end_of_file))
+} // End of function promote_implicit_null()
+
+/// Whether the physical line starting at `at` holds nothing but a comment.
+///
+/// The condition [`EditError::ImplicitNullSequenceHasAmbiguousTrivia`] turns on.
+/// A blank line is deliberately not one: a comment separated from what follows by
+/// a blank line belongs to the **file** under plan section 6.2's rule 2, and the
+/// file keeps it wherever the insertion lands.
+fn a_standalone_comment_starts_at(source: &str, at: usize) -> bool {
+    source
+        .get(at..)
+        .map(|rest| rest.trim_start_matches([' ', '\t']))
+        .is_some_and(|text| text.starts_with('#'))
+}
+
+/// How many columns further in this document indents a block child.
+///
+/// The evidence is taken in three passes, narrowest first, and the number is
+/// never invented until all three are exhausted:
+///
+/// 1. **the block children of the same surrounding mapping.** The closest thing
+///    the document says about how *this* mapping indents;
+/// 2. **every mapping entry in the document** whose value is a block collection.
+///    The document's own dominant step;
+/// 3. **two columns**, the renderer's documented default
+///    ([`crate::emit::ScalarContext::block`]), and only when the document offers
+///    no evidence at all — a single-entry file whose only collection is the one
+///    being created.
+///
+/// A step of **zero** is real evidence, not a missing answer: `matches:` with its
+/// items' dashes at the key's own column is idiomatic YAML and is what a document
+/// that writes it that way is saying. Ties are broken by the smallest step, which
+/// is what a `BTreeMap`'s ascending iteration gives for free.
+fn indentation_step(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    mapping: NodeId,
+    exclude: NodeId,
+) -> usize {
+    let local = observed_steps(source, index, trivia, Some(mapping), exclude);
+    if let Some(step) = dominant(&local) {
+        return step;
+    }
+    dominant(&observed_steps(source, index, trivia, None, exclude)).unwrap_or(2)
+} // End of function indentation_step()
+
+/// The most common step of a tally, smallest winning a tie.
+fn dominant(steps: &BTreeMap<usize, usize>) -> Option<usize> {
+    steps
+        .iter()
+        .max_by_key(|(step, count)| (**count, usize::MAX - **step))
+        .map(|(step, _)| *step)
+}
+
+/// Every (key column → block child column) step the document actually shows.
+///
+/// `within` restricts the walk to one mapping's own entries; `None` walks every
+/// mapping in the document. `exclude` is the key of the entry being promoted,
+/// which has no block child to measure and must never be counted as evidence
+/// about itself.
+fn observed_steps(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    within: Option<NodeId>,
+    exclude: NodeId,
+) -> BTreeMap<usize, usize> {
+    let body_offset = index.preamble().body_offset;
+    let mut steps: BTreeMap<usize, usize> = BTreeMap::new();
+    for node in index.nodes() {
+        if node.kind != NodeKind::Mapping || within.is_some_and(|id| id != node.id) {
+            continue;
+        }
+        for entry in mapping_entries(node) {
+            if entry.key == exclude {
+                continue;
+            }
+            let (Some(key), Some(value)) = (index.node(entry.key), index.node(entry.value)) else {
+                continue;
+            };
+            let Some(child) = block_child_column(source, index, trivia, value, body_offset) else {
+                continue;
+            };
+            if let Some(step) = child.checked_sub(column_of(source, key.span.start, body_offset)) {
+                *steps.entry(step).or_insert(0) += 1;
+            }
+        } // End of the loop over this mapping's entries
+    } // End of the loop over the document's mappings
+    steps
+} // End of function observed_steps()
+
+/// The column a block collection's first child begins at, or `None`.
+///
+/// A sequence's answer is its first item's dash, read off the ownership layer as
+/// [`sequence_marker_column`] reads it; a mapping's is its first key's own column.
+/// A flow collection has no answer, because its children share a line with the
+/// brackets that introduce them.
+fn block_child_column(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    value: &Node,
+    body_offset: usize,
+) -> Option<usize> {
+    if value.collection_style == Some(CollectionStyle::Flow) {
+        return None;
+    }
+    let first = *value.children.first()?;
+    match value.kind {
+        NodeKind::Sequence => trivia
+            .items_owned_by(first)
+            .find(|item| item.kind == TriviaKind::Punctuation(Punctuation::SequenceDash))
+            .map(|dash| column_of(source, dash.span.start, body_offset)),
+        NodeKind::Mapping => index
+            .node(first)
+            .map(|key| column_of(source, key.span.start, body_offset)),
+        _ => None,
+    }
+} // End of function block_child_column()
+
+/// Renders one new block-mapping sequence item.
+///
+/// The first field's line carries the `- ` marker; every later field is indented
+/// two columns further so that its key lines up under the first one's. Every
+/// scalar — key and value alike — is spelled by [`crate::emit::choose_scalar`] in
+/// a context whose parent indent is the item's own key column, so a multi-line
+/// value becomes a `|` block indented two columns inside that.
+///
+/// `at_end_of_file` inverts where the line ending goes: the break is written in
+/// **front** of the item and the last line is left unterminated, so a document
+/// with no final newline keeps not having one. A last field whose value is a block
+/// scalar terminates itself, and its own trailing break is never taken away —
+/// removing one would silently shorten the user's value.
+fn render_item(
+    fields: &[(String, String)],
+    marker: usize,
+    line_ending: LineEnding,
+    at_end_of_file: bool,
+) -> String {
+    let context = ScalarContext::block(marker + 2, line_ending);
+    let mut text = String::new();
+    if at_end_of_file {
+        text.push_str(line_ending.as_str());
+    }
+    for (at, (key, value)) in fields.iter().enumerate() {
+        let key = choose_scalar(key, context.as_key());
+        let value = choose_scalar(value, context);
+        let entry = format!("{}: {}", key.render(), value.render());
+        text.push_str(&" ".repeat(marker));
+        text.push_str(if at == 0 { "- " } else { "  " });
+        text.push_str(&entry);
+        let last = at + 1 == fields.len();
+        if !entry.ends_with(['\n', '\r']) && !(last && at_end_of_file) {
+            text.push_str(line_ending.as_str());
+        }
+    } // End of the loop that writes one line per requested field
+    text
+} // End of function render_item()
 
 /// The block scalar the moved item ends with, when relocating it would change
 /// that block's value.
@@ -4642,6 +5906,8 @@ struct Expected<'a> {
     edits: &'a [DocumentEdit],
     /// What each mapping a structural edit changed must hold afterwards.
     fields: &'a [FieldExpectation],
+    /// What each sequence an item edit changed must hold afterwards.
+    items: &'a [ItemExpectation],
     /// What the batch's move must have done. At most one (see
     /// [`EditError::MoveMustBeTheOnlyEditInItsBatch`]).
     moves: &'a [MoveExpectation],
@@ -4719,6 +5985,7 @@ fn verify(
         trivia,
         edits,
         fields: expectations,
+        items: sequences,
         moves,
     } = expected;
     replacements_stay_inside_the_permitted_spans(replacements, permitted)?;
@@ -4780,6 +6047,9 @@ fn verify(
 
     for expectation in expectations {
         verify_field(candidate, &index, expectation)?;
+    }
+    for expectation in sequences {
+        verify_items(candidate, &index, expectation)?;
     }
     Ok(())
 } // End of function verify()
@@ -4902,6 +6172,134 @@ fn verify_field(
     }
     Ok(())
 } // End of function verify_field()
+
+/// Checks one sequence-item edit against the reparsed candidate.
+///
+/// The sequence's counterpart of [`verify_field`], and it makes the same four
+/// claims in the same order:
+///
+/// 1. the **sequence** is still there, found by re-resolving its own path against
+///    the freshly parsed index. For a promotion this is also what proves the
+///    implicit null became a sequence at all, because the path that named a
+///    zero-width scalar in the original must name a sequence here;
+/// 2. it holds exactly as many items as the folded claims intended;
+/// 3. **every item the batch did not name still decodes to exactly what it
+///    decoded to before**, whole subtree, in the same order. This is what stops an
+///    oversized envelope: a removal that also swallowed a neighbouring item passes
+///    every other property and fails only this one;
+/// 4. the item an insertion wrote is a **flat mapping holding exactly the
+///    requested fields**, each decoded by the substrate *and* by our own decoder,
+///    exactly as [`verify_field`] checks an inserted entry.
+///
+/// # Errors
+///
+/// [`VerificationFailure::MappingLost`] — the name the move's own sequence check
+/// already reports a lost sequence under — [`VerificationFailure::EntryCountChanged`],
+/// [`VerificationFailure::SiblingChanged`], [`VerificationFailure::FieldNotInserted`],
+/// [`VerificationFailure::Undecodable`] and
+/// [`VerificationFailure::DecoderDisagreement`].
+fn verify_items(
+    candidate: &str,
+    index: &SyntaxIndex,
+    expectation: &ItemExpectation,
+) -> Result<(), VerificationFailure> {
+    let edit = expectation.edit;
+    let id = resolve(index, &expectation.sequence)
+        .map_err(|error| VerificationFailure::MappingLost { edit, error })?;
+    let sequence = index
+        .node(id)
+        .filter(|node| node.kind == NodeKind::Sequence)
+        .ok_or(VerificationFailure::MappingLost {
+            edit,
+            error: PathError::MalformedIndex { node: id },
+        })?;
+    if sequence.children.len() != expectation.slots.len() {
+        return Err(VerificationFailure::EntryCountChanged {
+            edit,
+            expected: expectation.slots.len(),
+            found: sequence.children.len(),
+        });
+    }
+
+    for (position, (slot, item)) in expectation.slots.iter().zip(&sequence.children).enumerate() {
+        match slot {
+            ItemSlot::Kept(Some(before)) if *before != digest(index, *item) => {
+                return Err(VerificationFailure::SiblingChanged {
+                    edit,
+                    entry: position,
+                })
+            }
+            ItemSlot::Kept(_) => {}
+            ItemSlot::Inserted(fields) => {
+                verify_inserted_item(candidate, index, edit, *item, fields)?
+            }
+        }
+    } // End of the loop that compares every position with what was intended for it
+    Ok(())
+} // End of function verify_items()
+
+/// Checks that one candidate node is the flat mapping an insertion asked for.
+///
+/// Every field is compared by **decoded value**, key and value alike, and every
+/// value is decoded twice — once by the substrate's reparse and once by
+/// [`crate::emit::decode`] — because a disagreement between the two means one of
+/// them is wrong about bytes this edit has just written and there is no way to
+/// tell which. That is [`verify_field`]'s rule, applied to a whole item.
+///
+/// The **flatness** claim is made by the shape of the comparison rather than
+/// asserted separately: a value that reparsed as a collection has no
+/// `Node::scalar`, so it fails as a missing field.
+///
+/// # Errors
+///
+/// [`VerificationFailure::FieldNotInserted`], carrying the length of a key and
+/// never its text (`CLAUDE.md` section 1);
+/// [`VerificationFailure::Undecodable`]; [`VerificationFailure::DecoderDisagreement`].
+fn verify_inserted_item(
+    candidate: &str,
+    index: &SyntaxIndex,
+    edit: usize,
+    item: NodeId,
+    fields: &[(String, String)],
+) -> Result<(), VerificationFailure> {
+    let first = fields.first().map_or(0, |(key, _)| key.len());
+    let mapping = index
+        .node(item)
+        .filter(|node| node.kind == NodeKind::Mapping)
+        .ok_or(VerificationFailure::FieldNotInserted {
+            edit,
+            key_len: first,
+        })?;
+    let entries = mapping_entries(mapping);
+    if entries.len() != fields.len() {
+        return Err(VerificationFailure::FieldNotInserted {
+            edit,
+            key_len: first,
+        });
+    }
+    for (entry, (key, value)) in entries.iter().zip(fields) {
+        let missing = VerificationFailure::FieldNotInserted {
+            edit,
+            key_len: key.len(),
+        };
+        if decoded_value(index, entry.key) != Some(key.as_str()) {
+            return Err(missing);
+        }
+        let scalar = index
+            .node(entry.value)
+            .and_then(|node| node.scalar.as_ref())
+            .ok_or(missing.clone())?;
+        let ours = decode(candidate, &scalar.presentation)
+            .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
+        if ours != scalar.value {
+            return Err(VerificationFailure::DecoderDisagreement { edit });
+        }
+        if &scalar.value != value {
+            return Err(missing);
+        }
+    } // End of the loop over the fields the insertion asked for
+    Ok(())
+} // End of function verify_inserted_item()
 
 /// Checks that no comment the **file** owns was lost.
 ///
@@ -5176,22 +6574,79 @@ fn item_own_lines(
         end = line_end_of(source, end);
     }
 
-    let mut start = line_start_of(source, span.start, body_offset);
+    let start = leading_comment_block_start(
+        source,
+        index,
+        line_start_of(source, span.start, body_offset),
+        body_offset,
+    );
+    Some(ByteSpan::new(start, end))
+} // End of function item_own_lines()
+
+/// Walks up from a line start over the comment-only lines directly above it.
+///
+/// **One implementation, two callers** — [`item_own_lines`] and
+/// [`entry_owned_runs`] — because the boundary they derive is the same boundary
+/// read from two directions, and the moment the two walks differed one of them
+/// would be wrong about a document the other accepted. They were written twice
+/// and are now written once.
+///
+/// The walk is plan section 6.2's rule 1 stated over text: contiguous comment
+/// lines immediately above an entry, with no blank line between, belong to that
+/// entry. It stops at the first line that is blank or holds anything else, so it
+/// can never climb over a blank line into a comment rule 2 gives to the **file**.
+///
+/// # Two things it gets right that a plainer walk does not
+///
+/// - **A `#` inside a frontier leaf is not a comment.** A line of shell or Python
+///   inside a `replace: |` block's body looks exactly like a leading comment, and
+///   the real corpus contains one. Only the syntax index can tell the two apart,
+///   so the walk asks it rather than the text.
+/// - **A CRLF line above is one terminator, not two lines.** Stepping back a
+///   single byte from a line start lands on the `\n` of a `\r\n`, and asking for
+///   *that* byte's line start answers with the offset one past the `\r` — the
+///   same line, one byte in. The walk then reads a "line" that is just the
+///   terminator, decides it is not a comment and stops, so **no CRLF document
+///   ever had its leading comment block counted as owned**. Found by the Phase
+///   2b-2c-1 removal table's CRLF twin, which is exactly the row an LF-only
+///   fixture cannot produce.
+fn leading_comment_block_start(
+    source: &str,
+    index: &SyntaxIndex,
+    from: usize,
+    body_offset: usize,
+) -> usize {
+    let mut start = from;
     while start > body_offset {
-        let above = line_start_of(source, start - 1, body_offset);
-        let line = source.get(above..start)?;
+        let Some(before) = source.get(..start) else {
+            break;
+        };
+        // Step back over the whole terminator that ends the line above, so that
+        // the offset handed to `line_start_of` is that line's own last content
+        // byte rather than the second half of its `\r\n`.
+        let content_end = if before.ends_with("\r\n") {
+            start - 2
+        } else if before.ends_with(['\n', '\r']) {
+            start - 1
+        } else {
+            start
+        };
+        let above = line_start_of(source, content_end, body_offset);
+        let Some(line) = source.get(above..start) else {
+            break;
+        };
         let text = line.trim_start_matches([' ', '\t']);
         let opener = above + (line.len() - text.len());
         let inside_a_leaf = index.nodes().iter().any(|node| {
             node.is_frontier_leaf() && node.span.start <= opener && opener < node.span.end
         });
-        if !text.starts_with('#') || inside_a_leaf {
+        if !text.starts_with('#') || inside_a_leaf || above == start {
             break;
         }
         start = above;
-    } // End of the walk up over the item's own leading comment block
-    Some(ByteSpan::new(start, end))
-} // End of function item_own_lines()
+    } // End of the walk up over the entry's own leading comment block
+    start
+} // End of function leading_comment_block_start()
 
 /// The first and last byte any node of the entry's two subtrees occupies.
 ///
@@ -5267,20 +6722,12 @@ fn entry_owned_runs(
     if !source.get(..end)?.ends_with(['\n', '\r']) {
         end = line_end_of(source, end);
     }
-    let mut start = line_start_of(source, first, body_offset);
-    while start > body_offset {
-        let above = line_start_of(source, start - 1, body_offset);
-        let line = source.get(above..start)?;
-        let text = line.trim_start_matches([' ', '\t']);
-        let opener = above + (line.len() - text.len());
-        let inside_a_leaf = index.nodes().iter().any(|node| {
-            node.is_frontier_leaf() && node.span.start <= opener && opener < node.span.end
-        });
-        if !text.starts_with('#') || inside_a_leaf {
-            break;
-        }
-        start = above;
-    } // End of the walk up over the entry's own leading comment block
+    let start = leading_comment_block_start(
+        source,
+        index,
+        line_start_of(source, first, body_offset),
+        body_offset,
+    );
     let lines = ByteSpan::new(start, end.max(start));
 
     let mut kept: Vec<ByteSpan> = Vec::new();
@@ -5730,6 +7177,7 @@ mod tests {
             trivia,
             edits,
             fields: &[],
+            items: &[],
             moves: &[],
         }
     } // End of function expected()
@@ -7466,6 +8914,7 @@ mod structural_tests {
                 trivia: &trivia,
                 edits: &[],
                 fields: &expectations,
+                items: &[],
                 moves: &[],
             },
         )?;
@@ -8284,6 +9733,7 @@ mod move_tests {
                 trivia: &trivia,
                 edits: &[],
                 fields: &[],
+                items: &[],
                 moves: &moves,
             },
         )?;

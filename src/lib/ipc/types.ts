@@ -990,6 +990,14 @@ export type EditErrorName =
   | 'MoveWouldTerminateTheFinalLine'
   | 'MoveWouldExtendAKeptBlock'
   | 'MoveWouldExtendABlockScalar'
+  | 'NotASequence'
+  | 'InsertedItemHasNoFields'
+  | 'DuplicateInsertedField'
+  | 'InvalidInsertedFieldKey'
+  | 'FlowSequenceInsertionUnsupported'
+  | 'InconsistentSequenceIndentation'
+  | 'ImplicitNullSequenceHasAmbiguousTrivia'
+  | 'RemovalWouldEmptyTheSequence'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1080,6 +1088,37 @@ export type EditError =
         readonly seam: MoveSeam;
       };
     }
+  | {
+      readonly NotASequence: {
+        readonly edit: number;
+        readonly node: NodeId;
+        readonly kind: NodeKind;
+      };
+    }
+  | { readonly InsertedItemHasNoFields: { readonly edit: number } }
+  | { readonly DuplicateInsertedField: { readonly edit: number; readonly field: number } }
+  | { readonly InvalidInsertedFieldKey: { readonly edit: number; readonly field: number } }
+  | {
+      readonly FlowSequenceInsertionUnsupported: {
+        readonly edit: number;
+        readonly sequence: NodeId;
+      };
+    }
+  | {
+      readonly InconsistentSequenceIndentation: {
+        readonly edit: number;
+        readonly sequence: NodeId;
+        readonly expected: number;
+        readonly found: number;
+      };
+    }
+  | {
+      readonly ImplicitNullSequenceHasAmbiguousTrivia: {
+        readonly edit: number;
+        readonly at: number;
+      };
+    }
+  | { readonly RemovalWouldEmptyTheSequence: { readonly edit: number; readonly sequence: NodeId } }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */
