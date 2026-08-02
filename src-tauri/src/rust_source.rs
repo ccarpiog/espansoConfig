@@ -262,6 +262,103 @@ pub(crate) fn serializable_types(source: &str) -> BTreeSet<String> {
     found
 } // End of function serializable_types()
 
+/// Every module `source` declares **without** a `#[cfg(test)]` attribute.
+///
+/// The derived answer to *which files of this crate are production code*. A
+/// hand-written list of them would be the thing that rots: a module added to
+/// `main.rs` and forgotten in the list is invisible to every check built on it,
+/// which is the escape `crate::dictionary_contract`'s question 3 already had to
+/// close once.
+///
+/// Only the declarations of one file are read — `mod name;` and `mod name { … }`
+/// alike — because the crate root is where this crate declares every module it
+/// has.
+pub(crate) fn modules_not_gated_by_cfg_test(source: &str) -> BTreeSet<String> {
+    let file = parse(source, "a crate root");
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Mod(declaration) if !is_cfg_test(&declaration.attrs) => {
+                Some(declaration.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+} // End of function modules_not_gated_by_cfg_test()
+
+/// Whether an attribute list gates its item on the test configuration.
+///
+/// `test` is looked for **anywhere** in the `cfg`'s tokens, so
+/// `#[cfg(all(test, feature = "x"))]` is read as gated and a nested predicate
+/// cannot hide it. A `not` anywhere in the same predicate makes the answer
+/// `false` instead: `#[cfg(not(test))]` is production code, and the direction to
+/// be wrong in is the one that scans a file needlessly rather than the one that
+/// skips it.
+fn is_cfg_test(attributes: &[syn::Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        let Meta::List(list) = &attribute.meta else {
+            return false;
+        };
+        if !list.path.is_ident("cfg") {
+            return false;
+        }
+        let mut gated = false;
+        let mut negated = false;
+        collect_identifier(list.tokens.clone(), "test", &mut gated);
+        collect_identifier(list.tokens.clone(), "not", &mut negated);
+        gated && !negated
+    })
+} // End of function is_cfg_test()
+
+/// Whether `source` names `name` as an identifier in **code**.
+///
+/// Lexed, so the three things that are *not* a mention are all excluded for the
+/// same reason rather than by three special cases: a comment never reaches the
+/// token stream, a doc comment is an attribute and attributes are skipped, and a
+/// string literal is a literal rather than an identifier. `"DraftError"` written
+/// inside an exclusion table is therefore not a reference to `DraftError`, and
+/// `use …::DraftError;` is.
+///
+/// It answers *is this name written here*, never *does this name reach a user*.
+/// A caller that needs the second question has to ask it itself.
+pub(crate) fn mentions_identifier(source: &str, name: &str) -> bool {
+    let tokens: TokenStream = source
+        .parse()
+        .unwrap_or_else(|error| panic!("cannot lex this source as Rust: {error}"));
+    let mut found = false;
+    collect_identifier(tokens, name, &mut found);
+    found
+} // End of function mentions_identifier()
+
+/// Walks a token stream looking for one identifier, skipping attributes.
+///
+/// The attribute rule is [`collect_string_literals`]', for the same reason: a
+/// `#[doc = "…"]` — which is what a `///` line becomes — is prose about the
+/// code, not the code.
+fn collect_identifier(tokens: TokenStream, name: &str, found: &mut bool) {
+    let mut trees = tokens.into_iter().peekable();
+    while let Some(tree) = trees.next() {
+        match tree {
+            TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                if matches!(trees.peek(), Some(TokenTree::Punct(next)) if next.as_char() == '!') {
+                    trees.next();
+                }
+                let is_attribute = matches!(
+                    trees.peek(),
+                    Some(TokenTree::Group(group))
+                        if group.delimiter() == proc_macro2::Delimiter::Bracket
+                );
+                if is_attribute {
+                    trees.next();
+                }
+            }
+            TokenTree::Group(group) => collect_identifier(group.stream(), name, found),
+            TokenTree::Ident(ident) if ident == name => *found = true,
+            TokenTree::Ident(_) | TokenTree::Literal(_) | TokenTree::Punct(_) => {}
+        }
+    } // End of the loop over the token stream
+} // End of function collect_identifier()
+
 /// Every enum `source` declares, by name.
 pub(crate) fn declared_enums(source: &str) -> BTreeSet<String> {
     let file = parse(source, "a source file");
@@ -307,8 +404,9 @@ fn type_name(declared: &syn::Type) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::string_literals;
     use super::{declared_enums, declared_fields, declared_variants, serializable_types};
-    use super::{is_string_literal, string_literals};
+    use super::{is_string_literal, mentions_identifier, modules_not_gated_by_cfg_test};
 
     /// The three shapes the review's counterexamples used are all read.
     ///
@@ -414,6 +512,55 @@ mod tests {
         assert!(!is_string_literal("'c'"));
         assert!(!is_string_literal("12"));
     } // End of function a_raw_or_byte_string_is_a_string_and_a_char_is_not()
+
+    /// A `#[cfg(test)]` module is not production code, and the rest are.
+    #[test]
+    fn a_cfg_test_module_is_not_a_production_module() {
+        let source = concat!(
+            "mod commands;\n",
+            "#[cfg(test)]\n",
+            "mod dictionary_contract;\n",
+            "/// A doc comment about the next one.\n",
+            "mod error;\n",
+            "#[cfg(all(test, feature = \"x\"))]\n",
+            "mod also_a_test;\n",
+            "#[cfg(not(test))]\n",
+            "mod production_only;\n",
+            "fn main() {}\n",
+        );
+        let modules: Vec<String> = modules_not_gated_by_cfg_test(source).into_iter().collect();
+        assert_eq!(modules, vec!["commands", "error", "production_only"]);
+    } // End of function a_cfg_test_module_is_not_a_production_module()
+
+    /// The identifier reader distinguishes a mention in code from a mention in
+    /// prose or in a string.
+    ///
+    /// The positive control matters more than the negative ones: a scanner that
+    /// answered `false` to everything would make every check built on it pass
+    /// vacuously, which is the failure mode this whole module exists to avoid.
+    #[test]
+    fn an_identifier_is_read_in_code_and_not_in_a_comment_or_a_literal() {
+        let in_prose = concat!(
+            "//! A module comment about DraftError.\n",
+            "/// A doc comment about DraftError.\n",
+            "const NOT_A_CODE: &[&str] = &[\"DraftError\"];\n",
+            "// A line comment about DraftError.\n",
+            "fn f() { /* DraftError */ let x = 1; }\n",
+        );
+        assert!(!mentions_identifier(in_prose, "DraftError"));
+
+        let in_code = concat!(
+            "use espansoconfig_core::draft::DraftError;\n",
+            "fn f(error: DraftError) -> DraftError { error }\n",
+        );
+        assert!(mentions_identifier(in_code, "DraftError"));
+
+        // Inside a macro body too, because a macro's body is a token stream.
+        assert!(mentions_identifier(
+            "fn f() { let _ = matches!(e, DraftError::MatchHasNoPath); }",
+            "DraftError"
+        ));
+    } // End of function an_identifier_is_read_in_code_and_not_in_a_comment_or_a_literal()
 
     /// A hand-written `impl Serialize` counts, and a struct's does not.
     #[test]

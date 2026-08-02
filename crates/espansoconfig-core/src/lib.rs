@@ -18,6 +18,7 @@
 //! | [`discovery`] | locate the config dir, enumerate files, classify them |
 //! | [`syntax`] | span-aware parse + syntax index |
 //! | [`model`] | semantic projection (`MatchView`, …) |
+//! | [`draft`] | one match's drafted values → the minimal edit batch |
 //! | [`patch`] | the edit engine — byte-span surgery |
 //! | [`emit`] | scalar style selection + block emitter |
 //! | [`validate`] | structural + espanso-semantic validation |
@@ -96,12 +97,24 @@
 //!   fails is counted and never fails anything. Retention is ten sessions, not
 //!   forever, and no string may say *your file is recoverable*.
 //!
+//! - **2b-2b-1** — [`draft`]: one match's drafted values, and the **minimal**
+//!   [`patch::DocumentEdit`] batch that realises them. A tri-state
+//!   [`draft::DraftField`] per field, compared against the existing scalar's
+//!   **decoded logical value** so that a field the user retyped identically —
+//!   or never touched — produces no edit and therefore no byte. The surface is
+//!   closed to the part of a match espanso's schema fixes as a string, and the
+//!   batch may never change a sequence's cardinality or synthesize a collection
+//!   node; two public guards read the derived batch back and refuse it if it
+//!   does. It writes nothing and has **no caller**: no `#[tauri::command]`
+//!   reaches it, exactly as [`persist::save`] had none at 2a.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step, and [`watch`] holds only [`ContentRevision`].
 
 #![deny(missing_docs)]
 
 pub mod discovery;
+pub mod draft;
 pub mod emit;
 pub mod model;
 pub mod patch;

@@ -84,7 +84,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::error::CommandError;
-use crate::rust_source::{declared_enums, declared_variants, serializable_types};
+use crate::rust_source::{
+    declared_enums, declared_variants, mentions_identifier, modules_not_gated_by_cfg_test,
+    serializable_types,
+};
 
 /// One enum whose variants owe a dictionary entry.
 struct CodeEnum {
@@ -365,7 +368,58 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "a block-scalar header detail the read projection never carries; it is \
          serialized for the syntax tests' own snapshots, not for a screen",
     ),
+    (
+        "DraftField",
+        "a protocol tag, not a code: `Unchanged`/`Set`/`Remove` travel *into* the \
+         core as one field's intent and are never rendered — the value inside a \
+         `Set` is what a screen shows",
+    ),
+    (
+        "MatchField",
+        "a field identifier, not a code: it names an espanso key, and what a \
+         screen puts beside a match's field is that key itself, spelled the same \
+         in every language. It serializes as that key — `uppercase_style`, not \
+         `UppercaseStyle` — which is what makes the sentence above true rather \
+         than merely intended; `every_match_field_serializes_as_its_espanso_key` \
+         pins it variant by variant",
+    ),
+    (
+        "SequenceField",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names `triggers` or \
+         `search_terms`, which espanso spells one way and which \
+         `every_sequence_field_serializes_as_its_espanso_key` pins",
+    ),
+    (
+        "DraftTarget",
+        "an address, not a code, exactly as `PathSegment` is: it says which \
+         drafted value a refusal is about, and both things it can name are \
+         rendered literally — the nested `MatchField`/`SequenceField` serialize \
+         as espanso keys and an index is an index",
+    ),
+    (
+        "DraftError",
+        "TEMPORARY, and the only entry here that is: Phase 2b-2b-1 built \
+         `espansoconfig_core::draft` with no caller, so nothing serializes a \
+         refusal yet. The sub-phase that gives it a command owes it a `draftError` \
+         namespace and both dictionaries in the same change, exactly as 2b-1 did \
+         for the save transaction, and must delete this entry then — which \
+         `the_temporary_draft_error_exclusion_expires_when_anything_names_it` \
+         makes a build failure rather than a hope",
+    ),
 ];
+
+/// The enum whose exclusion above is temporary, and the namespace it owes.
+///
+/// Named once, so the expiry test and the failure message it prints cannot come
+/// to disagree about which entry they are talking about.
+const TEMPORARY_EXCLUSION: &str = "DraftError";
+
+/// The crate root, which is where this crate declares every module it has.
+const CRATE_ROOT: &str = "src-tauri/src/main.rs";
+
+/// The TypeScript file every wire type has to be declared in.
+const WIRE_TYPES: &str = "src/lib/ipc/types.ts";
 
 /// The prefix every key checked by this module carries.
 const CODE_PREFIX: &str = "code.";
@@ -755,6 +809,75 @@ fn every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code() {
         );
     }
 } // End of function every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code()
+
+/// **A temporary exclusion with an expiry the build enforces.**
+///
+/// [`NOT_A_CODE`] holds one entry marked TEMPORARY, and the danger is precisely
+/// that it makes
+/// [`every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code`] **pass**.
+/// A later sub-phase that serializes a `DraftError` out of a command and forgets
+/// to delete the entry ships a code with no sentence: the refusal reaches a
+/// screen with nothing to render, and no test anywhere fails. A note in a
+/// decision record is not a mechanism.
+///
+/// So this asks a question the exclusion cannot answer for itself: **does any
+/// production Rust module of this crate, or the wire's own TypeScript, name the
+/// excluded type at all?** If one does, the type has left the core and the
+/// exclusion has expired.
+///
+/// Three things make the question narrow enough to be honest:
+///
+/// - **production** modules only, and derived rather than listed —
+///   [`modules_not_gated_by_cfg_test`] reads `main.rs`, so the contract modules
+///   that legitimately discuss the type by name are out of scope and a new
+///   module is in scope the moment it is declared;
+/// - **identifiers**, not text. `"DraftError"` inside [`NOT_A_CODE`] is a string
+///   literal, and the doc comment you are reading is an attribute; neither is a
+///   reference. `use …::DraftError;` is;
+/// - **the wire's TypeScript too**, because a type can reach a screen by being
+///   declared in `types.ts` without any Rust in this crate naming it.
+///
+/// What it does **not** establish: that a type nobody names cannot reach a user
+/// some other way. It is a tripwire on the one route this exclusion was written
+/// for, not a proof.
+#[test]
+fn the_temporary_draft_error_exclusion_expires_when_anything_names_it() {
+    let excluded = NOT_A_CODE
+        .iter()
+        .any(|(name, _)| *name == TEMPORARY_EXCLUSION);
+    if !excluded {
+        // The exclusion is gone, which is the intended end state. The dictionary
+        // checks above now own the type, and this guard has nothing to add.
+        return;
+    }
+
+    let production = modules_not_gated_by_cfg_test(&read_repository_file(CRATE_ROOT));
+    assert!(
+        production.len() >= 5,
+        "only {} production modules were derived from {CRATE_ROOT}, so this scan is not \
+         reading the crate root",
+        production.len()
+    );
+
+    let mut naming: Vec<String> = Vec::new();
+    for module in &production {
+        let relative = format!("src-tauri/src/{module}.rs");
+        if mentions_identifier(&read_repository_file(&relative), TEMPORARY_EXCLUSION) {
+            naming.push(relative);
+        }
+    } // End of the loop over this crate's production modules
+    if crate::wire_contract::read_without_comments(WIRE_TYPES).contains(TEMPORARY_EXCLUSION) {
+        naming.push(WIRE_TYPES.to_owned());
+    }
+
+    assert!(
+        naming.is_empty(),
+        "{naming:?} names {TEMPORARY_EXCLUSION}, so it is on the wire and its TEMPORARY \
+         entry in NOT_A_CODE has expired. Delete that entry and add the draftError \
+         namespace to both src/lib/i18n/en.json and src/lib/i18n/es.json in this same \
+         change — a code with no string is worse than a code with no caller."
+    );
+} // End of function the_temporary_draft_error_exclusion_expires_when_anything_names_it()
 
 /// Every string-literal union of `types.ts` names a namespace that exists.
 ///
