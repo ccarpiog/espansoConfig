@@ -4,7 +4,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::draft::match_draft::{DraftTarget, MatchField, SequenceField};
+use crate::draft::match_draft::{DraftTarget, MatchField, SequenceField, VariableField};
 use crate::model::ValueKind;
 use crate::syntax::HazardKind;
 
@@ -283,6 +283,166 @@ pub enum DraftError {
         /// Position of the edit in the batch.
         edit: usize,
     },
+    /// The draft names a variable, a `params` entry, a `form_fields` entry, one
+    /// of its options or one element of a sequence that the projection does not
+    /// hold.
+    ///
+    /// **The open half's cardinality refusal, and a decision as much as a
+    /// shape** (2b-2b-2's D1). Below the match mapping this engine inserts
+    /// nothing at all: writing an author-chosen key would be the first time it
+    /// composes a key string that no schema fixes, which needs its own anchor
+    /// machinery, its own emission checks and its own review. So a drafted
+    /// address the projection cannot resolve is refused by name rather than
+    /// created — and the address is an **index**, never a key text
+    /// (`CLAUDE.md` section 1).
+    ///
+    /// `length` is how many entries or elements the container actually holds. A
+    /// value whose shape is not the one the draft addressed reports `0`: an
+    /// entry that is not a sequence has no elements to name, and a
+    /// `form_fields` entry that is not a mapping has no options.
+    TargetDoesNotExist {
+        /// What the draft named.
+        target: DraftTarget,
+        /// How many the container holds.
+        length: usize,
+    },
+    /// A drafted variable carries no [`crate::patch::DocumentPath`], so nothing
+    /// inside it can be addressed.
+    ///
+    /// The nested twin of [`DraftError::MatchHasNoPath`], and unreachable for
+    /// the same reason: a variable reached through a match reached through
+    /// `matches` always has one. Refused rather than invented, because the
+    /// alternative is a path that names something else.
+    VariableHasNoPath {
+        /// The variable's index in the projected `vars` list.
+        index: usize,
+    },
+    /// The draft names one of a variable's three schema-known scalars and the
+    /// projection holds no scalar for it.
+    ///
+    /// Two facts reach this refusal and both are refusals for the same reason:
+    /// the key is **absent**, or it is present holding a shape espanso's schema
+    /// does not use, in which case the projection recorded it as an unknown
+    /// entry rather than as a scalar. Neither can be honoured here — this phase
+    /// inserts nothing below the match mapping (D1), and no primitive replaces a
+    /// collection node with a scalar one.
+    VariableFieldHasNoScalar {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which of the three.
+        field: VariableField,
+    },
+    /// One [`crate::draft::EntryDraft`] drafts both a scalar and a sequence.
+    ///
+    /// **Two answers to one question**, refused at intent level and before any
+    /// diffing for [`DraftError::SequenceItemDraftedTwice`]'s reason: an entry's
+    /// value is one node, and a draft that describes it twice is not a smaller
+    /// version of a draft that describes it once.
+    EntryDraftsAScalarAndASequence {
+        /// What the draft named.
+        target: DraftTarget,
+    },
+    /// The entry the draft names is introduced by a key no path segment can
+    /// spell.
+    ///
+    /// Two shapes reach it. A **non-scalar key** — an alias, or a collection
+    /// used as a key — has [`crate::model::FieldView::key`] `None` and can never
+    /// be matched by a [`crate::patch::PathSegment::Key`]. A key whose
+    /// [`crate::model::ScalarView::decoded`] is `false` holds its raw source
+    /// bytes rather than a decoded value, and the resolver compares decoded key
+    /// values, so those bytes are not the key the path would look for.
+    ///
+    /// The entry is not lost — the projection carries it either way — it is
+    /// simply not addressable, and inventing an address for it is what this
+    /// refusal exists instead of.
+    TargetIsNotNameable {
+        /// What the draft named.
+        target: DraftTarget,
+    },
+    /// Two entries of **one** open mapping decode to the same key text, so no
+    /// path names one of them.
+    ///
+    /// The nested analogue of [`DraftError::AmbiguousKey`], and it carries
+    /// indices rather than the key (`CLAUDE.md` section 1).
+    /// `crate::patch::path::resolve` resolves a key to the **first** entry that
+    /// carries it, so a batch naming a repeated key addresses one occurrence and
+    /// reads as though it addressed the other.
+    TargetKeyIsAmbiguous {
+        /// What the draft named.
+        target: DraftTarget,
+        /// The index of the other entry of that mapping carrying the same key.
+        other: usize,
+    },
+    /// A [`crate::draft::DraftField::Set`] names an entry whose existing value
+    /// is a collection.
+    ///
+    /// The nested twin of [`DraftError::FieldHasAnUnmodelledShape`], and it is
+    /// inexpressible for the same reason: no primitive replaces a collection
+    /// node with a scalar one, and *remove then insert* is not a spelling of it,
+    /// because an insertion is planned against the original index where the key
+    /// is still present — and because this phase inserts nothing below the match
+    /// mapping at all (D1).
+    NestedValueIsACollection {
+        /// What the draft named.
+        target: DraftTarget,
+        /// What its value actually is.
+        found: crate::model::ValueKind,
+    },
+    /// A [`crate::draft::DraftField::Remove`] names an entry whose value this
+    /// editor never displayed.
+    ///
+    /// The nested twin of
+    /// [`DraftError::RemovalWouldDiscardUnshownStructure`], refused as the same
+    /// **decision**: [`crate::patch::FieldRemoval`] could do it — it deletes the
+    /// whole entry, subtree included — and deleting bytes the user was never
+    /// shown is the class of silent destruction this application refuses on
+    /// principle.
+    NestedRemovalWouldDiscardUnshownStructure {
+        /// What the draft named.
+        target: DraftTarget,
+        /// What its value actually is.
+        found: crate::model::ValueKind,
+    },
+    /// The draft asks for one element of a nested sequence to be taken away.
+    ///
+    /// **A cardinality change**, refused for
+    /// [`DraftError::SequenceItemRemoval`]'s reason: a sequence item's removal
+    /// is not one of the four primitives.
+    NestedItemRemoval {
+        /// What the draft named.
+        target: DraftTarget,
+    },
+    /// Two intents of the draft name one index of one nested list.
+    ///
+    /// **Checked at intent level, before any diffing**, and that is the whole
+    /// point of it — see [`DraftError::SequenceItemDraftedTwice`], whose
+    /// reasoning this variant inherits unchanged. It covers two drafted
+    /// variables at one index, two `params` entries at one index within one
+    /// variable, two `form_fields` entries at one index, two options at one index
+    /// within one form field, and two elements at one index within one nested
+    /// sequence.
+    ///
+    /// `first` and `second` are positions in the **draft's own list**, not in
+    /// any batch: there is no batch when this fires.
+    TargetDraftedTwice {
+        /// What both intents name.
+        target: DraftTarget,
+        /// Position of the first intent in the draft's list.
+        first: usize,
+        /// Position of the second.
+        second: usize,
+    },
+    /// The batch names a key that a **nested** mapping it reaches into writes
+    /// more than once.
+    ///
+    /// The guard-level twin of [`DraftError::TargetKeyIsAmbiguous`], stated over
+    /// a batch and reachable by a batch this engine did not build. It carries a
+    /// position in the batch and nothing else, because the key that is repeated
+    /// is one no schema fixes (`CLAUDE.md` section 1).
+    AmbiguousNestedKey {
+        /// Position of the edit in the batch.
+        edit: usize,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -343,6 +503,39 @@ impl fmt::Display for DraftError {
                 write!(formatter, "edit {edit} is outside the surface")
             }
             DraftError::MoveIsNotADraftEdit { edit } => write!(formatter, "edit {edit} is a move"),
+            DraftError::TargetDoesNotExist { length, .. } => {
+                write!(formatter, "the target is not among the {length} there are")
+            }
+            DraftError::VariableHasNoPath { index } => {
+                write!(formatter, "variable {index} has no path")
+            }
+            DraftError::VariableFieldHasNoScalar { variable, .. } => {
+                write!(formatter, "variable {variable} holds no such scalar")
+            }
+            DraftError::EntryDraftsAScalarAndASequence { .. } => {
+                formatter.write_str("one entry is drafted as a scalar and as a sequence")
+            }
+            DraftError::TargetIsNotNameable { .. } => {
+                formatter.write_str("no path segment names the entry's key")
+            }
+            DraftError::TargetKeyIsAmbiguous { other, .. } => {
+                write!(formatter, "entry {other} carries the same key")
+            }
+            DraftError::NestedValueIsACollection { found, .. } => {
+                write!(formatter, "the entry holds a {found:?}")
+            }
+            DraftError::NestedRemovalWouldDiscardUnshownStructure { found, .. } => {
+                write!(formatter, "removing it would discard a {found:?}")
+            }
+            DraftError::NestedItemRemoval { .. } => {
+                formatter.write_str("a nested element may not be deleted")
+            }
+            DraftError::TargetDraftedTwice { first, second, .. } => {
+                write!(formatter, "intents {first} and {second} name one target")
+            }
+            DraftError::AmbiguousNestedKey { edit } => {
+                write!(formatter, "edit {edit} names a repeated nested key")
+            }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError
 }

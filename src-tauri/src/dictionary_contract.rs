@@ -391,11 +391,20 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          `every_sequence_field_serializes_as_its_espanso_key` pins",
     ),
     (
+        "VariableField",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names `name`, `type` or \
+         `inject_vars` inside one variable, which espanso spells one way and \
+         which `every_variable_field_serializes_as_its_espanso_key` pins",
+    ),
+    (
         "DraftTarget",
         "an address, not a code, exactly as `PathSegment` is: it says which \
-         drafted value a refusal is about, and both things it can name are \
-         rendered literally — the nested `MatchField`/`SequenceField` serialize \
-         as espanso keys and an index is an index",
+         drafted value a refusal is about, and everything it can name is \
+         rendered literally — the nested \
+         `MatchField`/`SequenceField`/`VariableField` serialize as espanso keys \
+         and every other operand is an index, deliberately, because an \
+         author-chosen key's text is the owner's private configuration",
     ),
     (
         "DraftError",

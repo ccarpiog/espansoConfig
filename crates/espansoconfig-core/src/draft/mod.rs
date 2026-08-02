@@ -15,16 +15,32 @@
 //! rewriting one of those is a scalar-node replacement, not a sequence
 //! mutation.
 //!
-//! `vars` and `form_fields` are outside it. Their keys are the author's rather
-//! than the schema's and their values may be collections, and the difference
-//! between "a key espanso defined" and "a key this user wrote" is the whole
-//! reason the projection treats them differently.
+//! # The open half, since Phase 2b-2b-2
+//!
+//! `vars` and `form_fields` are inside the surface too, and they are inside it
+//! on different terms, because espanso fixes neither their keys nor the shape of
+//! their values. Three rules make them safe to draft:
+//!
+//! - **an address is an index, never a key text.** A variable, a `params` entry,
+//!   a `form_fields` entry and one of its options are each named by their
+//!   position in the projection; Rust reads the key out of the projection to
+//!   build the path. A caller can only name what it was shown, and no refusal
+//!   carries a byte of the owner's configuration (`CLAUDE.md` section 1);
+//! - **nothing is inserted below the match mapping.** A drafted address the
+//!   projection cannot resolve is refused by name. Writing an author-chosen key
+//!   would be the first time this engine composes a key string that no schema
+//!   fixes, and that needs its own anchor machinery, its own emission checks and
+//!   its own review — `docs/decisions/2b-2b-2-notes.md` decision D1;
+//! - **an open value is a scalar or a sequence of scalars.** Anything else is
+//!   named and then refused, in both directions: a `Set` cannot replace a
+//!   collection node with a scalar one, and a `Remove` would discard bytes this
+//!   editor never displayed.
 //!
 //! # The invariant
 //!
 //! **This engine may modify or remove existing addressable nodes, and may insert
-//! scalar-valued mapping entries. It may never change a sequence's cardinality
-//! and never synthesize a collection node.**
+//! scalar-valued mapping entries into the match's own mapping. It may never
+//! change a sequence's cardinality and never synthesize a collection node.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
@@ -72,8 +88,11 @@ mod field;
 mod match_draft;
 mod plan;
 
-pub use audit::{check_batch_independence, check_closed_surface};
+pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
 pub use error::DraftError;
 pub use field::DraftField;
-pub use match_draft::{DraftTarget, ItemDraft, MatchDraft, MatchField, SequenceField};
+pub use match_draft::{
+    DraftTarget, EntryDraft, FormFieldDraft, ItemDraft, MatchDraft, MatchField, SequenceField,
+    VariableDraft, VariableField,
+};
 pub use plan::plan_match_edits;
