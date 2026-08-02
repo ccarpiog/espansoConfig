@@ -240,6 +240,51 @@ export function parserStopOf(operands: DocumentDoesNotParseOperands): ParserStop
 } // End of function parserStopOf()
 
 /**
+ * The value that would make a refused save proceed, or `null`.
+ *
+ * **The one place this decision is made.** It is not raw-specific — the gate's
+ * rule is the same for a field save, a creation and a deletion — and it moved
+ * here at Phase 2c-1a so that `saveOutcome.ts` could *use* it rather than restate
+ * it. `describeRawSave` below calls it too, so the two cannot drift.
+ *
+ * Only one verdict can be moved by handing the findings back. The other says a
+ * finding of the editor-model class refused, and no acknowledgement covers one.
+ *
+ * The emptiness half is defensive rather than reachable: the gate produces the
+ * acknowledgeable verdict only when some suspicion went unacknowledged, so a
+ * refusal carrying no findings at all cannot come from the core today. It is
+ * checked because the alternative is offering a button whose only possible effect
+ * is the same refusal again, which is a promise this application would not keep.
+ *
+ * It holds **every** finding the refusal carried, because the gate matches the
+ * multiset and a subset is simply a second refusal.
+ *
+ * @param refusal - The `refused` outcome as it crossed the boundary.
+ * @returns The acknowledgement to re-submit, or `null` when none would work.
+ */
+export function refusalAcknowledgement(refusal: RefusedResult): Acknowledgement | null {
+  return refusal.verdict === 'RefusedForUnacknowledgedSuspicions' && refusal.findings.length > 0
+    ? { accepted: [...refusal.findings] }
+    : null;
+} // End of function refusalAcknowledgement()
+
+/**
+ * What to offer about a refusal, given whether acknowledging would work.
+ *
+ * Derived from the acknowledgement rather than from the verdict a second time,
+ * so `saveAnyway` is offered **exactly** when there is a value that makes the
+ * save proceed and a caller cannot route around a missing button.
+ *
+ * @param acknowledgement - What {@link refusalAcknowledgement} answered.
+ * @returns The choices, in the order to offer them.
+ */
+export function refusalChoices(
+  acknowledgement: Acknowledgement | null
+): readonly RawSaveChoice[] {
+  return acknowledgement === null ? ['keepEditing'] : ['saveAnyway', 'keepEditing'];
+} // End of function refusalChoices()
+
+/**
  * Builds what the raw editor says about one save.
  *
  * @param refusal - The `refused` outcome the save came back with, or `null`
@@ -275,22 +320,16 @@ export function describeRawSave(refusal: RefusedResult | null): RawSaveModel {
         : { kind: 'stoppedAt', line: unparseable.stop.line, column: unparseable.stop.column }
     );
   }
-  // Only one verdict can be moved by handing the findings back. The other says a
-  // finding of the editor-model class refused, and no acknowledgement covers one.
-  //
-  // The emptiness half is defensive rather than reachable: the gate produces this
-  // verdict only when some suspicion went unacknowledged, so a refusal carrying
-  // no findings at all cannot come from the core today. It is checked because the
-  // alternative is offering a button whose only possible effect is the same
-  // refusal again, which is a promise this application would not keep.
-  const acknowledgeable =
-    refusal.verdict === 'RefusedForUnacknowledgedSuspicions' && refusal.findings.length > 0;
+  // Whether handing the findings back would really work, and what to offer, are
+  // one decision each and both live above — `saveOutcome.ts` asks the same two
+  // questions about the same refusals.
+  const acknowledgement = refusalAcknowledgement(refusal);
   return {
     messages,
     unparseable,
     otherFindings,
-    choices: acknowledgeable ? ['saveAnyway', 'keepEditing'] : ['keepEditing'],
-    acknowledgement: acknowledgeable ? { accepted: [...refusal.findings] } : null
+    choices: refusalChoices(acknowledgement),
+    acknowledgement
   };
 } // End of function describeRawSave()
 

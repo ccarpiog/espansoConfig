@@ -48,7 +48,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2c-3a** | **The whole-document-text replacement mode**, in the core, with **no command**: `SaveContent::ReplaceText` beside `SaveContent::Edits` inside the one entry point that writes, the parse demoted from a gate to a reported fact, and "does not parse" made an **acknowledgeable finding** so the owner's ruling is safe rather than silent | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on a High finding; **it was fixed before the commit** |
 | **2b-2c-3b** | **`save_raw_document`, the eleventh `#[tauri::command]` and the fifth that writes**: the whole-text request off the wire, the mandatory `BackupSession`, `run_one_save` generalized to carry a `SaveContent` so all five writers share one tail, `moved: null` by construction, the Q8 presentation model in both languages, and the **full identity invalidation** moved into the state that owns the cache | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on a High finding; **all four findings were fixed before the commit**. **2b-2c is closed, and with it 2b: every command Phase 2b was scoped to deliver exists** |
 | **2c split** | **Phase 2c cut into ten sub-phases**, by dependency order and failure mode, after a design consult that changed four of the seven things it was asked about | ✅ complete — `docs/decisions/2c-split-notes.md` is the cut; `docs/reviews/phase-2c-split-design.md` is the consult |
-| 2c-1a … 2c-5 | The editing UI. See the 2c split table below | ⬜️ **2c-1a is next** |
+| **2c-1a** | The **draft spine**, with no editor and no screen: `Draft<T>` with undo expressible rather than addable, the one-shot **sealed** whole-document invalidation, and the save-outcome presentation model for all three arms | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on three High findings; **all eight were fixed before the commit** |
+| 2c-1b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-1b is next** |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -1240,6 +1241,62 @@ verification were removed, and no test involves a second process. The frontend w
 suite was not run — this sub-phase adds **no user-facing string and no dictionary key**, which is what
 makes its CLAUDE.md §2 compliance cheap to believe.
 
+### Phase 2c-1a — the draft spine, with no editor and no screen
+
+**Three modules in `src/lib/browser/`, and not one line of Rust, Svelte or IPC registration.** The
+same shape as 1b-1 (the i18n layer with no command) and 2b-2c-3a (the core mode with no caller):
+the state everything later stands on, proven before anything stands on it. `cargo test --workspace`
+is in the verification table **precisely because** this phase should not have moved it, and it did
+not — 1007, unchanged.
+
+**`draft.ts` — `Draft<T>`, generic over the drafted value**, because the raw editor drafts a
+`string` and 2c-2 will draft a structured `MatchDraft`. It carries a base revision **and** a base
+value, a current value, past and future steps, and **`isDirty` derived from the base** rather than
+stored — editing back to the base value makes it clean again, and there is no flag to forget to
+clear. A draft is constructed with **rules**, `{ same, snapshot }`, not merely an equality: every
+value it records is a deep-frozen snapshot, which is what stops an in-place mutation of a nested
+field moving the base, the history and the consent candidate all at once. Undo, redo, redo cleared
+on branching, and a bounded hundred-step history are all here, because
+`docs/decisions/2c-split-notes.md` §3 makes undo a property of the shape rather than a later
+sub-phase.
+
+**Consent is opaque, branded, and derived — never handed in.** `acknowledgeRefusal(draft,
+submission, refusal)` is the only producer, and it checks the base revision, the candidate identity
+and acknowledgeability before it will issue one. Editing or undoing invalidates it. This is the
+protocol's own content-addressing rule (`FindingCode::DocumentDoesNotParse` carries the candidate's
+revision) meeting the fact that undo changes the candidate — put in the state shape because that is
+the only place it cannot be forgotten.
+
+**`invalidation.ts` — the obligation that was represented in no type.** After a committed
+whole-document replacement every `MatchId` in the file is stale and `moved` is `null` permanently,
+and until this phase a caller that ignored that compiled (`2b-2c-3b-notes.md` §7.2). Now the
+outcome arrives **sealed**: the sealed object is an empty frozen husk, its payload lives in a
+module-private `WeakMap`, and `openWholeDocumentSave(sealed, forget)` is the only way to learn
+anything at all — so a caller that does not discharge the invalidation does not have a save result.
+The seal is **one-shot**, and the entry is deleted *before* the callback runs, so a `forget` that
+re-enters cannot be served either. **A throwing `forget` never unwrites the file**: the throw is
+classified and returned beside the committed outcome, because *a committed write is never
+afterwards reported as an error* and a previous review had already found that invariant broken in
+TypeScript once.
+
+**`saveOutcome.ts` — all three arms, returning codes and never sentences.** `Saved` including
+`committed: false` as a legal success and its `notes` disclosures; `Refused` with the
+acknowledgeable subset and the **exact-multiset** re-submission, delegating the
+`DocumentDoesNotParse` case to `rawSave.ts` rather than restating it; and `Conflict` as the
+terminal, honest state of `2c-split-notes.md` §6, whose model **carries the actual `Draft<T>`** and
+whose reload is a confirmed transition rather than a descriptive boolean. There is no `scope`
+string for a caller to get wrong — `describeWholeDocumentSave` and `describeEditSave` are separate
+producers, and the whole-document saved arm **types** `moved: null`. **No affordance is named or
+coded "keep my draft"**, and that is a rule rather than an oversight: the phrase means 2c-4b's
+rebase.
+
+**Three of the eight review findings were High, and two of the eight were this file's sibling
+document claiming a guarantee the code did not give** — that the seal was unreadable, and that a
+dishonest conflict model was "not expressible". Both were false as written, both are corrected in
+the same words rather than softened, and the honesty rule they produced is now the first rule of
+every 2c fix round: **where TypeScript cannot force something, say so in the same sentence that
+describes what it does force.**
+
 ---
 
 ## Decisions (and why — this is what a fresh session cannot re-derive)
@@ -2101,6 +2158,48 @@ write is what is on disk would be wrong for the same reason.
 | R35 | **Nothing establishes that a Spanish string is Spanish.** The dictionary suite checks key parity, placeholder parity and non-identity with the English value — a translation reading `"Sprache"` passes every one | Accepted, and the *claim* was corrected rather than the code: the suite is named for the untranslated-value heuristic it is, per the review's finding 5, and the `"Sprache"` counterexample is written into the notes and the module doc comments so the boundary cannot be forgotten. Closing this needs reviewed expected translations or a bilingual review gate — a process, not a test — and the cost grows with every phase, since 1c is almost entirely user-facing strings. Two smaller relatives named with it: the duplicate-key scanner compares **key text** rather than decoded escapes, and `webview-floor.test.ts` pins the esbuild target against the plist floor for *consistency* only — esbuild constrains syntax, not library APIs, so a newly used API with a higher baseline than the target would still slip through. `Object.hasOwn` was exactly that shape. |
 | R33 | **TypeScript is pinned to 6.0.3, one major behind 7.0.2**, because `svelte-check@4.7.4` declares `typescript: ^5 \|\| ^6` | Accepted and dated. The whole i18n guarantee is a *compile-time* one, so the version that compiles it is load-bearing: an upgrade that changes how `Record<Exclude<keyof T, TranslationKey>, never>` behaves would weaken `ExactDictionary` silently. The four disabling experiments of `1b-1-notes.md` §2 are the tripwire — **re-run them after any TypeScript or `svelte-check` upgrade**, because they are the only thing that would notice. |
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
+
+---
+
+## Phase 2c-1a review disposition
+
+The mandatory once-per-phase adversarial review is `docs/reviews/phase-2c-1a-draft-spine.md`. It
+returned **`READINESS: NOT READY`** on three High findings. **All eight were fixed before the
+commit**, so — as with every phase since `8989c16` — no commit holds a demonstrated defect.
+
+The brief carried the protocol as *rules* rather than as background, so a violation would come
+back as a defect and not as taste, and it told the reviewer the tests already passed and to skip
+"add a test for X" unless a missing test hid a real defect. **Two of the eight findings were this
+project's own decision record asserting a guarantee the code did not give** — the most valuable
+thing the review found, because a false claim in a notes file is the one defect no test can fail.
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 1 | **High** | **The seal was readable by reflection.** The payload sat on the sealed object under a module-private symbol, and `Reflect.ownKeys(sealed)` / `Object.getOwnPropertySymbols` recovered it, as did spreading the object and reflecting on the copy. The seal was also **reusable** — openable again later with a no-op callback. The module doc's claim that the outcome could not be read except through the opener was **false** | The payload moved off the object into a module-private **`WeakMap`**; the sealed object is now an empty frozen husk carrying nothing at all. The entry is **deleted before the callback runs**, so the seal is one-shot *and* a `forget` that re-enters with the same seal cannot be served either. A second open returns `alreadyOpened` and does not call the callback. Six escapes are now tests |
+| 2 | **High** | **A throwing `forget` hid a committed save.** The opener let the callback's exception propagate in place of the result, which is exactly the prohibited *"a committed write is never afterwards reported as an error"* — the invariant a prior review had already caught broken in TypeScript once | The throw is caught, classified through the existing `classifyFailure`, and returned **beside** the committed outcome as `invalidation: { kind: 'failed' }`. The file is written and stays written, and the answer says so |
+| 3 | **High** | **Structured values were stored by reference.** Acknowledge candidate A, mutate a nested field in place, and `draft.value` and `consent.candidate` are the same object — so consent survives onto candidate B, with no history step and no invalidation. If the base is the same object the mutation moves it too, so `isDirty` stays false. `readonly` is shallow and is not a runtime barrier | A draft carries **rules**, `{ same, snapshot }`, not just an equality. The base, the current value, every history step, the save/reload base and the consent candidate are all snapshots, **deep-frozen unconditionally**. The reviewer's exact scenario is driven with a structured `T` |
+| 4 | Medium | **`acknowledgeDraft` accepted any acknowledgement**, so A's consent could be bound to draft B — and **this file's own record claimed the module never produces that pairing**, which was untrue: given A's acknowledgement, it constructed it | `acknowledgeDraft` is **gone**. Consent is opaque and branded, and only `acknowledgeRefusal(draft, submission, refusal)` produces it, checking the base revision, the candidate identity and acknowledgeability. The record was corrected to say what is now true rather than to soften what was wrong |
+| 5 | Medium | **The save boundary destroyed history the person still needed.** Submit `2`, type `3` while the save is in flight, succeed: the post-submission edit could no longer be undone back to the saved value | Submissions carry a **history generation**. `savedDraft` cuts the past at the submitted step and **keeps what came after it**. The undone-past and abandoned-branch cases are handled and tested explicitly |
+| 6 | Medium | **Scope and document were caller assertions.** `describeSaveOutcome(rawRefusal, 'edit')` suppressed the whole-document disclosure; the wrong `DocumentId` could be sealed against a result; and a whole-document saved arm with a non-`null` `moved` stayed representable although the protocol says it is `null` permanently and by construction | Two producers — `describeWholeDocumentSave` and `describeEditSave` — replace the free-form `scope` string. `WholeDocumentOutcome` is produced **only** by the seal, and its saved arm **types** `moved: null`, rebuilt rather than passed through |
+| 7 | Medium | **`draftKept: true` was an adjective, not a guarantee** — a caller could discard the draft and still get a model saying it was kept. **This record called that "not expressible"**, which was untrue | `ConflictModel<T>` **carries the actual `Draft<T>`**. Reload is a confirmed transition, `confirmReloadDiskVersion` → `reloadDiskVersion`, with a token checked against that conflict. This is also the shape 2c-4a inherits |
+| 8 | Low | **Unbounded history** — every keystroke would append a whole document string for the life of a session | `HISTORY_LIMIT = 100`, oldest step dropped first, with the memory arithmetic and **what the user loses at the bound** written down. Coalescing is explicitly the editor's job, not this module's, and it says so |
+
+**The review's closing judgement was answered rather than absorbed.** It held that the shape was
+*"not yet adequate for `MatchDraft` or later conflict rebase"* on three counts — aliasing,
+post-submission history, and a conflict state not carrying the draft. All three are findings 3, 5
+and 7, and `docs/decisions/2c-1a-notes.md` §5 answers each **plainly**, including whether 2c-4b
+will need more than this shape gives.
+
+**Five residues are recorded rather than claimed closed** (`2c-1a-notes.md` §4), and the first
+three are the same shape: **TypeScript has no linear types.** A caller can still read
+`submission.acknowledgement` and pass it beside different text straight through
+`commands.saveRawDocument`, where the wire's exact-multiset check is the only backstop; nothing
+forces a value to be **sealed** in the first place, and `sealWholeDocumentSave(documentB, resultOfA)`
+is undetectable here because the pairing is asserted once by the adapter that issued the save;
+`() => {}` still satisfies `ForgetReplacedDocument`, because no signature can require a body to
+act. Two more are narrower: `reloadedDraft` is exported and reachable without the confirmation
+token, and `deepFreeze`/`deepEquals` cover plain data only while the history bound is arithmetic
+rather than measurement.
 
 ---
 
@@ -3043,6 +3142,40 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-1a
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was run **twice** — on the implementation and again after the review fix
+round — and the table records the second run.
+
+| Command | Result |
+|---|---|
+| `npm test` | **821 passed, 33 files** (738 before the phase; 797 before the fix round) |
+| `npm run check` | 384 files, **0 errors, 0 warnings, 0 files with problems** |
+| `npm run build` | exit 0, 150 modules |
+| `cargo test --workspace` | **1007 passed, 0 failed** — *unchanged*, and run to prove it |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `git status --short` | changes only under `src/lib/` and `docs/` |
+
+**The baseline was verified before the phase, not assumed**: `cargo test --workspace` 1007 passed
+and `npm test` 738 passed were both run at the head of the session, so the +83 frontend tests are
+measured against a number this session observed.
+
+**`cargo test --workspace` is in the table although this phase wrote no Rust.** That is the point
+of running it: 2c-1a's whole claim is that it is TypeScript-only, and an unchanged 1007 is the
+evidence. `git status --short` is in the table for the same reason — it is what shows no `.svelte`
+file, nothing under `crates/` and nothing under `src-tauri/` was touched.
+
+**What this table does not establish, and cannot.** Nothing in this project renders a Svelte
+component in an automated test, and 2c-1a **draws nothing** — no component, no screen, no window
+reading. So none of these 821 tests is evidence about a screen, and the phase does not claim to
+be. The three kinds of evidence `2c-split-notes.md` §7 requires of every 2c sub-phase are owed
+in full by **2c-1b**, which is where the first mounted-component test and the first window reading
+of an editing screen both land.
 
 ---
 
@@ -4478,6 +4611,78 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**Phase 2c-1a is complete: the draft spine exists and nothing draws it.**
+`docs/decisions/2c-1a-notes.md` is the record; the aggregate code review is
+`docs/reviews/phase-2c-1a-draft-spine.md`, and it returned **`READINESS: NOT READY`** on three
+High findings. **All eight were fixed before the commit.** The cut this phase implements is
+`docs/decisions/2c-split-notes.md`, produced by the consult
+`docs/reviews/phase-2c-split-design.md`; **do not re-commission that consult for 2c-1b** — it
+covers the whole of 2c.
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 821 passed, 33 files
+```
+
+(`cargo test --workspace` still expects **1007**, and this phase wrote no Rust.)
+
+**The next step is Phase 2c-1b — the raw editor, the one vertical slice of 2c-1.** It is the
+first screen in this project that can write a user's file. Its scope is in the 2c split table
+above: the raw pane made editable and saveable over the already-wired `saveRawDocument`, the three
+outcome arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state,
+and **this project's first mounted-component test**.
+
+**What 2c-1a built that 2c-1b calls, and must not redesign.**
+
+- **`Draft<T>` carries rules, `{ same, snapshot }`, not just an equality**, and every value it
+  records — base, current, each history step, the save/reload base, the consent candidate — is a
+  **deep-frozen snapshot**. The raw editor drafts a `string`, so the snapshot is the identity; do
+  not conclude from that that the rules are ceremony. 2c-2 drafts a structured `MatchDraft`, and
+  the review demonstrated the aliasing defect that shape exists to prevent.
+- **`isDirty` is derived from the base**, not stored. There is no flag to set and none to clear.
+- **Consent is opaque and branded, and `acknowledgeDraft` does not exist.** The only producer is
+  `acknowledgeRefusal(draft, submission, refusal)`, which checks the base revision, the candidate
+  identity and acknowledgeability. Editing or undoing invalidates it. **Do not reach around this**
+  by lifting `submission.acknowledgement` and pairing it with different text — that path is still
+  reachable (hole 4.1) and the wire's exact-multiset check is the only thing that would catch it.
+- **A whole-document outcome arrives sealed.** `openWholeDocumentSave(sealed, forget)` is the only
+  way to learn anything about it; the seal is **one-shot**, and a second open returns
+  `alreadyOpened` without calling the callback. `forget` is **synchronous** and total — the
+  re-read that follows is a separate, asynchronous step and is not this.
+- **A throwing `forget` never unwrites the file.** The opener returns the committed outcome beside
+  `invalidation: { kind: 'failed' }`. 2c-1b must present that honestly: **the save succeeded and
+  the window is out of step**, never "the save failed".
+- **Two describers, and no `scope` string**: `describeWholeDocumentSave` and `describeEditSave`.
+  A whole-document saved arm **types** `moved: null`. Both return **codes and parameters, never
+  sentences**.
+- **`ConflictModel<T>` carries the actual `Draft<T>`**, and reload is a confirmed transition —
+  `confirmReloadDiskVersion` → `reloadDiskVersion`, with a token checked against that conflict.
+
+**What 2c-1b owes.**
+
+1. **The eight requirements of `2c-split-notes.md` §6**, in a drawn conflict state — and the
+   prohibition with them: **no control may be named or coded "keep my draft"**, because that
+   phrase means 2c-4b's rebase and using it early would make 2c-4b look already done. **No
+   placeholder buttons for 2c-4.**
+2. **The mounted-component test**, this project's first. `vite.config.ts` still says
+   `environment: 'node'` with a comment reading *"Adding jsdom later is a deliberate decision, not
+   a default"* — 2c-1b is where that decision is taken. Scope it to the interactive components 2c
+   introduces; **do not back-fill the existing six**, and **do not treat it as replacing the
+   window reading** — a mounted test proves a handler fires, not that a window draws.
+3. **A window reading**, per `1c-1-notes.md` §10, under the WKWebView constraint of
+   `1c-2b-2b-2-notes.md` §6.1: **one plan per launch, into a fresh bundle path.**
+4. **The twelve strings 2c-1a added have still never been drawn**, on top of the ~40 already on
+   that list. 2c-1b draws the raw-save subset of both.
+5. **Nothing forces a caller to seal.** `commands.saveRawDocument` and
+   `BrowserState.saveRawDocument` still answer unsealed values (hole 4.2). 2c-1b is where the seal
+   is either proved useful at a real call site or found wanting — decide it there, on evidence.
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" further down still binds**,
+unchanged. Nothing in 2c-1a supersedes it.
+
+---
 
 **The Phase 2c split is done, and it is the only thing this entry records.** No code was written:
 the previous checkpoint's instruction was *"A fresh session's first act is that split, not code"*,

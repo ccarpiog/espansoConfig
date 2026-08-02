@@ -23,6 +23,12 @@ import {
   type RawSaveChoice,
   type RawSaveMessage
 } from '../browser/rawSave';
+import {
+  conflictChoiceKey,
+  saveOutcomeMessageKey,
+  type ConflictChoice,
+  type SaveOutcomeMessage
+} from '../browser/saveOutcome';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
@@ -406,6 +412,38 @@ export function tRawSaveMessage(message: RawSaveMessage): string {
 export function tRawSaveChoice(choice: RawSaveChoice): string {
   return translate(locale.current, rawSaveChoiceKey(choice));
 } // End of function tRawSaveChoice()
+
+/**
+ * Renders one line a save outcome shows, in the current language.
+ *
+ * The accessor over the save-outcome model, here for `tRawSaveMessage`'s
+ * reason: a component that turned a code into a key in markup would be doing the
+ * one thing CLAUDE.md section 2 forbids.
+ *
+ * **None of these nine sentences carries an operand**, so nothing is substituted
+ * here. A revision is opaque and is never rendered; a finding's own numbers reach
+ * a screen through `tFindingCode`.
+ *
+ * @param message - A line of the save-outcome model.
+ * @returns The translated sentence.
+ */
+export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
+  return translate(locale.current, saveOutcomeMessageKey(message));
+} // End of function tSaveOutcomeMessage()
+
+/**
+ * Renders one thing the person may do about a conflict, in the current language.
+ *
+ * **None of these labels is "keep my draft"**, and none may become one: that
+ * phrase means *reapply the draft to the newly parsed document*, which is Phase
+ * 2c-4b (`docs/decisions/2c-split-notes.md` section 6).
+ *
+ * @param choice - What the model offers.
+ * @returns The translated label.
+ */
+export function tConflictChoice(choice: ConflictChoice): string {
+  return translate(locale.current, conflictChoiceKey(choice));
+} // End of function tConflictChoice()
 
 /**
  * Renders what kind of node a value is, in the current language.

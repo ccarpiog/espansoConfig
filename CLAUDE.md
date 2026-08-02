@@ -144,16 +144,31 @@ seventh `#[tauri::command]` and the first that is not read-only.**
 layer's single cache-coherency policy; a sixth writing command **calls it rather than copying it**,
 because it was four copies once.
 
-**Phase 2c — the editing UI — is split, and the split is `docs/decisions/2c-split-notes.md`.** Ten
-sub-phases, 2c-1a first: the draft spine, with no editor and no screen. Three of its rules bind
-before any code: **undo is not a sub-phase** — the draft state shape must be able to express it in
-2c-1a or it will be rewritten under two editors later; **a committed whole-document replacement
-must produce a typed invalidation effect**, because every `MatchId` in the file is stale and the
-obligation is today represented in no type; and **a projection-based copy is not a duplicate** —
-it drops comments, key order and scalar spelling, so calling it *Duplicate* breaks the
-preservation promise in the one place nobody checks. Every sub-phase of 2c owes **three** kinds of
-evidence: model tests, a **mounted-component test** (new to this project, taken deliberately in
-2c-1b — `vite.config.ts` has held the decision open since 1b-1), and a manual window reading.
+**Phase 2c — the editing UI — is split into ten sub-phases**
+(`docs/decisions/2c-split-notes.md`), and **2c-1a is complete: the draft spine exists and nothing
+draws it.** Three of the split's rules bind every later sub-phase. **Undo is not a sub-phase** —
+the draft state shape had to express it in 2c-1a or be rewritten under two editors later. **A
+projection-based copy is not a duplicate** — it drops comments, key order and scalar spelling, so
+calling it *Duplicate* breaks the preservation promise in the one place nobody checks (2c-3c).
+And **every sub-phase of 2c owes three kinds of evidence**: model tests, a **mounted-component
+test** (new to this project, taken deliberately in 2c-1b — `vite.config.ts` has held that decision
+open since 1b-1), and a manual window reading. **2c-1b is next**, and it is the first screen in
+this project that can write a user's file.
+
+**A whole-document save outcome arrives sealed, and the seal is one-shot.**
+`openWholeDocumentSave(sealed, forget)` in `src/lib/browser/invalidation.ts` is the only way to
+learn anything about it — a caller that does not discharge the invalidation does not have a save
+result, because after a committed replacement **every `MatchId` in that file is stale** and `moved`
+is `null` permanently. `forget` is synchronous and total; the re-read that follows is a separate
+step. **A throwing `forget` never unwrites the file** — the throw comes back beside the committed
+outcome, never in place of it. In `src/lib/browser/draft.ts`, **`isDirty` is derived and consent is
+opaque**: `acknowledgeRefusal` is the only producer, and editing or undoing invalidates it. **No
+control anywhere may be named or coded "keep my draft"** before 2c-4b — there it means *rebase the
+draft onto the newly parsed document*, and using the words early makes that phase look done.
+
+**Where TypeScript cannot force something, say so in the same sentence that describes what it does
+force.** Two of the eight findings in 2c-1a's review were this project's own decision record
+claiming a guarantee the code did not give — the one class of defect no test can fail.
 
 **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's file.**
 Never call `replace_file_atomically` or `replace_locked_file` from a command, and never from inside the
