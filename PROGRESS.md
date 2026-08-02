@@ -5516,8 +5516,20 @@ _Updated at each phase boundary._
 | 2b-2b-2 | `8016a3b` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-2 code review | `f1bbad1` | ✅ pushed to `origin/main` | clean |
 | 2b-2b-3 | `0cf7420` | ✅ pushed to `origin/main` | clean |
-| **2b-2c-1** | **`95c1a0b`** | ✅ pushed to `origin/main` | clean |
+| 2b-2c-1 | `95c1a0b` | ✅ pushed to `origin/main` | clean |
+| **2b-2c-2** | **`8d223fc`** | ✅ pushed to `origin/main` | clean |
 | 2b-2b-1 | `a45424f` | ✅ pushed to `origin/main` | clean |
+
+`8d223fc` is Phase 2b-2c-2 **whole** — its design consult, its aggregate code review, **both of that
+review's findings fixed before the commit**, and this checkpoint. 29 files, +3477/−246. It contains
+`create_match` and `delete_match` in `src-tauri/src/commands.rs`, the closed `NewMatch` in
+`crates/espansoconfig-core/src/draft/new_match.rs`, `ItemPlacement` and the front insertion in
+`patch/edit.rs`, `PresentationNote` reshaped into a tagged union across `src-tauri/src/save.rs` and
+`src/lib/ipc/types.ts`, `CommandError::DocumentHasNoMatchList` with its two sentences, the new
+`every_edit_error_variant_crosses_as_an_object`, `docs/decisions/2b-2c-2-notes.md` and the two review
+files. **It is the first commit in which this application can create or delete a user's snippet** —
+and the first in which a deletion tells the user about the blank line it doubled instead of doing it
+silently.
 
 `95c1a0b` is Phase 2b-2c-1 **whole** — both Codex consultations, the one Low documentation finding
 fixed before the commit, and this checkpoint. It contains `InsertItem`, `RemoveItem` and the shared
