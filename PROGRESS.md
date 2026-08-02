@@ -47,7 +47,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2b-2c-2** | **`create_match` and `delete_match`, the ninth and tenth commands**, over those two primitives and through `save_document`: the closed `NewMatch`, the identity-addressed `NewMatchPosition`, a front insertion made a **planner** operation, and `PresentationNote` generalized into a tagged union so a deletion can disclose the blank line it doubles | ✅ complete — its design consult and its aggregate code review are both closed. The review returned **NOT READY** on one Medium finding; **both findings were fixed before the commit** and the verdict's condition discharged |
 | **2b-2c-3a** | **The whole-document-text replacement mode**, in the core, with **no command**: `SaveContent::ReplaceText` beside `SaveContent::Edits` inside the one entry point that writes, the parse demoted from a gate to a reported fact, and "does not parse" made an **acknowledgeable finding** so the owner's ruling is safe rather than silent | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on a High finding; **it was fixed before the commit** |
 | **2b-2c-3b** | **`save_raw_document`, the eleventh `#[tauri::command]` and the fifth that writes**: the whole-text request off the wire, the mandatory `BackupSession`, `run_one_save` generalized to carry a `SaveContent` so all five writers share one tail, `moved: null` by construction, the Q8 presentation model in both languages, and the **full identity invalidation** moved into the state that owns the cache | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on a High finding; **all four findings were fixed before the commit**. **2b-2c is closed, and with it 2b: every command Phase 2b was scoped to deliver exists** |
-| 2c … 2d | See the Phase 2 split below | ⬜️ **2c is next** |
+| **2c split** | **Phase 2c cut into ten sub-phases**, by dependency order and failure mode, after a design consult that changed four of the seven things it was asked about | ✅ complete — `docs/decisions/2c-split-notes.md` is the cut; `docs/reviews/phase-2c-split-design.md` is the consult |
+| 2c-1a … 2c-5 | The editing UI. See the 2c split table below | ⬜️ **2c-1a is next** |
+| 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -64,6 +66,35 @@ that can destroy a file is finished and proven before anything can call it.
 | **2b** | The **Tauri mutation surface** — `save_match`, `create_match`, `delete_match`, `move_match`, `save_raw_document`, `reload_document`, and `SaveResult::Conflict` on the wire |
 | **2c** | The **editing UI** — the draft model, the small editor (literal trigger · `replace` · label · word boundary), new / duplicate / delete / move, the conflict UI, draft-level undo, restore from backup |
 | **2d** | **External change reconciliation** — plan §6.5's debounced watcher, self-write suppression, and the clean-draft reload |
+
+**2c is split into ten sub-phases**, and the cut is `docs/decisions/2c-split-notes.md`. It was put
+to a design consult (`docs/reviews/phase-2c-split-design.md`) before any line of 2c was written, by
+the same rule 2b-2c followed, and **the consult changed four of the seven things it was asked
+about** rather than confirming the proposal. 2c is the first UI in this project that can destroy
+data: five commands can write a user's file and no screen calls any of them, so 2c carries the
+whole save protocol onto a screen for the first time — three outcome arms, an exact-multiset
+acknowledgement round trip, a content-addressed refusal, a conflict that must overwrite neither
+side, and an identity invalidation **represented in no type**.
+
+| Sub-phase | Scope | Fails as |
+|---|---|---|
+| **2c-1a** | The **draft spine**, with no editor: the draft state shape (base revision, base value, current value, undo/redo history, **derived** dirty, history boundaries), the **typed whole-document invalidation effect**, and the save-outcome presentation model for all three arms including the acknowledgement round trip. No screen | a **state-shape** mistake |
+| **2c-1b** | The **raw editor**, the one vertical slice: the raw pane made editable and saveable over the already-wired `saveRawDocument`, the three arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state, and this project's **first mounted-component test** | a **protocol** mistake |
+| **2c-2** | The **small editor** — literal trigger · `replace` · label · word boundary — over `MatchDraft` and `save_match`, extending undo coverage to per-field editing | a **draft-versus-projection** mistake |
+| **2c-3a** | **New and delete**: `create_match` and `delete_match` on a screen, the returned identity adopted, and the selection's behaviour when the selected match is the one deleted | an **identity** mistake |
+| **2c-3b** | **Move**: `move_match` on a screen, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden | an **identity** mistake |
+| **2c-3c** | **Duplicate**, once its semantics are settled — a projection-based copy is **not** a duplicate and would break the preservation promise in the one place nobody checks. May require Rust | a **preservation-promise** mistake |
+| **2c-4a** | **Conflict capture and preservation**: retain the draft, load the disk version separately, compare, copy, reload — overwriting neither side | a **both-sides data-loss** mistake |
+| **2c-4b** | **Reapply** — "keep my draft" in the plan's strong sense: identify the intended match in the newly parsed document and apply only when confidence suffices | an **algorithmic** mistake |
+| **2c-4c** | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone | a **dead-end** mistake |
+| **2c-5** | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | a **destructive** mistake |
+
+**Draft-level undo is deliberately not on that list.** The consult rejected it as a sub-phase:
+a draft model built without undo in mind is a `{ value, dirty }` pair, a draft model that can
+support undo is a base plus a current plus two stacks plus boundary rules, and the second is not
+reachable from the first by addition. So the **shape** is 2c-1a's and its **coverage** extends
+editor by editor (2c-1b for the raw text, 2c-2 for the fields). Deferring it would have meant
+designing the wrong shape, shipping two editors on it, and rewriting it under both.
 
 **2b is split into 2b-1 / 2b-2**, by the same cut every earlier split used — a dependency order, not a
 convenience, and by *failure mode*. 2b was handed two pieces of work that fail differently. The first
@@ -2070,6 +2101,39 @@ write is what is on disk would be wrong for the same reason.
 | R35 | **Nothing establishes that a Spanish string is Spanish.** The dictionary suite checks key parity, placeholder parity and non-identity with the English value — a translation reading `"Sprache"` passes every one | Accepted, and the *claim* was corrected rather than the code: the suite is named for the untranslated-value heuristic it is, per the review's finding 5, and the `"Sprache"` counterexample is written into the notes and the module doc comments so the boundary cannot be forgotten. Closing this needs reviewed expected translations or a bilingual review gate — a process, not a test — and the cost grows with every phase, since 1c is almost entirely user-facing strings. Two smaller relatives named with it: the duplicate-key scanner compares **key text** rather than decoded escapes, and `webview-floor.test.ts` pins the esbuild target against the plist floor for *consistency* only — esbuild constrains syntax, not library APIs, so a newly used API with a higher baseline than the target would still slip through. `Object.hasOwn` was exactly that shape. |
 | R33 | **TypeScript is pinned to 6.0.3, one major behind 7.0.2**, because `svelte-check@4.7.4` declares `typescript: ^5 \|\| ^6` | Accepted and dated. The whole i18n guarantee is a *compile-time* one, so the version that compiles it is load-bearing: an upgrade that changes how `Record<Exclude<keyof T, TranslationKey>, never>` behaves would weaken `ExactDictionary` silently. The four disabling experiments of `1b-1-notes.md` §2 are the tripwire — **re-run them after any TypeScript or `svelte-check` upgrade**, because they are the only thing that would notice. |
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
+
+---
+
+## Phase 2c split — consult disposition
+
+The split of Phase 2c was put to a design consult before any line of 2c was written, by the same
+rule 2b-2c's split followed. The consult is `docs/reviews/phase-2c-split-design.md` — held to a
+self-contained brief with no web search and no repository exploration, so its answers are about
+the design as stated rather than about whatever it might have found by reading. The resulting cut
+is `docs/decisions/2c-split-notes.md`.
+
+**Seven questions, seven answers, all adopted. Four changed the cut rather than confirming it.**
+
+| # | Question | Answer | Disposition |
+|---|---|---|---|
+| 1 | Is putting the **raw whole-document editor first** right, or dangerous? | **Raw editor first** — the small editor introduces changed-field tracking, scalar fidelity, optional-field semantics and projection-to-draft conversion *simultaneously*, so a protocol failure could be misattributed to any of them. A raw candidate is one exact string and isolates the protocol unusually well. *"Saving unparseable text is not itself the danger; saving it without content-addressed, draft-specific acknowledgement is."* | **Adopted, with its prerequisite.** The prerequisite is not optional: a committed replacement must produce a **typed** invalidation effect, not a documented obligation. **That moves the effect out of 2c-3 and into 2c-1a** — the first change to the cut |
+| 2 | Is a "minimal but honest" conflict state in 2c-1 sound, or a half-built path never revisited? | **Sound** — *"a deliberately terminal conflict state is a complete first implementation, not a partial implementation of rebasing."* Eight requirements listed for it to be honest | Adopted verbatim as `2c-split-notes.md` §6, plus its prohibition: **no control in 2c-1b may be called "Keep my draft"**, because in the plan that phrase means the 2c-4b rebase. No placeholder buttons; 2c-4's behaviour is an explicit Phase 2c exit requirement instead |
+| 3 | Where does **draft-level undo** belong? | **Not a sub-phase.** *"Undo is not genuinely separable from the draft architecture. Its state shape must be designed in 2c-1."* Seven state distinctions listed | **Adopted — the second change.** Undo is deleted as a sub-phase; its shape is 2c-1a's and its coverage extends per editor. The seventh distinction is the protocol's own rule meeting undo: **an acknowledgement is bound to the exact current candidate**, so undoing invalidates consent collected for another |
+| 4 | Is **duplicate** a trivial addition? | **No.** A projection-based duplicate loses comments, key order, scalar spelling and quoting, unknown fields, tags and anchors — *"Calling that operation 'Duplicate' would violate the app's preservation promise even if the source match itself remains untouched."* A true duplicate clones the exact source subtree, which `create_match` cannot express | **Adopted — the third change.** Duplicate becomes **2c-3c**, owing a decision before it owes code: a true duplicate (Rust work in `patch/`) or an honestly-labelled *New from supported fields*. Not a button |
+| 5 | Which sub-phases are themselves too large? | 2c-3 → three; 2c-4 → three (*"'keep my draft' is the dangerous algorithmic part and shouldn't ship alongside five new UI offers in one commit"*); 2c-5 dissolved | **Adopted — the fourth change.** Five sub-phases became ten |
+| 6 | The most likely failure the split does **not** protect against? | *"A successful raw save followed by continued use of stale frontend projections and `MatchId`s"* — the screen can present every arm correctly and still leave the workspace holding stale selections, details, search results and draft targets | Adopted and **written into the split as §8 rather than left to be discovered.** Moving the effect into 2c-1a does not by itself close it: the effect must be **unignorable**, and where TypeScript cannot force that, the residue is recorded as a hole rather than claimed closed — as `2b-2c-3b-notes.md` §7.2 already did for `ReloadAfterRawSave` |
+| 7 | What acceptance evidence, given no automated test renders a component? | **Three kinds per sub-phase**: automated model/state tests, **at least one mounted-component interaction test**, and a recorded manual window reading. Per-sub-phase specifics given | Adopted, with one addition of our own — see the decision below |
+
+**The one decision taken here rather than by the consult: this project gains mounted-component
+tests, in 2c-1b, scoped.** The consult asked for them; the choice of when and how wide is ours.
+`vite.config.ts` has anticipated exactly this decision since 1b-1 in as many words — *"Adding
+jsdom later is a deliberate decision, not a default"* — and Phase 2c is where the premise behind
+that default expires: its components hold interactive state, and **the acknowledgement round trip
+is the highest-risk protocol in the application while living entirely inside a component**, where
+a model test cannot reach it and a manual reading cannot regress-test it. The decision is scoped
+and not retroactive: the harness is added in 2c-1b and used for the interactive components 2c
+introduces; existing components are not back-filled; and **the manual window reading is not
+replaced** — a mounted test proves a handler fires, not that a window draws.
 
 ---
 
@@ -4414,6 +4478,60 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**The Phase 2c split is done, and it is the only thing this entry records.** No code was written:
+the previous checkpoint's instruction was *"A fresh session's first act is that split, not code"*,
+and this is that act. The cut is `docs/decisions/2c-split-notes.md`; the design consult behind it
+is `docs/reviews/phase-2c-split-design.md`; the disposition of its seven answers is the section
+above. **Four of the seven changed the cut.**
+
+The exact first command a fresh session should run:
+
+```sh
+cargo test --workspace          # expect 1007 tests, 0 failed
+```
+
+(and `npm install` before any frontend command, as since 1b-1. `npm test` expects **738**.)
+Both were run at the head of this session and both matched, so the split rests on a verified
+baseline rather than an assumed one.
+
+**The next step is Phase 2c-1a — the draft spine, with no editor and no screen.** Its scope is in
+the 2c split table above. Three things it owes, in the order they matter:
+
+1. **The draft state shape**, designed so undo is expressible rather than addable later: base
+   revision **and** base value; the current editable value; past and future states (or reversible
+   actions); **dirty derived from the base, never a separate flag**; a history boundary after a
+   successful save or a reload; redo cleared when editing resumes from an undone state; and an
+   **acknowledgement bound to the exact current candidate**, so that undoing or editing invalidates
+   consent collected for a different one. That last one is the protocol's own content-addressing
+   rule (`FindingCode::DocumentDoesNotParse` carries the candidate's revision) meeting the fact
+   that undo changes the candidate — it belongs in the shape because that is the only place it
+   cannot be forgotten.
+2. **The typed whole-document invalidation effect.** A committed replacement makes **every**
+   `MatchId` in the file stale, and today that obligation is represented in no type: a caller that
+   ignores it compiles (`2b-2c-3b-notes.md` §7.2). 2c-1a owes a shape where dropping it does not
+   compile — and where TypeScript cannot force that, the residue is **written down as a hole, not
+   claimed closed.** This is the consult's answer 6, the single most likely way 2c goes wrong.
+3. **The save-outcome presentation model for all three arms** — `Saved` (including
+   `committed: false` and the `notes` disclosures), `Refused` (the findings, the acknowledgeable
+   subset, and the **exact-multiset** re-submission), and `Conflict`. It lives in
+   `src/lib/browser/`, beside `rawSave.ts`, which already models the `DocumentDoesNotParse` case
+   specifically and must be **used** by this model rather than duplicated by it.
+
+**2c-1a registers no command, writes no Rust and draws no screen.** It is the same shape as 1b-1
+(the i18n layer with no command) and 2b-2c-3a (the core mode with no caller): the state that
+everything later stands on, proven before anything stands on it.
+
+**What 2c-1b will need from it, so 2c-1a does not under-build:** a raw text area bound to the
+current value, a save control gated on dirty, the three arms drawn, the acknowledgement round trip
+drawn, a terminal-but-honest conflict state meeting the eight requirements of
+`2c-split-notes.md` §6, and **this project's first mounted-component test** — the deliberate
+`jsdom` decision `vite.config.ts` has been holding open since 1b-1.
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" in the entry below still
+binds**, unchanged. Read it before starting 2c-1a; nothing in the split supersedes it.
+
+---
 
 **Phase 2b-2c-3b is complete, and with it 2b-2c and the whole of 2b.**
 `docs/decisions/2b-2c-3b-notes.md` is the record; the aggregate code review is

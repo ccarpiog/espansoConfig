@@ -142,8 +142,18 @@ seventh `#[tauri::command]` and the first that is not read-only.**
 `save_match`, `create_match`, `delete_match` and `save_raw_document`. **All five end in one
 `run_one_save`** in `src-tauri/src/commands.rs`, which carries a `SaveContent` and holds this
 layer's single cache-coherency policy; a sixth writing command **calls it rather than copying it**,
-because it was four copies once. **The next phase is 2c, the editing UI, and it must be split
-before any of it is written.**
+because it was four copies once.
+
+**Phase 2c — the editing UI — is split, and the split is `docs/decisions/2c-split-notes.md`.** Ten
+sub-phases, 2c-1a first: the draft spine, with no editor and no screen. Three of its rules bind
+before any code: **undo is not a sub-phase** — the draft state shape must be able to express it in
+2c-1a or it will be rewritten under two editors later; **a committed whole-document replacement
+must produce a typed invalidation effect**, because every `MatchId` in the file is stale and the
+obligation is today represented in no type; and **a projection-based copy is not a duplicate** —
+it drops comments, key order and scalar spelling, so calling it *Duplicate* breaks the
+preservation promise in the one place nobody checks. Every sub-phase of 2c owes **three** kinds of
+evidence: model tests, a **mounted-component test** (new to this project, taken deliberately in
+2c-1b — `vite.config.ts` has held the decision open since 1b-1), and a manual window reading.
 
 **`espansoconfig_core::persist::save_document` is the only entry point that may write a user's file.**
 Never call `replace_file_atomically` or `replace_locked_file` from a command, and never from inside the
