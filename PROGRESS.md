@@ -6999,7 +6999,7 @@ _Updated at each phase boundary._
 | **2c-1b** | **`fa72d45`** | ✅ pushed to `origin/main` | clean |
 | **2c-2 step 1** | **`22a52cc`** | ✅ pushed to `origin/main` | clean |
 | **2c-2 step 2** | **`a17d975`** | ✅ pushed to `origin/main` | clean |
-| **2c-3a step 1** | **`37ea352`** | see below | clean |
+| **2c-3a step 1** | **`37ea352`** | ✅ pushed to `origin/main` (as `cb6fee3`) | clean |
 
 `37ea352` is Phase 2c-3a step 1 **including all three of its review rounds** — the step was held
 open until all ten findings were closed, so, as with every phase since `8989c16`, no commit holds a
