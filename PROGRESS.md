@@ -5168,20 +5168,45 @@ npm install && npm test        # expect 1160 passed, 42 files
 (`cargo test --workspace` expects **1008**, unchanged — neither step of 2c-3a wrote any Rust, and
 2c-3b should need none either.)
 
-### ⚠️ One decision is owed by the owner before, or alongside, the next sub-phase
+### The Spanish snippet term — DECIDED BY THE OWNER and applied
 
-**The Spanish dictionary calls a snippet two different things, and one window now shows both at
-once.** `atajo` in the 2c namespaces (22 of 2c-3a-2's 51 new strings) and `fragmento` everywhere
-older; the window reading's L9 drew both **five lines apart in a single pane**. The split predates
-2c-3a-2 — this step only widened it and made it visible.
+**The owner chose `fragmento`.** The Spanish dictionary had called a snippet both `atajo` (the 2c
+namespaces) and `fragmento` (everything older), and the window reading's L9 drew both **five lines
+apart in a single pane**. The split predated 2c-3a-2; that step widened it and was the first to put
+both words on screen together. `fragmento` won as the established majority term and the closer match
+to the English *snippet* — `atajo` means *shortcut*, which in espanso more naturally names the
+**trigger** than the match.
 
-It was left unfixed deliberately: it spans the 2c-1a, 2c-1b and 2c-2 namespaces, outside 2c-3a's cut,
-and **which Spanish word this application uses for a snippet is a user-facing terminology decision in
-the owner's own language**. The mechanical recommendation is **`fragmento`** — the established
-majority term, and the closer match to the English *snippet*, where `atajo` means *shortcut* and in
-espanso more naturally names the **trigger** than the match. **Ask before changing 22 strings.**
-Whichever way it goes, the change is dictionary-only: it touches no component, so it obliges no
-re-taken window reading.
+**The real count was 49 strings / 60 occurrences, not the 22 first reported**, and the discrepancy is
+worth keeping: 22 was this *step's own* new strings, and the whole-dictionary figure was never
+checked until the change was made. It reconciles — `git show 37ea352:src/lib/i18n/es.json` holds 27,
+step 2 added 22, and 27 + 22 = 49 at `57bf362`. **Zero occurrences remain**, and none was kept back:
+all 49 were read against their `en.json` counterparts and every one said *snippet* — not one was a
+keyboard shortcut or about the trigger. `git diff --numstat` reports **49 changed, 0 added, 0
+removed**, so no key moved and the parity suites still pass.
+
+**⚠️ What this leaves open, and it is not nothing.** The change is **dictionary-only** — it touches no
+component, so it obliges no re-taken window reading, and none was taken. But `fragmento` is the
+**longer** noun, and the re-taken reading measured Spanish with only **13 px of margin** on the
+creation form. **No screen has been observed drawing the longer word**, so control width — e.g.
+*Añadir este fragmento* — is unverified. The sticky action row should keep the primary control
+visible regardless of wrapping, which is why this was judged safe to defer rather than safe to
+ignore. **2c-3b's window reading must set the language to Spanish through the picker anyway; it
+should look at the creation form's width while it is there.**
+
+**Two further Spanish inconsistencies were found while making this change, reported and deliberately
+NOT fixed** — expanding the change beyond the term the owner ruled on was out of scope:
+
+- **A real split.** English's single *"a single value"* is Spanish's `un valor suelto` in four codes
+  (`code.valueKind.scalar`, `code.nodeKind.scalar`, `code.editError.notAScalar`,
+  `code.verificationFailure.targetKindChanged`) **and** `un valor único` in five
+  (`code.draftError.notAScalar`, `.fieldHasAnUnmodelledShape`, `.variableFieldHasNoScalar`,
+  `.entryDraftsAScalarAndASequence`, `.nestedValueIsACollection`).
+- **A collision this change sharpened.** `browser.matchEditor.readOnly.unmodelledShape` and
+  `browser.matchEditor.shapeOnly` say `un solo fragmento de texto` for "a single piece of text" — in a
+  pane that now says `fragmento` for the snippet itself.
+- **Not a defect**, checked and dismissed: `conjunto de claves` vs `bloque de claves` faithfully
+  mirrors English's own *set of keys* / *block of keys*.
 
 **The next step is Phase 2c-3b — move on a screen**, per `docs/decisions/2c-split-notes.md` §2:
 `move_match` drawn, the new identity adopted, and the cross-sequence and combined-edit refusals
@@ -7254,9 +7279,11 @@ re-take, and this checkpoint. **A fresh session starting Phase 2c-3b should star
 later.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command will run. It
 touches no Rust, so `cargo test --workspace` is unchanged at 1008 and need not be re-run to verify it.
 
-**One thing this commit deliberately does not fix**, and it is the only known user-visible defect at
-this SHA: the Spanish dictionary calls a snippet both `atajo` and `fragmento`, and one pane now shows
-both. It needs the owner's decision — see the ⚠️ under "Next action".
+**One thing `57bf362` deliberately did not fix**, and it was the only known user-visible defect at
+that SHA: the Spanish dictionary called a snippet both `atajo` and `fragmento`, and one pane showed
+both. **The owner has since chosen `fragmento` and the change is applied in the commit below** — see
+"The Spanish snippet term" under "Next action" for the count, what it leaves open, and the two
+further Spanish inconsistencies it surfaced but did not touch.
 
 `37ea352` is Phase 2c-3a step 1 **including all three of its review rounds** — the step was held
 open until all ten findings were closed, so, as with every phase since `8989c16`, no commit holds a

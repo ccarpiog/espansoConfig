@@ -423,6 +423,36 @@ identical to the other language's.
 No fix was applied here: choosing between the two words is a decision about 27 + 22 existing strings
 across four sub-phases, and changing any of them obliges a re-taken reading.
 
+#### 7.1.1 **FIXED — the Spanish dictionary now says `fragmento` everywhere.** A dictionary-only change, and no window reading was taken
+
+**The owner decided the term, and it is not re-litigated: a snippet is a `fragmento` in Spanish.** It
+is the established majority term and the closer match to the English *snippet*, whereas `atajo` means
+*shortcut*, which in espanso names the **trigger** more naturally than the match.
+
+**The true count is 49 strings, holding 60 occurrences** — 56 `atajo` and 4 `atajos`, counted with
+`rg -o -i 'atajos?' src/lib/i18n/es.json | sort | uniq -c` before the change and re-counted as zero
+after it. That confirms this section's own arithmetic rather than restating it: `git show
+37ea352:src/lib/i18n/es.json | rg -c -i atajo` gives **27**, step 2 added **22**, and the file at
+`57bf362` has exactly **49** such lines. **Every one of the 49 was read against its English
+counterpart before being changed, and all 49 say *snippet* in `en.json`** — none named a keyboard
+shortcut and none was about the trigger rather than the match, so **none was deliberately kept**.
+Both nouns are masculine, so every article, demonstrative and adjective carried over unchanged; the
+four plurals became `fragmentos`, and the file-shaped phrases became `archivo de fragmentos` and
+`lista de fragmentos`, which is what `code.fileKind.matchFile`, `code.documentShape.matchFile` and
+`code.commandError.documentHasNoMatchList` already said.
+
+**Only `src/lib/i18n/es.json` changed.** No key was added, removed or renamed; every `{placeholder}`
+stayed in the string it belongs to; `en.json` was already correct and was not touched; no `.svelte`
+file was touched.
+
+**This was not seen in a running window, and this subsection does not claim it was.** The evidence is
+the key-parity and placeholder-parity suites in `npm test` (1160 tests over 42 files, unchanged),
+`npm run check` (0 errors, 0 warnings), `npm run build` (165 modules, unchanged) and a reading of all
+49 strings in place. What that leaves open is exactly what a dictionary cannot answer: no screen has
+been observed drawing the new words, and the width of a longer noun in a control — `Añadir este
+fragmento` for `Añadir este atajo` — is a layout question this evidence does not touch. No component
+changed, so the rule that a component change obliges a re-taken reading is not triggered.
+
 ### 7.2 **The create control is below the fold when the form opens.** L12, measured — **FIXED, and re-measured in §12**
 
 ```
