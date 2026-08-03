@@ -123,6 +123,7 @@
   "browser.notice.differentMatch": "Este archivo ha cambiado en el disco y en esa posición hay ahora un fragmento distinto, así que se ha borrado la selección.",
   "browser.notice.gone": "Este archivo ha cambiado en el disco y ya no contiene el fragmento que estaba seleccionado, así que se ha borrado la selección.",
   "browser.notice.unresolved": "Este archivo ha cambiado en el disco y no se ha podido volver a leer, así que se ha borrado la selección.",
+  "browser.notice.deleted": "Ese fragmento se ha eliminado. Esta ventana ha vuelto a leer el archivo y ha seleccionado lo que ahora ocupa su lugar; si el archivo ya no contiene fragmentos, no hay nada seleccionado.",
   "browser.notice.dismiss": "Descartar",
 
   "browser.rawSave.replacesWholeDocument": "Al guardar se escribe todo el texto de este archivo tal y como aparece aquí. No es una edición de un fragmento: se reemplaza el documento entero.",
@@ -207,6 +208,25 @@
   "browser.matchEditor.fieldRemoved": "Esta clave se quitará del archivo cuando guardes.",
   "browser.matchEditor.remove": "Quitar esta clave",
   "browser.matchEditor.restore": "Mantener esta clave",
+
+  "browser.matchCreation.destination.notASnippetFile": "espanso no carga atajos de este archivo, así que un atajo escrito aquí no se activaría nunca. Elige un archivo de atajos.",
+  "browser.matchCreation.destination.readOnly": "Esta aplicación no debe escribir en este archivo, así que no puede añadirle un atajo.",
+  "browser.matchCreation.destination.couldNotBeRead": "Esta aplicación no ha podido leer este archivo, así que no sabe qué contiene ni dónde iría un atajo dentro de él. La lista de archivos indica por qué no se ha podido leer.",
+  "browser.matchCreation.destination.notParsed": "Este archivo no se ha podido leer como YAML, así que la aplicación no sabe dónde iría un atajo dentro de él. Repara antes el archivo.",
+  "browser.matchCreation.destination.noMatchList": "Este archivo no tiene una lista de atajos a la que añadir. Añádele una lista «matches:» en el propio archivo y después podrás elegirlo aquí.",
+  "browser.matchCreation.cannotCreate.alreadyCreated": "Este atajo ya se ha escrito en el archivo. Volver a leer el archivo es lo que le dice a la aplicación qué contiene ahora, así que cierra este formulario y abre otro para añadir uno más.",
+  "browser.matchCreation.cannotCreate.saveInFlight": "Se está escribiendo este atajo, así que no se puede cambiar nada hasta que el archivo responda.",
+  "browser.matchCreation.cannotCreate.conflict": "El archivo ha cambiado mientras se escribía este atajo, así que no se ha escrito nada. Lee qué ha pasado antes de volver a añadirlo.",
+  "browser.matchCreation.cannotCreate.noDestination": "Elige el archivo al que debe añadirse este atajo.",
+  "browser.matchCreation.cannotCreate.destinationIneligible": "Esta aplicación no puede añadir un atajo al archivo elegido. Elige otro.",
+  "browser.matchCreation.cannotCreate.anchorUnavailable": "El atajo al que debía seguir este ya no está en el archivo elegido, así que vuelve a elegir dónde va.",
+  "browser.matchCreation.cannotCreate.triggerEmpty": "Un atajo necesita el texto que lo activa.",
+  "browser.matchCreation.cannotCreate.replaceEmpty": "Un atajo necesita algo en lo que expandirse.",
+  "browser.matchCreation.cannotCreate.carriageReturn": "Uno de estos valores contiene un retorno de carro, que ninguna caja de esta ventana podría mostrarte después, así que no se escribirá.",
+
+  "browser.matchDeletion.refused.readOnly": "Esta aplicación no debe escribir en este archivo, así que no puede eliminar nada de él.",
+  "browser.matchDeletion.refused.lastSnippet": "Este es el único atajo de este archivo, y vaciar la lista de atajos de un archivo no es algo que haga esta aplicación. Elimina el archivo entero fuera de la aplicación.",
+  "browser.matchDeletion.refused.notInDocument": "Este atajo y la lectura del archivo que tiene esta ventana no se corresponden, así que no se puede eliminar nada desde aquí. Vuelve a leer el archivo y elige el atajo en la lista.",
 
   "language.label": "Idioma",
   "language.followSystem": "Seguir el idioma del sistema",

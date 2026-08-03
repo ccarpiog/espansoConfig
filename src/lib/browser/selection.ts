@@ -119,6 +119,13 @@ export function matchFingerprint(match: MatchView): string {
  * different parse — a caller error rather than the staleness R27 is about, and
  * the boundary refuses that case with its own code.
  *
+ * **That assumption has one kind of caller it is false for**, and 2c-3a-1's third
+ * finding was exactly it: an *adoption* resolves an identity a save minted, in a
+ * projection a later command read, so another program can move the file in between
+ * and the fresh parse can reuse the node. `positionInSameParse` in
+ * `./workspace.svelte.ts` is what such a caller uses instead — the same lookup
+ * with all three fields compared first.
+ *
  * @param view - The projection to look in.
  * @param id - The identity to find.
  * @returns The index, or `null` when the projection has no such node.

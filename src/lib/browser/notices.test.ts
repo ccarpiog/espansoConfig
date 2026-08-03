@@ -6,8 +6,12 @@
  * that exists in English and was never translated — `ExactDictionary` catches a
  * *missing* Spanish key — and what neither can see is the two keys being
  * swapped. So this file pins three things the type system has no opinion about:
- * which key each notice maps to, that the four sentences read as sentences, and
+ * which key each notice maps to, that every sentence reads as a sentence, and
  * that each one differs from its English twin and from the other notices.
+ *
+ * **The list below is hand-maintained and a new arm has to be added to it**, which
+ * 2c-3a's `deleted` was: the `switch` in `selectionNoticeKey` is exhaustive and
+ * catches a *missing key*, and nothing catches a notice this file forgets to walk.
  *
  * The 1c-1 review is why the last two are checked rather than assumed. `"x"`
  * satisfied "has a non-blank sentence", and "say different things in the two
@@ -20,14 +24,21 @@ import { LOCALES } from '../i18n/locale';
 import { selectionNoticeKey, type SelectionNotice } from './notices';
 
 /** Every notice the browser can raise. */
-const NOTICES: readonly SelectionNotice[] = ['kept', 'differentMatch', 'gone', 'unresolved'];
+const NOTICES: readonly SelectionNotice[] = [
+  'kept',
+  'differentMatch',
+  'gone',
+  'unresolved',
+  'deleted'
+];
 
 /** The key each notice must map to, written out rather than derived. */
 const EXPECTED_KEYS: ReadonlyMap<SelectionNotice, string> = new Map([
   ['kept', 'browser.notice.kept'],
   ['differentMatch', 'browser.notice.differentMatch'],
   ['gone', 'browser.notice.gone'],
-  ['unresolved', 'browser.notice.unresolved']
+  ['unresolved', 'browser.notice.unresolved'],
+  ['deleted', 'browser.notice.deleted']
 ] as const);
 
 describe('selection notices', () => {
@@ -51,7 +62,7 @@ describe('selection notices', () => {
     }
   });
 
-  it('have four distinct keys, so no two notices read the same', () => {
+  it('have one distinct key each, so no two notices read the same', () => {
     const keys = new Set(NOTICES.map(selectionNoticeKey));
     expect(keys.size).toBe(NOTICES.length);
   });

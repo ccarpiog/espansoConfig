@@ -1,0 +1,756 @@
+/**
+ * Deleting one snippet: a two-phase transition, in a value a test can drive.
+ *
+ * **No component and no screen.** The design consult's Q2
+ * (`docs/reviews/phase-2c-3a-design.md`) asked for exactly this, and the reason
+ * is not tidiness: the save protocol's acknowledgement round trip only engages
+ * when the transaction produces **findings**, so a clean deletion of an ordinary
+ * snippet produces none and the protocol offers no consent step at all. Without
+ * the two phases below, one click writes the user's file with no in-app undo —
+ * restore-from-backup is Phase 2c-5 and does not exist.
+ *
+ * A dialog in a `.svelte` file would put that rule where nothing in this
+ * repository can test it, which is the placement this project has rejected since
+ * `docs/decisions/1c-1-notes.md` hole 1.
+ *
+ * ## The three transitions, and what makes them a protocol
+ *
+ * {@link requestDelete} asks, {@link cancelDelete} takes the question back, and
+ * {@link confirmDelete} is the **only** thing that produces a
+ * {@link StartedDeletion} — which is what a caller needs before it can reach
+ * `BrowserState.deleteMatch` with anything to send. A caller holding no pending
+ * request gets `null`.
+ *
+ * The pending consent is bound to the **exact** {@link MatchId}, all three fields
+ * including the revision, and is issued by nothing but {@link requestDelete}
+ * (`PENDING` is a `unique symbol` this module never exports, so no literal outside
+ * it can have the type). That is `draft.ts`'s `DraftConsent` shape applied to a
+ * different question.
+ *
+ * ## Why a confirmation names the identity the window is projecting **now**
+ *
+ * The first review round's fifth finding, and it is worth stating as the mistake
+ * it corrects. This module used to compare the pending identity against the
+ * session's own — two values minted together, both frozen at
+ * {@link startMatchDeletion} — and its header claimed that a reload could
+ * therefore not carry a stale confirmation. It could: a session is a value, a
+ * caller may keep holding one while the workspace re-reads the file underneath,
+ * and the two stale halves went on agreeing with each other. Nothing in the
+ * comparison observed the world.
+ *
+ * So {@link confirmDelete} takes a second argument: the identity **the current
+ * projection gives that snippet**, or `null` when the projection no longer holds
+ * it. It must agree with the pending consent, with the session's own identity and
+ * with the draft's candidate — four values, one comparison — and a re-projection
+ * moves the first of them, so the confirmation is refused and has to be asked
+ * again.
+ *
+ * **What no type here forces**, in the same sentence as what one does: `MatchId`
+ * carries no brand and nothing checks where the argument came from, so a caller
+ * that passes `session.match` back defeats this entirely, and nothing stops a
+ * component importing `deleteMatch` from `../ipc/commands` and calling it with no
+ * confirmation at all — the hole `saveMatch`, `moveMatch` and `saveRawDocument`
+ * have had since 2b-2a. What is closed is that *this module* produces nothing to
+ * send without a confirmation bound to the snippet being deleted, and that a
+ * caller which reads the live projection — the only source of that argument a
+ * screen has — cannot spend consent across a reprojection.
+ *
+ * ## The draft holds an identity, and nothing is drafted
+ *
+ * `Draft<MatchId>` looks odd until the question it answers is named. The
+ * acknowledgement round trip is defined over a draft: `acknowledgeRefusal` checks
+ * that the submission carries **this** draft's base revision and that the value
+ * the draft holds is still the candidate that was sent, and derives the
+ * acknowledgement from the refusal itself. A deletion has exactly one candidate —
+ * *this snippet, at this revision* — so that is what the draft holds, and it never
+ * changes: nothing is typed, the history stays empty and `isDirty` is always
+ * `false`.
+ *
+ * So the draft here is the **carrier** for the base revision, the candidate and
+ * the consent, which is the triple the protocol is defined over. Reusing it is
+ * what keeps `editorSave.ts`'s consent rule the only one in this application; a
+ * second, deletion-shaped acknowledgement path would be a second place for it to
+ * be relaxed (D7).
+ *
+ * ## The last snippet of a file
+ *
+ * The consult's Q6. The core refuses to empty a file's snippet list — that would
+ * mean either writing an empty list or leaving the list line with nothing under
+ * it, and both are different files from the one the person has — and it answers
+ * `saveFailed` carrying the engine's own reason.
+ *
+ * {@link deletionEligibility} says so **first**, from the projection, so nobody is
+ * walked through a confirmation for an operation already known to fail. That is an
+ * **affordance derived from current state, never authorization**: if the
+ * projection and the file disagree, the command refuses and that refusal is what
+ * reaches the screen. Drift can therefore only produce a surfaced refusal, never
+ * an invalid write.
+ *
+ * ## What a committed deletion leaves behind
+ *
+ * `moved` is `null` permanently — the snippet that was deleted has no identity in
+ * the new revision, and filling that field with a neighbour's would put a position
+ * back into the one field that exists to replace positions with identities. Every
+ * `MatchId` held for that file is stale afterwards, this session's included, so a
+ * commit **spends** the session: {@link MatchDeletionSession.deleted} is set and
+ * nothing here clears it. What the *window* does about its selection is
+ * `BrowserState.deleteMatch`'s, and it is documented there.
+ */
+
+import type { TranslationKey } from '../i18n/dictionaries';
+import type { IpcFailure } from '../ipc/errors';
+import type {
+  Acknowledgement,
+  ContentRevision,
+  DocumentId,
+  DocumentView,
+  MatchId,
+  MatchView,
+  PresentationNote,
+  SaveResult
+} from '../ipc/types';
+import {
+  savedDraft,
+  startDraft,
+  structuredDraftRules,
+  submissionOf,
+  type Draft,
+  type DraftSubmission,
+  type DraftValueRules
+} from './draft';
+import {
+  conflictArm,
+  consentForRefusal,
+  offeredRefusalChoices,
+  refusedArm,
+  sendFailureLines,
+  sendFailureOf,
+  submissionIsStale,
+  type EditorPhase,
+  type SendFailure,
+  type SendFailureLine
+} from './editorSave';
+import type { InvalidationStatus } from './invalidation';
+import type { RawSaveChoice } from './rawSave';
+import {
+  describeEditSave,
+  invalidationFailureMessage,
+  type ConflictChoice,
+  type ConflictModel,
+  type SaveOutcomeMessage,
+  type SaveOutcomeModel
+} from './saveOutcome';
+
+/**
+ * How this session compares and snapshots the identity it is about.
+ *
+ * `structuredDraftRules` because a {@link MatchId} has fields: deep equality is
+ * what makes "still the same candidate" mean *the same three values* rather than
+ * *the same object*, and the frozen deep copy is what stops a caller mutating the
+ * identity the consent was bound to.
+ */
+const IDENTITY_RULES: DraftValueRules<MatchId> = structuredDraftRules<MatchId>();
+
+/**
+ * Whether two match identities name the same snippet of the same parse.
+ *
+ * All three fields, because all three are the identity: the revision is part of
+ * it precisely so that a confirmation crossing a reparse is refused rather than
+ * spent on whatever now occupies that arena slot.
+ *
+ * @param one - One identity.
+ * @param other - The other.
+ * @returns `true` when they name the same snippet.
+ */
+function sameIdentity(one: MatchId, other: MatchId): boolean {
+  return (
+    one.document === other.document && one.revision === other.revision && one.node === other.node
+  );
+} // End of function sameIdentity()
+
+/**
+ * Why this application will not delete one snippet.
+ *
+ * **A code, never a sentence** (CLAUDE.md section 2). `deletionRefusalKey` maps it
+ * to a dictionary key and `tDeletionRefusal` in `../i18n` renders it; a component
+ * never builds the key.
+ */
+export type DeletionRefusal =
+  /** The projection says this application must refuse to write the file. */
+  | 'readOnly'
+  /** It is the only snippet the file's list holds, and the list may not be emptied. */
+  | 'lastSnippet'
+  /** The snippet and the file handed in are not a pair this projection describes. */
+  | 'notInDocument';
+
+/**
+ * Whether one snippet may be deleted, and why not when it may not.
+ *
+ * A discriminated union rather than a boolean with a nullable reason, so a
+ * refused verdict with no reason is not representable.
+ */
+export type DeletionEligibility =
+  | {
+      /** The snippet may be deleted. */
+      readonly kind: 'deletable';
+    }
+  | {
+      /** It may not, and the reason is shown. */
+      readonly kind: 'refused';
+      /** Why, as a code. */
+      readonly reason: DeletionRefusal;
+    };
+
+/** The one deletable verdict, shared rather than rebuilt per snippet. */
+const DELETABLE: DeletionEligibility = Object.freeze({ kind: 'deletable' as const });
+
+/**
+ * Whether one snippet of one projected file may be deleted.
+ *
+ * **The two arguments are checked against each other**, which is 2c-2-2's High
+ * finding one level up: a snippet and its file are one fact, and a caller passing
+ * a second value straight from the live selection type-checks perfectly and can
+ * be wrong. `notInDocument` is that check — the identity must name this file, this
+ * revision, and a snippet this projection actually holds.
+ *
+ * The last-snippet arm is the consult's Q6, and it is an affordance rather than
+ * authorization: see this module's header.
+ *
+ * @param document - The file's projection, exactly as this window holds it.
+ * @param match - The snippet's projection, from that same file.
+ * @returns The verdict, with a reason code when it is a refusal.
+ */
+export function deletionEligibility(
+  document: DocumentView,
+  match: MatchView
+): DeletionEligibility {
+  const belongs =
+    match.id.document === document.id &&
+    match.id.revision === document.revision &&
+    document.matches.some((held) => held.id.node === match.id.node);
+  if (!belongs) {
+    return { kind: 'refused', reason: 'notInDocument' };
+  }
+  if (document.read_only) {
+    return { kind: 'refused', reason: 'readOnly' };
+  }
+  if (document.matches.length <= 1) {
+    return { kind: 'refused', reason: 'lastSnippet' };
+  }
+  return DELETABLE;
+} // End of function deletionEligibility()
+
+/**
+ * The brand that makes a pending deletion unforgeable.
+ *
+ * Declared and never exported, so no object outside this module can have the
+ * property and no type outside it can name the key: a caller cannot write a
+ * {@link PendingDeletion} literal, and {@link requestDelete} is the only thing
+ * that produces one. The same mechanism `draft.ts` uses for consent.
+ */
+declare const PENDING: unique symbol;
+
+/**
+ * A deletion the person has been asked about and has not yet confirmed.
+ *
+ * It carries the identity it was issued for, and {@link confirmDelete} compares
+ * all three fields of that identity against the session's own **and against the
+ * identity the current projection gives the snippet** before it will produce
+ * anything to send. The last of those is the only one of the three that can
+ * disagree, and why is this module's header.
+ */
+export interface PendingDeletion {
+  /** The brand. Never present at runtime, never nameable outside this module. */
+  readonly [PENDING]: typeof PENDING;
+  /** The snippet the person was asked about. */
+  readonly match: MatchId;
+}
+
+/**
+ * One deletion, as a value.
+ *
+ * **A value with pure transitions, never a store**: a component holds one in a
+ * `$state.raw` and reassigns it, and every function below returns a new session
+ * without touching its argument.
+ */
+export interface MatchDeletionSession {
+  /** The snippet this is about, by the identity this window holds. */
+  readonly match: MatchId;
+  /** The file it lives in. */
+  readonly document: DocumentId;
+  /** Whether it may be deleted at all, and why not when it may not. */
+  readonly eligibility: DeletionEligibility;
+  /**
+   * The base revision, the candidate and the consent, as one value.
+   *
+   * Never edited. See this module's header for why a deletion holds a draft at
+   * all.
+   */
+  readonly draft: Draft<MatchId>;
+  /** The question that has been asked and not answered, or `null`. */
+  readonly pending: PendingDeletion | null;
+  /** Whether a deletion is in flight. */
+  readonly phase: EditorPhase;
+  /** What the last attempt sent, or `null`. Kept so a refusal can be consented to. */
+  readonly submitted: DraftSubmission<MatchId> | null;
+  /** How the last attempt ended, as the thing a screen draws, or `null`. */
+  readonly outcome: SaveOutcomeModel<MatchId> | null;
+  /**
+   * Lines to show **beside** the outcome rather than in place of it.
+   *
+   * Today exactly one can appear: a committed deletion whose adoption failed. The
+   * bytes are gone from the file (`PROGRESS.md` D2) and what failed is this
+   * window's attempt to bring itself back into step.
+   */
+  readonly extraMessages: readonly SaveOutcomeMessage[];
+  /** How the last attempt failed to produce an outcome at all, or `null`. */
+  readonly sendFailure: SendFailure | null;
+  /**
+   * Whether a deletion has committed through this session.
+   *
+   * Set by a committed save and cleared by **nothing**. Every `MatchId` held for
+   * that file is stale afterwards, this session's own included, so the session
+   * stops offering to delete and only a fresh projection can produce one that
+   * does.
+   */
+  readonly deleted: boolean;
+}
+
+/**
+ * Opens a deletion over one snippet of one file.
+ *
+ * The base revision is the **document's**, not the identity's, and the two agree
+ * whenever the pair is one this projection describes — which is exactly what
+ * {@link deletionEligibility}'s `notInDocument` arm checks, so a mismatch is a
+ * refusal rather than a silently wrong base.
+ *
+ * @param document - The file's projection, exactly as this window holds it.
+ * @param match - The snippet's projection, from that same file.
+ * @returns A session with nothing pending and nothing said.
+ */
+export function startMatchDeletion(
+  document: DocumentView,
+  match: MatchView
+): MatchDeletionSession {
+  return {
+    match: match.id,
+    document: document.id,
+    eligibility: deletionEligibility(document, match),
+    draft: startDraft(document.revision, match.id, IDENTITY_RULES),
+    pending: null,
+    phase: 'editing',
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    sendFailure: null,
+    deleted: false
+  };
+} // End of function startMatchDeletion()
+
+/**
+ * The conflict the session is showing, or `null`.
+ *
+ * @param session - The session to ask about.
+ * @returns The conflict model, or `null` when the session is not in one.
+ */
+export function conflictOf(session: MatchDeletionSession): ConflictModel<MatchId> | null {
+  return conflictArm(session.outcome);
+} // End of function conflictOf()
+
+/**
+ * Whether this session may be asked to delete right now.
+ *
+ * Four reasons it may not: the snippet is not deletable, a deletion is already in
+ * flight, a conflict is on screen, or one has already committed.
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when {@link requestDelete} would do anything.
+ */
+export function canRequestDelete(session: MatchDeletionSession): boolean {
+  return (
+    session.eligibility.kind === 'deletable' &&
+    session.phase === 'editing' &&
+    !session.deleted &&
+    conflictOf(session) === null
+  );
+} // End of function canRequestDelete()
+
+/**
+ * Asks the person to confirm deleting this snippet.
+ *
+ * The first of the two phases. It records **which** snippet was asked about, so
+ * the answer cannot be spent on another one.
+ *
+ * @param session - The session.
+ * @returns The session with the question pending, or the same session when it may
+ *   not be asked or one is already pending.
+ */
+export function requestDelete(session: MatchDeletionSession): MatchDeletionSession {
+  if (!canRequestDelete(session) || session.pending !== null) {
+    return session;
+  }
+  // The cast is the brand: `PendingDeletion` declares a property on a symbol this
+  // module does not export, so no literal outside it can have the type and this is
+  // the only place one is built.
+  const pending = { match: session.match } as unknown as PendingDeletion;
+  return { ...session, pending, sendFailure: null };
+} // End of function requestDelete()
+
+/**
+ * Takes the question back.
+ *
+ * @param session - The session.
+ * @returns The session with nothing pending, or the same session when nothing
+ *   was.
+ */
+export function cancelDelete(session: MatchDeletionSession): MatchDeletionSession {
+  return session.pending === null ? session : { ...session, pending: null };
+} // End of function cancelDelete()
+
+/** A deletion about to be sent: the session that is waiting, and what to send. */
+export interface StartedDeletion {
+  /** The session, now in flight, with the submission recorded on it. */
+  readonly session: MatchDeletionSession;
+  /**
+   * What was sent, for the acknowledgement round trip.
+   *
+   * Its `acknowledgement` is whatever consent is bound to **this exact
+   * candidate** and `EMPTY_ACKNOWLEDGEMENT` otherwise; `submissionOf` is the only
+   * place the two are put together.
+   */
+  readonly submission: DraftSubmission<MatchId>;
+  /** The snippet to delete, by identity. */
+  readonly match: MatchId;
+}
+
+/**
+ * Confirms the deletion and produces what the command takes.
+ *
+ * **The only thing in this module that produces a {@link StartedDeletion}**, and
+ * it refuses every way of arriving here without an answered question: no pending
+ * request, a pending request issued for a different identity, an identity the
+ * current projection no longer gives that snippet, a snippet that is not
+ * deletable, a deletion already in flight, a conflict on screen, or a deletion
+ * that has already committed.
+ *
+ * **Four values are compared, not two**, which is the first review round's fifth
+ * finding: the pending consent, the session's own identity, the draft's candidate
+ * and `projected`. The first three were minted together and therefore agree with
+ * each other however stale they all are; `projected` is the only one that comes
+ * from outside this value, so it is the only one that can notice a reprojection.
+ * See this module's header for what that closes and what it cannot.
+ *
+ * **What the type does not force**, in the same sentence: `StartedDeletion` is a
+ * structural interface with no brand, so a caller can write one by hand — as it
+ * can call `deleteMatch` in `../ipc/commands` with no session at all — and
+ * `projected` is an ordinary `MatchId`, so a caller that hands back
+ * `session.match` rather than reading the live projection gets the old behaviour
+ * and no warning. What is closed is that no transition here yields something to
+ * send without a confirmation bound to this exact identity, and that a caller
+ * reading the projection cannot spend one across a reparse.
+ *
+ * The pending request is **consumed**. Consent is for one attempt: a refusal that
+ * comes back with findings is acknowledged and then confirmed again, which is the
+ * same shape the acknowledgement round trip has everywhere else in this
+ * application.
+ *
+ * @param session - The session holding the person's answer.
+ * @param projected - The identity the projection this window holds **now** gives
+ *   the snippet, or `null` when it holds no such snippet any more. Required, and
+ *   nullable rather than defaulted: a default would be this function inventing
+ *   agreement for a caller that did not look.
+ * @returns The waiting session and what to send, or `null`.
+ */
+export function confirmDelete(
+  session: MatchDeletionSession,
+  projected: MatchId | null
+): StartedDeletion | null {
+  const pending = session.pending;
+  if (pending === null || !canRequestDelete(session)) {
+    return null;
+  }
+  if (projected === null || !sameIdentity(pending.match, session.match)) {
+    return null;
+  }
+  if (!sameIdentity(projected, session.match) || !sameIdentity(projected, session.draft.value)) {
+    return null;
+  }
+  const submission = submissionOf(session.draft);
+  return {
+    session: {
+      ...session,
+      phase: 'saving',
+      pending: null,
+      submitted: submission,
+      sendFailure: null
+    },
+    submission,
+    match: session.match
+  };
+} // End of function confirmDelete()
+
+/**
+ * Takes a deletion's answer.
+ *
+ * **Not sealed, and that is not an omission**, but the reason differs from a
+ * field save's: a whole-document replacement is sealed because a caller must be
+ * made to discharge an invalidation it has no identity for, and a deletion has no
+ * identity to answer with *either*. What makes the seal unnecessary here is that
+ * `BrowserState.deleteMatch` performs the whole invalidation — the re-read and the
+ * selection repair — before this can be called, and answers what became of it.
+ *
+ * On a `saved` arm the draft's base moves to the revision the transaction ended
+ * on, through `savedDraft`, which spends the consent. A **committed** deletion
+ * additionally spends the session: `deleted` is set, and nothing here clears it.
+ *
+ * **A failed adoption is a line beside the outcome, never in place of it.** The
+ * snippet really is gone from the file; telling the person the deletion failed
+ * would invite a retry of a write that already happened (`PROGRESS.md` D2).
+ *
+ * @param session - The session waiting for an answer.
+ * @param result - How the save ended, exactly as the transaction reported it.
+ * @param adoption - What became of the adoption, from `BrowserState.deleteMatch`.
+ *   Required and not defaulted: a default would be this function inventing a
+ *   `notOwed` for a caller that simply did not look.
+ * @returns The session showing what the deletion ended as.
+ */
+export function applyDeletion(
+  session: MatchDeletionSession,
+  result: SaveResult,
+  adoption: InvalidationStatus
+): MatchDeletionSession {
+  const submission = session.submitted;
+  if (submission === null) {
+    return session;
+  }
+  const outcome = describeEditSave(result, session.draft);
+  const failed = invalidationFailureMessage(adoption);
+  const extraMessages = failed === null ? [] : [failed];
+  if (result.outcome !== 'saved') {
+    return {
+      ...session,
+      phase: 'editing',
+      outcome,
+      extraMessages,
+      sendFailure: null
+    };
+  }
+  return {
+    ...session,
+    deleted: result.committed,
+    draft: savedDraft(session.draft, submission, result.revision),
+    phase: 'editing',
+    outcome,
+    extraMessages,
+    sendFailure: null
+  };
+} // End of function applyDeletion()
+
+/**
+ * Records that the deletion produced no outcome.
+ *
+ * **Not an outcome, and not always "nothing was written".** The command failed
+ * before any of the three arms existed. Whether the file changed is a **second**
+ * question, and the only honest answers are "no" and "this application cannot
+ * tell".
+ *
+ * @param session - The session waiting for an answer.
+ * @param mayHaveWritten - Whether the file may already have lost the snippet.
+ * @param reason - Why the command rejected, or `null` when nothing was sent and
+ *   the boundary therefore has no rejection to hand on.
+ * @returns The session, back to its resting state, with the right notice raised.
+ */
+export function deletionCouldNotBeSent(
+  session: MatchDeletionSession,
+  mayHaveWritten: boolean,
+  reason: IpcFailure | null
+): MatchDeletionSession {
+  return {
+    ...session,
+    phase: 'editing',
+    sendFailure: sendFailureOf(mayHaveWritten, reason)
+  };
+} // End of function deletionCouldNotBeSent()
+
+/**
+ * Records that the person accepted the findings of the refusal on screen.
+ *
+ * Delegates to `consentForRefusal`, which delegates to `acknowledgeRefusal` — the
+ * **only** producer of consent in this application. The submission is taken from
+ * the session rather than from an argument, so a caller cannot pair one
+ * candidate's acknowledgement with another candidate.
+ *
+ * @param session - The session showing a refusal.
+ * @returns The session carrying consent, or the same session.
+ */
+export function acknowledgeDeletionFindings(
+  session: MatchDeletionSession
+): MatchDeletionSession {
+  const draft = consentForRefusal(session.draft, session.submitted, session.outcome);
+  return draft === session.draft ? session : { ...session, draft };
+} // End of function acknowledgeDeletionFindings()
+
+/**
+ * Puts the outcome away.
+ *
+ * The draft is untouched — this is a panel being dismissed, not a state being
+ * resolved — and the submission goes with it, because there is nothing left on
+ * screen to acknowledge. It does **not** give a committed session back: `deleted`
+ * survives this, so nobody can dismiss their way into deleting a snippet that is
+ * already gone.
+ *
+ * @param session - The session showing an outcome.
+ * @returns The session with nothing being said about the last attempt.
+ */
+export function dismissDeletionOutcome(session: MatchDeletionSession): MatchDeletionSession {
+  return {
+    ...session,
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    sendFailure: null
+  };
+} // End of function dismissDeletionOutcome()
+
+/**
+ * The choices a conflict offers in this sub-phase.
+ *
+ * **One**, for `matchEditor.ts`'s reason: *Copy draft* copies a text and there is
+ * no text here, and *Load the version on disk* is conflict capture and
+ * preservation — Phase 2c-4a. **None of these is "keep my draft"**, which means
+ * something specific and belongs to 2c-4b.
+ */
+const CONFLICT_CHOICES: readonly ConflictChoice[] = ['keepEditing'];
+
+/** Everything a screen needs about one deletion, derived on every read. */
+export interface MatchDeletionView {
+  /** The snippet this is about. */
+  readonly match: MatchId;
+  /** Whether the delete control does anything. */
+  readonly canDelete: boolean;
+  /** Why it does not, as a code, or `null`. */
+  readonly refusal: DeletionRefusal | null;
+  /** Whether the person has been asked and has not answered. */
+  readonly confirming: boolean;
+  /** Whether a deletion is in flight. */
+  readonly deleting: boolean;
+  /** Whether one has committed, so this session is spent. */
+  readonly deleted: boolean;
+  /** How the last attempt failed to produce an outcome, or `null`. */
+  readonly sendFailure: SendFailure | null;
+  /** The reasons to show beside that failure, outermost first. */
+  readonly failureLines: readonly SendFailureLine[];
+  /** How the last attempt ended, or `null`. */
+  readonly outcome: SaveOutcomeModel<MatchId> | null;
+  /** The outcome's lines followed by anything to be said beside them. */
+  readonly messages: readonly SaveOutcomeMessage[];
+  /**
+   * The presentation changes a saved arm disclosed, in report order.
+   *
+   * **A deletion is the one command that produces
+   * `PresentationNote::DoubledSequenceSeparation`**, so this list is the reason
+   * `SavedModel.notes` exists as far as this sub-phase is concerned: the blank
+   * line a removed snippet leaves behind is a change to how the file is written,
+   * and plan section 6.2 is *never silently normalise*.
+   */
+  readonly notes: readonly PresentationNote[];
+  /** What to offer about a refusal, withdrawn once its findings are stale. */
+  readonly refusalChoices: readonly RawSaveChoice[];
+  /** Whether the findings on screen are about a candidate that has since changed. */
+  readonly findingsAreStale: boolean;
+  /** The conflict being shown, or `null`. */
+  readonly conflict: ConflictModel<MatchId> | null;
+  /** What to offer about the conflict. */
+  readonly conflictChoices: readonly ConflictChoice[];
+}
+
+/**
+ * Everything a screen needs about one deletion.
+ *
+ * Derived on every call and stored nowhere, which is 2c-1a's D2 carried up.
+ *
+ * @param session - The session to describe.
+ * @returns The view.
+ */
+export function matchDeletionView(session: MatchDeletionSession): MatchDeletionView {
+  const outcome = session.outcome;
+  const refused = refusedArm(outcome);
+  const stale = submissionIsStale(session.draft, session.submitted);
+  const conflict = conflictOf(session);
+  const saved = outcome !== null && outcome.kind === 'saved' ? outcome : null;
+  return {
+    match: session.match,
+    canDelete: canRequestDelete(session),
+    refusal: session.eligibility.kind === 'refused' ? session.eligibility.reason : null,
+    confirming: session.pending !== null,
+    deleting: session.phase === 'saving',
+    deleted: session.deleted,
+    sendFailure: session.sendFailure,
+    failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
+    outcome,
+    messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    notes: saved === null ? [] : saved.notes,
+    refusalChoices: offeredRefusalChoices(refused, stale),
+    findingsAreStale: refused !== null && stale,
+    conflict,
+    conflictChoices: conflict === null ? [] : CONFLICT_CHOICES
+  };
+} // End of function matchDeletionView()
+
+/**
+ * The dictionary key holding one deletion refusal's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom of every other
+ * describer in this directory: a renamed key is a compile error here, and a new
+ * member of {@link DeletionRefusal} with no sentence is one too.
+ *
+ * @param reason - Why the snippet may not be deleted.
+ * @returns The key holding that reason's sentence.
+ */
+export function deletionRefusalKey(reason: DeletionRefusal): TranslationKey {
+  switch (reason) {
+    case 'readOnly':
+      return 'browser.matchDeletion.refused.readOnly';
+    case 'lastSnippet':
+      return 'browser.matchDeletion.refused.lastSnippet';
+    case 'notInDocument':
+      return 'browser.matchDeletion.refused.notInDocument';
+  }
+} // End of function deletionRefusalKey()
+
+/**
+ * The acknowledgement one submission carries, for a caller that only needs that.
+ *
+ * A named read rather than a property walk at the call site, so the one place a
+ * screen hands consent to the boundary is a place this module can be searched
+ * for.
+ *
+ * @param submission - What {@link confirmDelete} produced.
+ * @returns The suspicions already shown to a person, for this exact candidate.
+ */
+export function acknowledgementOf(submission: DraftSubmission<MatchId>): Acknowledgement {
+  return submission.acknowledgement;
+} // End of function acknowledgementOf()
+
+/**
+ * The base revision this session would delete against.
+ *
+ * A named read rather than a property walk at the call site, and **since the first
+ * review round's second finding nothing downstream substitutes another**:
+ * `BrowserState.deleteMatch` takes a base revision and forwards it unchanged
+ * rather than reading its own projection's at the moment of the call. That is what
+ * lets a session opened at one revision *conflict* against a file the window has
+ * since re-read, instead of a deletion being resolved to a position in a parse the
+ * person never saw.
+ *
+ * **What no type forces**, in the same sentence: that parameter is an ordinary
+ * `ContentRevision`, so a caller may hand over the projection's current one
+ * instead of this and get the old behaviour. What is closed is that the wrapper no
+ * longer chooses for it.
+ *
+ * @param session - The session to ask about.
+ * @returns The revision the session was opened at.
+ */
+export function baseRevisionOf(session: MatchDeletionSession): ContentRevision {
+  return session.draft.baseRevision;
+} // End of function baseRevisionOf()

@@ -37,6 +37,8 @@
  */
 
 import {
+  createMatch,
+  deleteMatch,
   documentText,
   getDocument,
   getMatch,
@@ -64,6 +66,8 @@ import type {
   MatchDraft,
   MatchId,
   MatchView,
+  NewMatch,
+  NewMatchPosition,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
@@ -85,11 +89,12 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
  *
  * The six read-only commands of `../ipc/commands`, with the same signatures, and
  * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch},
- * {@link BrowserCommands.saveMatch} and {@link BrowserCommands.saveRawDocument}
- * are the three members that can change a file on disk, and they are here for the
- * same reason the others are: a test that cannot run Tauri still has to be able to
- * drive a refusal, a conflict and a commit and watch what this state does about
- * each.
+ * {@link BrowserCommands.saveMatch}, {@link BrowserCommands.createMatch},
+ * {@link BrowserCommands.deleteMatch} and
+ * {@link BrowserCommands.saveRawDocument} are the five members that can change a
+ * file on disk, and they are here for the same reason the others are: a test that
+ * cannot run Tauri still has to be able to drive a refusal, a conflict and a
+ * commit and watch what this state does about each.
  */
 export interface BrowserCommands {
   /**
@@ -170,6 +175,43 @@ export interface BrowserCommands {
     acknowledgement: Acknowledgement
   ): Promise<CommandResult<SaveResult>>;
   /**
+   * Writes one new snippet into a file's snippet list, and saves the file.
+   *
+   * @param document - The file to write into, by the identity this window holds.
+   * @param newMatch - What the new snippet says: a trigger and a body, both
+   *   required.
+   * @param position - Where it goes in the list; the `After` arm names the
+   *   snippet it follows **by identity**.
+   * @param baseRevision - The revision the caller believes the file holds, and
+   *   the revision the anchor identity was minted from.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure.
+   */
+  createMatch(
+    document: DocumentId,
+    newMatch: NewMatch,
+    position: NewMatchPosition,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
+   * Deletes one snippet from its file, and saves the file.
+   *
+   * @param id - The snippet to delete, by identity.
+   * @param baseRevision - The revision the caller believes the file holds. A
+   *   stale one is refused rather than resolved, because the address a deletion
+   *   resolves to is a **position**.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure. `saved.moved` is `null` by
+   *   construction: the snippet that was deleted has no identity in the new
+   *   revision.
+   */
+  deleteMatch(
+    id: MatchId,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
    * Replaces one file's whole text, and saves it.
    *
    * **The one member whose answer is not a `CommandResult`**, because a
@@ -202,6 +244,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   documentText,
   moveMatch,
   saveMatch,
+  createMatch,
+  deleteMatch,
   saveRawDocument
 };
 
@@ -231,6 +275,36 @@ function isTheSameIdentity(held: MatchId | null, other: MatchId | null): boolean
 } // End of function isTheSameIdentity()
 
 /**
+ * Where one identity sits in a projection **of the parse it was minted from**.
+ *
+ * `positionOf` in `./selection.ts` compares the arena node alone, and its own
+ * header says why: its caller has just read the projection it is looking in, so a
+ * revision mismatch would be a caller error rather than the staleness R27 is
+ * about. **An adoption is not that caller.** The identity it resolves is `moved`,
+ * minted by the *save* in the revision the transaction ended on, and the
+ * projection it looks in comes from a `get_document` performed afterwards — so
+ * another program can move the file in between and the fresh parse can reuse the
+ * arena node for a snippet nobody created. Resolving by node alone then selects
+ * an unrelated snippet and calls it the one just written, which is the first
+ * review round's third finding.
+ *
+ * So all three fields must agree, and the revision is the one doing the work.
+ * When they do not, the caller falls back to ordinary repair (positionally and
+ * then checked, R27) rather than exposing a stale identity as a current one.
+ *
+ * @param view - The projection just read.
+ * @param id - The identity to resolve, minted in some other parse.
+ * @returns The index, or `null` when this projection is of a different parse or
+ *   holds no such node.
+ */
+function positionInSameParse(view: DocumentView, id: MatchId): number | null {
+  if (view.id !== id.document || view.revision !== id.revision) {
+    return null;
+  }
+  return positionOf(view, id);
+} // End of function positionInSameParse()
+
+/**
  * What {@link BrowserState.saveRawDocument} answers.
  *
  * **Two arms, and the second is not "nothing happened".** The first version of
@@ -247,7 +321,16 @@ function isTheSameIdentity(held: MatchId | null, other: MatchId | null): boolean
  * the file may have changed under it.
  */
 /**
- * What {@link BrowserState.saveMatch} answers.
+ * What {@link BrowserState.saveMatch}, {@link BrowserState.createMatch} and
+ * {@link BrowserState.deleteMatch} answer.
+ *
+ * **One type for the three, and that is a decision rather than reuse for its own
+ * sake**: the three questions a caller has to be able to ask are identical — did
+ * the transaction answer, did this state refuse before anything ran, or did a
+ * command run and reject — and the *only* thing that differs between them is what
+ * the adoption consisted of, which `adoption` already carries as a status rather
+ * than as a description. A delete-shaped variant would have differed in nothing a
+ * caller could act on.
  *
  * **Three arms, and none of them is `null`.** The first version of this method
  * answered `SaveResult | null`, and the 2c-2 review was right that the `null`
@@ -536,8 +619,9 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The first of the three entry points on this state that change a file**; the
-   * others are {@link BrowserState.saveMatch} and
+   * **The first of the five entry points on this state that change a file**; the
+   * others are {@link BrowserState.saveMatch},
+   * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch} and
    * {@link BrowserState.saveRawDocument}. Everything else here reads.
    *
    * What comes back is the outcome, and all three of its arms are answers rather
@@ -551,9 +635,34 @@ export interface BrowserState {
    * answered with — because a commit invalidates every identity this state holds
    * for that file.
    *
+   * **The base revision is the caller's and is forwarded unchanged**, exactly as it
+   * is for {@link BrowserState.createMatch} and {@link BrowserState.deleteMatch}.
+   * This method read `view.revision` at the moment of the call until the 2c-3a-1
+   * confirmation pass, which is the shape the first review round's second finding
+   * closed for the other two: a stale R0 submission presented after the window had
+   * reprojected to R1 was sent *as though drafted at R1*, so the core found no
+   * conflict and answered an identity failure instead of the revision conflict that
+   * describes what happened. Nothing between a caller and `move_match` may
+   * substitute another revision; no signature can require this one to be the
+   * caller's own.
+   *
+   * **Three latent shapes remain here and are 2c-3b's**, not this sub-phase's, and
+   * not because anything blocks them — nothing calls this method from a `.svelte`
+   * file, which was checked rather than assumed. This method still answers
+   * `SaveResult | null` where the other four writing methods answer a
+   * `MatchSaveAnswer`; it still leaves a stale projection installed when its own
+   * re-read fails, where `saveMatch` drops it; and it calls `forgetFileText` where
+   * `forgetTextOf` belongs, so a conflict capture for this file is never dropped.
+   * All three are decisions about what a *move UI* is handed and what the window
+   * shows when a committed move cannot be read back, and 2c-3b is the sub-phase
+   * that puts a move on a screen and can decide them with that screen in front of
+   * it.
+   *
    * @param match - The snippet to move.
    * @param after - The snippet it should follow, or `null` for the top of the
    *   list.
+   * @param baseRevision - The revision the caller's move was decided against.
+   *   Sent unchanged.
    * @param acknowledgement - The suspicions already shown to a person; pass
    *   `{ accepted: [] }` on a first attempt.
    * @returns How the save ended, or `null` when the command failed.
@@ -561,6 +670,7 @@ export interface BrowserState {
   moveMatch(
     match: MatchView,
     after: MatchView | null,
+    baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
   ): Promise<SaveResult | null>;
   /**
@@ -612,9 +722,126 @@ export interface BrowserState {
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
   /**
+   * Writes one new snippet into a file's snippet list, and saves the file.
+   *
+   * **The wrapper is the enforcement**, exactly as it is for
+   * {@link BrowserState.saveMatch}: a committed create makes every `MatchId` this
+   * window holds for that file stale, `SavedResult.moved` is the **created**
+   * snippet's identity in the new revision, and the adoption happens here, before
+   * the answer is handed back, so there is no way to obtain the result without it.
+   *
+   * **The selection moves to the created snippet**, under two conditions that are
+   * this method's own decision and are stated rather than assumed. `saveMatch`
+   * re-points only when the held selection is still the snippet the save was
+   * about; a create has no such target, so the rule applied instead is:
+   *
+   * - the held selection must be **exactly what it was when this call started**,
+   *   which is the same protection stated for a different question — a person who
+   *   clicked another snippet while the create was in flight must not be dragged
+   *   away from it;
+   * - the sidebar must be showing a scope that **contains** the new snippet — the
+   *   "All" entry, or that same file. Selecting a snippet the middle pane is not
+   *   listing would leave the window pointing at a row nobody can see.
+   *
+   * When either fails, or when the command answered no identity, the selection is
+   * repaired the ordinary way (positionally and then checked, R27).
+   *
+   * **The base revision is the caller's and is forwarded unchanged**, which is the
+   * 2c-3a-1 review's second finding. This method used to read `view.revision` at
+   * the moment of the call and send that, which silently rebased a stale form: a
+   * form opened at R0, a reprojection to R1 while it was open, and a submission
+   * that the core then found no conflict in — so a snippet was written into a file
+   * whose parse the person never saw, at an anchor resolved in it. The form's own
+   * base is `submission.baseRevision` in `./matchCreation.ts`, and nothing between
+   * it and `create_match` may substitute another.
+   *
+   * **What that does not force, in the same breath.** Nothing in TypeScript stops
+   * a component importing `createMatch` from `../ipc/commands` and calling it
+   * directly, which bypasses this method entirely — the same hole `moveMatch`,
+   * `saveMatch` and `saveRawDocument` have had since 2b-2a. Nor can a signature
+   * require `baseRevision` to be *the submission's*: a caller may pass the
+   * projection's current one and get the old behaviour. What the wrapper forces is
+   * that every caller *of it* adopts, and that this layer no longer chooses the
+   * revision on the caller's behalf.
+   *
+   * @param document - The file to write into, by the identity this window holds.
+   * @param newMatch - What the new snippet says: a trigger and a body.
+   * @param position - Where it goes in the file's list.
+   * @param baseRevision - The revision the **submission** was drafted from, and
+   *   the revision its anchor identity was minted in. Sent unchanged.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   this state made before any command ran; or a command failure that says
+   *   whether the file may already have been written and why it rejected.
+   */
+  createMatch(
+    document: DocumentId,
+    newMatch: NewMatch,
+    position: NewMatchPosition,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
+   * Deletes one snippet from its file, and saves the file.
+   *
+   * **`moved` is `null` permanently and every `MatchId` for that file is stale**,
+   * so there is no identity to adopt — which makes this the one writing command
+   * whose invalidation is neither an adoption nor the whole-document seal. What
+   * happens instead, after the file has been read again:
+   *
+   * - when the held selection **was the snippet deleted**, the snippet now
+   *   occupying its former **ordinal** position is selected, falling back to the
+   *   new last snippet when the deleted one was last, and to no selection when the
+   *   file now holds none. A `deleted` notice says so.
+   *
+   *   **This is not the positional reasoning `moved: null` forbids**, and the
+   *   difference is worth being exact about. Nothing here preserves or
+   *   re-resolves the stale identity: the projection is replaced whole, the
+   *   window looks at the fresh one, and the snippet it selects is adopted under
+   *   its **own new identity**. What distinguishes it from R27's `differentMatch`
+   *   case — where a different snippet at the held position drops the selection —
+   *   is that there the file changed underneath the person, and here they asked
+   *   for the change themselves. Selecting a neighbour may still read as
+   *   continuity with something that no longer exists, which is the design
+   *   consult's own counter-argument to its Q1, and is why the notice is shown;
+   * - when the held selection was a **different** snippet of that file, it is
+   *   repaired the ordinary way (positionally and then checked, R27) and this
+   *   method does not touch it.
+   *
+   * **The base revision is the caller's and is forwarded unchanged**, exactly as
+   * it is for {@link BrowserState.createMatch} and for the same finding. It
+   * matters more here than anywhere else on this state: a deletion resolves an
+   * identity to a **position**, so a session opened at R0 and submitted after the
+   * window re-read the file at R1 used to be sent with R1 beside an R0 identity —
+   * which the core answers as an identity failure rather than as the revision
+   * conflict the person should be shown, and which nothing in this window decided.
+   *
+   * The same hole as {@link BrowserState.createMatch}: nothing stops a component
+   * importing `deleteMatch` from `../ipc/commands` and skipping this method,
+   * nothing here requires the caller to have collected a confirmation —
+   * `./matchDeletion.ts` is what makes a confirmation the only way to *produce*
+   * something to send — and no signature can require `baseRevision` to be the
+   * session's own.
+   *
+   * @param id - The snippet to delete, by the identity the caller holds.
+   * @param baseRevision - The revision the caller's session was opened at, from
+   *   `baseRevisionOf` in `./matchDeletion.ts`. Sent unchanged.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   this state made before any command ran; or a command failure that says
+   *   whether the file may already have been written and why it rejected.
+   */
+  deleteMatch(
+    id: MatchId,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
    * Replaces one file's whole text, and saves the file.
    *
-   * **The third entry point on this state that changes a file, and the only one
+   * **The fifth entry point on this state that changes a file, and the only one
    * that is not an edit.** It exists here rather than being called through
    * `../ipc/commands` directly because the invalidation a committed replacement
    * owes is about *this module's* cache: the projections, the selection and the
@@ -722,13 +949,25 @@ export function createBrowserState(
     readonly answer: CommandResult<string>;
   } | null>(null);
 
-  // The three generation counters. None is `$state`: nothing renders them, and
-  // they are read only by the request that took one, immediately after its own
-  // `await`. Making them reactive would add a dependency to every getter that
-  // happens to run in the same effect.
+  // The generation counters. None is `$state`: nothing renders them, and they are
+  // read only by the request that took one, immediately after its own `await`.
+  // Making them reactive would add a dependency to every getter that happens to
+  // run in the same effect.
   let openGeneration = 0;
   let selectGeneration = 0;
   let fileTextGeneration = 0;
+  // **The projection counters, one per document**, and the confirmation review's
+  // High finding is why they are not one. A single counter made every projection
+  // replacement invalidate every selection lookup in flight, including one for a
+  // file the replacement said nothing about: a raw save of B committing while a
+  // click on a snippet of A was still being checked cancelled A's repair, and the
+  // state went on holding a `MatchId` that no longer resolved — this sub-phase's
+  // declared worst failure, produced by the fix for a narrower one.
+  //
+  // A plain `Map` rather than `$state`: nothing renders it, and a `Map` in `$state`
+  // is not reactive without Svelte's own wrapper anyway. A document with no entry
+  // has never had a projection replaced, which is generation zero.
+  const projectionGenerations = new Map<DocumentId, number>();
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -743,6 +982,85 @@ export function createBrowserState(
   function viewOf(id: DocumentId): DocumentView | undefined {
     return views.find((view) => view.id === id);
   } // End of function viewOf()
+
+  /**
+   * How many times one document's projection has been replaced or dropped.
+   *
+   * @param document - The file.
+   * @returns Its projection generation; zero for a file never replaced.
+   */
+  function projectionGenerationOf(document: DocumentId): number {
+    return projectionGenerations.get(document) ?? 0;
+  } // End of function projectionGenerationOf()
+
+  /**
+   * Invalidates every lookup taken against one document's projection.
+   *
+   * Called by {@link installView} and by {@link forgetTheReplacedDocument}, which
+   * are the only two functions that replace or drop a projection.
+   *
+   * @param document - The file whose projection has been replaced or dropped.
+   */
+  function invalidateProjectionOf(document: DocumentId): void {
+    projectionGenerations.set(document, projectionGenerationOf(document) + 1);
+  } // End of function invalidateProjectionOf()
+
+  /**
+   * Replaces the held selection, and cancels any lookup the old one was for.
+   *
+   * The invariant is that **no selection is assigned without `selectGeneration`
+   * having been bumped in the same synchronous block**, so an answer that lands
+   * afterwards is describing an intent nobody holds. Every write to `selected`
+   * goes through here to get that, with exactly **two** deliberate exceptions,
+   * each of which bumps the counter itself:
+   *
+   * - `select()`'s own assignment, which bumps at entry instead — a call cannot be
+   *   allowed to cancel the lookup it is about to take;
+   * - `open()`'s, which bumps globally before clearing both the map and the
+   *   selection, because every projection of the workspace being closed is going.
+   *
+   * **That list is maintained by hand and TypeScript does not enforce it.** What
+   * the compiler forces is nothing at all here: `selected` is a `$state` binding in
+   * this module's scope, so a third direct assignment added later would type-check
+   * and would strand exactly the lookup this function exists to cancel. The
+   * enumeration above is the check, and it is a call-site one — the third-pass
+   * review's only finding was that an earlier version of this comment claimed one
+   * exception when there were two.
+   *
+   * **This is the half {@link invalidateProjectionOf} cannot do**, and the two are
+   * about different things. A create committing in file B can move the selection to
+   * the snippet it made while a click on a snippet of file A is still being checked
+   * across the boundary; nothing about A's projection changed, so A's projection
+   * generation is untouched, and without this bump A's stale answer would be
+   * repaired and would drag the person back off the snippet they just made.
+   *
+   * @param next - The selection to hold, or `null` to hold none.
+   */
+  function replaceSelection(next: SelectedMatch | null): void {
+    selectGeneration += 1;
+    selected = next;
+  } // End of function replaceSelection()
+
+  /**
+   * Whether a selection lookup taken earlier still describes something.
+   *
+   * Two questions, and the confirmation review's High finding is that they were
+   * one: whether the **intent** it was serving has been replaced, and whether the
+   * **projection** its identity was minted from has been. A lookup survives only
+   * while both answers are no.
+   *
+   * @param intent - The selection generation the lookup was taken at.
+   * @param document - The file the lookup's identity belongs to.
+   * @param projection - That file's projection generation when it was taken.
+   * @returns Whether the answer must be dropped rather than acted on.
+   */
+  function selectionLookupIsStale(
+    intent: number,
+    document: DocumentId,
+    projection: number
+  ): boolean {
+    return intent !== selectGeneration || projection !== projectionGenerationOf(document);
+  } // End of function selectionLookupIsStale()
 
   /**
    * The matches the current sidebar entry puts in scope, unsearched.
@@ -810,9 +1128,42 @@ export function createBrowserState(
    * calls `readFileText` afterwards, so dropping it here is what makes them
    * re-read rather than what leaves them empty.
    *
+   * **It also invalidates every selection lookup taken against the projection it
+   * replaces** — `next.id`'s, and no other file's. That is the 2c-3a-1 review's
+   * fourth finding as corrected by the confirmation pass, and the scope is the
+   * correction. The defect the bump exists for: a `select()` awaiting `get_match`
+   * lands after a deletion's adoption has chosen the neighbour and raised the
+   * mandated `deleted` notice, its stale identity is repaired against the file the
+   * commit produced, and the repair clears the selection and replaces the notice
+   * with `differentMatch` — the person is told their file moved under them when
+   * what actually happened is the deletion they asked for. A create is dragged off
+   * the snippet it just made the same way.
+   *
+   * **What the first fix round got wrong was the width, not the place.** It bumped
+   * one global counter and the doc comment here argued that every caller "wants"
+   * it, enumerating them. The enumeration was true of every caller and said nothing
+   * about the *other* documents each call was not concerned with: a raw save of
+   * file B commits, this function installs B, and a click on a snippet of file A
+   * that is still being checked across the boundary is cancelled by it. A's
+   * identity then goes unrepaired and the state keeps a `MatchId` that resolves to
+   * nothing. So the counter is per document, and the claim this comment can make is
+   * the narrow one — a lookup is cancelled by a replacement **of the projection it
+   * was taken from**.
+   *
+   * The other half, a selection replaced without any projection being replaced, is
+   * {@link replaceSelection}'s and is stated there. Neither implies the other, and
+   * `select()` checks both.
+   *
+   * The bump happens before the caller re-points anything, and none of the
+   * adoptions awaits between this call and its selection assignment, so no answer
+   * can land in between. `applyRepair` is the one caller inside `select()` itself,
+   * and it runs *after* that call's own two checks and before nothing — so this
+   * bump cancels only lookups **other** than the one performing the repair.
+   *
    * @param next - The projection just read from disk.
    */
   function installView(next: DocumentView): void {
+    invalidateProjectionOf(next.id);
     const index = views.findIndex((view) => view.id === next.id);
     // The `-1` arm is not reachable from `select()` — a selection exists only
     // in a document that was projected — but appending is the right answer for
@@ -971,7 +1322,7 @@ export function createBrowserState(
     switch (repair.kind) {
       case 'kept':
         installView(repair.reloaded);
-        selected = repair.selected;
+        replaceSelection(repair.selected);
         notice = 'kept';
         return;
       case 'cleared':
@@ -980,11 +1331,11 @@ export function createBrowserState(
           // stop being selected.
           installView(repair.reloaded);
         }
-        selected = null;
+        replaceSelection(null);
         notice = repair.reason;
         return;
       case 'unresolved':
-        selected = null;
+        replaceSelection(null);
         notice = 'unresolved';
         report(repair.failure);
         return;
@@ -1111,8 +1462,15 @@ export function createBrowserState(
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
       // A selection into the workspace being replaced can never be applied to
-      // the one replacing it, so every pending `select()` is invalidated here.
+      // the one replacing it, so every pending `select()` is invalidated here —
+      // globally, which is right because *every* projection is about to go.
       selectGeneration += 1;
+      // And the per-document counters are about documents of the workspace being
+      // closed. Their identities are reallocated by the load below, so an entry
+      // kept here would be a count of replacements of a different file. Clearing
+      // cannot un-cancel anything: the bump above has already invalidated every
+      // lookup that could have read one.
+      projectionGenerations.clear();
 
       // *Everything* the previous workspace decided goes, not only the parts
       // that obviously belong to a file: a sidebar filter naming document 3 and
@@ -1216,7 +1574,16 @@ export function createBrowserState(
     },
 
     async select(match: MatchView): Promise<void> {
+      // **This call's own intent**, bumped before anything can fail: a click that
+      // cannot be resolved still replaces the intent of an earlier one.
       const generation = ++selectGeneration;
+      // **And the projection this lookup will be taken against.** Captured here,
+      // per document, because the answer below is only about the parse the
+      // identity was minted from; a replacement of some *other* file's projection
+      // says nothing about it. The confirmation review's High finding is that the
+      // two were one counter and this lookup died with any file's replacement.
+      const document = match.id.document;
+      const projection = projectionGenerationOf(document);
       // The row was rendered from a projection this state holds, so the
       // document is found by identity and the position is looked up rather than
       // carried through the markup — a row's index in the *list* is not a
@@ -1233,6 +1600,9 @@ export function createBrowserState(
       if (next === null) {
         return;
       }
+      // Assigned directly rather than through `replaceSelection`, and this is the
+      // one place that is right: the bump at the top of this call is this
+      // assignment's, and bumping again here would cancel the lookup below.
       selected = next;
       notice = null;
       // In the "All" scope the selected snippet's file *is* the raw viewer's
@@ -1244,12 +1614,14 @@ export function createBrowserState(
       // not, R27's three answers are what comes back, and `repairSelection` is
       // where they are turned into a decision.
       const resolved = await commands.getMatch(next.id);
-      if (generation !== selectGeneration) {
-        // A later click, or a reload of the whole workspace, has happened while
-        // this one was in flight. Its answer describes a selection the user has
-        // already replaced, so it is dropped whole — including the reloaded
-        // document, which is a projection the newer selection's position and
-        // identity were not taken from.
+      if (selectionLookupIsStale(generation, document, projection)) {
+        // A later click, a reload of the whole workspace, an operation that moved
+        // the selection, or a replacement of **this file's** projection has
+        // happened while this one was in flight. Its answer describes a selection
+        // the user has already replaced or a parse this state no longer holds, so
+        // it is dropped whole — including the reloaded document, which is a
+        // projection the newer selection's position and identity were not taken
+        // from.
         return;
       }
       if (resolved.ok) {
@@ -1257,7 +1629,7 @@ export function createBrowserState(
       }
       report(resolved.failure);
       const repair = await repairSelection(next, resolved.failure, commands.reloadDocument);
-      if (generation !== selectGeneration) {
+      if (selectionLookupIsStale(generation, document, projection)) {
         return;
       }
       applyRepair(repair);
@@ -1271,8 +1643,7 @@ export function createBrowserState(
     clearSelection(): void {
       // A selection dropped on purpose also invalidates whatever `select()` has
       // in flight: its answer is about a selection the user has just discarded.
-      selectGeneration += 1;
-      selected = null;
+      replaceSelection(null);
       notice = null;
       // And in the "All" scope the selection *was* the raw viewer's target, so
       // dropping it leaves nothing named. Same call, same reason as above.
@@ -1299,21 +1670,26 @@ export function createBrowserState(
     async moveMatch(
       match: MatchView,
       after: MatchView | null,
+      baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ): Promise<SaveResult | null> {
       const view = views.find((held) => held.id === match.id.document);
       if (view === undefined) {
-        // Nothing on this state describes that document, so there is no base
-        // revision to send. Refusing here rather than inventing one is the same
-        // rule the command applies: a base that is not the parse the caller was
-        // editing against turns a move into a move of whatever now sits at the
-        // position.
+        // Nothing on this state describes that document, so nothing here could
+        // adopt what a commit produced or tell whether its own projection went out
+        // of date — and the anchor is worse than an edit's target: an identity
+        // minted from a parse this window does not hold names a *different*
+        // snippet in the parse the command reads. Nothing was sent, so nothing can
+        // have been written.
         return null;
       }
       const answer = await commands.moveMatch(
         match.id,
         after === null ? null : after.id,
-        view.revision,
+        // **The caller's, unchanged**, and never `view.revision`: see this method's
+        // JSDoc. Reading the projection here rebases a move the window has moved on
+        // from, and turns the conflict that should stop it into a commit.
+        baseRevision,
         acknowledgement
       );
       if (!answer.ok) {
@@ -1450,6 +1826,146 @@ export function createBrowserState(
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function saveMatch()
 
+    async createMatch(
+      document: DocumentId,
+      newMatch: NewMatch,
+      position: NewMatchPosition,
+      baseRevision: ContentRevision,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      const view = views.find((held) => held.id === document);
+      if (view === undefined) {
+        // Nothing on this state describes that file, so nothing here could adopt
+        // what a commit produced or tell whether the projection went out of date —
+        // and for a create the anchor is worse than an edit's target: an identity
+        // minted from a parse this window does not hold would name a *different*
+        // snippet in the parse the command reads. Nothing was sent, so nothing can
+        // have been written.
+        return { kind: 'notAttempted' };
+      }
+      // **Captured before the command**, because the rule below is about whether
+      // the person moved the selection while the create was in flight, and after
+      // the `await` there is no way to tell.
+      const heldBefore = selected;
+      const answer = await commands.createMatch(
+        document,
+        newMatch,
+        position,
+        // **The caller's, unchanged**, and never `view.revision`: see this method's
+        // JSDoc. Reading the projection here rebases a form the window has moved
+        // on from, and turns the conflict that should stop it into a commit.
+        baseRevision,
+        acknowledgement
+      );
+      if (!answer.ok) {
+        // The same rule a failed field save follows: a save that failed is not a
+        // workspace that failed, and `mayHaveWritten` is the only thing that says
+        // whether this window is still describing the file correctly.
+        report(answer.failure);
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
+          forgetTextOf(document);
+          await adoptTheDocumentOnDisk(document, null, null);
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+      }
+
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
+      if (answer.value.outcome === 'saved') {
+        // A `committed: false` is a documented success and is very nearly
+        // unreachable for an insertion; the second half of the test is the one
+        // that matters here, as it does for a move: a revision the transaction
+        // ended on that is not the one this state was projecting is a file some
+        // other program changed under the lock's two reads.
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          forgetTextOf(document);
+          const stale = await adoptTheCreatedSnippet(document, heldBefore, answer.value.moved);
+          if (stale === null) {
+            adoption = { kind: 'done' };
+          } else {
+            // The commit happened and this window could not read the file back, so
+            // everything it holds for that file was minted from bytes that have
+            // been replaced. It is dropped rather than left on screen, and the
+            // failure travels back beside the committed outcome (`PROGRESS.md` D2).
+            forgetTheReplacedDocument(document);
+            adoption = { kind: 'failed', failure: stale };
+          }
+          await readFileText();
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        // Nothing was written, and the command has already refreshed its own cache
+        // from the disk. Taking the projection it handed back keeps this state
+        // describing the bytes the next attempt will be checked against.
+        forgetTextOf(document);
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return { kind: 'answered', result: answer.value, adoption };
+    }, // End of function createMatch()
+
+    async deleteMatch(
+      id: MatchId,
+      baseRevision: ContentRevision,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      const view = views.find((held) => held.id === id.document);
+      if (view === undefined) {
+        // Nothing on this state describes that file, so nothing here could adopt
+        // what a commit produced or tell whether the projection went out of date.
+        // Nothing was sent, so nothing can have been written.
+        return { kind: 'notAttempted' };
+      }
+      // **Captured before the command**, and it is the *position* that is captured
+      // as well as the identity: after a committed deletion the identity names
+      // nothing, and the position is where the repair below starts looking.
+      const heldBefore =
+        selected !== null &&
+        selected.document === id.document &&
+        isTheSameIdentity(selected.id, id)
+          ? selected
+          : null;
+      // **The caller's base revision, unchanged**, and never `view.revision`: a
+      // deletion resolves an identity to a *position*, so a base that is not the
+      // parse the session was opened against is the one thing standing between a
+      // stale confirmation and the removal of whatever now sits there.
+      const answer = await commands.deleteMatch(id, baseRevision, acknowledgement);
+      if (!answer.ok) {
+        report(answer.failure);
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
+          forgetTextOf(id.document);
+          await adoptTheDocumentOnDisk(id.document, null, null);
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+      }
+
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
+      if (answer.value.outcome === 'saved') {
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          forgetTextOf(id.document);
+          const stale = await adoptAfterTheDeletion(id.document, heldBefore);
+          if (stale === null) {
+            adoption = { kind: 'done' };
+          } else {
+            forgetTheReplacedDocument(id.document);
+            adoption = { kind: 'failed', failure: stale };
+          }
+          await readFileText();
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        forgetTextOf(id.document);
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return { kind: 'answered', result: answer.value, adoption };
+    }, // End of function deleteMatch()
+
     async saveRawDocument(
       document: DocumentId,
       baseRevision: ContentRevision,
@@ -1567,6 +2083,12 @@ export function createBrowserState(
    * window moved without being asked. Any other selection in the file is repaired
    * the ordinary way, positionally and then checked (R27).
    *
+   * **And `moved` is resolved only in a projection of its own parse**, which is
+   * 2c-3a-1's third finding: {@link positionInSameParse} compares all three fields,
+   * so a file another program rewrote between the transaction's answer and this
+   * read falls back to that same ordinary repair rather than adopting whatever now
+   * occupies the arena node.
+   *
    * @param document - The file that was, or may have been, written.
    * @param target - The identity the operation was about, as it was **before** the
    *   save, or `null` when there is none. Compared against the held selection.
@@ -1590,9 +2112,12 @@ export function createBrowserState(
       selected.document === document &&
       isTheSameIdentity(selected.id, target)
     ) {
-      const position = positionOf(fresh.value, moved);
+      // All three fields, against the projection just read: see
+      // `positionInSameParse`. A `moved` from the save's revision must not be
+      // resolved in a later parse that happens to reuse its node.
+      const position = positionInSameParse(fresh.value, moved);
       if (position !== null) {
-        selected = selectMatch(fresh.value, position);
+        replaceSelection(selectMatch(fresh.value, position));
         notice = null;
         return null;
       }
@@ -1600,6 +2125,118 @@ export function createBrowserState(
     repairAfter(fresh.value);
     return null;
   } // End of function adoptTheDocumentOnDisk()
+
+  /**
+   * Re-reads a file a create wrote into, and points the selection at the new
+   * snippet.
+   *
+   * The projection is fetched rather than assumed, exactly as
+   * {@link adoptTheDocumentOnDisk} does: a commit invalidates every identity this
+   * state holds for that file, and `views` still describes the bytes that were
+   * replaced.
+   *
+   * **The two conditions on moving the selection are `BrowserState.createMatch`'s
+   * own**, and they are stated in its JSDoc: the held selection must not have been
+   * replaced since the call, and the sidebar must be showing a scope that contains
+   * the new snippet. The first is a reference comparison rather than a field-by-
+   * field one on purpose — `selected` is replaced whole by every path that changes
+   * it, so identity is exactly the question "has anything moved it since?", and it
+   * answers `true` for the ordinary case where nothing was selected at all.
+   *
+   * **A third condition is the file's rather than the person's**, and it is
+   * 2c-3a-1's third finding: {@link positionInSameParse} resolves the created
+   * identity only in a projection of the revision it was minted in, so a file
+   * another program rewrote between the write and this read cannot make an
+   * unrelated snippet look like the one just created.
+   *
+   * Anything else is repaired the ordinary way, positionally and then checked
+   * (R27).
+   *
+   * @param document - The file that was written.
+   * @param heldBefore - The selection this state held when the create started.
+   * @param moved - The created snippet's identity in the new revision, or `null`.
+   * @returns The failure of the re-read, or `null` when it succeeded.
+   */
+  async function adoptTheCreatedSnippet(
+    document: DocumentId,
+    heldBefore: SelectedMatch | null,
+    moved: MatchId | null
+  ): Promise<IpcFailure | null> {
+    const fresh = await commands.getDocument(document);
+    if (!fresh.ok) {
+      report(fresh.failure);
+      return fresh.failure;
+    }
+    installView(fresh.value);
+    const inScope = selection.kind === 'all' || selection.id === document;
+    if (moved !== null && selected === heldBefore && inScope) {
+      // The third condition, and it is about the *file* rather than the person:
+      // `positionInSameParse` refuses a `moved` the fresh projection is not a
+      // parse of, so a file another program rewrote between the write and the
+      // read cannot hand this window an unrelated snippet as the one just made.
+      const position = positionInSameParse(fresh.value, moved);
+      if (position !== null) {
+        replaceSelection(selectMatch(fresh.value, position));
+        notice = null;
+        return null;
+      }
+    } // End of the arm that selects the snippet the person has just made
+    repairAfter(fresh.value);
+    return null;
+  } // End of function adoptTheCreatedSnippet()
+
+  /**
+   * Re-reads a file a deletion wrote, and repairs the selection.
+   *
+   * **The one adoption that has no identity to adopt.** `moved` is `null`
+   * permanently for a deletion — the snippet that was deleted has none in the new
+   * revision, and filling that field with a neighbour's would put a position back
+   * into the one field that exists to replace positions with identities — so this
+   * function is handed the *selection that was deleted* instead, and only when the
+   * held selection really was that snippet.
+   *
+   * **Why this is not the positional reasoning `moved: null` forbids.** Nothing
+   * here preserves or re-resolves the stale identity: the projection is replaced
+   * whole and the snippet selected is adopted under its **own new identity**,
+   * minted by the read that has just happened. What separates it from R27's
+   * `differentMatch` — where a different snippet at the held position drops the
+   * selection with a notice — is that R27 is about a file that moved **under**
+   * somebody, and this is the change they asked for. The notice is shown anyway,
+   * because selecting a neighbour can still read as continuity with a snippet that
+   * no longer exists (the consult's own counter-argument to its Q1).
+   *
+   * Any other selection in that file is repaired the ordinary way, and this
+   * function does not hijack it.
+   *
+   * @param document - The file the snippet was deleted from.
+   * @param deleted - The selection that was the deleted snippet, or `null` when
+   *   the person had something else, or nothing, selected.
+   * @returns The failure of the re-read, or `null` when it succeeded.
+   */
+  async function adoptAfterTheDeletion(
+    document: DocumentId,
+    deleted: SelectedMatch | null
+  ): Promise<IpcFailure | null> {
+    const fresh = await commands.getDocument(document);
+    if (!fresh.ok) {
+      report(fresh.failure);
+      return fresh.failure;
+    }
+    installView(fresh.value);
+    if (deleted === null || selected !== deleted) {
+      // Either the person was looking at another snippet all along, or they moved
+      // the selection while the deletion was in flight. Both are ordinary repairs.
+      repairAfter(fresh.value);
+      return null;
+    }
+    // The former ordinal position, and the new last snippet when the deleted one
+    // was last. `selectMatch` answers `null` for a file that now holds none, which
+    // is the third case and needs no branch of its own.
+    const at = Math.min(deleted.position, fresh.value.matches.length - 1);
+    replaceSelection(at < 0 ? null : selectMatch(fresh.value, at));
+    notice = 'deleted';
+    return null;
+  } // End of function adoptAfterTheDeletion()
 
   /**
    * Forgets everything this state holds about one document.
@@ -1625,11 +2262,19 @@ export function createBrowserState(
   function forgetTheReplacedDocument(document: DocumentId): SelectedMatch | null {
     const held = selected !== null && selected.document === document ? selected : null;
     views = views.filter((view) => view.id !== document);
+    // A `select()` in flight **against this document** describes a parse that no
+    // longer exists, so its answer must not land after this. Scoped to the file
+    // being dropped, exactly as `installView`'s is, and for the same finding: the
+    // first fix round made this bump unconditional *and global*, which cancelled
+    // lookups into files this call says nothing about. Unconditional it stays —
+    // the branch below asks whether the **selection** is in this document, and a
+    // generation asks whether a **lookup** is, which are different questions — but
+    // it is now a question about one file rather than about all of them.
+    invalidateProjectionOf(document);
     if (held !== null) {
-      // A `select()` in flight for this document describes a parse that no
-      // longer exists, so its answer must not land after this.
-      selectGeneration += 1;
-      selected = null;
+      // A selection dropped is an intent replaced, so it cancels a lookup for any
+      // document, which is `replaceSelection`'s own half of the rule.
+      replaceSelection(null);
       notice = null;
     }
     if (fileTextDocument === document) {
@@ -1681,7 +2326,7 @@ export function createBrowserState(
       // surprising one.
       const found = reresolve(held, fresh.value);
       if (found.outcome === 'sameMatch') {
-        selected = found.selected;
+        replaceSelection(found.selected);
         notice = 'kept';
       } else {
         notice = found.outcome;
@@ -1740,11 +2385,11 @@ export function createBrowserState(
     }
     const found = reresolve(selected, view);
     if (found.outcome === 'sameMatch') {
-      selected = found.selected;
+      replaceSelection(found.selected);
       notice = 'kept';
       return;
     }
-    selected = null;
+    replaceSelection(null);
     notice = found.outcome;
   } // End of function repairAfter()
 } // End of function createBrowserState()

@@ -16,6 +16,13 @@ import {
   type OptionGroupName
 } from '../browser/detail';
 import {
+  creationRefusalKey,
+  destinationRefusalKey,
+  type CreationRefusal,
+  type DestinationRefusal
+} from '../browser/matchCreation';
+import { deletionRefusalKey, type DeletionRefusal } from '../browser/matchDeletion';
+import {
   fieldRefusalKey,
   reprojectionRefusalKey,
   type FieldRefusal,
@@ -468,6 +475,42 @@ export function tFieldRefusal(reason: FieldRefusal): string {
 export function tReprojectionRefusal(reason: ReprojectionRefusal): string {
   return translate(locale.current, reprojectionRefusalKey(reason));
 } // End of function tReprojectionRefusal()
+
+/**
+ * Renders why a new snippet may not be written into one file.
+ *
+ * The accessor over `destinationEligibility`'s verdict, here for
+ * `tFieldRefusal`'s reason: a component that wrote
+ * `t(destinationRefusalKey(reason))` would be turning a code into a key in
+ * markup, which CLAUDE.md section 2 forbids and
+ * `scripts/lint/built-translation-keys.ts` refuses.
+ *
+ * @param reason - Why the file cannot be a destination.
+ * @returns The translated sentence.
+ */
+export function tDestinationRefusal(reason: DestinationRefusal): string {
+  return translate(locale.current, destinationRefusalKey(reason));
+} // End of function tDestinationRefusal()
+
+/**
+ * Renders why the new-snippet form cannot be submitted as it stands.
+ *
+ * @param reason - What `creationRefusal` answered.
+ * @returns The translated sentence.
+ */
+export function tCreationRefusal(reason: CreationRefusal): string {
+  return translate(locale.current, creationRefusalKey(reason));
+} // End of function tCreationRefusal()
+
+/**
+ * Renders why one snippet may not be deleted.
+ *
+ * @param reason - What `deletionEligibility` answered.
+ * @returns The translated sentence.
+ */
+export function tDeletionRefusal(reason: DeletionRefusal): string {
+  return translate(locale.current, deletionRefusalKey(reason));
+} // End of function tDeletionRefusal()
 
 /**
  * Renders one line a save outcome shows, in the current language.

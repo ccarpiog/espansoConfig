@@ -195,7 +195,6 @@ import type {
 import type { DetailFieldName } from './detail';
 import { matchEditability, type MatchEditability } from './detail';
 import {
-  amendDraft,
   canRedo,
   canUndo,
   deepFreeze,
@@ -211,6 +210,7 @@ import {
   type DraftSubmission,
   type DraftValueRules
 } from './draft';
+import { recordTyping, TYPING_GROUP_IDLE_MS, type Clock, type TypingRun } from './typing';
 import {
   conflictArm,
   consentForRefusal,
@@ -549,34 +549,27 @@ const BUFFER_RULES: DraftValueRules<MatchBuffers> = structuredDraftRules<MatchBu
 /**
  * A source of milliseconds, injected so a boundary is testable.
  *
- * Never `Date.now` named inside this module, and never a `setTimeout`: a group
- * boundary decided by real time is a boundary a test would have to sleep through.
- * The running application passes `() => Date.now()`.
- *
- * @returns A reading in milliseconds, which must not go backwards within a
- *   session.
+ * **Re-exported rather than declared here since 2c-3a**, when the coalescing
+ * policy moved to `./typing.ts` so that the creation form of 2c-3a could hold the
+ * same rule rather than a second copy of it. `MatchEditor.svelte` imports this
+ * name from this module, so it keeps answering here.
  */
-export type Clock = () => number;
+export type { Clock };
 
 /**
  * How long a pause ends a run of typing in one field, in milliseconds.
  *
- * **A judgement, not a measurement.** Nothing has been profiled and no session has
- * been timed; seven hundred milliseconds is long enough that ordinary typing in
- * one field stays one undo step and short enough that stopping to think starts a
- * new one. The cost of it being wrong is undo granularity, which is recoverable
- * by pressing undo again — unlike the cost of not coalescing at all, which is
- * history entries the person cannot get back.
+ * Re-exported from `./typing.ts`, which owns the boundary both editors share.
  */
-export const TYPING_GROUP_IDLE_MS = 700;
+export { TYPING_GROUP_IDLE_MS };
 
-/** A run of typing in one field that later keystrokes may still join. */
-export interface TypingGroup {
-  /** The field being typed into. A different field is a different group. */
-  readonly field: EditableField;
-  /** The clock reading of the last keystroke recorded in it. */
-  readonly at: number;
-}
+/**
+ * A run of typing in one field that later keystrokes may still join.
+ *
+ * The shared {@link TypingRun} named over this editor's own field union, so the
+ * session's shape is unchanged by the 2c-3a extraction.
+ */
+export type TypingGroup = TypingRun<EditableField>;
 
 /**
  * One editing session over one snippet's six editable fields.
@@ -1110,22 +1103,11 @@ function withField(
 /**
  * Records a change, joining the open typing group or starting a new one.
  *
- * **The whole of the coalescing policy, in one place.** A change joins the group
- * when it is in the same field and within {@link TYPING_GROUP_IDLE_MS} of the last
- * one recorded in it; otherwise it opens a step of its own. Joining uses
- * `amendDraft`, which replaces the current value without pushing history;
- * starting uses `editDraft`, which pushes.
- *
- * The live value moves either way, on every keystroke. What is coalesced is the
- * *snapshot*, and nothing else.
- *
- * **A burst that ends where it began leaves no step**, which is the 2c-2 review's
- * fifth finding: type three characters and erase them again inside the window, and
- * the amendment restored the value the group started from while its history entry
- * stayed — an undo the person could press that changed nothing on screen and only
- * spent a step. `amendDraft` now drops the entry in that case, and the group is
- * closed here rather than left open, because a group whose step no longer exists
- * has nothing left to amend and the next keystroke must push one.
+ * **The policy itself is `recordTyping`'s**, in `./typing.ts`, since 2c-3a: the
+ * boundary — the same field, within {@link TYPING_GROUP_IDLE_MS} — is shared with
+ * the creation form and is one rule in one place rather than two copies. What
+ * stays here is what is about *this* session: the focus follows the field being
+ * typed into, and a change clears the last send failure.
  *
  * @param session - The session being edited.
  * @param field - The field the change is in.
@@ -1137,23 +1119,15 @@ function recordChange(
   field: EditableField,
   buffers: MatchBuffers
 ): MatchEditorSession {
-  const now = session.clock();
-  const open = session.group;
-  const joins = open !== null && open.field === field && now - open.at <= TYPING_GROUP_IDLE_MS;
-  const draft = joins ? amendDraft(session.draft, buffers) : editDraft(session.draft, buffers);
-  if (draft === session.draft) {
-    // Nothing changed, so nothing happened: the group is not extended either, or a
-    // no-op keystroke would keep a group alive across an arbitrary pause.
+  const recorded = recordTyping(session.draft, session.group, field, buffers, session.clock());
+  if (recorded === null) {
     return session;
   }
-  // The amendment collapsed its own step: the burst is back where it started, the
-  // history entry is gone, and there is nothing for a later keystroke to amend.
-  const collapsed = joins && draft.past.length < session.draft.past.length;
   return {
     ...session,
-    draft,
+    draft: recorded.draft,
     focus: field,
-    group: collapsed ? null : { field, at: now },
+    group: recorded.group,
     sendFailure: null
   };
 } // End of function recordChange()

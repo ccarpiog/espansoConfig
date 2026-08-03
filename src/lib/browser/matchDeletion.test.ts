@@ -1,0 +1,418 @@
+/**
+ * Deleting one snippet, driven without a screen.
+ *
+ * Four groups:
+ *
+ * 1. **eligibility** — the three refusals, and in particular the last snippet of
+ *    a file, which the consult's Q6 says the value refuses **and** the core still
+ *    decides;
+ * 2. **the two phases** — the consult's Q2: nothing reaches the command without a
+ *    confirmation, and a confirmation is bound to the exact identity it was given
+ *    for;
+ * 3. **the answer** — the three arms, the acknowledgement round trip, and the
+ *    `DoubledSequenceSeparation` note that only a deletion produces;
+ * 4. **the view** — what a screen would draw, derived on every read.
+ *
+ * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
+ * argument is already its description carries no JSDoc of its own; ordinary
+ * helpers here do.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { DICTIONARIES } from '../i18n/dictionaries';
+import { LOCALES } from '../i18n/locale';
+import type { ContentRevision, DocumentView, Finding, MatchId, SaveResult } from '../ipc/types';
+import { makeDocument, makeMatch } from './fixtures';
+import type { InvalidationStatus } from './invalidation';
+import {
+  acknowledgeDeletionFindings,
+  applyDeletion,
+  baseRevisionOf,
+  canRequestDelete,
+  cancelDelete,
+  conflictOf,
+  confirmDelete,
+  deletionCouldNotBeSent,
+  deletionEligibility,
+  deletionRefusalKey,
+  dismissDeletionOutcome,
+  matchDeletionView,
+  requestDelete,
+  startMatchDeletion,
+  type DeletionRefusal,
+  type MatchDeletionSession
+} from './matchDeletion';
+
+/** The revision every projection below is minted from. */
+const BASE: ContentRevision = 'a'.repeat(64);
+
+/** The revision the file holds after a commit. */
+const AFTER: ContentRevision = 'b'.repeat(64);
+
+/**
+ * A snippet file with two snippets in it.
+ *
+ * @param overrides - Whatever a case needs beyond the two snippets.
+ * @returns The projection.
+ */
+function file(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: BASE,
+    matches: [
+      makeMatch({ node: 10, document: 2, revision: BASE, trigger: ':sig' }),
+      makeMatch({ node: 11, document: 2, revision: BASE, trigger: ':date' })
+    ],
+    ...overrides
+  });
+} // End of function file()
+
+/**
+ * A session over the first snippet of {@link file}.
+ *
+ * @param document - The projection to take the pair from.
+ * @returns The session.
+ */
+function session(document: DocumentView = file()): MatchDeletionSession {
+  return startMatchDeletion(document, document.matches[0]!);
+} // End of function session()
+
+/**
+ * The identity the window's **current** projection gives the snippet under test.
+ *
+ * What a screen would read off the live projection and hand to
+ * {@link confirmDelete}, which is the only argument there that comes from outside
+ * the session and therefore the only one that can notice a reprojection.
+ *
+ * @param document - The projection the window is holding now.
+ * @returns That projection's identity for the first snippet.
+ */
+function live(document: DocumentView = file()): MatchId {
+  return document.matches[0]!.id;
+} // End of function live()
+
+/**
+ * The same file, re-read: the same two snippets under a new parse.
+ *
+ * **The fixture the retained-session case needs.** Nothing about the session
+ * changes when a window re-reads a file — that is the whole point of the finding
+ * this exists for — so what has to change is the world, and a reparse changes
+ * every identity in it.
+ *
+ * @returns The projection a re-read would install.
+ */
+function reprojected(): DocumentView {
+  return file({
+    revision: AFTER,
+    matches: [
+      makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' }),
+      makeMatch({ node: 31, document: 2, revision: AFTER, trigger: ':date' })
+    ]
+  });
+} // End of function reprojected()
+
+/** The adoption a save that wrote nothing owes: none. */
+const NOT_OWED: InvalidationStatus = { kind: 'notOwed' };
+
+/** The adoption a committed deletion performed. */
+const ADOPTED: InvalidationStatus = { kind: 'done' };
+
+/** The adoption a committed deletion could not perform. */
+const NOT_ADOPTED: InvalidationStatus = {
+  kind: 'failed',
+  failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+};
+
+/**
+ * A `saved` outcome.
+ *
+ * **`moved` is `null` and has no parameter**, because a deletion's answer names
+ * nothing by construction: the snippet that was deleted has no identity in the new
+ * revision, and a fixture that could say otherwise would model a wire this
+ * application does not have.
+ *
+ * @param committed - Whether the file was rewritten.
+ * @returns The wire result.
+ */
+function saved(committed = true): SaveResult {
+  return {
+    outcome: 'saved',
+    revision: AFTER,
+    committed,
+    notes: [],
+    backup_taken: false,
+    moved: null
+  };
+} // End of function saved()
+
+/** A finding the gate reported about the deletion. */
+const SUSPICION: Finding = {
+  code: { ReferenceHasNoDeclaration: { name: 'greeting' } },
+  span: null,
+  node: null,
+  path: null
+};
+
+/** A refusal carrying that finding. */
+const REFUSED: SaveResult = {
+  outcome: 'refused',
+  verdict: 'RefusedForUnacknowledgedSuspicions',
+  findings: [SUSPICION]
+};
+
+/** A conflict: the file moved on and nothing was written. */
+const CONFLICT: SaveResult = {
+  outcome: 'conflict',
+  expected: BASE,
+  found: AFTER,
+  disk_revision: AFTER,
+  disk: file()
+};
+
+describe('whether one snippet may be deleted at all', () => {
+  it('says yes for an ordinary snippet of an ordinary file', () => {
+    expect(deletionEligibility(file(), file().matches[0]!)).toEqual({ kind: 'deletable' });
+    expect(canRequestDelete(session())).toBe(true);
+  });
+
+  it('refuses the last snippet of a file, from the projection', () => {
+    // The consult's Q6: an affordance derived from current state, not
+    // authorization. The core refuses the same thing, and its refusal is what a
+    // person sees if the two ever disagree.
+    const lonely = file({
+      matches: [makeMatch({ node: 10, document: 2, revision: BASE, trigger: ':sig' })]
+    });
+    expect(deletionEligibility(lonely, lonely.matches[0]!)).toEqual({
+      kind: 'refused',
+      reason: 'lastSnippet'
+    });
+    expect(canRequestDelete(session(lonely))).toBe(false);
+    expect(requestDelete(session(lonely)).pending).toBeNull();
+  });
+
+  it('refuses a file this application must not write', () => {
+    const packaged = file({ kind: 'Package', readOnly: true });
+    expect(deletionEligibility(packaged, packaged.matches[0]!)).toEqual({
+      kind: 'refused',
+      reason: 'readOnly'
+    });
+  });
+
+  it('refuses a snippet and a file that are not a pair this projection describes', () => {
+    // 2c-2-2's High finding one level up: the two arguments are one fact, and a
+    // caller passing a second value straight from the live selection type-checks.
+    const stranger = makeMatch({ node: 10, document: 9, revision: BASE });
+    expect(deletionEligibility(file(), stranger)).toEqual({
+      kind: 'refused',
+      reason: 'notInDocument'
+    });
+    const stale = makeMatch({ node: 10, document: 2, revision: AFTER });
+    expect(deletionEligibility(file(), stale)).toEqual({
+      kind: 'refused',
+      reason: 'notInDocument'
+    });
+    const absent = makeMatch({ node: 99, document: 2, revision: BASE });
+    expect(deletionEligibility(file(), absent)).toEqual({
+      kind: 'refused',
+      reason: 'notInDocument'
+    });
+  });
+
+  it('has a sentence for every refusal, in both languages', () => {
+    const reasons: readonly DeletionRefusal[] = ['readOnly', 'lastSnippet', 'notInDocument'];
+    for (const locale of LOCALES) {
+      for (const reason of reasons) {
+        expect(DICTIONARIES[locale][deletionRefusalKey(reason)].length).toBeGreaterThan(0);
+      }
+    } // End of the loop over the two locales
+  });
+}); // End of the "eligibility" suite
+
+describe('the two phases a deletion goes through', () => {
+  it('produces nothing to send until the person has confirmed', () => {
+    // The consult's Q2, and the reason it exists: the protocol's acknowledgement
+    // round trip engages only for a finding-bearing candidate, so a clean deletion
+    // collects no consent anywhere else.
+    const clean = session();
+    expect(confirmDelete(clean, live())).toBeNull();
+    const asked = requestDelete(clean);
+    expect(asked.pending).not.toBeNull();
+    expect(confirmDelete(asked, live())).not.toBeNull();
+  });
+
+  it('takes the question back', () => {
+    const asked = requestDelete(session());
+    const cancelled = cancelDelete(asked);
+    expect(cancelled.pending).toBeNull();
+    expect(confirmDelete(cancelled, live())).toBeNull();
+    // And cancelling nothing changes nothing.
+    expect(cancelDelete(cancelled)).toBe(cancelled);
+  });
+
+  it('refuses a confirmation given for a different identity', () => {
+    // All three fields of the pending consent against the session's own. Both are
+    // minted together, so this is the *caller-built* case: a session literal
+    // carrying somebody else's identity.
+    const asked = requestDelete(session());
+    const elsewhere: MatchId = { document: 2, revision: AFTER, node: 10 };
+    const carried: MatchDeletionSession = { ...asked, match: elsewhere };
+    expect(confirmDelete(carried, elsewhere)).toBeNull();
+    const otherNode: MatchDeletionSession = {
+      ...asked,
+      match: { document: 2, revision: BASE, node: 11 }
+    };
+    expect(confirmDelete(otherNode, otherNode.match)).toBeNull();
+  });
+
+  it('refuses a confirmation the window has reprojected the file under', () => {
+    // **The first review round's fifth finding, and the whole of it.** The session
+    // is *retained*, exactly as a component holding one in a `$state.raw` retains
+    // it: nothing here manufactures a changed `session.match`, because a reload
+    // does not change one. What changes is the file, and the identity the current
+    // projection gives that snippet is the only value in the comparison that comes
+    // from outside the session — so it is the only one that can say so.
+    const asked = requestDelete(session());
+    expect(confirmDelete(asked, live())).not.toBeNull();
+
+    const afterReload = reprojected();
+    expect(confirmDelete(asked, live(afterReload))).toBeNull();
+    // The session really is untouched: every field it carries still names the
+    // parse it was opened over, which is why nothing inside it could have noticed.
+    expect(asked.match).toEqual(file().matches[0]!.id);
+    expect(asked.draft.value).toEqual(file().matches[0]!.id);
+    expect(asked.pending).not.toBeNull();
+  });
+
+  it('refuses a confirmation when the projection no longer holds the snippet', () => {
+    // Somebody else deleted it, or the file no longer parses: there is no current
+    // identity to agree with, and a confirmation cannot be spent on nothing.
+    const asked = requestDelete(session());
+    expect(confirmDelete(asked, null)).toBeNull();
+  });
+
+  it('spends the confirmation, so a second attempt is asked for again', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    expect(started!.session.pending).toBeNull();
+    expect(started!.match).toEqual(file().matches[0]!.id);
+    expect(started!.session.phase).toBe('saving');
+    expect(started!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(baseRevisionOf(started!.session)).toBe(BASE);
+  });
+
+  it('asks nothing while a deletion is in flight, or after one has committed', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    expect(canRequestDelete(started!.session)).toBe(false);
+    expect(requestDelete(started!.session)).toBe(started!.session);
+    const done = applyDeletion(started!.session, saved(), ADOPTED);
+    expect(done.deleted).toBe(true);
+    expect(canRequestDelete(done)).toBe(false);
+    // And dismissing the panel does not give it back.
+    expect(canRequestDelete(dismissDeletionOutcome(done))).toBe(false);
+    expect(confirmDelete(requestDelete(done), live())).toBeNull();
+  });
+}); // End of the "two phases" suite
+
+describe('what comes back', () => {
+  it('spends the session on a commit and says the file was written', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const done = applyDeletion(started!.session, saved(), ADOPTED);
+    const view = matchDeletionView(done);
+    expect(view.deleted).toBe(true);
+    expect(view.deleting).toBe(false);
+    expect(view.messages.map((message) => message.kind)).toEqual(['fileWritten']);
+  });
+
+  it('carries the doubled-separation note only a deletion produces', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const withNote: SaveResult = {
+      outcome: 'saved',
+      revision: AFTER,
+      committed: true,
+      notes: [{ DoubledSequenceSeparation: { edit: 0 } }],
+      backup_taken: false,
+      moved: null
+    };
+    const view = matchDeletionView(applyDeletion(started!.session, withNote, ADOPTED));
+    // Plan section 6.2 is *never silently normalise*, and the blank line a removed
+    // snippet leaves behind is exactly such a change.
+    expect(view.notes).toEqual([{ DoubledSequenceSeparation: { edit: 0 } }]);
+  });
+
+  it('puts the out-of-step line beside a commit whose adoption failed', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const done = applyDeletion(started!.session, saved(), NOT_ADOPTED);
+    // Beside the saved arm, never in place of it: the snippet really is gone.
+    expect(matchDeletionView(done).messages.map((message) => message.kind)).toEqual([
+      'fileWritten',
+      'windowOutOfStep'
+    ]);
+  });
+
+  it('carries a refusal’s findings and the consent that answers them', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const refused = applyDeletion(started!.session, REFUSED, NOT_OWED);
+    const view = matchDeletionView(refused);
+    expect(view.outcome?.kind).toBe('refused');
+    expect(view.refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
+    expect(view.deleted).toBe(false);
+
+    const consented = acknowledgeDeletionFindings(refused);
+    const again = confirmDelete(requestDelete(consented), live());
+    expect(again!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
+  });
+
+  it('offers one way out of a conflict, and stops asking while it shows', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const conflicted = applyDeletion(started!.session, CONFLICT, NOT_OWED);
+    expect(conflictOf(conflicted)).not.toBeNull();
+    expect(canRequestDelete(conflicted)).toBe(false);
+    expect(matchDeletionView(conflicted).conflictChoices).toEqual(['keepEditing']);
+    const dismissed = dismissDeletionOutcome(conflicted);
+    expect(conflictOf(dismissed)).toBeNull();
+    expect(canRequestDelete(dismissed)).toBe(true);
+  });
+
+  it('records a send that produced no outcome, in its two arms', () => {
+    const started = confirmDelete(requestDelete(session()), live());
+    const notSent = deletionCouldNotBeSent(started!.session, false, null);
+    expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
+    expect(notSent.deleted).toBe(false);
+    const failure = { kind: 'command' as const, error: { code: 'noWorkspaceOpen' as const } };
+    const maybe = deletionCouldNotBeSent(started!.session, true, failure);
+    expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
+    expect(matchDeletionView(maybe).failureLines).toEqual([{ kind: 'failure', failure }]);
+  });
+
+  it('ignores an answer nothing was waiting for', () => {
+    const clean = session();
+    expect(applyDeletion(clean, saved(), ADOPTED)).toBe(clean);
+  });
+}); // End of the "what comes back" suite
+
+describe('the view a screen draws', () => {
+  it('answers everything a control needs, derived on every read', () => {
+    const view = matchDeletionView(session());
+    expect(view.match).toEqual(file().matches[0]!.id);
+    expect(view.canDelete).toBe(true);
+    expect(view.refusal).toBeNull();
+    expect(view.confirming).toBe(false);
+    expect(view.deleting).toBe(false);
+    expect(view.deleted).toBe(false);
+    expect(view.outcome).toBeNull();
+    expect(view.notes).toEqual([]);
+  });
+
+  it('names the refusal and stops offering the control', () => {
+    const lonely = file({
+      matches: [makeMatch({ node: 10, document: 2, revision: BASE, trigger: ':sig' })]
+    });
+    const view = matchDeletionView(session(lonely));
+    expect(view.canDelete).toBe(false);
+    expect(view.refusal).toBe('lastSnippet');
+  });
+
+  it('says when the question is on screen', () => {
+    expect(matchDeletionView(requestDelete(session())).confirming).toBe(true);
+  });
+}); // End of the "view" suite

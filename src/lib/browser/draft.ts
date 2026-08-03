@@ -851,6 +851,60 @@ export function savedDraft<T>(
 } // End of function savedDraft()
 
 /**
+ * The draft with whatever consent it had collected withdrawn.
+ *
+ * **The transition for a change that is not a change to the drafted value.**
+ * Every transition above that moves the value already drops the consent, because
+ * consent is content-addressed to the candidate it was collected for. This is the
+ * other case: something *outside* the value changed, and the transaction the
+ * person accepted findings for is no longer the transaction that would be sent.
+ * 2c-3a's creation form is the first caller — its destination file and its
+ * position are part of the submission's identity and are not part of its buffers
+ * (`docs/reviews/phase-2c-3a-1-code.md` finding 1).
+ *
+ * **What no type here forces**, in the same sentence as what one does: nothing
+ * makes a caller notice that one of its own fields belongs to the submission's
+ * identity, so this cannot find the transitions that ought to call it. What it
+ * closes is that a caller which *has* noticed does not have to reach into a
+ * draft's fields to act on it, which is the only way outside this module to drop
+ * consent while keeping a value.
+ *
+ * @typeParam T - The drafted value.
+ * @param draft - The draft whose consent no longer describes what would be sent.
+ * @returns The draft with no consent, or the same draft when it had none.
+ */
+export function withdrawnConsent<T>(draft: Draft<T>): Draft<T> {
+  return draft.consent === null ? draft : { ...draft, consent: null };
+} // End of function withdrawnConsent()
+
+/**
+ * The draft measured against a different revision, with its value untouched.
+ *
+ * **This is not 2c-4b's rebase and must not be called one.** That word is
+ * reserved for *reapplying a draft to a newly parsed document*, which changes the
+ * value; this changes only the revision the value is drafted **from**, which is
+ * what a save sends and what {@link acknowledgeRefusal} matches a submission
+ * against. Its caller is a form whose *destination* moved: the same two typed
+ * fields are now drafted against another file, so the base revision is that
+ * file's and the history the person typed is theirs to keep.
+ *
+ * The consent goes, through {@link withdrawnConsent}: findings accepted against
+ * one file's revision say nothing about another's.
+ *
+ * @typeParam T - The drafted value.
+ * @param draft - The draft to re-point.
+ * @param revision - The revision it is now drafted from.
+ * @returns The draft at that revision with no consent, or the same draft when
+ *   neither would change.
+ */
+export function retargetedDraft<T>(draft: Draft<T>, revision: ContentRevision): Draft<T> {
+  if (draft.baseRevision === revision) {
+    return withdrawnConsent(draft);
+  }
+  return { ...draft, baseRevision: revision, consent: null };
+} // End of function retargetedDraft()
+
+/**
  * The history boundary a reload draws, discarding the draft.
  *
  * **This is the destructive one.** It replaces the current value with what was

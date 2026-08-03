@@ -123,6 +123,7 @@
   "browser.notice.differentMatch": "This file changed on disk, and what is now in that position is a different snippet, so the selection was cleared.",
   "browser.notice.gone": "This file changed on disk and no longer holds the snippet that was selected, so the selection was cleared.",
   "browser.notice.unresolved": "This file changed on disk and could not be read again, so the selection was cleared.",
+  "browser.notice.deleted": "That snippet was deleted. This window has read the file again and selected whatever now sits where it was; if the file holds no snippets any more, nothing is selected.",
   "browser.notice.dismiss": "Dismiss",
 
   "browser.rawSave.replacesWholeDocument": "Saving writes this file's whole text exactly as it appears here. This is not an edit to one snippet: the entire document is replaced.",
@@ -207,6 +208,25 @@
   "browser.matchEditor.fieldRemoved": "This key will be taken out of the file when you save.",
   "browser.matchEditor.remove": "Take this key out",
   "browser.matchEditor.restore": "Keep this key",
+
+  "browser.matchCreation.destination.notASnippetFile": "espanso does not load snippets out of this file, so a snippet written here would never fire. Choose a snippet file instead.",
+  "browser.matchCreation.destination.readOnly": "This app must not write to this file, so it cannot add a snippet to it.",
+  "browser.matchCreation.destination.couldNotBeRead": "This app could not read this file, so it does not know what is in it or where a snippet would go. The file list says why it could not be read.",
+  "browser.matchCreation.destination.notParsed": "This file could not be read as YAML, so this app does not know where a snippet would go in it. Repair the file first.",
+  "browser.matchCreation.destination.noMatchList": "This file has no snippet list to add to. Add a “matches:” list to it in the file itself, and it can be chosen here afterwards.",
+  "browser.matchCreation.cannotCreate.alreadyCreated": "This snippet has been written to the file. Reading the file again is what tells this app what it now holds, so close this form and open a new one to add another.",
+  "browser.matchCreation.cannotCreate.saveInFlight": "This snippet is being written, so nothing can be changed until the file answers.",
+  "browser.matchCreation.cannotCreate.conflict": "The file changed while this snippet was being written, so nothing was written. Read what happened before adding it again.",
+  "browser.matchCreation.cannotCreate.noDestination": "Choose the file this snippet should be added to.",
+  "browser.matchCreation.cannotCreate.destinationIneligible": "This app cannot add a snippet to the file chosen. Choose another one.",
+  "browser.matchCreation.cannotCreate.anchorUnavailable": "The snippet this new one was to follow is no longer in the file chosen, so choose where it goes again.",
+  "browser.matchCreation.cannotCreate.triggerEmpty": "A snippet needs the text that fires it.",
+  "browser.matchCreation.cannotCreate.replaceEmpty": "A snippet needs something to expand to.",
+  "browser.matchCreation.cannotCreate.carriageReturn": "One of these values contains a carriage return, which no box in this window could show you back afterwards, so it will not be written.",
+
+  "browser.matchDeletion.refused.readOnly": "This app must not write to this file, so it cannot delete anything from it.",
+  "browser.matchDeletion.refused.lastSnippet": "This is the only snippet in this file, and emptying a file’s snippet list is not something this app does. Delete the file itself instead, outside this app.",
+  "browser.matchDeletion.refused.notInDocument": "This snippet and the reading of the file this window holds do not go together, so nothing can be deleted from here. Read the file again and pick the snippet from the list.",
 
   "language.label": "Language",
   "language.followSystem": "Follow the system language",

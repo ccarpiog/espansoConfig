@@ -527,6 +527,20 @@ export interface DocumentOverrides {
   readonly revision?: string;
   /** The matches the document holds. */
   readonly matches?: readonly MatchView[];
+  /**
+   * Every top-level key of the projected document, as source text.
+   *
+   * **The default is derived rather than pinned**, for the reason
+   * {@link DocumentOverrides.hazards} makes about `safely_editable`: a fixture
+   * that contradicts itself is a fixture the next reader trusts. A snippet file
+   * that parses writes its snippets under `matches:`, so that is what one has; a
+   * file the substrate did not accept has no projected keys at all, and neither
+   * does a config profile by default.
+   *
+   * It matters because `destinationEligibility` in `./matchCreation.ts` asks the
+   * same question of the same field the core's `match_list_of` does.
+   */
+  readonly topLevelKeys?: readonly string[];
   /** Whether the substrate accepted the file. */
   readonly parsed?: boolean;
   /** Everything the projection noticed, in source order. */
@@ -563,6 +577,9 @@ export function makeSummary(overrides: DocumentOverrides = {}): DocumentSummary 
  */
 export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
   const summary = makeSummary(overrides);
+  const parsed = overrides.parsed ?? true;
+  const keys =
+    overrides.topLevelKeys ?? (parsed && summary.kind !== 'ConfigProfile' ? ['matches'] : []);
   return {
     id: summary.id,
     path: summary.path,
@@ -574,14 +591,14 @@ export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
     byte_len: 0,
     line_ending: 'Lf',
     bom: false,
-    parsed: overrides.parsed ?? true,
+    parsed,
     stream_documents: 1,
     // Follows the kind rather than being pinned to `MatchFile`: a profile is
     // projected as of the 1c-2b-1 review, so a fixture profile whose *shape*
     // still said "snippet file" would be the kind of self-contradicting fixture
     // the next reader trusts.
     shape: summary.kind === 'ConfigProfile' ? 'ConfigProfile' : 'MatchFile',
-    top_level_keys: [],
+    top_level_keys: keys.map((key) => scalar(key)),
     matches: overrides.matches ?? [],
     global_vars: [],
     imports: [],

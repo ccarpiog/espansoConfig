@@ -52,7 +52,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-1b** | The **raw editor**, the one vertical slice: the raw pane made editable and saveable over `saveRawDocument`, the three arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state, this project's **first mounted-component test**, and the **first window reading of a screen that writes** | ✅ complete — after **three** review fix rounds below. The aggregate review returned **NOT READY** on three High findings; **all six were fixed**, and then the window reading found **two real defects the whole test suite had passed over**, and a second Codex pass on those two fixes returned **NOT READY** again on one more. **All nine were fixed before the commit** |
 | **2c-2-1** | The **small editor's model layer and its command wiring**, with no component and no screen: a five-reason eligibility verdict computed from the projection, the baseline/buffer split with `DraftField` as the authoritative intent, per-field coalesced history on an injected clock, and `saveMatch` wired with identity adoption inside the wrapper | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on five findings; the confirmation pass over those fixes returned **NOT READY** again on two more the fixes had themselves introduced. **All seven were fixed before the commit** |
 | **2c-2-2** | The **small editor's screen**: the component, this project's second and third mounted-component tests, and **four window readings over 26 launches** — the two thirds of 2c-2's evidence step 1 did not have. A refused field draws its value in the order the file writes it, each entry named; a committed save owes a re-projection the session cannot be dismissed past; a save that produced no outcome shows *why* | ✅ complete — after **two** Codex rounds, both **NOT READY** (four findings, then three more), plus **four defects the readings found and two the implementer's audit found**. **All thirteen were fixed before the commit**, and eight of them were this project's named worst defect class — three of those in **sentences a person reads**. **2c-2 is closed** |
-| **2c-3a** | **New and delete on a screen**: `create_match` and `delete_match` wired through `BrowserState`, the returned identity adopted, and the selection's behaviour when the snippet deleted is the one selected | ⬜️ **next** |
+| **2c-3a-1** | **New and delete as values, with no screen**: `matchCreation.ts` (destinations with typed ineligibility, the three position arms, the two required fields), `matchDeletion.ts` (a two-phase confirmation bound to one identity), both commands wired through `BrowserState` with the adoption inside the wrapper, and a fifth `SelectionNotice` arm for a deletion the person asked for | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on three High findings; the confirmation pass returned **NOT READY** again on one High the first round's own fix had introduced; the third pass returned one Low. **All ten were fixed before the commit** |
+| **2c-3a-2** | **New and delete on a screen**: the components, a mounted-component test and a window reading — the two thirds of 2c-3a's evidence step 1 does not have | ⬜️ **next** |
 | 2c-3b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3255,6 +3256,94 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-3a step 1
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report, and re-run after each of the three review rounds. The figures are the final run.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1116 passed, 40 files** (from 1020 over 38 at the 2c-2-2 checkpoint) |
+| `npm run check` | `399 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS` |
+| `npm run build` | exit 0, **161 modules** |
+| `rg -c 'svelte/internal/server\|node:async_hooks' dist/assets/*.js` | no match — **not** the `resolve.conditions` regression |
+| `git status --short` | no `.svelte` file, no Rust file, no corpus file |
+
+**The module guard moved 158 → 161 and the delta is honest**: exactly three new source modules
+(`matchCreation.ts`, `matchDeletion.ts`, `typing.ts`), each reaching the bundle through
+`i18n/index.ts`'s three new accessors. `vite.config.ts` was not touched, and the bundle was checked
+for the server build rather than the count being trusted — a jump to ~180 with
+`svelte/internal/server` present is the regression, and it is absent.
+
+`cargo test --workspace` was **not** re-run and does not need to be: this step wrote no Rust, which
+`git status` confirms rather than the worker's report. It stands at **1008**.
+
+**One frontend claim was checked against Rust rather than assumed.** Destination eligibility asks
+whether a file has a match list, and `matchCreation.ts:301` reads
+`view.top_level_keys.some((key) => key.text === 'matches')`. `match_list_of` in
+`src-tauri/src/commands.rs:947` reads `view.top_level_keys.iter().any(|key| key.text == MATCH_LIST_KEY)`
+with `MATCH_LIST_KEY = "matches"`. Same field, same literal, same comparison — so the affordance
+cannot disagree with the authority it defers to. The literal is duplicated because nothing on the
+wire carries the name; the module says so.
+
+**What this verification does not cover, and it is two thirds of the phase's evidence.**
+`2c-split-notes.md` §7 requires three kinds, and step 1 has one: **the model tests**. There is no
+mounted-component test and **no window reading**, because no `.svelte` file was touched. Per
+`1c-1-notes.md` hole 1 and 2c-1b's own conclusion, a green suite is not a screen — nothing in this
+project renders a Svelte component in an automated test except the three files that opt into jsdom
+by docblock. **Step 2 owes both, and until it is done no claim may be made about what any of this
+looks like in a window.**
+
+---
+
+## Phase 2c-3a step 1 review disposition
+
+**Three Codex rounds, ten findings, all closed before the commit.** The shape of the rounds is the
+finding worth remembering, more than any individual defect: *each round's fix produced the next
+round's finding.*
+
+**Round 1 — the aggregate code review** (`docs/reviews/phase-2c-3a-1-code.md`, `NOT READY`):
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High — creation consent survived a retarget.** A create refused in file A at `End` could have its findings acknowledged, then be redirected to file B or `Front`, and `beginCreate` reused the old acknowledgement because the drafted buffers had not changed | **Adopted.** `chooseDestination`/`choosePlacement` now withdraw the submission, outcome, extra lines and consent; a destination change re-points the base through the new `retargetedDraft`. A placement equal to the one held is not a change |
+| 2 | **High — the wrapper silently rebased a stale form.** `createMatch`/`deleteMatch` took no `baseRevision` and sent `view.revision` read at call time, so a form opened at R0 and submitted after the window reached R1 was committed against a parse it was never based on | **Adopted.** Both now take a `baseRevision` and forward it unchanged. **The record's own hole 3 was wrong** and was rewritten: it argued the disagreement was decided by "the command's own conflict check", and the original base never reached that check |
+| 3 | **High — an identity resolved across revisions by node alone.** `positionOf` compares only `node`, so an R1 `moved` could resolve against a fresh R2 projection that had reused the arena slot, selecting an unrelated snippet as the one just created | **Adopted.** New `positionInSameParse` (document + revision + node), used by `adoptTheCreatedSnippet` **and** by `adoptTheDocumentOnDisk`, which serves `saveMatch` and `moveMatch` |
+| 4 | **Medium — a save's adoption could be undone by an in-flight selection lookup**, replacing the mandated `deleted` notice with `differentMatch` — telling the person their file moved under them when what happened is the deletion they asked for | **Adopted**, and the fix was itself wrong. See round 2 |
+| 5 | **Medium — a reload did not really invalidate pending deletion consent.** `confirmDelete` compared the pending identity against the session's own — two values minted together — so a retained session across a reprojection kept both stale **and equal**. The test manufactured a changed `session.match` and never drove the real path | **Adopted, enforced not narrowed.** `confirmDelete(session, projected)` takes the identity the **current projection** gives that snippet and compares four values; the test drives the retained-session path |
+| 6 | **Low — not every open file was offered** as a destination; `destinationsOf` mapped projections, so a file the sidebar names as unreadable vanished from the list | **Adopted.** It maps summaries; a fifth typed refusal `couldNotBeRead` in both dictionaries |
+
+**Round 2 — the confirmation pass** (`docs/reviews/phase-2c-3a-1-confirmation.md`, `NOT READY`):
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High — and it was round 1's own fix.** Finding 4 had been closed with one **global** `selectGeneration` bump inside `installView`. A projection replaced in file B therefore killed a pending `select()` for file A, which returned without repairing, **stranding a `MatchId` that names nothing** — this sub-phase's declared worst failure mode, reached from the other side. Every deferred test used one document, so the suite was green for an unrelated reason | **Adopted.** The counter was split in two: a per-document `projectionGenerations` map bumped only by `installView` and `forgetTheReplacedDocument` for their own file, and the global counter kept as *selection intent*, bumped by a new `replaceSelection` through which every write to `selected` passes |
+| 2 | **Medium — the deferral was justified by a caller that does not exist.** The record said fixing `saveMatch` and `moveMatch` needed a `.svelte` edit; `BrowserState.moveMatch` has **no production caller at all**, and `matchEditor.baseRevisionOf` is unused | **Adopted.** `moveMatch` now takes and forwards a `baseRevision`; only `saveMatch` is left to step 2, with the true reason. Its other latent shapes are re-recorded as 2c-3b's scope — **not** as blocked by a component |
+| 3 | **Low — the record said `draft.ts` was unchanged** after the fix round added two transitions to it, concealing a change to the spine both other editors draft over | **Adopted**, rewritten as the two halves it has |
+
+**Round 3 — a scoped pass over the round-2 refactor alone**
+(`docs/reviews/phase-2c-3a-1-third-pass.md`, `NOT READY` on one **Low**): the invariant comment on
+`replaceSelection` claimed one deliberate exception when there are two (`select()`'s and `open()`'s),
+in the one place a maintainer would look for permission to add a third. Adopted: both are enumerated,
+and the comment now says in the same sentence that the list is maintained by hand and that TypeScript
+enforces nothing here.
+
+That pass also **settled an open probe** rather than only finding a defect. Round 2's implementer had
+honestly reported that dropping the projection half of `selectionLookupIsStale` failed no test. The
+answer is that it is redundant in **every reachable ordering**, not merely the tested ones — a live
+lookup makes its document the held selection before awaiting, and every same-document invalidation
+then synchronously repairs or replaces that selection, bumping the intent counter. So **no honest test
+can isolate it**, and none was written pretending to. It is kept as defensive redundancy and
+`2c-3a-1-notes.md` §8.2 says so, including the fact that deleting it would break no test today — so
+that deleting it is at least a decision.
+
+**Why three rounds.** Two would have shipped the cross-document identity-stranding bug: it was
+introduced by the fix for round 1's finding 4 and found only by looking again. The third round was
+commissioned for that reason alone and scoped to that one change — the selection machinery serves
+every operation in the application, not only this step's two.
+
+---
+
 ## Verification — Phase 2c-2-2
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4920,6 +5009,97 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**Phase 2c-3a is split into two steps, and step 1 is complete: new and delete exist as values and
+nothing draws them.** `docs/decisions/2c-3a-1-notes.md` is the record (§4 is twelve open holes,
+§5 / §7 / §8 are the three review rounds). The design consult for the whole of 2c-3a is
+`docs/reviews/phase-2c-3a-design.md`; the three code reviews are
+`docs/reviews/phase-2c-3a-1-{code,confirmation,third-pass}.md`, and **all three returned
+`READINESS: NOT READY`. All ten findings were fixed before the commit.**
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1116 passed, 40 files
+```
+
+(`cargo test --workspace` expects **1008**, unchanged — step 1 wrote no Rust, and step 2 should
+need none either.)
+
+**The next step is Phase 2c-3a-2 — new and delete on a screen.** Step 1 deliberately touched no
+`.svelte` file, so **two of `2c-split-notes.md` §7's three kinds of evidence are still owed**: the
+mounted-component test and the window reading. Only the model tests exist.
+
+**Do not re-commission the design consult.** `docs/reviews/phase-2c-3a-design.md` covers the whole
+of 2c-3a, step 2 included — its Q1 (the selection after a delete), Q2 (the two-phase confirmation),
+Q4 (the position default), Q5 (the destination list) and Q6 (the last snippet) are all statements
+about the *screen* that step 1 could only prepare for.
+
+**What step 1 built that step 2 must call and must not redesign.**
+
+- **`src/lib/browser/matchCreation.ts` and `matchDeletion.ts` are the whole of new and delete as
+  values**, exactly as `matchEditor.ts` is for the small editor. The components are thin walks
+  over them. Every decision — what may be created, where, what a confirmation means, when a save
+  may start — is in those two modules, and that is why ten review findings were reachable without
+  a screen.
+- **Deletion is two phases and `confirmDelete` is the only producer of a `StartedDeletion`.**
+  `requestDelete` asks, `cancelDelete` takes it back, `confirmDelete(session, projected)` is the
+  only thing that yields something to send. **`projected` must be read from the live projection**,
+  never passed back as `session.match` — the module's header says plainly that nothing enforces
+  where the argument came from, and a component that hands back the session's own identity defeats
+  the whole check.
+- **A destination is offered even when it cannot receive a snippet.** Five typed refusals —
+  `notASnippetFile`, `readOnly`, `couldNotBeRead`, `notParsed`, `noMatchList` — rendered with
+  `tDestinationRefusal`. **Never build the key.** Silently omitting a file the sidebar names is
+  what consult Q5 rejects.
+- **The `After` anchor is an identity and cannot outlive its file.** Changing the destination
+  clears or replaces an incompatible anchor. Do not offer a position picker that stores an ordinal.
+- **Both wrappers take a `baseRevision` and forward it unchanged.** Pass the *submission's* base,
+  the one the form or session holds — not whatever the window's projection happens to say at the
+  moment of the click. That was round 1's second High finding.
+- **`code.commandError.documentHasNoMatchList` can finally be drawn**, and only `create_match`
+  produces it.
+
+**What step 2 owes, beyond drawing it.**
+
+1. **The three kinds of evidence of `2c-split-notes.md` §7, all three**: model tests (step 1 has
+   these), at least one **mounted-component test** (opt in with `/** @vitest-environment jsdom */`
+   as the first line, as `MatchEditor.test.ts` and `DetailPane.test.ts` do; **do not back-fill the
+   existing six components**), and **a recorded window reading** — `1c-1-notes.md` §10 for the
+   technique, `1c-2b-2b-2-notes.md` §6.1 for the WKWebView constraint: **one plan per launch, into
+   a fresh bundle path**. A window reading is **re-taken after any change to a component**.
+2. **Set the language explicitly through the picker at the top of every plan.** The webview's
+   `localStorage` follows the **bundle identifier**, not `HOME` (`CLAUDE.md` §6).
+3. **`BrowserState.saveMatch` still substitutes `view.revision`** for the caller's base, the one
+   half of round 1's finding 2 that was left. Its caller is `DetailPane.svelte:435`, which step 2
+   touches anyway — **fix the signature and the caller together.** `matchEditor.baseRevisionOf`
+   exists and is unused; it is what should be passed.
+4. **`startMatchCreation` needs `DocumentView[]` and `BrowserState` does not expose one.** A
+   projections accessor is owed before a component can build the destination list.
+5. **Where `confirmDelete`'s `projected` is read from** is a decision step 2 must make explicitly
+   and write down, for the reason in the second bullet above.
+6. **Rebaseline the module guard honestly if it moves.** It is **161** now. Build a pristine
+   `git archive HEAD` copy and subtract; a delta equal to the number of new source modules is a new
+   module, a jump to ~180 with `svelte/internal/server` in the bundle is the `resolve.conditions`
+   regression. **Never rebaseline by editing the condition.**
+
+**Two things inherited that are still owed.**
+
+- **`BrowserState.moveMatch` still carries two latent shapes** — a `SaveResult | null` return and a
+  stale projection left installed when its own re-read fails. Its `baseRevision` was fixed in this
+  step. **It has no production caller**, so nothing about a component blocks fixing the rest;
+  **2c-3b is the sub-phase that puts move on a screen and owns them**, and that is the whole reason
+  they are deferred.
+- **`browser.rawEditor.discardWarning` still says *"Your changes have not been written to the
+  file"***, which is false after a `mayHaveWritten` send failure. The small editor's twin was fixed
+  in 2c-2-2; the raw editor's was left because its markup is outside that cut and changing it
+  obliges a re-take of 2c-1b's window reading. Whichever sub-phase next touches the raw editor
+  owes it.
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" further down still binds**,
+unchanged.
+
+---
 
 **Phase 2c-2 is complete, both steps: a person can now open one snippet in a window, edit its six
 fields, undo, save, and read what the save did.** `docs/decisions/2c-2-2-notes.md` is the record (§4
@@ -6622,11 +6802,15 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/matchCreation.ts`](src/lib/browser/matchCreation.ts) | **The new-snippet form as a value, and 2c-3a-2 draws it without adding a rule to it.** Its own module rather than a mode of `matchEditor.ts` (consult Q3): creation has no projection, no baseline and no absent-key semantics, so the `Unchanged`-versus-`Set("")` distinction that dominates the small editor has no meaning here and must not be imported. `destinationsOf(documents, views)` maps the **summaries**, so a file the sidebar names as unreadable appears as ineligible rather than vanishing — five typed refusals, rendered with `tDestinationRefusal`, **never a built key**. The `After` anchor is an **identity** and a change of destination clears or replaces an incompatible one. `chooseDestination`/`choosePlacement` **withdraw the consent, the submission and the outcome**, which is round 1's first High finding: a create refused in file A and acknowledged there could otherwise be redirected to file B and committed on consent nobody gave for it |
+| [`src/lib/browser/matchDeletion.ts`](src/lib/browser/matchDeletion.ts) | **Deletion as a two-phase value (consult Q2), because the protocol's own acknowledgement round trip only engages when there are findings** — a clean delete produces none, so without this one click writes a user's file and there is no in-app undo until 2c-5. `confirmDelete(session, projected)` is the **only** producer of a `StartedDeletion`, and its second argument must come from the **live projection**: the module's header says in the same sentence that nothing enforces where it came from, and a component handing back `session.match` defeats the whole check — that was round 1's fifth finding, where the comparison observed nothing about the world. The last-snippet refusal is an **affordance derived from current state, never authorization**; the core refuses it too and that refusal is what reaches the screen |
+| [`src/lib/browser/typing.ts`](src/lib/browser/typing.ts) | The coalescing boundary — `Clock`, `TYPING_GROUP_IDLE_MS`, `TypingRun<F>`, `recordTyping` — **extracted** from `matchEditor.ts` in 2c-3a-1 rather than copied a second time, because two editors now share it. What did **not** move is which actions *close* a run; those are transitions of an editor and each still decides its own. `matchEditor.ts` re-exports `Clock` and `TYPING_GROUP_IDLE_MS` because `MatchEditor.svelte` imports the first from there and step 1 could not touch a `.svelte` file |
+| [`docs/reviews/phase-2c-3a-1-confirmation.md`](docs/reviews/phase-2c-3a-1-confirmation.md) | **The clearest case in this project of a fix becoming the next defect, and worth reading before any change to the selection machinery.** Round 1 closed an in-flight-lookup race with one *global* generation bump; this pass showed that a projection replaced in file B then killed a pending `select()` for file A and **stranded a `MatchId` naming nothing** — the sub-phase's declared worst failure, reached from the other side, with a green suite because every deferred test used one document. It is also why `docs/reviews/phase-2c-3a-1-third-pass.md` exists |
 | [`src/lib/browser/rawEditor.ts`](src/lib/browser/rawEditor.ts) | **The editor's whole state machine as a value, and the model 2c-2's field editor should follow** — the component is a thin walk over it, which is what let the protocol be tested at all. Its drafted value is `RoundTripText`, a **branded** string whose only constructor applies the carriage-return check, so a bare `string` cannot type-check into a draft, a submission, a history step or a candidate; all three doors mint one or refuse, and `beginSave` re-checks because **a brand is a cast at bottom** and that is the last line before a wire that replaces a user's file. **The brand does not generalize to 2c-2**: a `replace` block scalar drafted through a `<textarea>` meets the identical API-value normalization, and that must be decided deliberately rather than assumed covered |
 | [`src/lib/components/RawEditor.svelte`](src/lib/components/RawEditor.svelte) | **The first screen in this project that writes a user's file**, and the first of the three components with a mounted test — `MatchEditor.svelte` and `DetailPane.svelte` gained theirs in 2c-2-2. **The harness is scoped by docblock opt-in, not by default**: `environment: 'node'` stays the suite's default, a file opts in with `/** @vitest-environment jsdom */` as its first line, and the five components with no mounted test are deliberately **not** back-filled — each of the three that has one gained it in the sub-phase that changed it. Read `copyBySelecting` before writing any clipboard code: `navigator.clipboard` is not sufficient on its own here, the carrier must be **offscreen rather than `hidden`** (an unrendered element cannot hold a selection), and every step of putting the screen back is separately non-throwing — because the first version restored focus in an unguarded `finally`, so a throw there produced **no** disclosure at all, neither success nor failure, on the one control that exists to keep a draft from being lost |
 | [`docs/decisions/2c-1b-notes.md`](docs/decisions/2c-1b-notes.md) **§9** | **The two window readings, and the reason this project's third kind of evidence is not ceremony.** They found two real defects that 883 passing tests, `svelte-check` and two Codex passes had all sailed past — one of which silently rewrote every line ending in a user's file. §9.11 is the re-take, taken because the fixes changed three components. **§13 is the honesty rule's third occurrence in one phase**: a decision record asserting a guarantee the code did not give. D13 is the corrected shape to copy — three named categories, one of them *what merely happens to be true of the current component path*, written as no guarantee at all |
-| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default and component test files opt in by docblock; the components with no mounted test are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **The module count is the regression guard and it moves with the source: 154 at 2c-1b, 156 at 2c-2-1, 158 at 2c-2-2.** The guard is not the number but the *shape of a change to it* — a delta equal to the new source modules is a new module, a jump to ~180 with `svelte/internal/server` in the bundle is the regression. Rebaseline by building a pristine `git archive HEAD` copy and subtracting; **never by editing the condition** |
-| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **The only place a writing command is wired to real state.** `moveMatch` (2b-2a), `saveRawDocument` (2b-2c-3b) and `saveMatch` (2c-2-1) are in `BrowserCommands`, `REAL_COMMANDS` and `BrowserState`; **`createMatch` and `deleteMatch` are not** — that is 2c-3a's, and it is the last of the five writing commands to be wired. `saveMatch` answers **`MatchSaveAnswer`** (`answered` / `notAttempted` / `failed` with a **required** `IpcFailure`), never `SaveResult \| null`, and performs the identity adoption **before** the answer is handed back. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
+| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default and component test files opt in by docblock; the components with no mounted test are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **The module count is the regression guard and it moves with the source: 154 at 2c-1b, 156 at 2c-2-1, 158 at 2c-2-2, 161 at 2c-3a-1.** The guard is not the number but the *shape of a change to it* — a delta equal to the new source modules is a new module, a jump to ~180 with `svelte/internal/server` in the bundle is the regression. Rebaseline by building a pristine `git archive HEAD` copy and subtracting; **never by editing the condition** |
+| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **The only place a writing command is wired to real state.** `moveMatch` (2b-2a), `saveRawDocument` (2b-2c-3b) and `saveMatch` (2c-2-1), `createMatch` and `deleteMatch` (2c-3a-1) are all in `BrowserCommands`, `REAL_COMMANDS` and `BrowserState`: **all five writing commands are now wired**, though only three are called from a screen. **`createMatch`, `deleteMatch` and `moveMatch` take a caller-supplied `baseRevision` and forward it unchanged; `saveMatch` still substitutes `view.revision` read at call time** — round 1's second High finding, left because its caller is `DetailPane.svelte:435` and step 1 could not touch a `.svelte` file. **2c-3a-2 fixes the signature and the caller together.** The selection machinery is now **two** counters, not one: a per-document `projectionGenerations` map bumped by `installView`/`forgetTheReplacedDocument` for their own file, and the global `selectGeneration` as *selection intent* bumped by `replaceSelection`. Collapsing them back into one is exactly the cross-document identity-stranding bug the confirmation round found. `saveMatch` answers **`MatchSaveAnswer`** (`answered` / `notAttempted` / `failed` with a **required** `IpcFailure`), never `SaveResult \| null`, and performs the identity adoption **before** the answer is handed back. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The eleven wrappers, five of which write.** `saveRawDocument` is the only one that does not return `CommandResult<SaveResult>`: it returns **`RawSaveOutcome`**, whose success arm always carries the `SaveResult` **plus** a required `reload` discriminant (`notOwed` / `done` / `failed`). That shape exists because the 3b review found **D2 broken in TypeScript** — a rejecting reload callback threw past the return type and hid a *committed* write. **A sixth writing wrapper inherits the rule, not the shape**: whatever it returns, a committed write may never come back as a rejection or an error |
 | [`src/lib/browser/rawSave.ts`](src/lib/browser/rawSave.ts) | The Q8 presentation model, in the tested layer rather than in a component. `describeRawSave` puts **"this replaces the entire document"** first in every model — the mode's identity, not a warning — then the owner's ruling when the candidate does not parse: espanso will not load the file, the parser's position **or the explicit no-position case**, and the choice. **`saveAnyway` is withheld for verdicts no acknowledgement can move.** `detail` is the parser's own message: carried, never localized, and deliberately not rendered |
 | [`docs/decisions/2b-2c-3b-notes.md`](docs/decisions/2b-2c-3b-notes.md) | Nine decisions with their reasons and the fix round. **§2.2 is the one to read before adding a writing command**: a raw save takes **no `view_at`**, because a replacement turns nothing into a position and — in consult Q7's scenario exactly — the session's cache still holds the loaded revision, so a pre-check would *pass*. Only the transaction's locked read sees it, and `SaveResult::Conflict` is strictly richer than `IdentityStaleRevision` |

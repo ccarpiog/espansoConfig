@@ -160,6 +160,33 @@ the raw editor, and **no `.svelte` file was touched**: the component, its mounte
 window reading are step 2's, and all three are still owed. Its decisions are
 `docs/reviews/phase-2c-2-design.md` (the consult) and `docs/decisions/2c-2-1-notes.md` (the record).
 
+**2c-3a is split the same way, and step 1 is complete: `matchCreation.ts` and `matchDeletion.ts`
+are new and delete as values, and nothing draws them.** All five writing commands are now wired
+through `BrowserState`; only three are called from a screen. Its decisions are
+`docs/reviews/phase-2c-3a-design.md` and `docs/decisions/2c-3a-1-notes.md`.
+
+**The selection machinery is two counters and collapsing them into one is a data defect.** A
+per-document `projectionGenerations` map says *this file's projection was replaced*; the global
+`selectGeneration` says *the intent this lookup served is gone*. Neither implies the other, and
+2c-3a-1 shipped one global counter for a round before the confirmation pass found what it did: a
+save committing in file B killed a pending `select()` for file A, which returned without repairing
+and **left a `MatchId` that names nothing selected**. Every deferred test used one document, so
+1112 tests were green over it. **Every write to `selected` bumps a counter in the same synchronous
+block** — through `replaceSelection`, or by the two documented exceptions that bump it themselves —
+and nothing in TypeScript enforces that.
+
+**A confirmation that compares two values minted together observes nothing.** `confirmDelete` used
+to check the pending identity against the session's own; both were frozen at `startMatchDeletion`,
+so a session retained across a reprojection kept them stale **and equal** and the confirmation
+still passed. It now takes the identity the **live projection** gives that snippet — and nothing
+enforces that the caller reads it from there rather than handing back `session.match`, which the
+module's own header says in the same sentence as what it does force.
+
+**A fix is a change, and the round that reviews it is not optional.** Three of 2c-3a-1's ten
+findings were regressions or false records introduced by a *previous round's fix*, and the third
+review pass was commissioned for that reason alone, scoped to one change. Each round's fix produced
+the next round's finding.
+
 **The projection and the draft are two values, and confusing them is 2c-2's named failure mode.**
 `MatchBaseline` is what the file held — including *whether it held the key at all* — and
 `MatchBuffers` is what the controls hold; `fieldIntent` is the only function that reads both. **An

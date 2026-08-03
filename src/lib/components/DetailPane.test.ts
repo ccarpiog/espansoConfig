@@ -131,6 +131,8 @@ function scriptedCommands(): BrowserCommands {
     documentText: vi.fn(async (): Promise<CommandResult<string>> => refusal),
     moveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveRawDocument: vi.fn(async () => refusal)
   };
 } // End of function scriptedCommands()

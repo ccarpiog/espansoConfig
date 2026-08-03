@@ -4,7 +4,7 @@
  * A notice is a **code**, never a sentence, for the same reason a Rust error is
  * (plan section 9): the prose belongs in `src/lib/i18n/{en,es}.json`, where both
  * languages are checked against each other. {@link selectionNoticeKey} is the
- * one place a code becomes a key, and its `switch` is exhaustive, so a fourth
+ * one place a code becomes a key, and its `switch` is exhaustive, so a further
  * notice with no key fails `npm run check` in this file rather than rendering
  * nothing on a screen.
  *
@@ -14,8 +14,10 @@
  * key — the thing CLAUDE.md section 2 forbids, and the thing
  * `scripts/lint/built-translation-keys.ts` now refuses on every component.
  *
- * The four are R27's three answers plus the case where nothing could be asked:
- * re-resolution needs the document read again, and that read can itself fail.
+ * The first four are R27's three answers plus the case where nothing could be
+ * asked: re-resolution needs the document read again, and that read can itself
+ * fail. The fifth is 2c-3a's, and it is the only one that is not about a
+ * document moving on **under** the person.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -30,8 +32,13 @@ import type { TranslationKey } from '../i18n/dictionaries';
  * - `gone` — nothing is there any more.
  * - `unresolved` — the document could not be read again, so which of the three
  *   it is cannot be known.
+ * - `deleted` — the selected snippet was deleted **because the person asked for
+ *   it**, and the window has read the file again and selected whatever now sits
+ *   where it was, or nothing when the file holds none. That is what makes it a
+ *   fifth arm rather than `differentMatch`: R27's correction is about a file that
+ *   changed underneath somebody, and this is a change they made.
  */
-export type SelectionNotice = 'kept' | 'differentMatch' | 'gone' | 'unresolved';
+export type SelectionNotice = 'kept' | 'differentMatch' | 'gone' | 'unresolved' | 'deleted';
 
 /**
  * The dictionary key holding one notice's sentence.
@@ -54,5 +61,7 @@ export function selectionNoticeKey(notice: SelectionNotice): TranslationKey {
       return 'browser.notice.gone';
     case 'unresolved':
       return 'browser.notice.unresolved';
+    case 'deleted':
+      return 'browser.notice.deleted';
   }
 } // End of function selectionNoticeKey()
