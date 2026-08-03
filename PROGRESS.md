@@ -7281,9 +7281,19 @@ touches no Rust, so `cargo test --workspace` is unchanged at 1008 and need not b
 
 **One thing `57bf362` deliberately did not fix**, and it was the only known user-visible defect at
 that SHA: the Spanish dictionary called a snippet both `atajo` and `fragmento`, and one pane showed
-both. **The owner has since chosen `fragmento` and the change is applied in the commit below** — see
-"The Spanish snippet term" under "Next action" for the count, what it leaves open, and the two
-further Spanish inconsistencies it surfaced but did not touch.
+both. **The owner has since chosen `fragmento`, applied in `7c266c8` below** — see "The Spanish
+snippet term" under "Next action" for the count, what it leaves open, and the two further Spanish
+inconsistencies it surfaced but did not touch.
+
+| Phase | Commit | Push | Tree |
+|---|---|---|---|
+| **2c-3a step 2, follow-up** | **`7c266c8`** | ✅ pushed to `origin/main` | clean |
+
+`7c266c8` is the owner's Spanish terminology decision, applied: 49 values in `src/lib/i18n/es.json`,
+no key added, removed or renamed, plus §7.1.1 of the window reading recording the fix and §the
+"Next action" entry recording what it leaves open. **`7c266c8` is `HEAD` and is where a fresh session
+starting Phase 2c-3b begins.** It touches no Rust and no component: `cargo test --workspace` is
+unchanged at 1008 and the module guard is unchanged at 165.
 
 `37ea352` is Phase 2c-3a step 1 **including all three of its review rounds** — the step was held
 open until all ten findings were closed, so, as with every phase since `8989c16`, no commit holds a
