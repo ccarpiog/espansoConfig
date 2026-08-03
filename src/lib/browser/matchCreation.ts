@@ -122,6 +122,7 @@ import type {
   DocumentView,
   FileKind,
   MatchId,
+  MatchView,
   NewMatch,
   NewMatchPosition,
   PresentationNote,
@@ -1360,6 +1361,86 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
 } // End of function matchCreationView()
 
 /**
+ * One position a screen may offer, with whatever it needs to name it.
+ *
+ * **The `after` arm carries a projection and not a piece of text.**
+ * {@link CreationDestination.anchors} is identities only, deliberately — a model
+ * holding display text would be holding a second copy of what the snippet list
+ * already draws — so what this hands a screen is the *projection* the identity
+ * resolves to, and the screen names it the way it names a row, through
+ * `triggerLabel` and `labelText` in `./labels.ts`.
+ */
+export interface PlacementOption {
+  /**
+   * A stable key for a keyed `{#each}` and for a control's own value.
+   *
+   * Built from the identity's three fields for an `after`, so two anchors of the
+   * same file cannot collide and an anchor from an older parse is a different
+   * key. It is a rendering key and never a way to recognise a snippet across a
+   * change to the file, exactly as `matchKey` in `./labels.ts` is.
+   */
+  readonly key: string;
+  /** The placement this option would install. */
+  readonly placement: CreationPlacement;
+  /** The snippet an `after` names, or `null` for the two empty arms. */
+  readonly anchor: MatchView | null;
+  /** Whether this is the placement the form currently holds. */
+  readonly chosen: boolean;
+}
+
+/**
+ * Every position the form can offer for the destination it holds.
+ *
+ * The consult's Q4 order — `Front`, then one option per named snippet, then
+ * `End` — with the anchors in the order the file writes them, which is the order
+ * {@link CreationDestination.anchors} carries.
+ *
+ * **An anchor this window can no longer name is not offered**, and that is the
+ * honest answer rather than a hidden one: the projections handed in are asked
+ * for a snippet of the anchor's own document *and its own revision*, so a file
+ * re-read since the form opened resolves none of its anchors and the `after`
+ * options disappear. The form is not left claiming it can place a snippet after
+ * something it cannot show; {@link creationRefusal} answers `anchorUnavailable`
+ * for a placement that was installed before the re-read, which is the same fact
+ * said the other way round.
+ *
+ * @param session - The form to describe.
+ * @param views - Every projection this window holds, in any order.
+ * @returns The options, in the order a screen shows them.
+ */
+export function placementOptionsOf(
+  session: MatchCreationSession,
+  views: readonly DocumentView[]
+): readonly PlacementOption[] {
+  const front: CreationPlacement = { kind: 'front' };
+  const options: PlacementOption[] = [
+    { key: 'front', placement: front, anchor: null, chosen: samePlacement(session.placement, front) }
+  ];
+  const destination = chosenDestination(session);
+  for (const anchor of destination?.anchors ?? []) {
+    const view = views.find((one) => one.id === anchor.document && one.revision === anchor.revision);
+    const match = view?.matches.find((one) => one.id.node === anchor.node);
+    if (match === undefined) {
+      continue;
+    }
+    const placement: CreationPlacement = { kind: 'after', anchor };
+    options.push({
+      key: `after:${anchor.document}:${anchor.revision}:${anchor.node}`,
+      placement,
+      anchor: match,
+      chosen: samePlacement(session.placement, placement)
+    });
+  } // End of the loop over the chosen destination's anchors
+  options.push({
+    key: 'end',
+    placement: AT_END,
+    anchor: null,
+    chosen: samePlacement(session.placement, AT_END)
+  });
+  return options;
+} // End of function placementOptionsOf()
+
+/**
  * The dictionary key holding one destination refusal's sentence.
  *
  * A `switch` over literal keys rather than a template, the idiom of every other
@@ -1428,3 +1509,29 @@ export function acknowledgementOf(
 ): Acknowledgement {
   return submission.acknowledgement;
 } // End of function acknowledgementOf()
+
+/**
+ * The base revision this form would create against.
+ *
+ * A named read rather than a property walk at the call site, so the one place a
+ * screen hands a revision to the boundary is a place this module can be searched
+ * for — the same read `matchEditor.baseRevisionOf` and
+ * `matchDeletion.baseRevisionOf` are.
+ *
+ * It is the **chosen destination's** revision, re-pointed by
+ * {@link chooseDestination} every time the destination moves, and since the first
+ * review round's second finding nothing downstream substitutes another:
+ * `BrowserState.createMatch` forwards the base revision it is handed rather than
+ * reading its own projection's.
+ *
+ * **What no type forces**, in the same sentence: that parameter is an ordinary
+ * `ContentRevision`, so a caller may hand the window's current projection over
+ * instead of this and get the old behaviour. What is closed is that the wrapper no
+ * longer chooses for it.
+ *
+ * @param session - The form to ask about.
+ * @returns The revision the draft is drafted from.
+ */
+export function baseRevisionOf(session: MatchCreationSession): ContentRevision {
+  return session.draft.baseRevision;
+} // End of function baseRevisionOf()

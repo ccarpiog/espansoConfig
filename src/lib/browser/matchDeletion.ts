@@ -241,6 +241,42 @@ export function deletionEligibility(
 } // End of function deletionEligibility()
 
 /**
+ * The identity the projections handed in give the snippet at one arena node.
+ *
+ * **This exists to be {@link confirmDelete}'s second argument**, and it is the
+ * one place in this application that reads it. The module header says a caller
+ * that hands `session.match` straight back defeats the whole confirmation and
+ * that no type can say where an argument came from; this function is what a
+ * caller uses *instead*, so that "read it from the live projection" is a call
+ * somebody can search for rather than an instruction in a comment.
+ *
+ * **It is not a way to follow a snippet across a reparse, and it must not be
+ * used as one.** It looks the arena node up in whatever projection this window
+ * now holds for the file and answers **that projection's** identity, revision
+ * included. When the file has been re-read the revision differs, the four-way
+ * comparison in {@link confirmDelete} fails, and the confirmation has to be
+ * asked again — which is exactly the behaviour the first review round's fifth
+ * finding asked for. A revision is a content hash, so an answer whose revision
+ * matches the session's is an answer from the same bytes.
+ *
+ * @param views - Every projection this window holds **now**, in any order.
+ * @param match - The identity the session is about.
+ * @returns The identity the current projection gives that node, or `null` when
+ *   this window holds no projection of the file or the file no longer holds the
+ *   node.
+ */
+export function identityInProjection(
+  views: readonly DocumentView[],
+  match: MatchId
+): MatchId | null {
+  const view = views.find((one) => one.id === match.document);
+  if (view === undefined) {
+    return null;
+  }
+  return view.matches.find((one) => one.id.node === match.node)?.id ?? null;
+} // End of function identityInProjection()
+
+/**
  * The brand that makes a pending deletion unforgeable.
  *
  * Declared and never exported, so no object outside this module can have the
@@ -317,6 +353,28 @@ export interface MatchDeletionSession {
 }
 
 /**
+ * The three fields of one identity, in an object nothing else can reach.
+ *
+ * **A plain copy, and it is load-bearing rather than tidy.** {@link IDENTITY_RULES}
+ * snapshots through `structuredClone`, which **throws** on a reactive proxy — and
+ * the identity a screen hands in comes out of `BrowserState.views`, which is
+ * `$state` and therefore deeply proxied. The mounted test of 2c-3a-2 is what found
+ * that: every model test passes a plain fixture, so the whole of
+ * `matchDeletion.test.ts` was green over a call that threw the moment a real
+ * window made it.
+ *
+ * It also makes the session's own identity independent of a projection that may be
+ * replaced under it, which is what the rest of this module assumes when it compares
+ * four values across a reprojection.
+ *
+ * @param id - The identity to copy.
+ * @returns The same three values, in a fresh plain object.
+ */
+function plainIdentity(id: MatchId): MatchId {
+  return { document: id.document, revision: id.revision, node: id.node };
+} // End of function plainIdentity()
+
+/**
  * Opens a deletion over one snippet of one file.
  *
  * The base revision is the **document's**, not the identity's, and the two agree
@@ -332,11 +390,12 @@ export function startMatchDeletion(
   document: DocumentView,
   match: MatchView
 ): MatchDeletionSession {
+  const identity = plainIdentity(match.id);
   return {
-    match: match.id,
+    match: identity,
     document: document.id,
     eligibility: deletionEligibility(document, match),
-    draft: startDraft(document.revision, match.id, IDENTITY_RULES),
+    draft: startDraft(document.revision, identity, IDENTITY_RULES),
     pending: null,
     phase: 'editing',
     submitted: null,

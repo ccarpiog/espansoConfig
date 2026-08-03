@@ -492,6 +492,34 @@ describe('the load', () => {
     expect(state.loadFailures).toEqual([{ document: 3, failure }]);
   });
 
+  it('exposes one projection per file that read, and none for one that did not', async () => {
+    // **The accessor 2c-3a-2 added, and the shape a caller has to know about.**
+    // `startMatchCreation` takes the summaries *and* the projections precisely
+    // because they are two different lists: a file whose read refused is on the
+    // first and not on the second, and a destination list built from this alone
+    // would silently omit a file the sidebar is still naming — which is what the
+    // design consult's Q5 rejects.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: { code: 'io', path: '/tmp/espanso/match/other.yml', kind: 'PermissionDenied' }
+    };
+    const state = createBrowserState(
+      scriptedCommands({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
+          [2, { ok: true, value: baseDocument() }],
+          [3, { ok: false, failure }]
+        ])
+      }),
+      () => undefined
+    );
+    await state.open(null);
+
+    expect(state.documents.map((one) => one.id)).toEqual([1, 2, 3]);
+    expect(state.views.map((one) => one.id)).toEqual([1, 2]);
+    expect(state.views.find((one) => one.id === 2)?.revision).toBe('rev-a');
+  });
+
   it('says which file could not be read, so its own row can say so too', async () => {
     const failure: IpcFailure = {
       kind: 'command',
@@ -1858,6 +1886,7 @@ describe('saving one snippet’s fields', () => {
     const answer = await state.saveMatch(
       baseDocument().matches[0]!.id,
       editedDraft(),
+      'rev-a',
       NOTHING_ACKNOWLEDGED
     );
 
@@ -1919,7 +1948,12 @@ describe('saving one snippet’s fields', () => {
     await state.select(baseDocument().matches[0]!);
 
     documents.set(2, { ok: true, value: raced });
-    await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED);
+    await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      'rev-a',
+      NOTHING_ACKNOWLEDGED
+    );
 
     // Ordinary repair (R27) rather than adoption of an identity this projection is
     // not a parse of.
@@ -1927,7 +1961,7 @@ describe('saving one snippet’s fields', () => {
     expect(state.notice).toBe('differentMatch');
   }); // End of the "moved from another parse" case
 
-  it('sends the revision this state is projecting, and the draft unchanged', async () => {
+  it('sends the identity, the base revision, the draft and the acknowledgement', async () => {
     const saved: CommandResult<SaveResult> = {
       ok: true,
       value: {
@@ -1944,7 +1978,7 @@ describe('saving one snippet’s fields', () => {
     await state.open(null);
 
     const draft = editedDraft();
-    await state.saveMatch(baseDocument().matches[0]!.id, draft, NOTHING_ACKNOWLEDGED);
+    await state.saveMatch(baseDocument().matches[0]!.id, draft, 'rev-a', NOTHING_ACKNOWLEDGED);
 
     const call = vi.mocked(commands.saveMatch).mock.calls[0]!;
     expect(call[0]).toEqual(baseDocument().matches[0]!.id);
@@ -1953,7 +1987,42 @@ describe('saving one snippet’s fields', () => {
     expect(call[3]).toEqual(NOTHING_ACKNOWLEDGED);
     // Nothing was written and the revision did not move, so nothing was re-read.
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
-  }); // End of the "base revision" case
+  }); // End of the "arguments" case
+
+  it('sends the draft’s own base revision, never the one it is projecting', async () => {
+    // **The last of the four**, closed at 2c-3a-2 because it is the only one with a
+    // component caller: `MatchEditor.svelte` now hands over
+    // `matchEditor.baseRevisionOf(session)` and this method forwards it. Until
+    // then an editor opened at R0 over a window that had since reprojected to R1
+    // was submitted *as though drafted at R1*, so the core found no conflict to
+    // report and could commit into a parse the person never saw.
+    // A refusal, because it is the one answer that changes nothing on this state:
+    // what the assertion is about is the argument, not the aftermath.
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [suspicion()]
+      }
+    };
+    const commands = scriptedCommands({ saves: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      'rev-older',
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // The state really is projecting something else, so this is not the same value
+    // arriving by another route.
+    expect(state.scopedDocument?.revision).toBe('rev-a');
+    expect(vi.mocked(commands.saveMatch).mock.calls[0]![2]).toBe('rev-older');
+  }); // End of the "stale field save" case
 
   it('refuses to send anything for a document this state does not describe', async () => {
     const commands = scriptedCommands();
@@ -1965,7 +2034,7 @@ describe('saving one snippet’s fields', () => {
     // rejection to hand on nor a `mayHaveWritten` to weigh — and after the 2c-2-2
     // review the type says that rather than a comment claiming it beside an
     // `IpcFailure | null` that could have been `null` for any reason at all.
-    expect(await state.saveMatch(stranger, editedDraft(), NOTHING_ACKNOWLEDGED)).toEqual({
+    expect(await state.saveMatch(stranger, editedDraft(), 'rev-a', NOTHING_ACKNOWLEDGED)).toEqual({
       kind: 'notAttempted'
     });
     expect(commands.saveMatch).not.toHaveBeenCalled();
@@ -1989,6 +2058,7 @@ describe('saving one snippet’s fields', () => {
     const answer = await state.saveMatch(
       baseDocument().matches[0]!.id,
       editedDraft(),
+      'rev-a',
       NOTHING_ACKNOWLEDGED
     );
 
@@ -2014,6 +2084,7 @@ describe('saving one snippet’s fields', () => {
     const answer = await state.saveMatch(
       baseDocument().matches[0]!.id,
       editedDraft(),
+      'rev-a',
       NOTHING_ACKNOWLEDGED
     );
 
@@ -2065,7 +2136,12 @@ describe('saving one snippet’s fields', () => {
     // could not tell them apart would say nothing was written about a file that may
     // already hold the edited snippet.
     expect(
-      await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
+      await state.saveMatch(
+        baseDocument().matches[0]!.id,
+        editedDraft(),
+        'rev-a',
+        NOTHING_ACKNOWLEDGED
+      )
     ).toEqual({
       kind: 'failed',
       mayHaveWritten: true,
@@ -2116,6 +2192,7 @@ describe('saving one snippet’s fields', () => {
     const answer = await state.saveMatch(
       baseDocument().matches[0]!.id,
       editedDraft(),
+      'rev-a',
       NOTHING_ACKNOWLEDGED
     );
 
@@ -2154,6 +2231,7 @@ describe('saving one snippet’s fields', () => {
     const inFlight = state.saveMatch(
       baseDocument().matches[0]!.id,
       editedDraft(),
+      'rev-a',
       NOTHING_ACKNOWLEDGED
     );
     // The person clicks the other snippet of the same file while the save is out.
@@ -2191,7 +2269,12 @@ describe('saving one snippet’s fields', () => {
     await state.open(null);
 
     expect(
-      await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
+      await state.saveMatch(
+        baseDocument().matches[0]!.id,
+        editedDraft(),
+        'rev-a',
+        NOTHING_ACKNOWLEDGED
+      )
     ).toEqual({ kind: 'failed', mayHaveWritten: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
   });
@@ -2728,7 +2811,12 @@ describe("replacing a file's whole text", () => {
     await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
     expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
 
-    await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED);
+    await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      'rev-a',
+      NOTHING_ACKNOWLEDGED
+    );
 
     expect(state.rawTextOf(2)).toBeNull();
     // Another file's capture would be untouched, because nothing about it changed —

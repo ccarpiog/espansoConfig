@@ -3,6 +3,7 @@
     acknowledgeFindings,
     acknowledgementOf,
     applySave,
+    baseRevisionOf,
     beginSave,
     editField,
     focusField,
@@ -42,6 +43,7 @@
   } from '../i18n';
   import type {
     Acknowledgement,
+    ContentRevision,
     DocumentSummary,
     MatchDraft,
     MatchId,
@@ -158,14 +160,25 @@
      * identity for every later edit, save and selection lookup. Nothing in
      * TypeScript stops that, which is why it is written here.
      *
+     * **The base revision is the session's own and is handed over explicitly**,
+     * which is the last half of the 2c-3a-1 review's second finding. The wrapper
+     * used to read its own projection's revision at the moment of the call, so an
+     * editor opened at one revision over a window that had since re-read the file
+     * was submitted as though it had been drafted at the newer one — and the core
+     * found no conflict to report. `baseRevisionOf` is the read; nothing between
+     * here and `save_match` substitutes another, and no signature can require this
+     * argument to be the session's rather than the window's.
+     *
      * @param id - The snippet to save, by the identity drafted against.
      * @param draft - What the snippet should say, as a whole.
+     * @param baseRevision - The revision the draft was seeded from.
      * @param acknowledgement - The suspicions already shown to a person.
      * @returns The outcome and the adoption's fate, or a typed failure.
      */
     save: (
       id: MatchId,
       draft: MatchDraft,
+      baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ) => Promise<MatchSaveAnswer>;
     /**
@@ -327,6 +340,12 @@
     const answer = await save(
       started.session.match,
       started.draft,
+      // **The session's own base, never the window's current projection.** The
+      // three values that travel together — the identity, the draft and the
+      // revision they were drafted against — all come from the same session here,
+      // so a window that re-read the file while this editor was open produces a
+      // conflict rather than a silent commit into a parse nobody saw.
+      baseRevisionOf(started.session),
       acknowledgementOf(started.submission)
     );
     // Three arms, and each says something different about the file. `notAttempted`

@@ -289,4 +289,57 @@ describe('the mounted detail pane', () => {
     expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchEditor.open']);
     pane.stop();
   }); // End of the "editor offered" case
+
+  it('opens the deletion panel from the pane, over the snippet and its own parse', async () => {
+    // **Reachability, which no test of `MatchDeleter.svelte` can establish.** That
+    // suite mounts the panel directly; this is the claim that a person can get to
+    // it at all, and that what it opens over is the selected snippet rather than
+    // whatever the pane happened to be holding.
+    const pane = await mountPane();
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+
+    control(pane.target, 'browser.matchDeletion.open').click();
+    flushSync();
+
+    // `match/a.yml` holds exactly one snippet, so what opens is the consult's Q6
+    // on the running pane: the panel names the snippet and its file, says why this
+    // one may not be deleted, and asks nothing. The two-phase question over a file
+    // that *can* lose a snippet is `MatchDeleter.test.ts`'s.
+    expect(pane.target.textContent).toContain(':a');
+    expect(pane.target.textContent).toContain('match/a.yml');
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.matchDeletion.refused.lastSnippet']
+    );
+    expect(pane.target.textContent).not.toContain(
+      DICTIONARIES.en['browser.matchDeletion.question']
+    );
+    // The panel outranks the pane's read-only subjects while it is open, so the
+    // openers beside it are withdrawn rather than drawn under a pending question.
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchEditor.open']);
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.open']);
+    pane.stop();
+  }); // End of the "deletion reachable" case
+
+  it('opens the new-snippet form with nothing selected, and offers every file', async () => {
+    // The form asks which file itself rather than inheriting the selection, so it
+    // has to be reachable with nothing selected — which is exactly the state a
+    // person adding their first snippet is in.
+    const pane = await mountPane();
+    expect(pane.state.selected).toBeNull();
+
+    control(pane.target, 'browser.matchCreation.open').click();
+    flushSync();
+
+    const listed = [...pane.target.querySelectorAll('.destinations button')].map((one) =>
+      one.textContent?.trim()
+    );
+    // Both files, the read-only one included: the consult's Q5 says every file the
+    // window lists is offered, with a reason on the ones it cannot write.
+    expect(listed).toEqual(['match/a.yml', 'match/b.yml']);
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.matchCreation.destination.readOnly']
+    );
+    pane.stop();
+  }); // End of the "creation reachable" case
 }); // End of the "mounted detail pane" suite

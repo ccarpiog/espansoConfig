@@ -195,6 +195,14 @@ interface RecordedSave {
   readonly id: MatchId;
   /** The whole twenty-two-field draft it sent. */
   readonly draft: MatchDraft;
+  /**
+   * The revision it said the draft was taken from.
+   *
+   * Recorded since 2c-3a-2, when `BrowserState.saveMatch` stopped substituting
+   * its own projection's revision for the caller's: the editor now hands one over
+   * and this is what a case can assert it hands over.
+   */
+  readonly baseRevision: ContentRevision;
   /** The suspicions it said had already been shown to a person. */
   readonly acknowledgement: Acknowledgement;
 }
@@ -276,9 +284,10 @@ function mountEditor(
       save: (
         id: MatchId,
         draft: MatchDraft,
+        baseRevision: ContentRevision,
         acknowledgement: Acknowledgement
       ): Promise<MatchSaveAnswer> => {
-        calls.push({ id, draft, acknowledgement });
+        calls.push({ id, draft, baseRevision, acknowledgement });
         const next = remaining.shift();
         if (next?.pending === true) {
           // Never resolves: the case is about what the screen does while a save

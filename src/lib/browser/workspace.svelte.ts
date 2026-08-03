@@ -475,6 +475,24 @@ export interface BrowserState {
   readonly summary: WorkspaceSummary | null;
   /** Every file of the workspace, in the order the command returned them. */
   readonly documents: readonly DocumentSummary[];
+  /**
+   * Every projection this window holds, in the order they were read.
+   *
+   * **Not one per listed file.** A `get_document` that refused leaves no
+   * projection and one entry on {@link BrowserState.loadFailures} instead, so a
+   * caller building a per-file list walks {@link BrowserState.documents} and
+   * looks each one up here — which is what `destinationsOf` in
+   * `./matchCreation.ts` does, and why it takes both lists rather than this one
+   * alone. A list built from this alone silently omits the files the sidebar is
+   * still naming, which is what the design consult's Q5 rejects.
+   *
+   * Added in 2c-3a-2 because `startMatchCreation` needs it and because a
+   * deletion's confirmation is checked against it (`identityInProjection` in
+   * `./matchDeletion.ts`). It is the array itself and not a copy: everything on
+   * this state is read-only to a caller by type, and nothing here can stop a
+   * caller casting the readonly away.
+   */
+  readonly views: readonly DocumentView[];
   /** The three sidebar groups and the "All" total. */
   readonly sidebar: SidebarModel;
   /** Which sidebar entry is selected. */
@@ -694,15 +712,28 @@ export interface BrowserState {
    * `adoption` comes back `failed` beside the committed outcome. The save
    * succeeded; the window is out of step. Those are two facts and both survive.
    *
+   * **The base revision is the caller's and is forwarded unchanged**, which is the
+   * last half of the 2c-3a-1 review's second finding and was closed at 2c-3a-2.
+   * This method read `view.revision` at the moment of the call until then — so an
+   * editor opened at R0 over a window that had since reprojected to R1 was
+   * submitted *as though drafted at R1*, the core found no conflict, and a save was
+   * committed into a parse the person never saw. It was the last of the three to be
+   * closed because it is the only one of them with a component caller:
+   * `matchEditor.baseRevisionOf(session)` is what `MatchEditor.svelte` passes, and
+   * the signature and that caller moved in one commit.
+   *
    * **What that does not force, in the same breath.** Nothing in TypeScript stops
    * a component importing `saveMatch` from `../ipc/commands` and calling it
    * directly, which bypasses this method entirely — the same hole `moveMatch` and
    * `saveRawDocument` have had since 2b-2a, and one no type in this repository can
-   * close. Nor can any type require a caller to *read* `adoption`; what it can do
-   * is make the failure survive as a value on the answer instead of as a line in a
-   * developer console. What the wrapper forces is that every caller *of it* adopts;
-   * what keeps the other door shut is that this is the only path any component
-   * uses, which is a fact about the code as written and not a guarantee.
+   * close. Nor can any type require a caller to *read* `adoption`, or require
+   * `baseRevision` to be the session's own rather than whatever the window is
+   * projecting; what it can do is make the failure survive as a value on the answer
+   * instead of as a line in a developer console. What the wrapper forces is that
+   * every caller *of it* adopts and that this layer no longer chooses the revision
+   * on the caller's behalf; what keeps the other door shut is that this is the only
+   * path any component uses, which is a fact about the code as written and not a
+   * guarantee.
    *
    * A snippet identified by `MatchId` rather than by `MatchView`, unlike
    * {@link BrowserState.moveMatch}: an editor adopts the identity a save answers
@@ -710,6 +741,8 @@ export interface BrowserState {
    *
    * @param id - The snippet to save, by the identity the caller drafted against.
    * @param draft - What the snippet should say, as a whole.
+   * @param baseRevision - The revision the **draft** was seeded from, from
+   *   `baseRevisionOf` in `./matchEditor.ts`. Sent unchanged.
    * @param acknowledgement - The suspicions already shown to a person; pass
    *   `{ accepted: [] }` on a first attempt.
    * @returns How the save ended together with the adoption's own fate; a refusal
@@ -719,6 +752,7 @@ export interface BrowserState {
   saveMatch(
     id: MatchId,
     draft: MatchDraft,
+    baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
   /**
@@ -1360,6 +1394,9 @@ export function createBrowserState(
     get documents(): readonly DocumentSummary[] {
       return documents;
     },
+    get views(): readonly DocumentView[] {
+      return views;
+    },
     get sidebar(): SidebarModel {
       const counts = new Map<DocumentId, number>();
       for (const view of views) {
@@ -1745,6 +1782,7 @@ export function createBrowserState(
     async saveMatch(
       id: MatchId,
       draft: MatchDraft,
+      baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ): Promise<MatchSaveAnswer> {
       const view = views.find((held) => held.id === id.document);
@@ -1758,7 +1796,18 @@ export function createBrowserState(
         // a comment claiming it.
         return { kind: 'notAttempted' };
       }
-      const answer = await commands.saveMatch(id, draft, view.revision, acknowledgement);
+      const answer = await commands.saveMatch(
+        id,
+        draft,
+        // **The caller's, unchanged**, and never `view.revision`: see this method's
+        // JSDoc. Reading the projection here rebases a draft the window has moved
+        // on from, and turns the conflict that should stop it into a commit. The
+        // `view` lookup above stays, because without a projection this state can
+        // neither adopt what a commit produces nor tell whether its own projection
+        // went out of date.
+        baseRevision,
+        acknowledgement
+      );
       if (!answer.ok) {
         // A save that failed is not a workspace that failed, so the window keeps
         // showing the configuration it was showing — but `mayHaveWritten` is the

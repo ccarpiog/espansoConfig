@@ -36,6 +36,7 @@ import {
   deletionEligibility,
   deletionRefusalKey,
   dismissDeletionOutcome,
+  identityInProjection,
   matchDeletionView,
   requestDelete,
   startMatchDeletion,
@@ -416,3 +417,58 @@ describe('the view a screen draws', () => {
     expect(matchDeletionView(requestDelete(session())).confirming).toBe(true);
   });
 }); // End of the "view" suite
+
+describe('the identity a session holds', () => {
+  it('is a plain copy, because the draft snapshots it through structuredClone', () => {
+    // **Found by the mounted test of 2c-3a-2, not by this file.** A screen reads
+    // its snippet out of `BrowserState.views`, which is `$state` and therefore
+    // deeply proxied, and `structuredClone` **throws** on a proxy — so opening a
+    // deletion from a real window threw while every case here, which passes plain
+    // fixtures, stayed green. The copy is also what keeps the session's identity
+    // independent of a projection that may be replaced under it.
+    const document = file();
+    const held = startMatchDeletion(document, document.matches[0]!);
+    expect(held.match).toEqual(document.matches[0]!.id);
+    expect(held.match).not.toBe(document.matches[0]!.id);
+    expect(held.draft.value).not.toBe(document.matches[0]!.id);
+  });
+}); // End of the "identity a session holds" suite
+
+describe('the identity a screen reads off the live projection', () => {
+  it('answers what this window’s projection gives that node', () => {
+    // The argument `confirmDelete`'s whole check turns on, and the one place in
+    // this application that produces it. A screen calls this rather than handing
+    // the session's own identity back — which type-checks and defeats the check.
+    expect(identityInProjection([file()], session().match)).toEqual(live());
+  });
+
+  it('answers the re-read parse’s identity, which is a different identity', () => {
+    // **Not a way to follow a snippet across a reparse.** It answers the identity
+    // the *current* projection gives the node, revision included, so a re-read
+    // makes the answer disagree with the session and the confirmation is refused.
+    // The node is deliberately kept and only the revision moved: a fixture that
+    // renumbered the nodes would pass by finding nothing, which is a weaker claim.
+    const sameNodes = file({
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 10, document: 2, revision: AFTER, trigger: ':sig' }),
+        makeMatch({ node: 11, document: 2, revision: AFTER, trigger: ':date' })
+      ]
+    });
+    const fresh = identityInProjection([sameNodes], session().match);
+    expect(fresh).toEqual({ document: 2, revision: AFTER, node: 10 });
+    expect(confirmDelete(requestDelete(session()), fresh)).toBeNull();
+  });
+
+  it('answers nothing for a file this window holds no projection of', () => {
+    expect(identityInProjection([], session().match)).toBeNull();
+    expect(identityInProjection([file({ id: 3 })], session().match)).toBeNull();
+  });
+
+  it('answers nothing when the file no longer holds the node', () => {
+    const thinned = file({
+      matches: [makeMatch({ node: 11, document: 2, revision: BASE, trigger: ':date' })]
+    });
+    expect(identityInProjection([thinned], session().match)).toBeNull();
+  });
+}); // End of the "live identity" suite

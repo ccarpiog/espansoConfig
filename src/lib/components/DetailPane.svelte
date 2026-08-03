@@ -14,7 +14,15 @@
   import { rawEditorRefusal } from '../browser/rawEditor';
   import type { BrowserState } from '../browser/workspace.svelte';
   import type { Reprojection } from '../browser/matchEditor';
-  import type { ContentRevision, DocumentSummary, MatchId, MatchView } from '../ipc/types';
+  import type {
+    ContentRevision,
+    DocumentSummary,
+    DocumentView,
+    MatchId,
+    MatchView
+  } from '../ipc/types';
+  import MatchCreator from './MatchCreator.svelte';
+  import MatchDeleter from './MatchDeleter.svelte';
   import MatchEditor from './MatchEditor.svelte';
   import RawEditor from './RawEditor.svelte';
   import SourceText from './SourceText.svelte';
@@ -274,6 +282,60 @@
       ? { kind: 'projected', match: held }
       : { kind: 'unavailable', reason: 'notProjected' };
   } // End of function reprojectMatch()
+
+  /** What one open deletion is over: which snippet, of which parse, in which file. */
+  interface MatchDeletingSession {
+    /**
+     * The file's projection, captured **in the same assignment** as the snippet.
+     *
+     * `startMatchDeletion` checks the two against each other and refuses a pair
+     * this projection does not describe, so taking them from two reads would turn
+     * a real deletion into a `notInDocument` refusal — or, worse if the check ever
+     * loosened, into a deletion decided against a parse nobody was shown.
+     */
+    readonly projection: DocumentView;
+    /** The snippet being deleted, as it was projected when the panel opened. */
+    readonly match: MatchView;
+    /** The file it lives in, for the person to see which one it is. */
+    readonly file: DocumentSummary | null;
+  }
+
+  // The deletion panel's session, or `null`. `$state.raw` for the reason the
+  // small editor's is: the three values are captured once and replaced whole, and
+  // the panel owns the confirmation from then on.
+  let deletingMatch = $state.raw<MatchDeletingSession | null>(null);
+
+  // Whether the new-snippet form is open. It is a flag rather than a captured
+  // value because the form captures nothing from this pane: `MatchCreator` reads
+  // the files, the projections and the held selection through functions, so that
+  // a re-seed after a committed create sees what the window has just re-read.
+  let creating = $state(false);
+
+  /**
+   * The projection this window holds of one file, or `null`.
+   *
+   * A lookup and not a decision: `BrowserState.views` holds one entry per file
+   * that *read*, so a file whose `get_document` refused has none. The deletion
+   * panel needs one, which is why its control is drawn only when this answers.
+   *
+   * @param id - The file to look for.
+   * @returns Its projection, or `null`.
+   */
+  function projectionOf(id: number): DocumentView | null {
+    return browser.views.find((view) => view.id === id) ?? null;
+  } // End of function projectionOf()
+
+  /**
+   * Whether one of this pane's four write surfaces is open.
+   *
+   * They outrank the pane's read-only subjects and each other: a draft, a pending
+   * confirmation or a save in flight may not be dismissed by a click somewhere
+   * else in the window, so the openers below are withdrawn while any of them is
+   * showing rather than drawn beside it.
+   */
+  const busy = $derived(
+    editing !== null || editingMatch !== null || deletingMatch !== null || creating
+  );
 </script>
 
 {#snippet scalarText(display: ScalarDisplay)}
@@ -416,6 +478,19 @@
     </p>
   {/if}
 
+  <!-- **The new-snippet form is reachable with nothing selected**, and it has to
+       be: a person whose window is showing a file that holds no snippets, or the
+       "All" scope with no selection, is exactly the person adding their first
+       one. The form asks which file itself rather than inheriting the selection,
+       and offers every file the window lists (the consult's Q5). -->
+  {#if !busy}
+    <p class="toggle">
+      <button type="button" onclick={() => (creating = true)}>
+        {t('browser.matchCreation.open')}
+      </button>
+    </p>
+  {/if}
+
   {#if editing !== null}
     {@const open = editing}
     <RawEditor
@@ -432,9 +507,38 @@
     <MatchEditor
       match={open.match}
       file={open.file}
-      save={(id, draft, acknowledgement) => browser.saveMatch(id, draft, acknowledgement)}
+      save={(id, draft, baseRevision, acknowledgement) =>
+        browser.saveMatch(id, draft, baseRevision, acknowledgement)}
       reproject={reprojectMatch}
       close={() => (editingMatch = null)}
+    />
+  {:else if deletingMatch !== null}
+    {@const open = deletingMatch}
+    <!-- **`projections` is a function, and that is the whole confirmation.** The
+         panel reads the window's projections at the instant *Delete it* is
+         clicked and hands `confirmDelete` the identity they give this snippet; a
+         captured array would be a snapshot minted beside the consent, which is
+         the pair that was found agreeing while both were stale. -->
+    <MatchDeleter
+      projection={open.projection}
+      match={open.match}
+      file={open.file}
+      projections={() => browser.views}
+      remove={(id, baseRevision, acknowledgement) =>
+        browser.deleteMatch(id, baseRevision, acknowledgement)}
+      close={() => (deletingMatch = null)}
+    />
+  {:else if creating}
+    <!-- Every reader is a function, so a re-seed after a committed create sees
+         the files as the window has just re-read them rather than as they were
+         when the form opened. -->
+    <MatchCreator
+      documents={() => browser.documents}
+      projections={() => browser.views}
+      held={() => browser.selectedMatch?.id ?? null}
+      create={(document, newMatch, position, baseRevision, acknowledgement) =>
+        browser.createMatch(document, newMatch, position, baseRevision, acknowledgement)}
+      close={() => (creating = false)}
     />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}
     {@const view = browser.fileText}
@@ -506,6 +610,31 @@
           {t('browser.matchEditor.open')}
         </button>
       </p>
+    {/if}
+
+    {#if browser.selectedDocument !== null}
+      {@const target = browser.selectedMatch}
+      {@const inFile = browser.selectedDocument}
+      {@const parse = projectionOf(inFile.id)}
+      <!-- **Offered whether or not the snippet may be deleted**, which is the
+           consult's Q6: the panel says why it may not, inline and localized, and
+           the core's own refusal is still the one that decides. The one gate is a
+           projection to open over — `startMatchDeletion` takes a `DocumentView`,
+           and a file this window could not read has none.
+
+           **The snippet and its parse are captured in one assignment**, so the
+           two cannot come from two reads and disagree afterwards. -->
+      {#if parse !== null && target !== null}
+        <p class="toggle">
+          <button
+            type="button"
+            onclick={() =>
+              (deletingMatch = { projection: parse, match: target, file: inFile })}
+          >
+            {t('browser.matchDeletion.open')}
+          </button>
+        </p>
+      {/if}
     {/if}
 
     <section>

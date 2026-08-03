@@ -53,7 +53,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-2-1** | The **small editor's model layer and its command wiring**, with no component and no screen: a five-reason eligibility verdict computed from the projection, the baseline/buffer split with `DraftField` as the authoritative intent, per-field coalesced history on an injected clock, and `saveMatch` wired with identity adoption inside the wrapper | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on five findings; the confirmation pass over those fixes returned **NOT READY** again on two more the fixes had themselves introduced. **All seven were fixed before the commit** |
 | **2c-2-2** | The **small editor's screen**: the component, this project's second and third mounted-component tests, and **four window readings over 26 launches** — the two thirds of 2c-2's evidence step 1 did not have. A refused field draws its value in the order the file writes it, each entry named; a committed save owes a re-projection the session cannot be dismissed past; a save that produced no outcome shows *why* | ✅ complete — after **two** Codex rounds, both **NOT READY** (four findings, then three more), plus **four defects the readings found and two the implementer's audit found**. **All thirteen were fixed before the commit**, and eight of them were this project's named worst defect class — three of those in **sentences a person reads**. **2c-2 is closed** |
 | **2c-3a-1** | **New and delete as values, with no screen**: `matchCreation.ts` (destinations with typed ineligibility, the three position arms, the two required fields), `matchDeletion.ts` (a two-phase confirmation bound to one identity), both commands wired through `BrowserState` with the adoption inside the wrapper, and a fifth `SelectionNotice` arm for a deletion the person asked for | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on three High findings; the confirmation pass returned **NOT READY** again on one High the first round's own fix had introduced; the third pass returned one Low. **All ten were fixed before the commit** |
-| **2c-3a-2** | **New and delete on a screen**: the components, a mounted-component test and a window reading — the two thirds of 2c-3a's evidence step 1 does not have | ⬜️ **next** |
+| **2c-3a-2** | **New and delete on a screen**: `MatchCreator.svelte` and `MatchDeleter.svelte` as rule-free walks over step 1's values, a mounted-component test for each, and a 12-launch window reading — the two thirds of 2c-3a's evidence step 1 did not have. **Phase 2c-3a is now complete.** | ✅ complete — after a review fix round, a confirmation pass and a **window-reading fix round with a re-taken reading** below. The aggregate review returned **NOT READY** on two findings; the confirmation returned **READY**; the window reading then found two Medium defects of its own, **one fixed in this cut and one deferred with a decision owed** |
+| **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Owns the two latent shapes `BrowserState.moveMatch` still carries | ⬜️ **next** |
 | 2c-3b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3256,6 +3257,146 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-3a step 2
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+each of the two fix rounds. None was taken on a worker's word.
+
+| Command | Result |
+|---|---|
+| `npm run check` | 403 files, **0 errors, 0 warnings** |
+| `npm test` | **1160 passed, 42 files** (from 1116 / 40 at step 1) |
+| `npm run build` | **165 modules**, `vite.config.ts` untouched |
+| `cargo test --workspace` | **1008 passed, 0 failed** — unchanged; step 2 wrote no Rust |
+
+**The module guard moved 161 → 165 and was rebaselined honestly**, not by editing
+`resolve.conditions`: a pristine `git archive HEAD` copy measured 161, and the delta of exactly +4 is
+two new `.svelte` files × (the module + its virtual CSS module) — confirmed by deleting one `<style>`
+block in a scratch copy, which gave 164. No `svelte/internal/server` and no `node:async_hooks` in the
+bundle, so this is the new-module shape and not the `resolve.conditions` regression.
+
+**The i18n delta was verified rather than taken on trust**, because a false count was one of the two
+review findings: `git diff --numstat` reports **51 added, 0 deleted** in each of `en.json` and
+`es.json`.
+
+### The three kinds of evidence 2c-split-notes §7 requires — all three exist for the first time in this sub-phase
+
+1. **Model tests** — step 1's, extended in step 2.
+2. **Mounted-component tests** — `MatchCreator.test.ts` and `MatchDeleter.test.ts`, each opting into
+   jsdom by its first-line docblock. The existing six components were **not** back-filled; the jsdom
+   decision stays scoped. These include the identity-churn test the design consult's Q7 demands, and
+   Codex confirmed it **would fail if the repair were removed** rather than passing vacuously.
+3. **A window reading** — `docs/decisions/2c-3a-2-window-reading.md`, **12 launches**, all eight
+   planned items established, plus a **6-launch re-take** after the layout fix.
+
+**The mounted test earned its existence on its first run, and this is the strongest evidence yet for
+the §7 rule.** `startMatchDeletion` drafted `match.id`, and `draft.ts` snapshots through
+`structuredClone`, which **throws on Svelte's `$state` proxy**. Opening a deletion in a real window
+would have thrown `DataCloneError` — while the whole of `matchDeletion.test.ts` stayed green, because
+every model test passes a plain fixture. `plainIdentity()` in `matchDeletion.ts` is the fix; a model
+case **and** a mounted case now pin it.
+
+---
+
+## Phase 2c-3a step 2 review disposition
+
+**Round 1 — the aggregate code review** (`docs/reviews/phase-2c-3a-2-code.md`, `NOT READY`):
+
+- **Medium — the line-ending disclosure contradicted the measurement recorded beside it.** The
+  creation screen drew **one shared sentence** saying a pasted carriage return becomes an ordinary
+  line break, but the trigger is an `<input type="text">`, which **deletes** the character, and only
+  the body is a `<textarea>`, which collapses it to LF. Pasting `:a\rb` into the trigger produced
+  `:ab` while the screen promised a line break. Fixed by **splitting the key in two** —
+  `browser.matchCreation.lineEndings.{trigger,replace}` — each drawn inside its own control's block,
+  so **position** chooses the sentence and no condition entered the markup.
+  **Interception was deliberately not chosen**: the precedent for refusing a `\r` is the *raw
+  editor*, where reconstructing a line ending would reformat lines the user never touched, whereas
+  creation writes a brand-new match and no pre-existing byte is at stake.
+- **Low — a false count in the decision record**: it claimed fifty-one Spanish sentences where the
+  diff added fifty. Fixed by **re-deriving the number** rather than adopting either figure: fifty
+  before the fix, **fifty-one** after it, because the fix splits one key into two. All four places in
+  the record now agree, and the record says how the number was obtained.
+
+Codex confirmed in the same review that the identity checks this sub-phase exists to protect all
+hold: every deletion reaches `confirmDelete` through a single path that recomputes
+`identityInProjection(projections(), session.match)` **at the click**; save, create and delete each
+forward their own submission's base revision; the two selection generations remain independent and no
+changed path adds a direct `selected` assignment; and no writing path bypasses the Rust save entry
+point.
+
+**Round 2 — the confirmation pass** (`docs/reviews/phase-2c-3a-2-confirmation.md`, **`READY`**),
+commissioned because *a fix is a change and the round that reviews it is not optional* — three of
+step 1's ten findings were regressions introduced by a previous round's fix. **No findings.** It
+checked, among other things, that the Spanish sentence says what its English twin says, that the new
+test **would fail if the two sentences were swapped**, and that the 51-key figure holds against the
+actual dictionary diff.
+
+**Round 3 — the window reading, which found what neither review could.** See the section below.
+
+---
+
+## The window reading of 2c-3a-2, and the two defects it found
+
+`docs/decisions/2c-3a-2-window-reading.md`. Twelve launches, all reaching `--- end` with zero-byte
+stderr, none blanking. One launch (L2) was wasted on the *instrument* rather than the product — the
+probe read `aria-pressed` where `SnippetList.svelte` writes `aria-current` — and was re-taken as L3.
+**No launch was lost to a leaked language override**, because every plan set the language through the
+picker, which is the correction `2c-2-2-window-reading.md` §1.2 records.
+
+All eight planned items were established, including all five `DestinationRefusal` members drawn as
+localized sentences with nothing omitted (consult Q5), the ordinal-position selection repair **and**
+its new-last fallback with the localized notice both times (consult Q1), the single-snippet refusal
+with no delete control anywhere in the window (consult Q6), and the whole form in Spanish. Every write
+was byte-checked: *byte-identical outside the one span*, every time.
+
+**Defect 1 — FIXED IN THIS CUT. The creation form's primary action opened below the fold.** At the
+default window (webview 1180×728) with 8 files, the form was **805 px inside a 645 px pane** and
+*Add this snippet* sat at **y=813**, invisible until scrolled 174 px — as was the body's line-ending
+disclosure. **The cause was the unbounded destination list**, so it scaled with file count and the
+owner's real 13-file configuration would have been worse than the measured case.
+Fixed in `MatchCreator.svelte` with **layout only, no new string and no new condition**:
+`.destinations` takes `max-height: 12rem; overflow-y: auto` so the list scrolls inside itself, and the
+action row becomes `position: sticky; bottom: 0`, with the create control and the sentence saying why
+it is disabled wrapped into **one** block so a pinned control cannot lose its reason.
+
+**The re-take is what makes that a fact rather than an intention** — a reading is re-taken after any
+change to a component. Six further launches, none failed: the create control is now at **y=594** with
+the pane no longer scrolling at all (`scrollHeight` 645 = `clientH` 645), and at **14 files the y is
+identical at 594** — only the list's internal `scrollH` moves, 390 → 570. A deliberately forced
+overflow (an 824 px form in a 617 px box) still put the control on screen at y=624 with its refusal at
+y=654. Every destination remains reachable and every refusal readable, so Q5 is not traded away for
+the fix. **Spanish measured 13 px of margin, and the record says 13, not "comfortably."**
+
+**Defect 2 — DEFERRED, AND IT NEEDS THE OWNER'S DECISION.** The Spanish dictionary calls a snippet
+both **`atajo`** (the 2c namespaces — 22 of this step's 51 new strings) and **`fragmento`**
+(everything older), and L9 draws **both, five lines apart, in one pane**. The split **predates
+2c-3a-2**; this step widened it and is the first to put both words on screen together.
+It was **not** fixed here for two reasons, both deliberate: it spans namespaces belonging to 2c-1a,
+2c-1b and 2c-2, well outside this cut, and *which Spanish word this application uses for a snippet* is
+a user-facing terminology decision in the owner's own language, not an orchestrator's call.
+The mechanical reading favours **`fragmento`** — it is the established majority term and the closer
+match to the English *snippet*, whereas `atajo` means *shortcut*, which in espanso more naturally
+names the **trigger** than the match. That is a recommendation, not a decision.
+
+**Two further observations, both Low and both recorded rather than acted on**: the destination list
+and the sidebar draw the same files in two different orders (each correct per its own documentation),
+and hole 13 was confirmed on screen — the raw-text toggle is not withdrawn while either new screen is
+open.
+
+**What the reading did not reach, stated as gaps in its §9 rather than papered over**: every outcome
+arm but `saved`, plus `confirmationRefused`, `notInDocument`, the leaving confirmation, the in-flight
+sentences, undo/redo by click, and `documentHasNoMatchList`. The re-take adds three more: it drove no
+save, so no bytes were re-checked; the Spanish *destination list* was not re-listed, so the
+reachability finding is English-only; and the list was scrolled by assigning `scrollTop` rather than
+by a pointer gesture, so **whether the bounded list looks scrollable to someone who has not tried is
+a question no DOM transcript can answer** (§12.9).
+
+**The probe was removed and its removal verified** — `diff` reports `main.ts` and `main.rs` identical
+to their pre-probe copies, `rg` finds no probe symbol, and `git status --short --untracked-files=all`
+shows exactly the intended files. No real configuration was opened at any point in either reading.
+
+---
+
 ## Verification — Phase 2c-3a step 1
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -5010,8 +5151,108 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3a is split into two steps, and step 1 is complete: new and delete exist as values and
-nothing draws them.** `docs/decisions/2c-3a-1-notes.md` is the record (§4 is twelve open holes,
+**Phase 2c-3a is complete, both steps: a person can now create a snippet and delete one from a
+window, and the selection survives a delete.** `docs/decisions/2c-3a-2-notes.md` is step 2's record
+(§4 is fourteen open holes) and `docs/decisions/2c-3a-2-window-reading.md` is its window reading —
+12 launches plus a 6-launch re-take, and it is the primary evidence for the phase. The two code
+reviews are `docs/reviews/phase-2c-3a-2-{code,confirmation}.md`; the first returned **NOT READY** on
+two findings and the second, after the fix, returned **READY**. **All findings, and the window
+reading's own layout defect, were fixed before the commit.**
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1160 passed, 42 files
+```
+
+(`cargo test --workspace` expects **1008**, unchanged — neither step of 2c-3a wrote any Rust, and
+2c-3b should need none either.)
+
+### ⚠️ One decision is owed by the owner before, or alongside, the next sub-phase
+
+**The Spanish dictionary calls a snippet two different things, and one window now shows both at
+once.** `atajo` in the 2c namespaces (22 of 2c-3a-2's 51 new strings) and `fragmento` everywhere
+older; the window reading's L9 drew both **five lines apart in a single pane**. The split predates
+2c-3a-2 — this step only widened it and made it visible.
+
+It was left unfixed deliberately: it spans the 2c-1a, 2c-1b and 2c-2 namespaces, outside 2c-3a's cut,
+and **which Spanish word this application uses for a snippet is a user-facing terminology decision in
+the owner's own language**. The mechanical recommendation is **`fragmento`** — the established
+majority term, and the closer match to the English *snippet*, where `atajo` means *shortcut* and in
+espanso more naturally names the **trigger** than the match. **Ask before changing 22 strings.**
+Whichever way it goes, the change is dictionary-only: it touches no component, so it obliges no
+re-taken window reading.
+
+**The next step is Phase 2c-3b — move on a screen**, per `docs/decisions/2c-split-notes.md` §2:
+`move_match` drawn, the new identity adopted, and the cross-sequence and combined-edit refusals
+**surfaced rather than hidden**. Like 2c-3a it **fails as an identity mistake**, so the care 2c-3a
+needed carries over unchanged.
+
+**2c-3b owns the two latent shapes `BrowserState.moveMatch` still carries**, and that is the whole
+reason they were deferred rather than forgotten:
+
+- its `SaveResult | null` return, and
+- **a stale projection left installed when its own re-read fails.**
+
+Its `baseRevision` was already fixed in 2c-3a-1. It has had **no production caller** until now, which
+is precisely why nothing about a component blocked the deferral — and why 2c-3b must not draw it
+before fixing them.
+
+**Two refusals 2c-3b must surface rather than hide** — both are locked decisions, not defects:
+`ItemMove` is **same-sequence only** (D2r: no moving between files or between sequences), and a move
+**may not be combined with any other edit in one batch** (R25).
+
+**What 2c-3a-2 built that 2c-3b must copy and must not redesign.**
+
+- **`MatchCreator.svelte` and `MatchDeleter.svelte` hold no rule.** Every decision lives in
+  `matchCreation.ts` / `matchDeletion.ts`, which is why both of this step's review findings were
+  fixable without touching behaviour. Keep that shape.
+- **The identity a confirmation checks is read from the live projection at the moment of the click** —
+  `identityInProjection(projections(), session.match)` in `matchDeletion.ts`, called from exactly one
+  path in `MatchDeleter.svelte`. Never hand back `session.match`. Nothing in TypeScript enforces
+  this; the module header says so in the same sentence as what it does force.
+- **Every writing wrapper forwards the *submission's* base revision**, never the live projection's.
+  `saveMatch` now takes one — the last half of 2c-3a-1's second finding, closed at 2c-3a-2 with the
+  signature and its `MatchEditor.svelte` caller moved together.
+- **`BrowserState.views` exposes the projections** and was added for `startMatchCreation`. It is
+  **not one per listed file**: a refused `get_document` leaves no projection, so a per-file list
+  walks `documents` and looks each one up in `views` — which is why `destinationsOf` takes both.
+- **A `MatchId` handed to `draft.ts` must be a plain object.** `structuredClone` throws on a
+  `$state` proxy, and `BrowserState.views` is deeply proxied. `plainIdentity()` in
+  `matchDeletion.ts` is the pattern; **a model test cannot catch a repeat of this**, because model
+  tests pass plain fixtures.
+
+**What 2c-3b owes, beyond drawing it.**
+
+1. **All three kinds of evidence** (`2c-split-notes.md` §7): model tests, at least one
+   **mounted-component test** (`/** @vitest-environment jsdom */` as the **first** line; **do not
+   back-fill the existing six components**), and **a recorded window reading**.
+2. **Set the language explicitly through the picker at the top of every plan.** The webview's
+   `localStorage` follows the **bundle identifier**, not `HOME`.
+3. **A window reading is re-taken after any change to a component.** 2c-3a-2 re-took its reading over
+   six further launches for a change that was pure CSS, and the re-take is what turned the layout fix
+   from an intention into a measurement.
+4. **Rebaseline the module guard honestly if it moves.** It is **165** now. Build a pristine
+   `git archive HEAD` copy and subtract; a delta equal to the number of new source modules is a new
+   module, a jump to ~180 with `svelte/internal/server` in the bundle is the `resolve.conditions`
+   regression. **Never rebaseline by editing the condition.**
+
+**One thing inherited that is still owed.** `browser.rawEditor.discardWarning` still says *"Your
+changes have not been written to the file"*, which is **false after a `mayHaveWritten` send
+failure**. The small editor's twin was fixed in 2c-2-2; the raw editor's was left because changing it
+obliges a re-take of 2c-1b's window reading. **Whichever sub-phase next touches the raw editor owes
+it.**
+
+**A layout defect is a defect, and only a window shows it.** 2c-3a-2's creation form opened with its
+primary action at y=813 in a 645 px pane — past 1160 passing tests, `svelte-check` with zero
+warnings, and two Codex passes that both examined the very component. The cause was an **unbounded
+list** whose height scaled with the user's file count, so it got worse the more real the
+configuration. Any new pane that draws one-row-per-something owes a bound and a measurement.
+
+---
+
+**Phase 2c-3a step 1 (superseded by the above, kept for its rationale): new and delete existed as
+values and nothing drew them.** `docs/decisions/2c-3a-1-notes.md` is the record (§4 is twelve open holes,
 §5 / §7 / §8 are the three review rounds). The design consult for the whole of 2c-3a is
 `docs/reviews/phase-2c-3a-design.md`; the three code reviews are
 `docs/reviews/phase-2c-3a-1-{code,confirmation,third-pass}.md`, and **all three returned

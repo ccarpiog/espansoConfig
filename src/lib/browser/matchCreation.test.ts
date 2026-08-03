@@ -49,11 +49,13 @@ import {
   destinationRefusalKey,
   destinationsOf,
   editCreationField,
+  baseRevisionOf,
   focusCreationField,
   isEditable,
   keepDrafting,
   matchCreationView,
   newMatchOf,
+  placementOptionsOf,
   redoCreation,
   startMatchCreation,
   undoCreation,
@@ -760,3 +762,73 @@ describe('the view a screen draws', () => {
     expect(view.notes).toEqual([{ DoubledSequenceSeparation: { edit: 0 } }]);
   });
 }); // End of the "view" suite
+
+describe('the positions a screen offers', () => {
+  it('offers Front, one option per named anchor in file order, then End', () => {
+    // The consult's Q4 order, and the anchors in the order the file writes them —
+    // which is the order `CreationDestination.anchors` carries, not one this
+    // function chooses.
+    const views = [snippetFile(), otherFile()];
+    const options = placementOptionsOf(chooseDestination(form(), 2), views);
+    expect(options.map((one) => one.placement.kind)).toEqual(['front', 'after', 'after', 'end']);
+    expect(options.map((one) => one.anchor?.id.node ?? null)).toEqual([null, 10, 11, null]);
+    // The key is built from all three fields of the identity, so two anchors of
+    // one file cannot collide and an anchor of an older parse is a different key.
+    expect(options[1]?.key).toBe(`after:2:${BASE}:10`);
+  });
+
+  it('says which option the form is holding, and only that one', () => {
+    const views = [snippetFile(), otherFile()];
+    const held = makeMatch({ node: 11, document: 2, revision: BASE }).id;
+    const session = chooseDestination(form(held), 2);
+    const options = placementOptionsOf(session, views);
+    expect(options.filter((one) => one.chosen).map((one) => one.key)).toEqual([
+      `after:2:${BASE}:11`
+    ]);
+  });
+
+  it('offers the two empty arms and no anchor when no destination has been chosen', () => {
+    const options = placementOptionsOf(form(), [snippetFile(), otherFile()]);
+    expect(options.map((one) => one.placement.kind)).toEqual(['front', 'end']);
+    expect(options[0]?.chosen).toBe(false);
+    expect(options[1]?.chosen).toBe(true);
+  });
+
+  it('stops offering an anchor whose file has been read again', () => {
+    // **All three fields, and the revision is the one doing the work.** A window
+    // that has re-read the file holds a projection of a different parse, so the
+    // form's anchors resolve to nothing and the `after` options go rather than
+    // naming a snippet of a revision nobody chose.
+    const reread = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 10, document: 2, revision: AFTER, trigger: ':sig' }),
+        makeMatch({ node: 11, document: 2, revision: AFTER, trigger: ':date' })
+      ]
+    });
+    const options = placementOptionsOf(chooseDestination(form(), 2), [reread, otherFile()]);
+    expect(options.map((one) => one.placement.kind)).toEqual(['front', 'end']);
+  });
+
+  it('offers no anchor of a file this window holds no projection of', () => {
+    const options = placementOptionsOf(chooseDestination(form(), 2), [otherFile()]);
+    expect(options.map((one) => one.placement.kind)).toEqual(['front', 'end']);
+  });
+}); // End of the "positions" suite
+
+describe('the base revision a screen sends', () => {
+  it('is the chosen destination’s, and moves with it', () => {
+    // The named read a component uses in place of a property walk, and the value
+    // `BrowserState.createMatch` forwards unchanged.
+    expect(baseRevisionOf(form())).toBe('');
+    expect(baseRevisionOf(chooseDestination(form(), 2))).toBe(BASE);
+    expect(baseRevisionOf(chooseDestination(chooseDestination(form(), 2), 3))).toBe(OTHER);
+  });
+
+  it('is what the submission carries, so the two cannot describe two parses', () => {
+    const started = beginCreate(ready());
+    expect(started!.submission.baseRevision).toBe(baseRevisionOf(started!.session));
+  });
+}); // End of the "base revision" suite
