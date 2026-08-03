@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContentRevision, Finding, RefusedResult } from '../ipc/types';
 import {
   acknowledgeRefusal,
+  amendDraft,
   boundAcknowledgement,
   canRedo,
   canUndo,
@@ -309,6 +310,141 @@ describe('undo and redo', () => {
     expect(draft.baseValue).toBe('0');
   }); // End of the "keeps the history bounded" case
 }); // End of the "undo and redo" suite
+
+describe('amending the current step, which is what coalescing is made of', () => {
+  it('replaces the value and adds no history step', () => {
+    const draft = amendDraft(editDraft(text('0'), '1'), '12');
+    expect(draft.value).toBe('12');
+    // One step, for the edit. The amendment joined it rather than following it.
+    expect(draft.past).toHaveLength(1);
+    expect(draft.past[0]?.value).toBe('0');
+    expect(undoDraft(draft).value).toBe('0');
+  });
+
+  it('mints a new generation, because the value changed', () => {
+    const edited = editDraft(text('0'), '1');
+    const amended = amendDraft(edited, '12');
+    expect(amended.generation).not.toBe(edited.generation);
+    expect(amended.nextGeneration).toBe(edited.nextGeneration + 1);
+  });
+
+  it('leaves a submission taken at the replaced step off the branch, so a save discards nothing', () => {
+    // `savedDraft`'s third case, reached by amending rather than by branching:
+    // the step the submission names is gone, there is no boundary left to draw,
+    // and the honest answer is to keep the history rather than to guess.
+    const edited = editDraft(text('0'), '1');
+    const submission = submissionOf(edited);
+    const amended = amendDraft(edited, '12');
+    const saved = savedDraft(amended, submission, NEXT);
+    expect(saved.past).toEqual(amended.past);
+    expect(saved.baseValue).toBe('1');
+  });
+
+  it('clears the redo stack and any collected consent', () => {
+    const undone = undoDraft(editDraft(editDraft(text('0'), '1'), '2'));
+    expect(canRedo(undone)).toBe(true);
+    expect(canRedo(amendDraft(undone, '9'))).toBe(false);
+    const { draft } = acknowledged();
+    expect(boundAcknowledgement(draft)).not.toBeNull();
+    expect(amendDraft(draft, 'broken: more').consent).toBeNull();
+  });
+
+  it('answers the same draft when nothing changed', () => {
+    const draft = editDraft(text('0'), '1');
+    expect(amendDraft(draft, '1')).toBe(draft);
+  });
+
+  it('drops the step it was replacing when the replacement is what that step began as', () => {
+    // Two adjacent identical branch entries are an undo the person can press that
+    // changes nothing and only spends a step. The entry that survives is the one
+    // that was about to be duplicated, and its own generation comes back with it,
+    // exactly as an undo restores one.
+    const started = text('0');
+    const edited = editDraft(started, '1');
+    const back = amendDraft(edited, '0');
+    expect(back.value).toBe('0');
+    expect(back.past).toEqual([]);
+    expect(canUndo(back)).toBe(false);
+    expect(back.generation).toBe(started.generation);
+    expect(isDirty(back)).toBe(false);
+  }); // End of the "drops the step" case
+
+  it('gives back the entry its own push evicted at the bound, so a net-zero group costs nothing', () => {
+    // **The 2c-2 confirmation pass's second finding.** With the history full, the
+    // push that opens a group evicts the oldest step; a collapse that only sliced
+    // left the value where it started and the history one state shorter — and
+    // silently, because nothing on screen changed. Repeat that burst and the past
+    // erodes one entry at a time.
+    let draft = text('0');
+    for (let index = 1; index <= HISTORY_LIMIT; index += 1) {
+      draft = editDraft(draft, String(index));
+    }
+    expect(draft.past).toHaveLength(HISTORY_LIMIT);
+    expect(draft.past[0]?.value).toBe('0');
+
+    const opened = editDraft(draft, 'typed');
+    // The push really did cost the oldest entry: this is the state the collapse has
+    // to be able to give back.
+    expect(opened.past[0]?.value).toBe('1');
+    expect(opened.evicted?.value).toBe('0');
+
+    const back = amendDraft(opened, String(HISTORY_LIMIT));
+    expect(back.value).toBe(String(HISTORY_LIMIT));
+    expect(back.past).toHaveLength(HISTORY_LIMIT);
+    expect(back.past[0]?.value).toBe('0');
+    // And it is reachable by undo, not merely present in the array.
+    let walked = back;
+    for (let step = 0; step < HISTORY_LIMIT; step += 1) {
+      walked = undoDraft(walked);
+    }
+    expect(walked.value).toBe('0');
+    // The slot is released once it has been spent, so a later collapse cannot
+    // resurrect it a second time.
+    expect(back.evicted).toBeNull();
+  }); // End of the "gives back the entry its own push evicted" case
+
+  it('releases the retained eviction at every boundary a collapse could not follow', () => {
+    let draft = text('0');
+    for (let index = 1; index <= HISTORY_LIMIT; index += 1) {
+      draft = editDraft(draft, String(index));
+    }
+    const opened = editDraft(draft, 'typed');
+    expect(opened.evicted).not.toBeNull();
+    // An undo moves the branch somewhere the collapse no longer applies.
+    expect(undoDraft(opened).evicted).toBeNull();
+    // A save draws a boundary undo may not cross, so nothing may reappear behind it.
+    expect(savedDraft(opened, submissionOf(opened), NEXT).evicted).toBeNull();
+    // A reload discards the history, and the slot held outside it goes too.
+    expect(reloadedDraft(opened, NEXT, 'fresh').evicted).toBeNull();
+    // An amendment that does *not* collapse keeps it: a group is one push followed
+    // by any number of amendments, and the collapse may be the last of ten.
+    const amended = amendDraft(opened, 'typed more');
+    expect(amended.evicted?.value).toBe('0');
+    expect(amendDraft(amended, String(HISTORY_LIMIT)).past[0]?.value).toBe('0');
+  }); // End of the "releases the retained eviction" case
+
+  it('collapses only against the step immediately before it', () => {
+    // `0 → 1 → 2`, then amend the `2` back to `1`: the `1` entry is the one about
+    // to be duplicated, so it goes and the `0` before it stays.
+    const draft = amendDraft(editDraft(editDraft(text('0'), '1'), '2'), '1');
+    expect(draft.value).toBe('1');
+    expect(draft.past.map((step) => step.value)).toEqual(['0']);
+    // And an amendment back to a value further up the branch is an ordinary
+    // amendment: `0` is not the step this one is replacing.
+    const further = amendDraft(editDraft(editDraft(text('0'), '1'), '2'), '0');
+    expect(further.past.map((step) => step.value)).toEqual(['0', '1']);
+  }); // End of the "collapses only against the step immediately before it" case
+
+  it('snapshots a structured value rather than keeping the caller’s object', () => {
+    const rules = structuredDraftRules<Structured>();
+    const draft = startDraft(BASE, { trigger: ':a', vars: [] }, rules);
+    const mine: Structured = { trigger: ':ab', vars: [{ name: 'x' }] };
+    const amended = amendDraft(draft, mine);
+    mine.vars[0]!.name = 'y';
+    expect(amended.value.vars[0]?.name).toBe('x');
+    expect(Object.isFrozen(amended.value)).toBe(true);
+  });
+}); // End of the "amending the current step" suite
 
 describe('the boundaries a save and a reload draw', () => {
   it('rebases on the candidate that was written', () => {

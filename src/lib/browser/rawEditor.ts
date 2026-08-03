@@ -21,7 +21,13 @@
  *   `./rawSave.ts`'s `describeRawSave`, reached through the refused arm's own
  *   `rawSave` field rather than called again here;
  * - the whole-document invalidation is `./invalidation.ts`'s seal, and this
- *   module is the caller that opens it.
+ *   module is the caller that opens it;
+ * - the five decisions about a save that are **not** about a text area — the
+ *   phase, the send failure's two arms, staleness, the consent round trip and the
+ *   choices a stale refusal may still offer — are `./editorSave.ts`'s since
+ *   2c-2-1, because the small editor needs every one of them over a different
+ *   drafted value and a second copy of a rule about consent is a second place for
+ *   it to be relaxed.
  *
  * ## Three policy decisions this sub-phase owed, made here
  *
@@ -72,7 +78,6 @@ import type {
   PresentationNote
 } from '../ipc/types';
 import {
-  acknowledgeRefusal,
   canRedo,
   canUndo,
   editDraft,
@@ -87,6 +92,16 @@ import {
   type DraftSubmission,
   type DraftValueRules
 } from './draft';
+import {
+  conflictArm,
+  consentForRefusal,
+  offeredRefusalChoices,
+  refusedArm,
+  sendFailureOf,
+  submissionIsStale,
+  type EditorPhase,
+  type SendFailure
+} from './editorSave';
 import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import { describeRawSave, type RawSaveChoice, type RawSaveModel } from './rawSave';
 import {
@@ -105,11 +120,13 @@ import {
 /**
  * What the editor is doing.
  *
- * Two states rather than three: an outcome being on screen is not a phase, it is
- * a value ({@link RawEditorSession.outcome}), and treating it as a phase is how a
- * screen ends up with a saved panel it cannot dismiss.
+ * `EditorPhase` under this module's own name, because it is not a property of a
+ * text area: 2c-2-1 extracted it into `./editorSave.ts` when the small editor
+ * needed the same two states over a different drafted value.
  */
-export type RawEditorPhase = 'editing' | 'saving';
+export type RawEditorPhase = EditorPhase;
+
+export type { SendFailure } from './editorSave';
 
 /**
  * How far the conflict's reload has got.
@@ -177,27 +194,6 @@ export interface RawEditorSession {
    */
   readonly sendFailure: SendFailure | null;
 }
-
-/**
- * A save that produced no outcome, and what is known about the file afterwards.
- *
- * **Two arms, because "nothing was written" is a claim this application is often
- * not entitled to make.** A save that fails before its rename really did write
- * nothing. A save that fails *after* it — a directory sync, a read-back — may have
- * left the candidate on disk, and `may_have_written` is the wire saying so. The
- * 2c-1b review found both collapsed into one screen that said nothing was written,
- * which for the second is the opposite of what the disk may hold and is
- * `PROGRESS.md` D2 broken from the other side.
- */
-export type SendFailure =
-  | {
-      /** The command failed before anything could have been written. */
-      readonly kind: 'notSent';
-    }
-  | {
-      /** The write may have completed. This application cannot tell. */
-      readonly kind: 'mayHaveWritten';
-    };
 
 /**
  * What this mode always says about itself, before any save has been attempted.
@@ -400,7 +396,7 @@ export function startRawEditor(
  * @returns The conflict model, or `null` when the session is not in one.
  */
 export function conflictOf(session: RawEditorSession): ConflictModel<RoundTripText> | null {
-  return session.outcome !== null && session.outcome.kind === 'conflict' ? session.outcome : null;
+  return conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
@@ -492,11 +488,7 @@ export function redoEdit(session: RawEditorSession): RawEditorSession {
  * @returns `true` when a save has been answered and the draft has moved on since.
  */
 export function outcomeIsStale(session: RawEditorSession): boolean {
-  const submitted = session.submitted;
-  if (submitted === null) {
-    return false;
-  }
-  return !session.draft.rules.same(submitted.candidate, session.draft.value);
+  return submissionIsStale(session.draft, session.submitted);
 } // End of function outcomeIsStale()
 
 /**
@@ -572,12 +564,7 @@ export function beginSave(session: RawEditorSession): StartedSave | null {
  * @returns The session carrying consent, or the same session.
  */
 export function acknowledgeFindings(session: RawEditorSession): RawEditorSession {
-  const outcome = session.outcome;
-  const submitted = session.submitted;
-  if (outcome === null || outcome.kind !== 'refused' || submitted === null) {
-    return session;
-  }
-  const draft = acknowledgeRefusal(session.draft, submitted, outcome.refusal);
+  const draft = consentForRefusal(session.draft, session.submitted, session.outcome);
   return draft === session.draft ? session : { ...session, draft };
 } // End of function acknowledgeFindings()
 
@@ -684,7 +671,7 @@ export function saveCouldNotBeSent(
   return {
     ...session,
     phase: 'editing',
-    sendFailure: { kind: mayHaveWritten ? 'mayHaveWritten' : 'notSent' }
+    sendFailure: sendFailureOf(mayHaveWritten)
   };
 } // End of function saveCouldNotBeSent()
 
@@ -876,7 +863,7 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
   const outcome = session.outcome;
   const conflict = conflictOf(session);
   const stale = outcomeIsStale(session);
-  const refused = outcome !== null && outcome.kind === 'refused' ? outcome : null;
+  const refused = refusedArm(outcome);
   return {
     text: session.draft.value,
     dirty: isDirty(session.draft),
@@ -890,7 +877,7 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
     notes: outcome !== null && outcome.kind === 'saved' ? outcome.notes : [],
-    refusalChoices: refused === null ? [] : stale ? ['keepEditing'] : refused.choices,
+    refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices:

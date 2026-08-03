@@ -152,7 +152,35 @@ rewritten under two editors later. **A projection-based copy is not a duplicate*
 comments, key order and scalar spelling, so calling it *Duplicate* breaks the preservation promise
 in the one place nobody checks (2c-3c). And **every sub-phase of 2c owes three kinds of evidence**:
 model tests, a **mounted-component test** (taken deliberately in 2c-1b — `vite.config.ts` had held
-that decision open since 1b-1), and a manual window reading. **2c-2, the small editor, is next.**
+that decision open since 1b-1), and a manual window reading.
+
+**2c-2, the small editor, is split into two steps, and step 1 — the model layer — is complete.**
+`src/lib/browser/matchEditor.ts` is the whole editor as a value, exactly as `rawEditor.ts` is for
+the raw editor, and **no `.svelte` file was touched**: the component, its mounted test and the
+window reading are step 2's, and all three are still owed. Its decisions are
+`docs/reviews/phase-2c-2-design.md` (the consult) and `docs/decisions/2c-2-1-notes.md` (the record).
+
+**The projection and the draft are two values, and confusing them is 2c-2's named failure mode.**
+`MatchBaseline` is what the file held — including *whether it held the key at all* — and
+`MatchBuffers` is what the controls hold; `fieldIntent` is the only function that reads both. **An
+initially absent field left blank is `'Unchanged'`, not `Set("")`**, because the buffer alone cannot
+tell that case from a present field cleared to empty, and getting it wrong writes `label: ''` into a
+file that never had a label.
+
+**A word-boundary control may not be a checkbox.** `word`, `left_word` and `right_word` are three
+independent source-text fields, and a checkbox would have to decide that `word: on` means boolean
+true — precisely the claim D2u forbids. They stay textual.
+
+**A field whose projected value contains a real `\r` is read-only, and the refusal is enforced three
+times** — at eligibility, at `editField`, and at `beginSave`. The last one is not redundant:
+`MatchBuffers` carries **no brand**, unlike `RoundTripText`, so a well-typed caller can put a
+carriage return in a buffer, and without the save-time gate it reaches the wire. The gate asks the
+**derived draft**, never the buffers, because a field refused for carrying a CR legitimately holds
+one in its buffer while sending `'Unchanged'`.
+
+**A decision record that claims a guarantee the code does not give is this project's worst defect
+class, and 2c-2-1 produced two more instances of it** — one per review round, both caught by Codex
+and neither by any test. Check the notes against the code, not the code against the notes.
 
 **A `<textarea>`'s value is the HTML *API value*, and it has every line break normalized to LF.**
 2c-1b's window reading caught this: one keystroke in a CRLF document rewrote every line ending, the
@@ -173,7 +201,11 @@ any change to a component** — 2c-1b took two for exactly that reason.
 existing six components are not back-filled. **`resolve.conditions` in `vite.config.ts` is set
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
-**server** build with nothing failing. **154 modules is a regression guard**; check it.
+**server** build with nothing failing. **The module count is a regression guard**; check it — it is
+**156** as of 2c-2-1, and the guard is not the number but the *shape of a change to it*. A count
+that moves by exactly the number of new source modules is a new module; a jump to ~180 with
+`svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine
+`git archive HEAD` copy and subtracting; never by editing the condition.
 
 **A whole-document save outcome arrives sealed, and the seal is one-shot.**
 `openWholeDocumentSave(sealed, forget)` in `src/lib/browser/invalidation.ts` is the only way to

@@ -171,6 +171,12 @@
   "browser.rawEditor.notProjected": "No se ha podido leer este archivo, así que su texto no se puede editar aquí.",
   "browser.rawEditor.lineEndingsNotPreserved": "Este archivo usa retornos de carro en sus saltos de línea, y este editor no puede devolverlos exactamente como están. En lugar de reescribir todos los saltos de línea del archivo sin que nadie lo pida, no abrirá este archivo para editarlo.",
 
+  "browser.matchEditor.readOnly.notDecodable": "Esta aplicación no pudo leer este valor como texto sencillo, así que lo que se muestra son los caracteres del propio archivo y no el valor en sí. Editarlo aquí no podría devolverse sin cambios, así que este campo se muestra y no se edita.",
+  "browser.matchEditor.readOnly.carriageReturn": "Este valor contiene un retorno de carro, y una caja de texto de esta ventana convierte todos los retornos de carro en saltos de línea. En lugar de cambiar un carácter que nadie ha tocado, este campo se muestra y no se edita.",
+  "browser.matchEditor.readOnly.ownsNoBytes": "Esta clave está en el archivo sin nada detrás, así que aquí no hay ningún valor que sustituir. Por ahora hay que escribirlo en el archivo mismo, así que este campo se muestra y no se edita.",
+  "browser.matchEditor.readOnly.unmodelledShape": "Este archivo escribe esta clave como algo que no es un solo fragmento de texto, así que esta aplicación no puede mostrar lo que contiene y no lo va a sobrescribir. Este campo se muestra y no se edita.",
+  "browser.matchEditor.readOnly.triggerNotSingle": "Este atajo no se dispara con un único disparador literal, así que su disparador se muestra y no se edita aquí. Cambiar un atajo de una forma de disparador a otra no es algo que haga esta aplicación.",
+
   "language.label": "Idioma",
   "language.followSystem": "Seguir el idioma del sistema",
   "language.english": "English",

@@ -1800,6 +1800,61 @@ fn which_control_characters_can_reach_a_projected_slice() {
     );
 } // End of function which_control_characters_can_reach_a_projected_slice()
 
+/// A projected **logical value** can carry a real carriage return.
+///
+/// [`which_control_characters_can_reach_a_projected_slice`] measures what reaches
+/// a match's *source slice*, which is a different question and a weaker one: a
+/// slice is bytes, and every byte of the file is in one. This is about
+/// [`ScalarView::text`], which is the decoder's output and is what the frontend's
+/// small editor would bind to a control.
+///
+/// It matters because the frontend refuses to edit such a value, and a guard over
+/// a case nobody has shown to be reachable is a guard nobody can justify keeping.
+/// A `<textarea>` or an `<input>` normalises every carriage return in its value to
+/// a line feed, so binding this value and reading it back would rewrite a
+/// character the person never touched — silently, and under a save that correctly
+/// reports having written exactly what it was given.
+///
+/// The escape is what makes it reachable: the decoder turns every *source* line
+/// break into `\n`, so a carriage return in the file's line endings never survives
+/// into a logical value. A double-quoted `\r` is not a line ending — it is content
+/// the person wrote on purpose — and it decodes to U+000D.
+///
+/// An inline source rather than a corpus fixture, deliberately: a new synthetic
+/// file ripples through every corpus-wide sweep and through
+/// [`SYNTHETIC_PROJECTIONS`]'s pinned counts, and an inline string proves the same
+/// thing about the same code path.
+#[test]
+fn an_escaped_carriage_return_decodes_into_a_projected_logical_value() {
+    let source = "matches:\n  - trigger: ':a'\n    replace: \"a\\rb\"\n";
+    let document = project("escaped-cr.yml", source);
+    assert!(document.view.parsed, "a double-quoted escape parses");
+
+    let replace = document.view.matches[0]
+        .content
+        .replace
+        .clone()
+        .expect("the fixture sets `replace`");
+    assert!(
+        replace.decoded,
+        "a double-quoted scalar is the decoder's output"
+    );
+    assert!(
+        replace.text.contains('\u{000d}'),
+        "the escape was expected to decode to a real carriage return"
+    );
+    assert_eq!(
+        replace.text, "a\rb",
+        "the decoded value is the two characters and the carriage return between them"
+    );
+    // And the source itself holds no carriage return at all, so nothing here is
+    // measuring a line ending: the character exists only after decoding.
+    assert!(
+        !source.contains('\u{000d}'),
+        "the source is written with a two-character escape, not with a CR"
+    );
+} // End of function an_escaped_carriage_return_decodes_into_a_projected_logical_value()
+
 #[test]
 fn every_shape_a_matches_sequence_can_hold_is_projected_with_its_own_span() {
     // **The measurement the detail pane's scope sentence is written from.**

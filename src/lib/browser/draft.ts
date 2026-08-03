@@ -290,6 +290,24 @@ export interface Draft<T> {
   readonly past: readonly DraftStep<T>[];
   /** Undone steps, next-to-redo first. Emptied by any edit. */
   readonly future: readonly DraftStep<T>[];
+  /**
+   * The step the **most recent push** dropped at {@link HISTORY_LIMIT}, or `null`.
+   *
+   * **One retained slot, and it exists for exactly one caller.** {@link amendDraft}
+   * collapses a step when the amendment is what that step began as, and at the
+   * bound the push that opened the step had already evicted the oldest one — so a
+   * collapse that only sliced would answer a draft whose value is back where it
+   * started and whose history is one state shorter, permanently and silently. That
+   * is the one case where "an edit that ends where it began costs nothing" was
+   * false, and it is the confirmation pass's second finding.
+   *
+   * It is **not** part of the history: nothing reads it but the collapse, undo and
+   * redo do not walk into it, and every transition that moves the branch somewhere
+   * a collapse could not follow clears it. The cost is one extra step retained per
+   * draft, which is the smallest thing that can make the collapse history-neutral —
+   * the evicted value is not recoverable from anything else the draft holds.
+   */
+  readonly evicted: DraftStep<T> | null;
   /** Consent collected for one exact candidate, or `null`. */
   readonly consent: DraftConsent<T> | null;
   /** The next generation to mint. Monotonic, never reused. */
@@ -349,6 +367,14 @@ export const EMPTY_ACKNOWLEDGEMENT: Acknowledgement = deepFreeze({ accepted: [] 
  * between the two stacks rather than creating them, so the two together hold
  * about this many and not more.
  *
+ * **What changed at 2c-2-1, and what did not.** {@link amendDraft} gives an
+ * editor a way to replace the current step instead of pushing a new one, which is
+ * what coalescing is made of. The decision above is unchanged: this module still
+ * does not decide *when* two changes are one edit, it only stops an editor from
+ * having to fake the transition. 2c-1b's raw editor takes one keystroke as one
+ * step and does not call it; 2c-2's small editor coalesces a typing burst per
+ * field and does.
+ *
  * **What the user loses when it is reached:** the *oldest* undo step, and then the
  * next oldest. The recent history — which is what undo is for — is never the part
  * that is dropped, and `baseValue` is never dropped at all, so "what this file
@@ -381,6 +407,7 @@ export function startDraft<T>(
     generation: 0,
     past: [],
     future: [],
+    evicted: null,
     consent: null,
     nextGeneration: 1,
     rules
@@ -434,20 +461,38 @@ function currentStep<T>(draft: Draft<T>): DraftStep<T> {
   return { value: draft.value, generation: draft.generation };
 } // End of function currentStep()
 
+/** A bounded push: the new past, and whatever the bound cost. */
+interface BoundedPush<T> {
+  /** The new past, never longer than {@link HISTORY_LIMIT}. */
+  readonly past: readonly DraftStep<T>[];
+  /** The step the bound dropped, or `null` when it dropped none. */
+  readonly evicted: DraftStep<T> | null;
+}
+
 /**
  * The past with one step appended, dropping the oldest once the bound is reached.
+ *
+ * **It answers what it dropped**, which it did not until 2c-2's confirmation pass.
+ * A push at the bound evicts the oldest step, and an amendment that collapses that
+ * same push has to be able to put it back or the collapse silently costs the
+ * person a state — see {@link Draft.evicted}.
+ *
+ * At most one step is ever evicted by one push, because the past is never longer
+ * than the bound to begin with.
  *
  * @typeParam T - The drafted value.
  * @param past - The steps kept so far, oldest first.
  * @param step - The step to record.
- * @returns The new past, never longer than {@link HISTORY_LIMIT}.
+ * @returns The new past and the step the bound cost, if any.
  */
-function pushBounded<T>(
-  past: readonly DraftStep<T>[],
-  step: DraftStep<T>
-): readonly DraftStep<T>[] {
+function pushBounded<T>(past: readonly DraftStep<T>[], step: DraftStep<T>): BoundedPush<T> {
   const grown = [...past, step];
-  return grown.length <= HISTORY_LIMIT ? grown : grown.slice(grown.length - HISTORY_LIMIT);
+  if (grown.length <= HISTORY_LIMIT) {
+    return { past: grown, evicted: null };
+  }
+  // `grown` is longer than the bound, so it has a first element; the index read is
+  // widened by `noUncheckedIndexedAccess` and cannot see that.
+  return { past: grown.slice(grown.length - HISTORY_LIMIT), evicted: grown[0] ?? null };
 } // End of function pushBounded()
 
 /**
@@ -472,16 +517,110 @@ export function editDraft<T>(draft: Draft<T>, next: T): Draft<T> {
   if (draft.rules.same(next, draft.value)) {
     return draft;
   }
+  const pushed = pushBounded(draft.past, currentStep(draft));
   return {
     ...draft,
     value: draft.rules.snapshot(next),
     generation: draft.nextGeneration,
     nextGeneration: draft.nextGeneration + 1,
-    past: pushBounded(draft.past, currentStep(draft)),
+    past: pushed.past,
+    // What this push cost at the bound, retained for one purpose only: an
+    // amendment that collapses this very step has to be able to give it back.
+    evicted: pushed.evicted,
     future: [],
     consent: null
   };
 } // End of function editDraft()
+
+/**
+ * Records a new value **in place of the current one**, adding no history step.
+ *
+ * The mechanism coalescing needs, and only the mechanism: *when* two changes are
+ * one edit is a policy this module still refuses to decide, for the reason
+ * {@link HISTORY_LIMIT} gives — a text area and a set of twenty-two fields will
+ * not agree about it. What belongs here is the transition itself, because the
+ * alternative is an editor composing {@link undoDraft} with {@link editDraft} to
+ * get the same effect by a route nobody reading it would recognise.
+ *
+ * It is {@link editDraft} in every respect but one: the previous value does
+ * **not** join the past, so the step this replaces is gone and cannot be undone
+ * to. Everything else is the same rule, and each part matters:
+ *
+ * - the value is snapshotted, so a caller that mutates its own object afterwards
+ *   changes nothing here;
+ * - a **new generation** is minted, because the value changed and a generation
+ *   identifies a value rather than a position. A submission taken at the step
+ *   this replaces is therefore no longer on the branch, and {@link savedDraft}
+ *   already has a rule for that: it discards nothing;
+ * - the future is emptied and the consent is dropped, because the candidate has
+ *   changed and consent is content-addressed to the candidate it was collected
+ *   for.
+ *
+ * A change that changes nothing is not a change: the draft is returned as it is.
+ *
+ * ## An amendment back to where the step began drops the step
+ *
+ * The one case where this does more than replace, and it is the same rule rather
+ * than a second one. An amendment replaces the step it is on, so an amendment
+ * whose value equals **the step before it** leaves two adjacent identical entries
+ * on the branch — an undo the person can press that changes nothing on screen and
+ * only spends a step. Type a burst and erase it again inside one group and that is
+ * exactly what happens.
+ *
+ * So the step is dropped instead, and the draft goes back to the earlier step's
+ * own value and its own generation, exactly as {@link undoDraft} would. This is not
+ * a decision about *when* two changes are one edit — that is still the editor's —
+ * it is this transition declining to manufacture a history entry that describes
+ * nothing, which no caller could want.
+ *
+ * **And nothing is lost, at the bound as well as below it.** The first version of
+ * this branch only sliced, which is right below {@link HISTORY_LIMIT} and wrong at
+ * it: the push that opened the collapsed step had already evicted the oldest entry,
+ * so a burst typed and erased again left the value where it started and the history
+ * one state shorter — silently, since nothing on screen changed. The evicted step
+ * is put back from {@link Draft.evicted}, so a net-zero group really is history-
+ * neutral. That is the whole reason the draft retains one extra slot.
+ *
+ * @typeParam T - The drafted value.
+ * @param draft - The draft being edited.
+ * @param next - What the editor now holds.
+ * @returns The draft with its current value replaced — or with the replaced step
+ *   dropped when the replacement is what that step was made from, or the same
+ *   draft when nothing changed.
+ */
+export function amendDraft<T>(draft: Draft<T>, next: T): Draft<T> {
+  if (draft.rules.same(next, draft.value)) {
+    return draft;
+  }
+  const previous = draft.past[draft.past.length - 1];
+  if (previous !== undefined && draft.rules.same(next, previous.value)) {
+    const kept = draft.past.slice(0, -1);
+    return {
+      ...draft,
+      value: previous.value,
+      generation: previous.generation,
+      // The step this collapse undoes may have cost the oldest entry when it was
+      // pushed. Putting it back is what makes a net-zero group cost nothing at the
+      // bound as well as below it.
+      past: draft.evicted === null ? kept : [draft.evicted, ...kept],
+      evicted: null,
+      future: [],
+      consent: null
+    };
+  }
+  // The eviction is deliberately **not** cleared here: a group is a push followed
+  // by any number of amendments, and the collapse that ends it may be the third or
+  // the tenth. It is the push's cost, and it stays recoverable until that push is
+  // either collapsed or left behind.
+  return {
+    ...draft,
+    value: draft.rules.snapshot(next),
+    generation: draft.nextGeneration,
+    nextGeneration: draft.nextGeneration + 1,
+    future: [],
+    consent: null
+  };
+} // End of function amendDraft()
 
 /**
  * Goes back one value.
@@ -506,6 +645,10 @@ export function undoDraft<T>(draft: Draft<T>): Draft<T> {
     generation: previous.generation,
     past: draft.past.slice(0, -1),
     future: [currentStep(draft), ...draft.future],
+    // An undo takes the branch somewhere a collapse could no longer follow, so the
+    // retained eviction is released rather than kept for a later amendment that
+    // would put it back in the wrong place.
+    evicted: null,
     consent: null
   };
 } // End of function undoDraft()
@@ -523,11 +666,13 @@ export function redoDraft<T>(draft: Draft<T>): Draft<T> {
   }
   // As in `undoDraft`: the length check is what makes this read total.
   const next = draft.future[0] as DraftStep<T>;
+  const pushed = pushBounded(draft.past, currentStep(draft));
   return {
     ...draft,
     value: next.value,
     generation: next.generation,
-    past: pushBounded(draft.past, currentStep(draft)),
+    past: pushed.past,
+    evicted: pushed.evicted,
     future: draft.future.slice(1),
     consent: null
   };
@@ -698,6 +843,9 @@ export function savedDraft<T>(
     baseRevision: revision,
     baseValue: draft.rules.snapshot(submission.candidate),
     past,
+    // A save draws a boundary undo may not walk back across, so a step evicted
+    // before it must not be able to reappear behind it.
+    evicted: null,
     consent: null
   };
 } // End of function savedDraft()
@@ -733,6 +881,8 @@ export function reloadedDraft<T>(
     nextGeneration: draft.nextGeneration + 1,
     past: [],
     future: [],
+    // The history is gone, so the one step held outside it goes too.
+    evicted: null,
     consent: null
   };
 } // End of function reloadedDraft()

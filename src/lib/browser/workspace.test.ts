@@ -22,6 +22,7 @@ import type {
   DocumentSummary,
   DocumentView,
   Finding,
+  MatchDraft,
   MatchView,
   SaveResult,
   WorkspaceSummary
@@ -174,6 +175,14 @@ interface Script {
    */
   readonly moves?: readonly CommandResult<SaveResult>[];
   /**
+   * What `save_match` answers, in order.
+   *
+   * A list for the same reason `moves` is: the interesting case is a refusal that
+   * carries its findings, and then the same draft with the acknowledgement built
+   * from them.
+   */
+  readonly saves?: readonly CommandResult<SaveResult>[];
+  /**
    * What `save_raw_document` answers, in order.
    *
    * A list for the same reason `moves` is: the interesting case is a refusal
@@ -196,6 +205,7 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   // commands a test drives more than once with different answers, so their
   // scripts are consumed in order.
   let moves = 0;
+  let saves = 0;
   let raws = 0;
   const documents =
     script.documents ??
@@ -238,6 +248,13 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     moveMatch: vi.fn(async () => {
       const answer: CommandResult<SaveResult> = script.moves?.[moves++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    saveMatch: vi.fn(async () => {
+      const answer: CommandResult<SaveResult> = script.saves?.[saves++] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -1617,6 +1634,348 @@ describe('moving a snippet', () => {
 }); // End of the "moving a snippet" suite
 
 /**
+ * A draft that changes one field and says *leave this alone* about every other.
+ *
+ * Written out rather than built, because `MatchDraft` has no optional property
+ * and a helper that filled the gaps would be hiding exactly the thing the type is
+ * arranged to expose.
+ *
+ * @returns The draft.
+ */
+function editedDraft(): MatchDraft {
+  return {
+    trigger: 'Unchanged',
+    regex: 'Unchanged',
+    replace: { Set: 'a new body' },
+    markdown: 'Unchanged',
+    html: 'Unchanged',
+    image_path: 'Unchanged',
+    form: 'Unchanged',
+    label: 'Unchanged',
+    comment: 'Unchanged',
+    word: 'Unchanged',
+    left_word: 'Unchanged',
+    right_word: 'Unchanged',
+    propagate_case: 'Unchanged',
+    uppercase_style: 'Unchanged',
+    force_mode: 'Unchanged',
+    force_clipboard: 'Unchanged',
+    paragraph: 'Unchanged',
+    anchor: 'Unchanged',
+    triggers: [],
+    search_terms: [],
+    vars: [],
+    form_fields: []
+  };
+} // End of function editedDraft()
+
+describe('saving one snippet’s fields', () => {
+  it('adopts the identity the commit answered with, and re-reads the file', async () => {
+    // **The consult's Q6, driven.** A caller cannot obtain this result without the
+    // adoption, because the adoption happens inside the wrapper: the selection
+    // follows `moved` rather than staying at the position it used to occupy, and
+    // the raw viewer's snapshot of the replaced bytes is dropped and read again.
+    const edited = movedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: edited.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, saves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+
+    documents.set(2, { ok: true, value: edited });
+    const answer = await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    expect(state.selected?.id.node).toBe(31);
+    expect(state.notice).toBeNull();
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+  }); // End of the "committed field save" case
+
+  it('sends the revision this state is projecting, and the draft unchanged', async () => {
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-a',
+        committed: false,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({ saves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const draft = editedDraft();
+    await state.saveMatch(baseDocument().matches[0]!.id, draft, NOTHING_ACKNOWLEDGED);
+
+    const call = vi.mocked(commands.saveMatch).mock.calls[0]!;
+    expect(call[0]).toEqual(baseDocument().matches[0]!.id);
+    expect(call[1]).toBe(draft);
+    expect(call[2]).toBe('rev-a');
+    expect(call[3]).toEqual(NOTHING_ACKNOWLEDGED);
+    // Nothing was written and the revision did not move, so nothing was re-read.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "base revision" case
+
+  it('refuses to send anything for a document this state does not describe', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const stranger = makeMatch({ node: 99, document: 99 }).id;
+    expect(await state.saveMatch(stranger, editedDraft(), NOTHING_ACKNOWLEDGED)).toEqual({
+      kind: 'failed',
+      mayHaveWritten: false
+    });
+    expect(commands.saveMatch).not.toHaveBeenCalled();
+  });
+
+  it('shows the findings of a refusal and changes nothing here', async () => {
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [suspicion()]
+      }
+    };
+    const commands = scriptedCommands({ saves: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const answer = await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('refused');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(state.selected?.id.node).toBe(10);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "refused field save" case
+
+  it('adopts the disk projection a conflict handed back', async () => {
+    const disk = movedDocument();
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: { outcome: 'conflict', expected: 'rev-a', found: 'rev-b', disk_revision: 'rev-b', disk }
+    };
+    const commands = scriptedCommands({ saves: [conflict] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const answer = await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('conflict');
+    // Nothing was written, and this state now describes the bytes the next save
+    // will be checked against.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    // R27: what is at the held position is a different snippet, so the selection
+    // is dropped with a notice rather than silently re-pointed.
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "conflicted field save" case
+
+  it('re-reads the file when a failure may already have written it', async () => {
+    const failed: CommandResult<SaveResult> = {
+      ok: false,
+      failure: {
+        kind: 'command',
+        error: {
+          code: 'saveFailed',
+          error: {
+            Write: {
+              Io: {
+                step: 'SyncDirectory',
+                path: '/tmp/espanso/match/base.yml',
+                kind: 'Interrupted',
+                raw_os_error: 4
+              }
+            }
+          },
+          may_have_written: true
+        }
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, saves: [failed] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    documents.set(2, { ok: true, value: movedDocument() });
+    // **The 2c-2 review's first finding.** The classification survives the wrapper:
+    // a bare `null` here reads exactly like `noWorkspaceOpen`, and an editor that
+    // could not tell them apart would say nothing was written about a file that may
+    // already hold the edited snippet.
+    expect(
+      await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
+    ).toEqual({ kind: 'failed', mayHaveWritten: true });
+
+    // A failure at or after the rename means the file may already hold the edited
+    // snippet, so nothing cached for it can be vouched for.
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+  }); // End of the "may have written" case
+
+  it('drops what it can no longer vouch for when the adoption itself fails, and says so', async () => {
+    // **The 2c-2 review's second finding.** The save committed and the re-read
+    // failed, so every projection and every identity this state holds for that file
+    // was minted from bytes that are gone. Leaving them installed would have the
+    // window drawing the pre-save snippet under a committed save; they are dropped,
+    // and the failure comes back **beside** the committed outcome rather than in
+    // place of it.
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: movedDocument().matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, saves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    const answer = await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // The save is still a save.
+    expect(answer.kind).toBe('answered');
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    // And the failure travels with it rather than to the console alone.
+    expect(answer.kind === 'answered' ? answer.adoption.kind : null).toBe('failed');
+    // Nothing stale is left on screen: no projection of that file, no selection
+    // into it, and no held text.
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.selected).toBeNull();
+    expect(state.scopedDocument).toBeNull();
+  }); // End of the "failed adoption" case
+
+  it('does not drag the selection back when it moved while the save was in flight', async () => {
+    // **The 2c-2 review's fourth finding.** Save snippet A, click snippet B before
+    // the answer lands, and the adoption must not re-point the selection at A: that
+    // is this window moving a selection nobody asked it to move.
+    const edited = movedDocument();
+    const answering = deferred<CommandResult<SaveResult>>();
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents }),
+      saveMatch: vi.fn(() => answering.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const inFlight = state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      NOTHING_ACKNOWLEDGED
+    );
+    // The person clicks the other snippet of the same file while the save is out.
+    await state.select(baseDocument().matches[1]!);
+    expect(state.selected?.id.node).toBe(11);
+
+    documents.set(2, { ok: true, value: edited });
+    answering.resolve({
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: edited.matches[1]!.id
+      }
+    });
+    await inFlight;
+
+    // Node 31 is the saved snippet in the new revision. The selection was not on
+    // it when the answer landed, so it is repaired the ordinary way — positionally
+    // and then checked — and dropped with a notice rather than re-pointed at A.
+    expect(state.selected?.id.node).not.toBe(31);
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "selection moved in flight" case
+
+  it('leaves everything alone when the failure cannot have written', async () => {
+    const failed: CommandResult<SaveResult> = {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    };
+    const commands = scriptedCommands({ saves: [failed] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    expect(
+      await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
+    ).toEqual({ kind: 'failed', mayHaveWritten: false });
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  });
+}); // End of the "saving one snippet's fields" suite
+
+/**
  * What `match/base.yml` projects to after its whole text was replaced.
  *
  * A **new revision**, a **new node** and a different snippet, because that is
@@ -2105,6 +2464,56 @@ describe("replacing a file's whole text", () => {
     expect(state.fileTextTarget?.id).toBe(3);
     expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 3\n' });
   }); // End of the "disk text by document" case
+
+  it('drops that captured text when a field save moves the same file on', async () => {
+    // **The 2c-2 confirmation pass's first finding.** `conflictText` is keyed by
+    // document and `forgetFileText` is keyed by the viewer's target, so forgetting
+    // the viewer's snapshot left the capture behind — and `rawTextOf` prefers it. A
+    // raw save conflicts and captures version A; a field save then commits version
+    // B; and this window went on answering A, two writes old, with nothing on
+    // screen to say so.
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk: replacedDocument()
+      }
+    };
+    const committed: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-d',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [conflict], saves: [committed] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    // The viewer is closed, so the capture is the only text this window holds and
+    // the assertion below cannot be satisfied by the viewer's snapshot instead.
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
+
+    await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED);
+
+    expect(state.rawTextOf(2)).toBeNull();
+    // Another file's capture would be untouched, because nothing about it changed —
+    // there is none here, and that is what makes the drop above document-scoped
+    // rather than a blanket clear.
+    expect(state.rawTextOf(3)).toBeNull();
+  }); // End of the "field save drops the captured text" case
 
   it('answers nothing for a document this window holds no text of', async () => {
     const commands = scriptedCommands();

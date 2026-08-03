@@ -171,6 +171,12 @@
   "browser.rawEditor.notProjected": "This file could not be read, so its text cannot be edited here.",
   "browser.rawEditor.lineEndingsNotPreserved": "This file uses carriage returns in its line endings, and this editor cannot give them back exactly as they are. Rather than rewrite every line ending in the file without being asked, it will not open this file for editing.",
 
+  "browser.matchEditor.readOnly.notDecodable": "This app could not read this value back as plain text, so what is shown is the file's own characters rather than the value itself. Editing it here could not be given back unchanged, so this field is shown and not edited.",
+  "browser.matchEditor.readOnly.carriageReturn": "This value contains a carriage return, and a text box in this window turns every carriage return into a line break. Rather than change a character you did not touch, this field is shown and not edited.",
+  "browser.matchEditor.readOnly.ownsNoBytes": "This key is in the file with nothing after it, so there is no value here to replace. Writing one has to be done in the file itself for now, so this field is shown and not edited.",
+  "browser.matchEditor.readOnly.unmodelledShape": "This file writes this key as something other than a single piece of text, so this app cannot show what it holds and will not write over it. This field is shown and not edited.",
+  "browser.matchEditor.readOnly.triggerNotSingle": "This snippet does not fire from one literal trigger, so its trigger is shown and not edited here. Changing a snippet from one trigger form to another is not something this app does.",
+
   "language.label": "Language",
   "language.followSystem": "Follow the system language",
   "language.english": "English",

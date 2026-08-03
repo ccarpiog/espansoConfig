@@ -15,6 +15,7 @@ import {
   type DetailFieldName,
   type OptionGroupName
 } from '../browser/detail';
+import { fieldRefusalKey, type FieldRefusal } from '../browser/matchEditor';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import { rawEditorRefusalKey, type RawEditorRefusal } from '../browser/rawEditor';
 import {
@@ -428,6 +429,25 @@ export function tRawSaveChoice(choice: RawSaveChoice): string {
 export function tRawEditorRefusal(refusal: RawEditorRefusal): string {
   return translate(locale.current, rawEditorRefusalKey(refusal));
 } // End of function tRawEditorRefusal()
+
+/**
+ * Renders why one field of a snippet is shown rather than edited.
+ *
+ * The accessor over `fieldEligibility`'s verdict, here for `tRawSaveMessage`'s
+ * reason: a component that wrote `t(fieldRefusalKey(reason))` would be turning a
+ * code into a key in markup, which CLAUDE.md section 2 forbids and
+ * `scripts/lint/built-translation-keys.ts` refuses.
+ *
+ * **None of the five names a `TriggerKind`**, and `triggerNotSingle` deliberately
+ * does not: the sentence says the snippet does not fire from one literal trigger,
+ * and a screen that wants to name the shape it does have calls `tTriggerKind`.
+ *
+ * @param reason - Why the field may not be edited.
+ * @returns The translated sentence.
+ */
+export function tFieldRefusal(reason: FieldRefusal): string {
+  return translate(locale.current, fieldRefusalKey(reason));
+} // End of function tFieldRefusal()
 
 /**
  * Renders one line a save outcome shows, in the current language.

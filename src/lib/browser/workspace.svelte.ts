@@ -44,6 +44,7 @@ import {
   moveMatch,
   openWorkspace,
   reloadDocument,
+  saveMatch,
   saveRawDocument
 } from '../ipc/commands';
 import type {
@@ -60,12 +61,17 @@ import type {
   DocumentId,
   DocumentSummary,
   DocumentView,
+  MatchDraft,
   MatchId,
   MatchView,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
-import { sealWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
+import {
+  sealWholeDocumentSave,
+  type InvalidationStatus,
+  type SealedWholeDocumentSave
+} from './invalidation';
 import type { SelectionNotice } from './notices';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
@@ -78,11 +84,12 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
  * The commands the browser needs, as one injectable object.
  *
  * The six read-only commands of `../ipc/commands`, with the same signatures, and
- * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch}
- * and {@link BrowserCommands.saveRawDocument} are the two members that can change
- * a file on disk, and they are here for the same reason the others are: a test
- * that cannot run Tauri still has to be able to drive a refusal, a conflict and a
- * commit and watch what this state does about each.
+ * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch},
+ * {@link BrowserCommands.saveMatch} and {@link BrowserCommands.saveRawDocument}
+ * are the three members that can change a file on disk, and they are here for the
+ * same reason the others are: a test that cannot run Tauri still has to be able to
+ * drive a refusal, a conflict and a commit and watch what this state does about
+ * each.
  */
 export interface BrowserCommands {
   /**
@@ -147,6 +154,22 @@ export interface BrowserCommands {
     acknowledgement: Acknowledgement
   ): Promise<CommandResult<SaveResult>>;
   /**
+   * Writes one snippet's drafted values into its file.
+   *
+   * @param id - The snippet to save, by identity.
+   * @param draft - What the snippet should say, as a whole.
+   * @param baseRevision - The revision the caller believes the file holds, and the
+   *   revision the draft's indices are positions in.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure.
+   */
+  saveMatch(
+    id: MatchId,
+    draft: MatchDraft,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
    * Replaces one file's whole text, and saves it.
    *
    * **The one member whose answer is not a `CommandResult`**, because a
@@ -178,11 +201,34 @@ export const REAL_COMMANDS: BrowserCommands = {
   reloadDocument,
   documentText,
   moveMatch,
+  saveMatch,
   saveRawDocument
 };
 
 /** Where the workspace load has got to. */
 export type BrowserStatus = 'loading' | 'ready' | 'failed';
+
+/**
+ * Whether two match identities name the same snippet of the same parse.
+ *
+ * All three fields, because all three are the identity: the revision is part of it
+ * precisely so that a lookup crossing a reparse is refused rather than resolved to
+ * whatever now occupies that arena slot.
+ *
+ * @param held - One identity, or `null`.
+ * @param other - The other, or `null`.
+ * @returns `true` when both are present and name the same snippet.
+ */
+function isTheSameIdentity(held: MatchId | null, other: MatchId | null): boolean {
+  if (held === null || other === null) {
+    return false;
+  }
+  return (
+    held.document === other.document &&
+    held.revision === other.revision &&
+    held.node === other.node
+  );
+} // End of function isTheSameIdentity()
 
 /**
  * What {@link BrowserState.saveRawDocument} answers.
@@ -200,6 +246,53 @@ export type BrowserStatus = 'loading' | 'ready' | 'failed';
  * gone to the reporter. What the caller needs back is not the reason but whether
  * the file may have changed under it.
  */
+/**
+ * What {@link BrowserState.saveMatch} answers.
+ *
+ * **Two arms, and neither of them is `null`.** The first version of this method
+ * answered `SaveResult | null`, and the 2c-2 review was right that the `null`
+ * throws away the one bit a screen cannot do without: a command that failed at or
+ * after its rename carries `may_have_written: true`, and a caller that cannot tell
+ * that from `noWorkspaceOpen` will tell the person nothing was written when the
+ * file may already hold the edited snippet. That is `PROGRESS.md` D2 broken from
+ * the same side {@link RawSaveAnswer} was written to protect.
+ *
+ * The `answered` arm carries the adoption's own fate beside the outcome, for the
+ * reason the seal of `./invalidation.ts` carries an `InvalidationStatus`: a
+ * committed save this window could not re-read is a **successful save and a window
+ * out of step**, never a failed save, and a fact with nowhere to go is a fact that
+ * reaches the developer console and no screen.
+ */
+export type MatchSaveAnswer =
+  | {
+      /** The discriminant: the transaction answered. */
+      readonly kind: 'answered';
+      /** How the save ended. */
+      readonly result: SaveResult;
+      /**
+       * What became of the adoption a committed save owes.
+       *
+       * `notOwed` when nothing was written and nothing went stale, `done` when
+       * this state re-read the file and re-pointed what it holds, and `failed`
+       * when it could not — in which case everything this state held for that file
+       * has been **dropped** rather than left on screen describing bytes that are
+       * gone, and the file is unprojected until something reads it again.
+       *
+       * **A `failed` here never means the save failed.**
+       */
+      readonly adoption: InvalidationStatus;
+    }
+  | {
+      /** The discriminant: the command failed and there is no outcome at all. */
+      readonly kind: 'failed';
+      /**
+       * Whether the file may already hold the submitted draft.
+       *
+       * **A screen must not say "nothing was written" for one of these.**
+       */
+      readonly mayHaveWritten: boolean;
+    };
+
 export type RawSaveAnswer =
   | {
       /** The discriminant: the transaction answered, and the outcome is sealed. */
@@ -410,8 +503,9 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The first of the two entry points on this state that change a file**; the
-   * other is {@link BrowserState.saveRawDocument}. Everything else here reads.
+   * **The first of the three entry points on this state that change a file**; the
+   * others are {@link BrowserState.saveMatch} and
+   * {@link BrowserState.saveRawDocument}. Everything else here reads.
    *
    * What comes back is the outcome, and all three of its arms are answers rather
    * than failures: `saved`, `conflict` — the file moved on, and nothing was
@@ -437,9 +531,56 @@ export interface BrowserState {
     acknowledgement: Acknowledgement
   ): Promise<SaveResult | null>;
   /**
+   * Writes one snippet's drafted values into its file.
+   *
+   * **The wrapper is the enforcement, and this is exactly what it enforces.** A
+   * committed field save makes every `MatchId` this window holds for that file
+   * stale, and `SavedResult.moved` is the snippet's identity in the new revision.
+   * The design consult's Q6 says a caller that ignores it succeeds once and is
+   * then rejected on every later edit, save or selection lookup — so the adoption
+   * happens **here**, before the answer is handed back, and there is no way to
+   * obtain the result without it. That is the consult's second option: a single
+   * enforced wrapper rather than a sealed one-shot outcome, chosen because a field
+   * save has one identity to answer with and does not need the ceremony that
+   * `./invalidation.ts` exists to impose on a replacement that has none.
+   *
+   * **An adoption that could not be performed is carried, not swallowed.** If the
+   * save commits and the re-read then fails, everything this state holds for that
+   * file is stale and cannot be refreshed: the projection and the held selection
+   * are **dropped** rather than left on screen describing bytes that are gone, and
+   * `adoption` comes back `failed` beside the committed outcome. The save
+   * succeeded; the window is out of step. Those are two facts and both survive.
+   *
+   * **What that does not force, in the same breath.** Nothing in TypeScript stops
+   * a component importing `saveMatch` from `../ipc/commands` and calling it
+   * directly, which bypasses this method entirely — the same hole `moveMatch` and
+   * `saveRawDocument` have had since 2b-2a, and one no type in this repository can
+   * close. Nor can any type require a caller to *read* `adoption`; what it can do
+   * is make the failure survive as a value on the answer instead of as a line in a
+   * developer console. What the wrapper forces is that every caller *of it* adopts;
+   * what keeps the other door shut is that this is the only path any component
+   * uses, which is a fact about the code as written and not a guarantee.
+   *
+   * A snippet identified by `MatchId` rather than by `MatchView`, unlike
+   * {@link BrowserState.moveMatch}: an editor adopts the identity a save answers
+   * with, and there is no projection to go with it until the file is read again.
+   *
+   * @param id - The snippet to save, by the identity the caller drafted against.
+   * @param draft - What the snippet should say, as a whole.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended together with the adoption's own fate, or a failure
+   *   that says whether the file may already have been written.
+   */
+  saveMatch(
+    id: MatchId,
+    draft: MatchDraft,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
    * Replaces one file's whole text, and saves the file.
    *
-   * **The second entry point on this state that changes a file, and the only one
+   * **The third entry point on this state that changes a file, and the only one
    * that is not an edit.** It exists here rather than being called through
    * `../ipc/commands` directly because the invalidation a committed replacement
    * owes is about *this module's* cache: the projections, the selection and the
@@ -683,6 +824,47 @@ export function createBrowserState(
     // half no longer exists.
     fileTextRevision = null;
   } // End of function forgetFileText()
+
+  /**
+   * Drops the disk text captured for one document, when it is that document's.
+   *
+   * **The second text cache, and the one `forgetFileText` cannot reach.**
+   * `conflictText` is keyed by document rather than by whatever the viewer is
+   * pointed at — that is the whole reason it exists — so forgetting the viewer's
+   * snapshot leaves it untouched, and `rawTextOf` prefers it. The 2c-2 confirmation
+   * pass found the consequence: a raw save that conflicted captured version A, a
+   * later field save committed version B, and `rawTextOf` still answered A. Nothing
+   * on screen would have said the text was two writes old.
+   *
+   * Another document's capture is left alone, because nothing about it changed.
+   *
+   * @param document - The file whose captured text can no longer be vouched for.
+   */
+  function forgetConflictText(document: DocumentId): void {
+    if (conflictText !== null && conflictText.document === document) {
+      conflictText = null;
+    }
+  } // End of function forgetConflictText()
+
+  /**
+   * Drops **every** text this window holds that could be about one document.
+   *
+   * There are two caches and they are keyed differently — the viewer's snapshot by
+   * whatever it is pointed at, the conflict capture by document — so "forget this
+   * file's text" is two calls and was one until the 2c-2 confirmation pass. A call
+   * site that makes the second question answerable and only asks the first leaves a
+   * text behind that `rawTextOf` will happily serve.
+   *
+   * The viewer's half is dropped unconditionally rather than only when it names
+   * this document, which is what `forgetFileText` has always done: it also cancels
+   * a read in flight, and a read in flight for another file is cheap to retake.
+   *
+   * @param document - The file whose bytes this window can no longer vouch for.
+   */
+  function forgetTextOf(document: DocumentId): void {
+    forgetFileText();
+    forgetConflictText(document);
+  } // End of function forgetTextOf()
 
   /**
    * Reads the target file's text, if the viewer is showing a different file.
@@ -1112,7 +1294,7 @@ export function createBrowserState(
         report(answer.failure);
         if (mayHaveWritten(answer.failure)) {
           forgetFileText();
-          await adoptTheDocumentOnDisk(match.id.document, null);
+          await adoptTheDocumentOnDisk(match.id.document, null, null);
           await readFileText();
         }
         return null;
@@ -1133,7 +1315,7 @@ export function createBrowserState(
           // in that form. This is `forgetFileText`'s fourth caller and the first
           // one that is about a *write*.
           forgetFileText();
-          await adoptTheDocumentOnDisk(match.id.document, answer.value.moved);
+          await adoptTheDocumentOnDisk(match.id.document, match.id, answer.value.moved);
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
@@ -1149,6 +1331,88 @@ export function createBrowserState(
       }
       return answer.value;
     }, // End of function moveMatch()
+
+    async saveMatch(
+      id: MatchId,
+      draft: MatchDraft,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      const view = views.find((held) => held.id === id.document);
+      if (view === undefined) {
+        // Nothing on this state describes that document, so there is no base
+        // revision to send. The same refusal a move makes, for the same reason: a
+        // base that is not the parse the caller was drafting against turns an edit
+        // into an edit of whatever now occupies those spans. Nothing was sent, so
+        // nothing can have been written.
+        return { kind: 'failed', mayHaveWritten: false };
+      }
+      const answer = await commands.saveMatch(id, draft, view.revision, acknowledgement);
+      if (!answer.ok) {
+        // A save that failed is not a workspace that failed, so the window keeps
+        // showing the configuration it was showing — but `mayHaveWritten` is the
+        // only thing that says whether it is still showing this *file* correctly. A
+        // failure at or after the rename means the file may already hold the edited
+        // snippet, and a window that went on drawing the pre-save projection and the
+        // pre-save text would be describing bytes that are no longer there.
+        //
+        // **The answer carries it**, which is the 2c-2 review's first finding: a
+        // bare `null` here is indistinguishable from `noWorkspaceOpen`, and a screen
+        // that renders both as *nothing was written* states the opposite of what the
+        // disk may hold.
+        report(answer.failure);
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
+          forgetTextOf(id.document);
+          await adoptTheDocumentOnDisk(id.document, null, null);
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written };
+      }
+
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
+      if (answer.value.outcome === 'saved') {
+        // **A `Saved` does not mean the bytes changed.** `committed: false` is a
+        // documented success — a draft whose every field already held the value it
+        // asked for derives no edit — so what makes this screen out of date is one
+        // of two facts: the file was rewritten, or the revision the transaction
+        // ended on is not the one this state was projecting, which is a file some
+        // other program changed under the lock's two reads.
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          forgetTextOf(id.document);
+          // **The adoption the consult's Q6 asks for**, performed here so that a
+          // caller cannot obtain this result without it. `moved` is the snippet's
+          // identity in the new revision, and the selection follows it — but only
+          // when the selection is still the snippet that was saved, which is the
+          // review's fourth finding: a person who clicked another snippet while the
+          // save was in flight must not be dragged back to this one.
+          const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
+          if (stale === null) {
+            adoption = { kind: 'done' };
+          } else {
+            // **The commit happened and this window could not read the file back.**
+            // Everything it holds for that file was minted from bytes that have been
+            // replaced, so it is dropped rather than left on screen: a stale
+            // projection is not a smaller problem than an unprojected file, it is
+            // the same problem told as a fact. The failure travels back beside the
+            // committed outcome, never in place of it (`PROGRESS.md` D2).
+            forgetTheReplacedDocument(id.document);
+            adoption = { kind: 'failed', failure: stale };
+          }
+          await readFileText();
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        // Nothing was written, and the command has already refreshed its own cache
+        // from the disk. Taking the projection it handed back keeps this state
+        // describing the same bytes the next save will be checked against — and an
+        // earlier capture of that file's text describes bytes older still.
+        forgetTextOf(id.document);
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return { kind: 'answered', result: answer.value, adoption };
+    }, // End of function saveMatch()
 
     async saveRawDocument(
       document: DocumentId,
@@ -1252,33 +1516,53 @@ export function createBrowserState(
    * that failed after its rename**. In both cases the selection is repaired the
    * ordinary way, by looking for it.
    *
-   * A re-read that itself fails is reported and leaves the projection alone. That
-   * is the honest answer available here: this state cannot describe a file it
-   * could not read, and blanking the workspace over one file would be a bigger
-   * claim than the failure supports.
+   * A re-read that itself fails is reported **and answered**, so a caller that
+   * needs to know its window is out of step can be told. What this function does
+   * *not* do about it is decide: leaving the stale projection in place is right for
+   * a caller that only suspects a write, and dropping it is right for one that
+   * knows a commit happened, so the choice belongs to the caller that knows which
+   * it is. `BrowserState.saveMatch` drops it; `moveMatch` leaves it, which is the
+   * behaviour it has had since 2b-2a.
+   *
+   * **The selection is re-pointed only when it is still the snippet that was
+   * operated on**, which is the 2c-2 review's fourth finding. Without the `target`
+   * comparison, a person who saved snippet A and clicked snippet B while the save
+   * was in flight was dragged back to A when the answer landed — a selection this
+   * window moved without being asked. Any other selection in the file is repaired
+   * the ordinary way, positionally and then checked (R27).
    *
    * @param document - The file that was, or may have been, written.
-   * @param moved - The moved snippet's identity in the new revision, or `null`.
+   * @param target - The identity the operation was about, as it was **before** the
+   *   save, or `null` when there is none. Compared against the held selection.
+   * @param moved - That snippet's identity in the new revision, or `null`.
+   * @returns The failure of the re-read, or `null` when it succeeded.
    */
   async function adoptTheDocumentOnDisk(
     document: DocumentId,
+    target: MatchId | null,
     moved: MatchId | null
-  ): Promise<void> {
+  ): Promise<IpcFailure | null> {
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
-      return;
+      return fresh.failure;
     }
     installView(fresh.value);
-    if (moved !== null && selected !== null && selected.document === document) {
+    if (
+      moved !== null &&
+      selected !== null &&
+      selected.document === document &&
+      isTheSameIdentity(selected.id, target)
+    ) {
       const position = positionOf(fresh.value, moved);
       if (position !== null) {
         selected = selectMatch(fresh.value, position);
         notice = null;
-        return;
+        return null;
       }
     }
     repairAfter(fresh.value);
+    return null;
   } // End of function adoptTheDocumentOnDisk()
 
   /**
@@ -1317,6 +1601,12 @@ export function createBrowserState(
       // file's snapshot is untouched, because nothing about it changed.
       forgetFileText();
     }
+    // **Both text caches, because this function claims to be total for one
+    // document.** The conflict capture is keyed by document rather than by the
+    // viewer's target, so the branch above cannot reach it, and a capture left
+    // behind here is a text `rawTextOf` would serve for a file that has just been
+    // rewritten. The 2c-2 confirmation pass found the same omission in `saveMatch`.
+    forgetConflictText(document);
     return held;
   } // End of function forgetTheReplacedDocument()
 

@@ -50,7 +50,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c split** | **Phase 2c cut into ten sub-phases**, by dependency order and failure mode, after a design consult that changed four of the seven things it was asked about | ✅ complete — `docs/decisions/2c-split-notes.md` is the cut; `docs/reviews/phase-2c-split-design.md` is the consult |
 | **2c-1a** | The **draft spine**, with no editor and no screen: `Draft<T>` with undo expressible rather than addable, the one-shot **sealed** whole-document invalidation, and the save-outcome presentation model for all three arms | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on three High findings; **all eight were fixed before the commit** |
 | **2c-1b** | The **raw editor**, the one vertical slice: the raw pane made editable and saveable over `saveRawDocument`, the three arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state, this project's **first mounted-component test**, and the **first window reading of a screen that writes** | ✅ complete — after **three** review fix rounds below. The aggregate review returned **NOT READY** on three High findings; **all six were fixed**, and then the window reading found **two real defects the whole test suite had passed over**, and a second Codex pass on those two fixes returned **NOT READY** again on one more. **All nine were fixed before the commit** |
-| 2c-2 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-2 is next** |
+| **2c-2-1** | The **small editor's model layer and its command wiring**, with no component and no screen: a five-reason eligibility verdict computed from the projection, the baseline/buffer split with `DraftField` as the authoritative intent, per-field coalesced history on an injected clock, and `saveMatch` wired with identity adoption inside the wrapper | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on five findings; the confirmation pass over those fixes returned **NOT READY** again on two more the fixes had themselves introduced. **All seven were fixed before the commit** |
+| **2c-2-2** | The **small editor's screen**: the component, the mounted-component test and the window reading — the two thirds of 2c-2's evidence that step 1 does not have | ⬜️ **next** |
+| 2c-3 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3252,6 +3254,65 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-2-1
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was re-run after **both** fix rounds; the table records the final run.
+
+| Command | Result |
+|---|---|
+| `npm test` | **974 passed, 36 files** (894 / 35 before the phase; 963 and 971 at the two fix rounds) |
+| `npm run check` | 391 files, **0 errors, 0 warnings, 0 files with problems** |
+| `npm run build` | exit 0, **156 modules** — the guard rebaselined, see below |
+| `cargo test --workspace` | **1008 passed, 0 failed** (1007 before — exactly the one Rust test this step added) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no output — the architecture rule holds |
+| `git status --short --untracked-files=all` | changes only under `src/lib/`, `docs/` and `crates/espansoconfig-core/tests/`; **nothing under `src-tauri/`, no corpus path, no probe artefact** |
+
+**The 154-module guard is now 156, and it was rebaselined by measurement rather than by assumption.**
+A pristine `git archive HEAD` copy was extracted, given a symlinked `node_modules` and built: it
+prints **154**, so the delta is exactly the two new source modules (`matchEditor.ts` and
+`editorSave.ts`, both reached from `i18n/index.ts`). The bundle was then searched for
+`svelte/internal/server`, `payload.out` and `async_hooks` — **none present**. The guard's real
+signature is a jump to ~180 *with the server build pulled in*; that is absent, `vite.config.ts` was
+not touched, and the number moved by exactly what a new module costs. **Rebaseline this way or not at
+all; never by editing the condition.**
+
+---
+
+## Phase 2c-2-1 review disposition
+
+Two Codex rounds, both saved in full: `docs/reviews/phase-2c-2-model-code.md` (the aggregate review,
+five findings) and `docs/reviews/phase-2c-2-model-code-confirmation.md` (the confirmation pass over
+the fixes, two more). **Both returned `READINESS: NOT READY`. All seven were fixed before the
+commit.** The design consult that preceded the code is `docs/reviews/phase-2c-2-design.md`.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High — `BrowserState.saveMatch` collapsed every command failure to `null`**, discarding the `mayHaveWritten` bit, so a `SyncDirectory` failure after the rename was indistinguishable from `noWorkspaceOpen` and could be reported as *nothing was written* | **Adopted.** `saveMatch` answers `MatchSaveAnswer` — `{kind:'failed', mayHaveWritten}` or `{kind:'answered', result, adoption}` — mirroring `RawSaveAnswer`. The `null` return is gone. This is the prohibited class *a committed or possibly-committed write reported as an error*, reached again by a new route |
+| 2 | **Medium — a failed reprojection left stale projections and identities installed** while still returning the committed result, contradicting the adoption guarantee the notes claimed | **Adopted.** `adoptTheDocumentOnDisk` now *returns* the failure; `saveMatch` calls `forgetTheReplacedDocument`, puts `adoption: {kind:'failed'}` **beside** the committed outcome, and `applySave` takes it as a required third argument and adds the `windowOutOfStep` line beside — never in place of — the saved arm |
+| 3 | **Medium — no carriage-return gate at save time**, though `MatchBuffers` is unbranded, so `{ Set: "a\rb" }` could reach the wire | **Adopted.** `beginSave` refuses when the **derived draft** would write a `\r` — the derived draft and not the buffers, because a CR-refused field legitimately holds one in its buffer while sending `'Unchanged'`, and gating on buffers would refuse every save on such a snippet |
+| 4 | **Low — identity adoption dragged the selection back** to the saved match even when the selection moved while the save was in flight | **Adopted.** Adoption takes the pre-save target identity and re-points only when the held selection is still that snippet; `moveMatch` inherits it |
+| 5 | **Low — a net-zero typing burst left a ghost undo step** that changed nothing | **Adopted.** `amendDraft` drops the step it replaces when the replacement equals the step immediately before it, restoring that step's value *and* generation |
+| 6 | **Medium (confirmation pass) — `saveMatch` invalidated `fileTextAnswer` but not the separate `conflictText` cache**, so a raw-conflict capture of version A survived a field save that committed version B — and the notes said all raw text was dropped | **Adopted.** `forgetConflictText` / `forgetTextOf` added and called on all three state-changing paths; `forgetTheReplacedDocument`, whose comment claims to be total for one document, drops it too, so that claim became true as well |
+| 7 | **Low (confirmation pass) — collapsing a net-zero group could not restore an undo entry the group's own bounded push had already evicted** at the 100-step bound | **Adopted, with the cost stated.** `pushBounded` answers what it dropped, `Draft.evicted` retains it for exactly one group, and every boundary a collapse cannot follow releases it. Worst case moves from 100 retained steps to 101, said in the code comment, in `Draft.evicted`'s doc and as notes hole 10 |
+
+**Findings 6 and 7 exist because of the fixes to 1–5** — the confirmation pass earned its round trip,
+exactly as 2c-1b's second pass did. **Run one; the pattern is now twice-attested.**
+
+**Two of the seven were the decision record claiming a guarantee the code did not give** (findings 2
+and 6), which is this project's named worst defect class and the one no test can fail. That is the
+third and fourth instance across two phases. The notes were swept afterwards rather than patched at
+the two named sentences, and the remaining guarantee sentences — the wrapper bypass, *nothing forces
+a caller to read `adoption`*, *eligibility is not re-derived*, *the gate cannot explain itself* —
+were each confirmed to state their limit in the same sentence as the claim.
+
+**The falsification check is the evidence that the tests are real**, and it was run for both rounds:
+with the fixes reverted, exactly the named tests fail (8 of 185, then 3 of 188) and nothing else.
+
+---
+
 ## Verification — Phase 2c-1b
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4765,6 +4826,94 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**Phase 2c-2 is split into two steps, and step 1 is complete: the small editor exists as a value
+and nothing draws it.** `docs/decisions/2c-2-1-notes.md` is the record (§4 is ten open holes). The
+design consult for the whole of 2c-2 is `docs/reviews/phase-2c-2-design.md`; the two code reviews
+are `docs/reviews/phase-2c-2-model-code.md` and `-confirmation.md`, and **both returned
+`READINESS: NOT READY`. All seven findings were fixed before the commit.**
+
+**Do not re-commission the design consult.** `phase-2c-2-design.md` covers the whole of 2c-2,
+step 2 included — its Q1 (word boundary), Q2 (the carriage return), Q5 (trigger read-only) and Q7
+(the most likely missed defect) are all statements about the *screen* that step 1 could only
+prepare for.
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 974 passed, 36 files
+```
+
+(`cargo test --workspace` expects **1008**, and step 2 should write no Rust.)
+
+**The next step is Phase 2c-2-2 — the small editor's screen.** Step 1 deliberately touched no
+`.svelte` file, so **two of `2c-split-notes.md` §7's three kinds of evidence are still owed**: the
+mounted-component test and the window reading. Only the model tests exist.
+
+**What step 1 built that step 2 must call and must not redesign.**
+
+- **`src/lib/browser/matchEditor.ts` is the whole editor as a value**, exactly as `rawEditor.ts` is
+  for the raw editor. The component is a thin walk over it. That is what made step 1's protocol
+  testable at all, and it is the only reason the seven review findings were reachable without a
+  screen.
+- **`MatchBaseline` and `MatchBuffers` are two values and `fieldIntent` is the only reader of
+  both.** Do not let a control write into the baseline, and do not seed a buffer from anything but
+  the projection. **An initially absent field left blank must stay `'Unchanged'`** — that single
+  rule is what stops the app writing `label: ''` into a file that never had a label.
+- **Eligibility is computed before anything is bound.** Five reasons: `notDecodable`,
+  `carriageReturn`, `ownsNoBytes`, `unmodelledShape`, `triggerNotSingle`. The consult's Q5 asked
+  for **read-only, not disabled** — the value stays selectable and the reason is shown inline.
+  Render the reason with `tFieldRefusal`; **never build the key.**
+- **The word-boundary control is three text fields, and it may not become a checkbox.** D2u forbids
+  deciding that `word: on` means true. A screen that wants to name the trigger shape a snippet
+  *does* have calls `tTriggerKind`.
+- **`describeEditSave`, not `describeWholeDocumentSave`.** The outcome is **not** sealed; a field
+  edit invalidates no identity by itself. `editorSave.ts` holds the five save decisions both
+  editors share — extend it rather than copying `rawEditor.ts` a second time.
+- **`BrowserState.saveMatch` answers `MatchSaveAnswer`, never `null`**, and performs identity
+  adoption inside the wrapper. `applySave` requires the `adoption` as its third argument. **A
+  failed adoption is reported beside the committed outcome, never in place of it** — the screen
+  must say *the file was written and this window is out of step*, never *the save failed*.
+
+**What step 2 owes.**
+
+1. **The component**, plus **the mounted-component test** (opt in with `/** @vitest-environment
+   jsdom */` as the first line, per `RawEditor.test.ts`; **do not back-fill the existing six
+   components**), plus **a window reading** — `1c-1-notes.md` §10 for the technique,
+   `1c-2b-2b-2-notes.md` §6.1 for the WKWebView constraint: **one plan per launch, into a fresh
+   bundle path.** A window reading is re-taken after any change to a component.
+2. **The consult's Q7 — the single most likely defect all the automated tests pass over: an
+   untouched `replace: "a\rb"` reaching a real browser control and being submitted with LF.** Step
+   1 proved that projection is genuinely reachable (`an_escaped_carriage_return_decodes_into_a_
+   projected_logical_value` in `crates/espansoconfig-core/tests/model_projection.rs`) and gated it
+   three times. **The window reading must include that exact case**, because jsdom's normalization
+   is not WKWebView's and a mounted test cannot settle it.
+3. **The strings still never drawn.** The thirty-two `code.draftError.*`, the thirty-six
+   `code.editError.*`, `code.commandError.draftRefused` and `code.commandError.documentHasNoMatchList`
+   — `save_match` is the command that produces most of them, so this is the step that can finally
+   draw them. (`PROGRESS.md` said *"the eight `code.editError.*`"* before 2c-2-1; the real count is
+   **36**.)
+4. **Rebaseline the module guard honestly if it moves.** It is **156** now. Build a pristine
+   `git archive HEAD` copy and subtract; a jump to ~180 with `svelte/internal/server` in the bundle
+   is the regression, a delta equal to the new source modules is not.
+
+**Two things step 1 recorded that a later sub-phase inherits.**
+
+- **Notes hole 9 — `BrowserState.moveMatch` still carries all three latent shapes** that findings 1,
+  2 and 6 fixed in `saveMatch`: a `SaveResult | null` return, a stale projection left installed when
+  its own re-read fails, and an un-dropped `conflictText`. **No screen calls it yet. 2c-3b is the
+  sub-phase that puts move on a screen, and it must fix these first** — they were written down
+  rather than changed silently because fixing them alters a published signature outside 2c-2's cut.
+- **A component can still bypass the wrapper.** `src/lib/ipc/commands.ts` exports `saveMatch`, and
+  nothing in TypeScript, `svelte-check` or the three lint scanners stops a `.svelte` file importing
+  it directly and skipping adoption — the same hole `moveMatch` and `saveRawDocument` have had since
+  2b-2a. Today no component imports that module for anything but a type. This is stated in
+  `BrowserState.saveMatch`'s own JSDoc in the same sentence as what the wrapper does force.
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" further down still binds**,
+unchanged.
+
+---
 
 **Phase 2c-1b is complete: this application can now be used to write a user's file from a window.**
 `docs/decisions/2c-1b-notes.md` is the record (1417 lines; §9 is the window readings). The aggregate
