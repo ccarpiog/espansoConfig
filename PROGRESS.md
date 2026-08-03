@@ -6999,6 +6999,23 @@ _Updated at each phase boundary._
 | **2c-1b** | **`fa72d45`** | ✅ pushed to `origin/main` | clean |
 | **2c-2 step 1** | **`22a52cc`** | ✅ pushed to `origin/main` | clean |
 | **2c-2 step 2** | **`a17d975`** | ✅ pushed to `origin/main` | clean |
+| **2c-3a step 1** | **`37ea352`** | see below | clean |
+
+`37ea352` is Phase 2c-3a step 1 **including all three of its review rounds** — the step was held
+open until all ten findings were closed, so, as with every phase since `8989c16`, no commit holds a
+demonstrated defect. It contains `src/lib/browser/matchCreation.ts`, `matchDeletion.ts` and
+`typing.ts` with their tests, the two wrappers and the two-counter selection machinery in
+`workspace.svelte.ts`, `retargetedDraft`/`withdrawnConsent` in `draft.ts`, `positionInSameParse` in
+`selection.ts`, the fifth `SelectionNotice` arm, eighteen new sentences per language, the design
+consult, the three reviews, `docs/decisions/2c-3a-1-notes.md`, `CLAUDE.md` §6 and this checkpoint.
+**A fresh session starting Phase 2c-3a step 2 should start from `37ea352` or later.** As at 1b-1,
+`npm install` (or `npm ci`) is required before any frontend command will run. It touches no Rust,
+so `cargo test --workspace` is unchanged at 1008 and need not be re-run to verify it.
+
+**Two of its ten findings were introduced by a previous round's own fix**, which is why three
+rounds were run rather than the usual two; the second is the one that matters, and
+`docs/reviews/phase-2c-3a-1-confirmation.md` is the file to read before touching the selection
+generations again.
 
 `8b1c050` is **not a phase** — it is the **split of Phase 2c**, which the previous checkpoint made a
 fresh session's first act in as many words: *"A fresh session's first act is that split, not code."*
