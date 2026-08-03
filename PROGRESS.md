@@ -7532,6 +7532,32 @@ _Updated at each phase boundary._
 | **2c-2 step 2** | **`a17d975`** | ✅ pushed to `origin/main` | clean |
 | **2c-3a step 1** | **`37ea352`** | ✅ pushed to `origin/main` (as `cb6fee3`) | clean |
 | **2c-3a step 2** | **`57bf362`** | ✅ pushed to `origin/main` | clean |
+| **2c-3b step 1** | **`76a5196`** | ✅ pushed to `origin/main` | clean |
+
+`76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
+until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a
+demonstrated defect. And the rounds are the record here rather than a formality: round 1 returned
+`NOT READY` on four, **its own fixes introduced round 2's four**, and round 2's fix to the
+uncertain-send state was found **BROKEN** by round 3, which raised six more. **Eight of the fourteen
+were false claims in prose rather than defects in code** — this project's named worst class, the one no
+test can catch — and two of those eight were sentences a person reads on screen. The sharpest was the
+record prescribing `identityInProjection` as the producer that closes the unsaved-draft residual: that
+function resolves by **arena node only**, so a step 2 that followed the record would have recreated the
+cross-revision identity defect the same round had just closed.
+
+It contains `src/lib/browser/matchMove.ts` and its 52 model cases, the repaired
+`BrowserState.moveMatch` in `workspace.svelte.ts` with three added cases in `workspace.test.ts`,
+`plainIdentity` exported from `matchDeletion.ts`, the `path` override and `matchListPath` in
+`fixtures.ts`, 37 `browser.matchMove.*` keys in each dictionary with three accessors in
+`src/lib/i18n/index.ts`, the design consult and the three review rounds under `docs/reviews/`,
+`docs/decisions/2c-3b-1-notes.md`, `CLAUDE.md` §6 and this checkpoint. 1160 → **1218** frontend tests
+over 43 files; the production module count moves 165 → **166**, a delta of exactly the one new source
+module. It writes **no Rust**, so `cargo test --workspace` is unchanged at 1008 and `npm install` is
+still required before any frontend command will run.
+
+**`moveMatch` is now the fifth writing wrapper shaped like the other four, and the only one still not
+called from a screen.** A fresh session starting Phase 2c-3b step 2 should start from `76a5196` or
+later.
 
 `57bf362` is Phase 2c-3a step 2 **including both review rounds and the window reading's own fix
 round** — as with every phase since `8989c16`, the step was held open until every finding was closed,
