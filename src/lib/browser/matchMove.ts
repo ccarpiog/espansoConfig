@@ -694,9 +694,15 @@ export interface MatchMoveSession {
    * **The third thing that spends a session, and the only one that spends it
    * without knowing what happened.** `may_have_written` on the wire means the save
    * failed at or after the rename, so the file may already hold the moved snippet
-   * and this application cannot tell. Retrying from here would be offering to
-   * repeat a write that may have happened, and the `outOfDate` sentence — *nothing
-   * has been written* — would be a claim this session has just disclaimed.
+   * and this application cannot tell.
+   *
+   * **What spends the session is that uncertainty and the identity it leaves
+   * stale, never a fear of writing twice.** A session resends its **frozen** base
+   * revision, so if the first write did land, that base is stale and the resend
+   * conflicts rather than duplicating. Saying otherwise is what both dictionaries
+   * said until the third round, and what two comments here said until the fourth.
+   * And the `outOfDate` sentence — *nothing has been written* — would be a claim
+   * this session has just disclaimed.
    *
    * A flag of its own rather than a read of {@link MatchMoveSession.sendFailure},
    * because {@link dismissMoveOutcome} clears that field and putting a panel away
@@ -1043,10 +1049,20 @@ export type MoveSubmissionRefusal =
  * - **above the liveness check.** `outOfDate`'s sentence says *nothing has been
  *   written*, which is the one claim a `may_have_written` rejection has disclaimed.
  *
+ * **The same rule puts the liveness check above `notMovable`, and that pair is the
+ * fourth pass's first finding.** {@link startMatchMove} freezes `eligibility` at
+ * the session's first parse and no transition here recomputes it, so once this
+ * session is invalidated or no longer live, *this snippet cannot be moved* is a
+ * definite claim about the snippet read off a projection that has since been
+ * replaced — while `outOfDate` claims only that this session is stale, which is
+ * the half still known to be true. The round before had these two the other way
+ * round, and the test that covered `notMovable` drove it only against its own
+ * original projection, where the overlap cannot arise.
+ *
  * Below those, the order is the order a person would resolve them in: what the
- * session is doing, then whether the snippet can move at all, then whether this
- * session still describes the file the window is showing, then what the
- * destination panel is showing.
+ * session is doing, then whether this session still describes the file the window
+ * is showing, then whether the snippet can move at all, then what the destination
+ * panel is showing.
  *
  * @param session - The session to ask about.
  * @param live - Whether the projection this window holds **now** still gives this
@@ -1072,11 +1088,15 @@ function refusalGiven(
   if (conflictOf(session) !== null) {
     return 'conflict';
   }
-  if (session.eligibility.kind !== 'movable') {
-    return 'notMovable';
-  }
+  // **By the same rule, one pair further down**: `eligibility` was frozen at this
+  // session's first parse, so once the session is stale the definite claim about
+  // the snippet is the one that may no longer be true, and the weaker `outOfDate`
+  // wins over it.
   if (session.invalidated || !live) {
     return 'outOfDate';
+  }
+  if (session.eligibility.kind !== 'movable') {
+    return 'notMovable';
   }
   const target = lowerPlacement(session, session.draft.value);
   if (target === null) {
@@ -1406,10 +1426,12 @@ export function acknowledgeMoveFindings(session: MatchMoveSession): MatchMoveSes
  * resolved — and the submission goes with it, because there is nothing left on
  * screen to acknowledge. It does **not** give a spent session back: `moved`,
  * `invalidated` and `mayHaveWritten` all survive this, so nobody can dismiss their
- * way into moving a snippet whose identity is already stale or repeating a write
- * this application could not account for. The `sendFailure` it clears is the
- * *message*; the flag that spends the session is a separate field for exactly this
- * reason.
+ * way into sending from a session whose identity and base revision may no longer
+ * describe the file — the `mayHaveWritten` case included, where this application
+ * does not know what the file now holds. **Not** because a resend would repeat a
+ * write: it would carry the frozen base revision and conflict. The `sendFailure`
+ * it clears is the *message*; the flag that spends the session is a separate field
+ * for exactly this reason.
  *
  * **Dismissing a conflict is the case that needs it.** A conflict wrote nothing, so
  * `moved` is `false` and the panel that refused the control goes away with the
@@ -1637,7 +1659,21 @@ export interface MatchMoveView {
   readonly placement: MovePlacement;
   /** Whether the move control does anything. */
   readonly canMove: boolean;
-  /** Why this snippet cannot be moved at all, as a code, or `null`. */
+  /**
+   * Why this snippet cannot be moved at all, as a code, or `null`.
+   *
+   * **This is the session's frozen eligibility, and {@link cannotMove} is the live
+   * refusal.** They are two fields because they answer at two times:
+   * `eligibility` was computed once at {@link startMatchMove} and no transition
+   * recomputes it, so after a reprojection this field can still name a reason that
+   * was read off a parse the window has replaced. `refusalGiven` puts `outOfDate`
+   * **above** `notMovable` for exactly that reason.
+   *
+   * **A screen must therefore not draw this beside a `cannotMove` of `outOfDate`**,
+   * or the definite claim the precedence just suppressed comes back through the
+   * other field. Nothing in TypeScript can enforce that; the rule is here because
+   * the only place it can be broken is a component.
+   */
   readonly notMovable: MoveRefusal | null;
   /** Why the control does nothing as things stand, as a code, or `null`. */
   readonly cannotMove: MoveSubmissionRefusal | null;

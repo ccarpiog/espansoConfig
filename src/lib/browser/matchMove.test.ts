@@ -127,9 +127,12 @@ function file(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView 
  * refused even when the node it names is still occupied — a `MatchId` is
  * session-local, and node 10 of the new parse is not node 10 of the old one.
  *
+ * @param overrides - Whatever a case needs the re-read file to keep saying about
+ *   itself, such as the kind and read-only flag a packaged file does not lose by
+ *   being read again.
  * @returns The projection this window holds after the re-read.
  */
-function reread(): DocumentView {
+function reread(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
   return file({
     revision: AFTER,
     matches: [
@@ -142,7 +145,8 @@ function reread(): DocumentView {
         path: matchListPath(1)
       }),
       makeMatch({ node: 12, document: 2, revision: AFTER, trigger: ':sql', path: matchListPath(2) })
-    ]
+    ],
+    ...overrides
   });
 } // End of function reread()
 
@@ -697,6 +701,31 @@ describe('starting a move', () => {
     const held = session(0, packaged);
     expect(moveSubmissionRefusal(held, [packaged])).toBe('notMovable');
     expect(beginMove(held, live(0, packaged))).toBeNull();
+  });
+
+  it('answers the stale session above the frozen ineligibility', () => {
+    // **The fourth pass's first finding.** `eligibility` is computed once, at
+    // `startMatchMove`, and no transition recomputes it — so against the session's
+    // own projection `notMovable` is the only true arm and this is what it says.
+    const packaged = file({ kind: 'Package', readOnly: true });
+    const held = session(0, packaged);
+    expect(moveSubmissionRefusal(held, [packaged])).toBe('notMovable');
+
+    // Read the file again and both arms are true at once. *This snippet cannot be
+    // moved* is then a definite claim read off a parse this window has replaced,
+    // while *this session is out of date* is the half still known to be true, so
+    // the weaker one wins — the same rule that puts `mayHaveWritten` on top.
+    const again = reread({ kind: 'Package', readOnly: true });
+    expect(moveSubmissionRefusal(held, [again])).toBe('outOfDate');
+    // And the view a screen draws from the same live projections agrees, which is
+    // the half a refusal computed off the frozen session alone would have missed.
+    expect(matchMoveView(held, [again]).cannotMove).toBe('outOfDate');
+    // The frozen reason survives on its own field, deliberately — it is what a
+    // panel would have said, and the rule that it may not be drawn beside an
+    // `outOfDate` sentence is `MatchMoveView.notMovable`'s, enforceable only there.
+    expect(matchMoveView(held, [again]).notMovable).toBe('readOnly');
+    // Nothing is sendable either way; `beginMove` refuses both without saying why.
+    expect(beginMove(held, live(0, again))).toBeNull();
   });
 }); // End of the "starting" suite
 

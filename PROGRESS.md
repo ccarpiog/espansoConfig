@@ -2227,6 +2227,37 @@ write is what is on disk would be wrong for the same reason.
 
 ---
 
+## Phase 2c-3b-1 fourth pass disposition — the decision the checkpoint left open
+
+**The decision was taken explicitly, as the checkpoint required, and the answer was to run the
+pass.** The reasoning: round 3 changed refusal *precedence* and *user-facing copy about a person's
+own file*, step 2 draws both onto a screen, and every one of the three previous rounds' fixes had
+produced the next round's finding. Settling it before a component is built on it is cheaper than
+after.
+
+**The pass was justified by its result: `READINESS: NOT READY`, two High findings, both real.**
+The review is `docs/reviews/phase-2c-3b-1-fourth-pass.md`.
+
+| # | Finding | Disposition |
+|---|---|---|
+| F1 | **`notMovable` still won over `outOfDate`, and it is the arm that claims more.** `refusalGiven` asked the frozen `eligibility` before `invalidated \|\| !live`. Eligibility is computed once, at `startMatchMove`, and no transition recomputes it — so after a reprojection a session still answered the definite *this snippet cannot be moved*, read off a parse the window had replaced. **This is the exact rule round 3 applied to `mayHaveWritten`, left unapplied one pair further down**; the existing test drove `notMovable` only against its own original projection, where the overlap cannot arise | **Fixed.** The liveness check moved above the frozen eligibility, the rule written into the doc comment with its reason rather than as an arrangement of `if`s, and a regression test added — **verified to fail against the old ordering** before being kept, so it is not a vacuous pass |
+| F2 | **Two comments still justified the terminal state as preventing a repeated write** — the justification §9 rejected and the dictionaries were rewritten to drop. A session resends its **frozen base revision**, so a successful first write makes that base stale and a retry **conflicts** rather than duplicating. This is this project's named worst defect class surviving in the two comments the dictionary rewrite did not reach | **Fixed.** Both passages restated on **uncertainty and stale identity**, each saying explicitly what the justification is **not**. No test accompanies it, because no test can fail a comment — which is the whole reason the class is named |
+
+**Clean in the pass, and worth recording as checked rather than assumed:** the swap itself is
+centralized in one `refusalGiven` serving **both** public paths, no arm became unreachable, both
+English strings limit themselves to uncertainty and stale identity, the Spanish makes the same
+claims at the same strength using `fragmento`, and all **37** `browser.matchMove` keys exist in both
+dictionaries with matching placeholders.
+
+**A third thing was found while fixing F1, by neither the pass nor any test.** `MatchMoveView`
+exposes `notMovable` — the **frozen** eligibility reason — as a field beside the live `cannotMove`,
+so a component drawing both would put the definite claim back on screen exactly where the new
+precedence had just suppressed it. **Nothing in TypeScript can enforce that**, and the only place it
+can be broken is a component, so the rule is written on the field's own doc comment where step 2
+reads it: `notMovable` may not be drawn beside a `cannotMove` of `outOfDate`.
+
+---
+
 ## Phase 2c-1b review disposition
 
 **Three rounds, nine findings, and the sharpest two were found by neither of the reviews.** The
@@ -5265,22 +5296,27 @@ returned `READINESS: NOT READY`. All fourteen findings were fixed before the com
 The exact first command a fresh session should run:
 
 ```sh
-npm install && npm test        # expect 1218 passed, 43 files
+npm install && npm test        # expect 1219 passed, 43 files
 ```
 
 (`cargo test --workspace` expects **1008**, unchanged — step 1 wrote no Rust, and step 2 should need
 none either.)
 
-### An open decision for the next session, to take before step 2 starts
+### That open decision is TAKEN, the fourth pass ran, and it found two High findings
 
-**Round 3's own fixes were not themselves re-reviewed, and whether to run a fourth pass is a decision
-rather than a defect.** Three rounds is the depth 2c-3a-1 was committed at; every finding found so far
-is closed and verified; nothing is blocked. But **each of the three previous rounds' fixes produced the
-next round's finding**, and round 3 changed exactly two things worth a fourth look: the
-**refusal-precedence swap** — `mayHaveWritten` asked above `alreadyMoved` and above the liveness
-check — and the **rewritten `mayHaveWritten` copy in both languages**, which is a sentence a person
-reads about their own file. A pass scoped to those two changes is a live option. **Take the decision
-explicitly and record it either way**, rather than letting step 2 start and settle it by default.
+**The decision the previous checkpoint left open — whether to re-review round 3's own fixes — was
+taken in favour of running the pass, and the pass returned `READINESS: NOT READY`.** Both findings
+are fixed and committed; the disposition table is *Phase 2c-3b-1 fourth pass disposition* above and
+the review is `docs/reviews/phase-2c-3b-1-fourth-pass.md`. In short: the precedence rule round 3
+wrote had been applied to `mayHaveWritten` but **not** one pair further down, where the frozen
+`notMovable` still beat `outOfDate`; and two comments still justified the terminal state by
+**duplicate execution**, the claim §9 had just removed from both dictionaries.
+
+**The rule that produced both is now four rounds old and still generating findings: each round's fix
+produces the next round's finding.** Step 2 should expect the same of its own fix rounds rather than
+treat a second pass as a formality.
+
+**Step 1's own baseline moved with the fix**: the frontend suite is now **1219**, not 1218.
 
 **The next step is Phase 2c-3b step 2 — move on a screen.** Step 1 deliberately touched no `.svelte`
 file, so **two of `2c-split-notes.md` §7's three kinds of evidence are still owed**: the
@@ -5332,7 +5368,15 @@ a destination and pressing move is already two deliberate steps), Q8 (the typed 
 - **Where two refusal arms are true at once, the one that claims less wins.** `mayHaveWritten` — *this
   application cannot tell what happened* — is asked **first**, above `alreadyMoved` and above the
   liveness check whose sentence says nothing was written. That ordering is round 3's first finding and
-  it is written as a rule with its reason, not as an arrangement of `if`s.
+  it is written as a rule with its reason, not as an arrangement of `if`s. **The same rule now puts the
+  liveness check above `notMovable`** (the fourth pass's first finding): `eligibility` is frozen at
+  `startMatchMove` and never recomputed, so after a reprojection *this snippet cannot be moved* is a
+  definite claim read off a replaced parse while `outOfDate` is the half still known to be true.
+- **`MatchMoveView.notMovable` is the frozen reason and `cannotMove` is the live one, and a component
+  may not draw the first beside a `cannotMove` of `outOfDate`.** They answer at two different times.
+  Drawing both puts the definite claim back on screen exactly where the precedence suppressed it —
+  and **nothing in TypeScript can enforce this**, because the only place it can be broken is a
+  `.svelte` file. The rule is on the field's own doc comment.
 - **`BrowserState.moveMatch` now mirrors `saveMatch`**: it answers `MatchSaveAnswer`, it **reads
   `adoptTheDocumentOnDisk`'s return value** and reports a failed re-read *beside* a committed outcome,
   and it calls `forgetTextOf(document)` rather than `forgetFileText()`. All three latent shapes this
