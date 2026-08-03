@@ -642,16 +642,27 @@ export interface BrowserState {
    * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch} and
    * {@link BrowserState.saveRawDocument}. Everything else here reads.
    *
-   * What comes back is the outcome, and all three of its arms are answers rather
-   * than failures: `saved`, `conflict` — the file moved on, and nothing was
-   * written — and `refused`, which carries the findings to show and to hand back.
-   * `null` means the command itself failed; the reason went to the reporter, as
-   * every other failure on this state does.
+   * **The wrapper is the enforcement**, exactly as it is for
+   * {@link BrowserState.saveMatch}: a committed move makes every `MatchId` this
+   * window holds for that file stale, `SavedResult.moved` is the moved snippet's
+   * identity in the new revision, and the adoption happens **here**, before the
+   * answer is handed back, so there is no way to obtain the result without it.
    *
-   * On a committed save this refreshes the document's projection, drops the raw
-   * viewer's held text, and re-points the selection at the identity the command
-   * answered with — because a commit invalidates every identity this state holds
-   * for that file.
+   * **The selection follows the moved snippet only when it is still the moved
+   * snippet.** `adoptTheDocumentOnDisk` compares the held selection against the
+   * identity this call was about, so a person who clicked another snippet while
+   * the move was in flight is not dragged back to this one; any other selection in
+   * the file is repaired the ordinary way, positionally and then checked (R27).
+   *
+   * **An adoption that could not be performed is carried, not swallowed**, which
+   * is the second of the three latent shapes 2c-3b inherited. If the move commits
+   * and the re-read then fails, everything this state holds for that file is stale
+   * and cannot be refreshed: the projection and the held selection are **dropped**
+   * rather than left on screen describing bytes that are gone, and `adoption`
+   * comes back `failed` beside the committed outcome. The move succeeded; the
+   * window is out of step. Those are two facts and both survive (`PROGRESS.md`
+   * D2). Until 2c-3b-1 the re-read's answer was discarded and the stale projection
+   * stayed installed.
    *
    * **The base revision is the caller's and is forwarded unchanged**, exactly as it
    * is for {@link BrowserState.createMatch} and {@link BrowserState.deleteMatch}.
@@ -660,37 +671,45 @@ export interface BrowserState {
    * closed for the other two: a stale R0 submission presented after the window had
    * reprojected to R1 was sent *as though drafted at R1*, so the core found no
    * conflict and answered an identity failure instead of the revision conflict that
-   * describes what happened. Nothing between a caller and `move_match` may
-   * substitute another revision; no signature can require this one to be the
-   * caller's own.
+   * describes what happened. `baseRevisionOf` in `./matchMove.ts` is where a
+   * session's own base is.
    *
-   * **Three latent shapes remain here and are 2c-3b's**, not this sub-phase's, and
-   * not because anything blocks them — nothing calls this method from a `.svelte`
-   * file, which was checked rather than assumed. This method still answers
-   * `SaveResult | null` where the other four writing methods answer a
-   * `MatchSaveAnswer`; it still leaves a stale projection installed when its own
-   * re-read fails, where `saveMatch` drops it; and it calls `forgetFileText` where
-   * `forgetTextOf` belongs, so a conflict capture for this file is never dropped.
-   * All three are decisions about what a *move UI* is handed and what the window
-   * shows when a committed move cannot be read back, and 2c-3b is the sub-phase
-   * that puts a move on a screen and can decide them with that screen in front of
-   * it.
+   * **What that does not force, in the same breath.** Nothing in TypeScript stops
+   * a component importing `moveMatch` from `../ipc/commands` and calling it
+   * directly, which bypasses this method entirely — the hole every writing command
+   * has had since 2b-2a. Nor can any signature require `baseRevision` to be the
+   * session's own rather than whatever the window is projecting, or require a
+   * caller to *read* `adoption`. What the wrapper forces is that every caller
+   * **of it** adopts, and that this layer no longer chooses the revision on the
+   * caller's behalf; what keeps the other door shut is that no `.svelte` file
+   * imports `../ipc/commands` at all, which is a fact about the code as written
+   * and not a guarantee.
+   *
+   * A snippet identified by `MatchView` rather than by `MatchId`, unlike the other
+   * four writing methods. Only `.id` is read from either argument, so the
+   * projections are friction rather than information; the signature is left as it
+   * is because changing it is a decision about what a *move component* holds, and
+   * 2c-3b step 2 is the step that has one. `docs/decisions/2c-3b-1-notes.md`
+   * records it.
    *
    * @param match - The snippet to move.
    * @param after - The snippet it should follow, or `null` for the top of the
-   *   list.
+   *   list. Already lowered by the caller: the destination panel's *end* is an
+   *   identity by the time it reaches here, because the wire has no such anchor.
    * @param baseRevision - The revision the caller's move was decided against.
    *   Sent unchanged.
    * @param acknowledgement - The suspicions already shown to a person; pass
    *   `{ accepted: [] }` on a first attempt.
-   * @returns How the save ended, or `null` when the command failed.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   this state made before any command ran; or a command failure that says
+   *   whether the file may already have been written and why it rejected.
    */
   moveMatch(
     match: MatchView,
     after: MatchView | null,
     baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
-  ): Promise<SaveResult | null>;
+  ): Promise<MatchSaveAnswer>;
   /**
    * Writes one snippet's drafted values into its file.
    *
@@ -1709,7 +1728,7 @@ export function createBrowserState(
       after: MatchView | null,
       baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
-    ): Promise<SaveResult | null> {
+    ): Promise<MatchSaveAnswer> {
       const view = views.find((held) => held.id === match.id.document);
       if (view === undefined) {
         // Nothing on this state describes that document, so nothing here could
@@ -1717,8 +1736,10 @@ export function createBrowserState(
         // of date — and the anchor is worse than an edit's target: an identity
         // minted from a parse this window does not hold names a *different*
         // snippet in the parse the command reads. Nothing was sent, so nothing can
-        // have been written.
-        return null;
+        // have been written, and there is no rejection to hand on because no
+        // command ran. Its own arm, so the type says both rather than a comment
+        // claiming it.
+        return { kind: 'notAttempted' };
       }
       const answer = await commands.moveMatch(
         match.id,
@@ -1738,15 +1759,22 @@ export function createBrowserState(
         // cached parse in exactly that case, and a window that did not do the same
         // would go on drawing the pre-save order and the pre-save text over a file
         // that has moved on.
+        //
+        // **The answer carries it**, which is the 2c-2 review's first finding
+        // applied here at 2c-3b-1: a bare `null` was indistinguishable from
+        // `noWorkspaceOpen`, and a screen that renders both as *nothing was
+        // written* states the opposite of what the disk may hold.
         report(answer.failure);
-        if (mayHaveWritten(answer.failure)) {
-          forgetFileText();
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
+          forgetTextOf(match.id.document);
           await adoptTheDocumentOnDisk(match.id.document, null, null);
           await readFileText();
         }
-        return null;
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
       }
 
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
       if (answer.value.outcome === 'saved') {
         // **A `Saved` does not mean the bytes changed.** `committed: false` is a
         // documented success: a candidate byte-identical to what the file already
@@ -1758,11 +1786,28 @@ export function createBrowserState(
         // a file some other program changed under the lock's two reads.
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          // The snapshot the raw viewer holds is of a file that no longer exists
-          // in that form. This is `forgetFileText`'s fourth caller and the first
-          // one that is about a *write*.
-          forgetFileText();
-          await adoptTheDocumentOnDisk(match.id.document, match.id, answer.value.moved);
+          // Both text caches, not only the viewer's snapshot: `forgetFileText`
+          // alone left a conflict capture for this same file in place, which
+          // `rawTextOf` would then serve for bytes that have just been replaced.
+          // The identical omission the 2c-2 confirmation pass found in `saveMatch`.
+          forgetTextOf(match.id.document);
+          const stale = await adoptTheDocumentOnDisk(
+            match.id.document,
+            match.id,
+            answer.value.moved
+          );
+          if (stale === null) {
+            adoption = { kind: 'done' };
+          } else {
+            // **The commit happened and this window could not read the file back.**
+            // Everything it holds for that file was minted from bytes that have
+            // been replaced, so it is dropped rather than left on screen: a stale
+            // projection is not a smaller problem than an unprojected file, it is
+            // the same problem told as a fact. The failure travels back beside the
+            // committed outcome, never in place of it (`PROGRESS.md` D2).
+            forgetTheReplacedDocument(match.id.document);
+            adoption = { kind: 'failed', failure: stale };
+          }
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
@@ -1770,13 +1815,14 @@ export function createBrowserState(
         // cache from the disk. Taking the projection it handed back keeps this
         // state describing the same bytes the next save will be checked against.
         // The viewer's snapshot is of the bytes the *caller* read, which are not
-        // the ones on disk, so it goes too.
-        forgetFileText();
+        // the ones on disk, so it goes too — and so does an earlier capture of
+        // that file's text, which describes bytes older still.
+        forgetTextOf(match.id.document);
         installView(answer.value.disk);
         repairAfter(answer.value.disk);
         await readFileText();
       }
-      return answer.value;
+      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function moveMatch()
 
     async saveMatch(
@@ -2122,8 +2168,11 @@ export function createBrowserState(
    * *not* do about it is decide: leaving the stale projection in place is right for
    * a caller that only suspects a write, and dropping it is right for one that
    * knows a commit happened, so the choice belongs to the caller that knows which
-   * it is. `BrowserState.saveMatch` drops it; `moveMatch` leaves it, which is the
-   * behaviour it has had since 2b-2a.
+   * it is. Both callers that know a commit happened —
+   * `BrowserState.saveMatch` and, since 2c-3b-1, `BrowserState.moveMatch` — drop
+   * it through {@link forgetTheReplacedDocument}. The `may_have_written` paths of
+   * each call this with no target and **keep** whatever they find, because a
+   * suspected write is not a commit.
    *
    * **The selection is re-pointed only when it is still the snippet that was
    * operated on**, which is the 2c-2 review's fourth finding. Without the `target`

@@ -160,10 +160,35 @@ the raw editor, and **no `.svelte` file was touched**: the component, its mounte
 window reading are step 2's, and all three are still owed. Its decisions are
 `docs/reviews/phase-2c-2-design.md` (the consult) and `docs/decisions/2c-2-1-notes.md` (the record).
 
-**2c-3a is split the same way, and step 1 is complete: `matchCreation.ts` and `matchDeletion.ts`
-are new and delete as values, and nothing draws them.** All five writing commands are now wired
-through `BrowserState`; only three are called from a screen. Its decisions are
-`docs/reviews/phase-2c-3a-design.md` and `docs/decisions/2c-3a-1-notes.md`.
+**2c-3a is split the same way, and both its steps are complete: `matchCreation.ts` and
+`matchDeletion.ts` are new and delete as values, and `MatchCreator.svelte` and `MatchDeleter.svelte`
+draw them.** All five writing commands are wired through `BrowserState`; **four are called from a
+screen, and `moveMatch` is the one that is not** — 2c-3b step 2 is what draws it. 2c-3a's decisions
+are `docs/reviews/phase-2c-3a-design.md` and `docs/decisions/2c-3a-{1,2}-notes.md`.
+
+**2c-3b is split the same way, and step 1 is complete: `matchMove.ts` is move as a value, nothing
+draws it, and the wrapper that sends it was repaired in the same step.** `BrowserState.moveMatch`
+had never had a production caller, which is exactly why it carried three latent defects — a
+`SaveResult | null` return where the other four writing wrappers answer a `MatchSaveAnswer`, a
+discarded `adoptTheDocumentOnDisk` result that left a **stale projection installed** when a committed
+move's re-read failed, and `forgetFileText()` where `forgetTextOf(document)` belongs. All three are
+closed. Its decisions are `docs/reviews/phase-2c-3b-design.md` and
+`docs/decisions/2c-3b-1-notes.md`.
+
+**"Same sequence" is the invariant a move keeps, and "same file" is not it.** D2r makes `ItemMove`
+same-sequence only; today's projection happens to give a snippet file exactly one snippet list, and
+encoding *that coincidence* would make the model silently wrong the first time a projection exposes a
+second. `sequenceOf()` in `matchMove.ts` reads `MatchView.path`, requires the last step to be an
+index, and carries the file's identity **beside** the steps — a `DocumentPath` names no file, so
+`matches[0]` of two files is one path and two sequences.
+
+**Where two refusal arms are true at once, the one that claims less wins.** A move that may have been
+written says so **above** *this snippet has been moved* and above the liveness check, because the
+alternative — which shipped for one review round — drew a definite *"This snippet has been moved"*
+beside a send failure saying it may or may not have been. And the terminal state after an uncertain
+send is justified by **uncertainty and stale identity, never by duplicate execution**: a session
+resends its frozen content-hash revision, so a successful first write makes that base stale and the
+retry conflicts. Both dictionaries said otherwise until the third review round.
 
 **The selection machinery is two counters and collapsing them into one is a data defect.** A
 per-document `projectionGenerations` map says *this file's projection was replaced*; the global

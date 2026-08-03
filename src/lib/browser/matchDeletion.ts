@@ -367,10 +367,20 @@ export interface MatchDeletionSession {
  * replaced under it, which is what the rest of this module assumes when it compares
  * four values across a reprojection.
  *
+ * **Exported at 2c-3b-1, and shared rather than copied.** `./matchMove.ts` needs
+ * the same copy for the same reason — its drafted placement carries a `MatchId`
+ * through the same `structuredClone` — and the argument above is a *rule* about
+ * what a reactive projection does to a snapshot, so a second copy of it is a second
+ * place for it to be got wrong by somebody who only read one of them. That is the
+ * argument that produced `./typing.ts` and `./editorSave.ts`. The right home for it
+ * and for {@link identityInProjection} is a module that is about identities rather
+ * than about deletion; `docs/decisions/2c-3b-1-notes.md` records that as a hole
+ * rather than moving them while nothing but this file and one sibling need them.
+ *
  * @param id - The identity to copy.
  * @returns The same three values, in a fresh plain object.
  */
-function plainIdentity(id: MatchId): MatchId {
+export function plainIdentity(id: MatchId): MatchId {
   return { document: id.document, revision: id.revision, node: id.node };
 } // End of function plainIdentity()
 

@@ -40,6 +40,7 @@ import type {
   Diagnostic,
   DiagnosticCode,
   DocumentId,
+  DocumentPath,
   DocumentSummary,
   DocumentView,
   ElidedValue,
@@ -385,7 +386,35 @@ export interface MatchOverrides {
    * produce — two byte-identical twins, for instance.
    */
   readonly sourceText?: string;
+  /**
+   * `path` — the address the edit engine works from.
+   *
+   * **The default is `null`, which is not what a real projection produces**, and
+   * the asymmetry is deliberate: every match of a parsed snippet file has a path,
+   * and no test needed one until 2c-3b, so defaulting to `null` leaves the
+   * fixtures every existing suite was written against byte-for-byte unchanged. A
+   * test about a *sequence position* sets it, and {@link matchListPath} is the
+   * shape a snippet-list item really has.
+   */
+  readonly path?: DocumentPath | null;
 }
+
+/**
+ * The path a snippet of a file's own `matches:` list is addressed by.
+ *
+ * The shape `project_document` in `crates/espansoconfig-core/src/model/document.rs`
+ * builds for every item of the snippet list: the first document of the stream, the
+ * `matches` key, then the item's index. A **transcription** of what Rust does, in
+ * the sense this file's header means — not a measurement of it.
+ *
+ * @param index - The item's position in the list.
+ * @param documentIndex - Which document of the stream, when a test needs one that
+ *   is not the first.
+ * @returns The path.
+ */
+export function matchListPath(index: number, documentIndex = 0): DocumentPath {
+  return { document_index: documentIndex, segments: [{ Key: 'matches' }, { Index: index }] };
+} // End of function matchListPath()
 
 /**
  * Builds a `MatchView` of the shape the boundary delivers.
@@ -482,7 +511,7 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   return {
     id: { document, revision, node },
     source_node: node,
-    path: null,
+    path: overrides.path ?? null,
     span: { start: 0, end: 1 },
     source_text: overrides.sourceText ?? lines.join('\n'),
     trigger,

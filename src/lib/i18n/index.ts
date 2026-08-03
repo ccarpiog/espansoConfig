@@ -23,6 +23,14 @@ import {
 } from '../browser/matchCreation';
 import { deletionRefusalKey, type DeletionRefusal } from '../browser/matchDeletion';
 import {
+  moveRecoveryKey,
+  moveRefusalKey,
+  moveSubmissionRefusalKey,
+  type MoveRecovery,
+  type MoveRefusal,
+  type MoveSubmissionRefusal
+} from '../browser/matchMove';
+import {
   fieldRefusalKey,
   reprojectionRefusalKey,
   type FieldRefusal,
@@ -511,6 +519,40 @@ export function tCreationRefusal(reason: CreationRefusal): string {
 export function tDeletionRefusal(reason: DeletionRefusal): string {
   return translate(locale.current, deletionRefusalKey(reason));
 } // End of function tDeletionRefusal()
+
+/**
+ * Renders why one snippet may not be moved at all.
+ *
+ * @param reason - What `moveEligibility` answered.
+ * @returns The translated sentence.
+ */
+export function tMoveRefusal(reason: MoveRefusal): string {
+  return translate(locale.current, moveRefusalKey(reason));
+} // End of function tMoveRefusal()
+
+/**
+ * Renders why the move control does nothing as things stand.
+ *
+ * A second accessor beside {@link tMoveRefusal} because the two answer different
+ * questions: that one is about the snippet, this one is about what the
+ * destination panel is currently showing.
+ *
+ * @param reason - What `moveSubmissionRefusal` answered.
+ * @returns The translated sentence.
+ */
+export function tMoveSubmissionRefusal(reason: MoveSubmissionRefusal): string {
+  return translate(locale.current, moveSubmissionRefusalKey(reason));
+} // End of function tMoveSubmissionRefusal()
+
+/**
+ * Renders one thing the person may do about a move that produced no outcome.
+ *
+ * @param choice - What `moveRecoveryChoices` offered.
+ * @returns The translated label.
+ */
+export function tMoveRecovery(choice: MoveRecovery): string {
+  return translate(locale.current, moveRecoveryKey(choice));
+} // End of function tMoveRecovery()
 
 /**
  * Renders one line a save outcome shows, in the current language.
