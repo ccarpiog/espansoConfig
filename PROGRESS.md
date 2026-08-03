@@ -7241,6 +7241,22 @@ _Updated at each phase boundary._
 | **2c-2 step 1** | **`22a52cc`** | ✅ pushed to `origin/main` | clean |
 | **2c-2 step 2** | **`a17d975`** | ✅ pushed to `origin/main` | clean |
 | **2c-3a step 1** | **`37ea352`** | ✅ pushed to `origin/main` (as `cb6fee3`) | clean |
+| **2c-3a step 2** | **`57bf362`** | ✅ pushed to `origin/main` | clean |
+
+`57bf362` is Phase 2c-3a step 2 **including both review rounds and the window reading's own fix
+round** — as with every phase since `8989c16`, the step was held open until every finding was closed,
+so no commit holds a demonstrated defect. It contains `src/lib/components/MatchCreator.svelte` and
+`MatchDeleter.svelte` with their **mounted-component tests**, `BrowserState.views` and the
+`saveMatch` base-revision signature with its `MatchEditor.svelte` caller, `identityInProjection` and
+`plainIdentity` in `matchDeletion.ts`, `placementOptionsOf` in `matchCreation.ts`, 51 new sentences
+per language, the two reviews, `docs/decisions/2c-3a-2-notes.md`, the window reading with its
+re-take, and this checkpoint. **A fresh session starting Phase 2c-3b should start from `57bf362` or
+later.** As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command will run. It
+touches no Rust, so `cargo test --workspace` is unchanged at 1008 and need not be re-run to verify it.
+
+**One thing this commit deliberately does not fix**, and it is the only known user-visible defect at
+this SHA: the Spanish dictionary calls a snippet both `atajo` and `fragmento`, and one pane now shows
+both. It needs the owner's decision — see the ⚠️ under "Next action".
 
 `37ea352` is Phase 2c-3a step 1 **including all three of its review rounds** — the step was held
 open until all ten findings were closed, so, as with every phase since `8989c16`, no commit holds a
