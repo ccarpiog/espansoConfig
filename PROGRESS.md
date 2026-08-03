@@ -51,8 +51,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-1a** | The **draft spine**, with no editor and no screen: `Draft<T>` with undo expressible rather than addable, the one-shot **sealed** whole-document invalidation, and the save-outcome presentation model for all three arms | ✅ complete — after the review fix round below. The aggregate review returned **NOT READY** on three High findings; **all eight were fixed before the commit** |
 | **2c-1b** | The **raw editor**, the one vertical slice: the raw pane made editable and saveable over `saveRawDocument`, the three arms drawn, the acknowledgement round trip drawn, the terminal-but-honest conflict state, this project's **first mounted-component test**, and the **first window reading of a screen that writes** | ✅ complete — after **three** review fix rounds below. The aggregate review returned **NOT READY** on three High findings; **all six were fixed**, and then the window reading found **two real defects the whole test suite had passed over**, and a second Codex pass on those two fixes returned **NOT READY** again on one more. **All nine were fixed before the commit** |
 | **2c-2-1** | The **small editor's model layer and its command wiring**, with no component and no screen: a five-reason eligibility verdict computed from the projection, the baseline/buffer split with `DraftField` as the authoritative intent, per-field coalesced history on an injected clock, and `saveMatch` wired with identity adoption inside the wrapper | ✅ complete — after **two** review fix rounds below. The aggregate review returned **NOT READY** on five findings; the confirmation pass over those fixes returned **NOT READY** again on two more the fixes had themselves introduced. **All seven were fixed before the commit** |
-| **2c-2-2** | The **small editor's screen**: the component, the mounted-component test and the window reading — the two thirds of 2c-2's evidence that step 1 does not have | ⬜️ **next** |
-| 2c-3 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
+| **2c-2-2** | The **small editor's screen**: the component, this project's second and third mounted-component tests, and **four window readings over 26 launches** — the two thirds of 2c-2's evidence step 1 did not have. A refused field draws its value in the order the file writes it, each entry named; a committed save owes a re-projection the session cannot be dismissed past; a save that produced no outcome shows *why* | ✅ complete — after **two** Codex rounds, both **NOT READY** (four findings, then three more), plus **four defects the readings found and two the implementer's audit found**. **All thirteen were fixed before the commit**, and eight of them were this project's named worst defect class — three of those in **sentences a person reads**. **2c-2 is closed** |
+| **2c-3a** | **New and delete on a screen**: `create_match` and `delete_match` wired through `BrowserState`, the returned identity adopted, and the selection's behaviour when the snippet deleted is the one selected | ⬜️ **next** |
+| 2c-3b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3254,6 +3255,99 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-2-2
+
+Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
+worker's report. Each was re-run after every fix round and after every window reading; the table
+records the final run.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1020 passed, 38 files** (974 / 36 after 2c-2-1; 1007 / 1014 / 1017 at the three reading boundaries) |
+| `npm run check` | 394 files, **0 errors, 0 warnings, 0 files with problems** |
+| `npm run build` | exit 0, **158 modules** — the guard moved by exactly two, see below |
+| `cargo test --workspace` | **1008 passed, 0 failed** — unmoved, because **no Rust was written** |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo fmt --check` | exit 0 |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no output — the architecture rule holds |
+| dictionary keys | **544 in each language** (513 before), parity clean; 31 keys added, one reworded |
+| `git status --short --untracked-files=all` | changes only under `src/lib/`, `docs/` and `CLAUDE.md`; **nothing under `src-tauri/` or `crates/`, no corpus path, no probe artefact** |
+
+**The 156-module guard is now 158, and the shape of the move is the check rather than the number.**
+The two are `src/lib/components/MatchEditor.svelte` and `src/lib/browser/matchEditor.ts` — the latter
+existed after 2c-2-1 but **no component imported it**, so it was tree-shaken out of the production
+bundle. `+2` is exactly the number of source modules a screen over an existing model adds. The bundle
+was searched for `svelte/internal/server` and `node:async_hooks`: **neither is present**, and
+`vite.config.ts` was not touched. The regression this guard exists for is a jump to ~180 *with the
+server build pulled in*. **Rebaseline by building a pristine `git archive HEAD` copy and subtracting;
+never by editing the `resolve.conditions` condition.**
+
+**The window readings are the third kind of evidence and they are not ceremony.**
+`docs/decisions/2c-2-2-window-reading.md` records **four passes, 26 launches**, one plan per launch
+into a fresh bundle path over a freshly rebuilt configuration. Every launch reached its own `--- end`
+and every `probe.err` was zero bytes. They found **four defects the 1017-test suite, `svelte-check`
+and the first Codex pass had all missed**. The probe was removed four times, once per pass;
+`src/main.ts` and `src-tauri/src/main.rs` were each restored from copies taken **before** the probe
+first existed and compared with `diff` — `IDENTICAL` every time — and every scratch path lived
+outside the repository. **The owner's real configuration was never opened**: every fixture was
+synthetic and hand-written for the run.
+
+---
+
+## Phase 2c-2-2 review disposition
+
+Two Codex rounds, both saved in full: `docs/reviews/phase-2c-2-2-code.md` (four findings) and
+`docs/reviews/phase-2c-2-2-confirmation.md` (all four confirmed fixed, three more). **Both returned
+`READINESS: NOT READY`. All seven were fixed before the commit**, as were the four the window
+readings found and the two the implementer's own audit found afterwards. The record is
+`docs/decisions/2c-2-2-notes.md`; the readings are `docs/decisions/2c-2-2-window-reading.md`.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High — `DetailPane` captured the match but read `file` reactively**, so opening the editor over a snippet of file A and then selecting file B put B's name on the header while every byte a save would write still went to A | **Adopted.** `MatchEditingSession { match, file }` is captured in **one assignment**; the header uses the captured file. `DetailPane.test.ts` exists for this one claim and is mounted over a **real** `createBrowserState` — a stub is not reactive, so the case would have passed before the fix as loudly as after it |
+| 2 | **Medium — reprojection was optional.** *Dismiss* cleared the outcome through `keepEditing` and resumed editing on eligibility carried over from bytes the commit had replaced | **Adopted.** `needsReprojection` is a field on `MatchEditorSession`, set by a commit and cleared by **nothing** but `startMatchEditor` over a fresh projection; `isEditable` is `false` while it is `true`; the committed panel offers the re-seed and **no *Dismiss*** |
+| 3 | **Medium — the `failure === null` invariant was a comment, not a type.** `{ kind: 'failed', mayHaveWritten: true, failure: null }` type-checked | **Adopted.** `MatchSaveAnswer` has three arms: `answered`, `notAttempted` (no fields, because nothing was sent) and `failed` with `failure: IpcFailure` **required**. This is the prohibited class *a record claiming a guarantee the code does not give*, in a published type |
+| 4 | **Low — a mounted test claimed 21 fields unchanged while sampling five** | **Adopted.** `UNTOUCHED: MatchDraft` is an exhaustive typed literal; a twenty-third required property is a compile error |
+| 5 | **Low (confirmation) — the caption claimed every refused value is shown "as the file writes it"**, while a `notScalar` arm renders only a localized shape name | **Adopted.** A caption **per arm**: `browser.detail.valueAsWritten` on a `text` arm, the new `browser.matchEditor.shapeOnly` on a `notScalar` one. The blanket caption is gone from the DOM, not overridden |
+| 6 | **Low (confirmation) — `unmodelledShape` said the app "cannot show what it holds"** while the component draws `UnknownEntry.value_text` above it | **Adopted, and deliberately not reworded to "the value is shown"** — `shownValuesOf` answers `[]` when `value_text` is empty. It now says the app cannot **edit** the key as one text field and will not write over it, which is true in both cases |
+| 7 | **Low (confirmation) — `cannotReproject` gave one cause where three are possible** | **Adopted, as a typed reason rather than a vaguer sentence.** `Reprojection` answers `projected` or `unavailable` over `ReprojectionRefusal = notProjected \| otherFile \| otherSnippet`; the three states have three different ways out, so a neutral sentence would be true and useless |
+
+**Four more came from the window readings, and no test could have.**
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | **A `triggers:`-list snippet's triggers were invisible.** A refused field drew its name and its reason with nothing between them, and D10 replaces the whole detail pane — so the triggers appeared **nowhere in the window**. Measured as `open triggersOnScreen: no` | **Adopted.** `FieldBaseline.shown` / `shownValuesOf`: one entry per trigger, `regex:` included, a non-scalar item **named** rather than dropped |
+| R2 | **`shownValuesOf`'s doc claimed "source order" while the code read three fixed slots**, so a file writing `regex:` above `trigger:` drew them the wrong way round | **Fixed in the code, not in the sentence.** Forms are placed by the **first byte of each form's value**; a `triggers:` list's own items are never re-sorted. Weakening the doc was available, correct and cheap — and would have shipped a screen that misorders a snippet's own trigger forms |
+| R3 | **The shown boxes were unlabelled**, so a `Several`'s trigger and regex were indistinguishable with the pane that names them off-screen | **Adopted.** `ShownValue.source` rendered with `tDetailField` — the detail pane's own strings, no new key. `tTriggerKind` will not do: it names the whole spec's shape, not a slot |
+| R4 | **The unlocated-form branch is unreachable from the projector**, while the doc sold it as a live fallback with a named trigger | **The branch was kept and the comment corrected.** `scalar_sequence()` at `crates/espansoconfig-core/src/model/project.rs:143` emits only `Scalar` or span-bearing `Elided`, so `position: null` cannot arise today — but `ValueView` has five arms and a `MatchView` is a **boundary value** nothing in TypeScript proves came from that writer |
+
+**And two the implementer's own audit found**, after both Codex rounds had passed over them:
+`browser.matchEditor.discardWarning` was drafted with the raw editor's *"Your changes have not been
+written to the file"*, which is **false** after a `mayHaveWritten` send failure; and the
+`fieldRemoved` marker was gated on the buffer's `removed` flag, so it went on promising a future
+write after a **committed** removal. It is now gated on `field.intent === 'Remove'`.
+
+**Eight of the thirteen rows above are this project's named worst defect class** — a record, comment
+or string claiming a guarantee the code does not give — plus one the tables do not list, the
+`matchEditor.ts` module header that said the carriage return is refused *twice* while three gates
+existed. That is instances five through thirteen, across three phases (2c-1a had two, 2c-2-1 had
+two), and the new thing about this phase is **where** they were: the first three rounds found them in
+comments, the last two found them in **sentences a person reads**. Nothing in the test suite,
+`svelte-check`, the i18n parity tests or the markup scan can fail on that — every one of those checks
+that a key exists and is translated, and every false key existed and was translated.
+
+**One latent instance was found and deliberately not changed.**
+`browser.rawEditor.discardWarning` carries the identical false wording and is reachable the same way.
+It is 2c-1b's published string and its markup is outside this cut; fixing it here would oblige a
+re-take of 2c-1b's window reading for a string this phase does not draw. It is hole 12 of
+`2c-2-2-notes.md` §4 rather than a silent carry-over.
+
+**The readings and the reviews found different things and neither subsumes the other.** Codex found
+three of the four code findings by reading types; the readings found four defects no type could
+express. The fourth reading found nothing, which is what a reading looks like when the fixes are real.
+
+---
+
 ## Verification — Phase 2c-2-1
 
 Every command below was run **by the orchestrator**, each as its own invocation, not taken on a
@@ -4826,6 +4920,119 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+**Phase 2c-2 is complete, both steps: a person can now open one snippet in a window, edit its six
+fields, undo, save, and read what the save did.** `docs/decisions/2c-2-2-notes.md` is the record (§4
+is fifteen open holes); `docs/decisions/2c-2-2-window-reading.md` is the four window readings, 26
+launches, and it is the primary evidence for the phase. The two code reviews are
+`docs/reviews/phase-2c-2-2-code.md` and `-confirmation.md`, and **both returned
+`READINESS: NOT READY`. All seven findings were fixed before the commit**, as were the four the
+window readings found and the two the implementer's own audit found afterwards.
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1020 passed, 38 files
+```
+
+(`cargo test --workspace` expects **1008**, unchanged — 2c-2-2 wrote no Rust, and 2c-3a should need
+none either.)
+
+**The next step is Phase 2c-3a — new and delete on a screen**, per `docs/decisions/2c-split-notes.md`
+§2: `create_match` and `delete_match` on a screen, the returned identity adopted, and **the
+selection's behaviour when the snippet deleted is the one selected**. It **fails as an identity
+mistake**, which is a different failure mode from 2c-2's and needs a different kind of care: 2c-2's
+worst case was writing the wrong value into the right place, and 2c-3a's is holding a `MatchId` that
+no longer names anything.
+
+**Do not re-commission the 2c design consult.** `docs/reviews/phase-2c-2-design.md` covers 2c-2 only;
+the split itself came from `docs/reviews/phase-2c-split-design.md` and covers the whole of 2c.
+
+**What 2c-2-2 built that 2c-3a must call and must not redesign.**
+
+- **`src/lib/components/MatchEditor.svelte` is a walk over `matchEditorView`, and holds no rule.**
+  Every decision about what may be edited, what a draft means, when a save may start and what a
+  commit moves is in `src/lib/browser/matchEditor.ts`. Keep new screens that shape; it is why this
+  phase's four code findings were fixable in a value.
+- **A snippet and its file are captured together**, in one assignment
+  (`MatchEditingSession` in `DetailPane.svelte`). Passing a second value straight from the live
+  selection is the High finding of this phase and type-checks perfectly.
+- **A committed save owes a re-projection, and the obligation lives on the session.**
+  `needsReprojection` is set by a commit and cleared by **nothing** but `startMatchEditor` over a
+  fresh projection; `isEditable` is `false` while it is `true`. There is deliberately **no *Dismiss***
+  on a committed panel. A delete has the same problem in a stronger form — see below.
+- **`Reprojection` answers a typed reason, never a bare `null`**
+  (`notProjected | otherFile | otherSnippet`). A refusal with no reason is not representable, and
+  `DetailPane.reprojectMatch` is the one implementation: it compares `document`, then `node`, then
+  `revision`.
+- **`MatchSaveAnswer` has three arms** — `answered`, `notAttempted` (no fields, because no command
+  ran) and `failed` with `failure: IpcFailure` **required**. Wire `createMatch` and `deleteMatch`
+  the same way; do not answer `SaveResult | null`.
+- **`sendFailureLines` in `editorSave.ts` walks the failure chain once**, in the model, so how deep a
+  screen goes is a decision a test can fail on. Reuse it; do not decide it in markup.
+- **A refused field shows its value and names where the value came from**
+  (`shownValuesOf`, `ShownValue.source`, `tDetailField`). Any new read-only surface owes the same:
+  showing a name and a reason with nothing between them is this phase's first window-reading defect.
+- **A value's source text goes through `SourceText`, never into a control.** Measured in the shipped
+  WKWebView: a `<textarea>` turns `"x\ry\r\nz"` into `"x\ny\nz"` and an `<input>` **deletes** a
+  carriage return (`"p\rq"` → `"pq"`). No control in this application can produce one.
+
+**What 2c-3a owes.**
+
+1. **The three kinds of evidence of `2c-split-notes.md` §7, all three**: model tests in
+   `src/lib/browser/`, at least one **mounted-component test** (opt in with
+   `/** @vitest-environment jsdom */` as the first line, as `MatchEditor.test.ts` and
+   `DetailPane.test.ts` do; **do not back-fill the existing six components**), and **a recorded
+   window reading** — `1c-1-notes.md` §10 for the technique, `1c-2b-2b-2-notes.md` §6.1 for the
+   WKWebView constraint: **one plan per launch, into a fresh bundle path**. A window reading is
+   **re-taken after any change to a component**; 2c-2-2 took four.
+2. **Set the language explicitly through the picker at the top of every plan.** The webview's
+   `localStorage` follows the **bundle identifier**, not `HOME`, so a previous launch's override
+   leaks into a fresh bundle with a fresh `HOME`. This **corrects `2c-1b-notes.md` §9.1**, which said
+   `HOME` keys it; the correction is in `CLAUDE.md` §6 and cost two launches to find.
+3. **Neither `createMatch` nor `deleteMatch` is wired into `BrowserState` yet.** Both exist in
+   `src/lib/ipc/commands.ts` (lines 502 and 561) and neither appears in `workspace.svelte.ts` —
+   only `moveMatch`, `saveMatch` and `saveRawDocument` do. Wiring them is 2c-3a's, through the
+   wrapper, with the adoption performed **before the answer is handed back**.
+4. **A deletion answers `moved: null`, and that is the answer rather than a gap.** `deleteMatch`'s
+   own JSDoc is explicit: the snippet that was deleted has no identity in the new revision, and
+   filling `moved` with a neighbour's identity would put a position back into the one field that
+   exists to replace positions with identities. **Every `MatchId` held for that file is stale
+   afterwards.** Re-read the document and choose — that choice is this sub-phase's central UI
+   question.
+5. **Deleting the last snippet of a file is refused** by the core, with `saveFailed` carrying the
+   engine's own reason. Offer to delete the file instead, or say so; **do not retry**, and do not
+   invent a force flag — there is none anywhere in this design.
+6. **`code.commandError.documentHasNoMatchList` can finally be drawn.** `match_list_of` in
+   `src-tauri/src/commands.rs` has exactly one caller, `create_one_match`, so **only `create_match`
+   produces it** — 2c-2-2 recorded it as a hole precisely because it belongs here.
+7. **Rebaseline the module guard honestly if it moves.** It is **158** now. Build a pristine
+   `git archive HEAD` copy and subtract; a delta equal to the number of new source modules is a new
+   module, a jump to ~180 with `svelte/internal/server` in the bundle is the `resolve.conditions`
+   regression. **Never rebaseline by editing the condition.**
+
+**Three things inherited that are still owed.**
+
+- **`BrowserState.moveMatch` still carries all three latent shapes** that findings 1, 2 and 6 fixed
+  in `saveMatch`: a `SaveResult | null` return, a stale projection left installed when its own
+  re-read fails, and an un-dropped `conflictText`. **No screen calls it yet. 2c-3b is the sub-phase
+  that puts move on a screen, and it must fix these first** — they were written down rather than
+  changed silently because fixing them alters a published signature outside 2c-2's cut.
+- **A component can still bypass the wrapper.** `src/lib/ipc/commands.ts` exports `saveMatch`, and
+  nothing in TypeScript, `svelte-check` or the three lint scanners stops a `.svelte` file importing
+  it directly and skipping adoption — the same hole `moveMatch` and `saveRawDocument` have had since
+  2b-2a. **Today no component imports that module for anything but a type**, which is a fact about
+  the code as written and not a guarantee. This is stated in `BrowserState.saveMatch`'s own JSDoc in
+  the same sentence as what the wrapper does force, and `createMatch`/`deleteMatch` will inherit it.
+- **`browser.rawEditor.discardWarning` still says *"Your changes have not been written to the
+  file"***, which is false after a `mayHaveWritten` send failure. The small editor's twin was fixed
+  in 2c-2-2; the raw editor's was left because its markup is outside that cut and changing it obliges
+  a re-take of 2c-1b's window reading. Whichever sub-phase next touches the raw editor owes it.
+
+**Everything under "What 2c inherits" and "What 2c must not revisit" further down still binds**,
+unchanged.
+
+---
 
 **Phase 2c-2 is split into two steps, and step 1 is complete: the small editor exists as a value
 and nothing draws it.** `docs/decisions/2c-2-1-notes.md` is the record (§4 is ten open holes). The
@@ -6416,10 +6623,10 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | Path | Why it matters next |
 |---|---|
 | [`src/lib/browser/rawEditor.ts`](src/lib/browser/rawEditor.ts) | **The editor's whole state machine as a value, and the model 2c-2's field editor should follow** — the component is a thin walk over it, which is what let the protocol be tested at all. Its drafted value is `RoundTripText`, a **branded** string whose only constructor applies the carriage-return check, so a bare `string` cannot type-check into a draft, a submission, a history step or a candidate; all three doors mint one or refuse, and `beginSave` re-checks because **a brand is a cast at bottom** and that is the last line before a wire that replaces a user's file. **The brand does not generalize to 2c-2**: a `replace` block scalar drafted through a `<textarea>` meets the identical API-value normalization, and that must be decided deliberately rather than assumed covered |
-| [`src/lib/components/RawEditor.svelte`](src/lib/components/RawEditor.svelte) | **The first screen in this project that writes a user's file**, and the only component with a mounted test. Read `copyBySelecting` before writing any clipboard code: `navigator.clipboard` is not sufficient on its own here, the carrier must be **offscreen rather than `hidden`** (an unrendered element cannot hold a selection), and every step of putting the screen back is separately non-throwing — because the first version restored focus in an unguarded `finally`, so a throw there produced **no** disclosure at all, neither success nor failure, on the one control that exists to keep a draft from being lost |
+| [`src/lib/components/RawEditor.svelte`](src/lib/components/RawEditor.svelte) | **The first screen in this project that writes a user's file**, and the first of the three components with a mounted test — `MatchEditor.svelte` and `DetailPane.svelte` gained theirs in 2c-2-2. **The harness is scoped by docblock opt-in, not by default**: `environment: 'node'` stays the suite's default, a file opts in with `/** @vitest-environment jsdom */` as its first line, and the five components with no mounted test are deliberately **not** back-filled — each of the three that has one gained it in the sub-phase that changed it. Read `copyBySelecting` before writing any clipboard code: `navigator.clipboard` is not sufficient on its own here, the carrier must be **offscreen rather than `hidden`** (an unrendered element cannot hold a selection), and every step of putting the screen back is separately non-throwing — because the first version restored focus in an unguarded `finally`, so a throw there produced **no** disclosure at all, neither success nor failure, on the one control that exists to keep a draft from being lost |
 | [`docs/decisions/2c-1b-notes.md`](docs/decisions/2c-1b-notes.md) **§9** | **The two window readings, and the reason this project's third kind of evidence is not ceremony.** They found two real defects that 883 passing tests, `svelte-check` and two Codex passes had all sailed past — one of which silently rewrote every line ending in a user's file. §9.11 is the re-take, taken because the fixes changed three components. **§13 is the honesty rule's third occurrence in one phase**: a decision record asserting a guarantee the code did not give. D13 is the corrected shape to copy — three named categories, one of them *what merely happens to be true of the current component path*, written as no guarantee at all |
-| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default, component test files opt in by docblock, the existing six components are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **154 modules is the regression guard**; check it on every round |
-| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **Where 2c starts, and the only place a writing command is wired to real state.** `moveMatch` (2b-2a) and `saveRawDocument` (2b-2c-3b) are in `BrowserCommands`; `saveMatch`, `createMatch` and `deleteMatch` are **not**. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
+| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default and component test files opt in by docblock; the components with no mounted test are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **The module count is the regression guard and it moves with the source: 154 at 2c-1b, 156 at 2c-2-1, 158 at 2c-2-2.** The guard is not the number but the *shape of a change to it* — a delta equal to the new source modules is a new module, a jump to ~180 with `svelte/internal/server` in the bundle is the regression. Rebaseline by building a pristine `git archive HEAD` copy and subtracting; **never by editing the condition** |
+| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **The only place a writing command is wired to real state.** `moveMatch` (2b-2a), `saveRawDocument` (2b-2c-3b) and `saveMatch` (2c-2-1) are in `BrowserCommands`, `REAL_COMMANDS` and `BrowserState`; **`createMatch` and `deleteMatch` are not** — that is 2c-3a's, and it is the last of the five writing commands to be wired. `saveMatch` answers **`MatchSaveAnswer`** (`answered` / `notAttempted` / `failed` with a **required** `IpcFailure`), never `SaveResult \| null`, and performs the identity adoption **before** the answer is handed back. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The eleven wrappers, five of which write.** `saveRawDocument` is the only one that does not return `CommandResult<SaveResult>`: it returns **`RawSaveOutcome`**, whose success arm always carries the `SaveResult` **plus** a required `reload` discriminant (`notOwed` / `done` / `failed`). That shape exists because the 3b review found **D2 broken in TypeScript** — a rejecting reload callback threw past the return type and hid a *committed* write. **A sixth writing wrapper inherits the rule, not the shape**: whatever it returns, a committed write may never come back as a rejection or an error |
 | [`src/lib/browser/rawSave.ts`](src/lib/browser/rawSave.ts) | The Q8 presentation model, in the tested layer rather than in a component. `describeRawSave` puts **"this replaces the entire document"** first in every model — the mode's identity, not a warning — then the owner's ruling when the candidate does not parse: espanso will not load the file, the parser's position **or the explicit no-position case**, and the choice. **`saveAnyway` is withheld for verdicts no acknowledgement can move.** `detail` is the parser's own message: carried, never localized, and deliberately not rendered |
 | [`docs/decisions/2b-2c-3b-notes.md`](docs/decisions/2b-2c-3b-notes.md) | Nine decisions with their reasons and the fix round. **§2.2 is the one to read before adding a writing command**: a raw save takes **no `view_at`**, because a replacement turns nothing into a position and — in consult Q7's scenario exactly — the session's cache still holds the loaded revision, so a pre-check would *pass*. Only the transaction's locked read sees it, and `SaveResult::Conflict` is strictly richer than `IdentityStaleRevision` |

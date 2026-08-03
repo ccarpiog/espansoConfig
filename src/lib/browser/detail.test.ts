@@ -779,13 +779,24 @@ describe('the source of the pane that renders this model', () => {
     expect(source).toContain(`${accessor}(`);
   });
 
-  it('contains the refusal arms in its source and the permission arm nowhere', () => {
+  it('contains the refusal arms in its source, and names the permission arm only as a gate', () => {
     // Both halves. The first is the point of the feature; the second is the
     // constraint on it, and it is the half a later edit would break by
     // "improving" the pane with a reassuring green line.
     expect(source).toContain("detail.editability.kind === 'blocked'");
     expect(source).toContain("detail.editability.kind === 'blockedUnnamed'");
-    expect(source).not.toContain("'unrestricted'");
+
+    // **The second half changed at Phase 2c-2-2 and did not go away.** Until an
+    // editor existed, naming the unrestricted arm at all could only produce a
+    // promise about an editor the reader could not reach, so the scan banned the
+    // word outright. The small editor exists now and this pane is where it is
+    // opened from, so the arm is named exactly once — as a **condition**, which
+    // is what the second assertion pins. A line that merely mentions it is a
+    // line that renders it, and that is the reassuring green line again.
+    const mentions = source.split("'unrestricted'").length - 1;
+    expect(mentions).toBe(1);
+    const line = source.split('\n').find((one) => one.includes("'unrestricted'"));
+    expect(line?.trim().startsWith('{#if ')).toBe(true);
   });
 
   // There is no "holds no built `t(` key" case here. `built-translation-keys.test.ts`

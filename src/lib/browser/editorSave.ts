@@ -30,6 +30,8 @@
  * arrangement as `./draft.ts`, one layer up.
  */
 
+import type { IpcFailure } from '../ipc/errors';
+import type { DraftError, EditError, SaveError } from '../ipc/types';
 import type { Draft, DraftSubmission } from './draft';
 import { acknowledgeRefusal } from './draft';
 import type { RawSaveChoice } from './rawSave';
@@ -59,10 +61,14 @@ export type SendFailure =
   | {
       /** The command failed before anything could have been written. */
       readonly kind: 'notSent';
+      /** Why, when the boundary handed a reason back. */
+      readonly reason: IpcFailure | null;
     }
   | {
       /** The write may have completed. This application cannot tell. */
       readonly kind: 'mayHaveWritten';
+      /** Why, when the boundary handed a reason back. */
+      readonly reason: IpcFailure | null;
     };
 
 /**
@@ -71,13 +77,100 @@ export type SendFailure =
  * A named function rather than a ternary at each editor, so the mapping from the
  * boundary's question to the screen's two arms is written once.
  *
+ * **The reason is a second, independent question and is required rather than
+ * defaulted.** Whether the file may hold the candidate is what the person has to
+ * act on; *why the command refused* is what tells them what to change, and until
+ * 2c-2-2 it reached the developer console and no screen at all. A default of
+ * `null` here would be this function inventing "nothing is known" for a caller
+ * that simply did not look, which is the argument `applySave`'s required
+ * `adoption` argument already makes one layer up.
+ *
  * @param mayHaveWritten - What `mayHaveWritten` in `../ipc/errors` answered about
  *   the failure.
+ * @param reason - The classified failure, or `null` when the caller's boundary
+ *   does not carry one to hand on.
  * @returns The arm to raise.
  */
-export function sendFailureOf(mayHaveWritten: boolean): SendFailure {
-  return { kind: mayHaveWritten ? 'mayHaveWritten' : 'notSent' };
+export function sendFailureOf(mayHaveWritten: boolean, reason: IpcFailure | null): SendFailure {
+  return mayHaveWritten
+    ? { kind: 'mayHaveWritten', reason }
+    : { kind: 'notSent', reason };
 } // End of function sendFailureOf()
+
+/**
+ * One line of the *why* beside a save that produced no outcome.
+ *
+ * **A code, never a sentence**, and four arms rather than one because the four
+ * are four different enums with four accessors: `tIpcFailure`, `tDraftError`,
+ * `tSaveError` and `tEditError`. A component walks this list and calls the
+ * accessor its arm names, which is the rule that keeps a key from being built in
+ * markup (CLAUDE.md section 2).
+ */
+export type SendFailureLine =
+  | {
+      /** The rejection itself, as the boundary classified it. */
+      readonly kind: 'failure';
+      /** What to hand `tIpcFailure`. */
+      readonly failure: IpcFailure;
+    }
+  | {
+      /** Why a draft could not be turned into an edit batch. */
+      readonly kind: 'draft';
+      /** What to hand `tDraftError`. */
+      readonly error: DraftError;
+    }
+  | {
+      /** Why a save that was attempted did not commit. */
+      readonly kind: 'save';
+      /** What to hand `tSaveError`. */
+      readonly error: SaveError;
+    }
+  | {
+      /** Why the patch the save was carrying could not be applied. */
+      readonly kind: 'edit';
+      /** What to hand `tEditError`. */
+      readonly error: EditError;
+    };
+
+/**
+ * The reasons to show beside a save that produced no outcome, outermost first.
+ *
+ * **The chain is walked here rather than in markup**, which is what makes it
+ * checkable: `tSaveError`'s own note says how much of the chain a screen shows is
+ * that screen's decision, and a decision written in a `.svelte` file is a decision
+ * nothing in this repository can test.
+ *
+ * Two rejections carry a reason worth a second line, and both are `save_match`'s:
+ * `draftRefused` carries the core's `DraftError` whole — thirty-two sentences that
+ * had never reached a screen before 2c-2-2 — and `saveFailed` carries a
+ * `SaveError` whose `Patch` arm carries an `EditError`, which is another
+ * thirty-six. Every other code says all it has to say in one sentence, so it
+ * produces one line.
+ *
+ * @param reason - The classified failure, or `null` when there is none to show.
+ * @returns The lines, outermost first, or an empty list.
+ */
+export function sendFailureLines(reason: IpcFailure | null): readonly SendFailureLine[] {
+  if (reason === null) {
+    return [];
+  }
+  const lines: SendFailureLine[] = [{ kind: 'failure', failure: reason }];
+  if (reason.kind !== 'command') {
+    return lines;
+  }
+  if (reason.error.code === 'draftRefused') {
+    lines.push({ kind: 'draft', error: reason.error.error });
+    return lines;
+  }
+  if (reason.error.code === 'saveFailed') {
+    const error = reason.error.error;
+    lines.push({ kind: 'save', error });
+    if ('Patch' in error) {
+      lines.push({ kind: 'edit', error: error.Patch });
+    }
+  }
+  return lines;
+} // End of function sendFailureLines()
 
 /**
  * Whether the findings on screen are about the value the draft still holds.

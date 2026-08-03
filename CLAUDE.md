@@ -254,6 +254,24 @@ running `setTimeout` about six seconds after launch — `open -a` does not resta
 it thinks is already running. One plan per launch, into a fresh bundle path
 (`docs/decisions/1c-2b-2b-2-notes.md` §6.1).
 
+**The webview's `localStorage` is NOT keyed by `HOME`, and this corrects `2c-1b-notes.md` §9.1.**
+2c-2-2's reading measured it: a language override set by one launch was still in force in the next,
+from a different bundle path, with a `HOME` created seconds earlier — the WebKit data store follows
+the **bundle identifier**, which every probe bundle shares. So a plan must set the language
+**explicitly through the picker** rather than trust the launch environment; two launches of that
+reading failed by looking for an English control on a Spanish screen. The older record is left as it
+was written; this is the correction (`docs/decisions/2c-2-2-window-reading.md` §1.2).
+
+**No control in the small editor can produce a carriage return, and the two controls fail
+differently.** Measured in the shipped WKWebView, not assumed: a `<textarea>` assigned `"x\ry\r\nz"`
+reads back `"x\ny\nz"` — bare CR and CRLF both collapse to one LF — while an `<input type="text">`
+assigned `"p\rq"` reads back `"pq"`, **deleting** the character rather than converting it. That
+completes the design consult's Q7 as far as a window can, and it is why a projected value holding a
+real carriage return is drawn through `SourceText` rather than into any box
+(`docs/decisions/2c-2-2-window-reading.md` §6). The open half is stated there as a hole: a person who
+pastes CRLF text into the replacement box gets LF written, and nothing on screen says so while they
+type.
+
 **A raw-text command answers valid UTF-8 or refuses.** `document_text` returns
 `CommandResult<string>`; a file that is not valid UTF-8 becomes a typed `NotUtf8 { path, offset }` and
 **cannot be displayed at all**. That is exact preservation of valid UTF-8 plus a typed refusal — never

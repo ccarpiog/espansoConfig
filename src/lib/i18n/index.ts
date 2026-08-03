@@ -15,7 +15,12 @@ import {
   type DetailFieldName,
   type OptionGroupName
 } from '../browser/detail';
-import { fieldRefusalKey, type FieldRefusal } from '../browser/matchEditor';
+import {
+  fieldRefusalKey,
+  reprojectionRefusalKey,
+  type FieldRefusal,
+  type ReprojectionRefusal
+} from '../browser/matchEditor';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import { rawEditorRefusalKey, type RawEditorRefusal } from '../browser/rawEditor';
 import {
@@ -448,6 +453,21 @@ export function tRawEditorRefusal(refusal: RawEditorRefusal): string {
 export function tFieldRefusal(reason: FieldRefusal): string {
   return translate(locale.current, fieldRefusalKey(reason));
 } // End of function tFieldRefusal()
+
+/**
+ * Renders why this window cannot read one snippet again.
+ *
+ * The accessor over a `Reprojection`'s refusal, for `tFieldRefusal`'s reason. It
+ * exists as a **code with three arms** because the single sentence it replaces
+ * named one cause — *the window is no longer showing the file* — and was false for
+ * the other two, which is the defect class this project names as its worst.
+ *
+ * @param reason - Why the window holds no fresh projection of the snippet.
+ * @returns The translated sentence.
+ */
+export function tReprojectionRefusal(reason: ReprojectionRefusal): string {
+  return translate(locale.current, reprojectionRefusalKey(reason));
+} // End of function tReprojectionRefusal()
 
 /**
  * Renders one line a save outcome shows, in the current language.

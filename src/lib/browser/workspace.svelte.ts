@@ -249,7 +249,7 @@ function isTheSameIdentity(held: MatchId | null, other: MatchId | null): boolean
 /**
  * What {@link BrowserState.saveMatch} answers.
  *
- * **Two arms, and neither of them is `null`.** The first version of this method
+ * **Three arms, and none of them is `null`.** The first version of this method
  * answered `SaveResult | null`, and the 2c-2 review was right that the `null`
  * throws away the one bit a screen cannot do without: a command that failed at or
  * after its rename carries `may_have_written: true`, and a caller that cannot tell
@@ -262,6 +262,15 @@ function isTheSameIdentity(held: MatchId | null, other: MatchId | null): boolean
  * committed save this window could not re-read is a **successful save and a window
  * out of step**, never a failed save, and a fact with nowhere to go is a fact that
  * reaches the developer console and no screen.
+ *
+ * **The two ways a save produces no outcome are two arms, not one arm with a
+ * nullable reason, and that is the 2c-2-2 review's third finding.** The reason was
+ * added as `IpcFailure | null` under a comment saying `null` happened only when no
+ * command ran — a comment asserting a guarantee the type did not give, which is
+ * this project's own named worst defect class. `{ kind: 'failed', mayHaveWritten:
+ * true, failure: null }` type-checked. Now `notAttempted` carries no reason
+ * *because there is none*, and `failed` carries one **required**, so the shape
+ * cannot describe a command that ran and rejected with nothing to say.
  */
 export type MatchSaveAnswer =
   | {
@@ -283,7 +292,19 @@ export type MatchSaveAnswer =
       readonly adoption: InvalidationStatus;
     }
   | {
-      /** The discriminant: the command failed and there is no outcome at all. */
+      /**
+       * The discriminant: this state refused before any command ran.
+       *
+       * It holds no projection of the file, so there is no base revision to send
+       * and an edit would land on whatever now occupies those spans. **Nothing was
+       * sent, so nothing can have been written**, and there is no rejection to
+       * hand on — which is why this arm carries neither field. A screen may say
+       * *nothing was written* for one of these and for nothing else.
+       */
+      readonly kind: 'notAttempted';
+    }
+  | {
+      /** The discriminant: a command ran, rejected, and produced no outcome. */
       readonly kind: 'failed';
       /**
        * Whether the file may already hold the submitted draft.
@@ -291,6 +312,18 @@ export type MatchSaveAnswer =
        * **A screen must not say "nothing was written" for one of these.**
        */
       readonly mayHaveWritten: boolean;
+      /**
+       * Why the command rejected. **Required**, because a command ran.
+       *
+       * **Carried as well as reported, which is 2c-2-2's addition.** The reason
+       * still goes to the developer channel — every other failure on this state
+       * does — but `save_match`'s most common rejection is `draftRefused`, whose
+       * `DraftError` says *which field cannot be written and why*. That is an
+       * actionable validation answer belonging beside the field the person was
+       * editing (`tDraftError`'s own note), and a fact with nowhere to go is a
+       * fact that reaches a console and no screen.
+       */
+      readonly failure: IpcFailure;
     };
 
 export type RawSaveAnswer =
@@ -569,8 +602,9 @@ export interface BrowserState {
    * @param draft - What the snippet should say, as a whole.
    * @param acknowledgement - The suspicions already shown to a person; pass
    *   `{ accepted: [] }` on a first attempt.
-   * @returns How the save ended together with the adoption's own fate, or a failure
-   *   that says whether the file may already have been written.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   this state made before any command ran; or a command failure that says
+   *   whether the file may already have been written and why it rejected.
    */
   saveMatch(
     id: MatchId,
@@ -1343,8 +1377,10 @@ export function createBrowserState(
         // revision to send. The same refusal a move makes, for the same reason: a
         // base that is not the parse the caller was drafting against turns an edit
         // into an edit of whatever now occupies those spans. Nothing was sent, so
-        // nothing can have been written.
-        return { kind: 'failed', mayHaveWritten: false };
+        // nothing can have been written — and there is no rejection to hand on,
+        // because no command ran. Its own arm, so the type says both rather than
+        // a comment claiming it.
+        return { kind: 'notAttempted' };
       }
       const answer = await commands.saveMatch(id, draft, view.revision, acknowledgement);
       if (!answer.ok) {
@@ -1366,7 +1402,7 @@ export function createBrowserState(
           await adoptTheDocumentOnDisk(id.document, null, null);
           await readFileText();
         }
-        return { kind: 'failed', mayHaveWritten: written };
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
       }
 
       let adoption: InvalidationStatus = { kind: 'notOwed' };

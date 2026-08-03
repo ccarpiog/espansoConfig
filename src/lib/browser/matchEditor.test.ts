@@ -26,8 +26,11 @@
 import { describe, expect, it } from 'vitest';
 import { DICTIONARIES } from '../i18n/dictionaries';
 import { LOCALES } from '../i18n/locale';
+import type { IpcFailure } from '../ipc/errors';
 import type {
   ContentRevision,
+  DraftError,
+  EditError,
   Finding,
   MatchDraft,
   MatchId,
@@ -37,7 +40,7 @@ import type {
   UnknownEntry
 } from '../ipc/types';
 import { editDraft, isDirty } from './draft';
-import { makeDocument, makeMatch, scalar } from './fixtures';
+import { aliasValue, makeDocument, makeMatch, scalar } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeFindings,
@@ -240,6 +243,175 @@ function withScalar(field: 'replace' | 'label' | 'word', value: ScalarView): Mat
   }
   return { ...match, options: { ...match.options, word: value } };
 } // End of function withScalar()
+
+/**
+ * A snippet carrying all three trigger forms, with their values placed by hand.
+ *
+ * **The spans are the test data.** `makeMatch` gives every scalar the span
+ * `0..text.length`, so a fixture built from it alone puts all three forms at byte
+ * zero and could not tell an ordering by position from an ordering by slot — which
+ * is exactly the mistake the re-reading found. Each argument is the first byte of
+ * one form's value, so a case chooses whether the file's order agrees with the
+ * slot order or contradicts it.
+ *
+ * @param at - Where the file puts each form's value. A form left out of the map
+ *   is left out of the snippet.
+ * @returns The projection.
+ */
+function several(at: {
+  readonly trigger?: number;
+  readonly triggers?: number;
+  readonly regex?: number;
+}): MatchView {
+  const match = projection({
+    trigger: at.trigger === undefined ? null : ':one',
+    triggers: at.triggers === undefined ? [] : [':two'],
+    regex: at.regex === undefined ? null : 'th.*ee',
+    triggerKind: 'Several'
+  });
+  /**
+   * The same scalar with its value placed at one byte.
+   *
+   * @param value - The scalar as the fixture built it.
+   * @param start - Where the file puts it.
+   * @returns The scalar, moved.
+   */
+  const placed = (value: ScalarView, start: number): ScalarView => ({
+    ...value,
+    span: { start, end: start + value.text.length }
+  });
+  const spec = match.trigger;
+  return {
+    ...match,
+    trigger: {
+      ...spec,
+      trigger: spec.trigger === null ? null : placed(spec.trigger, at.trigger ?? 0),
+      triggers: spec.triggers.map((item) =>
+        'Scalar' in item ? { Scalar: placed(item.Scalar, at.triggers ?? 0) } : item
+      ),
+      regex: spec.regex === null ? null : placed(spec.regex, at.regex ?? 0)
+    }
+  };
+} // End of function several()
+
+describe('what a refused field shows of the file', () => {
+  /*
+   * **The 2c-2-2 window reading's first finding**, and the reason it needed a
+   * screen to find: every model test passed while a `triggers:`-list snippet drew
+   * a field name, a refusal sentence, and nothing between them. `field.text` is
+   * one scalar, and the whole point of that refusal is that there is no single
+   * scalar behind `trigger:`. The re-reading then found two more, and the sharper
+   * of them is the ordering below.
+   */
+  it('draws nothing for a field a control draws', () => {
+    const base = baselineOf(projection());
+    expect(base.replace.shown).toEqual([]);
+    expect(base.label.shown).toEqual([]);
+  });
+
+  it('draws every trigger of a list, in the order the list carries them', () => {
+    const base = baselineOf(
+      makeMatch({ revision: BASE, replace: 'b', triggers: [':r1', ':r2'], triggerKind: 'Multiple' })
+    );
+    // `TriggerSpec.triggers` crosses one item per source entry in source order,
+    // and nothing re-sorts them: this is the one ordering claim that was always
+    // true, and it is a claim about items rather than about forms.
+    expect(base.trigger.shown).toEqual([
+      { kind: 'text', text: ':r1', source: 'triggers' },
+      { kind: 'text', text: ':r2', source: 'triggers' }
+    ]);
+  });
+
+  it('draws the pattern of a regex trigger, and every form of a `Several`', () => {
+    expect(
+      baselineOf(projection({ trigger: null, regex: 'a.*b', triggerKind: 'Regex' })).trigger.shown
+    ).toEqual([{ kind: 'text', text: 'a.*b', source: 'regex' }]);
+    // Three forms whose values the file puts in the order the spec names them.
+    expect(baselineOf(several({ trigger: 10, triggers: 30, regex: 60 })).trigger.shown).toEqual([
+      { kind: 'text', text: ':one', source: 'trigger' },
+      { kind: 'text', text: ':two', source: 'triggers' },
+      { kind: 'text', text: 'th.*ee', source: 'regex' }
+    ]);
+  }); // End of the "regex and several" case
+
+  it('orders the forms by where the file puts them, not by the slot order', () => {
+    // **The re-reading's §15.1, and this project's named worst defect class.** The
+    // comment said *source order* while the code read three named slots in a fixed
+    // order, so a file writing `regex:` above `trigger:` drew them the wrong way
+    // round. The spans here disagree with the slot order in every pair.
+    expect(baselineOf(several({ trigger: 60, triggers: 30, regex: 10 })).trigger.shown).toEqual([
+      { kind: 'text', text: 'th.*ee', source: 'regex' },
+      { kind: 'text', text: ':two', source: 'triggers' },
+      { kind: 'text', text: ':one', source: 'trigger' }
+    ]);
+    // A list is placed by its earliest item, not by its last or by its slot.
+    const listFirst = several({ trigger: 40, triggers: 5, regex: 70 });
+    expect(baselineOf(listFirst).trigger.shown.map((one) => one.source)).toEqual([
+      'triggers',
+      'trigger',
+      'regex'
+    ]);
+  }); // End of the "byte order" case
+
+  it('draws a form it can give no byte position for last, keeping the form order', () => {
+    // **A shape the wire type permits and no projection produces**, driven by hand
+    // because that is the only way to reach it: `scalar_sequence()` in
+    // `crates/espansoconfig-core/src/model/project.rs` is the only writer of
+    // `TriggerSpec::triggers` and turns a non-scalar item into a `ValueView::Elided`
+    // carrying its own span, so every real item is located. The third window
+    // reading built a `triggers:` list of only `[a, b]` and `{k: v}` and watched it
+    // draw **first**, in file order — this case pins the defensive branch, and it
+    // is not evidence that a person can see it.
+    const placed = several({ trigger: 60, regex: 10 });
+    const unlocatable: MatchView = {
+      ...placed,
+      trigger: { ...placed.trigger, triggers: [{ Sequence: [] }] }
+    };
+    expect(baselineOf(unlocatable).trigger.shown).toEqual([
+      { kind: 'text', text: 'th.*ee', source: 'regex' },
+      { kind: 'text', text: ':one', source: 'trigger' },
+      { kind: 'notScalar', shape: 'Sequence', source: 'triggers' }
+    ]);
+  }); // End of the "no position" case
+
+  it('names a list item it cannot draw as text rather than dropping it', () => {
+    // Silently omitting an item would be the same defect one level down: the file
+    // has a trigger the screen does not mention.
+    const match = projection({ trigger: null, triggers: [':r1'], triggerKind: 'Multiple' });
+    const withAlias: MatchView = {
+      ...match,
+      trigger: { ...match.trigger, triggers: [...match.trigger.triggers, aliasValue(7)] }
+    };
+    expect(baselineOf(withAlias).trigger.shown).toEqual([
+      { kind: 'text', text: ':r1', source: 'triggers' },
+      { kind: 'notScalar', shape: 'Alias', source: 'triggers' }
+    ]);
+  }); // End of the "unshowable item" case
+
+  it('draws the bytes of a key it did not model, and nothing for one that owns none', () => {
+    expect(baselineOf(unmodelledLabel()).label.shown).toEqual([
+      // No `source`: this field's own label already names the key.
+      { kind: 'text', text: '{a: b}', source: null }
+    ]);
+    // `ownsNoBytes` genuinely has nothing to draw: the span is zero-width, so
+    // there is no value in the file to show, and inventing a marker for it would
+    // be this screen saying more than it knows.
+    expect(baselineOf(withScalar('label', zeroWidth(''))).label.shown).toEqual([]);
+    // And so does a snippet with no trigger of any form.
+    expect(baselineOf(projection({ trigger: null, triggerKind: 'Absent' })).trigger.shown).toEqual(
+      []
+    );
+  }); // End of the "nothing to draw" case
+
+  it('draws an undecodable scalar’s source slice, and a carriage return it holds', () => {
+    expect(baselineOf(withScalar('replace', undecoded('b'))).replace.shown).toEqual([
+      { kind: 'text', text: 'b', source: null }
+    ]);
+    expect(baselineOf(withScalar('replace', scalar('a\rb'))).replace.shown).toEqual([
+      { kind: 'text', text: 'a\rb', source: null }
+    ]);
+  });
+}); // End of the "what a refused field shows" suite
 
 describe('what a field’s edit-eligibility is decided from', () => {
   it('admits an ordinary present scalar and an absent field alike', () => {
@@ -649,9 +821,42 @@ describe('the save, and what its answer moves', () => {
     const started = beginSave(editField(session(), 'label', 'a name'))!;
     const done = applySave(started.session, saved(), ADOPTED);
     expect(done.baseline.label).toMatchObject({ present: true, value: 'a name' });
-    const cleared = editField(done, 'label', '');
-    expect(fieldIntent(cleared.baseline.label, cleared.draft.value.label)).toEqual({ Set: '' });
+    // Asked of the rebased baseline directly rather than through `editField`,
+    // because a commit now stops the session accepting changes until a fresh
+    // projection is seeded — driving a control here would test that gate instead
+    // of this rebase.
+    expect(fieldIntent(done.baseline.label, { text: '', removed: false })).toEqual({ Set: '' });
+    // And the same question against the baseline as it was **before** the save is
+    // the other half of the rule: an absent field left blank writes nothing.
+    expect(fieldIntent(started.session.baseline.label, { text: '', removed: false })).toBe(
+      'Unchanged'
+    );
   });
+
+  it('stops accepting changes after a commit until a fresh projection is seeded', () => {
+    // **The 2c-2-2 review's second finding.** The baselines a commit rebases are
+    // right about presence and values and say nothing about the new scalars'
+    // spelling, spans or decodability, so every eligibility verdict this session
+    // holds is about bytes that no longer exist.
+    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(), ADOPTED);
+    expect(matchEditorView(done).needsReprojection).toBe(true);
+    expect(isEditable(done)).toBe(false);
+    expect(editField(done, 'replace', 'd')).toBe(done);
+
+    // **Dismissing the panel does not dismiss the obligation.** While this was
+    // derived from the outcome, `keepEditing` cleared the outcome and with it the
+    // only trace of the debt, and editing resumed on carried-over eligibility.
+    const dismissed = keepEditing(done);
+    expect(dismissed.outcome).toBeNull();
+    expect(matchEditorView(dismissed).needsReprojection).toBe(true);
+    expect(isEditable(dismissed)).toBe(false);
+
+    // The one way out, and it is a new session rather than a transition.
+    const reseeded = startMatchEditor(projection({ replace: 'c' }), () => 0);
+    expect(matchEditorView(reseeded).needsReprojection).toBe(false);
+    expect(isEditable(reseeded)).toBe(true);
+  }); // End of the "re-projection is owed" case
 
   it('moves a removed field’s baseline to absent, and says nothing about it afterwards', () => {
     const started = beginSave(removeField(session(), 'replace'))!;
@@ -703,14 +908,73 @@ describe('the save, and what its answer moves', () => {
 
   it('reports a send that never left as neither an outcome nor a written file', () => {
     const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const notSent = saveCouldNotBeSent(started.session, false);
-    expect(notSent.sendFailure).toEqual({ kind: 'notSent' });
+    const notSent = saveCouldNotBeSent(started.session, false, null);
+    expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(notSent.outcome).toBeNull();
     expect(notSent.draft.value.replace.text).toBe('c');
-    expect(saveCouldNotBeSent(started.session, true).sendFailure).toEqual({
-      kind: 'mayHaveWritten'
+    expect(saveCouldNotBeSent(started.session, true, null).sendFailure).toEqual({
+      kind: 'mayHaveWritten',
+      reason: null
     });
+    expect(matchEditorView(notSent).failureLines).toEqual([]);
   });
+
+  it('unfolds a refused draft into the sentence that names the field', () => {
+    // **The reason 2c-2-2 added the third argument.** `save_match`'s commonest
+    // rejection is `draftRefused`, and its `DraftError` is what says *which field
+    // cannot be written and why*. Before this, all thirty-two of those sentences
+    // reached the developer console and no screen at all.
+    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const unmodelled: DraftError = {
+      FieldHasAnUnmodelledShape: { field: 'label', found: 'Sequence' }
+    };
+    const refusedDraft: IpcFailure = {
+      kind: 'command',
+      error: { code: 'draftRefused', error: unmodelled }
+    };
+    const answered = saveCouldNotBeSent(started.session, false, refusedDraft);
+    expect(matchEditorView(answered).failureLines).toEqual([
+      { kind: 'failure', failure: refusedDraft },
+      { kind: 'draft', error: unmodelled }
+    ]);
+  }); // End of the "refused draft" case
+
+  it('unfolds a save that failed on its patch down to the edit that failed', () => {
+    // The other chain, and the deepest one a field save can produce: a
+    // `saveFailed` carrying a `SaveError` whose `Patch` arm carries an
+    // `EditError`. Thirty-six more sentences that had never been drawn.
+    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const patch: EditError = { EmptyTarget: { edit: 0, node: 7, at: { start: 12, end: 12 } } };
+    const failedSave: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: { Patch: patch },
+        may_have_written: false
+      }
+    };
+    const answered = saveCouldNotBeSent(started.session, false, failedSave);
+    expect(matchEditorView(answered).failureLines).toEqual([
+      { kind: 'failure', failure: failedSave },
+      { kind: 'save', error: { Patch: patch } },
+      { kind: 'edit', error: patch }
+    ]);
+  }); // End of the "failed patch" case
+
+  it('says only what it has to say about a rejection that carries no chain', () => {
+    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const stale: IpcFailure = {
+      kind: 'command',
+      error: { code: 'identityStaleRevision', expected: AFTER, found: BASE }
+    };
+    expect(matchEditorView(saveCouldNotBeSent(started.session, false, stale)).failureLines).toEqual(
+      [{ kind: 'failure', failure: stale }]
+    );
+    const unexpected: IpcFailure = { kind: 'unexpected' };
+    expect(
+      matchEditorView(saveCouldNotBeSent(started.session, true, unexpected)).failureLines
+    ).toEqual([{ kind: 'failure', failure: unexpected }]);
+  }); // End of the "no chain" case
 
   it('puts an outcome away without touching the draft', () => {
     const dismissed = keepEditing(refused());

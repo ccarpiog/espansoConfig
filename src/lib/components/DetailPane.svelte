@@ -13,7 +13,9 @@
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
   import type { BrowserState } from '../browser/workspace.svelte';
-  import type { ContentRevision, DocumentSummary } from '../ipc/types';
+  import type { Reprojection } from '../browser/matchEditor';
+  import type { ContentRevision, DocumentSummary, MatchId, MatchView } from '../ipc/types';
+  import MatchEditor from './MatchEditor.svelte';
   import RawEditor from './RawEditor.svelte';
   import SourceText from './SourceText.svelte';
   import {
@@ -205,6 +207,73 @@
     }
     editing = { file, baseRevision, text };
   } // End of function startEditing()
+
+  /** What one open small-editor session is over: which snippet, in which file. */
+  interface MatchEditingSession {
+    /** The snippet being edited, as it was projected when the editor opened. */
+    readonly match: MatchView;
+    /**
+     * The file it lives in, **captured with it**.
+     *
+     * The 2c-2-2 review's first finding, and it was a High. `file` was passed as
+     * `browser.selectedDocument`, which stays reactive: opening the editor over a
+     * snippet of file A and then clicking anything in file B moved the *name* on
+     * the editor's header to B while `session.match` — and therefore every byte
+     * the save would write — still pointed at A. A screen naming one file while
+     * writing another is the worst kind of wrong this application can be, and no
+     * amount of care inside `MatchEditor.svelte` could have prevented it, because
+     * the value was arriving already wrong. `RawEditor` never had the defect: its
+     * `file` prop has always been a captured `DocumentSummary`.
+     */
+    readonly file: DocumentSummary | null;
+  }
+
+  // The session the small editor is open over, or `null`. `$state.raw` for the
+  // reason above: a projection is captured once and replaced whole, and the
+  // editor owns the draft from then on.
+  let editingMatch = $state.raw<MatchEditingSession | null>(null);
+
+  /**
+   * The freshly projected snippet of one identity, or why there is none.
+   *
+   * What `MatchEditorView.needsReprojection` asks the caller for, answered from
+   * the selection because `BrowserState.saveMatch` has already re-read the file
+   * and re-pointed the selection at the identity the commit answered with. All
+   * three fields are compared rather than the node alone: a person who clicked
+   * another snippet while the save was in flight keeps their click, and the
+   * editor is told this window has no projection to give it rather than being
+   * silently re-seeded from a different snippet.
+   *
+   * **The three refusals are three different facts about this window**, and that
+   * is the confirmation pass's third finding: the editor drew one sentence saying
+   * the window had moved to another file, which is false for the person who
+   * selected another snippet in *this* file and false again after a commit whose
+   * adoption dropped the projection. Each branch below now says what actually
+   * happened.
+   *
+   * @param id - The identity the editor now holds.
+   * @returns That snippet's projection, or the reason there is none.
+   */
+  function reprojectMatch(id: MatchId): Reprojection {
+    const held = browser.selectedMatch;
+    if (held === null) {
+      // Nothing is selected at all — the state after a commit whose adoption
+      // failed, which drops everything this window held for that file.
+      return { kind: 'unavailable', reason: 'notProjected' };
+    }
+    if (held.id.document !== id.document) {
+      return { kind: 'unavailable', reason: 'otherFile' };
+    }
+    if (held.id.node !== id.node) {
+      return { kind: 'unavailable', reason: 'otherSnippet' };
+    }
+    // Same file and same node at a revision this session did not adopt: this
+    // window holds *a* reading of the snippet, but not the one the editor is in
+    // step with, so it is no fresher than what the session already has.
+    return held.id.revision === id.revision
+      ? { kind: 'projected', match: held }
+      : { kind: 'unavailable', reason: 'notProjected' };
+  } // End of function reprojectMatch()
 </script>
 
 {#snippet scalarText(display: ScalarDisplay)}
@@ -358,6 +427,15 @@
         browser.saveRawDocument(document, baseRevision, text, acknowledgement)}
       close={() => (editing = null)}
     />
+  {:else if editingMatch !== null}
+    {@const open = editingMatch}
+    <MatchEditor
+      match={open.match}
+      file={open.file}
+      save={(id, draft, acknowledgement) => browser.saveMatch(id, draft, acknowledgement)}
+      reproject={reprojectMatch}
+      close={() => (editingMatch = null)}
+    />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}
     {@const view = browser.fileText}
     {@const file = browser.fileTextTarget}
@@ -410,6 +488,24 @@
       </p>
     {:else if detail.editability.kind === 'blockedUnnamed'}
       <p class="blocked">{t('browser.detail.notEditableUnnamed')}</p>
+    {/if}
+
+    {#if detail.editability.kind === 'unrestricted' && browser.selectedDocument !== null && !browser.selectedDocument.read_only}
+      {@const selected = browser.selectedMatch}
+      {@const inFile = browser.selectedDocument}
+      <!-- The *Edit* control is withdrawn rather than opening into a dead end,
+           for the reason the raw editor's is: `startMatchEditor` consults the same
+           `matchEditability`, and a read-only file is one this app will not write
+           to at all. A snippet whose every field the projection refuses still
+           opens, because the editor's own sentences are what say why.
+
+           **The snippet and its file are captured together**, in one assignment,
+           so the two cannot come from two reads and disagree afterwards. -->
+      <p class="toggle">
+        <button type="button" onclick={() => (editingMatch = { match: selected, file: inFile })}>
+          {t('browser.matchEditor.open')}
+        </button>
+      </p>
     {/if}
 
     <section>

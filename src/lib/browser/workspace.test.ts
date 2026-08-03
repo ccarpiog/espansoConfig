@@ -1748,9 +1748,12 @@ describe('saving one snippet’s fields', () => {
     await state.open(null);
 
     const stranger = makeMatch({ node: 99, document: 99 }).id;
+    // **Its own arm, carrying nothing.** No command ran, so there is neither a
+    // rejection to hand on nor a `mayHaveWritten` to weigh — and after the 2c-2-2
+    // review the type says that rather than a comment claiming it beside an
+    // `IpcFailure | null` that could have been `null` for any reason at all.
     expect(await state.saveMatch(stranger, editedDraft(), NOTHING_ACKNOWLEDGED)).toEqual({
-      kind: 'failed',
-      mayHaveWritten: false
+      kind: 'notAttempted'
     });
     expect(commands.saveMatch).not.toHaveBeenCalled();
   });
@@ -1850,7 +1853,13 @@ describe('saving one snippet’s fields', () => {
     // already hold the edited snippet.
     expect(
       await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
-    ).toEqual({ kind: 'failed', mayHaveWritten: true });
+    ).toEqual({
+      kind: 'failed',
+      mayHaveWritten: true,
+      // **2c-2-2's addition.** The reason travels beside the bit, because
+      // `save_match`'s commonest rejection says which field cannot be written.
+      failure: failed.ok ? null : failed.failure
+    });
 
     // A failure at or after the rename means the file may already hold the edited
     // snippet, so nothing cached for it can be vouched for.
@@ -1970,7 +1979,7 @@ describe('saving one snippet’s fields', () => {
 
     expect(
       await state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), NOTHING_ACKNOWLEDGED)
-    ).toEqual({ kind: 'failed', mayHaveWritten: false });
+    ).toEqual({ kind: 'failed', mayHaveWritten: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
   });
 }); // End of the "saving one snippet's fields" suite

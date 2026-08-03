@@ -85,22 +85,42 @@
  * module owes is the verdict and the reason, and {@link isFieldEditable} is the
  * gate every transition below goes through.
  *
- * ## The carriage return, twice
+ * ## The carriage return, three times
  *
  * A `replace: "a\rb"` decodes to a logical value holding a **real** carriage
- * return, and a browser text control normalises every carriage return in its value
- * to a line feed. So binding such a value to a control and reading it back
- * silently corrupts it, and the corruption is invisible: the save reports that the
- * bytes written are exactly the bytes sent, which is true and is not the point.
+ * return, and a browser text control does not give one back. So binding such a
+ * value to a control and reading it back silently corrupts it, and the corruption
+ * is invisible: the save reports that the bytes written are exactly the bytes
+ * sent, which is true and is not the point.
+ *
+ * **What the controls actually do is now measured rather than assumed**, in this
+ * application's own WKWebView (`docs/decisions/2c-2-2-window-reading.md` §6), and
+ * the two are not the same normalisation:
+ *
+ * - a `<textarea>` assigned `"x\ry\r\nz"` reads back `"x\ny\nz"` — a bare CR and a
+ *   CRLF both collapse to one LF, which is the HTML API value the spec describes
+ *   and what 2c-1b found;
+ * - an `<input type="text">` assigned `"p\rq"` reads back `"pq"` — it **deletes**
+ *   the character rather than converting it, so three characters become two.
+ *
+ * That is the complete answer to the design consult's Q7 as far as a window can
+ * give one: **no control in this editor can produce a carriage return**, in either
+ * direction. The gates below therefore protect against a caller that is not a
+ * control, which is exactly what the third of them was written for.
  *
  * The consult chose policy (i) — make such a value visibly read-only — over
  * "submit only when something else changed", which mistakes a deliberate
  * carriage-return-to-line-feed edit for no change, and over normalising, which
- * contradicts the preservation promise outright. It is enforced in two places:
- * {@link fieldEligibility} refuses the field before anything is bound, and
- * {@link editField} refuses a value carrying one on the way in, because the first
- * is a statement about the projection and the second is a statement about this
- * function.
+ * contradicts the preservation promise outright. It is enforced in **three**
+ * places: {@link fieldEligibility} refuses the field before anything is bound,
+ * {@link editField} refuses a value carrying one on the way in, and
+ * {@link beginSave} refuses to send one on the way out. The first is a statement
+ * about the projection and the second about that function; the third is the one
+ * that is load-bearing rather than defensive, because {@link MatchBuffers} carries
+ * **no brand** and a caller that builds one by hand type-checks. This header said
+ * *two* until 2c-2-2 and the third gate was already there — the same
+ * documentation-versus-code mismatch the decision record calls this project's
+ * worst defect class.
  *
  * **Line breaks are not the hazard here, and 2c-1b's refusal does not
  * generalise.** The raw editor holds a file's own bytes, so a `\r\n` in the file
@@ -149,12 +169,18 @@
  * absent-and-blank rule applied to a file that is no longer absent — and the label
  * would silently stay in the file. **What the rebase does not refresh is
  * eligibility**: the new scalar's style, span and `decoded` flag are Rust's to
- * report, so the honest refresh is a re-projection, which is what
- * {@link MatchEditorView.needsReprojection} tells a caller to do.
+ * report, so the honest refresh is a re-projection, and
+ * {@link MatchEditorSession.needsReprojection} does not merely *ask* for one —
+ * the session stops accepting changes until it has one, and no transition here
+ * clears the flag. Only {@link startMatchEditor} over a freshly projected snippet
+ * does. That is the 2c-2-2 review's second finding: while the fact was derived
+ * from the saved *panel*, dismissing the panel dismissed the obligation with it.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
+import type { IpcFailure } from '../ipc/errors';
 import type {
+  Acknowledgement,
   ContentRevision,
   DraftField,
   MatchDraft,
@@ -162,7 +188,9 @@ import type {
   MatchView,
   PresentationNote,
   SaveResult,
-  ScalarView
+  ScalarView,
+  ValueKind,
+  ValueView
 } from '../ipc/types';
 import type { DetailFieldName } from './detail';
 import { matchEditability, type MatchEditability } from './detail';
@@ -188,10 +216,12 @@ import {
   consentForRefusal,
   offeredRefusalChoices,
   refusedArm,
+  sendFailureLines,
   sendFailureOf,
   submissionIsStale,
   type EditorPhase,
-  type SendFailure
+  type SendFailure,
+  type SendFailureLine
 } from './editorSave';
 import type { RawSaveChoice } from './rawSave';
 import type { InvalidationStatus } from './invalidation';
@@ -272,6 +302,157 @@ export type FieldEligibility =
 const EDITABLE: FieldEligibility = Object.freeze({ kind: 'editable' as const });
 
 /**
+ * One piece of what the file holds for a field a screen may not edit.
+ *
+ * **A refused field is read-only, not blank**, and until the 2c-2-2 window
+ * reading it was blank for one refusal in particular. A `triggers:` list has no
+ * single scalar behind `trigger:`, so the field's own `text` was `''` and the
+ * screen drew a name and a reason with nothing between them — and because the
+ * editor replaces the whole detail pane, a person editing a multi-trigger snippet
+ * could not see their triggers **anywhere**. The record is
+ * `docs/decisions/2c-2-2-window-reading.md` §5.1, measured as
+ * `open triggersOnScreen: no`.
+ *
+ * Two arms, because a trigger list may hold something that is not a scalar. An
+ * item this projection did not model as text is named by its **shape** rather
+ * than dropped: a screen that silently omitted it would be the same defect one
+ * level down.
+ */
+export type ShownValue =
+  | {
+      /** Source text, drawn exactly as the file writes it. */
+      readonly kind: 'text';
+      /** What to hand `SourceText`. */
+      readonly text: string;
+      /** Which key this came from, or `null`. See {@link ShownValue}. */
+      readonly source: DetailFieldName | null;
+    }
+  | {
+      /** A value that is not one piece of text, named rather than drawn. */
+      readonly kind: 'notScalar';
+      /** What to hand `tValueKind`. */
+      readonly shape: ValueKind;
+      /** Which key this came from, or `null`. See {@link ShownValue}. */
+      readonly source: DetailFieldName | null;
+    };
+
+/**
+ * What one projected value is, as a shape a sentence can name.
+ *
+ * `flattenValue` in `./detail.ts` walks the same union into lines; this answers
+ * the one question a marker needs, which is a different question and a much
+ * smaller one.
+ *
+ * @param value - A projected value as it crossed the boundary.
+ * @returns The shape to name it by.
+ */
+function shapeOf(value: ValueView): ValueKind {
+  if ('Scalar' in value) {
+    return 'Scalar';
+  }
+  if ('Sequence' in value) {
+    return 'Sequence';
+  }
+  if ('Mapping' in value) {
+    return 'Mapping';
+  }
+  return 'Alias' in value ? 'Alias' : value.Elided.kind;
+} // End of function shapeOf()
+
+/**
+ * Where the file puts one projected value, or `null`.
+ *
+ * **Three of the five arms of `ValueView` carry a byte span and two do not**: a
+ * scalar, an alias and an elided node each name their own bytes, while a nested
+ * sequence or mapping crosses as its items and nothing else. So the `null` is a
+ * fact about the **type**, and it is unreachable through the one caller below —
+ * `scalar_sequence()` in `crates/espansoconfig-core/src/model/project.rs` is the
+ * only writer of `TriggerSpec::triggers`, and it turns an item that is not a
+ * scalar into a `ValueView::Elided` carrying that item's own span rather than
+ * into a `Sequence` or a `Mapping`.
+ *
+ * @param value - A projected value as it crossed the boundary.
+ * @returns The first byte of the value, or `null` when the wire carries none —
+ *   which no projection of a `triggers:` list produces today.
+ */
+function spanStartOf(value: ValueView): number | null {
+  if ('Scalar' in value) {
+    return value.Scalar.span.start;
+  }
+  if ('Alias' in value) {
+    return value.Alias.span.start;
+  }
+  return 'Elided' in value ? value.Elided.span.start : null;
+} // End of function spanStartOf()
+
+/**
+ * One item of a trigger list, as the thing a screen draws.
+ *
+ * @param value - The item as it crossed the boundary.
+ * @param source - Which key it came from.
+ * @returns Its text when it is a scalar, its shape when it is not.
+ */
+function shownItem(value: ValueView, source: DetailFieldName): ShownValue {
+  return 'Scalar' in value
+    ? { kind: 'text', text: value.Scalar.text, source }
+    : { kind: 'notScalar', shape: shapeOf(value), source };
+} // End of function shownItem()
+
+/**
+ * One trigger form's values, together with where the file puts that form.
+ *
+ * A form rather than a value, because the three forms are what have to be
+ * ordered against one another: the items *inside* a `triggers:` list already
+ * cross in the order the file writes them, and nothing here re-sorts them.
+ */
+interface ShownForm {
+  /**
+   * The first byte of the form's value, or `null` when the wire carries none.
+   *
+   * `null` is representable and is not produced: see {@link spanStartOf}.
+   */
+  readonly position: number | null;
+  /** What that form contributes, in the order the wire carries it. */
+  readonly values: readonly ShownValue[];
+}
+
+/**
+ * The three trigger forms, put in the order the file writes them.
+ *
+ * **A stable partition rather than a sort with an invented key for the unknowns.**
+ * A form whose position the projection carries is placed by that position; a form
+ * it carries none for keeps its place relative to the other unpositioned forms and
+ * is drawn after all the positioned ones. Giving an unpositioned form a numeric
+ * key — zero, or a maximum — would be this function inventing a location for a
+ * value it has just admitted it cannot locate.
+ *
+ * **The second half of that is defence against a shape the type permits, and no
+ * projection produces it** ({@link spanStartOf}), so the branch is unreachable
+ * from the running application and is kept rather than removed because
+ * `ValueView` has five arms whether or not today's single Rust writer uses two of
+ * them, and a `MatchView` is a boundary value nothing in TypeScript proves came
+ * from that writer. What this function therefore guarantees in practice is the
+ * first half alone: **the forms come out in the order the file writes them.**
+ *
+ * @param forms - The contributing forms, in the fixed order `trigger`,
+ *   `triggers`, `regex`.
+ * @returns The same forms, positioned ones first and in byte order.
+ */
+function orderedForms(forms: readonly ShownForm[]): readonly ShownForm[] {
+  const placed: { readonly position: number; readonly form: ShownForm }[] = [];
+  const unplaced: ShownForm[] = [];
+  for (const form of forms) {
+    if (form.position === null) {
+      unplaced.push(form);
+    } else {
+      placed.push({ position: form.position, form });
+    }
+  } // End of the loop that separates the located forms from the rest
+  placed.sort((left, right) => left.position - right.position);
+  return [...placed.map((one) => one.form), ...unplaced];
+} // End of function orderedForms()
+
+/**
  * What the file held for one field when this session was seeded.
  *
  * **The projection side of the phase's named failure**, and it is not drafted:
@@ -296,6 +477,21 @@ export interface FieldBaseline {
   readonly value: string;
   /** Whether the field may be edited, and why not when it may not. */
   readonly eligibility: FieldEligibility;
+  /**
+   * What the file holds here, for a field no control will draw.
+   *
+   * Empty for an editable field — a control shows that value — and empty for a
+   * refusal that genuinely has nothing to show. Otherwise every piece of it: **a
+   * `triggers:` list contributes one entry per trigger**, not one for the list.
+   *
+   * **The order is {@link shownValuesOf}'s and is stated there in full**, because
+   * it is not simply the order the projection's fields happen to be read in: the
+   * three trigger forms are placed by the first byte of each form's value, so they
+   * come out in the order the file writes them. (That function also documents a
+   * partition for a form carrying no byte position, which the type permits and no
+   * projection produces.)
+   */
+  readonly shown: readonly ShownValue[];
 }
 
 /** What the file held for all six fields. */
@@ -438,6 +634,22 @@ export interface MatchEditorSession {
    * and a caller can seed a new session from a fresh projection.
    */
   readonly identityStale: boolean;
+  /**
+   * Whether a re-projection is owed before editing may continue.
+   *
+   * **On the session rather than derived from the outcome, and that is the whole
+   * of the 2c-2-2 review's second finding.** It was derived — `saved !== null &&
+   * saved.committed` — which made it a property of a *panel*: dismissing the
+   * saved panel through {@link keepEditing} cleared the outcome, and with it the
+   * only trace of the obligation, and the session went on editing against
+   * eligibility carried over from bytes that no longer exist.
+   *
+   * Set by a committed save and cleared by **nothing** — not by `keepEditing`,
+   * not by an undo. The only way out is {@link startMatchEditor} over a freshly
+   * projected snippet, which is what makes the recorded protocol a rule rather
+   * than a request. {@link isEditable} is `false` for as long as it is `true`.
+   */
+  readonly needsReprojection: boolean;
   /** Where the group boundary's readings come from. */
   readonly clock: Clock;
 }
@@ -555,6 +767,114 @@ export function fieldEligibility(match: MatchView, field: EditableField): FieldE
 } // End of function fieldEligibility()
 
 /**
+ * What the file holds for one field a screen will not let anybody edit.
+ *
+ * **Wherever a value exists, it is shown**, which is the 2c-2-2 window reading's
+ * first finding. Three sources, one arm each below:
+ *
+ * - a refused **trigger** is the whole trigger spec, not the `trigger:` key: a
+ *   `triggers:` list contributes **every** trigger, a `regex:` contributes its
+ *   pattern, and a `Several` contributes all of them. This is the arm the reading
+ *   found blank, and the order it comes out in is the paragraph below;
+ * - an **unmodelled** key is the bytes the projection kept for it —
+ *   `UnknownEntry.value_text`, sliced in Rust, which is the same text the detail
+ *   pane draws for such an entry;
+ * - anything else is the field's own scalar, which covers `notDecodable` (where
+ *   the text is the raw source slice, and saying so is the refusal's job) and
+ *   `carriageReturn` (which the reading confirmed already worked).
+ *
+ * **The order, stated exactly, because the first version of this comment claimed
+ * one the code did not give.** It said *source order* while reading `TriggerSpec`'s
+ * three named slots in the fixed order `trigger` → `triggers` → `regex`, so a file
+ * writing `regex:` above `trigger:` drew them the wrong way round — the re-reading's
+ * §15.1, and this project's own named worst defect class. What the code now does:
+ *
+ * - each form is placed by the **first byte of its value** —
+ *   `ScalarView.span.start` for `trigger:` and `regex:`, and the lowest such start
+ *   among a `triggers:` list's items — so the forms come out in the order the file
+ *   writes them, for **every** shape a projection can produce;
+ * - the items **inside** a `triggers:` list are never re-sorted: `TriggerSpec.triggers`
+ *   crosses one item per source entry in source order, and that order is kept;
+ * - a form the projection gives **no** byte position for would be drawn after every
+ *   positioned one, keeping the fixed form order among such forms — and **no
+ *   projection produces such a form**, so that branch orders nothing today. The
+ *   type permits it, because two of `ValueView`'s five arms carry no span; the
+ *   only writer of `TriggerSpec::triggers` cannot emit either of them, since
+ *   `scalar_sequence()` in `crates/espansoconfig-core/src/model/project.rs` turns a
+ *   non-scalar item into a `ValueView::Elided` carrying that item's **own span**.
+ *   The second version of this comment said such a list drew last; the third window
+ *   reading built exactly that shape and watched it draw **first**, in file order,
+ *   because it was located after all (§23) — the same defect class as §15.1, one
+ *   round later, and the reason the sentence now names its own unreachability.
+ *
+ * Each value also carries **which key it came from** ({@link ShownValue.source}),
+ * because a `Several` draws two boxes that are otherwise identical — the
+ * re-reading's §15.2. It is the detail pane's own `DetailFieldName`, so a screen
+ * renders it with the `tDetailField` it already uses and no new string exists.
+ * **`tTriggerKind` would not do**: it names the shape of the whole spec, not of one
+ * slot, and `Several` has no per-slot meaning at all.
+ *
+ * **`ownsNoBytes` answers nothing, and that is the honest answer**: the span is
+ * zero-width, so there is no value in the file to draw. So does a
+ * `triggerNotSingle` of kind `Absent`, for the same reason — the snippet has no
+ * trigger of any form.
+ *
+ * @param match - The snippet's projection.
+ * @param field - Which field.
+ * @param eligibility - What {@link fieldEligibility} decided about it.
+ * @returns What to draw, ordered as the paragraph above states; empty when a
+ *   control draws it or when there is nothing in the file to draw.
+ */
+function shownValuesOf(
+  match: MatchView,
+  field: EditableField,
+  eligibility: FieldEligibility
+): readonly ShownValue[] {
+  if (eligibility.kind === 'editable') {
+    return [];
+  }
+  if (eligibility.reason === 'triggerNotSingle') {
+    const spec = match.trigger;
+    const forms: ShownForm[] = [];
+    if (spec.trigger !== null) {
+      const scalar = spec.trigger;
+      forms.push({
+        position: scalar.span.start,
+        values: [{ kind: 'text', text: scalar.text, source: 'trigger' }]
+      });
+    }
+    if (spec.triggers.length > 0) {
+      const starts = spec.triggers
+        .map(spanStartOf)
+        .filter((start): start is number => start !== null);
+      forms.push({
+        position: starts.length === 0 ? null : Math.min(...starts),
+        values: spec.triggers.map((item) => shownItem(item, 'triggers'))
+      });
+    }
+    if (spec.regex !== null) {
+      const scalar = spec.regex;
+      forms.push({
+        position: scalar.span.start,
+        values: [{ kind: 'text', text: scalar.text, source: 'regex' }]
+      });
+    }
+    return orderedForms(forms).flatMap((form) => form.values);
+  } // End of the trigger-shape arm
+  if (eligibility.reason === 'unmodelledShape') {
+    const entry = match.unknown_entries.find((one) => one.key === field);
+    const text = entry?.value_text ?? '';
+    // No `source`: this field's own label already names the key, and repeating it
+    // under the box would say nothing a reader does not already have.
+    return text === '' ? [] : [{ kind: 'text', text, source: null }];
+  }
+  const scalar = projectedScalar(match, field);
+  return scalar === null || scalar.text === ''
+    ? []
+    : [{ kind: 'text', text: scalar.text, source: null }];
+} // End of function shownValuesOf()
+
+/**
  * What the file holds for all six fields, and which of them may be edited.
  *
  * @param match - The snippet's projection.
@@ -568,6 +888,7 @@ export function baselineOf(match: MatchView): MatchBaseline {
   >;
   for (const field of EDITABLE_FIELDS) {
     const scalar = projectedScalar(match, field);
+    const eligibility = fieldEligibility(match, field);
     baseline[field] = {
       present: scalar !== null,
       // A field whose scalar could not be decoded is read-only, so its `text` —
@@ -575,7 +896,8 @@ export function baselineOf(match: MatchView): MatchBaseline {
       // logical value by anything below. It is still carried, because a screen
       // shows what the file says.
       value: scalar === null ? '' : scalar.text,
-      eligibility: fieldEligibility(match, field)
+      eligibility,
+      shown: shownValuesOf(match, field, eligibility)
     };
   } // End of the loop over the six editable fields
   return deepFreeze(baseline);
@@ -700,6 +1022,9 @@ export function startMatchEditor(match: MatchView, clock: Clock): MatchEditorSes
     extraMessages: [],
     sendFailure: null,
     identityStale: false,
+    // The one producer of `false` after a commit: a session over a projection
+    // somebody has just read is, by construction, in step with the file.
+    needsReprojection: false,
     clock
   };
 } // End of function startMatchEditor()
@@ -717,12 +1042,21 @@ export function conflictOf(session: MatchEditorSession): ConflictModel<MatchBuff
 /**
  * Whether this session accepts changes at all right now.
  *
- * Four reasons it may not, and the first two are 2c-1b's policy decisions carried
+ * Five reasons it may not, and the first two are 2c-1b's policy decisions carried
  * over unchanged: not while a save is in flight, and not while a conflict is
  * showing. The third is this sub-phase's — not after a commit whose identity could
- * not be adopted, because there is nothing left to save against. The fourth is
+ * not be adopted, because there is nothing left to save against. The fifth is
  * defence in depth: not when this application has said the snippet is not safely
  * editable.
+ *
+ * **The fourth is the 2c-2-2 review's second finding**: not after a commit until
+ * a fresh projection has been seeded. The baselines a commit rebases are right
+ * about presence and values and say nothing about the new scalars' spelling,
+ * spans or decodability — so every one of the five eligibility verdicts is a
+ * statement about bytes that have been replaced. Editing on carried-over
+ * eligibility is not a live carriage-return write today, because `editField` and
+ * `beginSave` both still gate one, but it is a draft built on a claim this
+ * session is no longer entitled to make.
  *
  * @param session - The session to ask about.
  * @returns `true` when any field's controls may change anything.
@@ -732,6 +1066,7 @@ export function isEditable(session: MatchEditorSession): boolean {
     session.phase === 'editing' &&
     conflictOf(session) === null &&
     !session.identityStale &&
+    !session.needsReprojection &&
     session.editability.kind === 'unrestricted'
   );
 } // End of function isEditable()
@@ -1182,6 +1517,10 @@ export function applySave(
     // failed: in the second case the window holds no projection of that file at
     // all, so there is nothing an identity could be resolved against.
     identityStale: result.committed && (result.moved === null || adoption.kind === 'failed'),
+    // A commit replaced the bytes every eligibility verdict was computed from, so
+    // the session owes a re-projection and stops accepting changes until it has
+    // one. A `committed: false` replaced nothing and owes nothing.
+    needsReprojection: result.committed,
     baseline: committedBaseline(session.baseline, submission.candidate),
     draft: savedDraft(session.draft, submission, result.revision),
     phase: 'editing',
@@ -1201,19 +1540,31 @@ export function applySave(
  * honest answers are "no" and "this application cannot tell". The draft is
  * untouched either way, so nothing the person typed is lost.
  *
+ * **The reason is carried, and 2c-2-2 is why the third argument exists.** A
+ * `save_match` that never produced an outcome is very often a *validation*
+ * answer rather than an infrastructure one — `draftRefused` carries the core's
+ * `DraftError`, whose thirty-two sentences say which field cannot be written and
+ * why — and until this parameter existed every one of them reached the developer
+ * console and no screen. It is required rather than defaulted, for
+ * {@link applySave}'s `adoption` reason: a default would be this function
+ * inventing *nothing is known* for a caller that did not look.
+ *
  * @param session - The session waiting for an answer.
  * @param mayHaveWritten - Whether the file may already hold the submitted draft.
+ * @param reason - Why the command rejected, or `null` when nothing was sent and
+ *   the boundary therefore has no rejection to hand on.
  * @returns The session, back to editing, with the right notice raised.
  */
 export function saveCouldNotBeSent(
   session: MatchEditorSession,
-  mayHaveWritten: boolean
+  mayHaveWritten: boolean,
+  reason: IpcFailure | null
 ): MatchEditorSession {
   return {
     ...session,
     phase: 'editing',
     group: null,
-    sendFailure: sendFailureOf(mayHaveWritten)
+    sendFailure: sendFailureOf(mayHaveWritten, reason)
   };
 } // End of function saveCouldNotBeSent()
 
@@ -1239,6 +1590,12 @@ export function acknowledgeFindings(session: MatchEditorSession): MatchEditorSes
  * *Keep editing*, for all three arms. The draft is untouched — this is a panel
  * being dismissed, not a state being resolved — and the submission goes with it,
  * because there is nothing left on screen to acknowledge.
+ *
+ * **It does not give the controls back after a commit**, and that is deliberate
+ * rather than an oversight of the spread below:
+ * {@link MatchEditorSession.needsReprojection} lives on the session and survives
+ * this, so a person cannot dismiss their way past the re-projection a commit
+ * owes. Only {@link startMatchEditor} over a freshly projected snippet clears it.
  *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last save.
@@ -1284,6 +1641,16 @@ export interface EditableFieldModel {
   readonly editable: boolean;
   /** Why it does not, as a code, or `null`. */
   readonly refusal: FieldRefusal | null;
+  /**
+   * What the file holds here, when no control will draw it.
+   *
+   * Empty for an editable field and for a refusal with nothing to show. A screen
+   * walks it and calls `SourceText` or `tValueKind` per arm, and `tDetailField`
+   * for a value whose `source` is not `null` — never `field.text`, which is one
+   * scalar and is `''` for the very case the window reading found blank.
+   * {@link shownValuesOf} states the order these come out in.
+   */
+  readonly shown: readonly ShownValue[];
   /** What a save would say about this field. */
   readonly intent: DraftField<string>;
   /** Whether a *Remove* control would do anything. */
@@ -1312,6 +1679,16 @@ export interface MatchEditorView {
   readonly canSave: boolean;
   /** How the last attempt failed to produce an outcome, or `null`. */
   readonly sendFailure: SendFailure | null;
+  /**
+   * The reasons to show beside that failure, outermost first.
+   *
+   * Empty whenever there is no failure and whenever the boundary handed no
+   * reason on. `sendFailureLines` walks the chain — a `draftRefused` carries a
+   * `DraftError`, a `saveFailed` carries a `SaveError` whose `Patch` arm carries
+   * an `EditError` — so a component renders each line by calling the accessor its
+   * arm names rather than by deciding in markup how deep to go.
+   */
+  readonly failureLines: readonly SendFailureLine[];
   /** How the last save ended, or `null`. */
   readonly outcome: SaveOutcomeModel<MatchBuffers> | null;
   /** The outcome's lines followed by anything to be said beside them. */
@@ -1329,12 +1706,19 @@ export interface MatchEditorView {
   /** Whether this session's identity is known to be stale. */
   readonly identityStale: boolean;
   /**
-   * Whether the caller should seed a new session from a fresh projection.
+   * Whether the caller must seed a new session from a fresh projection.
    *
-   * `true` after a commit. The baselines this session rebased are what was
-   * *written*, which is correct about presence and values and says nothing about
-   * the new scalars' spelling, spans or decodability — so eligibility is the one
-   * thing only a re-projection can refresh.
+   * `true` after a commit, and **`editable` is `false` for as long as it is** —
+   * this is an obligation rather than a suggestion since the 2c-2-2 review, and
+   * dismissing the saved panel no longer clears it. The baselines this session
+   * rebased are what was *written*, which is correct about presence and values
+   * and says nothing about the new scalars' spelling, spans or decodability — so
+   * eligibility is the one thing only a re-projection can refresh.
+   *
+   * **What no type here can force** is that a caller *performs* one: a component
+   * that draws no way to re-seed leaves a person with an editor that has stopped
+   * accepting changes, which is a dead end rather than a data risk. What the
+   * model does force is that no draft is built on eligibility it cannot vouch for.
    */
   readonly needsReprojection: boolean;
 }
@@ -1358,6 +1742,7 @@ function fieldModel(session: MatchEditorSession, field: EditableField): Editable
     removed: buffer.removed,
     editable,
     refusal: baseline.eligibility.kind === 'readOnly' ? baseline.eligibility.reason : null,
+    shown: baseline.shown,
     intent: fieldIntent(baseline, buffer),
     canRemove: editable && baseline.present && !buffer.removed,
     canRestore: editable && buffer.removed
@@ -1390,6 +1775,7 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     editability: session.editability,
     canSave: canSave(session),
     sendFailure: session.sendFailure,
+    failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
     notes: saved === null ? [] : saved.notes,
@@ -1398,9 +1784,70 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     conflict,
     conflictChoices: conflict === null ? [] : CONFLICT_CHOICES,
     identityStale: session.identityStale,
-    needsReprojection: saved !== null && saved.committed
+    needsReprojection: session.needsReprojection
   };
 } // End of function matchEditorView()
+
+/**
+ * Why this window cannot seed a fresh session over one snippet.
+ *
+ * **Three reasons, because one sentence naming a single cause was false in two of
+ * them.** `cannotReproject` used to say the window was *no longer showing the file
+ * the snippet is in*; the confirmation pass found that a person who selects another
+ * snippet **in that same file** while a save is in flight reaches the same disabled
+ * control under that same false sentence, and so does a commit whose adoption
+ * failed. A code with three arms is this project's usual answer to that — the same
+ * shape as {@link FieldRefusal} — and it is what makes the sentence true rather
+ * than merely vaguer.
+ */
+export type ReprojectionRefusal =
+  /** The window holds no projection that answers for this snippet at all. */
+  | 'notProjected'
+  /** The window has moved to a different file. */
+  | 'otherFile'
+  /** The window is on this file, showing a different snippet. */
+  | 'otherSnippet';
+
+/**
+ * What a caller answers when a session asks to be seeded again.
+ *
+ * A discriminated union rather than `MatchView | null`, so a refusal with no
+ * reason is not representable and the screen cannot be left inventing one.
+ */
+export type Reprojection =
+  | {
+      /** The window has a fresh projection of that snippet. */
+      readonly kind: 'projected';
+      /** The projection to seed the new session from. */
+      readonly match: MatchView;
+    }
+  | {
+      /** It has none. */
+      readonly kind: 'unavailable';
+      /** Why, as a code. */
+      readonly reason: ReprojectionRefusal;
+    };
+
+/**
+ * The dictionary key holding one reprojection refusal's sentence.
+ *
+ * A `switch` over literal keys, the idiom {@link fieldRefusalKey} follows and for
+ * the same reason: a renamed key is a compile error here, and a new member of
+ * {@link ReprojectionRefusal} with no sentence is one too.
+ *
+ * @param reason - Why the window cannot re-read the snippet.
+ * @returns The key holding that reason's sentence.
+ */
+export function reprojectionRefusalKey(reason: ReprojectionRefusal): TranslationKey {
+  switch (reason) {
+    case 'notProjected':
+      return 'browser.matchEditor.cannotReproject.notProjected';
+    case 'otherFile':
+      return 'browser.matchEditor.cannotReproject.otherFile';
+    case 'otherSnippet':
+      return 'browser.matchEditor.cannotReproject.otherSnippet';
+  }
+} // End of function reprojectionRefusalKey()
 
 /**
  * The dictionary key holding one refusal's sentence.
@@ -1426,6 +1873,22 @@ export function fieldRefusalKey(reason: FieldRefusal): TranslationKey {
       return 'browser.matchEditor.readOnly.triggerNotSingle';
   }
 } // End of function fieldRefusalKey()
+
+/**
+ * The acknowledgement one submission carries, for a caller that only needs that.
+ *
+ * A named read rather than a property walk at the call site, so the one place a
+ * screen hands consent to the boundary is a place this module can be searched
+ * for. `rawEditor.ts` has the same read over its own drafted value; that is not
+ * the copying D7 forbids, because a property read is not a rule about consent —
+ * the rule is `acknowledgeRefusal`'s, and there is exactly one of it.
+ *
+ * @param submission - What {@link beginSave} produced.
+ * @returns The suspicions already shown to a person, for this exact candidate.
+ */
+export function acknowledgementOf(submission: DraftSubmission<MatchBuffers>): Acknowledgement {
+  return submission.acknowledgement;
+} // End of function acknowledgementOf()
 
 /**
  * The base revision one session would save against.

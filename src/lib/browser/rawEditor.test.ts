@@ -400,7 +400,7 @@ describe('starting a save', () => {
   it('answers a send that never left without inventing an outcome', () => {
     const started = beginSave(editText(fresh(), EDITED));
     const failed = saveCouldNotBeSent(started!.session, false);
-    expect(rawEditorView(failed).sendFailure).toEqual({ kind: 'notSent' });
+    expect(rawEditorView(failed).sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(rawEditorView(failed).outcome).toBeNull();
     expect(rawEditorView(failed).text).toBe(EDITED);
     expect(rawEditorView(failed).dirty).toBe(true);
@@ -413,7 +413,10 @@ describe('starting a save', () => {
     // telling a person their file is untouched when it may not be.
     const started = beginSave(editText(fresh(), EDITED));
     const indeterminate = saveCouldNotBeSent(started!.session, true);
-    expect(rawEditorView(indeterminate).sendFailure).toEqual({ kind: 'mayHaveWritten' });
+    expect(rawEditorView(indeterminate).sendFailure).toEqual({
+      kind: 'mayHaveWritten',
+      reason: null
+    });
     // And in neither case is there an outcome, or a lost draft.
     expect(rawEditorView(indeterminate).outcome).toBeNull();
     expect(rawEditorView(indeterminate).text).toBe(EDITED);

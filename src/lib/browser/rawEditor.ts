@@ -660,6 +660,15 @@ export function applySave(
  * nothing was written for one of those states the opposite of what the disk may
  * hold. The draft is untouched either way, so nothing the person wrote is lost.
  *
+ * **The reason is `null` here, and that is a limit rather than a policy.**
+ * `SendFailure` carries one since 2c-2-2, and the small editor draws it; the raw
+ * editor cannot, because `RawSaveAnswer`'s failed arm carries only
+ * `mayHaveWritten` and 2c-1b's sealed boundary is not this sub-phase's to widen.
+ * So a raw save that never left still sends the person to the developer console
+ * for the why. Written down rather than papered over, because a reader of this
+ * function beside `matchEditor.saveCouldNotBeSent` would otherwise take the
+ * difference for an oversight.
+ *
  * @param session - The session waiting for an answer.
  * @param mayHaveWritten - Whether the file may already hold the submitted text.
  * @returns The session, back to editing, with the right notice raised.
@@ -671,7 +680,7 @@ export function saveCouldNotBeSent(
   return {
     ...session,
     phase: 'editing',
-    sendFailure: sendFailureOf(mayHaveWritten)
+    sendFailure: sendFailureOf(mayHaveWritten, null)
   };
 } // End of function saveCouldNotBeSent()
 
