@@ -635,6 +635,57 @@ export interface BrowserState {
    */
   showFileText(on: boolean): Promise<void>;
   /**
+   * Reads one file again and puts what it finds in place of what this state holds.
+   *
+   * **The one public re-read of a single document, and it exists for a recovery.**
+   * `commands.reloadDocument` was reachable only from inside `select()`'s own
+   * repair until Phase 2c-3b step 2, so `MoveRecovery.reloadFile` in
+   * `./matchMove.ts` — the consult's Q8 answer, *read this file again* beside the
+   * four codes that say this window and the file disagree about an address — was a
+   * code with nothing behind it. This is what is behind it.
+   *
+   * It is a **re-read, never a repair of anything else**: the projection is
+   * replaced through the same `installView` every adoption uses, so the snippet
+   * list, the counts and every `MatchId` minted from the old parse move together,
+   * and the selection is put back the ordinary way — positionally and then checked,
+   * so a different snippet at the held position drops it with a notice (R27) rather
+   * than being silently adopted. The raw viewer's snapshot and any captured
+   * conflict text for that file go too, because they describe bytes this state has
+   * just stopped vouching for.
+   *
+   * A re-read that fails is reported on the one channel every other failure of this
+   * state uses **and answered**, so a caller can say on screen that the file could
+   * not be read rather than leaving the person with a control that appeared to do
+   * nothing. It leaves the stale projection in place: nothing here knows that the
+   * file is gone, only that this attempt did not reach it, and dropping a file's
+   * whole projection is a bigger claim than a failed read supports. **What that
+   * failure means for the caller's own session is the caller's**, and the one there
+   * is decides it: `moveRecoveryFailed` in `./matchMove.ts` spends a move session
+   * whose recovery re-read failed, because that recovery is offered only after the
+   * command has said this window's address disagrees with the file.
+   *
+   * **An answer that is no longer wanted installs nothing**, and that is the first
+   * review of Phase 2c-3b step 2's High finding. Three captures taken before the
+   * await decide it — the workspace generation, a per-document re-read generation,
+   * and that document's projection generation — so a workspace replaced mid-read,
+   * an overlapping re-read of the same file, and a projection installed meanwhile by
+   * any other path each leave this answer discarded rather than applied.
+   *
+   * **`null` therefore means the read did not fail, not that this call installed
+   * anything.** A caller that needs to know what the window now holds reads the
+   * projections; a discarded answer is one where something newer already did.
+   *
+   * **What no type forces**, in the same sentence as what one does: nothing makes a
+   * caller act on the answer, and nothing here can tell a recovery a person asked
+   * for from a re-read some other code path wanted. What it does force is that the
+   * projection, the two text caches and the selection move together, which is the
+   * invariant `installView` exists for.
+   *
+   * @param document - The file to read again.
+   * @returns The failure of the read, or `null` when it did not fail.
+   */
+  rereadDocument(document: DocumentId): Promise<IpcFailure | null>;
+  /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
    * **The first of the five entry points on this state that change a file**; the
@@ -685,14 +736,17 @@ export interface BrowserState {
    * imports `../ipc/commands` at all, which is a fact about the code as written
    * and not a guarantee.
    *
-   * A snippet identified by `MatchView` rather than by `MatchId`, unlike the other
-   * four writing methods. Only `.id` is read from either argument, so the
-   * projections are friction rather than information; the signature is left as it
-   * is because changing it is a decision about what a *move component* holds, and
-   * 2c-3b step 2 is the step that has one. `docs/decisions/2c-3b-1-notes.md`
-   * records it.
+   * **Identities, like the other four writing methods, and that changed at
+   * 2c-3b-2.** This took `MatchView`s until step 2 gave it a component: only `.id`
+   * was ever read from either argument, so the projections were friction rather
+   * than information, and the friction was real — `beginMove` in `./matchMove.ts`
+   * produces a `StartedMove` whose `match` and `after` are `MatchId`s, so a caller
+   * had to look each one up in a projection again to satisfy the old signature, and
+   * a lookup that answers `undefined` is a way for a decided move to be dropped
+   * between the model and the wire. `docs/decisions/2c-3b-1-notes.md` recorded the
+   * deferral; `docs/decisions/2c-3b-2-notes.md` records the choice.
    *
-   * @param match - The snippet to move.
+   * @param match - The snippet to move, by the identity the caller's session holds.
    * @param after - The snippet it should follow, or `null` for the top of the
    *   list. Already lowered by the caller: the destination panel's *end* is an
    *   identity by the time it reaches here, because the wire has no such anchor.
@@ -705,8 +759,8 @@ export interface BrowserState {
    *   whether the file may already have been written and why it rejected.
    */
   moveMatch(
-    match: MatchView,
-    after: MatchView | null,
+    match: MatchId,
+    after: MatchId | null,
     baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
@@ -1021,6 +1075,21 @@ export function createBrowserState(
   // is not reactive without Svelte's own wrapper anyway. A document with no entry
   // has never had a projection replaced, which is generation zero.
   const projectionGenerations = new Map<DocumentId, number>();
+  // **The re-read counters, one per document**, and they count *requests* rather
+  // than replacements — which is why they are not the map above. A re-read that
+  // starts while another is in flight for the same file must be the one that wins,
+  // whichever order the two answers arrive in, and a counter of installations
+  // cannot express that: the older read installs first, bumps it, and the newer
+  // read then finds its own capture stale and discards the fresher parse. This is
+  // `fileTextGeneration`'s shape — take the next number, compare after the await —
+  // per document, because a re-read of file A says nothing about one of file B.
+  //
+  // **Not cleared by `open()`**, unlike `projectionGenerations`. Clearing would set
+  // them back to zero while a capture from the closed workspace still held one, and
+  // the first re-read of the new workspace would then match it; `openGeneration` is
+  // what covers a replaced workspace, and monotonic counters cannot collide with a
+  // capture that has already been invalidated by it.
+  const rereadGenerations = new Map<DocumentId, number>();
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -1057,6 +1126,21 @@ export function createBrowserState(
   function invalidateProjectionOf(document: DocumentId): void {
     projectionGenerations.set(document, projectionGenerationOf(document) + 1);
   } // End of function invalidateProjectionOf()
+
+  /**
+   * Takes the next re-read generation for one document.
+   *
+   * Called immediately before the read it belongs to, so that a re-read started
+   * afterwards for the same file makes this one's capture stale.
+   *
+   * @param document - The file about to be read again.
+   * @returns The generation this read is the newest at.
+   */
+  function nextRereadOf(document: DocumentId): number {
+    const next = (rereadGenerations.get(document) ?? 0) + 1;
+    rereadGenerations.set(document, next);
+    return next;
+  } // End of function nextRereadOf()
 
   /**
    * Replaces the held selection, and cancels any lookup the old one was for.
@@ -1723,13 +1807,70 @@ export function createBrowserState(
       await readFileText();
     }, // End of function showFileText()
 
+    async rereadDocument(document: DocumentId): Promise<IpcFailure | null> {
+      // **Three captures, taken before the await, exactly as every other
+      // asynchronous path in this module takes its own.** The first review of step
+      // 2 found this call awaiting with none of them, which is how an older read
+      // installs a projection over newer state:
+      //
+      // - `openGeneration`, because a workspace that has been replaced reallocates
+      //   every document identity, and a projection from the closed one installed
+      //   into the open one describes a file this state is not showing.
+      //   **Neither per-document counter can stand in for it, and they fail for
+      //   opposite reasons**: `open()` *clears* `projectionGenerations`, so a file
+      //   whose projection had never been replaced compares equal across the two
+      //   workspaces; while `rereadGenerations` is deliberately monotonic and
+      //   `open()` leaves it alone (its own comment at its declaration says so),
+      //   so it goes on counting through a replacement and never encodes which
+      //   workspace a read belonged to. Only `openGeneration` separates them;
+      // - the re-read generation, so that of two overlapping reads of this file the
+      //   **newer** one wins whichever order the answers arrive in;
+      // - the projection generation, so that a projection installed by any other
+      //   path meanwhile — an adoption after a save, a repair inside `select()` —
+      //   is not overwritten by a read that started before it.
+      const opened = openGeneration;
+      const reread = nextRereadOf(document);
+      const projection = projectionGenerationOf(document);
+      const fresh = await commands.reloadDocument(document);
+      if (!fresh.ok) {
+        // Answered and reported whether or not this read is still the wanted one: a
+        // failed read installs nothing, so there is no state to protect here, and
+        // the failure is a true statement about the attempt the caller made.
+        report(fresh.failure);
+        return fresh.failure;
+      }
+      if (
+        opened !== openGeneration ||
+        reread !== rereadGenerations.get(document) ||
+        projection !== projectionGenerationOf(document)
+      ) {
+        // Nothing is installed and nothing is forgotten. The caller is answered
+        // `null` because this read did not fail — what happened is that the window
+        // moved on, and it moved on by reading this file again or by dropping the
+        // workspace whole, so nobody is left holding the parse this answer would
+        // have replaced.
+        return null;
+      }
+      // The two text caches go with the projection, for `installView`'s own
+      // reason one level down: a snapshot taken against the parse being replaced
+      // draws bytes from one revision beside a snippet list drawn from another.
+      // `installView` drops the viewer's when it is pointed at this file;
+      // `forgetTextOf` also reaches the conflict capture, which is keyed by
+      // document and which `installView` cannot see.
+      forgetTextOf(document);
+      installView(fresh.value);
+      repairAfter(fresh.value);
+      await readFileText();
+      return null;
+    }, // End of function rereadDocument()
+
     async moveMatch(
-      match: MatchView,
-      after: MatchView | null,
+      match: MatchId,
+      after: MatchId | null,
       baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ): Promise<MatchSaveAnswer> {
-      const view = views.find((held) => held.id === match.id.document);
+      const view = views.find((held) => held.id === match.document);
       if (view === undefined) {
         // Nothing on this state describes that document, so nothing here could
         // adopt what a commit produced or tell whether its own projection went out
@@ -1742,8 +1883,8 @@ export function createBrowserState(
         return { kind: 'notAttempted' };
       }
       const answer = await commands.moveMatch(
-        match.id,
-        after === null ? null : after.id,
+        match,
+        after,
         // **The caller's, unchanged**, and never `view.revision`: see this method's
         // JSDoc. Reading the projection here rebases a move the window has moved on
         // from, and turns the conflict that should stop it into a commit.
@@ -1767,8 +1908,8 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(match.id.document);
-          await adoptTheDocumentOnDisk(match.id.document, null, null);
+          forgetTextOf(match.document);
+          await adoptTheDocumentOnDisk(match.document, null, null);
           await readFileText();
         }
         return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
@@ -1790,10 +1931,10 @@ export function createBrowserState(
           // alone left a conflict capture for this same file in place, which
           // `rawTextOf` would then serve for bytes that have just been replaced.
           // The identical omission the 2c-2 confirmation pass found in `saveMatch`.
-          forgetTextOf(match.id.document);
+          forgetTextOf(match.document);
           const stale = await adoptTheDocumentOnDisk(
-            match.id.document,
-            match.id,
+            match.document,
+            match,
             answer.value.moved
           );
           if (stale === null) {
@@ -1805,7 +1946,7 @@ export function createBrowserState(
             // projection is not a smaller problem than an unprojected file, it is
             // the same problem told as a fact. The failure travels back beside the
             // committed outcome, never in place of it (`PROGRESS.md` D2).
-            forgetTheReplacedDocument(match.id.document);
+            forgetTheReplacedDocument(match.document);
             adoption = { kind: 'failed', failure: stale };
           }
           await readFileText();
@@ -1817,7 +1958,7 @@ export function createBrowserState(
         // The viewer's snapshot is of the bytes the *caller* read, which are not
         // the ones on disk, so it goes too — and so does an earlier capture of
         // that file's text, which describes bytes older still.
-        forgetTextOf(match.id.document);
+        forgetTextOf(match.document);
         installView(answer.value.disk);
         repairAfter(answer.value.disk);
         await readFileText();

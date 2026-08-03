@@ -24,6 +24,7 @@
   import MatchCreator from './MatchCreator.svelte';
   import MatchDeleter from './MatchDeleter.svelte';
   import MatchEditor from './MatchEditor.svelte';
+  import MatchMover from './MatchMover.svelte';
   import RawEditor from './RawEditor.svelte';
   import SourceText from './SourceText.svelte';
   import {
@@ -305,11 +306,68 @@
   // the panel owns the confirmation from then on.
   let deletingMatch = $state.raw<MatchDeletingSession | null>(null);
 
+  /** What one open move is over: which snippet, of which parse, in which file. */
+  interface MatchMovingSession {
+    /**
+     * The file's projection, captured **in the same assignment** as the snippet.
+     *
+     * `startMatchMove` checks the two against each other and refuses a pair this
+     * projection does not describe, exactly as `startMatchDeletion` does, and it
+     * additionally derives the whole destination list from it — so taking the two
+     * from two reads would offer anchors from one parse for a snippet addressed in
+     * another.
+     */
+    readonly projection: DocumentView;
+    /** The snippet being moved, as it was projected when the panel opened. */
+    readonly match: MatchView;
+    /** The file it lives in, for the person to see which one it is. */
+    readonly file: DocumentSummary | null;
+  }
+
+  // The move panel's session, or `null`. `$state.raw` for the reason the deletion
+  // panel's is: the three values are captured once and replaced whole, and the
+  // panel owns the destination from then on.
+  let movingMatch = $state.raw<MatchMovingSession | null>(null);
+
   // Whether the new-snippet form is open. It is a flag rather than a captured
   // value because the form captures nothing from this pane: `MatchCreator` reads
   // the files, the projections and the held selection through functions, so that
   // a re-seed after a committed create sees what the window has just re-read.
   let creating = $state(false);
+
+  /**
+   * The snippet this window is holding unsaved edits for, or `null`.
+   *
+   * **`moveEligibility`'s `unsavedDraftFor` argument, and the whole of what this
+   * pane can honestly answer.** A committed move gives the snippet a new identity,
+   * which strands a draft addressed to the old one, so `matchMove.ts` refuses the
+   * move — this application's workflow policy rather than the file refusing
+   * (consult correction 2).
+   *
+   * **It over-refuses, deliberately, and that is the R36 decision.** This pane
+   * cannot see inside `MatchEditor.svelte`, so it answers the identity of the
+   * snippet an editor is open over *at all*, dirty or not. Over-refusing costs a
+   * person one closed editor; under-refusing strands edits, and there is no
+   * relation in this application that can follow an open draft to its snippet
+   * across a reparse — `identityInProjection` resolves by arena node alone and
+   * would answer a **different** snippet's identity, which is the defect a
+   * previous round shipped. So the conservative refusal is what is implemented and
+   * a coordinator is not.
+   *
+   * **Today it always answers `null` while a move panel is open**, and that is a
+   * fact about this pane rather than about the rule: the four write surfaces are
+   * mutually exclusive through {@link busy}, so a snippet with an open editor is
+   * not offered a move in the first place — which is the same conservative refusal
+   * reached one step earlier. The wiring is here so the model's own arm becomes
+   * live the first moment that stops being true, and `MatchMover.test.ts` is what
+   * drives the non-null case.
+   *
+   * @returns The identity, as the editor's own captured projection gives it, or
+   *   `null`.
+   */
+  function unsavedDraftFor(): MatchId | null {
+    return editingMatch === null ? null : editingMatch.match.id;
+  } // End of function unsavedDraftFor()
 
   /**
    * The projection this window holds of one file, or `null`.
@@ -326,15 +384,25 @@
   } // End of function projectionOf()
 
   /**
-   * Whether one of this pane's four write surfaces is open.
+   * Whether one of this pane's five write surfaces is open.
    *
    * They outrank the pane's read-only subjects and each other: a draft, a pending
-   * confirmation or a save in flight may not be dismissed by a click somewhere
-   * else in the window, so the openers below are withdrawn while any of them is
-   * showing rather than drawn beside it.
+   * confirmation, a chosen destination or a save in flight may not be dismissed by
+   * a click somewhere else in the window, so the openers below are withdrawn while
+   * any of them is showing rather than drawn beside it.
+   *
+   * **This is also where the R36 refusal is actually enforced**: a snippet whose
+   * draft is open — whether or not that draft's identity is still live — cannot be
+   * moved, because the move panel cannot be opened while the small editor is.
+   * {@link unsavedDraftFor} states the same rule one level down for the day this
+   * exclusion stops holding.
    */
   const busy = $derived(
-    editing !== null || editingMatch !== null || deletingMatch !== null || creating
+    editing !== null ||
+      editingMatch !== null ||
+      deletingMatch !== null ||
+      movingMatch !== null ||
+      creating
   );
 </script>
 
@@ -528,6 +596,25 @@
         browser.deleteMatch(id, baseRevision, acknowledgement)}
       close={() => (deletingMatch = null)}
     />
+  {:else if movingMatch !== null}
+    {@const open = movingMatch}
+    <!-- **`projections` is a function, and it is the whole of R37 on this
+         screen.** `MatchMover` reads it **once** and derives the view, the
+         destination list and the identity `beginMove` checks from that one array;
+         a captured array would be a snapshot, and a snapshot is what the live
+         check exists to notice. `unsavedDraftFor` is read the same way, when the
+         panel opens. -->
+    <MatchMover
+      projection={open.projection}
+      match={open.match}
+      file={open.file}
+      projections={() => browser.views}
+      {unsavedDraftFor}
+      move={(id, after, baseRevision, acknowledgement) =>
+        browser.moveMatch(id, after, baseRevision, acknowledgement)}
+      reload={(document) => browser.rereadDocument(document)}
+      close={() => (movingMatch = null)}
+    />
   {:else if creating}
     <!-- Every reader is a function, so a re-seed after a committed create sees
          the files as the window has just re-read them rather than as they were
@@ -632,6 +719,23 @@
               (deletingMatch = { projection: parse, match: target, file: inFile })}
           >
             {t('browser.matchDeletion.open')}
+          </button>
+        </p>
+        <!-- **Offered whether or not the snippet may be moved**, for the reason
+             the deletion panel is: the panel says why it may not, inline and
+             localized, and the core's own refusal is still the one that decides.
+             The one gate is the same one — `startMatchMove` takes a
+             `DocumentView`, and a file this window could not read has none.
+
+             **The snippet and its parse are captured in one assignment**, so the
+             two cannot come from two reads and disagree afterwards; the whole
+             destination list is derived from that one parse. -->
+        <p class="toggle">
+          <button
+            type="button"
+            onclick={() => (movingMatch = { projection: parse, match: target, file: inFile })}
+          >
+            {t('browser.matchMove.open')}
           </button>
         </p>
       {/if}

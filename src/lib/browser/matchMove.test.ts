@@ -57,6 +57,7 @@ import {
   moveCouldNotBeSent,
   moveEligibility,
   moveRecoveryChoices,
+  moveRecoveryFailed,
   moveRecoveryKey,
   moveRefusalKey,
   moveSubmissionRefusal,
@@ -1013,6 +1014,42 @@ describe('what comes back', () => {
       expect(DICTIONARIES[locale][moveRecoveryKey('reloadFile')].length).toBeGreaterThan(0);
     } // End of the loop over the two locales
   });
+
+  it('spends the session when the recovery re-read could not reach the file', () => {
+    // **The second review's fifth finding.** The recovery is offered for four codes
+    // and all four say the address this window sent does not describe the file the
+    // command read — so until the re-read either succeeds or fails, the session is
+    // still holding an identity the file has already contradicted. A re-read that
+    // fails takes away the only way of resolving that, and leaving the session
+    // sendable there let the same disputed identity go back out, from a panel whose
+    // destinations were built from the very reading the command rejected.
+    const disputed: IpcFailure = {
+      kind: 'command',
+      error: { code: 'identityStaleRevision', expected: AFTER, found: BASE }
+    };
+    const refused = moveCouldNotBeSent(inFlight(), false, disputed);
+    // Before the recovery is attempted the session is live and sendable: nothing
+    // was written, so a retry is a legitimate thing to offer.
+    expect(matchMoveView(refused, HELD).recovery).toEqual(['reloadFile']);
+    expect(canChoose(refused)).toBe(true);
+    expect(moveSubmissionRefusal(refused, HELD)).toBeNull();
+
+    const spent = moveRecoveryFailed(refused);
+
+    expect(spent.invalidated).toBe(true);
+    // **And nothing else is claimed.** A failed read is not a write, and it is not
+    // a write this application cannot account for either.
+    expect(spent.moved).toBe(false);
+    expect(spent.mayHaveWritten).toBe(false);
+    expect(canChoose(spent)).toBe(false);
+    expect(moveSubmissionRefusal(spent, HELD)).toBe('outOfDate');
+    expect(matchMoveView(spent, HELD).spent).toBe(true);
+    expect(beginMove(spent, identityInProjection(HELD, spent.match))).toBeNull();
+    // Putting the send failure away does not hand the session back, which is the
+    // rule every other spending flag already follows.
+    expect(dismissMoveOutcome(spent).invalidated).toBe(true);
+    expect(canChoose(dismissMoveOutcome(spent))).toBe(false);
+  }); // End of the "failed recovery re-read" case
 
   it('ignores an answer nothing was waiting for', () => {
     const clean = session(0);

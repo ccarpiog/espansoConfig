@@ -1388,6 +1388,28 @@ function movedDocument(): DocumentView {
   });
 } // End of function movedDocument()
 
+/**
+ * A third projection of the same file, later than {@link movedDocument}.
+ *
+ * **A third revision and a third set of nodes**, so that a case about two reads
+ * that overlap can say *which* of them the state ended up holding. Two projections
+ * cannot: an assertion against `rev-b` passes whether the answer that installed it
+ * was the wanted one or the stale one.
+ *
+ * @returns The projection.
+ */
+function laterDocument(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: 'rev-c',
+    matches: [
+      makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':sig', label: 'Signature' }),
+      makeMatch({ node: 41, document: 2, revision: 'rev-c', trigger: ':date', label: 'Today' })
+    ]
+  });
+} // End of function laterDocument()
+
 /** A finding a refusal could carry and a caller could hand back. */
 function suspicion(): Finding {
   return {
@@ -1454,6 +1476,141 @@ const WRITE_MAY_HAVE_HAPPENED: CommandResult<SaveResult> = {
   }
 };
 
+describe('reading one file again', () => {
+  /*
+   * `BrowserState.rereadDocument`, added at Phase 2c-3b step 2 because
+   * `MoveRecovery.reloadFile` in `./matchMove.ts` — the design consult's Q8
+   * answer — was a code with no producer behind it: `commands.reloadDocument`
+   * was reachable only from inside `select()`'s own repair.
+   */
+
+  it('replaces the projection, drops the text it was showing, and answers nothing', async () => {
+    const commands = scriptedCommands({ reload: { ok: true, value: movedDocument() } });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    expect(state.fileText).not.toBeNull();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+
+    const failure = await state.rereadDocument(2);
+
+    expect(failure).toBeNull();
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+    // The whole projection moved, not merely one identity: the list, the counts
+    // and every `MatchId` minted from the old parse are read off `views`.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    expect(state.scopedDocument?.revision).toBe('rev-b');
+    // And the viewer's snapshot was of bytes this state has just stopped
+    // vouching for, so it was dropped and read again rather than redrawn.
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+  }); // End of the "replaces the projection" case
+
+  it('puts the selection back positionally and then checks it (R27)', async () => {
+    // `movedDocument` writes `:date` first and `:sig` second, so the snippet at
+    // the held position is a different one — which is a selection dropped with a
+    // notice, never a silent re-point.
+    const commands = scriptedCommands({ reload: { ok: true, value: movedDocument() } });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    expect(state.selected?.id.node).toBe(10);
+
+    await state.rereadDocument(2);
+
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "selection repaired" case
+
+  it('reports a read it could not make, answers it, and keeps what it holds', async () => {
+    // **The stale projection stays.** Nothing here knows the file is gone, only
+    // that this attempt did not reach it, and dropping a file's whole projection
+    // is a bigger claim than a failed read supports. The failure is answered as
+    // well as reported, so the caller can say why rather than leaving a control
+    // that appeared to do nothing.
+    const refusal: IpcFailure = {
+      kind: 'command',
+      error: { code: 'unknownDocument', document: 2 }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ reload: { ok: false, failure: refusal } });
+    const state = createBrowserState(commands, (failure) => reported.push(failure));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    expect(await state.rereadDocument(2)).toEqual(refusal);
+
+    expect(reported).toEqual([refusal]);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    // A read that failed is not a workspace that failed.
+    expect(state.status).toBe('ready');
+    expect(state.failure).toBeNull();
+  }); // End of the "failed re-read" case
+
+  it('lets the newer re-read win, however late the older one answers', async () => {
+    // **The second review's High finding.** This call awaited with no generation
+    // captured at all, so of two overlapping re-reads of one file the *older*
+    // answer installed last and won — the state ending up projecting bytes it had
+    // already replaced with fresher ones, with every identity minted from them.
+    const first = deferred<CommandResult<DocumentView>>();
+    let call = 0;
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      reloadDocument: vi.fn(() =>
+        call++ === 0
+          ? first.promise
+          : Promise.resolve<CommandResult<DocumentView>>({ ok: true, value: laterDocument() })
+      )
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    const pending = state.rereadDocument(2);
+    await state.rereadDocument(2);
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+
+    first.resolve({ ok: true, value: movedDocument() });
+    expect(await pending).toBeNull();
+
+    // The older answer is discarded whole rather than installed: `rev-b` describes
+    // a parse the second read has already superseded, and answering `null` says
+    // only that this read did not fail.
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40, 41]);
+  }); // End of the "overlapping re-reads" case
+
+  it('discards a re-read whose workspace has been replaced under it', async () => {
+    // **The half neither per-document counter can see, and they miss it for
+    // opposite reasons.** `open()` *clears* `projectionGenerations`, so a file whose
+    // projection had never been replaced compares equal across two workspaces;
+    // `rereadGenerations` is monotonic and `open()` leaves it alone, so it counts
+    // straight through the replacement without ever encoding which workspace a read
+    // belonged to. Meanwhile the identities themselves are reallocated by the load,
+    // so an answer from the closed workspace installed into the open one describes a
+    // file this state is not showing. `openGeneration` is the only capture that
+    // catches it.
+    const reload = deferred<CommandResult<DocumentView>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      reloadDocument: vi.fn(() => reload.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    const pending = state.rereadDocument(2);
+    await state.open('/tmp/other');
+
+    reload.resolve({ ok: true, value: movedDocument() });
+    expect(await pending).toBeNull();
+
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe('rev-a');
+    expect(state.status).toBe('ready');
+  }); // End of the "replaced workspace" case
+}); // End of the "reading one file again" suite
+
 describe('moving a snippet', () => {
   it('re-reads the file, re-points the selection and forgets the text it was showing', async () => {
     const moved = movedDocument();
@@ -1485,7 +1642,7 @@ describe('moving a snippet', () => {
     // answers with afterwards.
     documents.set(2, { ok: true, value: moved });
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1518,7 +1675,7 @@ describe('moving a snippet', () => {
     await state.select(baseDocument().matches[0]!);
 
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1560,7 +1717,7 @@ describe('moving a snippet', () => {
     await state.open(null);
 
     const first = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1568,7 +1725,7 @@ describe('moving a snippet', () => {
     const firstResult = first.kind === 'answered' ? first.result : null;
     expect(firstResult?.outcome).toBe('refused');
     const findings = firstResult?.outcome === 'refused' ? firstResult.findings : [];
-    await state.moveMatch(baseDocument().matches[0]!, null, OPEN_REVISION, {
+    await state.moveMatch(baseDocument().matches[0]!.id, null, OPEN_REVISION, {
       accepted: findings
     });
 
@@ -1600,7 +1757,7 @@ describe('moving a snippet', () => {
     await state.select(baseDocument().matches[0]!);
 
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1677,7 +1834,7 @@ describe('moving a snippet', () => {
     expect(started).not.toBeNull();
 
     const answer = await state.moveMatch(
-      before.matches[1]!,
+      before.matches[1]!.id,
       null,
       baseRevisionOf(opened),
       NOTHING_ACKNOWLEDGED
@@ -1722,7 +1879,7 @@ describe('moving a snippet', () => {
     expect(commands.documentText).toHaveBeenCalledTimes(1);
 
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1777,7 +1934,7 @@ describe('moving a snippet', () => {
     // What is on disk after the rename that did complete.
     documents.set(2, { ok: true, value: moved });
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1827,7 +1984,7 @@ describe('moving a snippet', () => {
     expect(commands.documentText).toHaveBeenCalledTimes(1);
 
     const outcome = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -1860,7 +2017,7 @@ describe('moving a snippet', () => {
     // Its own arm, not a `failed` with `mayHaveWritten: false`: no command ran, so
     // there is no rejection to hand on and the type says so by carrying neither
     // field.
-    expect(await state.moveMatch(stranger, null, OPEN_REVISION, NOTHING_ACKNOWLEDGED)).toEqual({
+    expect(await state.moveMatch(stranger.id, null, OPEN_REVISION, NOTHING_ACKNOWLEDGED)).toEqual({
       kind: 'notAttempted'
     });
     expect(commands.moveMatch).not.toHaveBeenCalled();
@@ -1883,7 +2040,7 @@ describe('moving a snippet', () => {
     await state.open(null);
 
     const base = baseDocument();
-    await state.moveMatch(base.matches[0]!, base.matches[1]!, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+    await state.moveMatch(base.matches[0]!.id, base.matches[1]!.id, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
 
     const call = vi.mocked(commands.moveMatch).mock.calls[0]!;
     expect(call[0]).toEqual(base.matches[0]!.id);
@@ -1918,7 +2075,7 @@ describe('moving a snippet', () => {
     state.show({ kind: 'document', id: 2 });
 
     const base = baseDocument();
-    await state.moveMatch(base.matches[0]!, null, 'rev-older', NOTHING_ACKNOWLEDGED);
+    await state.moveMatch(base.matches[0]!.id, null, 'rev-older', NOTHING_ACKNOWLEDGED);
 
     // The state really is projecting something else, so this is not the same value
     // arriving by another route.
@@ -1963,7 +2120,7 @@ describe('moving a snippet', () => {
       failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
     });
     const answer = await state.moveMatch(
-      baseDocument().matches[0]!,
+      baseDocument().matches[0]!.id,
       null,
       OPEN_REVISION,
       NOTHING_ACKNOWLEDGED
@@ -2026,7 +2183,7 @@ describe('moving a snippet', () => {
     // against the identities that projection carries.
     documents.set(2, { ok: true, value: moved });
     await state.moveMatch(
-      replacedDocument().matches[0]!,
+      replacedDocument().matches[0]!.id,
       null,
       'rev-c',
       NOTHING_ACKNOWLEDGED
@@ -2093,7 +2250,7 @@ describe('moving a snippet', () => {
       state.show({ kind: 'document', id: 2 });
       await state.select(before.matches[position]!);
       documents.set(2, { ok: true, value: after });
-      await state.moveMatch(before.matches[0]!, before.matches[1]!, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+      await state.moveMatch(before.matches[0]!.id, before.matches[1]!.id, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
       return state;
     } // End of function moveWhileLookingAt()
 

@@ -55,7 +55,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-3a-1** | **New and delete as values, with no screen**: `matchCreation.ts` (destinations with typed ineligibility, the three position arms, the two required fields), `matchDeletion.ts` (a two-phase confirmation bound to one identity), both commands wired through `BrowserState` with the adoption inside the wrapper, and a fifth `SelectionNotice` arm for a deletion the person asked for | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on three High findings; the confirmation pass returned **NOT READY** again on one High the first round's own fix had introduced; the third pass returned one Low. **All ten were fixed before the commit** |
 | **2c-3a-2** | **New and delete on a screen**: `MatchCreator.svelte` and `MatchDeleter.svelte` as rule-free walks over step 1's values, a mounted-component test for each, and a 12-launch window reading — the two thirds of 2c-3a's evidence step 1 did not have. **Phase 2c-3a is now complete.** | ✅ complete — after a review fix round, a confirmation pass and a **window-reading fix round with a re-taken reading** below. The aggregate review returned **NOT READY** on two findings; the confirmation returned **READY**; the window reading then found two Medium defects of its own, **one fixed in this cut and one deferred with a decision owed** |
 | **2c-3b-1** | **Move as a value, with no screen**: `matchMove.ts` — the **sequence** rather than the file as the invariant, a five-reason eligibility verdict, `top`/`after`/`end` with `end` lowered onto an identity anchor because the wire has none, the destination itself drafted so consent is content-addressed to it — plus the repair of `BrowserState.moveMatch`, the last writing wrapper never shaped as a `MatchSaveAnswer` and the carrier of **three** latent defects, all now closed | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on four findings; the confirmation pass returned **NOT READY** again on four the first round's own fixes had introduced; the third pass found the second round's central fix **BROKEN** and returned six more. **All fourteen were fixed before the commit**, and most of them were false claims in **prose** rather than defects in behaviour |
-| **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Split into two steps by the rule 2c-2 and 2c-3a used; **step 1 is the row above and is complete** | ⬜️ **step 2 — the screen — is next.** Two of `2c-split-notes.md` §7's three kinds of evidence are owed: the mounted-component test and the window reading |
+| **2c-3b-2** | **Move on a screen**: `MatchMover.svelte` as a rule-free walk over step 1's value, `BrowserState.rereadDocument` as the first public single-document re-read, `moveMatch` re-typed to identities, the destination list bounded before a reading measured it, and this project's fourth mounted-component test | ✅ **code complete** — after an aggregate review (**NOT READY**, six findings, three High) and a confirmation pass (**NOT READY**, three more, all Low). **All nine fixed before the commit.** Four of the six first-round findings were user-facing sentences claiming more than the code knows |
+| **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Split into two steps by the rule 2c-2 and 2c-3a used; **both steps' code is complete** | ⬜️ **the window reading is owed, and it is the only thing outstanding.** Two of `2c-split-notes.md` §7's three kinds of evidence are in hand — model tests and a mounted-component test; **the third is not**, and by this project's own rule the sub-phase is not complete without it |
 | 2c-3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -2224,6 +2225,67 @@ write is what is on disk would be wrong for the same reason.
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
 | R36 | **There is no relation that can follow an open draft to the snippet it edits across a reparse**, and 2c-3b-1 deliberately did not invent one. `moveEligibility`'s `unsavedDraft` rule compares **whole identities**, so the moment the draft's identity is older than the projection the eligibility is computed over, the rule **stops matching and the move is allowed** — and a commit strands those edits | Open, recorded as hole 18 of `docs/decisions/2c-3b-1-notes.md` and in `moveEligibility`'s own doc comment. **`identityInProjection` is not the producer that closes it, and the record claimed it was for one round**: it resolves by **arena node alone**, so with draft A at R0/node 10 and an unrelated snippet B at R1/node 10 it answers B's identity and the rule refuses **B** — the defect the round before had just closed, reached through the producer prescribed to close it. It is safe as a **check** (`confirmDelete` and `sessionIsLive` require equality including the revision) and unsafe as a **producer**. Two shapes would settle it, and step 2 must choose one: a coordinator that owns the editor-to-snippet relation and re-points it in the same synchronous block that installs a new projection — the shape `repairAfter` already has for the *selection* — **or** a rule that a snippet with a stale draft is not offered a move at all until the draft is saved or discarded. **Not** a lookup that infers cross-revision identity from an arena node, whatever it is named |
 | R37 | **A model rule that reads the live projection agrees with itself only over consistent inputs, and nothing forces a caller to supply them.** `matchMoveView(session, R0Views)` answering `canMove: true` beside `beginMove(session, identityInProjection(R1Views, …))` answering `null` type-checks, and no signature refuses it. The same shape is `beginMove`'s `projected` argument and `confirmDelete`'s, where nothing in TypeScript can say where an argument came from | Accepted and **stated in the same sentence as what the code does force** — in `refusalGiven`, in `beginMove` and in the two module headers — after a review round found the record claiming the two "cannot disagree by construction". What would close the remaining half is a requirement on the caller: **a component must derive the view, the destination options and the submission identity from one read of the current projections, in one synchronous block.** A screen holding a stale copy of `BrowserState.views` gets the stale answer from every one of them, consistently and wrongly |
+
+---
+
+## Phase 2c-3b-2 review disposition
+
+**Two rounds, nine findings, `NOT READY` both times.** The mandatory once-per-phase aggregate review
+is `docs/reviews/phase-2c-3b-2-code.md` (six findings, three High); the confirmation pass over its
+fixes is `docs/reviews/phase-2c-3b-2-confirmation.md` (three more, all Low). **All nine were fixed
+before the commit**, so no commit holds a demonstrated defect.
+
+**Four of the six first-round findings were user-facing sentences claiming more than the code
+knows** — this project's named worst defect class, in the medium where it does the most damage.
+
+| # | Finding | Disposition |
+|---|---|---|
+| F1 | **High — `rereadDocument` awaited with no generation captured**, so an older re-read could install a projection over newer state. The one genuine correctness bug in the round | **Fixed.** Three captures before the await, each in a shape already used in this file: `openGeneration`, a new per-document `rereadGenerations` request counter, and `projectionGenerationOf(document)`. Two deferred-promise tests force out-of-order completion |
+| F2 | **High — a committed move whose re-read failed drew two contradictory sentences at once**: `windowOutOfStep` ("this window could not read the file back") beside `browser.matchMove.moved` ("the file has been read again"). Both reachable together because `view.moved` is true even when `adoption.kind === 'failed'` | **Fixed.** `moved` no longer mentions a re-read in either language; a mounted case covers the failed-adoption state |
+| F3 | **High — `movedNotIdentified` said *"It is in the file"* on `landed === null`**, which means the file changed *again* between the write and the read that followed — an intervening change that may have removed the snippet entirely | **Fixed.** Both languages now say the window cannot establish where the snippet is **or whether it is still there**, and ask the person to look at the file as it is now |
+| F4 | **Medium — `sendFailed` claimed *"The snippet is where it was"***. The failure establishes that *this move* wrote nothing; it establishes nothing about the file, which something external may have changed | **Fixed.** Claims only that this move wrote nothing, in both languages |
+| F5 | **Medium — a *failed* recovery re-read kept a projection already known to disagree**, leaving the session live against it, holding its old destinations, and able to resend the same stale identity | **Fixed with the smallest honest change**, deliberately: a new `moveRecoveryFailed(session)` sets `invalidated`, so the session can no longer choose or send. **The workspace invalidation helpers and the two counters were not touched** — collapsing or mis-driving those is a known past data defect, and a Medium does not justify re-plumbing them |
+| F6 | **Low — the record promised every successful re-read makes the session `outOfDate`.** An unchanged-bytes re-read returns the *same* revision, the full identity still compares equal, and the panel stays usable | **Fixed in words, not code.** Qualified in the notes and in the component comment |
+
+**F5's fix forced a fifth copy change that no reviewer had seen**, which is why the confirmation pass
+was commissioned rather than assumed: `cannotMove.outOfDate` said *"This window has read this file
+again"*, false for the new producer, and now says only that the destinations come from a reading the
+window can no longer stand behind.
+
+**The confirmation pass found three more, and all three were prose contradicting code** — the class
+no test can fail:
+
+| # | Finding | Disposition |
+|---|---|---|
+| C1 | **`matchMove.ts`'s module header still called `applyMove` the only producer of `invalidated`** and defined the field as *a projection was replaced*. `moveRecoveryFailed` is a second producer and explicitly does **not** replace one | **Fixed.** `invalidated` is now documented as **identities the session can no longer vouch for**, with both producers named and the difference between them stated: one replaces a projection, the other leaves it installed after the command contradicted its identity |
+| C2 | **The spent-session prose in the component and the notes claimed every `outOfDate` session came from a parse that is gone.** After `moveRecoveryFailed` the parse is still installed | **Fixed in both places.** Three histories, not two, with the third named as the one where the parse is *not* gone |
+| C3 | **The F1 comments and the workspace-replacement test stated the opposite counter policy from the code** — that `open()` clears the re-read counters. It clears only `projectionGenerations`; `rereadGenerations` is deliberately monotonic, and its own declaration comment says so 200 lines above | **Fixed.** Both passages now say the two per-document counters fail to distinguish workspaces for **opposite** reasons, and that only `openGeneration` separates them |
+
+**Confirmed sound by the second pass, and worth recording as checked rather than assumed:** all three
+F1 generations are captured before the await and failures are still reported; the counters key by
+`DocumentId`; both race tests genuinely force delayed older completion; all five copy changes match in
+strength across English and Spanish; `moveRecoveryFailed` disables choosing and sending and survives
+dismissal; and R37, the `notMovable` suppression, `moveMatch`'s three repaired behaviours and the
+refusal precedence all remain intact.
+
+**One interlock the pass surfaced, and it is worth knowing before anyone edits either half.**
+`cannotMove.outOfDate` can say *"This move wrote nothing"* **only because of the refusal precedence**:
+`mayHaveWritten` and `alreadyMoved` are both asked above it, so a session that wrote — or may have —
+never reaches that sentence. **Reordering `refusalGiven` would silently make that copy a lie.** The
+copy's truthfulness is load-bearing on the arm order, in two files that look unrelated.
+
+### A defect this step found in a sibling module and did NOT fix
+
+**`browser.matchDeletion.sendFailed` carries F4's exact defect**, in both languages: *"The snippet is
+still in the file"* / *"El fragmento sigue en el archivo"*. A send failure establishes that **this
+deletion** wrote nothing; it establishes nothing about the file, which something external may have
+changed in the meantime.
+
+It was left deliberately, by this project's own standing rule: changing a sentence in a shipped
+screen obliges a **re-taken window reading** of the sub-phase that owns it, and that is 2c-3a-2's.
+This is the same reason `browser.rawEditor.discardWarning` is still outstanding. **Whichever
+sub-phase next touches the deleter owes this fix and the re-taken reading**, exactly as the raw
+editor's twin is owed.
 
 ---
 
@@ -5287,7 +5349,111 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3b step 1 is complete: move exists as a value, and nothing draws it.**
+**Phase 2c-3b step 2's code is complete and committed: a person can move a snippet from a window.
+The one thing outstanding is the window reading, and it is the whole of the next session's job.**
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1242 passed, 44 files
+```
+
+(`cargo test --workspace` expects **1008**, unchanged — neither step of 2c-3b wrote any Rust.
+`npm run check` expects 407 files, 0 errors, 0 warnings. `npm run build` expects **168 modules**;
+the guard was rebaselined from 166 by measuring a pristine `git archive HEAD` build and subtracting,
+and the +2 is `MatchMover.svelte` plus `matchMove.ts`, which was type-only in production until this
+step drew it.)
+
+### The next step is the window reading, and nothing else
+
+**It is the third of `2c-split-notes.md` §7's three kinds of evidence, and this sub-phase does not
+close without it.** Model tests and a mounted-component test are both in hand. The rule that makes
+this non-negotiable is written in `CLAUDE.md` and was earned twice: **a green test suite is not a
+screen.** 2c-1b's reading found two real defects past 883 passing tests, `svelte-check` and two Codex
+passes — one of them this project's central promise broken on the one screen that writes. 2c-3a-2's
+reading found a layout defect past 1160 passing tests and two Codex passes over the very component.
+
+**How to take it:**
+
+- **The technique is `docs/decisions/1c-1-notes.md` §10.** The WKWebView constraint is
+  `docs/decisions/1c-2b-2b-2-notes.md` §6.1: a webview whose window is occluded stops running
+  `setTimeout` about six seconds after launch, `open -a` does not restart it, and LaunchServices
+  silently drops `--env` for a bundle path it thinks is already running. **One plan per launch, into
+  a fresh bundle path.**
+- **Set the language explicitly through the picker at the top of every plan.** The webview's
+  `localStorage` follows the **bundle identifier**, not `HOME`, so a previous launch's override leaks
+  into a fresh bundle with a fresh `HOME` (`docs/decisions/2c-2-2-window-reading.md` §1.2). Two
+  launches of that reading failed by looking for an English control on a Spanish screen.
+- **Record it as `docs/decisions/2c-3b-2-window-reading.md`**, in the shape of
+  `docs/decisions/2c-3a-2-window-reading.md`.
+
+**What the reading must settle, beyond "it draws".**
+
+1. **The destination panel's height, measured, in Spanish.** §2.8 gave it `max-height: 12rem` with a
+   sticky action row — **a bound, not a measurement**. It is the same one-row-per-something shape that
+   put 2c-3a-2's creation form at 805 px tall inside a 645 px pane with its primary control below the
+   fold. Drive it over the longest sequence available. **Spanish is the longer language**, and
+   `fragmento` is longer than the `atajo` it replaced.
+2. **The creation form's width in Spanish, while you are there.** `PROGRESS.md` has owed this since
+   the terminology change: the re-taken 2c-3a-2 reading measured only **13 px** of margin *before*
+   `fragmento` replaced `atajo`, and no screen has drawn the longer word yet.
+3. **The three rewritten sentences, on screen, in both languages** — `moved`, `movedNotIdentified`
+   and `cannotMove.outOfDate`. All three grew in the fix rounds and **no test asserts what a sentence
+   says**, only which key is drawn (notes hole 10, taken deliberately: substring assertions over copy
+   are brittle enough to become their own defect). The reading is the only thing that can see them
+   wrap, overflow or read as nonsense.
+4. **`invalidatedByCommit`, still unsettled** (`2c-3b-1-notes.md` §5, and item 10 of the superseded
+   list below). Drive a file of **at least three snippets** with the selection moved mid-flight both
+   **inside** the shifted range and **outside** it. Measured today: a selection at a position the
+   reorder touched is dropped with the `differentMatch` notice, which tells the person the file
+   *changed on disk* and that what is now in that position is a different snippet — after a move they
+   asked for, with the snippet still in the file one row above. **If that reads as a false alarm, the
+   fix is an explicit notice argument on the adoption, never a swap inside `repairAfter`** — a
+   conflicted move really did move the file under the person, and the same code serves it.
+5. **Whether a spent session reads as a dead end.** The panel offers no repair for `outOfDate`,
+   `alreadyMoved` or `mayHaveWritten`, by decision: the sentences are supposed to say *close this and
+   pick the snippet again*. Whether they actually do is a claim about a screen.
+6. **The silent absence of Move while an editor is open.** The R36 conservative refusal means a
+   snippet with an open editor is not offered a move **and no sentence explains why**. The
+   confirmation review judged that acceptable for the chosen policy — but "acceptable" was a judgement
+   about code, and whether it is confusing is a judgement only a window can make.
+
+**A window reading is re-taken after any change to a component.** If the reading finds a defect and
+you fix it, the reading is taken again — 2c-1b took two and 2c-3a-2 took a 12-launch reading plus a
+6-launch re-take for exactly this reason.
+
+### What was decided in this step that a later session must not silently undo
+
+- **`invalidated` means *identities this session can no longer vouch for*, and it has TWO producers
+  that differ in kind.** `applyMove` sets it when a projection was **replaced**; `moveRecoveryFailed`
+  sets it when one was **not** — the projection is still installed, and what happened is that the
+  command contradicted the identity and the window could not obtain a better one. Reading the field as
+  *the projection was replaced* is wrong for one of its two producers, and the module header said
+  exactly that until the confirmation pass.
+- **`cannotMove.outOfDate` can say *"This move wrote nothing"* only because of the refusal
+  precedence.** `mayHaveWritten` and `alreadyMoved` are both asked above it, so a session that wrote —
+  or may have — never reaches that sentence. **Reordering `refusalGiven` would silently make that copy
+  a lie**, from a file that looks unrelated to it.
+- **`rereadDocument` captures three generations before its await**, and the two per-document counters
+  fail to distinguish workspaces for **opposite** reasons: `open()` clears `projectionGenerations`,
+  while `rereadGenerations` is monotonic and survives it. Only `openGeneration` separates workspaces.
+- **F5 was fixed at the session, not at the workspace, on purpose.** Making a failed recovery re-read
+  invalidate the workspace's projection and selection would have meant driving the two counters, and
+  mis-driving them is a defect this project has already shipped once. A Medium does not justify it.
+
+### The debt this step found and did not pay
+
+**`browser.matchDeletion.sendFailed` has F4's exact defect** — *"The snippet is still in the file"* —
+and was left because changing a shipped screen's copy obliges a re-taken window reading of the
+sub-phase that owns it (2c-3a-2). See the disposition section above. **`browser.rawEditor.discardWarning`
+is still outstanding for the same reason**, and has been since 2c-2-2. These two are now a pair, and
+the rule is the same for both: **whichever sub-phase next touches that screen owes the fix and the
+re-taken reading.**
+
+---
+
+**Phase 2c-3b step 1 (superseded by the above, kept for its rationale) is complete: move exists as a
+value, and nothing draws it.**
 `docs/decisions/2c-3b-1-notes.md` is the record (§6 is eighteen open holes, §7 / §8 / §9 are the three
 review rounds). The design consult for the whole of 2c-3b is `docs/reviews/phase-2c-3b-design.md`; the
 three code reviews are `docs/reviews/phase-2c-3b-1-{code,confirmation,third-pass}.md`, and **all three

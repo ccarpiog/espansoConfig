@@ -170,11 +170,19 @@
  * that the window has read the file again since. Two different mechanisms close
  * that, and neither subsumes the other:
  *
- * - {@link MatchMoveSession.invalidated} — a replacement this session was **told**
- *   about. {@link applyMove} is its only producer, and it derives it from two
- *   kinds of evidence: a committed save or an adoption the wrapper owed at all,
- *   **and** the conflict arm, which replaces this window's projection while
- *   reporting `adoption: notOwed` (the section above says why);
+ * - {@link MatchMoveSession.invalidated} — **identities this session can no longer
+ *   vouch for**, which it was **told** about. It has **two** producers, and they
+ *   differ in whether a projection was replaced at all:
+ *   {@link applyMove} sets it from a replacement, on two kinds of evidence — a
+ *   committed save or an adoption the wrapper owed at all, **and** the conflict
+ *   arm, which replaces this window's projection while reporting
+ *   `adoption: notOwed` (the section above says why); and
+ *   {@link moveRecoveryFailed} sets it **without** a replacement, from a recovery
+ *   re-read that failed. There the projection is still installed and the parse is
+ *   not gone — what happened is that the command **contradicted** the identity
+ *   this session holds and the window then could not obtain a better one. Reading
+ *   this field as *the projection was replaced* is therefore wrong for one of its
+ *   two producers, which is why it is named for what the session can vouch for;
  * - the **live projections**, which {@link moveSubmissionRefusal},
  *   {@link canMove} and {@link matchMoveView} all take for exactly this reason. A
  *   reprojection nobody told this session about — the window re-reading the file
@@ -670,16 +678,21 @@ export interface MatchMoveSession {
    */
   readonly moved: boolean;
   /**
-   * Whether the projection this session's identities came from has been replaced.
+   * Whether this session's identities can no longer be vouched for.
    *
    * **A second fact, because it is a second fact** — see this module's header.
    * {@link applyMove} sets it from a committed save, from an adoption
    * `BrowserState.moveMatch` owed at all — so it is set whenever that wrapper
    * re-read the file, whether or not the move committed — **and** from the
    * conflict arm, which the wrapper reports `notOwed` for while installing the
-   * projection the conflict carried. Cleared by nothing: `match`, `members` and
-   * `anchors` were all minted from a parse that is gone, and no transition here can
-   * mint them again.
+   * projection the conflict carried. {@link moveRecoveryFailed} is the fourth
+   * producer, and the only one where the projection was **not** replaced: the
+   * recovery is offered precisely because the command said this window's address
+   * does not describe the file it read, so a re-read that then fails leaves a
+   * session whose identities are known to disagree with the file and cannot be
+   * refreshed. Cleared by nothing: `match`, `members` and `anchors` were all minted
+   * from a parse that is gone or from one the file has contradicted, and no
+   * transition here can mint them again.
    *
    * **It is what this session was told, never everything that is true.** A
    * reprojection the wrapper did not perform — the window re-reading the file for
@@ -1016,6 +1029,14 @@ export type MoveSubmissionRefusal =
    * session's snippet the identity it holds; and a placement
    * {@link lowerPlacement} cannot lower at all, which today only a hand-assembled
    * session reaches — `MatchMoveSession` is a structural interface with no brand.
+   *
+   * **Its sentence therefore says only that this window can no longer stand behind
+   * the destinations it is offering**, and never *how* that came about. It used to
+   * say the window had read the file again, which is true of the commonest producer
+   * and false of {@link moveRecoveryFailed}'s — where the window tried to read the
+   * file again and could not. One arm renders one sentence, so the sentence has to
+   * be true of every way of reaching the arm; that is the same rule
+   * {@link refusalGiven} states about which arm wins.
    */
   | 'outOfDate'
   /** The chosen destination is where the file already writes the snippet. */
@@ -1521,6 +1542,42 @@ export function moveRecoveryChoices(failure: IpcFailure | null): readonly MoveRe
       return [];
   }
 } // End of function moveRecoveryChoices()
+
+/**
+ * Records that the one recovery this session offers did not reach the file.
+ *
+ * **The session stops being sendable, and the argument for that is the recovery's
+ * own premise.** {@link moveRecoveryChoices} offers *read this file again* for four
+ * codes and four only, and every one of them says the address this window sent does
+ * not describe the file the command read. So by the time this is called the window
+ * already **has evidence** that its reading of the file and the file disagree; a
+ * read that then fails removes the only way it had of resolving that. Leaving the
+ * session live there would let the same disputed identity be sent again, from a
+ * panel whose destinations were built from the very reading the command rejected.
+ *
+ * **Not because a resend would write twice.** A session sends its frozen base
+ * revision, so a first write that did land makes that base stale and the resend
+ * conflicts rather than duplicating — the reason is the disagreement and the stale
+ * identity, exactly as it is for {@link MatchMoveSession.mayHaveWritten}.
+ *
+ * **The flag it sets is `invalidated` rather than an arm of its own**, so the
+ * sentence the panel draws is `outOfDate` — which says the window can no longer
+ * stand behind the destinations it is offering, and says nothing about how that
+ * came about. The panel goes on drawing `browser.matchMove.reloadFailed` beside the
+ * send failure, which is where *why* is said.
+ *
+ * **What no type forces**, in the same sentence as what one does: nothing here can
+ * check that the caller really attempted a read, or that the read really failed.
+ * What is closed is that a session this is called on cannot send anything —
+ * {@link canChoose}, {@link moveSubmissionRefusal} and {@link beginMove} all refuse
+ * it, and no transition in this module clears the flag.
+ *
+ * @param session - The session whose recovery re-read failed.
+ * @returns The session, unable to send anything more.
+ */
+export function moveRecoveryFailed(session: MatchMoveSession): MatchMoveSession {
+  return { ...session, invalidated: true };
+} // End of function moveRecoveryFailed()
 
 /**
  * The choices a conflict offers in this sub-phase.
