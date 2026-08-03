@@ -6606,6 +6606,7 @@ _Updated at each phase boundary._
 | **2c split** | **`8b1c050`** | ✅ pushed to `origin/main` | clean |
 | **2c-1a** | **`25fcc40`** | ✅ pushed to `origin/main` | clean |
 | **2c-1b** | **`fa72d45`** | ✅ pushed to `origin/main` | clean |
+| **2c-2 step 1** | **`22a52cc`** | ✅ pushed to `origin/main` | clean |
 
 `8b1c050` is **not a phase** — it is the **split of Phase 2c**, which the previous checkpoint made a
 fresh session's first act in as many words: *"A fresh session's first act is that split, not code."*
