@@ -5362,8 +5362,8 @@ stands recorded there: `edit.rs` adds a new verification class over run-owned by
 asymmetric copy seams, and reviewing that beside a new command, cache adoption, session state
 and a component would make a preservation defect hard to localize.
 
-Step 1's commit is the row under "2c-3c step 1" in the git-state table. The exact first command
-a fresh session should run:
+**`e079161` is step 1's commit and is where a fresh session starting 2c-3c-2 begins.** The exact
+first command a fresh session should run:
 
 ```sh
 npm install && npm test        # expect 1244 passed, 44 files
@@ -7938,7 +7938,7 @@ _Updated at each phase boundary._
 | **2c-3a step 2** | **`57bf362`** | ✅ pushed to `origin/main` | clean |
 | **2c-3b step 1** | **`76a5196`** | ✅ pushed to `origin/main` | clean |
 | **2c-3b step 2 (phase)** | **`45d8478`** | ✅ pushed to `origin/main` (recorded by `f675b3e`) | clean |
-| **2c-3c step 1** | recorded in the follow-up commit | — | — |
+| **2c-3c step 1** | **`e079161`** | ✅ pushed to `origin/main` | clean |
 
 `76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
 until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a
