@@ -5356,7 +5356,8 @@ the previous checkpoint posed (five PASS, one confirmed defect), a fix round clo
 Codex reviewed the fix (**READY, no findings** — `docs/reviews/phase-2c-3b-2-reading-fix.md`), and
 a five-launch re-take (§13 of the record) measured the new sentences on screen in both languages.
 
-The exact first command a fresh session should run:
+**`45d8478` is the phase's commit and is where a fresh session starts.** The exact first command a
+fresh session should run:
 
 ```sh
 npm install && npm test        # expect 1244 passed, 44 files
