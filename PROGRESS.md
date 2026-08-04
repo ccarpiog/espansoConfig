@@ -5354,8 +5354,8 @@ writer, `BrowserState.duplicateMatch` is the sixth writing wrapper, and `matchDu
 is duplicate as a value. Nothing draws it — the component, the mounted test and the bilingual
 window reading are step 3's, and 2c-3c does not close without them.**
 
-Step 2's commit is the row under "2c-3c step 2" in the git-state table. The exact first
-command a fresh session should run:
+**`78f34dd` is step 2's commit and is where a fresh session starting 2c-3c-3 begins.** The
+exact first command a fresh session should run:
 
 ```sh
 npm install && npm test        # expect 1302 passed, 45 files
@@ -8033,7 +8033,7 @@ _Updated at each phase boundary._
 | **2c-3b step 1** | **`76a5196`** | ✅ pushed to `origin/main` | clean |
 | **2c-3b step 2 (phase)** | **`45d8478`** | ✅ pushed to `origin/main` (recorded by `f675b3e`) | clean |
 | **2c-3c step 1** | **`e079161`** | ✅ pushed to `origin/main` | clean |
-| **2c-3c step 2** | recorded in the follow-up commit | — | — |
+| **2c-3c step 2** | **`78f34dd`** | ✅ pushed to `origin/main` | clean |
 
 `76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
 until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a
