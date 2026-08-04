@@ -5349,7 +5349,126 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3b is complete: move exists as a value, a screen draws it, and all three kinds of
+**Phase 2c-3c — Duplicate — is under way, its owner decision is taken, and step 1 of its
+three-step cut is complete: `DocumentEdit::DuplicateItem` is a true duplicate in the core, and
+nothing calls it.**
+
+The owner decision `2c-split-notes.md` §4 left open was taken first: **a true duplicate** —
+option (1), the byte-exact clone — never the projection-based copy. The design consult is
+`docs/reviews/phase-2c-3c-design.md`, and its Q7 answer changed the expected cut from the
+two-step pattern of 2c-2/3a/3b to **three steps**: 2c-3c-1 the core primitive (this commit),
+2c-3c-2 the boundary and model, 2c-3c-3 the component and its evidence. The consult's reason
+stands recorded there: `edit.rs` adds a new verification class over run-owned bytes and
+asymmetric copy seams, and reviewing that beside a new command, cache adoption, session state
+and a component would make a preservation defect hard to localize.
+
+Step 1's commit is the row under "2c-3c step 1" in the git-state table. The exact first command
+a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1244 passed, 44 files
+```
+
+(`cargo test --workspace` expects **1041** — up from 1008; step 1 is Rust plus the precedented
+dictionary cascade. `npm run check` expects 407 files, 0 errors, 0 warnings. `npm run build`
+expects **168 modules**, unchanged — the cascade added keys and type members, no new source
+module. The real-corpus sweep inside `tests/patch_duplicate.rs` skips cleanly when
+`tests/corpus/real/` is absent and must apply at least one duplicate when it is present.)
+
+### What step 1 contains
+
+`DocumentEdit::DuplicateItem { item }` in `crates/espansoconfig-core/src/patch/edit.rs`: a
+byte-exact copy of a sequence item's owned runs (via `carve_envelope`, factored from
+`removal_envelope` so no deletion-premise refusal is imported), landing **immediately after its
+source, same sequence, with no placement choice** (consult Q4); batch-only via
+`DuplicateMustBeTheOnlyEditInItsBatch` (R25's precedent, consult Q1); destination-only seam
+refusals — `DuplicateSeam::{ArrivalLands,ArrivalCloses,CopiedRunsJoin}`,
+`DuplicateWouldExtendAKeptBlock`, `DuplicateWouldCopyAFileComment` — asymmetric on purpose,
+because the original never moves so there is no source-close arm; and an EOF-prefix line-ending
+rule for a last-item source (copy the observed ending in front of the clone, else
+`NoObservableLineEnding`). The verification class is independent of the planner by
+construction: a byte oracle against `entry_owned_runs`' own textual derivation, the re-derived
+insertion boundary (`arrival.span.start == item_own_lines(...).end`), digest/order, a lockstep
+tree walk, an exact comment-ownership multiset with clone-relative positional checks, and a
+claimed-run-set-equals-independent-set equality that is the only layer able to refuse a false
+provenance claim over honest bytes.
+
+`FindingCode::DuplicateKeepsTriggerDefinition` is produced by `save_document` only when the
+clone projects as a match with a modelled trigger form. It claims **risk, never espanso
+semantics** (D2u), and it **carries the candidate's `ContentRevision`**, so acknowledgement is
+content-addressed and consent for one clone cannot spend on another — the same discipline
+`DocumentDoesNotParse` established, closed here after review round 1 demonstrated the transfer.
+
+Tests: the new `crates/espansoconfig-core/tests/patch_duplicate.rs` (corpus classes: LF, CRLF,
+BOM, Unicode, mixed endings, no-final-newline, leading comments, file-owned holes, block
+scalars; the three move-seam fixtures — 6/6 copy on block-scalar seams, one `CopiedRunsJoin`
+refusal on run-joins, 4/4 on kept-comment — and the real-corpus sweep, 26 applied / 0 refused)
+plus the in-module adversarial suite built on `tampered_duplicate`. 1008 → **1041** Rust tests;
+the frontend suite is unchanged at 1244.
+
+### The review rounds, and what they teach again
+
+Both rounds returned `READINESS: NOT READY` (`docs/reviews/phase-2c-3c-1-code.md`; the
+confirmation pass is appended there). Round 1: three High, one Low — the acknowledgement that
+could transfer to a byte-different candidate on a later revision, the verification that trusted
+the planner's own boundary derivation, the run bound that did not independently exclude
+file-owned comment provenance, and the corpus sweep that stayed green if every duplicate was
+refused. Round 2, scoped to round 1's fixes, found what the standing rule predicts — **each
+round's fix produces the next round's finding**: the F3 mutation test changed byte order, so
+the byte oracle intercepted it and the provenance layer went untested. The closing fix tampers
+**only the claim** over honest bytes — verified by temporarily disabling the run-vector
+equality and watching the tampered plan return `Ok` through the whole pipeline — and a
+companion test records as two measurements why a bytes-rebuilding tamper proves nothing about
+that layer. All five findings are closed; the dispositions are
+`docs/decisions/2c-3c-1-notes.md` §6.
+
+### What step 1 decided that a later session must not silently undo
+
+- **The trigger is byte-identical and no edit rides along.** Clone-then-edit-trigger in one
+  batch was considered and refused (consult Q2) — R25's rationale binds duplicate too.
+  Uniqueness is the finding's job, not the primitive's.
+- **`ArrivalCloses` and the non-EOF kept-block clause are believed unreachable and kept
+  defensively** — `2c-3c-1-notes.md` §2.9, holes 1 and 3. Those are reachability *arguments*,
+  not proofs; deleting either arm requires re-running the argument, not observing the absence
+  of a failing test.
+- **A `|+` block's trailing blanks are the scalar's own content span** — owned, therefore
+  copied. Measured during implementation, and it is why the non-EOF kept-block clause is
+  believed unreachable.
+- **The dictionary cascade is part of the core step, by 2b-2c-3a's precedent** (the consult's
+  "no TypeScript in step 1" yields to the workspace staying green): 12 `code.*` keys per
+  language, `DuplicateSeam` in `CODE_ENUMS`, retabulated `VARIANT_COUNTS` and wire tallies
+  (177 → 189; struct/unit (106,12,59) → (115,12,62)), four TS union extensions with the finding
+  member tagged for its `ContentRevision` operand. `codes.ts` needed nothing — no new accessor
+  until 2c-3c-2 puts sentences on a screen.
+
+### Next: step 2c-3c-2 — the boundary and the model
+
+Consult Q5/Q6/Q8 are its spec, read them before coding: register
+`duplicate_match(id, base_revision, acknowledgement)` as the twelfth command, routed through
+`run_one_save` with the helper's `at` naming the clone's **post-insertion** path so
+`SaveResult.moved` names the clone in the fresh revision; `BrowserState.duplicateMatch` with
+full `MatchSaveAnswer` parity (refusal, conflict, `mayHaveWritten`, failed adoption,
+`committed: false`, `forgetTextOf`, total stale-projection removal after a known commit) and
+the two-counter selection rules — follow `moved` to the clone only if the source is still the
+selection that initiated the operation, never reclaim a selection the person moved;
+`matchDuplication.ts` as a `Draft<MatchId>` session with eligibility
+{`notInDocument`, `readOnly`, `noSequencePosition`, `unsavedDraftInDocument` — document-wide on
+purpose, a commit strands every dirty draft in the file} and refusal precedence
+{`mayHaveWritten`, `alreadyDuplicated`, `saveInFlight`, `conflict`, `outOfDate`,
+`notDuplicable`} — the arm that claims less wins; the i18n accessors and both dictionaries the
+model needs; **no `.svelte` file**. The mounted test and the bilingual window reading are
+2c-3c-3's, and 2c-3c is not done without them.
+
+### The debt this step carries forward, unchanged
+
+**`browser.matchDeletion.sendFailed` and `browser.rawEditor.discardWarning`** still have F4's
+defect pattern and are still a pair: whichever sub-phase next touches those screens owes the
+fix and the re-taken reading. This step touched neither screen.
+
+---
+
+**Phase 2c-3b (superseded by the above, kept for its rationale) is complete: move exists as a
+value, a screen draws it, and all three kinds of
 evidence are in hand — model tests, the mounted-component test, and the window reading.** The
 reading is `docs/decisions/2c-3b-2-window-reading.md`: twelve launches settled the six questions
 the previous checkpoint posed (five PASS, one confirmed defect), a fix round closed the one Medium,
@@ -7818,6 +7937,8 @@ _Updated at each phase boundary._
 | **2c-3a step 1** | **`37ea352`** | ✅ pushed to `origin/main` (as `cb6fee3`) | clean |
 | **2c-3a step 2** | **`57bf362`** | ✅ pushed to `origin/main` | clean |
 | **2c-3b step 1** | **`76a5196`** | ✅ pushed to `origin/main` | clean |
+| **2c-3b step 2 (phase)** | **`45d8478`** | ✅ pushed to `origin/main` (recorded by `f675b3e`) | clean |
+| **2c-3c step 1** | recorded in the follow-up commit | — | — |
 
 `76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
 until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a

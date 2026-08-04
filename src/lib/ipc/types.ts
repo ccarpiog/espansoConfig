@@ -741,6 +741,15 @@ export type RotationOutcome = 'NotAttempted' | 'Refused' | 'ScanFailed' | 'Scann
 /** Which join of a move a block-scalar refusal is about. */
 export type MoveSeam = 'SourceCloses' | 'ArrivalLands' | 'ArrivalCloses' | 'CarriedRunsJoin';
 
+/**
+ * Which join of a duplicate a block-scalar refusal is about.
+ *
+ * {@link MoveSeam} minus the source close, under duplicate names: a duplicate
+ * leaves the source in place, so the seam a removal and a move both create does
+ * not exist for it and this type cannot spell it.
+ */
+export type DuplicateSeam = 'ArrivalLands' | 'ArrivalCloses' | 'CopiedRunsJoin';
+
 /** The name of every {@link DecodeError} variant. */
 export type DecodeErrorName =
   | 'SpanOutsideSource'
@@ -900,7 +909,11 @@ export type VerificationFailureName =
   | 'MovedBytesWereRewritten'
   | 'CommentOwnershipChanged'
   | 'AmbiguousPlainScalarIntroduced'
-  | 'RemovalCarriesMoreThanTheEntry';
+  | 'RemovalCarriesMoreThanTheEntry'
+  | 'DuplicateCarriesMoreThanTheItem'
+  | 'DuplicatedBytesWereRewritten'
+  | 'DuplicateNotInPlace'
+  | 'ConstructChangedOutsideTheDuplicate';
 
 /**
  * Why a candidate document was rejected after being reparsed.
@@ -959,7 +972,28 @@ export type VerificationFailure =
     }
   | { readonly CommentOwnershipChanged: { readonly edit: number; readonly at: number } }
   | { readonly AmbiguousPlainScalarIntroduced: { readonly at: number; readonly len: number } }
-  | { readonly RemovalCarriesMoreThanTheEntry: { readonly at: ByteSpan; readonly lines: ByteSpan } };
+  | { readonly RemovalCarriesMoreThanTheEntry: { readonly at: ByteSpan; readonly lines: ByteSpan } }
+  | {
+      readonly DuplicateCarriesMoreThanTheItem: {
+        readonly edit: number;
+        readonly at: ByteSpan;
+        readonly lines: ByteSpan;
+      };
+    }
+  | {
+      readonly DuplicatedBytesWereRewritten: {
+        readonly edit: number;
+        readonly at: number;
+        readonly first_difference: number;
+      };
+    }
+  | { readonly DuplicateNotInPlace: { readonly edit: number; readonly position: number } }
+  | {
+      readonly ConstructChangedOutsideTheDuplicate: {
+        readonly edit: number;
+        readonly node: NodeId;
+      };
+    };
 
 /** The name of every {@link EditError} variant. */
 export type EditErrorName =
@@ -998,6 +1032,10 @@ export type EditErrorName =
   | 'InconsistentSequenceIndentation'
   | 'ImplicitNullSequenceHasAmbiguousTrivia'
   | 'RemovalWouldEmptyTheSequence'
+  | 'DuplicateMustBeTheOnlyEditInItsBatch'
+  | 'DuplicateWouldCopyAFileComment'
+  | 'DuplicateWouldExtendAKeptBlock'
+  | 'DuplicateWouldExtendABlockScalar'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1119,6 +1157,21 @@ export type EditError =
       };
     }
   | { readonly RemovalWouldEmptyTheSequence: { readonly edit: number; readonly sequence: NodeId } }
+  | {
+      readonly DuplicateMustBeTheOnlyEditInItsBatch: {
+        readonly edit: number;
+        readonly edits: number;
+      };
+    }
+  | { readonly DuplicateWouldCopyAFileComment: { readonly edit: number; readonly comment: ByteSpan } }
+  | { readonly DuplicateWouldExtendAKeptBlock: { readonly edit: number; readonly block: NodeId } }
+  | {
+      readonly DuplicateWouldExtendABlockScalar: {
+        readonly edit: number;
+        readonly block: NodeId;
+        readonly seam: DuplicateSeam;
+      };
+    }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */
@@ -1133,7 +1186,8 @@ export type FindingCodeName =
   | 'DuplicateVariableName'
   | 'ReferenceHasNoDeclaration'
   | 'RegexDoesNotCompile'
-  | 'DocumentDoesNotParse';
+  | 'DocumentDoesNotParse'
+  | 'DuplicateKeepsTriggerDefinition';
 
 /** What the semantic gate noticed about a candidate, as a code plus operands. */
 export type FindingCode =
@@ -1196,6 +1250,30 @@ export type FindingCode =
          * `RegexDoesNotCompile.detail` follows.
          */
         readonly detail: string;
+      };
+    }
+  | {
+      /**
+       * The save inserted a byte-exact copy of an existing snippet, so the copy
+       * keeps the same trigger definition as its source.
+       *
+       * Produced only by a duplicate batch, never by the semantic rules, and it
+       * is **acknowledgeable**: a claim about risk, never about espanso
+       * semantics — this app cannot determine how espanso chooses between
+       * overlapping definitions.
+       */
+      readonly DuplicateKeepsTriggerDefinition: {
+        /**
+         * The content revision of the exact candidate this finding is about.
+         *
+         * What binds an acknowledgement to one candidate. The clone's path,
+         * span and node also travel on the finding, but all three are equal
+         * across a same-length rewrite of the source trigger; hand a finding
+         * back unchanged and it acknowledges that text and no other.
+         *
+         * Opaque, and never rendered.
+         */
+        readonly revision: ContentRevision;
       };
     };
 

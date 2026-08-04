@@ -166,14 +166,31 @@ draw them.** All five writing commands are wired through `BrowserState`; **four 
 screen, and `moveMatch` is the one that is not** — 2c-3b step 2 is what draws it. 2c-3a's decisions
 are `docs/reviews/phase-2c-3a-design.md` and `docs/decisions/2c-3a-{1,2}-notes.md`.
 
-**2c-3b is split the same way, and step 1 is complete: `matchMove.ts` is move as a value, nothing
-draws it, and the wrapper that sends it was repaired in the same step.** `BrowserState.moveMatch`
-had never had a production caller, which is exactly why it carried three latent defects — a
-`SaveResult | null` return where the other four writing wrappers answer a `MatchSaveAnswer`, a
-discarded `adoptTheDocumentOnDisk` result that left a **stale projection installed** when a committed
-move's re-read failed, and `forgetFileText()` where `forgetTextOf(document)` belongs. All three are
-closed. Its decisions are `docs/reviews/phase-2c-3b-design.md` and
-`docs/decisions/2c-3b-1-notes.md`.
+**2c-3b is complete: `matchMove.ts` is move as a value, `MatchMover.svelte` draws it, and the window
+reading is taken** (`docs/decisions/2c-3b-2-window-reading.md` — twelve launches, one Medium found
+and fixed, a five-launch re-take). Step 1 also repaired the wrapper that sends it:
+`BrowserState.moveMatch` had never had a production caller, which is exactly why it carried three
+latent defects — a `SaveResult | null` return where the other four writing wrappers answer a
+`MatchSaveAnswer`, a discarded `adoptTheDocumentOnDisk` result that left a **stale projection
+installed** when a committed move's re-read failed, and `forgetFileText()` where
+`forgetTextOf(document)` belongs. All three are closed. Its decisions are
+`docs/reviews/phase-2c-3b-design.md` and `docs/decisions/2c-3b-1-notes.md`.
+
+**2c-3c — Duplicate — is under way as three steps, and step 1 is complete:
+`DocumentEdit::DuplicateItem` is a true duplicate in the core, and nothing calls it.** The owner
+decision `2c-split-notes.md` §4 demanded is taken: a **true duplicate** — the clone is the item's
+exact owned runs, byte-identical, trigger included — never a projection copy. The clone lands
+immediately after its source, same sequence, with no placement choice; the batch that holds a
+`DuplicateItem` holds nothing else (R25's precedent); the seam refusals are destination-only on
+purpose, because the original never moves. The save carries an acknowledgeable
+`FindingCode::DuplicateKeepsTriggerDefinition` that claims risk, never espanso semantics (D2u), and
+is content-addressed by the candidate's `ContentRevision` so consent for one clone cannot spend on
+another. Its decisions are `docs/reviews/phase-2c-3c-design.md` (the consult; its Q7 cut the phase
+into three steps) and `docs/decisions/2c-3c-1-notes.md`; the review is
+`docs/reviews/phase-2c-3c-1-code.md` — two rounds, both `NOT READY`, all five findings closed
+before the commit. Steps 2 (the `duplicate_match` command, `BrowserState.duplicateMatch`,
+`matchDuplication.ts`) and 3 (the component, its mounted test, the bilingual window reading) are
+owed, and 2c-3c is not done without all three kinds of evidence.
 
 **"Same sequence" is the invariant a move keeps, and "same file" is not it.** D2r makes `ItemMove`
 same-sequence only; today's projection happens to give a snippet file exactly one snippet list, and

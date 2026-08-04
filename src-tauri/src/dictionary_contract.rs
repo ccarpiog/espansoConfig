@@ -297,6 +297,10 @@ const CODE_ENUMS: &[CodeEnum] = &[
     },
     CodeEnum {
         source: "crates/espansoconfig-core/src/patch/edit.rs",
+        name: "DuplicateSeam",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/patch/edit.rs",
         name: "VerificationFailure",
     },
     CodeEnum {
@@ -366,11 +370,12 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("backupError", 8),
     ("backupStep", 12),
     ("rotationOutcome", 4),
-    ("findingCode", 11),
+    ("findingCode", 12),
     ("findingClass", 2),
-    ("editError", 36),
+    ("editError", 40),
     ("moveSeam", 4),
-    ("verificationFailure", 26),
+    ("duplicateSeam", 3),
+    ("verificationFailure", 30),
     ("syntaxError", 3),
     ("invariantViolation", 5),
     ("pathError", 9),

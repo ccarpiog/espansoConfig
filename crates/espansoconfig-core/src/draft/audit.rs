@@ -116,14 +116,17 @@ pub fn check_closed_surface(
             DocumentEdit::InsertField(insert) => {
                 insert.mapping() == mapping && MatchField::from_key(insert.key()).is_some()
             }
-            // A sequence-item insert or remove is a **cardinality change to a
-            // sequence**, which is exactly what a closed surface excludes: the
-            // draft diff describes one match's own scalar fields, and adding or
-            // deleting an item of `triggers`, `vars` or `matches` is a different
-            // operation with a different primitive behind it. Refused as outside
-            // the surface rather than by a name of its own, because that is what
-            // it is — the surface has no shape for it at all.
-            DocumentEdit::InsertItem(_) | DocumentEdit::RemoveItem(_) => false,
+            // A sequence-item insert, remove or duplicate is a **cardinality
+            // change to a sequence**, which is exactly what a closed surface
+            // excludes: the draft diff describes one match's own scalar fields,
+            // and adding, deleting or copying an item of `triggers`, `vars` or
+            // `matches` is a different operation with a different primitive
+            // behind it. Refused as outside the surface rather than by a name
+            // of its own, because that is what it is — the surface has no shape
+            // for it at all.
+            DocumentEdit::InsertItem(_)
+            | DocumentEdit::RemoveItem(_)
+            | DocumentEdit::DuplicateItem(_) => false,
         };
         if !within {
             return Err(DraftError::OutsideTheClosedSurface { edit: position });
@@ -296,12 +299,14 @@ fn check_every_named_key_is_unique(
             DocumentEdit::InsertField(insert) => insert
                 .sibling()
                 .map(|key| (insert.mapping().clone(), key.to_owned())),
-            // None of the three names a key in a parent mapping: a move and the
-            // two sequence-item primitives address a **position**, and
-            // `check_closed_surface` has already refused all three.
+            // None of the four names a key in a parent mapping: a move, a
+            // duplicate and the two sequence-item primitives address a
+            // **position**, and `check_closed_surface` has already refused all
+            // four.
             DocumentEdit::MoveItem(_)
             | DocumentEdit::InsertItem(_)
-            | DocumentEdit::RemoveItem(_) => None,
+            | DocumentEdit::RemoveItem(_)
+            | DocumentEdit::DuplicateItem(_) => None,
         };
         let Some((parent, key)) = named else {
             continue;

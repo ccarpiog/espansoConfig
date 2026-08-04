@@ -566,6 +566,7 @@
   "code.findingCode.referenceHasNoDeclaration": "El texto hace referencia a «{name}», y nada de lo que esta aplicación puede ver declara una variable con ese nombre.",
   "code.findingCode.regexDoesNotCompile": "Esta expresión regular no compiló con la versión que usa espansoConfig. espanso fija una anterior, de modo que ambas pueden discrepar.",
   "code.findingCode.documentDoesNotParse": "El analizador de YAML de espansoConfig no puede leer este texto. Analiza con una biblioteca distinta de la que usa espanso, así que esto es un aviso y no un veredicto, pero un archivo que espanso no pueda leer no se carga.",
+  "code.findingCode.duplicateKeepsTriggerDefinition": "El duplicado mantiene la misma definición de disparador que su origen, y espansoConfig no puede determinar cómo elige espanso entre definiciones superpuestas.",
 
   "code.editError.sourceDoesNotParse": "El analizador de YAML de espansoConfig no pudo leer este archivo, así que no se puede localizar nada dentro de él.",
   "code.editError.unresolvable": "El lugar que nombra este cambio no existe en el archivo.",
@@ -602,12 +603,19 @@
   "code.editError.inconsistentSequenceIndentation": "Los elementos de la lista no empiezan todos en la misma columna, así que un elemento nuevo no tiene ninguna sangría que copiar.",
   "code.editError.implicitNullSequenceHasAmbiguousTrivia": "Hay un comentario justo debajo de esta clave vacía, así que crear aquí una lista obligaría a decidir si ese comentario pertenece a la lista o a lo que viene después.",
   "code.editError.removalWouldEmptyTheSequence": "Quitar esto dejaría la lista sin elementos, y no hay forma de escribir eso que siga significando lo mismo.",
+  "code.editError.duplicateMustBeTheOnlyEditInItsBatch": "Un duplicado debe enviarse solo; espansoConfig todavía no comprueba un duplicado combinado con otro cambio.",
+  "code.editError.duplicateWouldCopyAFileComment": "Los bytes que copiaría este duplicado aún incluyen un comentario que pertenece al archivo. Eso es un fallo de esta aplicación.",
+  "code.editError.duplicateWouldExtendAKeptBlock": "La costura de la copia cambiaría el valor de un bloque de texto con el que termina el fragmento duplicado, cambiando un valor que nadie editó.",
+  "code.editError.duplicateWouldExtendABlockScalar": "Un bloque de texto absorbería una línea que este duplicado coloca debajo de él, cambiando un valor que nadie editó.",
   "code.editError.verification": "El resultado se volvió a analizar y comprobar, no superó esas comprobaciones y se descartó.",
 
   "code.moveSeam.sourceCloses": "donde las líneas que seguían al elemento suben a situarse bajo las que lo precedían",
   "code.moveSeam.arrivalLands": "donde las líneas movidas pasan a situarse bajo el destino",
   "code.moveSeam.arrivalCloses": "donde lo que seguía al destino pasa a situarse bajo las líneas movidas",
   "code.moveSeam.carriedRunsJoin": "donde se encuentran dos tramos de las líneas movidas que nunca fueron vecinos en el archivo",
+  "code.duplicateSeam.arrivalLands": "donde las líneas copiadas quedan debajo del original",
+  "code.duplicateSeam.arrivalCloses": "donde lo que seguía al original queda debajo de las líneas copiadas",
+  "code.duplicateSeam.copiedRunsJoin": "donde se encuentran dos tramos de las líneas copiadas que nunca fueron vecinos en el archivo",
 
   "code.verificationFailure.doesNotParse": "El analizador de YAML de espansoConfig no pudo leer el resultado.",
   "code.verificationFailure.targetLost": "El lugar editado no aparece en el resultado reanalizado.",
@@ -635,6 +643,10 @@
   "code.verificationFailure.commentOwnershipChanged": "Un comentario pertenece en el resultado a algo distinto de aquello a lo que pertenecía en el archivo.",
   "code.verificationFailure.ambiguousPlainScalarIntroduced": "El resultado contiene un valor sin comillas que YAML 1.1 y YAML 1.2 leen de forma distinta.",
   "code.verificationFailure.removalCarriesMoreThanTheEntry": "La eliminación borraría más bytes que la entrada que nombra.",
+  "code.verificationFailure.duplicateCarriesMoreThanTheItem": "El duplicado copiaría más bytes que el elemento que nombra.",
+  "code.verificationFailure.duplicatedBytesWereRewritten": "Los bytes copiados no son los bytes propios del elemento de origen.",
+  "code.verificationFailure.duplicateNotInPlace": "La lista no contiene cada elemento original más la copia inmediatamente después de su origen.",
+  "code.verificationFailure.constructChangedOutsideTheDuplicate": "Algo fuera del elemento duplicado cambió, y nada lo pidió.",
 
   "code.syntaxError.parse": "El analizador de YAML rechazó el documento.",
   "code.syntaxError.offset": "Una posición notificada quedó fuera del documento. Es un fallo de esta aplicación.",

@@ -67,15 +67,26 @@
 //! rather than an append-then-move, and it reuses [`ItemMove`]'s own front
 //! derivation: the start of the first item's hull, so that item's leading comment
 //! block stays with it.
+//!
+//! **2c-3c-1 — [`DuplicateItem`], the byte-exact copy.** A whole sequence item's
+//! owned runs — the same envelope a lift takes, carved below the removal-only
+//! refusals — are inserted verbatim immediately after the source, in the same
+//! sequence, with no destination argument and no rendering of any kind. It is
+//! batch-only, its seams are the move's destination seams under duplicate names
+//! ([`DuplicateSeam`] — there is no source close, because the source stays), and
+//! its verification is its own class: the arrival must equal the concatenation
+//! of the runs `entry_owned_runs` derives from the text, the sequence must be
+//! the original plus the clone in its slot, and the candidate's comments must be
+//! exactly the original's plus one owned copy of each comment the runs carry.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
-    apply_edits, apply_scalar_edit, apply_scalar_edits, insert_field, insert_item, move_item,
-    remove_field, remove_item, DocumentEdit, EditError, FieldInsert, FieldRemoval, InsertItem,
-    ItemMove, ItemPlacement, MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement,
-    ScalarEdit, VerificationFailure,
+    apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
+    move_item, remove_field, remove_item, DocumentEdit, DuplicateItem, DuplicateSeam, EditError,
+    FieldInsert, FieldRemoval, InsertItem, ItemMove, ItemPlacement, MoveSeam, PatchedDocument,
+    PresentationNote, RemoveItem, Replacement, ScalarEdit, VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

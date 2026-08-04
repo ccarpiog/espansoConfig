@@ -1345,24 +1345,27 @@ fn every_fixture_is_listed_in_every_fixture() {
 } // End of function every_fixture_is_listed_in_every_fixture()
 
 /// Every [`FindingCode`] variant this module can produce is produced by some
-/// fixture, and the one it cannot produce is **named** rather than skipped.
+/// fixture, and the ones it cannot produce are **named** rather than skipped.
 ///
 /// `FindingCode::ALL_NAMES` is checked against an exhaustive `match` inside the
 /// crate, so adding a variant without a fixture fails here rather than becoming
 /// a code nothing can reach.
 ///
-/// **`DocumentDoesNotParse` is the single exemption**, and it is one because the
-/// code is not a rule about espanso at all: `save_document`'s whole-text
-/// replacement mode produces it when the submitted text is not YAML this crate
-/// can index, and `validate` — which takes a projection, and therefore a
-/// document that already parsed — has no way to reach it. It lives in this enum
-/// because it must be acknowledgeable, and an acknowledgement is a multiset of
-/// `Finding`s. The exemption is asserted from both sides: no fixture reaches it,
-/// **and** it is really declared, so a renamed variant fails here.
-/// `tests/persist_raw_save.rs` is where it is proved reachable.
+/// **`DocumentDoesNotParse` and `DuplicateKeepsTriggerDefinition` are the two
+/// exemptions**, and each is one because the code is not a rule about espanso at
+/// all: both are `save_document`'s — the first from its whole-text replacement
+/// mode when the submitted text is not YAML this crate can index, the second
+/// from a `DuplicateItem` batch whose clone keeps its source's trigger
+/// definition — and `validate`, which takes a projection of a document that
+/// already parsed and knows nothing about the edit that produced it, has no way
+/// to reach either. They live in this enum because they must be acknowledgeable,
+/// and an acknowledgement is a multiset of `Finding`s. Each exemption is
+/// asserted from both sides: no fixture reaches it, **and** it is really
+/// declared, so a renamed variant fails here. `tests/persist_raw_save.rs` proves
+/// the first reachable and `tests/persist_save.rs` the second.
 #[test]
 fn every_finding_code_is_reachable() {
-    const NOT_VALIDATES: &str = "DocumentDoesNotParse";
+    const NOT_VALIDATES: [&str; 2] = ["DocumentDoesNotParse", "DuplicateKeepsTriggerDefinition"];
 
     let mut seen: Vec<&str> = Vec::new();
     for source in every_fixture() {
@@ -1370,19 +1373,21 @@ fn every_finding_code_is_reachable() {
     }
     seen.sort_unstable();
     seen.dedup();
-    assert!(
-        !seen.contains(&NOT_VALIDATES),
-        "{NOT_VALIDATES} is the save transaction's code; validate must not produce it"
-    );
+    for exempt in NOT_VALIDATES {
+        assert!(
+            !seen.contains(&exempt),
+            "{exempt} is the save transaction's code; validate must not produce it"
+        );
+    } // End of the loop over the two save-transaction codes
 
     let mut expected: Vec<&str> = FindingCode::ALL_NAMES
         .into_iter()
-        .filter(|name| *name != NOT_VALIDATES)
+        .filter(|name| !NOT_VALIDATES.contains(name))
         .collect();
     assert_eq!(
         expected.len(),
-        FindingCode::ALL_NAMES.len() - 1,
-        "the exemption names a code the enum no longer declares"
+        FindingCode::ALL_NAMES.len() - NOT_VALIDATES.len(),
+        "an exemption names a code the enum no longer declares"
     );
     expected.sort_unstable();
     assert_eq!(seen, expected, "a finding code no fixture produces");

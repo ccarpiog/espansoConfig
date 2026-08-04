@@ -65,7 +65,7 @@ use espansoconfig_core::model::{
     MatchBadge, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
 };
 use espansoconfig_core::patch::{
-    DocumentPath, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
+    DocumentPath, DuplicateSeam, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
     VerificationFailure,
 };
 use espansoconfig_core::persist::{
@@ -1187,7 +1187,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 36), ("SaveError", 10)] {
+    for (name, count) in [("EditError", 40), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -1587,6 +1587,15 @@ fn rotation_outcome_samples() -> Vec<RotationOutcome> {
     ]
 }
 
+/// One value of every [`DuplicateSeam`] variant.
+fn duplicate_seam_samples() -> Vec<DuplicateSeam> {
+    vec![
+        DuplicateSeam::ArrivalLands,
+        DuplicateSeam::ArrivalCloses,
+        DuplicateSeam::CopiedRunsJoin,
+    ]
+} // End of function duplicate_seam_samples()
+
 /// One value of every [`MoveSeam`] variant.
 fn move_seam_samples() -> Vec<MoveSeam> {
     vec![
@@ -1814,6 +1823,24 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
             at: a_span(),
             lines: a_span(),
         },
+        VerificationFailure::DuplicateCarriesMoreThanTheItem {
+            edit: 0,
+            at: a_span(),
+            lines: a_span(),
+        },
+        VerificationFailure::DuplicatedBytesWereRewritten {
+            edit: 0,
+            at: 12,
+            first_difference: 3,
+        },
+        VerificationFailure::DuplicateNotInPlace {
+            edit: 0,
+            position: 1,
+        },
+        VerificationFailure::ConstructChangedOutsideTheDuplicate {
+            edit: 0,
+            node: a_node(),
+        },
     ]
 } // End of function verification_failure_samples()
 
@@ -1949,6 +1976,20 @@ fn edit_error_samples() -> Vec<EditError> {
             edit: 0,
             sequence: a_node(),
         },
+        EditError::DuplicateMustBeTheOnlyEditInItsBatch { edit: 0, edits: 2 },
+        EditError::DuplicateWouldCopyAFileComment {
+            edit: 0,
+            comment: a_span(),
+        },
+        EditError::DuplicateWouldExtendAKeptBlock {
+            edit: 0,
+            block: a_node(),
+        },
+        EditError::DuplicateWouldExtendABlockScalar {
+            edit: 0,
+            block: a_node(),
+            seam: DuplicateSeam::CopiedRunsJoin,
+        },
         EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
     ]
 } // End of function edit_error_samples()
@@ -1983,6 +2024,9 @@ fn finding_code_samples() -> Vec<FindingCode> {
             column: Some(11),
             byte_index: Some(52),
             detail: "the substrate's own English diagnostic".to_owned(),
+        },
+        FindingCode::DuplicateKeepsTriggerDefinition {
+            revision: a_revision(),
         },
     ]
 } // End of function finding_code_samples()
@@ -2185,6 +2229,10 @@ fn save_transaction_enums() -> Vec<(&'static str, Vec<Value>)> {
             move_seam_samples().iter().map(json_of).collect(),
         ),
         (
+            "DuplicateSeam",
+            duplicate_seam_samples().iter().map(json_of).collect(),
+        ),
+        (
             "DecodeError",
             decode_error_samples().iter().map(json_of).collect(),
         ),
@@ -2279,13 +2327,15 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 177,
+        variants, 189,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
          Phase 2b-2c-3 added FindingCode::DocumentDoesNotParse and its fix round \
-         added SaveError::ReplacementRequiresBackups; this list now holds \
-         {variants}"
+         added SaveError::ReplacementRequiresBackups, and Phase 2c-3c-1 added the \
+         duplicate's twelve — four EditError refusals, DuplicateSeam's three, \
+         VerificationFailure's four and FindingCode::DuplicateKeepsTriggerDefinition; \
+         this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
 
@@ -2366,13 +2416,15 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (106, 12, 59),
+        (115, 12, 62),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
-         eight more struct ones, PresentationNote's two are two more, and \
+         eight more struct ones, PresentationNote's two are two more, \
          Phase 2b-2c-3's DocumentDoesNotParse and ReplacementRequiresBackups are \
-         the last two; a struct variant that became a skip is a hole"
+         two more, and Phase 2c-3c-1's duplicate added nine struct ones and \
+         three unit ones — its finding gained a revision operand at the review \
+         round; a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2650,7 +2702,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 177,
+        checked, 189,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

@@ -140,10 +140,10 @@ use serde::de::Deserializer;
 use serde::ser::{SerializeStructVariant, Serializer};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{DocumentContext, DocumentView};
+use crate::model::{DocumentContext, DocumentView, TriggerKind};
 use crate::patch::{
-    apply_edits, DocumentEdit, EditError, PatchedDocument, PresentationNote, Replacement,
-    VerificationFailure,
+    apply_edits, DocumentEdit, DuplicateItem, EditError, PatchedDocument, PresentationNote,
+    Replacement, VerificationFailure,
 };
 use crate::persist::backup::{BackupError, BackupRecord, BackupSession};
 use crate::persist::write::{
@@ -1237,7 +1237,15 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     // replacement branch treats it as the finding the user acknowledges.
     let candidate = produced.text();
     let findings = match &produced {
-        Candidate::Patched(_) => findings_of(context, &target, candidate)?,
+        Candidate::Patched(_) => {
+            // Only the edits mode can reach the patched arm, and the edits are
+            // what the duplicate-specific finding is derived from.
+            let edits = match content {
+                SaveContent::Edits(edits) => edits,
+                SaveContent::ReplaceText(_) => &[],
+            };
+            findings_of(context, &target, candidate, edits)?
+        }
         Candidate::Replaced(_) => findings_of_replacement(context, candidate),
     };
     let verdict = verdict(&findings, acknowledgement);
@@ -1455,14 +1463,79 @@ fn findings_of(
     context: &DocumentContext,
     target: &Path,
     candidate: &str,
+    edits: &[DocumentEdit],
 ) -> Result<Vec<Finding>, SaveError> {
     let index =
         SyntaxIndex::parse(candidate).map_err(|error| SaveError::CandidateParseDisagrees {
             path: target.to_path_buf(),
             error,
         })?;
-    Ok(project_and_validate(context, candidate, &index))
+    let trivia = TriviaIndex::scan(candidate, &index);
+    let revision = ContentRevision::of_bytes(candidate.as_bytes());
+    let view = DocumentView::project(context, candidate, revision, &index, &trivia);
+    let mut findings = validate(&view);
+    // The one operation-specific finding, appended after the projection pass so
+    // that the editor-model findings keep their precedence in `verdict`: an
+    // `EditorModelError` anywhere refuses the save whatever else is present.
+    for edit in edits {
+        if let DocumentEdit::DuplicateItem(duplicate) = edit {
+            findings.extend(duplicate_keeps_trigger_definition(
+                &view, duplicate, revision,
+            ));
+        }
+    } // End of the loop over the batch's edits, of which at most one duplicates
+    Ok(findings)
 } // End of function findings_of()
+
+/// The suspicion a duplicate owes its first save attempt — the 2c-3c design
+/// consult's Q3.
+///
+/// Produced when the **clone**, looked up in the candidate's own projection at
+/// the path [`DuplicateItem::resulting_path`] derives, is a match with exactly
+/// one modelled trigger form (`Single`, `Multiple` or `Regex`). When it has none
+/// or several, [`FindingCode::MatchHasNoTriggerField`] or
+/// [`FindingCode::MatchHasSeveralTriggerForms`] is already among the projection
+/// pass's findings — for the source and the clone both — and that
+/// `EditorModelError` wins in [`verdict`]; producing this suspicion beside it
+/// would add nothing and must not weaken that precedence. A duplicated item that
+/// does not project as a match at all — a `vars` item, say — owes no trigger
+/// warning either.
+///
+/// # The candidate's own hash is an operand, and the acknowledgement depends on it
+///
+/// `revision` is the **candidate's** [`ContentRevision`], and it goes into the
+/// finding for [`does_not_parse`]'s exact reason. The clone's path, span and
+/// node also travel — they are what a screen points at — but none of the three
+/// identifies a text: rewrite the source trigger to another value of the same
+/// byte length and the new candidate's clone has the same path, the same span
+/// and the same freshly minted node number, so an acknowledgement retained from
+/// the old candidate would cover the new one and a clone nobody was shown would
+/// commit (the 2c-3c-1 review's finding 1). With the operand, a different
+/// candidate is a different finding and [`Acknowledgement::covers_all`]'s
+/// exact-multiset match does the rest.
+fn duplicate_keeps_trigger_definition(
+    view: &DocumentView,
+    edit: &DuplicateItem,
+    revision: ContentRevision,
+) -> Option<Finding> {
+    let clone_path = edit.resulting_path()?;
+    let clone = view
+        .matches
+        .iter()
+        .find(|candidate| candidate.path.as_ref() == Some(&clone_path))?;
+    if !matches!(
+        clone.trigger.kind,
+        TriggerKind::Single | TriggerKind::Multiple | TriggerKind::Regex
+    ) {
+        return None;
+    }
+    Some(Finding {
+        code: FindingCode::DuplicateKeepsTriggerDefinition { revision },
+        span: Some(clone.span),
+        node: Some(clone.source_node),
+        path: Some(clone_path),
+    })
+} // End of function duplicate_keeps_trigger_definition()
 
 /// Step 5 for a [`SaveContent::ReplaceText`] candidate, where a failed parse is
 /// **the answer** rather than a contradiction.

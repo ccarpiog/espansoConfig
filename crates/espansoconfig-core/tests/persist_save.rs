@@ -53,13 +53,13 @@ use common::corpus_root;
 use espansoconfig_core::discovery::FileKind;
 use espansoconfig_core::model::DocumentContext;
 use espansoconfig_core::patch::{
-    apply_scalar_edit, path_to, DocumentEdit, DocumentPath, EditError, ScalarEdit,
+    apply_scalar_edit, path_to, DocumentEdit, DocumentPath, DuplicateItem, EditError, ScalarEdit,
 };
 use espansoconfig_core::persist::{
     lock_path, save_document, Acknowledgement, SaveContent, SaveError, SaveRequest, SaveVerdict,
     WriteError,
 };
-use espansoconfig_core::validate::FindingClass;
+use espansoconfig_core::validate::{FindingClass, FindingCode};
 use espansoconfig_core::workspace::project_source;
 use espansoconfig_core::{ContentRevision, DocumentId, SyntaxIndex};
 use std::path::{Path, PathBuf};
@@ -874,6 +874,197 @@ fn an_acknowledgement_from_a_different_candidate_does_not_carry() {
     ));
     assert_refused_without_writing(&target, before, &error, "a stale acknowledgement");
 } // End of function an_acknowledgement_from_a_different_candidate_does_not_carry()
+
+/// A duplicate's first attempt is refused with the operation-specific
+/// suspicion, and the acknowledged retry commits — Phase 2c-3c-1's finding,
+/// proved reachable here because `validate` cannot reach it.
+///
+/// The finding is attached to the **clone's** candidate address: the path is
+/// the slot after the source, and the span and node are the clone's own in the
+/// candidate's fresh parse. The second attempt recomputes an identical finding
+/// from the identical candidate, so `Acknowledgement::covers_all`'s exact
+/// multiset match is the whole round trip — no new machinery.
+#[test]
+fn a_duplicate_refuses_with_its_trigger_finding_until_it_is_acknowledged() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let source_path = DocumentPath::parse("matches[0]").expect("the test's own path parses");
+    let edits = [DocumentEdit::DuplicateItem(DuplicateItem::new(source_path))];
+
+    let refused =
+        save(&target, before, &edits, &Acknowledgement::none()).expect_err("the first attempt");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(
+        refusal.verdict,
+        SaveVerdict::RefusedForUnacknowledgedSuspicions
+    );
+    assert_eq!(
+        refusal.findings.len(),
+        1,
+        "one finding, the duplicate's own"
+    );
+    let finding = &refusal.findings[0];
+    assert!(
+        matches!(
+            finding.code,
+            FindingCode::DuplicateKeepsTriggerDefinition { .. }
+        ),
+        "{:?}",
+        finding.code
+    );
+    assert_eq!(
+        finding.path,
+        Some(DocumentPath::parse("matches[1]").expect("the clone's path parses")),
+        "the finding is attached to the clone, in the slot after the source"
+    );
+    assert!(finding.span.is_some(), "the clone's bytes are named");
+    assert!(finding.node.is_some(), "the clone's node is named");
+    assert_refused_without_writing(&target, before, &refused, "an unacknowledged duplicate");
+
+    let acknowledgement = Acknowledgement::of(&refusal.findings);
+    assert_eq!(acknowledgement.len(), 1);
+    let saved = save(&target, before, &edits, &acknowledgement).expect("the retry commits");
+    assert!(saved.committed);
+    assert_eq!(
+        saved.text,
+        "matches:\n  - trigger: ':one'\n    replace: 'first'\n  - trigger: ':one'\n    \
+         replace: 'first'\n  - trigger: ':two'\n    replace: 'second'\n",
+        "the clone is byte-exact and lands immediately after its source"
+    );
+    assert_eq!(
+        saved.findings, refusal.findings,
+        "the save reports what it proceeded past"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("readable"),
+        saved.text
+    );
+} // End of function a_duplicate_refuses_with_its_trigger_finding_until_it_is_acknowledged()
+
+/// Consent for one candidate must not commit a byte-different clone on a later
+/// revision — the Phase 2c-3c-1 review's finding 1, closed by the finding's
+/// `revision` operand.
+///
+/// The construction is the review's own: the source trigger is rewritten to a
+/// different value of the **same byte length**, so the new candidate's clone has
+/// the same path, the same span and the same freshly minted parser node number.
+/// Path, span and node therefore bind consent to a *shape*, and only the
+/// candidate's own `ContentRevision` in the code tells the two texts apart.
+#[test]
+fn a_duplicate_acknowledgement_does_not_transfer_across_a_same_length_rewrite() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let source_path = DocumentPath::parse("matches[0]").expect("the test's own path parses");
+    let edits = [DocumentEdit::DuplicateItem(DuplicateItem::new(source_path))];
+
+    let shown =
+        save(&target, before, &edits, &Acknowledgement::none()).expect_err("the first attempt");
+    let acknowledgement = Acknowledgement::of(shown.findings());
+    assert_eq!(acknowledgement.len(), 1);
+
+    // The file moves on: same position, same byte length, different trigger.
+    let rewritten = CLEAN.replace("':one'", "':uno'");
+    assert_eq!(
+        rewritten.len(),
+        CLEAN.len(),
+        "the rewrite must preserve every offset, or the span would differ anyway"
+    );
+    std::fs::write(&target, rewritten.as_bytes()).expect("the rewrite lands");
+    let moved_on = revision_on_disk(&target);
+    assert_ne!(moved_on, before);
+
+    let error = save(&target, moved_on, &edits, &acknowledgement)
+        .expect_err("consent collected for the ':one' clone must not commit the ':uno' clone");
+    let refusal = match &error {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(
+        refusal.verdict,
+        SaveVerdict::RefusedForUnacknowledgedSuspicions
+    );
+    assert_refused_without_writing(&target, moved_on, &error, "a transferred acknowledgement");
+
+    // The review's premise, asserted rather than assumed: the two findings
+    // agree in path, span and node, and differ — so the operand is the one
+    // thing doing the binding.
+    let first = &shown.findings()[0];
+    let second = &refusal.findings[0];
+    assert_eq!(first.path, second.path);
+    assert_eq!(first.span, second.span);
+    assert_eq!(first.node, second.node);
+    assert_ne!(
+        first, second,
+        "the candidate revision operand is what tells the two candidates apart"
+    );
+} // End of function a_duplicate_acknowledgement_does_not_transfer_across_a_same_length_rewrite()
+
+/// A duplicated item that is not a match owes no trigger warning at all.
+///
+/// The clone's path names an item of `triggers`, which no `MatchView` occupies,
+/// so the save commits on the first attempt with no finding — the suspicion is
+/// about a match keeping a trigger definition, and nothing here is a match.
+#[test]
+fn a_duplicate_of_a_non_match_item_commits_without_a_finding() {
+    let source = "matches:\n  - triggers:\n      - ':a'\n      - ':b'\n    replace: 'x'\n";
+    let (_directory, target) = fixture(source);
+    let before = revision_on_disk(&target);
+    let path = DocumentPath::parse("matches[0].triggers[0]").expect("the path parses");
+    let edits = [DocumentEdit::DuplicateItem(DuplicateItem::new(path))];
+
+    let saved = save(&target, before, &edits, &Acknowledgement::none())
+        .expect("no match, no trigger warning, no refusal");
+    assert!(saved.committed);
+    assert!(saved.findings.is_empty());
+    assert_eq!(
+        saved.text,
+        "matches:\n  - triggers:\n      - ':a'\n      - ':a'\n      - ':b'\n    replace: 'x'\n"
+    );
+} // End of function a_duplicate_of_a_non_match_item_commits_without_a_finding()
+
+/// When the source has no trigger form, the editor-model finding wins and the
+/// duplicate suspicion deliberately stays silent.
+///
+/// The candidate holds the missing-trigger finding twice — once for the source
+/// and once for the clone — and `verdict` refuses for the error class, which no
+/// acknowledgement can pass. Producing the suspicion beside it would weaken
+/// nothing and claim nothing; it is simply not produced.
+#[test]
+fn a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone() {
+    let source = "matches:\n  - replace: 'x'\n  - trigger: ':two'\n    replace: 'second'\n";
+    let (_directory, target) = fixture(source);
+    let before = revision_on_disk(&target);
+    let path = DocumentPath::parse("matches[0]").expect("the path parses");
+    let edits = [DocumentEdit::DuplicateItem(DuplicateItem::new(path))];
+
+    let error =
+        save(&target, before, &edits, &Acknowledgement::none()).expect_err("the model error wins");
+    let refusal = match &error {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(refusal.verdict, SaveVerdict::RefusedForEditorModelErrors);
+    assert_eq!(
+        refusal
+            .findings
+            .iter()
+            .filter(|finding| matches!(finding.code, FindingCode::MatchHasNoTriggerField))
+            .count(),
+        2,
+        "the missing trigger is reported for the source and for the clone"
+    );
+    assert!(
+        !refusal.findings.iter().any(|finding| matches!(
+            finding.code,
+            FindingCode::DuplicateKeepsTriggerDefinition { .. }
+        )),
+        "the suspicion must not appear beside the error it defers to"
+    );
+    assert_refused_without_writing(&target, before, &error, "a triggerless duplicate");
+} // End of function a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone()
 
 /// The semantic gate is run over the **candidate**, not over the original.
 ///

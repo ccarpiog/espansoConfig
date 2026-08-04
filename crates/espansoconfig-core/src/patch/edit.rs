@@ -820,6 +820,103 @@ impl RemoveItem {
     }
 } // End of impl RemoveItem
 
+/// One requested change: insert a **byte-exact copy** of a whole sequence item
+/// immediately after the original, in the same sequence.
+///
+/// # What "the exact source subtree" means — Phase 2c-3c-1
+///
+/// The clone is the item's **owned physical-line runs**: the envelope
+/// [`removal_envelope`] derives for a lift, which is the ownership hull widened
+/// to whole lines with the file's own comments and the blank runs beside them
+/// punched out. So the owned leading comment block, the sequence dash, every
+/// key, value, unknown subtree and nested collection, block-scalar headers and
+/// bodies, inline comments, trailing spaces and each copied line's original LF,
+/// CRLF or bare-CR bytes all travel — and a blank separator above the leading
+/// comment block, a file-owned comment inside the hull, and the blank runs that
+/// keep such a comment file-owned do **not**, because those bytes are not the
+/// item's under the ownership rules this crate already has.
+///
+/// **No item byte is rendered, decoded, re-encoded, re-indented or
+/// re-terminated.** The insertion replacement is the source runs concatenated in
+/// order. The one allowed non-item byte is the same EOF seam [`InsertItem`]
+/// already needs: when the landing is an unterminated end of file, the locally
+/// observed line ending is copied **in front of** the clone, so the source
+/// becomes terminated, the clone retains the source item's unterminated bytes,
+/// and the file remains without a final newline. When no line ending can be
+/// copied the edit is refused ([`EditError::NoObservableLineEnding`]); LF is
+/// never defaulted.
+///
+/// # Where the clone goes, and why there is no destination argument
+///
+/// **Immediately after the source, with no placement choice** (the Phase 2c-3c
+/// design consult's Q4). The landing is derived from the source item itself, so
+/// there is no second coordinate a caller could get wrong, no anchor that can go
+/// stale, and exactly one seam geometry to verify. Same sequence, and therefore
+/// the same document and file, is this phase's own scope — recorded as such
+/// rather than blamed on D2r, which is formally a move restriction.
+///
+/// # A duplicate is not a move, and the refusal set says so
+///
+/// A duplicate leaves the source in place, so it creates no
+/// [`MoveSeam::SourceCloses`] seam, never exposes the source-side kept-comment
+/// join, and cannot extend a neighbour by removing the source. What it does
+/// create are the destination-side seams — the copy lands, the copy closes, and
+/// one internal join per adjacent pair of copied runs ([`DuplicateSeam`]) — plus
+/// the terminal block-scalar cases [`EditError::DuplicateWouldExtendAKeptBlock`]
+/// names. Each is refused under a duplicate-named error rather than move or
+/// removal prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateItem {
+    /// The sequence item to copy, addressed as `sequence[index]` — the same one
+    /// path shape [`ItemMove::item`] and [`RemoveItem::item`] take.
+    item: DocumentPath,
+}
+
+impl DuplicateItem {
+    /// Builds a duplication of the sequence item `item` names.
+    pub fn new(item: DocumentPath) -> DuplicateItem {
+        DuplicateItem { item }
+    }
+
+    /// The sequence item being copied.
+    pub fn item(&self) -> &DocumentPath {
+        &self.item
+    }
+
+    /// The index the clone takes, given that the source sits at `from`.
+    ///
+    /// **The one spelling of the arithmetic**, public for
+    /// [`ItemMove::resulting_index`]'s reason: a caller that has just committed a
+    /// duplicate needs to say *which item is the clone now*, and every identity
+    /// minted from the previous revision is stale. The landing is fixed to the
+    /// slot immediately after the source, so the answer is `from + 1` — and the
+    /// planner derives its expectation from this same expression, so a caller
+    /// and the engine cannot disagree about where the clone went.
+    pub fn resulting_index(&self, from: usize) -> usize {
+        from + 1
+    }
+
+    /// The clone's own path: the source's, with its final index one higher.
+    ///
+    /// [`DuplicateItem::resulting_index`] read off the request itself, for the
+    /// caller that needs an *address* rather than a number — the save
+    /// transaction attaches its finding to the clone's candidate path, and a
+    /// second spelling of the arithmetic there could disagree with the
+    /// engine's. `None` when the path does not end in an index segment, which
+    /// [`plan_duplicate`] refuses as [`EditError::NotASequenceItem`] anyway;
+    /// the `Option` is so a caller can never mint an address for a request the
+    /// engine would refuse.
+    pub fn resulting_path(&self) -> Option<DocumentPath> {
+        let segments = self.item.segments();
+        let Some(PathSegment::Index(from)) = segments.last() else {
+            return None;
+        };
+        let mut cloned = segments[..segments.len() - 1].to_vec();
+        cloned.push(PathSegment::Index(from + 1));
+        Some(DocumentPath::new(self.item.document_index(), cloned))
+    } // End of function resulting_path()
+} // End of impl DuplicateItem
+
 /// One requested change of any kind, for [`apply_edits`].
 ///
 /// The batch protocol is written once, over this enum, rather than once per
@@ -841,6 +938,8 @@ pub enum DocumentEdit {
     InsertItem(InsertItem),
     /// Delete one whole item from a sequence.
     RemoveItem(RemoveItem),
+    /// Insert a byte-exact copy of one item immediately after its source.
+    DuplicateItem(DuplicateItem),
 }
 
 impl From<ScalarEdit> for DocumentEdit {
@@ -876,6 +975,12 @@ impl From<InsertItem> for DocumentEdit {
 impl From<RemoveItem> for DocumentEdit {
     fn from(edit: RemoveItem) -> DocumentEdit {
         DocumentEdit::RemoveItem(edit)
+    }
+}
+
+impl From<DuplicateItem> for DocumentEdit {
+    fn from(edit: DuplicateItem) -> DocumentEdit {
+        DocumentEdit::DuplicateItem(edit)
     }
 }
 
@@ -1669,6 +1774,100 @@ pub enum EditError {
         /// The sequence that would be emptied.
         sequence: NodeId,
     },
+    /// A batch that contains a duplicate contains something else as well.
+    ///
+    /// **The same deliberate scope rule as
+    /// [`EditError::MoveMustBeTheOnlyEditInItsBatch`], stated for the duplicate
+    /// rather than inherited from R25** — R25 is about a move, and claiming it
+    /// already covered this operation would be a false record. A duplicate is
+    /// verified against the original document plus one repeated position, and a
+    /// second edit in the batch changes what the candidate must say.
+    ///
+    /// It is also what keeps a duplicate a duplicate: a caller that could send
+    /// *clone this item and rewrite its trigger* in one batch would quietly turn
+    /// "duplicate" into "duplicate except for one rewritten field", and the
+    /// byte-exact preservation claim this operation exists for would be
+    /// unverifiable (the Phase 2c-3c design consult's Q2).
+    DuplicateMustBeTheOnlyEditInItsBatch {
+        /// Position of the duplicate in the requested batch.
+        edit: usize,
+        /// How many edits the batch holds.
+        edits: usize,
+    },
+    /// A run of the copied envelope still covers a comment the **file** owns.
+    ///
+    /// The duplicate's counterpart of
+    /// [`EditError::RemovalWouldDeleteAFileComment`], and an assertion on the
+    /// derived run set for the same reason: the punch-out is arithmetic, and this
+    /// reads the document's own ownership answer instead. A copied file-owned
+    /// comment would put a second copy of the file's own note into the document,
+    /// owned by nobody the user pointed at — argued unreachable, because the
+    /// punch-out removes whole lines, and kept live rather than decorative.
+    ///
+    /// Carries the comment's span and never its text (`CLAUDE.md` section 1).
+    DuplicateWouldCopyAFileComment {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the comment sits in the original document.
+        comment: ByteSpan,
+    },
+    /// The **block scalar the copied item ends with** would decode differently
+    /// once the clone sits beside it.
+    ///
+    /// Two clauses, both about the one byte-adjacency a duplicate changes — what
+    /// follows the source item's last line:
+    ///
+    /// 1. **a keep-chomped block loses its trailing blanks to the clone.** A
+    ///    `|+` block's value is every line break physically present after its
+    ///    last content line, and those breaks belong to whatever follows the
+    ///    block. When the item ends in one and a blank separator follows the
+    ///    item, the clone lands between the block and its blanks, so the
+    ///    source's value shrinks and the clone's value takes the blanks —
+    ///    neither of which is "insert a copy". The condition is
+    ///    [`kept_block_the_move_would_extend`]'s, asked at the duplicate's own
+    ///    landing;
+    /// 2. **the EOF prefix terminates a block's unterminated run.** At an
+    ///    unterminated end of file the one non-item byte a duplicate writes is a
+    ///    copied line ending in front of the clone — and when the item ends
+    ///    there in a keep-chomped block, or in a clip-chomped block whose last
+    ///    content line is the unterminated one, that ending becomes one more
+    ///    trailing break and the **source's own value** changes. This is the
+    ///    clause [`EditError::MoveWouldExtendAKeptBlock`] records as its
+    ///    withdrawn second clause: the move stopped rotating breaks, and the
+    ///    duplicate's EOF prefix is the same byte written deliberately, so the
+    ///    clause returns here. A strip-chomped block discards trailing breaks
+    ///    and is safe in both clauses.
+    DuplicateWouldExtendAKeptBlock {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar whose value would change.
+        block: NodeId,
+    },
+    /// A **block scalar** would swallow a line the duplicate puts under it.
+    ///
+    /// The duplicate's version of [`EditError::MoveWouldExtendABlockScalar`],
+    /// with one seam fewer: a duplicate leaves the source in place, so there is
+    /// no source-close join and no [`MoveSeam::SourceCloses`] equivalent. The
+    /// three seams that remain are named by [`DuplicateSeam`], and each is the
+    /// same condition — some block scalar's content ends directly above the line
+    /// in question, with nothing but blank lines in between, and that line sits
+    /// at the block's own body column or deeper — asked at a different place.
+    ///
+    /// **A duplicate re-indents nothing**, so the condition is a column
+    /// comparison and never a column computation: the clone's lines are the
+    /// source's own bytes, and what varies is the column of the item's leading
+    /// comment block, which the user chose and the copy preserves. The body
+    /// column is [`ScalarPresentation::indent`], read off the span layer, and a
+    /// block whose content span is empty is refused whatever the column is,
+    /// exactly as the move's twin refuses it.
+    DuplicateWouldExtendABlockScalar {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar whose value would grow.
+        block: NodeId,
+        /// Which of the joins the duplicate creates would feed it.
+        seam: DuplicateSeam,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
 }
@@ -1710,6 +1909,44 @@ pub enum MoveSeam {
     /// Unlike the three above, this seam does not exist for every move: an
     /// envelope of one run has no internal join, and one of *n* runs has *n − 1*.
     CarriedRunsJoin,
+}
+
+/// Which join a [`EditError::DuplicateWouldExtendABlockScalar`] refusal is about.
+///
+/// **[`MoveSeam`] minus the source close, under duplicate names.** A duplicate
+/// leaves the source in place, so the seam a removal and a move both create —
+/// what followed the item rising to sit under what preceded it — does not exist
+/// here, and an enum that could spell it would be an enum that can say something
+/// false about this operation. The three that remain are the move's destination
+/// seams, seen at the one destination a duplicate has: the slot immediately
+/// after the source.
+///
+/// The asymmetry is the whole point of the type (the Phase 2c-3c design
+/// consult's Q1): the three seam fixtures named in `CLAUDE.md` §4 get duplicate
+/// rows whose accepted/refused split differs from the move's exactly where the
+/// absent source-close seam says it should, and `tests/patch_duplicate.rs` pins
+/// that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DuplicateSeam {
+    /// **The copied bytes land.** The clone's own first non-blank line comes to
+    /// sit under the source item's last line — which is exactly where a block
+    /// scalar ending the source item can swallow the clone's leading comment
+    /// block, when that comment sits at the block's body column or deeper.
+    ArrivalLands,
+    /// **The copied bytes are left behind.** Whatever followed the source item
+    /// comes to sit under the clone's own last line. The clone's last line is
+    /// byte-identical to the source's, so outside the empty-content-span case —
+    /// which is refused conservatively, as everywhere else — this seam repeats
+    /// an adjacency the original document already held.
+    ArrivalCloses,
+    /// **Two copied runs meet.** The envelope has a hole — a comment the file
+    /// owns, and the blank runs beside it, stay at the source and are not copied
+    /// — so the run before the hole and the run after it become neighbours
+    /// inside the clone although they never were in the original document.
+    ///
+    /// The one seam that does not exist for every duplicate: an envelope of one
+    /// run has no internal join, and one of *n* runs has *n − 1*.
+    CopiedRunsJoin,
 }
 
 /// Why a candidate document was rejected after being reparsed.
@@ -2119,6 +2356,110 @@ pub enum VerificationFailure {
         /// The entry's own physical lines, as the independent bound derives them.
         lines: ByteSpan,
     },
+    /// A duplicate's copied run reaches outside the item's **own lines**.
+    ///
+    /// The duplicate's counterpart of
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`], and the bound the
+    /// Phase 2c-3c design consult's "must not ship without" list asks for by
+    /// name: the independent proof that the planner did not copy a neighbouring
+    /// blank line or a file-owned comment. The copied runs are not in the
+    /// replacement list — a duplicate deletes nothing — so they travel in the
+    /// duplicate's own expectation, and the bound they are checked against is
+    /// [`item_own_lines`], derived from the source text and the item's node span
+    /// with nothing of the planner's in it.
+    ///
+    /// Carries the run that reaches too far, never any content
+    /// (`CLAUDE.md` section 1).
+    DuplicateCarriesMoreThanTheItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The copied run that reaches outside the item's own lines.
+        at: ByteSpan,
+        /// The item's own lines, as the bound derived them.
+        lines: ByteSpan,
+    },
+    /// The bytes a duplicate wrote are not the source item's owned bytes.
+    ///
+    /// **The byte oracle, and the simplest statement of what a duplicate is**:
+    /// the arrival must be, byte for byte, the concatenation of the runs
+    /// [`entry_owned_runs`] derives for the item — the *textual* derivation,
+    /// which owes nothing to the envelope the planner built — with the one
+    /// separately identified exception of the copied EOF line ending written in
+    /// front of a clone that lands at an unterminated end of file. A planner
+    /// that re-indented a line, exchanged a terminator or permuted two comment
+    /// lines fails here, whatever else certifies it.
+    ///
+    /// **What a string comparison alone cannot pin is provenance** — which
+    /// occurrence of two equally spelled lines the copy claims to have taken —
+    /// which is why [`the_arrival_is_the_copy`] also requires the claimed run
+    /// set to equal the independent one and reports that mismatch as
+    /// [`VerificationFailure::DuplicateCarriesMoreThanTheItem`] (the Phase
+    /// 2c-3c-1 review's finding 3).
+    ///
+    /// A replacement list that is not exactly one zero-width arrival is
+    /// reported here too: a duplicate deletes nothing and rewrites nothing, so
+    /// any other shape is a planning defect wearing the wrong operation.
+    ///
+    /// Carries offsets only, never bytes (`CLAUDE.md` section 1).
+    DuplicatedBytesWereRewritten {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Where the bytes were written.
+        at: usize,
+        /// Offset inside the copied text of the first byte that differs, or the
+        /// shorter of the two lengths when one is a prefix of the other.
+        first_difference: usize,
+    },
+    /// The candidate sequence is not the original plus the clone in its slot.
+    ///
+    /// The duplicate's counterpart of
+    /// [`VerificationFailure::ItemsNotInTheIntendedOrder`], under its own name
+    /// because the sentence it stands for is different: every original item must
+    /// still be present, in its original order and with its original subtree
+    /// digest, and the position immediately after the source must hold the
+    /// source's own digest. Compared over digests across the reparse, so a clone
+    /// that landed in the right slot carrying the wrong decoded content fails
+    /// here as well.
+    ///
+    /// **Two producers since the Phase 2c-3c-1 review's finding 2, and they are
+    /// one sentence read at two granularities.** [`the_duplicate_is_in_place`]
+    /// states it over the candidate's decoded items, and
+    /// [`the_arrival_is_the_copy`] states it over bytes: the arrival must sit at
+    /// the **derived boundary** — the end of the item's own lines as
+    /// [`item_own_lines`] re-derives them, nothing of the planner's — because a
+    /// clone parked one blank separator further down still decodes as the
+    /// intended order while violating "immediately after its source" where the
+    /// bytes are.
+    ///
+    /// Carries the first sequence position that disagrees — or, from the byte
+    /// producer, the slot the clone should occupy — never any content.
+    DuplicateNotInPlace {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first sequence position that holds something other than what the
+        /// duplicate intended for it.
+        position: usize,
+    },
+    /// A construct the duplicate did not name decodes to something else now.
+    ///
+    /// The duplicate's counterpart of
+    /// [`VerificationFailure::ConstructChangedOutsideTheMove`]: the two indexes
+    /// are walked in lockstep from every document root, with the duplicated
+    /// sequence's children taken twice at the source position on the original's
+    /// side. Kinds, decoded scalar values and child counts must agree
+    /// everywhere. A block scalar that swallowed the clone's first line, a
+    /// neighbour whose value was clipped by the insertion, a mapping that gained
+    /// a key: all of them fail here, and none of them is anything the edit
+    /// declared.
+    ///
+    /// Carries the identifier of the candidate node at which the two disagree,
+    /// never a value (`CLAUDE.md` section 1).
+    ConstructChangedOutsideTheDuplicate {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The candidate node that is not what the original said.
+        node: NodeId,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -2321,6 +2662,29 @@ impl fmt::Display for EditError {
                 "edit {edit}: removing it would leave sequence {} with no items",
                 sequence.get()
             ),
+            EditError::DuplicateMustBeTheOnlyEditInItsBatch { edit, edits } => write!(
+                formatter,
+                "edit {edit}: a duplicate must be the only edit in its batch, and this batch \
+                 holds {edits}"
+            ),
+            EditError::DuplicateWouldCopyAFileComment { edit, comment } => write!(
+                formatter,
+                "edit {edit}: a run of the copied envelope covers the file-owned comment at \
+                 bytes {}..{}",
+                comment.start, comment.end
+            ),
+            EditError::DuplicateWouldExtendAKeptBlock { edit, block } => write!(
+                formatter,
+                "edit {edit}: the copy seam would change the value of the block scalar at node \
+                 {} that ends the item",
+                block.get()
+            ),
+            EditError::DuplicateWouldExtendABlockScalar { edit, block, seam } => write!(
+                formatter,
+                "edit {edit}: at the {seam:?} seam the duplicate would make a line content of \
+                 the block scalar at node {}",
+                block.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -2468,6 +2832,31 @@ impl fmt::Display for VerificationFailure {
                 "the removal run {}..{} is not inside the runs the entry owns within its own \
                  lines {}..{}",
                 at.start, at.end, lines.start, lines.end
+            ),
+            VerificationFailure::DuplicateCarriesMoreThanTheItem { edit, at, lines } => write!(
+                formatter,
+                "edit {edit}: the copied run {}..{} reaches outside the item's own lines {}..{}",
+                at.start, at.end, lines.start, lines.end
+            ),
+            VerificationFailure::DuplicatedBytesWereRewritten {
+                edit,
+                at,
+                first_difference,
+            } => write!(
+                formatter,
+                "edit {edit}: the bytes written at byte {at} are not the source item's owned \
+                 bytes; they first differ {first_difference} bytes in"
+            ),
+            VerificationFailure::DuplicateNotInPlace { edit, position } => write!(
+                formatter,
+                "edit {edit}: sequence position {position} does not hold what the duplicate \
+                 intended for it"
+            ),
+            VerificationFailure::ConstructChangedOutsideTheDuplicate { edit, node } => write!(
+                formatter,
+                "edit {edit}: candidate node {} is not what the original document said, although \
+                 the duplicate did not name it",
+                node.get()
             ),
         }
     } // End of function fmt() for VerificationFailure
@@ -2630,6 +3019,26 @@ pub fn remove_item(source: &str, item: &DocumentPath) -> Result<PatchedDocument,
     )
 } // End of function remove_item()
 
+/// Inserts a byte-exact copy of the sequence item `item` names immediately
+/// after it, and verifies the result.
+///
+/// A convenience over [`apply_edits`] with a single-element batch — which is the
+/// only batch a duplicate may travel in
+/// ([`EditError::DuplicateMustBeTheOnlyEditInItsBatch`]). See [`DuplicateItem`]
+/// for what the clone is made of and where it lands.
+///
+/// # Errors
+///
+/// See [`EditError`].
+pub fn duplicate_item(source: &str, item: &DocumentPath) -> Result<PatchedDocument, EditError> {
+    apply_edits(
+        source,
+        &[DocumentEdit::DuplicateItem(DuplicateItem::new(
+            item.clone(),
+        ))],
+    )
+} // End of function duplicate_item()
+
 /// Applies a batch of edits of **any kind** to one document and verifies it.
 ///
 /// This is the batch protocol itself, and [`apply_scalar_edits`] is a wrapper
@@ -2664,6 +3073,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     let mut guards = Vec::new();
     let mut rewritten = Vec::new();
     let mut moves = Vec::new();
+    let mut duplicates = Vec::new();
     for (position, edit) in edits.iter().enumerate() {
         let planned = match edit {
             DocumentEdit::Scalar(scalar) => plan_one(source, &index, &trivia, position, scalar)?,
@@ -2692,6 +3102,20 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
                 }
                 plan_move(source, &index, &trivia, position, relocation)?
             }
+            DocumentEdit::DuplicateItem(duplicate) => {
+                // The same batch rule as the move's, for the same reason and
+                // for one more: a duplicate is verified against the original
+                // document plus one repeated position, and a batch that could
+                // also rewrite a field would quietly turn "duplicate" into
+                // "duplicate except for one edit" (the 2c-3c consult's Q2).
+                if edits.len() != 1 {
+                    return Err(EditError::DuplicateMustBeTheOnlyEditInItsBatch {
+                        edit: position,
+                        edits: edits.len(),
+                    });
+                }
+                plan_duplicate(source, &index, &trivia, position, duplicate)?
+            }
         };
         replacements.extend(planned.replacements);
         permitted.extend(planned.permitted);
@@ -2710,6 +3134,9 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
         }
         if let Some(relocation) = planned.moved {
             moves.push(relocation);
+        }
+        if let Some(copy) = planned.duplicated {
+            duplicates.push(copy);
         }
     } // End of the loop that plans every requested edit
 
@@ -2760,6 +3187,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             fields: &expectations,
             items: &sequences,
             moves: &moves,
+            duplicates: &duplicates,
         },
     )?;
     Ok(PatchedDocument {
@@ -2786,6 +3214,8 @@ struct PlannedEdit {
     items: Option<PendingItem>,
     /// What `verify` must find in the candidate, for a move.
     moved: Option<MoveExpectation>,
+    /// What `verify` must find in the candidate, for a duplicate.
+    duplicated: Option<DuplicateExpectation>,
     /// Checks on the planned spans, stated in terms of the **original** index.
     ///
     /// A list rather than one, because a move plans a removal envelope *and* an
@@ -2851,12 +3281,15 @@ enum EnvelopeKind {
     /// A removal: the runs are deleted, and this guard bounds them by the runs
     /// [`entry_owned_runs`] says the entry owns.
     RemovesTheEntry,
-    /// A move's source half: the runs are relocated rather than deleted, and
-    /// `verify` bounds them twice over with the same two arguments —
-    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`] for the item's own
-    /// lines and [`VerificationFailure::CommentOwnershipChanged`] for the blank
-    /// run a kept comment's ownership rests on. Bounding them a third time here
-    /// would pre-empt both and report a removal's failure for a move.
+    /// A move's source half, or a duplicate's copied set: the runs are
+    /// relocated or copied rather than deleted, and `verify` bounds them with
+    /// the operation's own names —
+    /// [`VerificationFailure::MoveCarriesMoreThanTheItem`] or
+    /// [`VerificationFailure::DuplicateCarriesMoreThanTheItem`] for the item's
+    /// own lines, and [`VerificationFailure::CommentOwnershipChanged`] for the
+    /// blank run a kept comment's ownership rests on. Bounding them a third
+    /// time here would pre-empt both and report a removal's failure for another
+    /// operation.
     CarriesTheItem,
 }
 
@@ -3052,6 +3485,7 @@ fn plan_one(
         expectation: None,
         items: None,
         moved: None,
+        duplicated: None,
         guards: Vec::new(),
         rewritten: Some(resolved.value),
     })
@@ -3340,6 +3774,7 @@ fn plan_insertion(
         expectation: Some(expectation),
         items: None,
         moved: None,
+        duplicated: None,
         guards: vec![StructuralGuard::Insertion { at: point }],
         rewritten: None,
     })
@@ -3429,6 +3864,7 @@ fn plan_removal(
         expectation: Some(expectation),
         items: None,
         moved: None,
+        duplicated: None,
         guards: vec![StructuralGuard::Removal {
             runs,
             entry: (key, resolved.value),
@@ -3469,6 +3905,69 @@ fn removal_envelope(
     position: usize,
     extent: ByteSpan,
 ) -> Result<RemovalEnvelope, EditError> {
+    let envelope = carve_envelope(source, index, trivia, position, extent)?;
+    let RemovalEnvelope {
+        hull: _,
+        ref preserved,
+        ref runs,
+    } = envelope;
+
+    // Each of the three refusals below reads the document rather than the
+    // arithmetic above it, so a defect in the punch-out is answered by name.
+    for run in runs {
+        if let Some(comment) = file_comment_inside(trivia, *run) {
+            return Err(EditError::RemovalWouldDeleteAFileComment {
+                edit: position,
+                comment,
+            });
+        }
+        if let Some(block) = kept_block_the_removal_would_extend(source, index, *run) {
+            return Err(EditError::RemovalWouldExtendAKeptBlock {
+                edit: position,
+                block,
+            });
+        }
+    } // End of the loop over the runs the removal would delete
+    if !preserved.is_empty() {
+        if let Some(block) =
+            block_scalar_the_kept_bytes_would_join(source, index, preserved, runs[0].start)
+        {
+            return Err(EditError::RemovalWouldExtendABlockScalar {
+                edit: position,
+                block,
+            });
+        }
+    }
+
+    Ok(envelope)
+} // End of function removal_envelope()
+
+/// Steps 1 to 3 of the envelope derivation, with no removal-only refusal.
+///
+/// Factored out of [`removal_envelope`] when [`plan_duplicate`] arrived, because
+/// the duplicate needs exactly these three steps — the hull widened to whole
+/// lines, the file's comments and their blank runs punched out, and the runs
+/// that survive — and **must not** import the refusals whose premise is
+/// deletion. [`EditError::RemovalWouldExtendAKeptBlock`] is about a `|+` block
+/// gaining the blank lines a deletion hands it, and
+/// [`EditError::RemovalWouldExtendABlockScalar`] about the preserved lines
+/// rising once the runs are gone; a duplicate deletes nothing, so both
+/// conditions are false of it by construction and asking them would refuse
+/// legitimate copies (the 2c-3c design consult's Q1). The refusals that survive
+/// for both callers — [`EditError::EntryDoesNotOwnItsLines`] from the widening
+/// and [`EditError::MalformedSpan`] for an empty run set — live here, because
+/// their premise is line ownership rather than deletion.
+///
+/// # Errors
+///
+/// [`EditError::EntryDoesNotOwnItsLines`] and [`EditError::MalformedSpan`].
+fn carve_envelope(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    extent: ByteSpan,
+) -> Result<RemovalEnvelope, EditError> {
     let hull = removal_span(source, index, position, extent)?;
     // The file's comments punched out of the hull, and the runs that survive.
     // Both are derived after the hull has been widened to whole lines, because
@@ -3486,48 +3985,20 @@ fn removal_envelope(
             at: hull,
         });
     }
-
-    // Each of the three refusals below reads the document rather than the
-    // arithmetic above it, so a defect in the punch-out is answered by name.
-    for run in &runs {
-        if let Some(comment) = file_comment_inside(trivia, *run) {
-            return Err(EditError::RemovalWouldDeleteAFileComment {
-                edit: position,
-                comment,
-            });
-        }
-        if let Some(block) = kept_block_the_removal_would_extend(source, index, *run) {
-            return Err(EditError::RemovalWouldExtendAKeptBlock {
-                edit: position,
-                block,
-            });
-        }
-    } // End of the loop over the runs the removal would delete
-    if !preserved.is_empty() {
-        if let Some(block) =
-            block_scalar_the_kept_bytes_would_join(source, index, &preserved, runs[0].start)
-        {
-            return Err(EditError::RemovalWouldExtendABlockScalar {
-                edit: position,
-                block,
-            });
-        }
-    }
-
     Ok(RemovalEnvelope {
         hull,
         preserved,
         runs,
     })
-} // End of function removal_envelope()
+} // End of function carve_envelope()
 
-/// What [`removal_envelope`] derived: the hull, the holes and the runs.
+/// What [`carve_envelope`] derived: the hull, the holes and the runs.
 struct RemovalEnvelope {
     /// The ownership hull, widened to whole lines.
     hull: ByteSpan,
     /// The regions inside it the preservation rule protects.
     preserved: Vec<ByteSpan>,
-    /// The ordered, disjoint runs the edit deletes.
+    /// The ordered, disjoint runs a removal deletes — and a duplicate copies.
     runs: Vec<ByteSpan>,
 }
 
@@ -3942,6 +4413,7 @@ fn plan_move(
             from,
             to,
         }),
+        duplicated: None,
         // Both halves are pinned against the original index's node spans: the
         // source from both sides, exactly as a plain removal's is, and the
         // destination against the leaves it must not land inside.
@@ -3956,6 +4428,314 @@ fn plan_move(
         rewritten: None,
     })
 } // End of function plan_move()
+
+/// What [`verify`] must find in the candidate after a duplicate.
+///
+/// Recorded **before** the splice and derived from the original index, exactly
+/// as [`MoveExpectation`] is. `from` is the source's index in the sequence's own
+/// child list; the clone's index is `from + 1` by [`DuplicateItem`]'s one
+/// spelling of that arithmetic, so the expectation is the original child list
+/// with one position repeated.
+///
+/// `runs` is the one thing here that comes **from the planner**: a duplicate's
+/// replacement list is a single zero-width arrival, so the copied spans have no
+/// other channel into verification. They are the *claim* the independent bound
+/// checks, never the bound itself — [`the_arrival_is_the_copy`] bounds them by
+/// [`item_own_lines`] and compares the arrival's bytes against
+/// [`entry_owned_runs`]'s own textual derivation, neither of which reads them.
+struct DuplicateExpectation {
+    /// Position of the edit in the requested batch.
+    edit: usize,
+    /// The sequence. Re-resolved against the candidate by its own path.
+    sequence: DocumentPath,
+    /// Its identifier in the **original** index.
+    sequence_id: NodeId,
+    /// The item being copied, in the **original** index.
+    item: NodeId,
+    /// The item's index in the original sequence.
+    from: usize,
+    /// The runs the planner copied, in ascending order.
+    runs: Vec<ByteSpan>,
+}
+
+impl DuplicateExpectation {
+    /// The original child positions the candidate sequence must hold, in order.
+    ///
+    /// Length `items + 1`, with the source's position appearing twice in a row:
+    /// candidate position *i* must hold what original position `order[i]` held,
+    /// which is checkable across the reparse that mints new identifiers —
+    /// [`MoveExpectation::order`]'s reasoning, for a list that grew by one.
+    fn order(&self, items: usize) -> Vec<usize> {
+        let mut positions = Vec::with_capacity(items + 1);
+        for at in 0..items {
+            positions.push(at);
+            if at == self.from {
+                positions.push(at);
+            }
+        } // End of the loop that repeats the source's position once
+        positions
+    } // End of function order()
+} // End of impl DuplicateExpectation
+
+/// Plans a duplicate, or refuses it.
+///
+/// A duplicate is **an insertion whose bytes are the source item's own owned
+/// runs**, landed immediately after that item. The envelope is
+/// [`carve_envelope`], the same three steps a removal's derivation starts with —
+/// and deliberately *not* [`removal_envelope`] or [`lift_item`], because those
+/// import refusals whose premise is deletion and a duplicate deletes nothing.
+/// The destination is [`insertion_point`] past the item's own extent, the same
+/// call every other insertion makes.
+///
+/// The order of the steps is the contract:
+///
+/// 1. address the item, establish that its parent is a **block sequence**, and
+///    ask the gate about that whole sequence — through
+///    [`editable_sequence_item`], the move's own four checks in the move's own
+///    order, because a duplicate changes the sequence's shape exactly as a move
+///    does;
+/// 2. carve the envelope, and assert no run covers a file-owned comment
+///    ([`EditError::DuplicateWouldCopyAFileComment`]);
+/// 3. derive the landing from the item itself — there is no destination
+///    argument to validate and no [`EditError::MoveChangesNothing`] analogue,
+///    because a duplicate always changes the document;
+/// 4. collect the copied bytes **verbatim**, and at an unterminated end of file
+///    copy the locally observed line ending in front of them
+///    ([`EditError::NoObservableLineEnding`] when there is none) — the one
+///    non-item byte this operation may write, and the same EOF seam
+///    [`InsertItem`] already needs;
+/// 5. refuse the terminal block-scalar cases
+///    ([`EditError::DuplicateWouldExtendAKeptBlock`], both clauses), then every
+///    seam at which a block scalar could swallow a copied or following line —
+///    the copy lands, the copy closes, and one internal join per adjacent pair
+///    of copied runs ([`DuplicateSeam`]). There is no source-close seam: the
+///    source stays, so nothing rises.
+///
+/// # Nothing is rendered, and nothing is re-indented
+///
+/// The bytes written are the bytes the runs hold, concatenated in order. The
+/// source and the clone are two positions in one block sequence, so both sit at
+/// the same column by construction, and a leading comment block at a column the
+/// user chose keeps that column in the copy.
+fn plan_duplicate(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &DuplicateItem,
+) -> Result<PlannedEdit, EditError> {
+    let target = editable_sequence_item(index, trivia, position, edit.item())?;
+    let SequenceItem {
+        sequence,
+        path: sequence_path,
+        item,
+        index: from,
+    } = target;
+
+    // Step 2 — the envelope, carved below the removal-only refusals, plus the
+    // one assertion the copy keeps from the removal's set: a run that still
+    // covers a file-owned comment would copy the file's own note, and the
+    // punch-out arithmetic is not its own witness.
+    let extent = trivia.subtree_extent(index, item);
+    let envelope = carve_envelope(source, index, trivia, position, extent)?;
+    for run in &envelope.runs {
+        if let Some(comment) = file_comment_inside(trivia, *run) {
+            return Err(EditError::DuplicateWouldCopyAFileComment {
+                edit: position,
+                comment,
+            });
+        }
+    } // End of the loop that asserts no copied run covers a file comment
+
+    // Step 3 — the landing, derived from the item itself by the same call every
+    // other insertion makes. It is the offset just past the item's last owned
+    // line, which is also the envelope hull's own end.
+    let (point, at_end_of_file) = insertion_point(source, extent, position)?;
+
+    // Step 4 — the copied bytes, verbatim.
+    let mut carried = String::new();
+    for run in &envelope.runs {
+        carried.push_str(run.slice(source).ok_or(EditError::MalformedSpan {
+            edit: position,
+            at: *run,
+        })?);
+    } // End of the loop that collects the bytes the item's runs hold
+
+    // Step 5, first clause — the terminal block-scalar cases. Both are about
+    // the one byte-adjacency a duplicate changes: what follows the source
+    // item's last line.
+    if at_end_of_file {
+        if let Some(block) = block_the_eof_prefix_would_feed(source, index, point) {
+            return Err(EditError::DuplicateWouldExtendAKeptBlock {
+                edit: position,
+                block,
+            });
+        }
+    } else if let Some(block) =
+        kept_block_the_move_would_extend(source, index, envelope.hull, point)
+    {
+        return Err(EditError::DuplicateWouldExtendAKeptBlock {
+            edit: position,
+            block,
+        });
+    }
+
+    // The EOF seam: the clone of an unterminated item is itself unterminated,
+    // so the copied line ending goes in front of it — the source's last line
+    // becomes terminated, the clone ends the file without a break, and the
+    // file keeps not having a final newline. Never a default (D2p).
+    let text = if at_end_of_file {
+        let ending =
+            line_ending_before(source, point).ok_or(EditError::NoObservableLineEnding {
+                edit: position,
+                at: point,
+            })?;
+        format!("{}{carried}", ending.as_str())
+    } else {
+        if !carried.ends_with(['\n', '\r']) {
+            // Unreachable: a landing that is not the unterminated end of file
+            // sits just past the break that terminates the item's last line, so
+            // the carried bytes end in that break. A bug in this crate rather
+            // than a request to refuse.
+            return Err(EditError::MalformedSpan {
+                edit: position,
+                at: envelope.hull,
+            });
+        }
+        carried
+    };
+
+    let body_offset = index.preamble().body_offset;
+    // Seam 1 — the copy lands. The clone's own first non-blank line comes to
+    // sit under the source item's last line, which can be a block scalar's
+    // content: the shape `move-block-scalar-seams.yml` pins for the move's
+    // arrival, met here at the one destination a duplicate has.
+    if let Some(column) = first_kept_column(source, &envelope.runs, body_offset) {
+        if let Some(block) = block_absorbing_a_line(source, index, point, column) {
+            return Err(EditError::DuplicateWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: DuplicateSeam::ArrivalLands,
+            });
+        }
+    }
+    // Seam 2 — the copy closes. Whatever followed the source item comes to sit
+    // under the clone's own last line. The clone's last line is byte-identical
+    // to the source's, so outside the conservative empty-content-span arm this
+    // repeats an adjacency the original already held; the check is kept because
+    // a refusal costs nothing and the empty-content arm is real.
+    if let Some(column) = first_non_blank_column_from(source, point, body_offset) {
+        if let Some(block) = block_absorbing_a_line(source, index, envelope.hull.end, column) {
+            return Err(EditError::DuplicateWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: DuplicateSeam::ArrivalCloses,
+            });
+        }
+    }
+    // The internal seams, one per adjacent pair of copied runs: a hole in the
+    // envelope is a comment the file owns staying behind, so the runs on either
+    // side of it become neighbours inside the clone although they never were in
+    // the document — `move-run-joins.yml`'s shape, met by the copy.
+    for after in 1..envelope.runs.len() {
+        let before = envelope.runs[after - 1];
+        let Some(column) = first_kept_column(source, &envelope.runs[after..], body_offset) else {
+            continue;
+        };
+        if let Some(block) = block_absorbing_a_line(source, index, before.end, column) {
+            return Err(EditError::DuplicateWouldExtendABlockScalar {
+                edit: position,
+                block,
+                seam: DuplicateSeam::CopiedRunsJoin,
+            });
+        }
+    } // End of the loop over the joins the concatenated runs create
+
+    let arrival = ByteSpan::new(point, point);
+    Ok(PlannedEdit {
+        replacements: vec![Replacement {
+            span: arrival,
+            text,
+        }],
+        permitted: vec![arrival],
+        note: None,
+        expectation: None,
+        items: None,
+        moved: None,
+        duplicated: Some(DuplicateExpectation {
+            edit: position,
+            sequence: sequence_path,
+            sequence_id: sequence.id,
+            item,
+            from,
+            runs: envelope.runs.clone(),
+        }),
+        // The copied set is pinned against the original index's node spans
+        // exactly as a move's source half is — the guard's two node-span halves
+        // say the runs cover exactly the entry — and the destination against
+        // the leaves it must not land inside. `CarriesTheItem` skips the
+        // guard's own `entry_owned_runs` bound, because for a duplicate that
+        // bound is stated by `verify` under the duplicate's own names.
+        guards: vec![
+            StructuralGuard::Removal {
+                runs: envelope.runs,
+                entry: (item, item),
+                kind: EnvelopeKind::CarriesTheItem,
+            },
+            StructuralGuard::Insertion { at: point },
+        ],
+        rewritten: None,
+    })
+} // End of function plan_duplicate()
+
+/// The block scalar whose value the duplicate's **EOF prefix** would change.
+///
+/// Consulted only when the landing is the unterminated end of the document,
+/// where the one non-item byte a duplicate writes — the copied line ending in
+/// front of the clone — terminates the source item's own last line. A block
+/// scalar adjacent to that end through nothing but whitespace counts the new
+/// break into its value unless its chomping discards trailing breaks:
+///
+/// - **keep** (`|+`) counts every trailing break, so the prefix always extends
+///   it;
+/// - **clip** (`|`) keeps at most one, so the prefix changes it exactly when
+///   the content's own last line is the unterminated one — no break follows the
+///   content, so the value had none and gains one;
+/// - **strip** (`|-`) discards them all and is safe, which is why
+///   `block-scalar-terminal-spaces.yml`'s terminal `|-` item can be duplicated
+///   at all.
+///
+/// This is the clause [`EditError::MoveWouldExtendAKeptBlock`] records as
+/// withdrawn — the move stopped rotating breaks at an unterminated end of file —
+/// returned here because the duplicate's EOF prefix writes the same byte
+/// deliberately (the 2c-3c design consult's Q1).
+fn block_the_eof_prefix_would_feed(
+    source: &str,
+    index: &SyntaxIndex,
+    point: usize,
+) -> Option<NodeId> {
+    index
+        .nodes()
+        .iter()
+        .filter_map(|node| node.scalar.as_ref().map(|scalar| (node, scalar)))
+        .find(|(_, scalar)| {
+            let presentation = &scalar.presentation;
+            let adjacent = presentation.content_span.end <= point
+                && source
+                    .get(presentation.content_span.end..point)
+                    .is_some_and(|between| between.trim().is_empty());
+            presentation.style.is_block()
+                && adjacent
+                && match presentation.chomping {
+                    crate::Chomping::Keep => true,
+                    crate::Chomping::Clip => !source
+                        .get(..presentation.content_span.end)
+                        .is_some_and(|before| before.ends_with(['\n', '\r'])),
+                    crate::Chomping::Strip => false,
+                }
+        })
+        .map(|(node, _)| node.id)
+} // End of function block_the_eof_prefix_would_feed()
 
 // ---------------------------------------------------------------------------
 // Sequence items: the lift both a move and a removal make, and the insert
@@ -4235,6 +5015,7 @@ fn plan_item_removal(
             inserted: None,
         }),
         moved: None,
+        duplicated: None,
         // The same guard a mapping entry's removal carries, with the item as both
         // halves of the entry: a sequence item has no key. `RemovesTheEntry` is
         // the kind that also bounds every run by [`entry_owned_runs`], which is
@@ -4414,6 +5195,7 @@ fn plan_item_insertion(
             inserted: Some((items.0, edit.fields().to_vec())),
         }),
         moved: None,
+        duplicated: None,
         guards: vec![StructuralGuard::Insertion { at: point }],
         rewritten: None,
     })
@@ -6110,6 +6892,9 @@ struct Expected<'a> {
     /// What the batch's move must have done. At most one (see
     /// [`EditError::MoveMustBeTheOnlyEditInItsBatch`]).
     moves: &'a [MoveExpectation],
+    /// What the batch's duplicate must have done. At most one (see
+    /// [`EditError::DuplicateMustBeTheOnlyEditInItsBatch`]).
+    duplicates: &'a [DuplicateExpectation],
 } // End of struct Expected
 
 /// Reparses `candidate` and checks it says exactly what the edits asked for.
@@ -6186,24 +6971,47 @@ fn verify(
         fields: expectations,
         items: sequences,
         moves,
+        duplicates,
     } = expected;
     replacements_stay_inside_the_permitted_spans(replacements, permitted)?;
     bytes_outside_the_replacements_match(source, candidate, replacements)?;
     let index = SyntaxIndex::parse(candidate).map_err(VerificationFailure::DoesNotParse)?;
     file_comments_survive(source, candidate, &index, trivia)?;
-    no_ambiguous_plain_scalar_is_introduced(original, &index)?;
+    // A duplicate deliberately copies whatever the item holds, ambiguous plain
+    // scalars included, so the differential budget counts its subtree twice —
+    // see the doc comment on the function for why that is not a weakening.
+    let copied: Vec<NodeId> = duplicates.iter().map(|copy| copy.item).collect();
+    no_ambiguous_plain_scalar_is_introduced(original, &index, &copied)?;
     for relocation in moves {
         the_arrival_is_the_departure(source, original, replacements, relocation)?;
         document_lines_are_conserved(source, candidate)?;
         items_are_in_the_intended_order(original, &index, relocation)?;
         constructs_outside_the_move_are_unchanged(original, &index, relocation)?;
-        // The candidate's trivia is scanned only here, and only for a move: the
-        // scan is quadratic (`PROGRESS.md`, R19) and no other edit can change
-        // which construct owns a comment without also changing a byte one of the
-        // properties above already reads.
+        // The candidate's trivia is scanned only here, and only for a move or a
+        // duplicate: the scan is quadratic (`PROGRESS.md`, R19) and no other
+        // edit can change which construct owns a comment without also changing
+        // a byte one of the properties above already reads.
         let candidate_trivia = TriviaIndex::scan(candidate, &index);
         comment_ownership_survives(source, candidate, trivia, &candidate_trivia, relocation)?;
     } // End of the loop over the batch's moves, which holds at most one
+    for copy in duplicates {
+        // The placement comes back re-derived — boundary, EOF prefix and run
+        // set — so the comment check below reasons from the text's own answer
+        // rather than from anything the planner claimed.
+        let placed = the_arrival_is_the_copy(source, original, trivia, replacements, copy)?;
+        the_duplicate_is_in_place(original, &index, copy)?;
+        constructs_outside_the_duplicate_are_unchanged(original, &index, copy)?;
+        // The same deliberate one-scan rule as the move's, for the same reason.
+        let candidate_trivia = TriviaIndex::scan(candidate, &index);
+        comment_ownership_survives_a_copy(
+            source,
+            candidate,
+            trivia,
+            &candidate_trivia,
+            copy,
+            &placed,
+        )?;
+    } // End of the loop over the batch's duplicates, which holds at most one
 
     for (position, edit) in edits.iter().enumerate() {
         let DocumentEdit::Scalar(edit) = edit else {
@@ -6603,6 +7411,18 @@ fn file_comments_survive(
 /// and this reads what the document actually *holds*. A defect in the first is
 /// exactly what the second exists to catch.
 ///
+/// # A duplicate's copies are budgeted, and that is not a weakening
+///
+/// A [`DocumentEdit::DuplicateItem`] copies the item's bytes verbatim, so an
+/// ambiguous plain scalar the item already holds legitimately appears once more
+/// in the candidate — refusing that would refuse duplicating any match that
+/// contains a pre-existing `true` or `100`, which real espanso files do. The
+/// budget therefore counts every ambiguous plain scalar **inside a duplicated
+/// item's subtree** twice. The property is unchanged for every byte the copy
+/// does not explain: an edit still may not *write* a new ambiguous plain
+/// scalar, and a duplicate writes none — its bytes are the source's own, which
+/// [`the_arrival_is_the_copy`] pins byte for byte.
+///
 /// # Errors
 ///
 /// [`VerificationFailure::AmbiguousPlainScalarIntroduced`], carrying the offset
@@ -6610,12 +7430,22 @@ fn file_comments_survive(
 fn no_ambiguous_plain_scalar_is_introduced(
     original: &SyntaxIndex,
     candidate: &SyntaxIndex,
+    copied: &[NodeId],
 ) -> Result<(), VerificationFailure> {
     let mut budget: BTreeMap<&str, usize> = BTreeMap::new();
     for node in original.nodes() {
         if let Some(text) = ambiguous_plain_scalar(node) {
             *budget.entry(text).or_insert(0) += 1;
         }
+        // One more occurrence per duplicated subtree the scalar sits inside:
+        // the copy is byte-exact, so the candidate legitimately holds it twice.
+        for root in copied {
+            if in_subtree(original, *root, node.id) {
+                if let Some(text) = ambiguous_plain_scalar(node) {
+                    *budget.entry(text).or_insert(0) += 1;
+                }
+            }
+        } // End of the loop over the duplicated subtrees
     }
     for node in candidate.nodes() {
         let Some(text) = ambiguous_plain_scalar(node) else {
@@ -7205,40 +8035,64 @@ fn constructs_outside_the_move_are_unchanged(
     candidate: &SyntaxIndex,
     relocation: &MoveExpectation,
 ) -> Result<(), VerificationFailure> {
+    let items = original
+        .node(relocation.sequence_id)
+        .map_or(0, |node| node.children.len());
+    let order = relocation.order(items);
+    lockstep_documents(original, candidate, relocation.sequence_id, &order).map_err(|node| {
+        VerificationFailure::ConstructChangedOutsideTheMove {
+            edit: relocation.edit,
+            node,
+        }
+    })
+} // End of function constructs_outside_the_move_are_unchanged()
+
+/// Walks the two parses in lockstep from every document root.
+///
+/// **One implementation, two callers** —
+/// [`constructs_outside_the_move_are_unchanged`] and
+/// [`constructs_outside_the_duplicate_are_unchanged`] — because the walk is the
+/// same fact stated for two operations: candidate position *i* of the one named
+/// sequence holds what original position `order[i]` held, and everything else
+/// agrees position for position. `order`'s length is what distinguishes them: a
+/// move's is a permutation of the sequence's own size, a duplicate's is one
+/// longer with the source's position repeated.
+///
+/// Returns the **candidate** node at which the two first disagree; the caller
+/// wraps it in its own operation's failure name.
+fn lockstep_documents(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    sequence: NodeId,
+    order: &[usize],
+) -> Result<(), NodeId> {
     let documents = original.documents();
     let others = candidate.documents();
     if documents.len() != others.len() {
-        return Err(VerificationFailure::ConstructChangedOutsideTheMove {
-            edit: relocation.edit,
-            // No candidate document to name when the candidate has none; the
-            // sequence the move was about is the next most useful pointer.
-            node: *others.first().unwrap_or(&relocation.sequence_id),
-        });
+        // No candidate document to name when the candidate has none; the
+        // sequence the edit was about is the next most useful pointer.
+        return Err(*others.first().unwrap_or(&sequence));
     }
     for (before, after) in documents.iter().zip(others) {
-        compare_subtree(original, *before, candidate, *after, relocation).map_err(|node| {
-            VerificationFailure::ConstructChangedOutsideTheMove {
-                edit: relocation.edit,
-                node,
-            }
-        })?;
+        compare_subtree(original, *before, candidate, *after, sequence, order)?;
     } // End of the loop over the documents of the two parses
     Ok(())
-} // End of function constructs_outside_the_move_are_unchanged()
+} // End of function lockstep_documents()
 
-/// Compares two subtrees node for node, applying the move's permutation.
+/// Compares two subtrees node for node, applying the edit's intended order.
 ///
 /// Returns the **candidate** node at which they first disagree, so the caller can
-/// report a position without ever holding a value. The permutation is applied on
-/// the original's side and only at the sequence the move names, which is
-/// identified by its identifier in the original index rather than by anything the
-/// candidate says.
+/// report a position without ever holding a value. `order` maps each candidate
+/// child position of the one named `sequence` to the original child it must
+/// hold, and is applied only there — everywhere else the children correspond
+/// position for position, and a child-count disagreement is itself a failure.
 fn compare_subtree(
     original: &SyntaxIndex,
     before: NodeId,
     candidate: &SyntaxIndex,
     after: NodeId,
-    relocation: &MoveExpectation,
+    sequence: NodeId,
+    order: &[usize],
 ) -> Result<(), NodeId> {
     let (Some(was), Some(now)) = (original.node(before), candidate.node(after)) else {
         return Err(after);
@@ -7251,25 +8105,403 @@ fn compare_subtree(
         (Some(_), None) | (None, Some(_)) => return Err(after),
         _ => {}
     }
-    if was.children.len() != now.children.len() {
+    let identity: Vec<usize>;
+    let mapping: &[usize] = if before == sequence {
+        order
+    } else {
+        identity = (0..was.children.len()).collect();
+        &identity
+    };
+    if now.children.len() != mapping.len() {
         return Err(after);
     }
-    let order = if before == relocation.sequence_id {
-        relocation.order(was.children.len())
-    } else {
-        (0..was.children.len()).collect()
-    };
     for (position, child) in now.children.iter().enumerate() {
+        let Some(original_child) = mapping
+            .get(position)
+            .and_then(|wanted| was.children.get(*wanted))
+        else {
+            return Err(after);
+        };
         compare_subtree(
             original,
-            was.children[order[position]],
+            *original_child,
             candidate,
             *child,
-            relocation,
+            sequence,
+            order,
         )?;
-    } // End of the loop over the children, in the order the move intends
+    } // End of the loop over the children, in the order the edit intends
     Ok(())
 } // End of function compare_subtree()
+
+/// Where the clone verifiably sits, with every field re-derived from the text.
+///
+/// [`the_arrival_is_the_copy`] hands one back only after the arrival has passed
+/// every check, so a holder is holding the **independent** answer — the offset
+/// [`item_own_lines`] ends at, the EOF prefix the document itself justifies,
+/// and the run set [`entry_owned_runs`] derived — never the planner's claims.
+/// [`comment_ownership_survives_a_copy`] takes it so that the copied-comment
+/// arithmetic consults nothing a defective planner could have written (the
+/// Phase 2c-3c-1 review's finding 3).
+struct PlacedClone {
+    /// The arrival offset in the original document, confirmed equal to the
+    /// derived boundary.
+    at: usize,
+    /// Byte length of the copied EOF line ending in front of the clone, or 0.
+    prefix: usize,
+    /// The owned runs as [`entry_owned_runs`] derives them — the independent
+    /// set, confirmed equal to the planner's claim.
+    runs: Vec<ByteSpan>,
+}
+
+/// Checks that a duplicate wrote the source item's owned bytes, **at the
+/// derived boundary**, and claimed exactly the runs the item owns.
+///
+/// The duplicate's [`the_arrival_is_the_departure`], with one structural
+/// difference that decides where the copied spans come from: a duplicate's
+/// replacement list is a single zero-width arrival, because nothing is deleted,
+/// so the runs travel in the [`DuplicateExpectation`] and are treated as the
+/// **claim** — every bound here is re-derived from the text and the claim is
+/// compared against it, never the other way round.
+///
+/// 1. **every claimed run lies inside the item's own lines**, as
+///    [`item_own_lines`] derives them from the text
+///    ([`VerificationFailure::DuplicateCarriesMoreThanTheItem`]);
+/// 2. **the arrival sits at the derived boundary** — the end of the item's own
+///    lines, which is the one offset "immediately after the source" can mean.
+///    Without this the oracle proved the right bytes without proving the right
+///    place, and a planner landing the exact clone one blank line further down
+///    satisfied every property while violating the design's fixed landing (the
+///    Phase 2c-3c-1 review's finding 2). Reported as
+///    [`VerificationFailure::DuplicateNotInPlace`], because "the copy is not
+///    immediately after its source" is that variant's own sentence;
+/// 3. **the claimed run set equals the run set [`entry_owned_runs`] derives**
+///    ([`VerificationFailure::DuplicateCarriesMoreThanTheItem`]). Byte equality
+///    of the concatenation alone cannot pin *provenance*: two equal spellings —
+///    an owned comment and a file-owned one — concatenate identically, so a
+///    claim that swapped them could pass the byte oracle while the copied
+///    increment in the comment check lied about which occurrence travelled (the
+///    review's finding 3). Requiring the sets themselves to agree closes the
+///    channel, and hands the comment check an independent set to reason from;
+/// 4. **the arrival's bytes are the concatenation of the independent runs**,
+///    with the one separately identified exception of the copied EOF line
+///    ending, re-derived here from the document rather than read from the plan
+///    ([`VerificationFailure::DuplicatedBytesWereRewritten`]).
+///
+/// # Errors
+///
+/// [`VerificationFailure::DuplicateCarriesMoreThanTheItem`],
+/// [`VerificationFailure::DuplicateNotInPlace`] and
+/// [`VerificationFailure::DuplicatedBytesWereRewritten`], all carrying offsets
+/// only (`CLAUDE.md` section 1).
+fn the_arrival_is_the_copy(
+    source: &str,
+    original: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    replacements: &[Replacement],
+    expectation: &DuplicateExpectation,
+) -> Result<PlacedClone, VerificationFailure> {
+    let edit = expectation.edit;
+    let body_offset = original.preamble().body_offset;
+    let lines = item_own_lines(source, original, expectation.item, body_offset).ok_or(
+        VerificationFailure::DuplicateCarriesMoreThanTheItem {
+            edit,
+            at: ByteSpan::default(),
+            lines: ByteSpan::default(),
+        },
+    )?;
+    for run in &expectation.runs {
+        if !lines.contains(*run) {
+            return Err(VerificationFailure::DuplicateCarriesMoreThanTheItem {
+                edit,
+                at: *run,
+                lines,
+            });
+        }
+    } // End of the loop that bounds every claimed run by the item's own lines
+
+    // The shape: exactly one zero-width arrival, because a duplicate deletes
+    // nothing and rewrites nothing. Anything else is a planning defect.
+    if replacements.len() != 1 {
+        return Err(VerificationFailure::DuplicatedBytesWereRewritten {
+            edit,
+            at: replacements.first().map_or(0, |first| first.span.start),
+            first_difference: 0,
+        });
+    }
+    let arrival = &replacements[0];
+    if !arrival.span.is_empty() {
+        return Err(VerificationFailure::DuplicatedBytesWereRewritten {
+            edit,
+            at: arrival.span.start,
+            first_difference: 0,
+        });
+    }
+
+    // The boundary, re-derived: the clone lands immediately after the item's
+    // own last line, and `lines.end` is that offset stated from the text and
+    // the node span with nothing of the planner's in it. An arrival anywhere
+    // else — one blank line further down, say — writes the right bytes in the
+    // wrong place, which no other property can see.
+    if arrival.span.start != lines.end {
+        return Err(VerificationFailure::DuplicateNotInPlace {
+            edit,
+            position: expectation.from + 1,
+        });
+    }
+
+    // The independent run set, and the claim compared against it. Nothing of
+    // the planner's is an input to what the arrival is compared against.
+    let (_, owned) = entry_owned_runs(source, original, trivia, expectation.item, expectation.item)
+        .ok_or(VerificationFailure::DuplicateCarriesMoreThanTheItem {
+            edit,
+            at: ByteSpan::default(),
+            lines,
+        })?;
+    if expectation.runs != owned {
+        // The first run present on one side and not the other is the pointer.
+        let differing = expectation
+            .runs
+            .iter()
+            .find(|run| !owned.contains(run))
+            .or_else(|| owned.iter().find(|run| !expectation.runs.contains(run)))
+            .copied()
+            .unwrap_or_default();
+        return Err(VerificationFailure::DuplicateCarriesMoreThanTheItem {
+            edit,
+            at: differing,
+            lines,
+        });
+    }
+    let mut expected = String::new();
+    for run in &owned {
+        let Some(taken) = run.slice(source) else {
+            return Err(VerificationFailure::DuplicateCarriesMoreThanTheItem {
+                edit,
+                at: *run,
+                lines,
+            });
+        };
+        expected.push_str(taken);
+    } // End of the loop that collects the bytes the entry's owned runs hold
+    let mut prefix = 0usize;
+    if arrival.span.start == source.len() && !source.ends_with(['\n', '\r']) {
+        // The EOF seam: the clone of an unterminated item carries the copied
+        // line ending in front of it. Re-derived here; a document with no
+        // expressible ending was refused at planning, so `None` is a defect.
+        let Some(ending) = line_ending_before(source, source.len()) else {
+            return Err(VerificationFailure::DuplicatedBytesWereRewritten {
+                edit,
+                at: arrival.span.start,
+                first_difference: 0,
+            });
+        };
+        prefix = ending.as_str().len();
+        expected.insert_str(0, ending.as_str());
+    }
+    if arrival.text != expected {
+        return Err(VerificationFailure::DuplicatedBytesWereRewritten {
+            edit,
+            at: arrival.span.start,
+            first_difference: first_difference(&expected, &arrival.text),
+        });
+    }
+    Ok(PlacedClone {
+        at: arrival.span.start,
+        prefix,
+        runs: owned,
+    })
+} // End of function the_arrival_is_the_copy()
+
+/// Checks that the candidate sequence is the original plus the clone in its
+/// slot.
+///
+/// The duplicate's [`items_are_in_the_intended_order`]: candidate position *i*
+/// must hold the subtree digest of original position `order[i]`, where the
+/// order is [`DuplicateExpectation::order`] — every original item in its
+/// original place, and the source's digest repeated at `from + 1`. Digests are
+/// compared and never printed (`CLAUDE.md` section 1).
+///
+/// # Errors
+///
+/// [`VerificationFailure::DuplicateNotInPlace`], carrying the first sequence
+/// position that disagrees; [`VerificationFailure::MappingLost`] when the
+/// sequence cannot be re-found at all.
+fn the_duplicate_is_in_place(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    expectation: &DuplicateExpectation,
+) -> Result<(), VerificationFailure> {
+    let edit = expectation.edit;
+    let found = resolve(candidate, &expectation.sequence)
+        .map_err(|error| VerificationFailure::MappingLost { edit, error })?;
+    let sequence = candidate
+        .node(found)
+        .filter(|node| node.kind == NodeKind::Sequence)
+        .ok_or(VerificationFailure::MappingLost {
+            edit,
+            error: PathError::MalformedIndex { node: found },
+        })?;
+    let before: Vec<NodeId> = original
+        .node(expectation.sequence_id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let order = expectation.order(before.len());
+    if sequence.children.len() != order.len() {
+        return Err(VerificationFailure::DuplicateNotInPlace {
+            edit,
+            position: sequence.children.len().min(order.len()),
+        });
+    }
+    for (position, wanted) in order.iter().enumerate() {
+        let expected = digest(original, before[*wanted]);
+        if expected != digest(candidate, sequence.children[position]) {
+            return Err(VerificationFailure::DuplicateNotInPlace { edit, position });
+        }
+    } // End of the loop that compares each position with what was intended for it
+    Ok(())
+} // End of function the_duplicate_is_in_place()
+
+/// Checks that nothing the duplicate did not name says something else now.
+///
+/// The duplicate's [`constructs_outside_the_move_are_unchanged`], over the same
+/// [`lockstep_documents`] walk with the duplicated order applied: the candidate
+/// must be the original document with one sequence one item longer, that item a
+/// second reading of the source's own subtree, and every other construct's
+/// kind, decoded value and child count untouched.
+///
+/// # Errors
+///
+/// [`VerificationFailure::ConstructChangedOutsideTheDuplicate`], carrying the
+/// candidate node at which the two disagree — never a value.
+fn constructs_outside_the_duplicate_are_unchanged(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    expectation: &DuplicateExpectation,
+) -> Result<(), VerificationFailure> {
+    let items = original
+        .node(expectation.sequence_id)
+        .map_or(0, |node| node.children.len());
+    let order = expectation.order(items);
+    lockstep_documents(original, candidate, expectation.sequence_id, &order).map_err(|node| {
+        VerificationFailure::ConstructChangedOutsideTheDuplicate {
+            edit: expectation.edit,
+            node,
+        }
+    })
+} // End of function constructs_outside_the_duplicate_are_unchanged()
+
+/// Checks that a duplicate copied exactly the comments the item owns, that each
+/// copy is owned **inside the clone**, and that no comment anywhere changed
+/// hands.
+///
+/// The duplicate's [`comment_ownership_survives`], strengthened twice, and both
+/// halves reason from the [`PlacedClone`] — the placement and run set
+/// [`the_arrival_is_the_copy`] re-derived from the text — never from the
+/// planner's claims (the Phase 2c-3c-1 review's finding 3):
+///
+/// 1. **an exact multiset equality**, because a duplicate is the one edit whose
+///    comment arithmetic is fully known in advance: the candidate must hold
+///    every comment of the original with its original ownership class, plus one
+///    more occurrence of each comment lying inside an independently derived
+///    run, owned rather than the file's — a comment inside such a run is
+///    item-owned by construction, since the independent derivation punches
+///    every file-owned one out. Anything more, anything less, or anything
+///    whose class moved is a re-attribution;
+/// 2. **a clone-relative position check**, which the global multiset cannot
+///    make: for each copied comment, the candidate must hold a comment at
+///    exactly the clone-relative offset the copy puts it at — the arrival,
+///    plus the EOF prefix, plus the comment's own offset inside the
+///    concatenated runs — with the same length and an owner that is not the
+///    file. Two equal spellings are indistinguishable to a text/class
+///    multiset, and this is the check that tells them apart by *where they
+///    are* instead.
+///
+/// # Errors
+///
+/// [`VerificationFailure::CommentOwnershipChanged`], carrying the offset the
+/// comment had in the original document — or the end of the document for a
+/// surplus candidate comment no original comment explains — and never any text
+/// (`CLAUDE.md` section 1).
+fn comment_ownership_survives_a_copy(
+    source: &str,
+    candidate: &str,
+    trivia: &TriviaIndex,
+    candidate_trivia: &TriviaIndex,
+    expectation: &DuplicateExpectation,
+    placed: &PlacedClone,
+) -> Result<(), VerificationFailure> {
+    let edit = expectation.edit;
+    let mut wanted: Vec<(&str, bool, usize)> = Vec::new();
+    for comment in trivia.comments() {
+        let Some(text) = comment.span.slice(source) else {
+            continue;
+        };
+        wanted.push((text, comment.owner.is_file(), comment.span.start));
+        if placed.runs.iter().any(|run| run.contains(comment.span)) {
+            // The copy: one more occurrence, owned rather than the file's,
+            // with the source occurrence's offset as its pointer. Derived from
+            // the independent run set, so a defective claim cannot decide
+            // which occurrence deserves a copy.
+            wanted.push((text, false, comment.span.start));
+
+            // And the copy is where the clone puts it: the same offset inside
+            // the concatenated runs, shifted to the clone's own bytes in the
+            // candidate. A comment missing there, or owned by the file there,
+            // is a re-attribution two equal spellings would otherwise hide.
+            let mut relative = placed.prefix;
+            for run in &placed.runs {
+                if run.contains(comment.span) {
+                    relative += comment.span.start - run.start;
+                    break;
+                }
+                relative += run.len();
+            } // End of the loop that locates the comment inside the clone
+            let expected_at = placed.at + relative;
+            let in_the_clone = candidate_trivia.comments().iter().find(|copied| {
+                copied.span.start == expected_at && copied.span.len() == comment.span.len()
+            });
+            let owned_there = in_the_clone.is_some_and(|copied| !copied.owner.is_file());
+            if !owned_there {
+                return Err(VerificationFailure::CommentOwnershipChanged {
+                    edit,
+                    at: comment.span.start,
+                });
+            }
+        }
+    } // End of the loop that states what the candidate must hold
+
+    let mut survivors: Vec<(&str, bool)> = candidate_trivia
+        .comments()
+        .iter()
+        .filter_map(|comment| {
+            comment
+                .span
+                .slice(candidate)
+                .map(|text| (text, comment.owner.is_file()))
+        })
+        .collect();
+    for (text, of_the_file, at) in &wanted {
+        match survivors
+            .iter()
+            .position(|seen| *seen == (*text, *of_the_file))
+        {
+            Some(found) => {
+                survivors.swap_remove(found);
+            }
+            None => return Err(VerificationFailure::CommentOwnershipChanged { edit, at: *at }),
+        }
+    } // End of the loop that claims one candidate comment per expected one
+    if !survivors.is_empty() {
+        // A comment the arithmetic does not explain. No original offset to
+        // name, so the end of the document is the pointer.
+        return Err(VerificationFailure::CommentOwnershipChanged {
+            edit,
+            at: source.len(),
+        });
+    }
+    Ok(())
+} // End of function comment_ownership_survives_a_copy()
 
 /// Checks every replacement against the spans the edited scalars own.
 ///
@@ -7378,6 +8610,7 @@ mod tests {
             fields: &[],
             items: &[],
             moves: &[],
+            duplicates: &[],
         }
     } // End of function expected()
 
@@ -7488,7 +8721,7 @@ mod tests {
         let source = SyntaxIndex::parse("a: 'no'\nb: keep\n").expect("parses");
         let plain = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
         assert!(matches!(
-            no_ambiguous_plain_scalar_is_introduced(&source, &plain),
+            no_ambiguous_plain_scalar_is_introduced(&source, &plain, &[]),
             Err(VerificationFailure::AmbiguousPlainScalarIntroduced { .. })
         ));
 
@@ -7497,18 +8730,18 @@ mod tests {
         // or delete an ambiguous plain scalar the document already held.
         let held = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
         assert_eq!(
-            no_ambiguous_plain_scalar_is_introduced(&held, &held),
+            no_ambiguous_plain_scalar_is_introduced(&held, &held, &[]),
             Ok(())
         );
         let deleted = SyntaxIndex::parse("b: keep\n").expect("parses");
         assert_eq!(
-            no_ambiguous_plain_scalar_is_introduced(&held, &deleted),
+            no_ambiguous_plain_scalar_is_introduced(&held, &deleted, &[]),
             Ok(())
         );
         // Two occurrences where the source had one is still an introduction, so
         // the comparison has to count rather than merely look up.
         let twice = SyntaxIndex::parse("a: no\nb: no\n").expect("parses");
-        assert!(no_ambiguous_plain_scalar_is_introduced(&held, &twice).is_err());
+        assert!(no_ambiguous_plain_scalar_is_introduced(&held, &twice, &[]).is_err());
     } // End of function the_ambiguity_property_fires_on_a_candidate_no_emitter_would_produce()
 
     #[test]
@@ -9127,6 +10360,7 @@ mod structural_tests {
                 fields: &expectations,
                 items: &[],
                 moves: &[],
+                duplicates: &[],
             },
         )?;
         Ok(candidate)
@@ -9946,6 +11180,7 @@ mod move_tests {
                 fields: &[],
                 items: &[],
                 moves: &moves,
+                duplicates: &[],
             },
         )?;
         Ok(candidate)
@@ -10209,4 +11444,237 @@ mod move_tests {
         assert_eq!(physical_lines(""), Vec::new());
         assert_eq!(physical_lines("\n"), vec![(0, "", "\n")]);
     } // End of function a_document_is_split_into_physical_lines_with_their_own_terminators()
+
+    // -----------------------------------------------------------------------
+    // The duplicate's adversarial experiments — Phase 2c-3c-1's review round
+    // -----------------------------------------------------------------------
+
+    /// Plans a duplicate, lets `tamper` rewrite the plan, and runs everything
+    /// [`apply_edits`] runs afterwards.
+    ///
+    /// [`tampered_move`]'s twin, for the same reason it exists: the point is to
+    /// inject a plan no planner in this tree produces and then subject it to
+    /// the **whole** safety boundary — both structural guards, the splice and
+    /// every verification property — rather than to a chosen one.
+    fn tampered_duplicate(
+        source: &str,
+        item: usize,
+        tamper: impl FnOnce(&str, &mut PlannedEdit),
+    ) -> Result<String, EditError> {
+        let index = SyntaxIndex::parse(source).expect("the document parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let path = DocumentPath::parse(&format!("matches[{item}]")).expect("the path parses");
+        let request = DuplicateItem::new(path);
+        let mut planned = plan_duplicate(source, &index, &trivia, 0, &request)?;
+        tamper(source, &mut planned);
+        for guard in &planned.guards {
+            guard.check(source, &index, &trivia)?;
+        }
+        let candidate = splice(source, &planned.replacements);
+        let duplicates: Vec<DuplicateExpectation> = planned.duplicated.into_iter().collect();
+        verify(
+            source,
+            &candidate,
+            &planned.replacements,
+            &planned.permitted,
+            Expected {
+                index: &index,
+                trivia: &trivia,
+                edits: &[],
+                fields: &[],
+                items: &[],
+                moves: &[],
+                duplicates: &duplicates,
+            },
+        )?;
+        Ok(candidate)
+    } // End of function tampered_duplicate()
+
+    #[test]
+    fn a_planner_that_lands_the_clone_past_the_separator_blank_is_rejected() {
+        // The Phase 2c-3c-1 review's finding 2, as a measurement. Shift the
+        // exact clone one byte down — past the blank separator — and update
+        // everything the planner declares (the span, the permitted set and the
+        // insertion guard), so the only thing wrong with the plan is the
+        // landing. The candidate parses, holds the intended item order and
+        // digests, conserves every source byte and writes the exact owned
+        // bytes; only the re-derived boundary can disagree.
+        let source = "matches:\n  - trigger: a\n\n  - trigger: b\n";
+        let landed_low = tampered_duplicate(source, 0, |_, planned| {
+            let shifted = ByteSpan::new(
+                planned.replacements[0].span.start + 1,
+                planned.replacements[0].span.end + 1,
+            );
+            planned.replacements[0].span = shifted;
+            planned.permitted = vec![shifted];
+            for guard in &mut planned.guards {
+                if let StructuralGuard::Insertion { at } = guard {
+                    *at += 1;
+                }
+            } // End of the loop that moves the planner's own insertion guard
+        });
+        assert!(
+            matches!(
+                landed_low,
+                Err(EditError::Verification(
+                    VerificationFailure::DuplicateNotInPlace { .. }
+                ))
+            ),
+            "a clone parked past the separator must be refused, got {landed_low:?}"
+        );
+        // …and the same plan untampered applies, so what is refused is the
+        // landing and not the request.
+        assert!(tampered_duplicate(source, 0, |_, _| {}).is_ok());
+    } // End of function a_planner_that_lands_the_clone_past_the_separator_blank_is_rejected()
+
+    /// Two comment lines spelled identically, one the item's and one the
+    /// file's — the shape the review's finding 3 is about.
+    const EQUAL_SPELLINGS: &str = "matches:\n  - trigger: b\n    # same note\n    first: 'one'\n\n    # same note\n\n    second: 'two'\n  - trigger: c\n";
+
+    /// The runs a defective claim swaps the equal spellings with: the owned
+    /// `# same note` line dropped, the file's included, everything else kept.
+    ///
+    /// Shared by the isolation test and its byte-order fact check, so the two
+    /// cannot drift onto different claims.
+    fn equal_spelling_swap(source: &str) -> Vec<ByteSpan> {
+        let line = |from: usize, needle: &str| {
+            let at = source[from..].find(needle).expect("the needle exists") + from;
+            ByteSpan::new(at, at + needle.len())
+        };
+        let file_comment = {
+            let first = line(0, "    # same note\n");
+            line(first.end, "    # same note\n")
+        };
+        vec![
+            line(0, "  - trigger: b\n"),
+            line(0, "    first: 'one'\n"),
+            file_comment,
+            line(0, "    second: 'two'\n"),
+        ]
+    } // End of function equal_spelling_swap()
+
+    #[test]
+    fn a_claim_that_swaps_equal_spellings_between_owners_is_rejected() {
+        // The Phase 2c-3c-1 review's finding 3, isolated to the layer that
+        // closes it (the confirmation pass's own finding). The item owns the
+        // first `# same note` (directly above `first:`) and the file owns the
+        // second (blank-separated, inside the hull). **Only the claim is
+        // tampered** — `DuplicateExpectation.runs` and the removal guard's own
+        // copy — and the arrival bytes stay the honest independent
+        // concatenation, so the byte oracle has nothing to disagree with, the
+        // boundary check has nothing to disagree with, every claimed run lies
+        // inside the item's own lines, no node span is crossed and no frontier
+        // leaf is uncovered. Remove the claimed-set-equals-independent-set
+        // comparison and this candidate is **accepted**: the run-vector
+        // equality is the one property that can refuse the false provenance
+        // claim, which is exactly the isolation this test exists to prove.
+        let refused = tampered_duplicate(EQUAL_SPELLINGS, 0, |source, planned| {
+            let runs = equal_spelling_swap(source);
+            if let Some(expectation) = planned.duplicated.as_mut() {
+                expectation.runs = runs.clone();
+            }
+            for guard in &mut planned.guards {
+                if let StructuralGuard::Removal { runs: guarded, .. } = guard {
+                    *guarded = runs.clone();
+                }
+            } // End of the loop that tells the guard about the defective claim
+        });
+        assert!(
+            matches!(
+                refused,
+                Err(EditError::Verification(
+                    VerificationFailure::DuplicateCarriesMoreThanTheItem { .. }
+                ))
+            ),
+            "a claim swapping equal spellings must be refused, got {refused:?}"
+        );
+        // …and the honest duplicate of the same item applies, keeping the
+        // file's occurrence uncopied: the candidate holds three occurrences —
+        // the source's owned one, the file's, and the clone's copy.
+        let honest = tampered_duplicate(EQUAL_SPELLINGS, 0, |_, _| {}).expect("the copy applies");
+        assert_eq!(honest.matches("# same note").count(), 3);
+    } // End of function a_claim_that_swaps_equal_spellings_between_owners_is_rejected()
+
+    /// A provenance swap that also rebuilds the arrival's bytes is visible to
+    /// the **old** byte oracle — measured, not argued (the confirmation pass).
+    ///
+    /// Runs are ascending and disjoint and the arrival is their order-preserving
+    /// concatenation, so a claim that trades the owned `# same note` for the
+    /// file's cannot spell the same bytes: the honest concatenation holds the
+    /// comment *above* `first:` and the swapped one holds it *below*. This is
+    /// the fact that makes the isolation in the test above necessary — a
+    /// tamper that rebuilt the bytes from the swapped claim would be refused as
+    /// [`VerificationFailure::DuplicatedBytesWereRewritten`] whether or not the
+    /// run-vector equality existed, and would therefore prove nothing about the
+    /// provenance layer. What no byte comparison can see is a false claim over
+    /// **honest** bytes, and that is the run-vector equality's whole job.
+    #[test]
+    fn a_provenance_swap_that_rebuilds_the_bytes_is_caught_by_the_byte_oracle_instead() {
+        let source = EQUAL_SPELLINGS;
+        let index = SyntaxIndex::parse(source).expect("the document parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let path = DocumentPath::parse("matches[0]").expect("the path parses");
+        let planned =
+            plan_duplicate(source, &index, &trivia, 0, &DuplicateItem::new(path)).expect("plans");
+        let honest = &planned.replacements[0].text;
+        let mut swapped = String::new();
+        for run in &equal_spelling_swap(source) {
+            swapped.push_str(run.slice(source).expect("the run slices"));
+        } // End of the loop that concatenates the swapped claim's bytes
+        assert_ne!(
+            honest, &swapped,
+            "ascending, disjoint runs concatenate order-preservingly, so the swap cannot \
+             spell the honest bytes"
+        );
+
+        // And through the whole boundary, a tamper that rebuilds both the claim
+        // and the bytes is refused — by the byte oracle, not the provenance
+        // layer, which is why it isolates nothing.
+        let rebuilt = tampered_duplicate(EQUAL_SPELLINGS, 0, |source, planned| {
+            let runs = equal_spelling_swap(source);
+            let mut text = String::new();
+            for run in &runs {
+                text.push_str(run.slice(source).expect("the run slices"));
+            } // End of the loop that rebuilds the arrival from the claim
+            planned.replacements[0].text = text;
+            if let Some(expectation) = planned.duplicated.as_mut() {
+                // The claim is left honest here on purpose: with the bytes
+                // rebuilt AND the claim swapped, the run-vector equality fires
+                // first and shadows the byte oracle this test is about.
+                let _ = expectation;
+            }
+        });
+        assert!(
+            matches!(
+                rebuilt,
+                Err(EditError::Verification(
+                    VerificationFailure::DuplicatedBytesWereRewritten { .. }
+                ))
+            ),
+            "rebuilt bytes must be refused by the byte oracle, got {rebuilt:?}"
+        );
+    } // End of function a_provenance_swap_that_rebuilds_the_bytes_is_caught_by_the_byte_oracle_instead()
+
+    #[test]
+    fn a_planner_that_permutes_the_copied_comment_lines_is_rejected() {
+        // The duplicate's own reading of the move's permutation experiment: the
+        // byte oracle compares the arrival against the independent derivation,
+        // so two swapped copied lines fail whatever every other property says.
+        let source = "matches:\n  - trigger: ':a'\n    # first\n    # second\n    replace: x\n  - trigger: ':b'\n";
+        let swapped = tampered_duplicate(source, 0, |_, planned| {
+            let text = planned.replacements[0]
+                .text
+                .replace("    # first\n    # second\n", "    # second\n    # first\n");
+            planned.replacements[0].text = text;
+        });
+        assert!(
+            matches!(
+                swapped,
+                Err(EditError::Verification(
+                    VerificationFailure::DuplicatedBytesWereRewritten { .. }
+                ))
+            ),
+            "a permuted copy must be refused, got {swapped:?}"
+        );
+    } // End of function a_planner_that_permutes_the_copied_comment_lines_is_rejected()
 }

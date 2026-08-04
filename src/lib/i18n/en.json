@@ -566,6 +566,7 @@
   "code.findingCode.referenceHasNoDeclaration": "The text refers to “{name}”, and nothing this app can see declares a variable of that name.",
   "code.findingCode.regexDoesNotCompile": "This regular expression did not compile under the version espansoConfig uses. espanso pins an older one, so the two can disagree.",
   "code.findingCode.documentDoesNotParse": "espansoConfig’s YAML parser cannot read this text. It parses with a different library than espanso does, so this is a warning rather than a verdict — but a file espanso cannot read does not load.",
+  "code.findingCode.duplicateKeepsTriggerDefinition": "The duplicate keeps the same trigger definition as its source, and espansoConfig cannot determine how espanso chooses between overlapping definitions.",
 
   "code.editError.sourceDoesNotParse": "espansoConfig’s YAML parser could not read this file, so nothing in it can be located.",
   "code.editError.unresolvable": "The place this change names does not exist in the file.",
@@ -602,12 +603,19 @@
   "code.editError.inconsistentSequenceIndentation": "The list’s items do not all start at one column, so a new item has no indentation to copy.",
   "code.editError.implicitNullSequenceHasAmbiguousTrivia": "A comment sits directly under this empty key, so creating a list here would have to decide whether that comment belongs to the list or to what follows it.",
   "code.editError.removalWouldEmptyTheSequence": "Removing this would leave the list with no items, and there is no way to write that which still means the same thing.",
+  "code.editError.duplicateMustBeTheOnlyEditInItsBatch": "A duplicate has to be sent on its own; espansoConfig does not yet check a duplicate combined with another change.",
+  "code.editError.duplicateWouldCopyAFileComment": "The bytes this duplicate would copy still include a comment that belongs to the file. That is a fault in this app.",
+  "code.editError.duplicateWouldExtendAKeptBlock": "The copy seam would change the value of a text block the duplicated snippet ends with, changing a value nobody edited.",
+  "code.editError.duplicateWouldExtendABlockScalar": "A text block would swallow a line this duplicate puts under it, changing a value nobody edited.",
   "code.editError.verification": "The result was reparsed and checked, it did not pass those checks, and so it was discarded.",
 
   "code.moveSeam.sourceCloses": "where the lines that followed the item rise to sit under the ones that preceded it",
   "code.moveSeam.arrivalLands": "where the moved lines come to sit under the destination",
   "code.moveSeam.arrivalCloses": "where what followed the destination comes to sit under the moved lines",
   "code.moveSeam.carriedRunsJoin": "where two stretches of the moved lines meet, having never been neighbours in the file",
+  "code.duplicateSeam.arrivalLands": "where the copied lines come to sit under the original",
+  "code.duplicateSeam.arrivalCloses": "where what followed the original comes to sit under the copied lines",
+  "code.duplicateSeam.copiedRunsJoin": "where two stretches of the copied lines meet, having never been neighbours in the file",
 
   "code.verificationFailure.doesNotParse": "espansoConfig’s YAML parser could not read the result.",
   "code.verificationFailure.targetLost": "The edited place cannot be found in the reparsed result.",
@@ -635,6 +643,10 @@
   "code.verificationFailure.commentOwnershipChanged": "A comment belongs to something different in the result than it did in the file.",
   "code.verificationFailure.ambiguousPlainScalarIntroduced": "The result holds an unquoted value that YAML 1.1 and YAML 1.2 read differently.",
   "code.verificationFailure.removalCarriesMoreThanTheEntry": "The removal would delete more bytes than the entry it names.",
+  "code.verificationFailure.duplicateCarriesMoreThanTheItem": "The duplicate would copy more bytes than the item it names.",
+  "code.verificationFailure.duplicatedBytesWereRewritten": "The copied bytes are not the source item’s own bytes.",
+  "code.verificationFailure.duplicateNotInPlace": "The list does not hold every original item plus the copy immediately after its source.",
+  "code.verificationFailure.constructChangedOutsideTheDuplicate": "Something outside the duplicated item changed, and nothing asked it to.",
 
   "code.syntaxError.parse": "The YAML parser rejected the document.",
   "code.syntaxError.offset": "A reported position fell outside the document. That is a fault in this app.",
