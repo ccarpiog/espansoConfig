@@ -40,6 +40,7 @@ import {
   createMatch,
   deleteMatch,
   documentText,
+  duplicateMatch,
   getDocument,
   getMatch,
   listDocuments,
@@ -90,11 +91,11 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
  * The six read-only commands of `../ipc/commands`, with the same signatures, and
  * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch},
  * {@link BrowserCommands.saveMatch}, {@link BrowserCommands.createMatch},
- * {@link BrowserCommands.deleteMatch} and
- * {@link BrowserCommands.saveRawDocument} are the five members that can change a
- * file on disk, and they are here for the same reason the others are: a test that
- * cannot run Tauri still has to be able to drive a refusal, a conflict and a
- * commit and watch what this state does about each.
+ * {@link BrowserCommands.deleteMatch}, {@link BrowserCommands.saveRawDocument}
+ * and {@link BrowserCommands.duplicateMatch} are the six members that can change
+ * a file on disk, and they are here for the same reason the others are: a test
+ * that cannot run Tauri still has to be able to drive a refusal, a conflict and
+ * a commit and watch what this state does about each.
  */
 export interface BrowserCommands {
   /**
@@ -212,6 +213,23 @@ export interface BrowserCommands {
     acknowledgement: Acknowledgement
   ): Promise<CommandResult<SaveResult>>;
   /**
+   * Inserts a byte-exact copy of one snippet immediately after it, and saves
+   * the file.
+   *
+   * @param id - The snippet to copy, by identity.
+   * @param baseRevision - The revision the caller believes the file holds.
+   * @param acknowledgement - The suspicions already shown to a person. The
+   *   ordinary path here is refuse-then-acknowledge: the copy keeps its
+   *   source's trigger definition, and the transaction says so first.
+   * @returns How the save ended, or a failure. `saved.moved` is the **clone's**
+   *   identity in the new revision.
+   */
+  duplicateMatch(
+    id: MatchId,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
    * Replaces one file's whole text, and saves it.
    *
    * **The one member whose answer is not a `CommandResult`**, because a
@@ -246,6 +264,7 @@ export const REAL_COMMANDS: BrowserCommands = {
   saveMatch,
   createMatch,
   deleteMatch,
+  duplicateMatch,
   saveRawDocument
 };
 
@@ -688,10 +707,11 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The first of the five entry points on this state that change a file**; the
+   * **The first of the six entry points on this state that change a file**; the
    * others are {@link BrowserState.saveMatch},
-   * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch} and
-   * {@link BrowserState.saveRawDocument}. Everything else here reads.
+   * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch},
+   * {@link BrowserState.saveRawDocument} and
+   * {@link BrowserState.duplicateMatch}. Everything else here reads.
    *
    * **The wrapper is the enforcement**, exactly as it is for
    * {@link BrowserState.saveMatch}: a committed move makes every `MatchId` this
@@ -946,6 +966,86 @@ export interface BrowserState {
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
   /**
+   * Inserts a byte-exact copy of one snippet immediately after it, and saves
+   * the file.
+   *
+   * **The sixth entry point on this state that changes a file, and the wrapper
+   * is the enforcement**, exactly as it is for {@link BrowserState.moveMatch}:
+   * a committed duplicate makes every `MatchId` this window holds for that
+   * file stale — the source's included — `SavedResult.moved` is the **clone's**
+   * identity in the new revision, and the adoption happens **here**, before
+   * the answer is handed back, so there is no way to obtain the result without
+   * it.
+   *
+   * **The selection follows the clone only for an unchanged initiating
+   * intent, checked at the moment the selection is written.** The selection
+   * and the global `selectGeneration` are captured **before** the command is
+   * sent, travel whole into `adoptAfterTheDuplicate`, and are re-validated
+   * **after that helper's own re-read await**, in the same synchronous block
+   * as the write — so the guard holds across every await on the path, the
+   * command's and the adoption's. A person who clicked another snippet
+   * mid-flight, was elsewhere and selected the source mid-flight, left the
+   * source and returned to it — during either await — or whose failed
+   * `select()` bumped the intent counter without landing an assignment, has
+   * expressed a new intent, and the clone is not followed: the selection is
+   * repaired the ordinary way, positionally and then checked (R27), where
+   * `displacedByDuplicate` is the routine answer for a selection below the
+   * source, because the insertion shifted every later position down by one.
+   * (Review round 1's High finding, in two passes: the first version compared
+   * the *current* selection against the source, so a leave-and-return history
+   * was reclaimed; the first fix validated the capture between the two awaits,
+   * so a leave-and-return during the adoption's own re-read still was.)
+   *
+   * **The committed adoption passes `'requestedDuplicate'`**, the duplicate's
+   * own attribution rather than a reuse of the move's: the move's sentences say
+   * *reordered*, which an insertion did not do, and a notice claiming it would
+   * be a false record. It is honoured only against the parse the write itself
+   * produced — `adoptTheDocumentOnDisk`'s own guard — and the
+   * `may_have_written` path keeps the default `externalChange`, because an
+   * uncertain write cannot claim the copy and the sentence that claims less
+   * wins.
+   *
+   * **An adoption that could not be performed is carried, not swallowed.** If
+   * the duplicate commits and the re-read then fails, everything this state
+   * holds for that file is stale and cannot be refreshed: the projection and
+   * the held selection are **dropped** through `forgetTheReplacedDocument`
+   * rather than left on screen describing bytes that are gone, and `adoption`
+   * comes back `failed` beside the committed outcome. The duplicate succeeded;
+   * the window is out of step. Those are two facts and both survive
+   * (`PROGRESS.md` D2).
+   *
+   * **The base revision is the caller's and is forwarded unchanged**, exactly
+   * as it is for the other writing wrappers: `baseRevisionOf` in
+   * `./matchDuplication.ts` is where a session's own base is, and reading
+   * `view.revision` here instead would rebase a duplicate the window has moved
+   * on from and turn the conflict that should stop it into a commit.
+   *
+   * **What that does not force, in the same breath.** Nothing in TypeScript
+   * stops a component importing `duplicateMatch` from `../ipc/commands` and
+   * calling it directly — the hole every writing command has had since 2b-2a —
+   * nor can any signature require `baseRevision` to be the session's own, or
+   * require a caller to *read* `adoption`. What the wrapper forces is that
+   * every caller **of it** adopts.
+   *
+   * @param match - The snippet to copy, by the identity the caller's session
+   *   holds.
+   * @param baseRevision - The revision the caller's duplicate was decided
+   *   against. Sent unchanged.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt. The ordinary path here is
+   *   refuse-then-acknowledge, because the copy keeps its source's trigger
+   *   definition.
+   * @returns How the save ended together with the adoption's own fate; a
+   *   refusal this state made before any command ran; or a command failure
+   *   that says whether the file may already have been written and why it
+   *   rejected.
+   */
+  duplicateMatch(
+    match: MatchId,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
    * Replaces one file's whole text, and saves the file.
    *
    * **The fifth entry point on this state that changes a file, and the only one
@@ -1010,6 +1110,27 @@ export interface BrowserState {
     text: string,
     acknowledgement: Acknowledgement
   ): Promise<RawSaveAnswer>;
+}
+
+/**
+ * The selection that initiated a duplicate, with the intent generation it was
+ * captured at.
+ *
+ * **A pair on purpose, and the pair travels whole to the write site.** The
+ * held object answers "is the very selection that initiated the operation
+ * still the one held?" — every write to `selected` installs a fresh object —
+ * and the generation answers the half the object cannot: an intent expressed
+ * without an assignment landing, such as a `select()` that bumped the counter
+ * at entry and then failed to resolve. `adoptAfterTheDuplicate` re-validates
+ * both **after its own await**, in the same synchronous block that writes the
+ * selection; reducing the pair to a boolean anywhere earlier is the residual
+ * hole the 2c-3c-2 review's confirmation pass found.
+ */
+interface DuplicateIntent {
+  /** The selection held when the duplicate was sent — the source itself. */
+  readonly held: SelectedMatch;
+  /** The global `selectGeneration` at the same instant. */
+  readonly generation: number;
 }
 
 /**
@@ -2213,6 +2334,135 @@ export function createBrowserState(
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function deleteMatch()
 
+    async duplicateMatch(
+      match: MatchId,
+      baseRevision: ContentRevision,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      const view = views.find((held) => held.id === match.document);
+      if (view === undefined) {
+        // Nothing on this state describes that document, so nothing here could
+        // adopt what a commit produced or tell whether its own projection went
+        // out of date — and an identity minted from a parse this window does
+        // not hold names a *different* snippet in the parse the command reads,
+        // whose bytes would then be copied. Nothing was sent, so nothing can
+        // have been written, and there is no rejection to hand on because no
+        // command ran. Its own arm, so the type says both.
+        return { kind: 'notAttempted' };
+      }
+      // **Captured before the command, validated where the selection is
+      // written** (review round 1, finding 1; the confirmation pass is why the
+      // capture travels whole rather than being reduced to a boolean here).
+      // Following `moved` to the clone is legitimate only when the selection
+      // that **initiated** the duplicate was the source and the person has
+      // expressed no new intent since — and "since" runs across **every**
+      // await on the path, the command's *and* the adoption's own re-read, so
+      // the check cannot live at this altitude at all: a boolean computed
+      // between the two awaits was exactly the residual hole. The capture is
+      // handed to `adoptAfterTheDuplicate`, which re-validates both halves in
+      // the same synchronous block that writes the selection. The captured
+      // object answers "was the source selected when this started, and is that
+      // very selection still held?" (every write to `selected` installs a
+      // fresh object); the captured `selectGeneration` answers the half the
+      // object cannot — an intent expressed without an assignment landing,
+      // such as a `select()` that bumped the counter at entry and then failed
+      // to resolve. The two counters are not interchangeable, and neither is a
+      // substitute for this pair: the projection generation says nothing about
+      // intent.
+      const intent: DuplicateIntent | null =
+        selected !== null &&
+        selected.document === match.document &&
+        isTheSameIdentity(selected.id, match)
+          ? { held: selected, generation: selectGeneration }
+          : null;
+      const answer = await commands.duplicateMatch(
+        match,
+        // **The caller's, unchanged**, and never `view.revision`: see this
+        // method's JSDoc. Reading the projection here rebases a duplicate the
+        // window has moved on from, and turns the conflict that should stop it
+        // into a commit.
+        baseRevision,
+        acknowledgement
+      );
+      if (!answer.ok) {
+        // A save that failed is not a workspace that failed, so the window
+        // keeps showing the configuration it was showing — but `mayHaveWritten`
+        // is the only thing that says whether it is still showing this *file*
+        // correctly. A failure at or after the rename means the file may
+        // already hold the clone, and the cautious re-read below is attempted
+        // **without asserting that the duplicate exists** (consult Q8): the
+        // adoption is given no target and no `moved`, so nothing is selected on
+        // its account and the repair keeps the external sentences — an
+        // uncertain write cannot claim the copy.
+        report(answer.failure);
+        const written = mayHaveWritten(answer.failure);
+        if (written) {
+          forgetTextOf(match.document);
+          await adoptTheDocumentOnDisk(match.document, null, null);
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+      }
+
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
+      if (answer.value.outcome === 'saved') {
+        // **A `Saved` does not mean the bytes changed.** `committed: false` is
+        // a documented success and is practically unreachable for an insertion
+        // — a duplicate always changes the document — so the half that matters
+        // here is the second: a revision the transaction ended on that is not
+        // the one this state was projecting is a file some other program
+        // changed under the lock's two reads.
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          // Both text caches, not only the viewer's snapshot — the same rule
+          // every writing wrapper follows since the 2c-2 confirmation pass.
+          forgetTextOf(match.document);
+          // **The duplicate's own adoption, and the intent capture goes in
+          // whole** (the confirmation pass's finding): the decision to follow
+          // the clone is taken inside `adoptAfterTheDuplicate`, after its own
+          // await, in the same synchronous block that writes the selection —
+          // never here, where a value computed between the two awaits goes
+          // stale the moment the re-read yields. It also passes the duplicate's
+          // own attribution rather than the move's: `requestedDuplicate`'s
+          // sentences name the person's copy, where `requestedMove`'s say
+          // *reordered* — a claim an insertion would make false. Passed only
+          // for a commit; a `committed: false` here means the revision moved on
+          // its own, which is another writer's doing, and the external
+          // sentences are the accurate ones there.
+          const stale = await adoptAfterTheDuplicate(
+            match.document,
+            intent,
+            answer.value.moved,
+            answer.value.committed ? 'requestedDuplicate' : 'externalChange'
+          );
+          if (stale === null) {
+            adoption = { kind: 'done' };
+          } else {
+            // **The commit happened and this window could not read the file
+            // back.** Everything it holds for that file was minted from bytes
+            // that have been replaced, so it is dropped rather than left on
+            // screen, and the failure travels back beside the committed
+            // outcome, never in place of it (`PROGRESS.md` D2).
+            forgetTheReplacedDocument(match.document);
+            adoption = { kind: 'failed', failure: stale };
+          }
+          await readFileText();
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        // Nothing was written, and the command has already refreshed its own
+        // cache from the disk. Taking the projection it handed back keeps this
+        // state describing the same bytes the next save will be checked
+        // against — and the caller's session derives its invalidation from
+        // this very arm, because the adoption stays `notOwed`: nothing was
+        // re-read and nothing was written, exactly as a move's conflict.
+        forgetTextOf(match.document);
+        installView(answer.value.disk);
+        repairAfter(answer.value.disk);
+        await readFileText();
+      }
+      return { kind: 'answered', result: answer.value, adoption };
+    }, // End of function duplicateMatch()
+
     async saveRawDocument(
       document: DocumentId,
       baseRevision: ContentRevision,
@@ -2340,12 +2590,12 @@ export function createBrowserState(
    * occupies the arena node.
    *
    * **The attribution is honoured only against the parse the write produced.**
-   * `requestedMove` is a claim — *the move you asked for reordered this file* —
-   * and this function can only stand behind it when the projection it just read
-   * is the revision the transaction ended on, the one `moved` was minted in. A
-   * re-read that comes back with any other revision found a file that changed
-   * *again* after the commit, so the repair falls back to `externalChange`,
-   * whose sentences are the accurate ones there
+   * `requestedMove` and `requestedDuplicate` are claims — *the operation you
+   * asked for changed this file* — and this function can only stand behind one
+   * when the projection it just read is the revision the transaction ended on,
+   * the one `moved` was minted in. A re-read that comes back with any other
+   * revision found a file that changed *again* after the commit, so the repair
+   * falls back to `externalChange`, whose sentences are the accurate ones there
    * (`docs/decisions/2c-3b-2-window-reading.md` section 5.3: the external
    * sentences are right when the file really was changed by another writer).
    * The same fallback covers a `moved` of `null`, where no revision can vouch
@@ -2354,11 +2604,13 @@ export function createBrowserState(
    * @param document - The file that was, or may have been, written.
    * @param target - The identity the operation was about, as it was **before** the
    *   save, or `null` when there is none. Compared against the held selection.
-   * @param moved - That snippet's identity in the new revision, or `null`.
-   * @param attribution - Who a repair's notice says reordered the file. Defaults
+   * @param moved - That snippet's identity in the new revision — the clone's,
+   *   for a duplicate — or `null`.
+   * @param attribution - Who a repair's notice says changed the file. Defaults
    *   to `externalChange`, so every caller that does not pass it — every writing
-   *   wrapper except `BrowserState.moveMatch` — shows exactly what it showed
-   *   before this argument existed.
+   *   wrapper except the **committed** adoptions of `BrowserState.moveMatch` and
+   *   `BrowserState.duplicateMatch` — shows exactly what it showed before this
+   *   argument existed.
    * @returns The failure of the re-read, or `null` when it succeeded.
    */
   async function adoptTheDocumentOnDisk(
@@ -2455,6 +2707,88 @@ export function createBrowserState(
     repairAfter(fresh.value);
     return null;
   } // End of function adoptTheCreatedSnippet()
+
+  /**
+   * Re-reads a file a duplicate wrote, and follows the clone only for an
+   * initiating intent still standing **at the moment the selection is
+   * written**.
+   *
+   * **The duplicate's own adoption, and the re-validation site is the whole
+   * reason it exists** (review round 1's High finding, closed fully at its
+   * confirmation pass). The rule every write to `selected` lives under is that
+   * the justification is checked in the same synchronous block that performs
+   * the write, re-validated after every `await` that precedes it —
+   * `rereadDocument`'s three captures are the established shape. The first fix
+   * validated the capture *between* the command's await and this function's
+   * own, then reduced it to a target identity: a person who left the source
+   * and returned **during this function's re-read** — or whose failed
+   * `select()` bumped the intent counter without replacing the object — was
+   * still reclaimed, because the helper compared only the current selection's
+   * identity. So the capture now travels whole, and both halves are required
+   * **here**, after the one await, immediately before `replaceSelection`:
+   * the held object must still be the very selection that initiated the
+   * duplicate, and the global `selectGeneration` must not have moved. There is
+   * no await between the checks and the write, so nothing can invalidate a
+   * justification that has been established.
+   *
+   * **`moved` is a separate argument because it is also the attribution's
+   * voucher**: `requestedDuplicate` is honoured only when this projection is
+   * the parse the write itself produced — `moved`'s own revision — and a
+   * refused follow must not demote the person's committed copy to an external
+   * change when the parse still vouches for it.
+   *
+   * **The no-follow path never leaves a stale identity selected** (the
+   * 2c-3a-1 rule): the fresh projection is installed first, and
+   * {@link repairAfter} either re-points the selection under an identity of
+   * that projection or clears it with a notice, synchronously.
+   *
+   * @param document - The file that was written.
+   * @param intent - The selection that initiated the duplicate — required to
+   *   have been the source — with the intent generation it was captured at, or
+   *   `null` when the source was not the initiating selection.
+   * @param moved - The clone's identity in the new revision, or `null`.
+   * @param attribution - Who a repair's notice says changed the file. Pass
+   *   `requestedDuplicate` only for a commit.
+   * @returns The failure of the re-read, or `null` when it succeeded.
+   */
+  async function adoptAfterTheDuplicate(
+    document: DocumentId,
+    intent: DuplicateIntent | null,
+    moved: MatchId | null,
+    attribution: RepairAttribution
+  ): Promise<IpcFailure | null> {
+    const fresh = await commands.getDocument(document);
+    if (!fresh.ok) {
+      report(fresh.failure);
+      return fresh.failure;
+    }
+    installView(fresh.value);
+    // **The justification, at the write.** Both halves re-validated after the
+    // await above — the only await on this path — and no await separates them
+    // from the `replaceSelection` they justify.
+    if (
+      moved !== null &&
+      intent !== null &&
+      selected === intent.held &&
+      selectGeneration === intent.generation
+    ) {
+      // All three fields, against the projection just read: a `moved` from the
+      // save's revision must not be resolved in a later parse that happens to
+      // reuse its node. See `positionInSameParse`.
+      const position = positionInSameParse(fresh.value, moved);
+      if (position !== null) {
+        replaceSelection(selectMatch(fresh.value, position));
+        notice = null;
+        return null;
+      }
+    } // End of the arm that follows the clone for an unchanged intent
+    // The guard `adoptTheDocumentOnDisk` states: the requested attribution
+    // stands only when this projection is the parse the write produced.
+    const fromThisWrite =
+      moved !== null && fresh.value.id === moved.document && fresh.value.revision === moved.revision;
+    repairAfter(fresh.value, fromThisWrite ? attribution : 'externalChange');
+    return null;
+  } // End of function adoptAfterTheDuplicate()
 
   /**
    * Re-reads a file a deletion wrote, and repairs the selection.
@@ -2639,6 +2973,45 @@ export function createBrowserState(
   } // End of function captureTheDiskText()
 
   /**
+   * The notice a repair raises when the selection was found again.
+   *
+   * One place for the mapping rather than a ternary per caller, because the
+   * attribution grew a third value at 2c-3c-2 and a swapped pair of literals
+   * would tell the person their duplicate reordered the file.
+   *
+   * @param attribution - Who the repair's notice credits.
+   * @returns The notice for a kept selection.
+   */
+  function keptNoticeFor(attribution: RepairAttribution): SelectionNotice {
+    switch (attribution) {
+      case 'requestedMove':
+        return 'keptAfterMove';
+      case 'requestedDuplicate':
+        return 'keptAfterDuplicate';
+      case 'externalChange':
+        return 'kept';
+    }
+  } // End of function keptNoticeFor()
+
+  /**
+   * The notice a repair raises when the held position now holds another
+   * snippet.
+   *
+   * @param attribution - Who the repair's notice credits.
+   * @returns The notice for a displaced selection.
+   */
+  function displacedNoticeFor(attribution: RepairAttribution): SelectionNotice {
+    switch (attribution) {
+      case 'requestedMove':
+        return 'displacedByMove';
+      case 'requestedDuplicate':
+        return 'displacedByDuplicate';
+      case 'externalChange':
+        return 'differentMatch';
+    }
+  } // End of function displacedNoticeFor()
+
+  /**
    * Puts the selection back in a projection that has just replaced the one it
    * was made against.
    *
@@ -2646,23 +3019,25 @@ export function createBrowserState(
    * held position is `differentMatch` and drops the selection with a notice,
    * never a silent re-point (`PROGRESS.md` R27). After a move that is the
    * expected answer for every selection except the moved one, which
-   * {@link adoptTheDocumentOnDisk} has already re-pointed by identity.
+   * {@link adoptTheDocumentOnDisk} has already re-pointed by identity — and
+   * after a duplicate it is the routine answer for every selection below the
+   * source, which the insertion shifted down by one.
    *
    * **The attribution changes the sentence, never the repair.** What is kept,
-   * dropped or re-pointed is identical under both values; only which notice is
-   * raised differs. The parameter defaults to `externalChange`, so every caller
-   * that does not pass it shows exactly what it showed before this argument
-   * existed — the fix shape `docs/decisions/2c-3b-1-notes.md` section 5.2
-   * prescribes, an argument threaded from the adoption rather than a swap made
-   * here. `gone` keeps the external sentence under both attributions: a move
-   * within one sequence never changes its length, so a vanished position means
-   * something other than the move also happened, and the sentence that claims
-   * less wins.
+   * dropped or re-pointed is identical under all three values; only which
+   * notice is raised differs. The parameter defaults to `externalChange`, so
+   * every caller that does not pass it shows exactly what it showed before this
+   * argument existed — the fix shape `docs/decisions/2c-3b-1-notes.md` section
+   * 5.2 prescribes, an argument threaded from the adoption rather than a swap
+   * made here. `gone` keeps the external sentence under every attribution: a
+   * move never changes its sequence's length and a duplicate only grows it, so
+   * a vanished position means something other than the asked-for operation also
+   * happened, and the sentence that claims less wins.
    *
    * @param view - The projection now in place.
-   * @param attribution - Who the notice says reordered the file. Pass
-   *   `requestedMove` only for a repair against the parse a committed move
-   *   produced.
+   * @param attribution - Who the notice says changed the file. Pass
+   *   `requestedMove` or `requestedDuplicate` only for a repair against the
+   *   parse the committed operation itself produced.
    */
   function repairAfter(
     view: DocumentView,
@@ -2674,13 +3049,11 @@ export function createBrowserState(
     const found = reresolve(selected, view);
     if (found.outcome === 'sameMatch') {
       replaceSelection(found.selected);
-      notice = attribution === 'requestedMove' ? 'keptAfterMove' : 'kept';
+      notice = keptNoticeFor(attribution);
       return;
     }
     replaceSelection(null);
     notice =
-      attribution === 'requestedMove' && found.outcome === 'differentMatch'
-        ? 'displacedByMove'
-        : found.outcome;
+      found.outcome === 'differentMatch' ? displacedNoticeFor(attribution) : found.outcome;
   } // End of function repairAfter()
 } // End of function createBrowserState()

@@ -1,4 +1,4 @@
-//! The twelve commands, invoked through the real dispatcher.
+//! The thirteen commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -775,6 +775,146 @@ fn save_raw_document_is_reachable_and_its_text_reaches_the_disk_unchanged() {
     );
 } // End of function save_raw_document_is_reachable_and_its_text_reaches_the_disk_unchanged()
 
+/// The sixth command that writes is reachable, and its whole ordinary path —
+/// refuse, acknowledge, commit — crosses the dispatcher.
+///
+/// **The measurement Phase 2c-3c-2 owes**, and it is four claims a direct call
+/// to [`crate::commands::WorkspaceSession::duplicate_match`] cannot make.
+///
+/// 1. **It is registered and the empty capability set does not block it.**
+/// 2. **Its arguments deserialize from the shapes the frontend really sends** —
+///    a whole `MatchId` for `id`, a camelCase `baseRevision`, and an
+///    `Acknowledgement` through its hand-written `Deserialize`. There is no
+///    destination argument at all, which is the consult's Q4 as a wire fact.
+/// 3. **The refusal crosses in the `Ok` channel carrying
+///    `DuplicateKeepsTriggerDefinition` with its `revision` operand**, and the
+///    same request with exactly those findings acknowledged commits — the
+///    content-addressed round trip, for the one finding whose operand exists so
+///    consent for one clone cannot be spent on another.
+/// 4. **`moved` names the clone**, resolves through `get_match` across the
+///    dispatcher — and the disk claim is read **from the disk**, with
+///    `std::fs::read`, while `document_text` pins the separate boundary fact
+///    that the session serves the same bytes. The two oracles are deliberately
+///    both here: `document_text` serves the session's cache and refreshes
+///    nothing for a loaded entry, so a version of this test that asked it alone
+///    would have passed for a command that updated the cache without persisting
+///    anything — the same cache-as-disk conflation the 2b-2c-3b review found in
+///    `save_raw_document`'s test, and the 2c-3c-2 review found again here.
+#[test]
+fn duplicate_match_is_reachable_and_round_trips_its_own_finding() {
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir: dir,
+    } = opened_over_ipc(
+        "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':two'\n    replace: second\n",
+    );
+    // The file every disk assertion below reads with `std::fs::read`, named
+    // once: a claim about "the disk" must not be answered from a session cache.
+    let target = dir.path().join("match").join("base.yml");
+    let held = view["matches"][0]["id"].clone();
+
+    let request = json!({
+        "id": held,
+        "baseRevision": view["revision"],
+        "acknowledgement": { "accepted": [] },
+    });
+    let refusal =
+        invoke(&webview, "duplicate_match", request.clone()).expect("a refusal is a value");
+    assert_eq!(refusal["outcome"], "refused");
+    assert_eq!(refusal["verdict"], "RefusedForUnacknowledgedSuspicions");
+    let findings = refusal["findings"]
+        .as_array()
+        .expect("a refusal carries its evidence")
+        .clone();
+    assert_eq!(findings.len(), 1);
+    let operand = &findings[0]["code"]["DuplicateKeepsTriggerDefinition"];
+    assert!(
+        operand.is_object(),
+        "the finding must be the duplicate's own suspicion: {refusal}"
+    );
+    assert_eq!(
+        operand["revision"].as_str().map(str::len),
+        Some(64),
+        "the finding is content-addressed to the candidate by its revision: {refusal}"
+    );
+    assert_ne!(
+        operand["revision"], view["revision"],
+        "the operand is the candidate's hash, not the base the request named"
+    );
+    assert!(!request.to_string().contains("force"));
+
+    // The round trip: the findings go back exactly as they arrived, and the
+    // same duplicate proceeds.
+    let acknowledged = invoke(
+        &webview,
+        "duplicate_match",
+        json!({
+            "id": held,
+            "baseRevision": view["revision"],
+            "acknowledgement": { "accepted": findings },
+        }),
+    )
+    .expect("the acknowledged duplicate proceeds");
+    assert_eq!(
+        acknowledged["outcome"], "saved",
+        "the outcome must be a flat discriminant, not a tag: {acknowledged}"
+    );
+    assert_eq!(acknowledged["committed"], true);
+    assert_eq!(acknowledged["backup_taken"], true);
+    assert_eq!(acknowledged["notes"], json!([]));
+    assert!(
+        acknowledged["moved"].is_object(),
+        "a committed duplicate names the clone: {acknowledged}"
+    );
+    assert_ne!(acknowledged["revision"], view["revision"]);
+
+    // The identity the command minted resolves, across the dispatcher, to the
+    // clone — and the one held before the save does not.
+    let found = invoke(
+        &webview,
+        "get_match",
+        json!({ "id": acknowledged["moved"] }),
+    )
+    .expect("the answered identity resolves");
+    assert_eq!(found["trigger"]["trigger"]["text"], ":one");
+    assert_eq!(
+        found["path"]["segments"],
+        json!([{ "Key": "matches" }, { "Index": 1 }]),
+        "moved must name the clone at the post-insertion path: {found}"
+    );
+    let stale = invoke(&webview, "get_match", json!({ "id": held }))
+        .expect_err("an identity from the previous revision must not resolve");
+    assert_eq!(
+        stale.get("code").and_then(Value::as_str),
+        Some("identityStaleRevision"),
+        "the refusal must be our typed code: {stale}"
+    );
+
+    // And the file really grew by one byte-exact copy — **read from the disk**,
+    // because `document_text` serves the session's cache and a cache is not a
+    // file (this test's own doc comment says which review found that
+    // conflation, twice).
+    let expected = "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':one'\n    \
+                    replace: first\n  - trigger: ':two'\n    replace: second\n";
+    assert_eq!(
+        fs::read(&target).expect("the file is readable"),
+        expected.as_bytes(),
+        "the clone must be persisted, not only cached"
+    );
+    // The separate boundary fact: the session serves the same bytes over IPC,
+    // so a later `get_document` and this text describe one file.
+    let text = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(
+        text.as_str(),
+        Some(expected),
+        "the session's cache must agree with the disk it just wrote"
+    );
+} // End of function duplicate_match_is_reachable_and_round_trips_its_own_finding()
+
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
 /// The distinction the whole result type is built on, measured at the boundary:
@@ -1485,7 +1625,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the twelve commands.
+/// A page that is not this application cannot reach any of the thirteen commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -1497,7 +1637,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twelve are attempted, and the count is asserted against the registered
+/// **All thirteen are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1588,6 +1728,17 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // The sixth that can write, and the one whose whole ordinary path runs
+        // through the acknowledgement round trip: a navigated webview must not
+        // be able to grow the user's configuration by copying its snippets.
+        (
+            "duplicate_match",
+            json!({
+                "id": identity,
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1602,7 +1753,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 12, "the surface is twelve commands");
+    assert_eq!(attempted.len(), 13, "the surface is thirteen commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)

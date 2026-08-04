@@ -1,5 +1,5 @@
 /**
- * The eleven workspace commands, typed.
+ * The twelve workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,15 +17,15 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## Five of them write
+ * ## Six of them write
  *
  * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3;
- * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2; and
- * {@link saveRawDocument}, since 2b-2c-3b. They are the only functions in this
- * application that can change a file on disk, and what each answers with is a
- * {@link SaveResult} in the value channel rather than a thrown error: a save
- * that was refused, and a save that found the file had moved on, are
- * **outcomes** and not failures.
+ * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2;
+ * {@link saveRawDocument}, since 2b-2c-3b; and {@link duplicateMatch}, since
+ * 2c-3c-2. They are the only functions in this application that can change a
+ * file on disk, and what each answers with is a {@link SaveResult} in the value
+ * channel rather than a thrown error: a save that was refused, and a save that
+ * found the file had moved on, are **outcomes** and not failures.
  *
  * ## The fifth is not an edit, and its signature says so
  *
@@ -89,7 +89,8 @@ export const COMMAND_NAMES = [
   'save_match',
   'create_match',
   'delete_match',
-  'save_raw_document'
+  'save_raw_document',
+  'duplicate_match'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -680,3 +681,63 @@ export async function saveRawDocument(
   }
   return { ok: true, value: answer.value, reload: { kind: 'done' } };
 } // End of function saveRawDocument()
+
+/**
+ * Inserts a byte-exact copy of one snippet immediately after it, and saves the
+ * file.
+ *
+ * **The sixth function in this application that writes a user's file**, and it
+ * goes through the same save transaction as the other five and through nothing
+ * else: the file is locked, read and hashed under that lock, patched, reparsed,
+ * projected, checked, backed up and replaced atomically, all before this
+ * promise resolves.
+ *
+ * ## The copy is the source's own bytes, and it lands in one place
+ *
+ * The clone is the snippet's owned lines exactly as the file writes them —
+ * comments, key order, scalar spelling, line endings — inserted **immediately
+ * after the source, in the same list**. There is no destination argument: a
+ * placement product was considered and refused, so the action stays
+ * unsurprising and no anchor can go stale (2c-3c design consult, Q4).
+ *
+ * ## The first attempt is refused, by design, and that is the ordinary path
+ *
+ * A byte-exact copy keeps its source's trigger definition, so whenever the
+ * source has one the save is interrupted with a `refused` outcome carrying a
+ * `DuplicateKeepsTriggerDefinition` finding — a claim about **risk**, never
+ * about espanso semantics: this application cannot determine how espanso
+ * chooses between overlapping definitions, and no string built on this command
+ * may say which snippet would win. The finding carries the candidate's own
+ * revision, so consent collected for one clone cannot be spent on another;
+ * hand the findings back exactly as they arrived and the same call commits.
+ * There is deliberately **no force flag**.
+ *
+ * ## `saved.moved` is the clone
+ *
+ * Every {@link MatchId} held for this file is stale after a successful commit,
+ * the source's included; `saved.moved` is the **clone's** identity in the new
+ * revision, minted at the slot below its source. It is the only safe
+ * continuation — and `null` on a commit means only that **the clone could not
+ * be identified in the read that followed the write**, never which of its
+ * causes occurred: the file may have changed again, or that read itself may
+ * have failed, among others. A caller re-reads the document and asserts
+ * nothing about a second writer.
+ *
+ * @param id - The snippet to copy, by identity. Not a path: a path is a
+ *   **position**, and deleting an earlier snippet re-points one at a different
+ *   snippet — whose bytes this command would then copy.
+ * @param baseRevision - The revision the caller believes the file holds.
+ *   Checked against this session's projection and again against the bytes under
+ *   the write lock.
+ * @param acknowledgement - The suspicions already shown to a person, by
+ *   content. Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `duplicateSourceNotASequenceItem`, or `saveFailed`.
+ */
+export async function duplicateMatch(
+  id: MatchId,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('duplicate_match', { id, baseRevision, acknowledgement });
+} // End of function duplicateMatch()

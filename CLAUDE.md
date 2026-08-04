@@ -188,9 +188,19 @@ is content-addressed by the candidate's `ContentRevision` so consent for one clo
 another. Its decisions are `docs/reviews/phase-2c-3c-design.md` (the consult; its Q7 cut the phase
 into three steps) and `docs/decisions/2c-3c-1-notes.md`; the review is
 `docs/reviews/phase-2c-3c-1-code.md` — two rounds, both `NOT READY`, all five findings closed
-before the commit. Steps 2 (the `duplicate_match` command, `BrowserState.duplicateMatch`,
-`matchDuplication.ts`) and 3 (the component, its mounted test, the bilingual window reading) are
-owed, and 2c-3c is not done without all three kinds of evidence.
+before the commit.
+
+**2c-3c step 2 is also complete: `duplicate_match` is the twelfth command and the sixth writer,
+`BrowserState.duplicateMatch` the sixth writing wrapper, and `matchDuplication.ts` duplicate as a
+value — nothing draws it yet.** Its review ran four rounds (`docs/reviews/phase-2c-3c-2-code.md`;
+round 4 `READY`, no findings), and the High that took three of them is the lesson: **the
+selection-follow guard holds at the write, not before it** — a `DuplicateIntent` captured before
+the command is re-validated after the adoption's own await in the same synchronous block as
+`replaceSelection`, because a leave-and-return during any await on that path must never end with
+the clone hijacking a selection the person moved. `moved: null` claims only that the clone could
+not be identified in the read that followed the write. Step 3 (the component, the
+`unsavedDraftInDocument` producer, the mounted test, the bilingual window reading) is owed, and
+2c-3c is not done without all three kinds of evidence.
 
 **"Same sequence" is the invariant a move keeps, and "same file" is not it.** D2r makes `ItemMove`
 same-sequence only; today's projection happens to give a snippet file exactly one snippet list, and

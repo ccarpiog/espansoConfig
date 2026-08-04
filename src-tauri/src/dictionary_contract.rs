@@ -354,7 +354,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 16),
+    ("commandError", 17),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),

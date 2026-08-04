@@ -241,6 +241,30 @@ pub enum CommandError {
     /// because it is what keeps the guarantee true the day the projection grows a
     /// second sequence, and a guarantee with no code is a comment.
     MoveNotWithinOneSequence,
+    /// The snippet a duplicate was asked for could not be addressed as an item
+    /// of a sequence, so there is nothing to copy from.
+    ///
+    /// **[`CommandError::MoveNotWithinOneSequence`]'s claim, under a
+    /// duplicate-specific code** — the design consult for Phase 2c-3c (Q5) rules
+    /// that a duplicate must not leak a code named *move* as its user-facing
+    /// reason, and renaming the shared code is a wire change three shipped
+    /// commands would inherit. `duplicate_one_match` in `crate::commands` maps
+    /// the shared resolution's refusal to this one; the *sentence* it renders is
+    /// the same negative claim, said about a copy: this application could not
+    /// establish that the snippet is an item of a list, so it has no bytes to
+    /// copy as one.
+    ///
+    /// **Unreachable through today's projection, exactly as the cross-sequence
+    /// half of the move's code is**: every match a
+    /// [`espansoconfig_core::model::DocumentView`] holds is an item of the one
+    /// `matches` sequence, with a path that ends in its index. The code exists
+    /// because the guarantee has to survive the day the projection grows a
+    /// match it cannot address, and a guarantee with no code is a comment.
+    ///
+    /// It carries no operand, for the move code's reason: the address involved
+    /// is a [`espansoconfig_core::patch::DocumentPath`], which is a position
+    /// rather than prose, and no message interpolates one.
+    DuplicateSourceNotASequenceItem,
     /// The document holds no top-level `matches:` key, so there is no list for a
     /// new snippet to join.
     ///
@@ -386,6 +410,7 @@ impl CommandError {
             CommandError::InvalidMenuLabels { .. } => "invalidMenuLabels",
             CommandError::MenuBuildFailed => "menuBuildFailed",
             CommandError::MoveNotWithinOneSequence => "moveNotWithinOneSequence",
+            CommandError::DuplicateSourceNotASequenceItem => "duplicateSourceNotASequenceItem",
             CommandError::DocumentHasNoMatchList { .. } => "documentHasNoMatchList",
             CommandError::DraftRefused { .. } => "draftRefused",
             CommandError::SaveFailed { .. } => "saveFailed",
@@ -443,6 +468,7 @@ impl Serialize for CommandError {
             }
             CommandError::MenuBuildFailed => {}
             CommandError::MoveNotWithinOneSequence => {}
+            CommandError::DuplicateSourceNotASequenceItem => {}
             CommandError::DocumentHasNoMatchList { document } => {
                 out.serialize_field("document", document)?;
             }
@@ -468,7 +494,8 @@ impl CommandError {
             CommandError::NoWorkspaceOpen
             | CommandError::MenuUnavailable
             | CommandError::MenuBuildFailed
-            | CommandError::MoveNotWithinOneSequence => 0,
+            | CommandError::MoveNotWithinOneSequence
+            | CommandError::DuplicateSourceNotASequenceItem => 0,
             CommandError::ConfigDirNotFound { .. }
             | CommandError::NotADirectory { .. }
             | CommandError::UnknownDocument { .. }
@@ -543,6 +570,7 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
         },
         CommandError::MenuBuildFailed,
         CommandError::MoveNotWithinOneSequence,
+        CommandError::DuplicateSourceNotASequenceItem,
         CommandError::DocumentHasNoMatchList { document: 4 },
         // The one variant that carries an index below the match mapping, chosen
         // over the eleven simpler ones so that the enumeration exercises the
@@ -817,6 +845,7 @@ mod tests {
             ("invalidMenuLabels", vec!["missing", "unexpected"]),
             ("menuBuildFailed", vec![]),
             ("moveNotWithinOneSequence", vec![]),
+            ("duplicateSourceNotASequenceItem", vec![]),
             ("documentHasNoMatchList", vec!["document"]),
             ("draftRefused", vec!["error"]),
             ("saveFailed", vec!["error", "may_have_written"]),

@@ -771,6 +771,7 @@ describe('a move panel over the real workspace state', () => {
       saveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       saveRawDocument: vi.fn(async () => refusal)
     };
     const state: BrowserState = createBrowserState(commands, () => undefined);

@@ -10,7 +10,8 @@
  * that each one differs from its English twin and from the other notices.
  *
  * **The list below is hand-maintained and a new arm has to be added to it**, which
- * 2c-3a's `deleted` and 2c-3b's `keptAfterMove` and `displacedByMove` were: the
+ * 2c-3a's `deleted`, 2c-3b's `keptAfterMove` and `displacedByMove`, and
+ * 2c-3c-2's `keptAfterDuplicate` and `displacedByDuplicate` were: the
  * `switch` in `selectionNoticeKey` is exhaustive and catches a *missing key*,
  * and nothing catches a notice this file forgets to walk.
  *
@@ -32,7 +33,9 @@ const NOTICES: readonly SelectionNotice[] = [
   'unresolved',
   'deleted',
   'keptAfterMove',
-  'displacedByMove'
+  'displacedByMove',
+  'keptAfterDuplicate',
+  'displacedByDuplicate'
 ];
 
 /** The key each notice must map to, written out rather than derived. */
@@ -43,7 +46,9 @@ const EXPECTED_KEYS: ReadonlyMap<SelectionNotice, string> = new Map([
   ['unresolved', 'browser.notice.unresolved'],
   ['deleted', 'browser.notice.deleted'],
   ['keptAfterMove', 'browser.notice.keptAfterMove'],
-  ['displacedByMove', 'browser.notice.displacedByMove']
+  ['displacedByMove', 'browser.notice.displacedByMove'],
+  ['keptAfterDuplicate', 'browser.notice.keptAfterDuplicate'],
+  ['displacedByDuplicate', 'browser.notice.displacedByDuplicate']
 ] as const);
 
 describe('selection notices', () => {
@@ -99,6 +104,27 @@ describe('selection notices', () => {
       );
       expect(DICTIONARIES[locale][selectionNoticeKey('displacedByMove')], locale).not.toBe(
         DICTIONARIES[locale][selectionNoticeKey('differentMatch')]
+      );
+    } // End of the loop over the two locales
+  });
+
+  it('attribute an asked-for duplicate distinctly from a move and from the disk, in both languages', () => {
+    // The 2c-3c-2 arms exist for the same reason the move's do, plus one more:
+    // reusing the move's sentences would claim the person's duplicate
+    // *reordered* the file, which an insertion did not do. So each duplicate
+    // arm must differ from its external twin **and** from its move twin.
+    for (const locale of LOCALES) {
+      expect(DICTIONARIES[locale][selectionNoticeKey('keptAfterDuplicate')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('kept')]
+      );
+      expect(DICTIONARIES[locale][selectionNoticeKey('keptAfterDuplicate')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('keptAfterMove')]
+      );
+      expect(DICTIONARIES[locale][selectionNoticeKey('displacedByDuplicate')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('differentMatch')]
+      );
+      expect(DICTIONARIES[locale][selectionNoticeKey('displacedByDuplicate')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('displacedByMove')]
       );
     } // End of the loop over the two locales
   });

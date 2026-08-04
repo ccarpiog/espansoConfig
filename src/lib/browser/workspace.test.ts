@@ -209,6 +209,15 @@ interface Script {
    */
   readonly deletes?: readonly CommandResult<SaveResult>[];
   /**
+   * What `duplicate_match` answers, in order.
+   *
+   * A list for the same reason `moves` is — and here the two-call case is the
+   * **ordinary** path rather than the interesting one: a duplicate's first
+   * attempt is refused with the trigger suspicion by design, and the second
+   * carries the acknowledgement built from it.
+   */
+  readonly duplicates?: readonly CommandResult<SaveResult>[];
+  /**
    * What `save_raw_document` answers, in order.
    *
    * A list for the same reason `moves` is: the interesting case is a refusal
@@ -234,6 +243,7 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let saves = 0;
   let creates = 0;
   let deletes = 0;
+  let duplicates = 0;
   let raws = 0;
   const documents =
     script.documents ??
@@ -297,6 +307,13 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     deleteMatch: vi.fn(async () => {
       const answer: CommandResult<SaveResult> = script.deletes?.[deletes++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    duplicateMatch: vi.fn(async () => {
+      const answer: CommandResult<SaveResult> = script.duplicates?.[duplicates++] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -2350,6 +2367,987 @@ describe('moving a snippet', () => {
     expect(state.notice).toBe('differentMatch');
   }); // End of the "re-read from another parse" case
 }); // End of the "moving a snippet" suite
+
+/**
+ * The projection after a committed duplicate of `:sig` in {@link baseDocument}.
+ *
+ * A **new revision and new node identifiers**, because that is what a commit
+ * really produces — and one more snippet than before, because that is what a
+ * duplicate produces: the clone sits immediately after its source, and every
+ * snippet below the source is one position further down.
+ *
+ * @returns The projection.
+ */
+function duplicatedDocument(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision: 'rev-b',
+    matches: [
+      makeMatch({ node: 30, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+      makeMatch({ node: 31, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+      makeMatch({ node: 32, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' })
+    ]
+  });
+} // End of function duplicatedDocument()
+
+describe('duplicating a snippet', () => {
+  it('re-reads the file, follows the selection to the clone and forgets the text', async () => {
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: true,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, duplicates: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // The person is parked on the source, which is what lets the selection
+    // follow `moved` to the clone (consult Q8): the source is still the
+    // selection that initiated the operation.
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    expect(state.fileText).not.toBeNull();
+
+    documents.set(2, { ok: true, value: grown });
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    expect(outcome.kind === 'answered' ? outcome.result.outcome : null).toBe('saved');
+    // The projection the list draws from is the one that was written: one more
+    // snippet, the clone directly below its source.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31, 32]);
+    // The selection followed the clone by the identity the command answered
+    // with, and no notice was raised for it — the person asked for the copy.
+    expect(state.selected?.id.node).toBe(31);
+    expect(state.notice).toBeNull();
+    // And the raw viewer's snapshot was of bytes that have just been replaced,
+    // so it was dropped and read again rather than redrawn.
+    expect(commands.documentText).toHaveBeenCalledTimes(2);
+    expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+  }); // End of the "committed duplicate" case
+
+  it('shows the findings of a refusal and writes nothing', async () => {
+    // **The ordinary first answer of this command**: a byte-exact copy keeps
+    // its source's trigger definition, and the transaction says so before
+    // anything is written.
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [suspicion()]
+      }
+    };
+    const commands = scriptedCommands({ duplicates: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(outcome).toEqual({
+      kind: 'answered',
+      result: refused.ok ? refused.value : null,
+      adoption: { kind: 'notOwed' }
+    });
+    // Nothing was written, so nothing here moved: same projection, same
+    // selection, and no second read of the document.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(state.selected?.id.node).toBe(10);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "refused duplicate" case
+
+  it('sends back exactly the findings a refusal carried, and no flag', async () => {
+    const shown = suspicion();
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [shown]
+      }
+    };
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const commands = scriptedCommands({ duplicates: [refused, saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const first = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    const firstResult = first.kind === 'answered' ? first.result : null;
+    expect(firstResult?.outcome).toBe('refused');
+    const findings = firstResult?.outcome === 'refused' ? firstResult.findings : [];
+    await state.duplicateMatch(baseDocument().matches[0]!.id, OPEN_REVISION, {
+      accepted: findings
+    });
+
+    // The second call carried the findings back by content, unchanged. There is
+    // no boolean anywhere in either call.
+    const calls = vi.mocked(commands.duplicateMatch).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![2]).toEqual({ accepted: [] });
+    expect(calls[1]![2]).toEqual({ accepted: [shown] });
+    expect(JSON.stringify(calls[1])).not.toContain('force');
+  }); // End of the "acknowledgement round trip" case
+
+  it('takes the conflict projection as the one the next save is checked against', async () => {
+    const disk = duplicatedDocument();
+    const conflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-b',
+        disk_revision: 'rev-b',
+        disk
+      }
+    };
+    const commands = scriptedCommands({ duplicates: [conflict] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // The adoption stays `notOwed` — nothing was written and nothing was
+    // re-read — which is exactly why `applyDuplication` derives the session's
+    // invalidation from the arm rather than from this field.
+    expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
+    expect(outcome.kind === 'answered' ? outcome.result.outcome : null).toBe('conflict');
+    // The disk side replaced the parse the caller was deciding against,
+    // without a second command: the conflict already carried it.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31, 32]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    // The selection was made against bytes that are gone; the repair keeps the
+    // external sentences, because the file really did move under the person.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.notice).toBe('kept');
+  }); // End of the "conflict" case
+
+  it('reports a failed save and changes nothing on the screen', async () => {
+    // The fixture fails **at the rename**, which means the rename did not
+    // happen: `may_have_written` is `false`, so nothing this window shows of
+    // the file has been invalidated.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: {
+          Write: {
+            Io: {
+              step: 'Rename',
+              path: '/tmp/espanso/match/base.yml',
+              kind: 'PermissionDenied',
+              raw_os_error: 13
+            }
+          }
+        },
+        may_have_written: false
+      }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ duplicates: [{ ok: false, failure }] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(outcome).toEqual({ kind: 'failed', mayHaveWritten: false, failure });
+    expect(reported).toEqual([failure]);
+    expect(state.status).toBe('ready');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    // Nothing was written, so nothing was re-read.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "failed save" case
+
+  it('re-reads cautiously when the rename may have completed, asserting nothing', async () => {
+    // **The consult's Q8: a `may_have_written` failure attempts the cautious
+    // re-read without asserting that the duplicate exists.** The adoption is
+    // given no target and no `moved`, so nothing is selected on the clone's
+    // account and the repair keeps the **external** sentences — an uncertain
+    // write cannot claim the copy, and the sentence that claims less wins.
+    const grown = duplicatedDocument();
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ documents, duplicates: [WRITE_MAY_HAVE_HAPPENED] });
+    const state = createBrowserState(commands, (next) => reported.push(next));
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // Parked on `:date`, below the source: if the write did land, this
+    // position now holds the clone.
+    await state.select(baseDocument().matches[1]!);
+
+    documents.set(2, { ok: true, value: grown });
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(outcome).toEqual({
+      kind: 'failed',
+      mayHaveWritten: true,
+      failure: WRITE_MAY_HAVE_HAPPENED.ok ? null : WRITE_MAY_HAVE_HAPPENED.failure
+    });
+    // The screen now describes the file as it may now be.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31, 32]);
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    // The selection's position now holds the clone, and the notice is the
+    // external one — never `displacedByDuplicate`, which would assert the copy
+    // this application cannot account for.
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "may have written" case
+
+  it('leaves the screen alone when a save commits nothing', async () => {
+    // `committed: false` is a documented success and is practically
+    // unreachable for an insertion; the arm is exercised because the wrapper
+    // carries it rather than hoping about it.
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-a',
+        committed: false,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({ duplicates: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "committed: false" case
+
+  it('refuses a snippet whose document this state does not hold', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const stranger = makeMatch({ node: 99, document: 9, trigger: ':nowhere' });
+    expect(
+      await state.duplicateMatch(stranger.id, OPEN_REVISION, NOTHING_ACKNOWLEDGED)
+    ).toEqual({ kind: 'notAttempted' });
+    expect(commands.duplicateMatch).not.toHaveBeenCalled();
+  }); // End of the "unknown document" case
+
+  it('sends the identity, the base revision and the acknowledgement, and no flag', async () => {
+    const commands = scriptedCommands({ duplicates: [{ ok: true, value: CREATED_NOTHING }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const base = baseDocument();
+    await state.duplicateMatch(base.matches[0]!.id, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+
+    const call = vi.mocked(commands.duplicateMatch).mock.calls[0]!;
+    expect(call[0]).toEqual(base.matches[0]!.id);
+    expect(call[1]).toBe('rev-a');
+    expect(call[2]).toEqual(NOTHING_ACKNOWLEDGED);
+    expect(JSON.stringify(call.slice(0, 3))).not.toContain('force');
+  }); // End of the "arguments" case
+
+  it('sends the caller’s own base revision, never the one it is projecting', async () => {
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [suspicion()]
+      }
+    };
+    const commands = scriptedCommands({ duplicates: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    await state.duplicateMatch(baseDocument().matches[0]!.id, 'rev-older', NOTHING_ACKNOWLEDGED);
+
+    // The state really is projecting something else, so this is not the same
+    // value arriving by another route.
+    expect(state.scopedDocument?.revision).toBe('rev-a');
+    expect(vi.mocked(commands.duplicateMatch).mock.calls[0]![1]).toBe('rev-older');
+  }); // End of the "stale duplicate" case
+
+  it('drops what it can no longer vouch for when the adoption itself fails, and says so', async () => {
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, duplicates: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    const answer = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // The duplicate is still a duplicate: the outcome stays `Saved`, and the
+    // failure travels beside it rather than in place of it (`PROGRESS.md` D2).
+    expect(answer.kind).toBe('answered');
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    expect(answer.kind === 'answered' ? answer.adoption.kind : null).toBe('failed');
+    // Nothing stale is left on screen: no projection of that file, no
+    // selection into it — dropped through `forgetTheReplacedDocument`.
+    expect(state.scopedMatches).toEqual([]);
+    expect(state.selected).toBeNull();
+    expect(state.scopedDocument).toBeNull();
+  }); // End of the "failed adoption" case
+
+  it('keeps a mid-flight selection the insertion did not shift, and drops one it did', async () => {
+    // `repairAfter` re-resolves positionally and then checks, so what a person
+    // who selected some other snippet mid-flight gets after a committed
+    // duplicate depends on whether the insertion shifted the position they
+    // were on: positions above the clone keep the same snippet, and every
+    // position below the source now holds its former neighbour. Both notices
+    // are the duplicate's own arms — the external sentences would tell the
+    // person their file changed on disk directly above a panel reporting the
+    // very copy they asked for, the defect class 2c-3b's window reading
+    // measured for a move.
+    const before = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      matches: [
+        makeMatch({ node: 10, document: 2, trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 11, document: 2, trigger: ':date', label: 'Today' }),
+        makeMatch({ node: 12, document: 2, trigger: ':sql', label: 'Query' })
+      ]
+    });
+
+    /**
+     * Duplicates one snippet while the person is looking at another.
+     *
+     * @param source - Which snippet of the pre-save file is copied.
+     * @param cloneIndex - Where the clone lands in the fresh projection.
+     * @param after - The projection the commit produced.
+     * @param position - Which snippet of the pre-save file they had selected.
+     * @returns The state, after the duplicate has been answered and adopted.
+     */
+    async function duplicateWhileLookingAt(
+      source: number,
+      cloneIndex: number,
+      after: DocumentView,
+      position: number
+    ): Promise<ReturnType<typeof createBrowserState>> {
+      const saved: CommandResult<SaveResult> = {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-b',
+          committed: true,
+          notes: [],
+          backup_taken: false,
+          moved: after.matches[cloneIndex]!.id
+        }
+      };
+      const documents = new Map<number, CommandResult<DocumentView>>([
+        [1, { ok: true, value: profileDocument() }],
+        [2, { ok: true, value: before }],
+        [3, { ok: true, value: otherDocument() }]
+      ]);
+      const commands = scriptedCommands({ documents, duplicates: [saved] });
+      const state = createBrowserState(commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(before.matches[position]!);
+      documents.set(2, { ok: true, value: after });
+      await state.duplicateMatch(
+        before.matches[source]!.id,
+        OPEN_REVISION,
+        NOTHING_ACKNOWLEDGED
+      );
+      return state;
+    } // End of function duplicateWhileLookingAt()
+
+    // `:sql` (last) duplicated while `:sig` at position 0 is selected: nothing
+    // above the clone moved, so the selection is kept under its new identity
+    // and the notice names the person's own copy.
+    const grownAtEnd = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 31, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' }),
+        makeMatch({ node: 32, document: 2, revision: 'rev-b', trigger: ':sql', label: 'Query' }),
+        makeMatch({ node: 33, document: 2, revision: 'rev-b', trigger: ':sql', label: 'Query' })
+      ]
+    });
+    const untouched = await duplicateWhileLookingAt(2, 3, grownAtEnd, 0);
+    expect(untouched.selected?.id.node).toBe(30);
+    expect(untouched.notice).toBe('keptAfterDuplicate');
+
+    // `:sig` (first) duplicated while `:date` at position 1 is selected: the
+    // insertion shifted every later position down one, so position 1 now holds
+    // the clone and the selection is dropped (R27 stands) — with the notice
+    // naming the person's own copy, and the snippet still in the file one row
+    // below.
+    const grownAtFront = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 31, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 32, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' }),
+        makeMatch({ node: 33, document: 2, revision: 'rev-b', trigger: ':sql', label: 'Query' })
+      ]
+    });
+    const shifted = await duplicateWhileLookingAt(0, 1, grownAtFront, 1);
+    expect(shifted.selected).toBeNull();
+    expect(shifted.notice).toBe('displacedByDuplicate');
+    expect(shifted.scopedMatches.map((match) => match.trigger.trigger?.text)).toContain(':date');
+  }); // End of the "mid-flight selection" case
+
+  it('keeps the external notice when the re-read is not the parse the duplicate produced', async () => {
+    // The attribution is a claim, and the adoption only makes it against the
+    // revision the transaction ended on: a re-read that finds any other
+    // revision found a file that changed *again* after the commit, so "the
+    // copy you asked for grew this file" would be false there and the repair
+    // falls back to the external sentences.
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: { document: 2, revision: 'rev-b', node: 31 }
+      }
+    };
+    const raced = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-elsewhere',
+      matches: [
+        makeMatch({
+          node: 40,
+          document: 2,
+          revision: 'rev-elsewhere',
+          trigger: ':stranger',
+          label: 'Somebody else’s'
+        }),
+        makeMatch({
+          node: 41,
+          document: 2,
+          revision: 'rev-elsewhere',
+          trigger: ':also',
+          label: 'Also theirs'
+        })
+      ]
+    });
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, duplicates: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // Parked on `:date`, the position a real duplicate of `:sig` would shift —
+    // the exact spot that answers `displacedByDuplicate` when the re-read *is*
+    // the duplicate's parse.
+    await state.select(baseDocument().matches[1]!);
+
+    documents.set(2, { ok: true, value: raced });
+    await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(state.scopedDocument?.revision).toBe('rev-elsewhere');
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "re-read from another parse" case
+
+  it('does not drag the selection away from a snippet clicked in another file mid-flight', async () => {
+    // **The two-document selection race.** The person picks a snippet of file
+    // 3 while a duplicate in file 2 is being written; the commit's adoption
+    // must not reclaim the selection for the clone, because the source is no
+    // longer the selection that initiated the operation.
+    const grown = duplicatedDocument();
+    const saved: SaveResult = {
+      outcome: 'saved',
+      revision: 'rev-b',
+      committed: true,
+      notes: [],
+      backup_taken: false,
+      moved: grown.matches[1]!.id
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const gate = deferred<CommandResult<SaveResult>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents }),
+      duplicateMatch: vi.fn(async () => gate.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    // The duplicate is decided while the source is selected…
+    await state.select(baseDocument().matches[0]!);
+    const pending = state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    // …and the person picks a snippet of another file while it is in flight.
+    await state.select(otherDocument().matches[0]!);
+    documents.set(2, { ok: true, value: grown });
+    gate.resolve({ ok: true, value: saved });
+    await pending;
+
+    // The selection stays where the person put it, in file 3, and no repair
+    // touched it: file 2's repair is about file 2's selection, and there is
+    // none.
+    expect(state.selected?.document).toBe(3);
+    expect(state.selected?.id.node).toBe(20);
+  }); // End of the "selection moved to another file mid-flight" case
+
+  it('drops a selection lookup in flight when a duplicate adopts', async () => {
+    // The per-document projection counter, driven through a duplicate: a
+    // `select()` awaiting `get_match` lands after the commit's adoption has
+    // followed the clone, and its stale answer must be dropped whole rather
+    // than repaired — repairing it would drag the person off the clone with a
+    // notice about a file that moved under them, when what happened is the
+    // copy they asked for.
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const lookup = deferred<CommandResult<MatchView>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents, duplicates: [saved] }),
+      getMatch: vi.fn(() => lookup.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    // Selected, and still being checked across the boundary when the
+    // duplicate lands.
+    const selecting = state.select(baseDocument().matches[0]!);
+    documents.set(2, { ok: true, value: grown });
+    await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    expect(state.selected?.id.node).toBe(31);
+
+    lookup.resolve({
+      ok: false,
+      failure: {
+        kind: 'command',
+        error: { code: 'identityStaleRevision', expected: 'rev-b', found: 'rev-a' }
+      }
+    });
+    await selecting;
+
+    // The stale answer describes a parse this window has replaced, so it is
+    // dropped whole: the person keeps the clone.
+    expect(state.selected?.id.node).toBe(31);
+    expect(state.notice).toBeNull();
+    expect(commands.reloadDocument).not.toHaveBeenCalled();
+  }); // End of the "lookup in flight during a duplicate" case
+
+  it('does not reclaim a selection made on the source while the duplicate was in flight', async () => {
+    // **Review round 1's High finding, first history.** The duplicate starts
+    // while another snippet is selected; the person selects the source before
+    // the answer lands. The current selection now *equals* the source, so a
+    // wrapper that compared the current selection would follow `moved` to the
+    // clone — but that selection is a new intent, expressed mid-flight, and
+    // the clone must not hijack it. The initiating selection was not the
+    // source, so the ordinary repair runs: same fingerprint at position 0,
+    // kept under its new identity, with the person's own copy named.
+    const grown = duplicatedDocument();
+    const saved: SaveResult = {
+      outcome: 'saved',
+      revision: 'rev-b',
+      committed: true,
+      notes: [],
+      backup_taken: false,
+      moved: grown.matches[1]!.id
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const gate = deferred<CommandResult<SaveResult>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents }),
+      duplicateMatch: vi.fn(async () => gate.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // The initiating selection is `:date`, not the source.
+    await state.select(baseDocument().matches[1]!);
+    const pending = state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    // The person selects the source while the duplicate is in flight.
+    await state.select(baseDocument().matches[0]!);
+    expect(state.selected?.id.node).toBe(10);
+    documents.set(2, { ok: true, value: grown });
+    gate.resolve({ ok: true, value: saved });
+    await pending;
+
+    // Not the clone: the mid-flight selection of the source is a new intent,
+    // repaired in place rather than redirected.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.selected?.id.node).not.toBe(31);
+    expect(state.notice).toBe('keptAfterDuplicate');
+  }); // End of the "selected the source mid-flight" case
+
+  it('does not reclaim the source after the person left it and returned mid-flight', async () => {
+    // **Review round 1's High finding, second history.** The duplicate starts
+    // on the source; the person moves to another snippet and comes back to the
+    // source before the answer lands. The current selection equals the source
+    // again — and it is a *different* selection, expressed after two clicks
+    // this window must not undo. The captured object and the intent counter
+    // are what tell it apart from an unchanged initiating selection.
+    const grown = duplicatedDocument();
+    const saved: SaveResult = {
+      outcome: 'saved',
+      revision: 'rev-b',
+      committed: true,
+      notes: [],
+      backup_taken: false,
+      moved: grown.matches[1]!.id
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const gate = deferred<CommandResult<SaveResult>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents }),
+      duplicateMatch: vi.fn(async () => gate.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // The initiating selection is the source…
+    await state.select(baseDocument().matches[0]!);
+    const pending = state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    // …and the person leaves it and returns while the duplicate is in flight.
+    await state.select(baseDocument().matches[1]!);
+    await state.select(baseDocument().matches[0]!);
+    expect(state.selected?.id.node).toBe(10);
+    documents.set(2, { ok: true, value: grown });
+    gate.resolve({ ok: true, value: saved });
+    await pending;
+
+    // Not the clone: leaving and returning is two intents, not none.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.selected?.id.node).not.toBe(31);
+    expect(state.notice).toBe('keptAfterDuplicate');
+  }); // End of the "left the source and returned" case
+
+  it('does not reclaim the source when the person leaves and returns during the adoption re-read', async () => {
+    // **The confirmation pass's High finding, its exact history.** The command
+    // has already answered; what is deferred is the **adoption's own
+    // `getDocument`**. The first fix validated the capture between the two
+    // awaits and reduced it to a target identity, so a leave-and-return landing
+    // in this window was still reclaimed — the helper compared only the
+    // current selection's identity against the source. The capture now travels
+    // whole and is re-validated after this very await, in the same synchronous
+    // block that writes the selection.
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const scripted = scriptedCommands({ documents, duplicates: [saved] });
+    // The adoption's re-read is the deferred call, and the test proves it
+    // drove that await rather than assuming it: the wrapper resolves
+    // `adoptionStarted` at the moment the deferred read is requested, and the
+    // mid-flight clicks happen strictly after that.
+    let deferAdoption = false;
+    let adoptionRequested: (() => void) | null = null;
+    const adoptionStarted = new Promise<void>((resolve) => {
+      adoptionRequested = resolve;
+    });
+    const adoptionGate = deferred<CommandResult<DocumentView>>();
+    const commands: BrowserCommands = {
+      ...scripted,
+      getDocument: vi.fn(async (id: number) => {
+        if (deferAdoption && id === 2) {
+          deferAdoption = false;
+          adoptionRequested?.();
+          return adoptionGate.promise;
+        }
+        return scripted.getDocument(id);
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // The initiating selection is the source, and it is still held when the
+    // command answers — the pre-command capture alone would follow the clone.
+    await state.select(baseDocument().matches[0]!);
+    deferAdoption = true;
+    const pending = state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    await adoptionStarted;
+    // The person leaves the source and returns to it **while the adoption's
+    // re-read is in flight** — two intents this window must not undo.
+    await state.select(baseDocument().matches[1]!);
+    await state.select(baseDocument().matches[0]!);
+    expect(state.selected?.id.node).toBe(10);
+    adoptionGate.resolve({ ok: true, value: grown });
+    const outcome = await pending;
+
+    expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    // Not the clone: the selection is repaired in place under its new identity.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.selected?.id.node).not.toBe(31);
+    expect(state.notice).toBe('keptAfterDuplicate');
+  }); // End of the "left and returned during the adoption re-read" case
+
+  it('does not follow the clone when a failed selection expressed an intent mid-adoption', async () => {
+    // **The generation half of the capture, isolated.** A `select()` on a row
+    // this state cannot resolve bumps the global `selectGeneration` at entry
+    // and then returns without replacing the held object — so the reference
+    // half of the guard still matches and only the generation can refuse. The
+    // person expressed an intent; the clone must not be selected on the back
+    // of it, however the attempt ended.
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const scripted = scriptedCommands({ documents, duplicates: [saved] });
+    let deferAdoption = false;
+    let adoptionRequested: (() => void) | null = null;
+    const adoptionStarted = new Promise<void>((resolve) => {
+      adoptionRequested = resolve;
+    });
+    const adoptionGate = deferred<CommandResult<DocumentView>>();
+    const commands: BrowserCommands = {
+      ...scripted,
+      getDocument: vi.fn(async (id: number) => {
+        if (deferAdoption && id === 2) {
+          deferAdoption = false;
+          adoptionRequested?.();
+          return adoptionGate.promise;
+        }
+        return scripted.getDocument(id);
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    const heldThroughout = state.selected;
+    deferAdoption = true;
+    const pending = state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+    await adoptionStarted;
+    // A click this state cannot resolve: the intent counter moves, the held
+    // object does not — the premise is asserted, not assumed.
+    await state.select(makeMatch({ node: 99, document: 9, trigger: ':nowhere' }));
+    expect(state.selected).toBe(heldThroughout);
+    adoptionGate.resolve({ ok: true, value: grown });
+    await pending;
+
+    // Not the clone: the expressed intent refuses the follow, and the ordinary
+    // repair re-points the still-held source under its new identity.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.selected?.id.node).not.toBe(31);
+    expect(state.notice).toBe('keptAfterDuplicate');
+  }); // End of the "failed selection intent mid-adoption" case
+
+  it('stays a success and asserts no second writer when the clone is not identified', async () => {
+    // **Review round 1's Medium, driven at the wrapper.** A committed answer
+    // with `moved: null` means only that the clone could not be identified in
+    // the read that followed the write — here the wrapper's own re-read then
+    // succeeds at the transaction's **own** revision, so no second writer
+    // exists at all, and nothing on this state may attribute the missing
+    // identity to one. With no identity to follow, the repair runs with the
+    // no-vouch fallback: the external `kept`, which claims less than
+    // `keptAfterDuplicate` — the attribution's voucher is `moved`'s revision,
+    // and a `null` vouches for nothing.
+    const grown = duplicatedDocument();
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, duplicates: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, { ok: true, value: grown });
+    const outcome = await state.duplicateMatch(
+      baseDocument().matches[0]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // A success with a completed adoption — never a failure, and never a claim
+    // about a second change.
+    expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    expect(outcome.kind === 'answered' ? outcome.result.outcome : null).toBe('saved');
+    // The selection is repaired in place under its new identity; nothing
+    // follows a clone nobody identified.
+    expect(state.selected?.id.node).toBe(30);
+    expect(state.notice).toBe('kept');
+  }); // End of the "clone not identified" case
+}); // End of the "duplicating a snippet" suite
 
 /**
  * A draft that changes one field and says *leave this alone* about every other.

@@ -64,6 +64,7 @@ const {
   createMatch,
   deleteMatch,
   documentText,
+  duplicateMatch,
   getDocument,
   getMatch,
   listDocuments,
@@ -130,7 +131,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the eleven wire names, in order, and export no twelfth wrapper', async () => {
+  it('call the twelve wire names, in order, and export no thirteenth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -148,11 +149,14 @@ describe('the command wrappers', () => {
     await deleteMatch(IDENTITY, 'a'.repeat(64), { accepted: [] });
     outcome = { resolve: COMMITTED };
     await saveRawDocument(1, 'a'.repeat(64), 'matches: []\n', { accepted: [] }, () => {});
+    outcome = { resolve: undefined };
+    await duplicateMatch(IDENTITY, 'a'.repeat(64), { accepted: [] });
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'createMatch',
       'deleteMatch',
       'documentText',
+      'duplicateMatch',
       'getDocument',
       'getMatch',
       'listDocuments',
@@ -162,7 +166,7 @@ describe('the command wrappers', () => {
       'saveMatch',
       'saveRawDocument'
     ]);
-  }); // End of the "call the eleven wire names" case
+  }); // End of the "call the twelve wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -170,9 +174,9 @@ describe('the command wrappers', () => {
     // have to call it.
     //
     // `moveMatch` left this list at Phase 2b-2a, `saveMatch` at 2b-2b-3,
-    // `createMatch` and `deleteMatch` at 2b-2c-2, and `saveRawDocument` at
-    // 2b-2c-3b, which is the only way a name may leave it: the command exists and
-    // is registered.
+    // `createMatch` and `deleteMatch` at 2b-2c-2, `saveRawDocument` at
+    // 2b-2c-3b, and `duplicateMatch` at 2c-3c-2, which is the only way a name
+    // may leave it: the command exists and is registered.
     const forbidden = ['validateMatch'];
     for (const name of forbidden) {
       expect(EXPORTED_FUNCTIONS).not.toContain(name);
@@ -301,6 +305,23 @@ describe('the command wrappers', () => {
     });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
   }); // End of the "deletion arguments" case
+
+  it('sends a duplicate as an identity, a base revision and an acknowledgement', async () => {
+    // The sixth command that writes, and the second with nothing to say about
+    // where anything goes: the clone lands immediately after its source, by
+    // design, so there is no destination argument to send. What it must not
+    // gain is a position, a placement, or a flag — and the acknowledgement is
+    // the load-bearing argument here, because the ordinary path is
+    // refuse-then-acknowledge.
+    await duplicateMatch(IDENTITY, 'e'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('duplicate_match');
+    expect(calls[0]?.args).toEqual({
+      id: IDENTITY,
+      baseRevision: 'e'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
+  }); // End of the "duplicate arguments" case
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

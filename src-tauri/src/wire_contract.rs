@@ -1269,8 +1269,15 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// [`FORBIDDEN_COMMANDS`] and the last of Phase 2b-2c, and it leaves for the same
 /// reason: `SaveContent::ReplaceText`, added to the one writing entry point at
 /// Phase 2b-2c-3a, is the mode behind it.
+///
+/// Phase 2c-3c-2 adds `duplicate_match`, taking the workspace surface to twelve
+/// and the whole to thirteen. It was never on [`FORBIDDEN_COMMANDS`] — the rule
+/// that put five names there was satisfied before the command existed:
+/// `DocumentEdit::DuplicateItem`, built and verified at 2c-3c-1, is the
+/// primitive behind it, so the command was registered only after the core could
+/// express it.
 #[test]
-fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twelve_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1279,8 +1286,8 @@ fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        11,
-        "the workspace surface is six read-only commands and five that write: {workspace:?}"
+        12,
+        "the workspace surface is six read-only commands and six that write: {workspace:?}"
     );
     for mutating in [
         "move_match",
@@ -1288,6 +1295,7 @@ fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
         "create_match",
         "delete_match",
         "save_raw_document",
+        "duplicate_match",
     ] {
         assert!(
             workspace.contains(mutating),
@@ -1300,8 +1308,8 @@ fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        12,
-        "Phase 2b-2c-3b registers eleven workspace commands and one menu command, and no more: {registered:?}"
+        13,
+        "Phase 2c-3c-2 registers twelve workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1309,7 +1317,7 @@ fn the_registered_commands_are_the_workspace_eleven_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_eleven_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twelve_and_the_menu_command()
 
 /// The three outcomes of a save are declared exactly as Rust writes them.
 ///

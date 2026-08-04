@@ -5349,7 +5349,101 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3c — Duplicate — is under way, its owner decision is taken, and step 1 of its
+**Phase 2c-3c step 2 is complete: `duplicate_match` is the twelfth command and the sixth
+writer, `BrowserState.duplicateMatch` is the sixth writing wrapper, and `matchDuplication.ts`
+is duplicate as a value. Nothing draws it — the component, the mounted test and the bilingual
+window reading are step 3's, and 2c-3c does not close without them.**
+
+Step 2's commit is the row under "2c-3c step 2" in the git-state table. The exact first
+command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1302 passed, 45 files
+```
+
+(`cargo test --workspace` expects **1046**. `npm run check` expects 409 files, 0 errors,
+0 warnings. `npm run build` expects **169 modules** — the +1 over step 1's 168 is
+`matchDuplication.ts`, production-reachable through `i18n/index.ts`.)
+
+### What step 2 contains
+
+`duplicate_match(id, base_revision, acknowledgement)` in `src-tauri/src/commands.rs`, routed
+through `run_one_save` with the helper's `at` set to `DuplicateItem::resulting_path()` so
+`SaveResult.moved` names the clone in the fresh revision (consult Q8); registered in
+`main.rs`; every contract test retabulated for twelve commands. `duplicateMatch` on the wire
+(`src/lib/ipc/commands.ts`) preserving the finding's `ContentRevision` operand exactly.
+`src/lib/browser/matchDuplication.ts`: a `Draft<MatchId>` session with eligibility
+{`notInDocument`, `readOnly`, `noSequencePosition`, `unsavedDraftInDocument` — document-wide,
+coordinator-supplied} and refusal precedence {`mayHaveWritten`, `alreadyDuplicated`,
+`saveInFlight`, `conflict`, `outOfDate`, `notDuplicable`}, sticky spent facts, and
+live-identity begin/submission gates. `BrowserState.duplicateMatch` in `workspace.svelte.ts`
+with full `MatchSaveAnswer` parity. i18n: 31 `browser.matchDuplication.*` keys per language,
+two notices, one `commandError` key, three typed accessors. 1041 → **1046** Rust tests,
+1244 → **1302** frontend tests over 45 files.
+
+### The four review rounds (`docs/reviews/phase-2c-3c-2-code.md`)
+
+Round 1 (`NOT READY`): a High — selection could be reclaimed after the person moved away and
+returned; a Medium — `moved: null` sentences implied a second file change; two Lows — the
+dispatcher test presenting cache content as disk evidence (2b-2c-3b's exact pattern, again),
+and an attribution doc describing duplication as reordering. Round 2, the confirmation pass
+(`NOT READY`): the High's fix had closed the pre-command window and left the adoption re-read
+await open — **each round's fix produces the next round's finding, again** — plus a Low in a
+test comment. Round 3 rebuilt the guard: a `DuplicateIntent { held, generation }` captured
+synchronously before the command travels whole into the dedicated `adoptAfterTheDuplicate`,
+which re-validates both halves after its own `getDocument` await **in the same synchronous
+block as `replaceSelection`** — no await between check and write, the `rereadDocument`
+capture-and-recheck shape — with two interleaving tests that fail against the round-2 code.
+Round 4, scoped to round 3's changes: **`READY`, no findings.** All dispositions are
+`docs/decisions/2c-3c-2-notes.md` §6.
+
+### What step 2 decided that a later session must not silently undo
+
+- **Selection is never reclaimed after the person moves it, and the guard holds at the write,
+  not before it.** The clone is followed only if the initiating `SelectedMatch` object is
+  still held AND `selectGeneration` has not moved, both re-checked with no await between the
+  check and `replaceSelection`. The no-follow path installs the fresh projection and
+  repairs/clears synchronously — no `MatchId` naming nothing (the 2c-3a-1 rule).
+- **`RepairAttribution` gained `'requestedDuplicate'` with its own notices**
+  (`keptAfterDuplicate`/`displacedByDuplicate`) rather than reusing `'requestedMove'` —
+  move's sentences say *reordered*, which is false of an insertion. The type's doc now says
+  only "changed the file", each member claiming its own kind of change.
+- **`moved: null` claims only that the clone could not be identified in the read that
+  followed the write** — causes non-exhaustive, in all four production sites and both
+  languages. A deleted-after-commit file still answers `Saved`/`moved: None`, tested.
+- **`CommandError::DuplicateSourceNotASequenceItem` is a new code, not a rename of move's
+  shared one** — the rename is a wire change three shipped commands inherit, recorded as the
+  standing 2b-2c-2 follow-up. Documented unreachable through today's projection, like its
+  move twin.
+- **There is no pending-confirmation phase in the session** — the acknowledgement round trip
+  is itself the deliberate step (consult Q6).
+
+### Next: step 2c-3c-3 — the component and the evidence
+
+Consult Q7 item 3 is the spec: draw the duplicate action and its acknowledge/retry UI as a
+rule-free walk over the model view; wire the `unsavedDraftInDocument` producer (it has no
+producer today — the coordinator must supply it, notes §4); add the mounted-component
+interaction test; run the full suites, build and module guard; and record a fresh
+English-and-Spanish window reading at the target size, as
+`docs/decisions/2c-3c-3-window-reading.md` in the shape of `2c-3b-2-window-reading.md`. The
+reading rules stand: one plan per launch into a fresh bundle path, the language set
+explicitly through the picker, a re-take after any component change. The Spanish creation-form
+width debt (owed since the `fragmento` change) and the destination-panel height precedent are
+the measured-size warnings to carry in. The one-synchronous-read rule binds the component:
+view, eligibility and submission identity from one projection read (notes §4).
+
+### The debt this step carries forward, unchanged
+
+**`browser.matchDeletion.sendFailed` and `browser.rawEditor.discardWarning`** still have F4's
+defect pattern and are still a pair: whichever sub-phase next touches those screens owes the
+fix and the re-taken reading. This step touched neither screen. Step 2 adds to the same
+ledger: the `movedNotIdentified`/`createdNotIdentified` twins and the pre-existing
+`after_a_save` prose residue, recorded in `2c-3c-2-notes.md` §6 for the owning follow-up.
+
+---
+
+**Phase 2c-3c step 1 (superseded by the above, kept for its rationale) — Duplicate is under
+way, its owner decision is taken, and step 1 of its
 three-step cut is complete: `DocumentEdit::DuplicateItem` is a true duplicate in the core, and
 nothing calls it.**
 
@@ -7939,6 +8033,7 @@ _Updated at each phase boundary._
 | **2c-3b step 1** | **`76a5196`** | ✅ pushed to `origin/main` | clean |
 | **2c-3b step 2 (phase)** | **`45d8478`** | ✅ pushed to `origin/main` (recorded by `f675b3e`) | clean |
 | **2c-3c step 1** | **`e079161`** | ✅ pushed to `origin/main` | clean |
+| **2c-3c step 2** | recorded in the follow-up commit | — | — |
 
 `76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
 until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a

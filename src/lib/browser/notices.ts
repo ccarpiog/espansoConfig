@@ -16,9 +16,10 @@
  *
  * The first four are R27's three answers plus the case where nothing could be
  * asked: re-resolution needs the document read again, and that read can itself
- * fail. The fifth is 2c-3a's, and the last two are 2c-3b's; those three are
- * the only ones that are not about a document moving on **under** the person —
- * they describe a change the person asked this application to make.
+ * fail. The fifth is 2c-3a's, the next two are 2c-3b's, and the last two are
+ * 2c-3c-2's; those five are the only ones that are not about a document moving
+ * on **under** the person — they describe a change the person asked this
+ * application to make.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -46,6 +47,14 @@ import type { TranslationKey } from '../i18n/dictionaries';
  *   asked for. The selection is still dropped rather than silently re-pointed
  *   (R27 stands), but the sentence names their own move as the cause, says the
  *   snippet is still in the file, and tells them to pick it in the list again.
+ * - `keptAfterDuplicate` and `displacedByDuplicate` — the same two answers, when
+ *   what grew the file was a duplicate the person asked for. Their own arms
+ *   rather than a reuse of the move's, because one arm renders one sentence and
+ *   the move's says *reordered*: a claim that would be false of an insertion,
+ *   and a decision record or a screen claiming it is this project's named worst
+ *   defect class. A duplicate displaces every position below its source by one,
+ *   so `displacedByDuplicate` is the routine answer for a selection parked
+ *   there.
  */
 export type SelectionNotice =
   | 'kept'
@@ -54,10 +63,17 @@ export type SelectionNotice =
   | 'unresolved'
   | 'deleted'
   | 'keptAfterMove'
-  | 'displacedByMove';
+  | 'displacedByMove'
+  | 'keptAfterDuplicate'
+  | 'displacedByDuplicate';
 
 /**
- * Who a selection repair's notice says reordered the file.
+ * Who a selection repair's notice says changed the file.
+ *
+ * **"Changed", not "reordered" or "grew"**: what kind of change it was is each
+ * member's own claim below — a move reorders, a duplicate grows — and the type
+ * naming one of them would contradict the other, which is the exact
+ * insertion-versus-reorder distinction the two duplicate notices exist to keep.
  *
  * The fix shape `docs/decisions/2c-3b-1-notes.md` section 5.2 prescribes: an
  * **explicit argument on the adoption**, never a swap inside the repair, because
@@ -71,8 +87,14 @@ export type SelectionNotice =
  *   Only `BrowserState.moveMatch`'s adoption passes this, and only for a
  *   commit; nothing in TypeScript enforces that restraint, so it is stated here
  *   in the same sentence as what the type does force.
+ * - `requestedDuplicate` — the sentences that name the person's own committed
+ *   duplicate. Only `BrowserState.duplicateMatch`'s adoption passes this, and
+ *   only for a commit, under the same unenforced restraint. Its own value
+ *   rather than a reuse of `requestedMove`, because the move's sentences say
+ *   *reordered* and a duplicate grows the file — the mechanism is shared, the
+ *   claim is not (2c-3c-2's deliberate choice, recorded in its notes).
  */
-export type RepairAttribution = 'externalChange' | 'requestedMove';
+export type RepairAttribution = 'externalChange' | 'requestedMove' | 'requestedDuplicate';
 
 /**
  * The dictionary key holding one notice's sentence.
@@ -101,5 +123,9 @@ export function selectionNoticeKey(notice: SelectionNotice): TranslationKey {
       return 'browser.notice.keptAfterMove';
     case 'displacedByMove':
       return 'browser.notice.displacedByMove';
+    case 'keptAfterDuplicate':
+      return 'browser.notice.keptAfterDuplicate';
+    case 'displacedByDuplicate':
+      return 'browser.notice.displacedByDuplicate';
   }
 } // End of function selectionNoticeKey()

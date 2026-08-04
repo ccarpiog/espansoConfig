@@ -23,6 +23,14 @@ import {
 } from '../browser/matchCreation';
 import { deletionRefusalKey, type DeletionRefusal } from '../browser/matchDeletion';
 import {
+  duplicationRecoveryKey,
+  duplicationRefusalKey,
+  duplicationSubmissionRefusalKey,
+  type DuplicationRecovery,
+  type DuplicationRefusal,
+  type DuplicationSubmissionRefusal
+} from '../browser/matchDuplication';
+import {
   moveRecoveryKey,
   moveRefusalKey,
   moveSubmissionRefusalKey,
@@ -553,6 +561,41 @@ export function tMoveSubmissionRefusal(reason: MoveSubmissionRefusal): string {
 export function tMoveRecovery(choice: MoveRecovery): string {
   return translate(locale.current, moveRecoveryKey(choice));
 } // End of function tMoveRecovery()
+
+/**
+ * Renders why one snippet may not be duplicated at all.
+ *
+ * @param reason - What `duplicationEligibility` answered.
+ * @returns The translated sentence.
+ */
+export function tDuplicationRefusal(reason: DuplicationRefusal): string {
+  return translate(locale.current, duplicationRefusalKey(reason));
+} // End of function tDuplicationRefusal()
+
+/**
+ * Renders why the duplicate control does nothing as things stand.
+ *
+ * A second accessor beside {@link tDuplicationRefusal} for
+ * {@link tMoveSubmissionRefusal}'s reason: that one is about the snippet, this
+ * one is about what the panel is currently showing.
+ *
+ * @param reason - What `duplicationSubmissionRefusal` answered.
+ * @returns The translated sentence.
+ */
+export function tDuplicationSubmissionRefusal(reason: DuplicationSubmissionRefusal): string {
+  return translate(locale.current, duplicationSubmissionRefusalKey(reason));
+} // End of function tDuplicationSubmissionRefusal()
+
+/**
+ * Renders one thing the person may do about a duplicate that produced no
+ * outcome.
+ *
+ * @param choice - What `duplicationRecoveryChoices` offered.
+ * @returns The translated label.
+ */
+export function tDuplicationRecovery(choice: DuplicationRecovery): string {
+  return translate(locale.current, duplicationRecoveryKey(choice));
+} // End of function tDuplicationRecovery()
 
 /**
  * Renders one line a save outcome shows, in the current language.

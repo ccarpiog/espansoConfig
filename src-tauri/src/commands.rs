@@ -1,11 +1,12 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
 //! Plan section 6.4's **read-only** set — `open_workspace`, `list_documents`,
-//! `get_document`, `get_match`, `document_text` and `reload_document` — and five
+//! `get_document`, `get_match`, `document_text` and `reload_document` — and six
 //! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), `create_match` and
-//! `delete_match` (2b-2c-2), and `save_raw_document` (2b-2c-3b). Each is one line
-//! over a [`WorkspaceSession`] method, and each of the six read-only ones is one
-//! call into `crate::workspace`, which Phase 1a built to be wrapped this way.
+//! `delete_match` (2b-2c-2), `save_raw_document` (2b-2c-3b), and
+//! `duplicate_match` (2c-3c-2). Each is one line over a [`WorkspaceSession`]
+//! method, and each of the six read-only ones is one call into
+//! `crate::workspace`, which Phase 1a built to be wrapped this way.
 //!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
@@ -15,25 +16,27 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Five of the eleven commands write, and they write the same way
+//! # Six of the twelve commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
-//! and `delete_match`, and 2b-2c-3b `save_raw_document`. All five go through
+//! and `delete_match`, 2b-2c-3b `save_raw_document`, and 2c-3c-2
+//! `duplicate_match`. All six go through
 //! [`espansoconfig_core::persist::save_document`] and through nothing else:
 //! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
 //! **no command in this crate calls either**. They also share [`run_one_save`],
-//! which is this layer's one cache-coherency policy rather than five agreeing
+//! which is this layer's one cache-coherency policy rather than six agreeing
 //! copies of it.
 //!
-//! Four of them differ only in **who derives the edits**. `move_match`,
-//! `create_match` and `delete_match` each build their own single primitive — an
-//! [`ItemMove`], an [`InsertItem`], a [`RemoveItem`] — because each is one
-//! operation with nothing to diff. `save_match` hands a [`MatchDraft`] to
-//! [`plan_match_edits`], which derives the **smallest** batch that realises it —
-//! or refuses by name, in which case nothing is attempted and the caller gets
-//! [`CommandError::DraftRefused`]. None of them ever combines two kinds of edit
-//! in one batch (`PROGRESS.md` R25).
+//! Five of them differ only in **who derives the edits**. `move_match`,
+//! `create_match`, `delete_match` and `duplicate_match` each build their own
+//! single primitive — an [`ItemMove`], an [`InsertItem`], a [`RemoveItem`], a
+//! [`DuplicateItem`] — because each is one operation with nothing to diff.
+//! `save_match` hands a [`MatchDraft`] to [`plan_match_edits`], which derives
+//! the **smallest** batch that realises it — or refuses by name, in which case
+//! nothing is attempted and the caller gets [`CommandError::DraftRefused`].
+//! None of them ever combines two kinds of edit in one batch (`PROGRESS.md`
+//! R25, and `DuplicateMustBeTheOnlyEditInItsBatch` for a duplicate).
 //!
 //! **`save_raw_document` derives no edits at all**, and that is the one real
 //! difference on this surface. Phase 2b-2c-3a gave the single writing entry point
@@ -93,7 +96,7 @@ use tauri::State;
 use espansoconfig_core::draft::{plan_match_edits, MatchDraft, NewMatch};
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{
-    DocumentEdit, DocumentPath, InsertItem, ItemMove, ItemPlacement, RemoveItem,
+    DocumentEdit, DocumentPath, DuplicateItem, InsertItem, ItemMove, ItemPlacement, RemoveItem,
 };
 use espansoconfig_core::persist::{
     save_document, Acknowledgement, BackupSession, SaveContent, SaveError, SaveRequest,
@@ -587,6 +590,64 @@ impl WorkspaceSession {
             )
         })
     } // End of function save_raw_document()
+
+    /// Inserts a byte-exact copy of one match immediately after it, and saves
+    /// the file.
+    ///
+    /// The sixth method in this crate that can write a user's file, and it
+    /// writes it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`], with exactly one
+    /// [`DocumentEdit::DuplicateItem`] — the batch restriction is the engine's
+    /// own (`DuplicateMustBeTheOnlyEditInItsBatch`), so a clone-and-edit cannot
+    /// be expressed here at all.
+    ///
+    /// # What travels, and where the clone lands
+    ///
+    /// The primitive's answer, not this layer's: the item's owned physical-line
+    /// runs, byte for byte — leading comment block, dash, every key, block
+    /// scalars, inline comments, trailing spaces and each line's own terminator —
+    /// landing **immediately after the source, in the same sequence, with no
+    /// placement choice** (Phase 2c-3c design consult, Q4). The trigger is
+    /// copied unchanged, which is why the first attempt is interrupted by the
+    /// acknowledgeable [`espansoconfig_core::validate::FindingCode::DuplicateKeepsTriggerDefinition`]
+    /// suspicion whenever the source has a modelled trigger form.
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// - a `base_revision` that is not the revision this session's projection
+    ///   holds — [`CommandError::IdentityStaleRevision`], for the reason every
+    ///   writing command shares: a path resolved against one parse and applied
+    ///   to another names a **position**, and a position is not an identity;
+    /// - the identity refusals, unchanged from [`WorkspaceSession::match_view`];
+    /// - a match this projection cannot address as a sequence item —
+    ///   [`CommandError::DuplicateSourceNotASequenceItem`], the duplicate's own
+    ///   spelling of the negative claim rather than a leaked move code.
+    ///
+    /// # What it answers with
+    ///
+    /// [`SaveResult`], in the `Ok` channel, exactly as every writing command
+    /// does — and [`SaveResult::Saved::moved`] is the **clone's** identity in
+    /// the new revision, minted at the post-insertion path the primitive's own
+    /// arithmetic derives. After a commit every identity the caller holds for
+    /// the file is stale, the source's included, so the returned identity is
+    /// the only safe continuation (consult Q8).
+    ///
+    /// **`moved: None` on a commit says only that the clone could not be
+    /// identified in the read that followed the write** — [`after_a_save`] also
+    /// answers `None` when that read itself fails, or when the fresh projection
+    /// holds no match at the landed path, so no string built on this answer may
+    /// name a second writer as *the* cause. The causes are not enumerated here
+    /// because the set is not closed.
+    pub fn duplicate_match(
+        &self,
+        id: MatchId,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        self.with_open(|workspace, backups| {
+            duplicate_one_match(workspace, backups, id, base_revision, acknowledgement)
+        })
+    } // End of function duplicate_match()
 
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
@@ -1091,6 +1152,65 @@ fn delete_one_match(
     )
 } // End of function delete_one_match()
 
+/// Plans and runs one duplication against an open workspace.
+///
+/// A free function for [`move_one_match`]'s reason, and it follows
+/// [`delete_one_match`]'s identity discipline exactly: resolve the projection
+/// through [`view_at`] first, address the held identity as a sequence item,
+/// construct exactly one [`DuplicateItem`], and hand it to the shared tail.
+///
+/// # The landed address is the clone's, and the arithmetic is the primitive's
+///
+/// `at` is [`DuplicateItem::resulting_path`] — the source's path with its final
+/// index one higher — so [`after_a_save`] mints [`SaveResult::Saved::moved`] as
+/// the **clone's** identity in the fresh revision (consult Q8: the returned
+/// identity is the only safe continuation, because a committed insertion makes
+/// every identity in the file stale). Reading the arithmetic off the request
+/// itself is what keeps this layer and the engine from holding two copies of
+/// where the clone went; the `None` arm of that `Option` is a path that does
+/// not end in an index, which [`addressed_item`] has already excluded, so the
+/// `ok_or` below is defensive rather than reachable.
+///
+/// # The refusal is the duplicate's own code
+///
+/// [`addressed_item`] answers [`CommandError::MoveNotWithinOneSequence`], whose
+/// name says *move*; the consult's Q5 forbids leaking it as a duplicate's
+/// user-facing reason, so it is mapped to
+/// [`CommandError::DuplicateSourceNotASequenceItem`] here — the same negative
+/// claim, spelled for this operation. Every other refusal passes through
+/// unchanged, because the identity codes mean the same thing for every command.
+fn duplicate_one_match(
+    workspace: &mut Workspace,
+    backups: &BackupSession,
+    id: MatchId,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    // A stale identity is refused before it can be turned into an index that
+    // still resolves — to a different snippet, whose bytes would then be copied.
+    let view = view_at(workspace, id.document, base_revision)?;
+    let (sequence, from) = addressed_item(view, id).map_err(|error| match error {
+        CommandError::MoveNotWithinOneSequence => CommandError::DuplicateSourceNotASequenceItem,
+        other => other,
+    })?;
+    let edit = DuplicateItem::new(sequence.with_index(from));
+    // Where the clone will be afterwards, from the engine's own arithmetic
+    // rather than from a second copy of it (`DuplicateItem::resulting_path`).
+    let landed = edit
+        .resulting_path()
+        .ok_or(CommandError::DuplicateSourceNotASequenceItem)?;
+    let edits = [DocumentEdit::DuplicateItem(edit)];
+    run_one_save(
+        workspace,
+        backups,
+        id.document,
+        base_revision,
+        SaveContent::Edits(&edits),
+        acknowledgement,
+        Some(&landed),
+    )
+} // End of function duplicate_one_match()
+
 /// Hands one whole replacement text to the save transaction.
 ///
 /// A free function for [`move_one_match`]'s reason, and the shortest of the
@@ -1580,6 +1700,48 @@ pub fn save_raw_document(
     session.save_raw_document(document, base_revision, &text, &acknowledgement)
 } // End of function save_raw_document()
 
+/// Inserts a byte-exact copy of one match immediately after it, and saves the
+/// file (plan section 6.4).
+///
+/// **The twelfth command, and the sixth that can write a user's file.**
+///
+/// # Its arguments, and why each is the shape it is
+///
+/// - `id` — the snippet to duplicate, by identity, for [`move_match`]'s reason:
+///   a [`espansoconfig_core::patch::DocumentPath`] is a **position**, and
+///   deleting an earlier match re-points one at a different snippet — whose
+///   bytes this command would then copy.
+/// - `base_revision` — the optimistic-concurrency token, checked twice as every
+///   writing command checks it: here against the parse this session holds, and
+///   inside the transaction against the bytes under the write lock.
+/// - `acknowledgement` — the suspicions the caller has already shown someone,
+///   by content, and it is load-bearing on this command's ordinary path: a
+///   duplicate keeps its source's trigger definition byte for byte, so the
+///   first attempt is refused with
+///   [`espansoconfig_core::validate::FindingCode::DuplicateKeepsTriggerDefinition`]
+///   — which carries the candidate's own revision, so consent for one clone
+///   cannot be spent on another — and the same call with that exact finding
+///   acknowledged commits. There is deliberately **no `force` flag**.
+///
+/// There is no destination argument at all: the clone lands immediately after
+/// its source, in the same sequence, by design (consult Q4).
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes, and
+/// [`CommandError::DuplicateSourceNotASequenceItem`] before anything is
+/// attempted; [`CommandError::SaveFailed`] for the transaction's own typed
+/// failures. A conflict and a refusal are **not** errors — see [`SaveResult`].
+#[tauri::command]
+pub fn duplicate_match(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.duplicate_match(id, base_revision, &acknowledgement)
+} // End of function duplicate_match()
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1742,7 +1904,7 @@ mod tests {
     ///
     /// "Every" is the claim, so the body holds every one of them: `documents`,
     /// `document`, `text`, `reload` and `match_view` — the five that route
-    /// through [`WorkspaceSession::with_workspace`] — and the five that write,
+    /// through [`WorkspaceSession::with_workspace`] — and the six that write,
     /// which take the guard themselves. `open` is excluded because it is the
     /// method that opens one, and `set_menu_labels` is not a workspace command at
     /// all.
@@ -1815,10 +1977,18 @@ mod tests {
                 )
                 .err()
                 .map(|error| error.code()),
+            session
+                .duplicate_match(
+                    identity,
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
         ];
         assert_eq!(
             refusals,
-            [Some("noWorkspaceOpen"); 10],
+            [Some("noWorkspaceOpen"); 11],
             "every session method that needs a workspace must refuse before one is open"
         );
     } // End of function every_command_refuses_before_a_workspace_is_open()
@@ -3988,6 +4158,232 @@ mod tests {
             [":one", ":two", ":greet"]
         );
     } // End of function a_suspicion_refuses_a_creation_until_the_findings_come_back()
+
+    // -----------------------------------------------------------------------
+    // duplicate_match — Phase 2c-3c-2
+    // -----------------------------------------------------------------------
+
+    /// A duplicate is refused until its trigger finding comes back, then copies
+    /// the bytes and answers with the clone's identity.
+    ///
+    /// **The whole ordinary path of this command, which is refuse-then-commit by
+    /// design**: a duplicate keeps its source's trigger definition, so the first
+    /// attempt is interrupted by `DuplicateKeepsTriggerDefinition` — bound to the
+    /// candidate by its own revision operand — and the same call with exactly
+    /// those findings acknowledged commits. Then the three claims every writing
+    /// command makes: the bytes on disk are the expected ones (the clone is a
+    /// byte-exact copy and everything else is untouched), `moved` is the
+    /// **clone's** identity and it resolves at the post-insertion path, and the
+    /// identity held before the save is stale.
+    #[test]
+    fn a_duplicate_is_refused_until_the_findings_come_back_then_names_the_clone() {
+        use espansoconfig_core::validate::FindingCode;
+
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+
+        let refused = session
+            .duplicate_match(held, before.revision, &Acknowledgement::none())
+            .expect("a refusal is an outcome, not a failure");
+        let findings = match refused {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(
+                    verdict,
+                    espansoconfig_core::persist::SaveVerdict::RefusedForUnacknowledgedSuspicions
+                );
+                assert!(
+                    findings.iter().any(|finding| matches!(
+                        finding.code,
+                        FindingCode::DuplicateKeepsTriggerDefinition { .. }
+                    )),
+                    "the refusal must carry the duplicate's own suspicion: {findings:?}"
+                );
+                findings
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(base_bytes(&dir), BASE_YML, "a refused save writes nothing");
+
+        // The round trip a real caller makes: the findings were serialized to
+        // the interface, and the acknowledgement arrives back as JSON.
+        let payload = serde_json::json!({ "accepted": findings });
+        let acknowledgement: Acknowledgement =
+            serde_json::from_value(payload).expect("an acknowledgement reads back");
+
+        let (revision, moved) = expect_saved(
+            session
+                .duplicate_match(held, before.revision, &acknowledgement)
+                .expect("the acknowledged duplicate proceeds"),
+            "duplicate",
+        );
+        assert_ne!(revision, before.revision, "the file was rewritten");
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "# A synthetic match file.\n",
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':two'\n",
+                "    replace: second\n",
+                "    invented_by_a_later_espanso: yes\n",
+            ),
+            "the clone is a byte-exact copy immediately after its source"
+        );
+
+        // The clone's identity resolves, at the post-insertion path.
+        let moved = moved.expect("a committed duplicate names the clone");
+        let found = session
+            .match_view(moved)
+            .expect("the identity the command answered with must resolve");
+        assert_eq!(trigger_text(&found), ":one");
+        assert_eq!(
+            found.path,
+            Some(
+                espansoconfig_core::patch::DocumentPath::root(0)
+                    .with_key("matches")
+                    .with_index(1)
+            ),
+            "moved must name the clone, one slot below its source"
+        );
+
+        // Every identity minted before the commit is stale, the source's included.
+        let stale = session
+            .match_view(held)
+            .expect_err("the identity held before the save is minted from the old revision");
+        assert_eq!(stale.code(), "identityStaleRevision");
+
+        // Cache coherence: what the session serves is what is on disk.
+        let after = session.document(id).expect("the file still reads");
+        assert_eq!(triggers_of(&after), [":one", ":one", ":two"]);
+        assert_eq!(session.text(id).expect("the bytes read"), base_bytes(&dir));
+    } // End of function a_duplicate_is_refused_until_the_findings_come_back_then_names_the_clone()
+
+    /// The acknowledgement is bound to the candidate, not to the request.
+    ///
+    /// The finding's `revision` operand is the candidate's own content hash
+    /// (`docs/decisions/2c-3c-1-notes.md` section 6.1), so it must differ from
+    /// the base the request was made against — an acknowledgement copied from a
+    /// different candidate would not match. Asserted here at the command layer
+    /// because this is the boundary a real caller round-trips it across; the
+    /// same-length-rewrite transfer case is pinned in the core's own
+    /// `persist_save.rs`.
+    #[test]
+    fn a_duplicates_finding_carries_the_candidates_own_revision() {
+        use espansoconfig_core::validate::FindingCode;
+
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        let refused = session
+            .duplicate_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome, not a failure");
+        let SaveResult::Refused { findings, .. } = refused else {
+            panic!("expected a refusal");
+        };
+        let operand = findings
+            .iter()
+            .find_map(|finding| match &finding.code {
+                FindingCode::DuplicateKeepsTriggerDefinition { revision } => Some(*revision),
+                _ => None,
+            })
+            .expect("the duplicate's suspicion is among the findings");
+        assert_ne!(
+            operand, before.revision,
+            "the operand is the candidate's hash, never the base the request named"
+        );
+    } // End of function a_duplicates_finding_carries_the_candidates_own_revision()
+
+    /// A stale base revision is refused before a duplicate is planned.
+    ///
+    /// The same claim `delete_match_never_deletes_the_item_at_a_stale_ids_old_path`
+    /// makes for a deletion: an identity resolved against another parse names a
+    /// **position**, and the bytes at that position may belong to a different
+    /// snippet — which this command would then copy.
+    #[test]
+    fn a_stale_base_revision_is_refused_before_a_duplicate_is_planned() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        let error = session
+            .duplicate_match(
+                view.matches[0].id,
+                espansoconfig_core::ContentRevision::of_bytes(b"not this file"),
+                &Acknowledgement::none(),
+            )
+            .expect_err("a base the session does not hold is refused");
+        assert_eq!(error.code(), "identityStaleRevision");
+        assert_eq!(base_bytes(&dir), BASE_YML, "nothing was attempted");
+    } // End of function a_stale_base_revision_is_refused_before_a_duplicate_is_planned()
+
+    /// A committed save whose re-read fails still answers `Saved`, and names
+    /// nothing — with no second writer anywhere.
+    ///
+    /// **Review round 1, finding 2's boundary case.** `moved: None` on a commit
+    /// means only that the clone — or the moved or created snippet — could not
+    /// be identified in the read that followed the write, and this is the
+    /// history that tells that apart from *the file changed again*: the file
+    /// becomes unreadable between the transaction's return and the re-read,
+    /// and nothing else touched it. No command can produce the interleaving —
+    /// both reads happen inside one synchronous call — so the shared tail is
+    /// driven directly, which is what a free function is for. Any sentence
+    /// built on `moved: None` that asserts a second writer is falsified by this
+    /// test's premise.
+    #[test]
+    fn a_committed_save_whose_re_read_fails_names_nothing_and_stays_saved() {
+        use espansoconfig_core::persist::SavedDocument;
+        use espansoconfig_core::workspace::Workspace;
+
+        let dir = tree_holding(BASE_YML);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the file reads");
+
+        // The interleaving no command can produce: the commit happened, and
+        // the file is gone by the time the re-read runs.
+        fs::remove_file(dir.path().join("match").join("base.yml")).unwrap();
+        let saved = SavedDocument {
+            revision: ContentRevision::of_bytes(b"the bytes the rename installed"),
+            text: String::new(),
+            replacements: Vec::new(),
+            notes: Vec::new(),
+            findings: Vec::new(),
+            committed: true,
+            backup: None,
+        };
+        let landed = espansoconfig_core::patch::DocumentPath::root(0)
+            .with_key("matches")
+            .with_index(1);
+        match super::after_a_save(&mut workspace, id, Some(&landed), saved) {
+            SaveResult::Saved {
+                committed, moved, ..
+            } => {
+                assert!(committed, "a failed re-read never takes the commit back");
+                assert!(
+                    moved.is_none(),
+                    "a re-read that failed cannot mint an identity — and no second writer exists"
+                );
+            }
+            other => panic!("a committed save is answered as Saved, got {other:?}"),
+        } // End of the match over the tail's answer
+    } // End of function a_committed_save_whose_re_read_fails_names_nothing_and_stays_saved()
 
     // -----------------------------------------------------------------------
     // save_raw_document — Phase 2b-2c-3b

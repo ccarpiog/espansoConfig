@@ -48,6 +48,7 @@ export const COMMAND_ERROR_CODES = [
   'invalidMenuLabels',
   'menuBuildFailed',
   'moveNotWithinOneSequence',
+  'duplicateSourceNotASequenceItem',
   'documentHasNoMatchList',
   'draftRefused',
   'saveFailed'
@@ -232,6 +233,21 @@ export interface MoveNotWithinOneSequenceError {
 }
 
 /**
+ * The snippet a duplicate was asked for could not be addressed as an item of a
+ * list, so there is nothing to copy from.
+ *
+ * {@link MoveNotWithinOneSequenceError}'s negative claim, under a
+ * duplicate-specific code: the 2c-3c design consult (Q5) forbids a duplicate
+ * leaking a code named *move* as its user-facing reason, and renaming the
+ * shared code is a wire change three shipped commands would inherit. Only
+ * `duplicateMatch` raises this one.
+ */
+export interface DuplicateSourceNotASequenceItemError {
+  /** The discriminant. */
+  readonly code: 'duplicateSourceNotASequenceItem';
+}
+
+/**
  * The file holds no snippet list, so a new snippet has nothing to join.
  *
  * **Not a failed save — no save was attempted.** Nothing was written, no
@@ -372,6 +388,7 @@ export type CommandError =
   | InvalidMenuLabelsError
   | MenuBuildFailedError
   | MoveNotWithinOneSequenceError
+  | DuplicateSourceNotASequenceItemError
   | DocumentHasNoMatchListError
   | DraftRefusedError
   | SaveFailedError;
@@ -559,6 +576,7 @@ export const COMMAND_ERROR_OPERANDS = {
   invalidMenuLabels: { missing: 'stringArray', unexpected: 'stringArray' },
   menuBuildFailed: {},
   moveNotWithinOneSequence: {},
+  duplicateSourceNotASequenceItem: {},
   documentHasNoMatchList: { document: 'number' },
   draftRefused: { error: 'object' },
   saveFailed: { error: 'object', may_have_written: 'boolean' }
@@ -742,6 +760,7 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     // `moved: null`; that is an outcome rather than an error, so it is not this
     // function's to classify either.
     case 'moveNotWithinOneSequence':
+    case 'duplicateSourceNotASequenceItem':
     case 'documentHasNoMatchList':
     case 'draftRefused':
     case 'saveFailed':

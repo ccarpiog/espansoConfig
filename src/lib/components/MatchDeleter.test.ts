@@ -497,6 +497,7 @@ describe('a committed deletion, over the real workspace state', () => {
       deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => {
         return { ok: true, value: COMMITTED };
       }),
+      duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       saveRawDocument: vi.fn(async () => refusal)
     };
     const state: BrowserState = createBrowserState(commands, () => undefined);
