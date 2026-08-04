@@ -124,6 +124,8 @@
   "browser.notice.gone": "This file changed on disk and no longer holds the snippet that was selected, so the selection was cleared.",
   "browser.notice.unresolved": "This file changed on disk and could not be read again, so the selection was cleared.",
   "browser.notice.deleted": "That snippet was deleted. This window has read the file again and selected whatever now sits where it was; if the file holds no snippets any more, nothing is selected.",
+  "browser.notice.keptAfterMove": "The move you asked for reordered this file, and the snippet you had selected was found again.",
+  "browser.notice.displacedByMove": "The move you asked for reordered this file, and what is now in that position is a different snippet, so the selection was cleared. The snippet you had selected is still in the file; pick it in the list again.",
   "browser.notice.dismiss": "Dismiss",
 
   "browser.rawSave.replacesWholeDocument": "Saving writes this file's whole text exactly as it appears here. This is not an edit to one snippet: the entire document is replaced.",

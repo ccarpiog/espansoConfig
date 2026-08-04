@@ -2197,9 +2197,16 @@ describe('moving a snippet', () => {
     // `repairAfter` re-resolves **positionally and then checks**, so what a person
     // who selected some other snippet mid-flight gets after a committed move
     // depends entirely on whether the reorder shifted the position they were on:
-    // the same fingerprint at the held position is `kept`, and a different snippet
-    // there is `differentMatch` with the selection dropped. Both are exercised
-    // here, against one file, so the two answers are one comparison.
+    // the same fingerprint at the held position is kept, and a different snippet
+    // there drops the selection. Both are exercised here, against one file, so
+    // the two answers are one comparison.
+    //
+    // **Both notices are the asked-for-move arms since 2c-3b's fix**: the window
+    // reading (`docs/decisions/2c-3b-2-window-reading.md` section 7.1) measured
+    // `kept` and `differentMatch` here telling the person their file changed on
+    // disk directly above a panel reporting the very write they asked for, so
+    // `moveMatch`'s adoption now attributes the reorder to their own move. The
+    // *repair* is unchanged — same selection kept, same selection dropped.
     const before = makeDocument({
       id: 2,
       relativePath: 'match/base.yml',
@@ -2255,20 +2262,93 @@ describe('moving a snippet', () => {
     } // End of function moveWhileLookingAt()
 
     // `:sql` is at position 2 before and after, so it is found and re-pointed under
-    // its new identity. The notice is `kept`.
+    // its new identity. The notice names the person's own move, never the disk.
     const untouched = await moveWhileLookingAt(2);
     expect(untouched.selected?.id.node).toBe(32);
-    expect(untouched.notice).toBe('kept');
+    expect(untouched.notice).toBe('keptAfterMove');
 
     // `:date` was at position 1 and `:sig` is there now, so the selection is
-    // dropped. **The snippet is still in the file**, one row above — which is what
-    // makes `differentMatch` misleading after a reorder somebody asked for, and is
-    // the hole `docs/decisions/2c-3b-1-notes.md` records.
+    // dropped (R27 stands). **The snippet is still in the file**, one row above —
+    // which is why the notice says so and tells the person to pick it again,
+    // rather than reporting an external change that never happened. This closes
+    // the hole `docs/decisions/2c-3b-1-notes.md` section 5.2 recorded.
     const shifted = await moveWhileLookingAt(1);
     expect(shifted.selected).toBeNull();
-    expect(shifted.notice).toBe('differentMatch');
+    expect(shifted.notice).toBe('displacedByMove');
     expect(shifted.scopedMatches.map((match) => match.trigger.trigger?.text)).toContain(':date');
   }); // End of the "mid-flight selection" case
+
+  it('keeps the external notice when the re-read is not the parse the move produced', async () => {
+    // **The attribution is a claim, and the adoption only makes it against the
+    // revision the transaction ended on.** The move committed at `rev-b`, and the
+    // re-read finds `rev-elsewhere`: somebody rewrote the file again between the
+    // answer and the read, so the reorder on screen is *not* only the move the
+    // person asked for. "The move you asked for reordered this file" would be
+    // false there — the same defect class as `differentMatch` after an asked-for
+    // move, with the two writers swapped — so the repair falls back to the
+    // external sentences, which the 2c-3b-2 reading's L4b/L5 launches proved
+    // accurate for a genuinely external change.
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: { document: 2, revision: 'rev-b', node: 31 }
+      }
+    };
+    const raced = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-elsewhere',
+      matches: [
+        makeMatch({
+          node: 40,
+          document: 2,
+          revision: 'rev-elsewhere',
+          trigger: ':stranger',
+          label: 'Somebody else’s'
+        }),
+        makeMatch({
+          node: 41,
+          document: 2,
+          revision: 'rev-elsewhere',
+          trigger: ':also',
+          label: 'Also theirs'
+        })
+      ]
+    });
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, moves: [saved] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    // Parked on `:date`, a snippet the person's own reorder would have shifted —
+    // the exact position that answers `displacedByMove` when the re-read *is*
+    // the move's parse (the case above).
+    await state.select(baseDocument().matches[1]!);
+
+    documents.set(2, { ok: true, value: raced });
+    await state.moveMatch(
+      baseDocument().matches[0]!.id,
+      baseDocument().matches[1]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // Ordinary repair with the external attribution: the selection is dropped and
+    // the notice says the file changed on disk, because it did — over and above
+    // the committed move.
+    expect(state.scopedDocument?.revision).toBe('rev-elsewhere');
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('differentMatch');
+  }); // End of the "re-read from another parse" case
 }); // End of the "moving a snippet" suite
 
 /**

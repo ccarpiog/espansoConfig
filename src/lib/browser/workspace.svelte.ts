@@ -76,7 +76,7 @@ import {
   type InvalidationStatus,
   type SealedWholeDocumentSave
 } from './invalidation';
-import type { SelectionNotice } from './notices';
+import type { RepairAttribution, SelectionNotice } from './notices';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
@@ -1932,10 +1932,21 @@ export function createBrowserState(
           // `rawTextOf` would then serve for bytes that have just been replaced.
           // The identical omission the 2c-2 confirmation pass found in `saveMatch`.
           forgetTextOf(match.document);
+          // **The one adoption that passes an attribution**, which is the fix
+          // `docs/decisions/2c-3b-2-window-reading.md` section 7.1 prescribes: a
+          // repair after a committed move must not tell the person their file
+          // changed on disk when the reorder is the write they asked for. It is
+          // passed only for a commit — `committed: false` here means the move
+          // wrote nothing and this screen is out of date because the *revision*
+          // moved, which is another writer's doing — and this method's
+          // `mayHaveWritten` path above keeps the default for the same reason:
+          // an uncertain write cannot claim the reorder, and the sentence that
+          // claims less wins.
           const stale = await adoptTheDocumentOnDisk(
             match.document,
             match,
-            answer.value.moved
+            answer.value.moved,
+            answer.value.committed ? 'requestedMove' : 'externalChange'
           );
           if (stale === null) {
             adoption = { kind: 'done' };
@@ -2328,16 +2339,33 @@ export function createBrowserState(
    * read falls back to that same ordinary repair rather than adopting whatever now
    * occupies the arena node.
    *
+   * **The attribution is honoured only against the parse the write produced.**
+   * `requestedMove` is a claim — *the move you asked for reordered this file* —
+   * and this function can only stand behind it when the projection it just read
+   * is the revision the transaction ended on, the one `moved` was minted in. A
+   * re-read that comes back with any other revision found a file that changed
+   * *again* after the commit, so the repair falls back to `externalChange`,
+   * whose sentences are the accurate ones there
+   * (`docs/decisions/2c-3b-2-window-reading.md` section 5.3: the external
+   * sentences are right when the file really was changed by another writer).
+   * The same fallback covers a `moved` of `null`, where no revision can vouch
+   * for the claim at all.
+   *
    * @param document - The file that was, or may have been, written.
    * @param target - The identity the operation was about, as it was **before** the
    *   save, or `null` when there is none. Compared against the held selection.
    * @param moved - That snippet's identity in the new revision, or `null`.
+   * @param attribution - Who a repair's notice says reordered the file. Defaults
+   *   to `externalChange`, so every caller that does not pass it — every writing
+   *   wrapper except `BrowserState.moveMatch` — shows exactly what it showed
+   *   before this argument existed.
    * @returns The failure of the re-read, or `null` when it succeeded.
    */
   async function adoptTheDocumentOnDisk(
     document: DocumentId,
     target: MatchId | null,
-    moved: MatchId | null
+    moved: MatchId | null,
+    attribution: RepairAttribution = 'externalChange'
   ): Promise<IpcFailure | null> {
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
@@ -2361,7 +2389,11 @@ export function createBrowserState(
         return null;
       }
     }
-    repairAfter(fresh.value);
+    // The guard this function's JSDoc states: the requested attribution stands
+    // only when this projection is the parse the write produced.
+    const fromThisWrite =
+      moved !== null && fresh.value.id === moved.document && fresh.value.revision === moved.revision;
+    repairAfter(fresh.value, fromThisWrite ? attribution : 'externalChange');
     return null;
   } // End of function adoptTheDocumentOnDisk()
 
@@ -2616,19 +2648,39 @@ export function createBrowserState(
    * expected answer for every selection except the moved one, which
    * {@link adoptTheDocumentOnDisk} has already re-pointed by identity.
    *
+   * **The attribution changes the sentence, never the repair.** What is kept,
+   * dropped or re-pointed is identical under both values; only which notice is
+   * raised differs. The parameter defaults to `externalChange`, so every caller
+   * that does not pass it shows exactly what it showed before this argument
+   * existed — the fix shape `docs/decisions/2c-3b-1-notes.md` section 5.2
+   * prescribes, an argument threaded from the adoption rather than a swap made
+   * here. `gone` keeps the external sentence under both attributions: a move
+   * within one sequence never changes its length, so a vanished position means
+   * something other than the move also happened, and the sentence that claims
+   * less wins.
+   *
    * @param view - The projection now in place.
+   * @param attribution - Who the notice says reordered the file. Pass
+   *   `requestedMove` only for a repair against the parse a committed move
+   *   produced.
    */
-  function repairAfter(view: DocumentView): void {
+  function repairAfter(
+    view: DocumentView,
+    attribution: RepairAttribution = 'externalChange'
+  ): void {
     if (selected === null || selected.document !== view.id) {
       return;
     }
     const found = reresolve(selected, view);
     if (found.outcome === 'sameMatch') {
       replaceSelection(found.selected);
-      notice = 'kept';
+      notice = attribution === 'requestedMove' ? 'keptAfterMove' : 'kept';
       return;
     }
     replaceSelection(null);
-    notice = found.outcome;
+    notice =
+      attribution === 'requestedMove' && found.outcome === 'differentMatch'
+        ? 'displacedByMove'
+        : found.outcome;
   } // End of function repairAfter()
 } // End of function createBrowserState()

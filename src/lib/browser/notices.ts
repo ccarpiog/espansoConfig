@@ -16,8 +16,9 @@
  *
  * The first four are R27's three answers plus the case where nothing could be
  * asked: re-resolution needs the document read again, and that read can itself
- * fail. The fifth is 2c-3a's, and it is the only one that is not about a
- * document moving on **under** the person.
+ * fail. The fifth is 2c-3a's, and the last two are 2c-3b's; those three are
+ * the only ones that are not about a document moving on **under** the person —
+ * they describe a change the person asked this application to make.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -37,8 +38,41 @@ import type { TranslationKey } from '../i18n/dictionaries';
  *   where it was, or nothing when the file holds none. That is what makes it a
  *   fifth arm rather than `differentMatch`: R27's correction is about a file that
  *   changed underneath somebody, and this is a change they made.
+ * - `keptAfterMove` — `kept`, when the reorder was a move the person asked for.
+ *   The repair is identical; only the attribution differs, because opening with
+ *   "this file changed on disk" over the person's own committed move is the
+ *   false alarm `docs/decisions/2c-3b-2-window-reading.md` section 7.1 measured.
+ * - `displacedByMove` — `differentMatch`, when the reorder was a move the person
+ *   asked for. The selection is still dropped rather than silently re-pointed
+ *   (R27 stands), but the sentence names their own move as the cause, says the
+ *   snippet is still in the file, and tells them to pick it in the list again.
  */
-export type SelectionNotice = 'kept' | 'differentMatch' | 'gone' | 'unresolved' | 'deleted';
+export type SelectionNotice =
+  | 'kept'
+  | 'differentMatch'
+  | 'gone'
+  | 'unresolved'
+  | 'deleted'
+  | 'keptAfterMove'
+  | 'displacedByMove';
+
+/**
+ * Who a selection repair's notice says reordered the file.
+ *
+ * The fix shape `docs/decisions/2c-3b-1-notes.md` section 5.2 prescribes: an
+ * **explicit argument on the adoption**, never a swap inside the repair, because
+ * the external sentences are accurate when the file really was changed by
+ * another writer (the reading's L4b/L5 launches are the proof). The default is
+ * `externalChange`, so every caller that does not pass the argument shows
+ * exactly what it showed before.
+ *
+ * - `externalChange` — the sentences that open "This file changed on disk".
+ * - `requestedMove` — the sentences that name the person's own committed move.
+ *   Only `BrowserState.moveMatch`'s adoption passes this, and only for a
+ *   commit; nothing in TypeScript enforces that restraint, so it is stated here
+ *   in the same sentence as what the type does force.
+ */
+export type RepairAttribution = 'externalChange' | 'requestedMove';
 
 /**
  * The dictionary key holding one notice's sentence.
@@ -63,5 +97,9 @@ export function selectionNoticeKey(notice: SelectionNotice): TranslationKey {
       return 'browser.notice.unresolved';
     case 'deleted':
       return 'browser.notice.deleted';
+    case 'keptAfterMove':
+      return 'browser.notice.keptAfterMove';
+    case 'displacedByMove':
+      return 'browser.notice.displacedByMove';
   }
 } // End of function selectionNoticeKey()

@@ -10,8 +10,9 @@
  * that each one differs from its English twin and from the other notices.
  *
  * **The list below is hand-maintained and a new arm has to be added to it**, which
- * 2c-3a's `deleted` was: the `switch` in `selectionNoticeKey` is exhaustive and
- * catches a *missing key*, and nothing catches a notice this file forgets to walk.
+ * 2c-3a's `deleted` and 2c-3b's `keptAfterMove` and `displacedByMove` were: the
+ * `switch` in `selectionNoticeKey` is exhaustive and catches a *missing key*,
+ * and nothing catches a notice this file forgets to walk.
  *
  * The 1c-1 review is why the last two are checked rather than assumed. `"x"`
  * satisfied "has a non-blank sentence", and "say different things in the two
@@ -29,7 +30,9 @@ const NOTICES: readonly SelectionNotice[] = [
   'differentMatch',
   'gone',
   'unresolved',
-  'deleted'
+  'deleted',
+  'keptAfterMove',
+  'displacedByMove'
 ];
 
 /** The key each notice must map to, written out rather than derived. */
@@ -38,7 +41,9 @@ const EXPECTED_KEYS: ReadonlyMap<SelectionNotice, string> = new Map([
   ['differentMatch', 'browser.notice.differentMatch'],
   ['gone', 'browser.notice.gone'],
   ['unresolved', 'browser.notice.unresolved'],
-  ['deleted', 'browser.notice.deleted']
+  ['deleted', 'browser.notice.deleted'],
+  ['keptAfterMove', 'browser.notice.keptAfterMove'],
+  ['displacedByMove', 'browser.notice.displacedByMove']
 ] as const);
 
 describe('selection notices', () => {
@@ -81,5 +86,20 @@ describe('selection notices', () => {
         DICTIONARIES[locale][selectionNoticeKey('gone')]
       );
     }
+  });
+
+  it('attribute an asked-for move distinctly from an external change, in both languages', () => {
+    // The two 2c-3b arms exist precisely because their external twins
+    // misattribute a committed move to the disk
+    // (`docs/decisions/2c-3b-2-window-reading.md` section 7.1). A pair whose
+    // sentences read the same would carry the new arm and keep the false alarm.
+    for (const locale of LOCALES) {
+      expect(DICTIONARIES[locale][selectionNoticeKey('keptAfterMove')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('kept')]
+      );
+      expect(DICTIONARIES[locale][selectionNoticeKey('displacedByMove')], locale).not.toBe(
+        DICTIONARIES[locale][selectionNoticeKey('differentMatch')]
+      );
+    } // End of the loop over the two locales
   });
 }); // End of the "selection notices" suite

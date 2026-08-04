@@ -124,6 +124,8 @@
   "browser.notice.gone": "Este archivo ha cambiado en el disco y ya no contiene el fragmento que estaba seleccionado, así que se ha borrado la selección.",
   "browser.notice.unresolved": "Este archivo ha cambiado en el disco y no se ha podido volver a leer, así que se ha borrado la selección.",
   "browser.notice.deleted": "Ese fragmento se ha eliminado. Esta ventana ha vuelto a leer el archivo y ha seleccionado lo que ahora ocupa su lugar; si el archivo ya no contiene fragmentos, no hay nada seleccionado.",
+  "browser.notice.keptAfterMove": "El traslado que has pedido ha reordenado este archivo y el fragmento que tenías seleccionado se ha vuelto a encontrar.",
+  "browser.notice.displacedByMove": "El traslado que has pedido ha reordenado este archivo y en esa posición hay ahora un fragmento distinto, así que se ha borrado la selección. El fragmento que tenías seleccionado sigue en el archivo; vuelve a elegirlo en la lista.",
   "browser.notice.dismiss": "Descartar",
 
   "browser.rawSave.replacesWholeDocument": "Al guardar se escribe todo el texto de este archivo tal y como aparece aquí. No es una edición de un fragmento: se reemplaza el documento entero.",

@@ -56,7 +56,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-3a-2** | **New and delete on a screen**: `MatchCreator.svelte` and `MatchDeleter.svelte` as rule-free walks over step 1's values, a mounted-component test for each, and a 12-launch window reading — the two thirds of 2c-3a's evidence step 1 did not have. **Phase 2c-3a is now complete.** | ✅ complete — after a review fix round, a confirmation pass and a **window-reading fix round with a re-taken reading** below. The aggregate review returned **NOT READY** on two findings; the confirmation returned **READY**; the window reading then found two Medium defects of its own, **one fixed in this cut and one deferred with a decision owed** |
 | **2c-3b-1** | **Move as a value, with no screen**: `matchMove.ts` — the **sequence** rather than the file as the invariant, a five-reason eligibility verdict, `top`/`after`/`end` with `end` lowered onto an identity anchor because the wire has none, the destination itself drafted so consent is content-addressed to it — plus the repair of `BrowserState.moveMatch`, the last writing wrapper never shaped as a `MatchSaveAnswer` and the carrier of **three** latent defects, all now closed | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on four findings; the confirmation pass returned **NOT READY** again on four the first round's own fixes had introduced; the third pass found the second round's central fix **BROKEN** and returned six more. **All fourteen were fixed before the commit**, and most of them were false claims in **prose** rather than defects in behaviour |
 | **2c-3b-2** | **Move on a screen**: `MatchMover.svelte` as a rule-free walk over step 1's value, `BrowserState.rereadDocument` as the first public single-document re-read, `moveMatch` re-typed to identities, the destination list bounded before a reading measured it, and this project's fourth mounted-component test | ✅ **code complete** — after an aggregate review (**NOT READY**, six findings, three High) and a confirmation pass (**NOT READY**, three more, all Low). **All nine fixed before the commit.** Four of the six first-round findings were user-facing sentences claiming more than the code knows |
-| **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Split into two steps by the rule 2c-2 and 2c-3a used; **both steps' code is complete** | ⬜️ **the window reading is owed, and it is the only thing outstanding.** Two of `2c-split-notes.md` §7's three kinds of evidence are in hand — model tests and a mounted-component test; **the third is not**, and by this project's own rule the sub-phase is not complete without it |
+| **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Split into two steps by the rule 2c-2 and 2c-3a used | ✅ **complete — all three kinds of evidence are in hand.** The 12-launch window reading (`docs/decisions/2c-3b-2-window-reading.md`) settled all six of the checkpoint's questions: five PASS, and item 4's `differentMatch` notice **confirmed on screen as a false alarm** (Medium, §7.1). The fix is the shape `2c-3b-1-notes.md` §5.2 prescribed — an explicit attribution argument on the adoption, passed only by `moveMatch`'s committed arm and honored only when the re-read is the parse the write produced — reviewed by Codex (**READY, no findings**, `docs/reviews/phase-2c-3b-2-reading-fix.md`) and closed by a 5-launch re-taken reading (§13 of the record). Two Lows and an observation (§7.2–§7.4) are recorded, not fixed |
 | 2c-3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -5349,8 +5349,82 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3b step 2's code is complete and committed: a person can move a snippet from a window.
-The one thing outstanding is the window reading, and it is the whole of the next session's job.**
+**Phase 2c-3b is complete: move exists as a value, a screen draws it, and all three kinds of
+evidence are in hand — model tests, the mounted-component test, and the window reading.** The
+reading is `docs/decisions/2c-3b-2-window-reading.md`: twelve launches settled the six questions
+the previous checkpoint posed (five PASS, one confirmed defect), a fix round closed the one Medium,
+Codex reviewed the fix (**READY, no findings** — `docs/reviews/phase-2c-3b-2-reading-fix.md`), and
+a five-launch re-take (§13 of the record) measured the new sentences on screen in both languages.
+
+The exact first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1244 passed, 44 files
+```
+
+(`cargo test --workspace` expects **1008**, unchanged — nothing in the reading or the fix touched
+Rust. `npm run check` expects 407 files, 0 errors, 0 warnings. `npm run build` expects **168
+modules**, unchanged: the fix added sentences and arms to existing modules, no new source module.)
+
+### The next step is Phase 2c-3c — Duplicate, and it owes a decision before it owes code
+
+`docs/decisions/2c-split-notes.md` §4 is explicit: there are exactly two honest products. **(1) A
+true duplicate** — clone the existing match's exact source subtree, insert the clone — which is
+new **Rust work in `patch/`** and is why 2c-3c is a sub-phase rather than a button; or **(2) a
+projection-based copy**, which is cheap and **is not duplicate** — it drops comments, key order and
+scalar spelling, and calling it *Duplicate* breaks the preservation promise in the one place nobody
+checks. They are not alternatives to choose between casually: (2) may exist only under a name that
+does not claim more than it does. **The first act of 2c-3c is the design consult
+(`docs/reviews/phase-2c-3c-design.md`, by the rule every sub-phase since 2b-2c has followed),
+and its first question is this owner decision.** If (1), the consult must also settle the clone
+primitive's shape (a `DocumentEdit` that copies a source byte range at a sequence-item boundary,
+beside `InsertItem`), the trigger-collision question (a byte-exact clone duplicates the trigger —
+what, if anything, warns?), and where the clone lands (the position model `NewMatchPosition`
+already gives `create_match`).
+
+### What this reading and its fix round settled that a later session must not silently undo
+
+- **`RepairAttribution` defaults to `'externalChange'` everywhere, and exactly one call site says
+  otherwise.** `adoptTheDocumentOnDisk` and `repairAfter` both take the argument with that default;
+  only `BrowserState.moveMatch`'s **committed** adoption passes `'requestedMove'`, and the adoption
+  honors it **only when the fetched projection matches both `moved.document` and `moved.revision`**
+  — the parse the write itself produced. A file changed again between the write and the re-read, a
+  recovery re-read, and every other wrapper's adoption all keep the external sentences, which the
+  reading's L4b/L5 (and the re-take's R5) measured being *accurate* for a genuinely external
+  change. Rewording those sentences globally was rejected for exactly that reason.
+- **`mayHaveWritten` and the conflict path keep the external attribution deliberately** —
+  uncertainty claims less, and a conflicted move really did have the file move under the person.
+  The new arms are `keptAfterMove` and `displacedByMove` in `src/lib/browser/notices.ts`, drawn
+  through `selectionNoticeKey`/`tSelectionNotice` like every other arm.
+- **The reading record's §5 transcripts are the pre-fix sentences, kept as taken.** §13 supersedes
+  §7.1 and says so; §7 itself was not rewritten. A later session must not "correct" §5 — it is the
+  record of what the defect looked like.
+- **§7.2 (the committed panel makes the same claim twice), §7.3 (placeless destinations enabled
+  under the `outOfDate` refusal) and §7.4 (the frozen *Where it is now* marker) are recorded, not
+  fixed** — two Lows and an observation, each with its reasoning in the record. §7.3 in particular
+  is the model's own rule read literally, coherent and strange to look at; fixing it is a decision,
+  not a cleanup.
+- **The true `conflict` outcome cannot be provoked through the IPC** — the command's identity gate
+  (`view_at` checks the base revision first) answers before the save transaction can conflict, so
+  the three `revision*` sentences, *Keep editing* and `cannotMove.conflict` have model-suite and
+  mounted evidence only (record §10.2). Reaching them from a window needs a filesystem write timed
+  between the gate and the lock. This is a standing hole, stated, not a defect.
+- **`movedNotIdentified` and the `mayHaveWritten` state were measured as canned-answer readings of
+  the real component** (record §4.3, §10.3) — their layout and copy are window-verified, their
+  end-to-end reachability rests on the model suite.
+
+### The debt this phase carries forward, unchanged
+
+**`browser.matchDeletion.sendFailed` and `browser.rawEditor.discardWarning`** still have F4's
+defect pattern and are still a pair: whichever sub-phase next touches those screens owes the fix
+and the re-taken reading (see the superseded entry below for the full disposition). This phase
+touched neither screen.
+
+---
+
+**Phase 2c-3b step 2 (superseded by the above, kept for its rationale): the code was complete and
+committed, and the window reading was the whole of the next session's job — the section above is
+that reading's outcome.**
 
 The exact first command a fresh session should run:
 
