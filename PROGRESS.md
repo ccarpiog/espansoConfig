@@ -5470,7 +5470,7 @@ jsdom-opted mounted suite, and `docs/decisions/2c-3c-3-window-reading.md` is the
 window reading — **24 launches, PASS on all seven items, no High and no Medium, and no defect
 in what is written to disk.**
 
-**`<SHA-TO-FILL>` is 2c-3c's closing commit and is where a fresh session begins.** The exact
+**`21b3573` is 2c-3c's closing commit and is where a fresh session begins.** The exact
 first command a fresh session should run:
 
 ```sh
@@ -8270,6 +8270,29 @@ _Updated at each phase boundary._
 | **2c-3b step 2 (phase)** | **`45d8478`** | ✅ pushed to `origin/main` (recorded by `f675b3e`) | clean |
 | **2c-3c step 1** | **`e079161`** | ✅ pushed to `origin/main` | clean |
 | **2c-3c step 2** | **`78f34dd`** | ✅ pushed to `origin/main` | clean |
+| **2c-3c step 3 (closes 2c-3c)** | **`21b3573`** | ✅ pushed to `origin/main` | clean |
+
+`21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
+phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
+commit holds a demonstrated defect. Both rounds returned `NOT READY` and both verdicts were accepted
+rather than argued with. The standing rule held again and is the record here rather than a formality:
+round 1's two findings were behavioural — a rule deciding between refusal arms living in markup, and
+a refusal sentence false of its own predicate — and **both of round 2's findings were prose that
+round 1's fixes had introduced**, a false testability record and two governing documents still
+claiming a dirty-draft coordination that deliberately did not ship. A fifth entry in the disposition
+table is the orchestrator's own: `DetailPane.svelte`'s header carried a pre-existing "nothing renders
+a Svelte component in an automated test" absolute that its **own** test file disproves at line 1.
+
+It contains `src/lib/components/MatchDuplicator.svelte` and its 13 mounted cases,
+`documentHasUnsavedDraft` and `notDuplicableToShow` in `src/lib/browser/matchDuplication.ts`, the
+`DetailPane.svelte` wiring with `busy` grown to six write surfaces, two rewritten dictionary
+sentences with no key added, correction blocks in `docs/decisions/2c-3c-2-notes.md` and
+`docs/reviews/phase-2c-3c-design.md`, `docs/reviews/phase-2c-3c-3-code.md`,
+`docs/decisions/2c-3c-3-notes.md`, the 24-launch bilingual reading
+`docs/decisions/2c-3c-3-window-reading.md`, `CLAUDE.md` §6 and this checkpoint. 1302 → **1324**
+frontend tests over 46 files; Rust unchanged at 1046. **This commit closes Phase 2c-3c. A fresh
+session starting Phase 2c-4a should start from `21b3573` or later.** As at 1b-1, `npm install` (or
+`npm ci`) is required before any frontend command will run.
 
 `76a5196` is Phase 2c-3b step 1 **including all three of its review rounds** — the phase was held open
 until all fourteen findings were closed, so, as with every phase since `8989c16`, no commit holds a
