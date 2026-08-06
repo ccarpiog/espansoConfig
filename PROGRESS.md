@@ -5528,7 +5528,9 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 no i18n key was added, and `conflictText`/`captureTheDiskText` in
 `src/lib/browser/workspace.svelte.ts` are untouched.
 
-**The commit is where a fresh session begins.** The exact first commands a fresh session should run:
+**`fa5bb93` is step 1's commit and is where a fresh session begins** (`ddf67ab` before it is the
+design consult, committed on its own so the ruling was durable before any code rested on it). The
+exact first commands a fresh session should run:
 
 ```sh
 npm install && npm test        # expect 1326 passed, 46 files
@@ -8433,7 +8435,7 @@ _Updated at each phase boundary._
 | **2c-3c step 2** | **`78f34dd`** | ✅ pushed to `origin/main` | clean |
 | **2c-3c step 3 (closes 2c-3c)** | **`21b3573`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a design consult** | **`ddf67ab`** | ⬜️ push pending | clean |
-| **2c-4a step 1** | recorded in the follow-up commit | ⬜️ push pending | clean |
+| **2c-4a step 1** | **`fa5bb93`** | ⬜️ push pending | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
