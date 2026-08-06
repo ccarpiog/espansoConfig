@@ -1276,11 +1276,45 @@ fn save_one_raw_document(
 /// the file changed **again** in between, and neither this application nor any
 /// string it shows may present the two as descriptions of the same bytes.
 ///
-/// **The one place the payload is built**, so the rule cannot be half-kept by a
-/// later command: `disk` and `disk_revision` come out of a single refresh here,
-/// and `found` is passed in from the error rather than re-derived. The refresh
-/// also leaves the session's cache describing the bytes the next save will be
-/// checked against, which is why the read serves both purposes.
+/// **The one place in production the payload is built**, so the rule cannot be
+/// half-kept by a later command: `disk`, `disk_revision` and `disk_text` come out
+/// of a single refresh here, and `found` is passed in from the error rather than
+/// re-derived. The refresh also leaves the session's cache describing the bytes
+/// the next save will be checked against, which is why the read serves both
+/// purposes. `crate::save::every_save_result` builds a **test-only** instance —
+/// the wire-contract fixture — and it is named here so that "one site" is not read
+/// as a claim about every occurrence of the variant in the crate.
+///
+/// # The text is paired with its revision by content-hash equality
+///
+/// Phase 2c-4a-1 adds [`SaveResult::Conflict::disk_text`], the whole file text a
+/// conflict screen has to show, and the pairing it needs is that the text really
+/// is the text of the read `disk_revision` names. [`Workspace::refresh`] answers
+/// **one** `SourceDocument` carrying `.source`, `.revision` and `.view`, and all
+/// three operands below are taken out of that one value. The alternative — a
+/// second `document_text` call from the frontend, placed beside `disk_revision` on
+/// screen — would prove nothing: a concurrent refresh between the two calls would
+/// make a later text masquerade as the conflict snapshot, and the only argument
+/// for it would be call ordering (design consult Q9 item 2).
+///
+/// **That snapshot is not always built by the read this call performs**, and the
+/// honest statement of the guarantee is the stronger one. `refresh` hashes the
+/// bytes it just read and, when that hash equals the revision the cached snapshot
+/// already carries, keeps the cached snapshot and discards the string it read. So
+/// `fresh.source` below may be an earlier read's text — of bytes a **content
+/// hash** has this moment proved equal to what the disk holds. That equality is
+/// what makes the text and the revision describe the same file; a
+/// [`ContentRevision`] collision is what it does not exclude.
+///
+/// What none of that gives is a type that forbids a second construction site from
+/// pairing them wrongly; `SaveResult::Conflict` is an ordinary struct variant and
+/// Rust cannot tie one field to another. What holds the rule is that there is
+/// exactly one production site, this one, and that the tests below rehash the text
+/// they got back rather than restating the expression that produced it.
+///
+/// `disk_text` is a `String` rather than an `Option<String>` for the reason its own
+/// documentation gives: [`Workspace::refresh`] reads through `read_utf8`, so a file
+/// that is not valid UTF-8 fails the `?` below and no `Conflict` is built at all.
 ///
 /// # Errors
 ///
@@ -1292,11 +1326,14 @@ fn conflict_after_the_lock(
     expected: ContentRevision,
     found: ContentRevision,
 ) -> Result<SaveResult, CommandError> {
-    let disk = Box::new(workspace.refresh(document)?.view.clone());
+    let fresh = workspace.refresh(document)?;
+    let disk_text = fresh.source.clone();
+    let disk = Box::new(fresh.view.clone());
     Ok(SaveResult::Conflict {
         expected,
         found,
         disk_revision: disk.revision,
+        disk_text,
         disk,
     })
 } // End of function conflict_after_the_lock()
@@ -2827,6 +2864,7 @@ mod tests {
                 expected,
                 found,
                 disk_revision,
+                disk_text,
                 disk,
             } => {
                 assert_eq!(expected, before.revision, "the base the caller sent");
@@ -2837,6 +2875,10 @@ mod tests {
                     disk.matches.len(),
                     2,
                     "the disk side is a projection of the fresh read"
+                );
+                assert_eq!(
+                    disk_text, REPLACED,
+                    "the disk side's text is the whole file the fresh read saw"
                 );
             }
             other => panic!("expected a conflict, got {other:?}"),
@@ -2872,6 +2914,12 @@ mod tests {
     /// projection separately from the revision beside it fails; and `disk` projects
     /// the **third** text, so a payload that described the bytes that refused the
     /// save fails.
+    ///
+    /// Phase 2c-4a-1 adds two more of the same kind for `disk_text`: it is the
+    /// later text **byte for byte**, and its own `ContentRevision::of_bytes`
+    /// equals `disk_revision`. The digest is recomputed from the string that
+    /// crossed rather than compared against the expression that produced it, so a
+    /// payload that carried the refusing bytes under the fresh revision fails.
     #[test]
     fn a_conflict_describes_the_refusing_read_and_the_fresh_read_separately() {
         const REFUSING: &str = concat!(
@@ -2932,6 +2980,7 @@ mod tests {
                 expected: base,
                 found: refusing,
                 disk_revision,
+                disk_text,
                 disk,
             } => {
                 assert_eq!(base, before.revision, "the base the caller sent");
@@ -2950,10 +2999,97 @@ mod tests {
                     [":only"],
                     "the projection must be of the fresh read, not of the bytes that refused"
                 );
+                assert_eq!(
+                    disk_text, LATER,
+                    "the text must be the fresh read's, not the bytes that refused the save"
+                );
+                assert_eq!(
+                    ContentRevision::of_bytes(disk_text.as_bytes()),
+                    disk_revision,
+                    "disk_text must hash to disk_revision: the pairing is the whole claim"
+                );
+                assert_ne!(
+                    ContentRevision::of_bytes(disk_text.as_bytes()),
+                    refusing,
+                    "and it must not be the text of the read that refused the save"
+                );
             }
             other => panic!("expected a conflict, got {other:?}"),
         }
     } // End of function a_conflict_describes_the_refusing_read_and_the_fresh_read_separately()
+
+    /// A conflict's `disk_text` is the file **byte for byte**, distinguishing
+    /// bytes included.
+    ///
+    /// The pairing test above uses ordinary LF text, so it could pass over a
+    /// payload that rebuilt the text from the projection, re-encoded it, or
+    /// normalised its line endings. This one cannot: the file it conflicts over
+    /// carries a UTF-8 BOM, CRLF line endings **and** no final newline — the three
+    /// properties the corpus fixtures exist to pin — and the assertion is on the
+    /// bytes, with the digest recomputed from what came back.
+    ///
+    /// Hand-authored and neutral, written with `\u{feff}` and explicit `\r\n` so
+    /// that an editor saving this source file cannot quietly agree with a
+    /// normalising boundary (CLAUDE.md sections 1 and 4).
+    #[test]
+    fn a_conflicts_disk_text_survives_byte_for_byte() {
+        const BOM: &str = "\u{feff}";
+        let their_bytes = format!(
+            "{BOM}# a comment\r\nmatches:\r\n  - trigger: ':theirs'\r\n    replace: theirs",
+        );
+
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(BASE_YML);
+
+        // Another writer replaces the file with one that has all three
+        // distinguishing properties, and this session is not told.
+        fs::write(dir.path().join("match").join("base.yml"), &their_bytes).unwrap();
+
+        let result = session
+            .save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':mine'\n    replace: mine\n",
+                &Acknowledgement::none(),
+            )
+            .expect("a conflict is an outcome, not a failure");
+        let SaveResult::Conflict {
+            disk_revision,
+            disk_text,
+            ..
+        } = result
+        else {
+            panic!("expected a conflict, got {result:?}");
+        };
+        assert!(
+            disk_text.starts_with(BOM),
+            "the BOM must survive: a stripped one is a different file"
+        );
+        assert_eq!(
+            disk_text.matches("\r\n").count(),
+            3,
+            "every CRLF must survive: converting one rewrites a line nobody touched"
+        );
+        assert!(
+            !disk_text.ends_with('\n'),
+            "the absent final newline must stay absent"
+        );
+        assert_eq!(disk_text, their_bytes, "and the whole text, byte for byte");
+        assert_eq!(
+            ContentRevision::of_bytes(disk_text.as_bytes()),
+            disk_revision,
+            "the text that crossed must hash to the revision it crossed beside"
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            their_bytes,
+            "and a conflict must leave the other writer's bytes alone"
+        );
+    } // End of function a_conflicts_disk_text_survives_byte_for_byte()
 
     /// A suspicion refuses the move, and the acknowledgement it hands back lets
     /// the same move through.
@@ -4622,6 +4758,7 @@ mod tests {
                 expected,
                 found,
                 disk_revision,
+                disk_text,
                 disk,
             } => {
                 assert_eq!(expected, before.revision, "the base the editor loaded");
@@ -4632,6 +4769,10 @@ mod tests {
                     [":one"],
                     "the payload projects the other writer's file, which is what a raw \
                      editor has to show"
+                );
+                assert_eq!(
+                    disk_text, OTHER_WRITER,
+                    "and carries the whole file, which a projection cannot stand in for"
                 );
             }
             other => panic!("expected a conflict, got {other:?}"),

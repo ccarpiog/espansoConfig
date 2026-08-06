@@ -122,6 +122,7 @@ const CONFLICTED: SaveResult = {
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,
+  disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
   disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision: AFTER })
 };
 

@@ -95,6 +95,13 @@
 //! regression confined to serializing a `DocumentView` would leave the bare
 //! string of `document_text` perfectly correct.
 //!
+//! Phase 2c-4a-1 adds a **third** such value — `SaveResult::Conflict::disk_text`,
+//! a whole file's text carried on a save's answer rather than on a read's — and
+//! `a_conflicts_disk_text_crosses_the_dispatcher_byte_for_byte` asks the same
+//! question of it, for the same reason: that value has its own serializer arm,
+//! reached only by a save that conflicts, so nothing the two sweeps above measure
+//! covers it.
+//!
 //! What this still cannot see is the webview: `mock_builder()` swaps the
 //! platform webview out, so what is measured is the response body Tauri
 //! produces, up to and including its JSON encoding and decoding. A defect in
@@ -1485,6 +1492,137 @@ fn document_text_carries_a_nul_and_the_two_unicode_line_separators() {
         "the text was cut short at one of the three"
     );
 } // End of function document_text_carries_a_nul_and_the_two_unicode_line_separators()
+
+/// A conflict's `disk_text` crosses the dispatcher byte for byte, and the digest
+/// beside it is re-derived from what came out.
+///
+/// **The Phase 2c-4a-1 review's medium finding, made falsifiable.** Three tests
+/// claimed byte-exactness for this field and none of them could have falsified a
+/// normalisation in the serialization path: the Rust test in `crate::commands`
+/// inspects the value *before* it is serialized, `crate::save`'s shape test does
+/// serialize but only over ordinary LF text, and `saveOutcome.test.ts` starts
+/// from a hand-built TypeScript value that never crossed anything. A regression
+/// confined to the `Conflict` arm of [`crate::save::SaveResult`]'s hand-written
+/// [`serde::Serialize`] — stripping the BOM, converting the line endings,
+/// truncating the string — would have left all three green.
+///
+/// The claim is therefore asked the way the other two fidelity sweeps in this
+/// module ask theirs: over the **real dispatcher**, with the answer's `disk_text`
+/// compared against `std::fs::read` of the file the other writer wrote, and the
+/// digest recomputed **here**, from the bytes the response body carried, rather
+/// than restated from the expression that produced them. A payload whose text was
+/// normalised on the way out fails the first comparison; one whose revision was
+/// taken from a different read fails the second.
+///
+/// The fixture is hand-authored and neutral (CLAUDE.md section 1), written with
+/// `\u{feff}` and explicit `\r\n` escapes so that an editor saving this source
+/// file cannot quietly make it agree with a normalising boundary.
+#[test]
+fn a_conflicts_disk_text_crosses_the_dispatcher_byte_for_byte() {
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir: dir,
+    } = opened_over_ipc("matches:\n  - trigger: ':mine'\n    replace: mine\n");
+    // The file every disk assertion below reads with `std::fs::read`: a claim
+    // about the bytes must not be answered from this session's cache.
+    let target = dir.path().join("match").join("base.yml");
+
+    // Another writer replaces the file with one carrying all three distinguishing
+    // properties — a UTF-8 BOM, CRLF line endings and no final newline — and this
+    // session is not told, so the save below is refused against a stale base.
+    let theirs = "\u{feff}# theirs\r\nmatches:\r\n  - trigger: ':theirs'\r\n    replace: theirs";
+    fs::write(&target, theirs).unwrap();
+
+    let answer = invoke(
+        &webview,
+        "save_raw_document",
+        json!({
+            "document": document_id,
+            "baseRevision": view["revision"],
+            "text": "matches:\n  - trigger: ':stale'\n    replace: stale\n",
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("a conflict is a value in the Ok channel, not a rejection");
+    assert_eq!(
+        answer["outcome"], "conflict",
+        "the premise: a stale base must come back as a conflict: {answer}"
+    );
+    assert_eq!(
+        answer["expected"], view["revision"],
+        "the conflict must be about the base this request named: {answer}"
+    );
+    assert_ne!(
+        answer["disk_revision"], view["revision"],
+        "the fixture must exercise a file that really moved, or this proves nothing"
+    );
+
+    // 1. The bytes, against a different expression from the one the payload was
+    //    built out of: the file itself, read from the disk.
+    let crossed = answer["disk_text"]
+        .as_str()
+        .expect("disk_text crosses as a JSON string");
+    let on_disk = fs::read(&target).expect("the file is readable");
+    if let Some(offset) = first_difference(crossed.as_bytes(), &on_disk) {
+        panic!(
+            "disk_text differs from the file at byte {offset} \
+             ({} bytes crossed, {} bytes on disk)",
+            crossed.len(),
+            on_disk.len()
+        );
+    }
+    assert_eq!(
+        on_disk,
+        theirs.as_bytes(),
+        "a conflict must leave the other writer's bytes alone"
+    );
+
+    // The three properties named individually on **what crossed**, so that a
+    // failure says which one this boundary lost rather than only that something
+    // changed. The comparison above could in principle pass with both sides
+    // wrong; these cannot.
+    assert!(
+        crossed.starts_with('\u{feff}'),
+        "the leading UTF-8 BOM was stripped in transit"
+    );
+    assert_eq!(
+        crossed.matches("\r\n").count(),
+        3,
+        "a CRLF pair was converted in transit"
+    );
+    assert_eq!(
+        crossed.matches("\r\n").count(),
+        crossed.matches('\n').count(),
+        "a bare LF arrived, so a line ending was converted on the way"
+    );
+    assert!(
+        !crossed.ends_with('\n'),
+        "a final newline was added in transit"
+    );
+
+    // 2. The pairing, re-derived from the bytes that came out of serialization.
+    //    The digest is computed on this side of the dispatcher, from the string
+    //    the response body carried, so a text normalised anywhere on the way out
+    //    no longer hashes to the revision that crossed beside it.
+    assert_eq!(
+        answer["disk_revision"].as_str(),
+        Some(
+            espansoconfig_core::ContentRevision::of_bytes(crossed.as_bytes())
+                .to_hex()
+                .as_str()
+        ),
+        "disk_text must hash to disk_revision: the pairing is the whole claim: {answer}"
+    );
+    // And the projection beside it describes the same read, which is what makes
+    // the three operands one snapshot rather than three observations.
+    assert_eq!(
+        answer["disk"]["revision"], answer["disk_revision"],
+        "the top-level revision must be the revision of the projection beside it: {answer}"
+    );
+} // End of function a_conflicts_disk_text_crosses_the_dispatcher_byte_for_byte()
 
 /// The dispatcher's rejection when the access-control list refuses a command.
 ///

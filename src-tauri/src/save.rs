@@ -41,6 +41,43 @@
 //! [`PresentationNote`] and a [`DocumentView`] all cross exactly as the core
 //! writes them. The shell is flat; the cargo keeps its own convention, which is
 //! precisely the arrangement `CommandError` has held since Phase 1b-2a.
+//!
+//! # A conflict's operands are observations, and one of them is now a whole file
+//!
+//! [`SaveResult::Conflict`] has carried two revisions since Phase 2b-2a because
+//! they are **two observations, not two names for one**. Phase 2c-4a-1 adds
+//! [`SaveResult::Conflict::disk_text`], and the same rule binds it: the text is of
+//! the fresh read, the one [`SaveResult::Conflict::disk_revision`] names, and
+//! never of the bytes at [`SaveResult::Conflict::found`] that actually refused the
+//! save. When the two revisions differ the file changed **again** between them,
+//! and the text on the payload describes the *later* of the two reads.
+//!
+//! It is paired with its revision **by construction**: both come out of one
+//! `SourceDocument` — the snapshot `Workspace::refresh` answers — inside
+//! `crate::commands::conflict_after_the_lock`, the one place **in production**
+//! this variant is built.
+//!
+//! **What makes that pairing sound is content-hash equality, not "one read".**
+//! `refresh` reads the file, hashes the bytes and installs a new snapshot built
+//! from them *unless* that hash equals the one the cached snapshot already
+//! carries — in which case it keeps the cached snapshot and drops the string it
+//! just read. So the text, the revision and the projection come out of one
+//! **snapshot**, which may be an earlier parse rather than the read that returned
+//! it. That is enough, and it is the stronger statement: a snapshot's text hashes
+//! to its own revision by construction, and `refresh` reuses one only after
+//! testing that same hash against the bytes it has this moment read off the disk.
+//!
+//! Two things it does not force. A [`ContentRevision`] collision would let a
+//! different text pass that test — the guarantee is a hash equality, never an
+//! identity of bytes. And Rust does not tie one field of a struct variant to
+//! another, so a future second construction site could pair a revision with
+//! somebody else's text and compile. What holds the rule is that there is one
+//! production site, and that the tests rehash the text they received rather than
+//! restating the expression that produced it. `every_save_result()` below builds a
+//! **test-only** instance and is not a counterexample to the first claim: it is
+//! the wire-contract fixture, it pairs text and revision the same way, and
+//! `a_conflict_reports_the_refusing_revision_and_the_fresh_read_separately`
+//! rehashes it rather than trusting it.
 
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
@@ -155,6 +192,13 @@ pub enum SaveResult {
     /// differ, the file changed again in between, and neither this application
     /// nor any string it shows may present the two as descriptions of the same
     /// bytes.
+    ///
+    /// **That rule binds the text too**, since Phase 2c-4a-1.
+    /// [`SaveResult::Conflict::disk_text`] is the text of the *fresh* read — the
+    /// bytes [`SaveResult::Conflict::disk_revision`] names — and never the bytes
+    /// at `found`. When the two revisions differ, the text on this payload is of
+    /// the **later** observation, so a screen that draws it beside `found` would
+    /// be labelling one read's bytes with another read's digest.
     Conflict {
         /// The revision the caller based its request on.
         expected: ContentRevision,
@@ -169,6 +213,49 @@ pub enum SaveResult {
         /// descending into a projection. A caller that finds them different is
         /// looking at a file that moved twice.
         disk_revision: ContentRevision,
+        /// The **whole file text** of that fresh read, unchanged.
+        ///
+        /// No line ending converted, no BOM stripped, no normalisation: it is
+        /// what [`espansoconfig_core::workspace::Workspace::document_text`]
+        /// answers for the snapshot the refresh installed, which is the file as
+        /// the disk holds it. A conflict screen needs it because
+        /// [`SaveResult::Conflict::disk`] cannot substitute for it — a
+        /// [`DocumentView`] is a projection, and even a match's own
+        /// `source_text` is one mapping's owned slice.
+        ///
+        /// **It is the text at [`SaveResult::Conflict::disk_revision`], never at
+        /// [`SaveResult::Conflict::found`]**, and the pairing is by construction
+        /// rather than by convention: `crate::commands::conflict_after_the_lock`
+        /// takes the text, the revision and the projection out of **one
+        /// `SourceDocument`** — the snapshot `Workspace::refresh` answers — so no
+        /// second read and no call ordering stands between them.
+        ///
+        /// **The snapshot is not always built by the read that returned it**, and
+        /// saying so makes the guarantee stronger rather than weaker. `refresh`
+        /// hashes the bytes it has just read and keeps the *cached* snapshot when
+        /// that hash equals the one the cache already holds, discarding the string
+        /// it read. So this text can be an earlier read's — of bytes a **content
+        /// hash** has just proved equal to what the disk held a moment ago. That
+        /// equality is precisely what pairs the text with `disk_revision`; what it
+        /// does not exclude is a [`ContentRevision`] collision.
+        ///
+        /// When `found` and `disk_revision` differ the file changed **again** in
+        /// between, and this text is of the *later* observation.
+        ///
+        /// # Why a `String` and not an `Option<String>`
+        ///
+        /// Because a conflict payload with no readable disk text **cannot be
+        /// produced**. `Workspace::refresh` reads through `read_utf8`, which
+        /// refuses a file that is not valid UTF-8 with
+        /// [`espansoconfig_core::workspace::WorkspaceError::NotUtf8`]; that error
+        /// propagates out of `conflict_after_the_lock`, which then returns `Err`
+        /// and builds no `Conflict` at all. A file that reads but does not
+        /// *parse* is not a failure — it comes back with its text and a
+        /// diagnostic — so there is no second way to reach this variant without
+        /// text either. An `Option` here would be a type claiming a possibility
+        /// the code denies, and a caller would owe an unreachable branch a
+        /// sentence.
+        disk_text: String,
         /// The projection of that fresh read.
         ///
         /// What the file holds now, as far as a read taken after the refusal can
@@ -219,7 +306,7 @@ impl SaveResult {
     fn operand_count(&self) -> usize {
         match self {
             SaveResult::Saved { .. } => 5,
-            SaveResult::Conflict { .. } => 4,
+            SaveResult::Conflict { .. } => 5,
             SaveResult::Refused { .. } => 2,
         }
     }
@@ -254,11 +341,13 @@ impl Serialize for SaveResult {
                 expected,
                 found,
                 disk_revision,
+                disk_text,
                 disk,
             } => {
                 out.serialize_field("expected", expected)?;
                 out.serialize_field("found", found)?;
                 out.serialize_field("disk_revision", disk_revision)?;
+                out.serialize_field("disk_text", disk_text)?;
                 out.serialize_field("disk", disk)?;
             }
             SaveResult::Refused { verdict, findings } => {
@@ -287,6 +376,13 @@ pub(crate) const SAMPLE_SOURCE: &str = "matches:\n  - trigger: ':one'\n    repla
 /// below derives its expectation from this file's own `pub enum SaveResult`
 /// block, so a variant added to the enum and forgotten here fails `cargo test`
 /// rather than reaching a screen with no shape behind it.
+///
+/// **This is the one place outside production that constructs a
+/// [`SaveResult::Conflict`]**, which the module documentation names so that "one
+/// construction site" is never read as "one occurrence in the crate". It is not a
+/// counterexample to the pairing rule: it pairs its text with its revision the way
+/// `crate::commands::conflict_after_the_lock` does, and the test below recomputes
+/// the digest from the serialized text rather than trusting it.
 #[cfg(test)]
 pub(crate) fn every_save_result() -> Vec<SaveResult> {
     use espansoconfig_core::model::DocumentContext;
@@ -321,6 +417,11 @@ pub(crate) fn every_save_result() -> Vec<SaveResult> {
             expected: ContentRevision::of_bytes(b"a"),
             found: ContentRevision::of_bytes(b"b"),
             disk_revision: view.revision,
+            // The fixture pairs the text with the revision the way the one
+            // production construction site does: both describe `SAMPLE_SOURCE`.
+            // `a_conflict_reports_the_refusing_revision_and_the_fresh_read_separately`
+            // rehashes the text rather than trusting this comment.
+            disk_text: SAMPLE_SOURCE.to_owned(),
             disk: Box::new(view),
         },
         SaveResult::Refused {
@@ -361,7 +462,7 @@ mod tests {
             ),
             (
                 "conflict",
-                vec!["disk", "disk_revision", "expected", "found"],
+                vec!["disk", "disk_revision", "disk_text", "expected", "found"],
             ),
             ("refused", vec!["findings", "verdict"]),
         ];
@@ -421,6 +522,16 @@ mod tests {
                 .as_str()
                 .expect("the projection carries its own revision"),
             "disk_revision must be the revision of the projection beside it"
+        );
+        // And, since Phase 2c-4a-1, the same claim for the text: the digest is
+        // recomputed from the bytes that crossed rather than compared against the
+        // expression that produced them, so a fixture pairing a revision with
+        // somebody else's text fails here.
+        let text = value["disk_text"].as_str().expect("disk_text is a string");
+        assert_eq!(
+            disk,
+            ContentRevision::of_bytes(text.as_bytes()).to_hex(),
+            "disk_text must be the text of the read disk_revision names"
         );
     } // End of function a_conflict_reports_the_refusing_revision_and_the_fresh_read_separately()
 

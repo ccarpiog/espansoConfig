@@ -135,6 +135,15 @@ function refusedWith(
 } // End of function refusedWith()
 
 /**
+ * The disk side's whole file text, with three bytes a normaliser would change.
+ *
+ * A leading BOM, one CRLF among bare LFs, and no final newline: written with
+ * `\u{feff}` and explicit escapes so that saving this source file cannot make the
+ * fixture agree with a boundary that normalises.
+ */
+const DISK_TEXT = '\u{feff}# theirs\r\nmatches:\n  - trigger: x\n    replace: theirs';
+
+/**
  * A save the file had moved on under.
  *
  * @param diskRevision - What the read taken after the refusal found; the same
@@ -147,6 +156,7 @@ function conflictWith(diskRevision: ContentRevision = AFTER): ConflictResult {
     expected: BASE,
     found: AFTER,
     disk_revision: diskRevision,
+    disk_text: DISK_TEXT,
     disk: makeDocument({ id: 3, revision: diskRevision })
   };
 } // End of function conflictWith()
@@ -337,6 +347,29 @@ describe('a conflict, which is terminal and honest', () => {
       changedAgain: false
     });
   });
+
+  it('carries the whole disk-side text through byte for byte', () => {
+    // 2c-4a-1's whole point on this side: `describeConflict` copies the text it
+    // was given and never rebuilds it from the projection, so the three bytes a
+    // normaliser would change survive. Asserted on the value rather than on its
+    // length, because a stripped BOM and a converted CRLF both keep the shape.
+    const model = conflictModel();
+    expect(model.diskText).toBe(DISK_TEXT);
+    expect(model.diskText.startsWith('\u{feff}')).toBe(true);
+    expect(model.diskText).toContain('\r\n');
+    expect(model.diskText.endsWith('\n')).toBe(false);
+  }); // End of the "carries the disk side's whole text" case
+
+  it('carries the text of the later read when the file changed twice', () => {
+    // The honesty rule applied to the text: `disk_text` describes the bytes at
+    // `disk_revision`, never the bytes at `found` that refused the save. The
+    // model can only be as honest as what it was handed, and what this pins is
+    // that it hands it on unchanged rather than pairing it with `found`.
+    const model = conflictModel(AGAIN);
+    expect(model.diskText).toBe(DISK_TEXT);
+    expect(model.diskRevision).toBe(AGAIN);
+    expect(model.changedAgain).toBe(true);
+  }); // End of the "carries the text of the later read" case
 
   it('keeps two observations apart when the file changed again', () => {
     // `found` is what the locked read saw and `disk_revision` is a fresh read

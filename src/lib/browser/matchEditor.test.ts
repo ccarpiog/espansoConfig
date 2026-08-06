@@ -1051,6 +1051,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
       expected: BASE,
       found: AFTER,
       disk_revision: AFTER,
+      disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
       disk: makeDocument({ revision: AFTER })
     };
     return applySave(started.session, conflict, NOT_OWED);

@@ -1451,6 +1451,15 @@ const NOTHING_ACKNOWLEDGED: Acknowledgement = { accepted: [] };
 const OPEN_REVISION: ContentRevision = 'rev-a';
 
 /**
+ * The disk side's whole file text, on every conflict fixture in this file.
+ *
+ * A conflict payload carries the file as the disk holds it, and no wrapper here
+ * reads it — 2c-4a-1 puts the value on the wire and adds no screen for it. It is
+ * one constant so that a later step wiring it through has one fixture to change.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/**
  * A save that ran to the end and wrote nothing.
  *
  * A documented success, and the arm the argument cases below use precisely
@@ -1764,6 +1773,7 @@ describe('moving a snippet', () => {
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
+        disk_text: DISK_TEXT,
         disk
       }
     };
@@ -1832,7 +1842,14 @@ describe('moving a snippet', () => {
     });
     const conflict: CommandResult<SaveResult> = {
       ok: true,
-      value: { outcome: 'conflict', expected: 'rev-a', found: 'rev-c', disk_revision: 'rev-c', disk }
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
+        disk
+      }
     };
     const documents = new Map<number, CommandResult<DocumentView>>([
       [1, { ok: true, value: profileDocument() }],
@@ -2168,6 +2185,7 @@ describe('moving a snippet', () => {
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
         disk: replacedDocument()
       }
     };
@@ -2535,6 +2553,7 @@ describe('duplicating a snippet', () => {
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
+        disk_text: DISK_TEXT,
         disk
       }
     };
@@ -3606,7 +3625,14 @@ describe('saving one snippet’s fields', () => {
     const disk = movedDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
-      value: { outcome: 'conflict', expected: 'rev-a', found: 'rev-b', disk_revision: 'rev-b', disk }
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-b',
+        disk_revision: 'rev-b',
+        disk_text: DISK_TEXT,
+        disk
+      }
     };
     const commands = scriptedCommands({ saves: [conflict] });
     const state = createBrowserState(commands, () => undefined);
@@ -4013,6 +4039,7 @@ describe("replacing a file's whole text", () => {
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
         disk
       }
     };
@@ -4285,6 +4312,7 @@ describe("replacing a file's whole text", () => {
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
         disk: replacedDocument()
       }
     };
@@ -4317,6 +4345,7 @@ describe("replacing a file's whole text", () => {
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
         disk: replacedDocument()
       }
     };
@@ -4812,7 +4841,14 @@ describe('creating a snippet', () => {
     const disk = grownDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
-      value: { outcome: 'conflict', expected: 'rev-a', found: 'rev-b', disk_revision: 'rev-b', disk }
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-b',
+        disk_revision: 'rev-b',
+        disk_text: DISK_TEXT,
+        disk
+      }
     };
     const commands = scriptedCommands({ creates: [conflict] });
     const state = createBrowserState(commands, () => undefined);
@@ -5147,7 +5183,14 @@ describe('deleting a snippet', () => {
     const disk = thinnedDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
-      value: { outcome: 'conflict', expected: 'rev-a', found: 'rev-c', disk_revision: 'rev-c', disk }
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
+        disk
+      }
     };
     const commands = scriptedCommands({ deletes: [conflict] });
     const state = createBrowserState(commands, () => undefined);

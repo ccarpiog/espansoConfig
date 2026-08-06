@@ -251,6 +251,31 @@ export interface ConflictModel<T> {
    */
   readonly disk: DocumentView;
   /**
+   * The disk side's **whole file text**, exactly as the file holds it.
+   *
+   * No line ending converted, no BOM stripped, no normalisation. It is the text
+   * at {@link ConflictModel.diskRevision}, paired with it by the command layer:
+   * one workspace snapshot in Rust carries the text, the revision and
+   * {@link ConflictModel.disk} together, so nothing between them can substitute a
+   * later read.
+   *
+   * **The pairing rests on content-hash equality, not on "one read".** Rust's
+   * refresh hashes the bytes it has just read and keeps the snapshot it already
+   * had when that hash matches, so this text may be an earlier read's — of bytes a
+   * digest has just proved equal to the disk's. A hash collision is what that does
+   * not exclude. This interface cannot express the pairing at all — they are two
+   * ordinary fields — and what it rests on is that one production function in Rust
+   * builds them.
+   *
+   * **Not the text at {@link ConflictModel.found}.** When
+   * {@link ConflictModel.changedAgain} is true the file moved twice and this is
+   * the later of the two observations, so no message may present it as the bytes
+   * that refused the save.
+   *
+   * Carried, not drawn: 2c-4a-1 adds the value and no screen shows it yet.
+   */
+  readonly diskText: string;
+  /**
    * Whether the file changed **again** between the refusal and the read after it.
    *
    * `found` and `diskRevision` are two observations, not two names for one: when
@@ -353,6 +378,10 @@ function describeRefused(result: RefusedResult, wholeDocument: boolean): Refused
 /**
  * Builds the `conflict` arm around the draft that was refused.
  *
+ * The disk side's text is carried through **unchanged** — copied, never rebuilt
+ * from the projection and never normalised — because it is the one value on this
+ * payload a comparison can be made against byte for byte.
+ *
  * @typeParam T - The drafted value.
  * @param result - The conflict, exactly as it arrived.
  * @param draft - The draft the save was made from, retained untouched.
@@ -363,6 +392,7 @@ function describeConflict<T>(
     readonly expected: ContentRevision;
     readonly found: ContentRevision;
     readonly disk_revision: ContentRevision;
+    readonly disk_text: string;
     readonly disk: DocumentView;
   },
   draft: Draft<T>
@@ -383,6 +413,7 @@ function describeConflict<T>(
     found: result.found,
     diskRevision: result.disk_revision,
     disk: result.disk,
+    diskText: result.disk_text,
     changedAgain,
     draft,
     choices: CONFLICT_CHOICES,

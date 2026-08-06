@@ -1637,6 +1637,12 @@ export interface SavedResult {
  * usually equal and they need not be: when they differ, the file changed again in
  * between, and nothing here may present the two as descriptions of the same
  * bytes.
+ *
+ * **That rule binds {@link ConflictResult.disk_text} too.** The text is of the
+ * fresh read — the bytes `disk_revision` names — and never of the bytes at `found`
+ * that actually refused the save. When the two revisions differ, the text here is
+ * of the *later* observation, so drawing it under `found` would label one read's
+ * bytes with another read's digest.
  */
 export interface ConflictResult {
   /** Which arm this is. */
@@ -1647,6 +1653,32 @@ export interface ConflictResult {
   readonly found: ContentRevision;
   /** The revision of the fresh read taken after the refusal. */
   readonly disk_revision: ContentRevision;
+  /**
+   * The **whole file text** of that fresh read, unchanged.
+   *
+   * No line ending converted, no BOM stripped, no normalisation: the file as the
+   * disk holds it. {@link ConflictResult.disk} cannot stand in for it — a
+   * {@link DocumentView} is a projection, and even a snippet's own `source_text`
+   * is one mapping's owned slice.
+   *
+   * **It is the text at {@link ConflictResult.disk_revision}**, paired with it by
+   * the command layer: both come out of one workspace snapshot in the single place
+   * in production this payload is built, so there is no second read and no call
+   * ordering between them.
+   *
+   * **What makes the pairing sound is content-hash equality**, not that the two
+   * came out of one read: the Rust refresh hashes the bytes it just read and keeps
+   * the snapshot it had cached when that hash already matches, so this text can be
+   * an earlier read's — of bytes just proved equal to the disk's by digest. What
+   * that leaves open is a hash collision. And TypeScript cannot express the pairing
+   * at all — these are two ordinary properties — so what it rests on is that one
+   * Rust function builds them together.
+   *
+   * Never `null`. A conflict whose disk text could not be read does not exist:
+   * the refresh that produces this payload refuses a file that is not valid
+   * UTF-8, and the whole command then rejects instead of reporting a conflict.
+   */
+  readonly disk_text: string;
   /**
    * The projection of that fresh read: what the file holds, as far as a read
    * taken after the refusal can say.

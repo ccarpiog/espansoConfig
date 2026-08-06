@@ -177,6 +177,7 @@ function conflict(diskRevision: ContentRevision = AFTER): SaveResult {
     expected: BASE,
     found: AFTER,
     disk_revision: diskRevision,
+    disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
     disk: makeDocument({ id: DOCUMENT, revision: diskRevision })
   };
 } // End of function conflict()

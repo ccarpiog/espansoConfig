@@ -258,6 +258,7 @@ const CONFLICT: ConflictResult = {
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,
+  disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
   disk: reread()
 };
 

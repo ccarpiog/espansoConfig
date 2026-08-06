@@ -57,7 +57,10 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-3b-1** | **Move as a value, with no screen**: `matchMove.ts` — the **sequence** rather than the file as the invariant, a five-reason eligibility verdict, `top`/`after`/`end` with `end` lowered onto an identity anchor because the wire has none, the destination itself drafted so consent is content-addressed to it — plus the repair of `BrowserState.moveMatch`, the last writing wrapper never shaped as a `MatchSaveAnswer` and the carrier of **three** latent defects, all now closed | ✅ complete — after **two** review fix rounds and a **third scoped pass** below. The aggregate review returned **NOT READY** on four findings; the confirmation pass returned **NOT READY** again on four the first round's own fixes had introduced; the third pass found the second round's central fix **BROKEN** and returned six more. **All fourteen were fixed before the commit**, and most of them were false claims in **prose** rather than defects in behaviour |
 | **2c-3b-2** | **Move on a screen**: `MatchMover.svelte` as a rule-free walk over step 1's value, `BrowserState.rereadDocument` as the first public single-document re-read, `moveMatch` re-typed to identities, the destination list bounded before a reading measured it, and this project's fourth mounted-component test | ✅ **code complete** — after an aggregate review (**NOT READY**, six findings, three High) and a confirmation pass (**NOT READY**, three more, all Low). **All nine fixed before the commit.** Four of the six first-round findings were user-facing sentences claiming more than the code knows |
 | **2c-3b** | **Move on a screen**: `move_match` drawn, the new identity adopted, the cross-sequence and combined-edit refusals surfaced rather than hidden. Split into two steps by the rule 2c-2 and 2c-3a used | ✅ **complete — all three kinds of evidence are in hand.** The 12-launch window reading (`docs/decisions/2c-3b-2-window-reading.md`) settled all six of the checkpoint's questions: five PASS, and item 4's `differentMatch` notice **confirmed on screen as a false alarm** (Medium, §7.1). The fix is the shape `2c-3b-1-notes.md` §5.2 prescribed — an explicit attribution argument on the adoption, passed only by `moveMatch`'s committed arm and honored only when the re-read is the parse the write produced — reviewed by Codex (**READY, no findings**, `docs/reviews/phase-2c-3b-2-reading-fix.md`) and closed by a 5-launch re-taken reading (§13 of the record). Two Lows and an observation (§7.2–§7.4) are recorded, not fixed |
-| 2c-3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
+| **2c-3c** | **Duplicate**: `DocumentEdit::DuplicateItem` as a **true** duplicate in the core, `duplicate_match` as the twelfth command and sixth writer, and `MatchDuplicator.svelte` as the sixth write surface. Three steps | ✅ **complete — all three kinds of evidence.** The owner decision `2c-split-notes.md` §4 demanded was taken first: the item's exact owned runs cloned byte-identically, trigger included, never a projection copy. The 24-launch bilingual window reading (`docs/decisions/2c-3c-3-window-reading.md`) is PASS on all seven items, no High and no Medium, and no defect in what is written to disk |
+| **2c-4a design consult** | **Phase 2c-4a put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4a-design.md`. It **changed the phase rather than confirming it**: the frontend's eager adoption of the disk projection on a conflict is ruled a **2c-4a defect**, not something to disclose. Three steps, and Q7 shows a true conflict is reachable from a window for all six surfaces once the second writer is a direct filesystem process |
+| **2c-4a-1** | The **revision-bound disk snapshot**, in Rust and on the wire, with no frontend behaviour change and no control on any screen: `SaveResult::Conflict::disk_text`, paired with `disk_revision` by content-hash equality in the one production construction site | ✅ complete — after the review fix round below. The review returned **NOT READY** on a Medium (three tests claimed byte-exactness and **none could have falsified it** — none crossed the serializer) and a Low (two documents overstating what the code gives). **Both were fixed before the commit**, and the new dispatcher test's falsifiability was **proved by mutation**, not asserted |
+| 2c-4a-2 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3406,6 +3409,62 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4a step 1
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+the review fix round. None was taken on a worker's word.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | **1048 passed, 0 failed** (from 1046 at 2c-3c-3: +1 for the pairing and byte-exactness assertions, +1 for the dispatcher fidelity test the review demanded) |
+| `npm test` | **1326 passed, 46 files** (from 1324 — two model tests, no new file) |
+| `npm run check` | **411 files, 0 errors, 0 warnings** |
+| `npm run build` | **171 modules** — unchanged, which is the point: this step adds no frontend module |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **finds nothing** — the architecture rule holds (D2x) |
+
+**The baseline was measured before the step, not assumed**: 1046 / 1324 / 411 files 0-0 / 171
+modules, all four matching what the 2c-3c-3 checkpoint claimed.
+
+**Scope discipline was verified rather than trusted.** `git status --short` shows no `.svelte`
+production file, no dictionary, and `src/lib/browser/workspace.svelte.ts` untouched. The twelve
+`.test.ts` files changed are fixture additions for the new required field — read, and no assertion
+was weakened or deleted to make anything pass.
+
+---
+
+## Phase 2c-4a step 1 review disposition
+
+The review is `docs/reviews/phase-2c-4a-1-code.md`. Verdict **NOT READY**, two findings, and five
+categories explicitly cleared rather than omitted (the pairing claim, `String`-versus-`Option`,
+wire-shape completeness, scope discipline, wire size, and the `diskText` naming collision).
+
+**The first Codex job for this review hung** and was recovered rather than waited on: its log froze
+mid-run after it announced *"the workspace is currently exposed as read-only, so I may be unable to
+create the requested review file"*. The bounded watchdog returned exit 3 (stalled), the job was
+cancelled, and the review was relaunched through the companion CLI **without the file-write
+requirement** — the orchestrator wrote `docs/reviews/phase-2c-4a-1-code.md` from `result` instead.
+The recovery procedure exists for exactly this and it was followed, not improvised.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| F1 | Medium | **Byte-exactness was claimed by three tests and falsifiable by none.** `a_conflicts_disk_text_survives_byte_for_byte` inspects the **Rust value** and stops before serialization; the shape test in `save.rs` does serialize but only over ordinary LF `SAMPLE_SOURCE`; and the `saveOutcome.test.ts` case starts from a **hand-built, already-correct** TypeScript value. A normalization specific to `disk_text` **in the serialization path** would have passed all three | **Fixed.** `a_conflicts_disk_text_crosses_the_dispatcher_byte_for_byte` added to `src-tauri/src/dispatch_check.rs` — the existing dispatcher-fidelity idiom from 1c-2b-2a, which already asks this question of the other two file-text values on this wire, so no new mechanism was invented. It conflicts over BOM + CRLF + no-final-newline text, compares the serialized `disk_text` against `std::fs::read`, and re-derives `ContentRevision::of_bytes` from the string the **response body** carried. **Its falsifiability was proved by mutation, run and reverted**: a serializer doing `disk_text.replace("\r\n", "\n")` failed the new test **alone** — all three tests that claimed byte-exactness stayed green, which is the finding demonstrated rather than argued |
+| F2 | Low | **Two documents claimed guarantees the code does not give** — this project's named worst defect class. (a) "the text, the revision and the projection come out of one read" is **not literally true**: when the freshly-read bytes hash to the revision the cache already holds, `Workspace::refresh` keeps the **cached** `SourceDocument` and drops the string it just read. (b) "every other `SaveResult::Conflict` occurrence is a pattern match" is **false** — `every_save_result()` constructs a test-only instance | **Fixed, and the honest framing is the stronger one.** (a) The claim is now **content-hash equality** — which is exactly what `refresh` tests before deciding to reuse — rewritten in five places (`save.rs` module doc and field doc, `conflict_after_the_lock`, `types.ts`, `saveOutcome.ts`), each naming what it leaves **unforced**: a `ContentRevision` collision, and the fact that Rust does not tie one field of a struct variant to another. (b) Corrected to "one **production** construction site plus one test-only fixture", with `every_save_result()` named and explained as the wire-contract fixture the shape test rehashes |
+
+**One point the implementer declined, and it is recorded rather than buried** (`2c-4a-1-notes.md`
+§6.1): a third mutation — `disk_revision: found` in `conflict_after_the_lock` — fails only the
+**pre-existing** changed-twice test and not the new one, because the new fixture changes the file
+**once**, so `found` and `disk_revision` are one value in it. That case stays the other test's and
+was deliberately not duplicated.
+
+**The corrections were added as in-place blocks pointing at §6**, with §§1–5 of the notes left
+standing as written. That is this project's house rule for a falsified sentence: the older record is
+left as it was and the correction is placed beside it, so the reader sees what was believed and what
+replaced it.
+
+---
+
 ## Verification — Phase 2c-3c step 3
 
 Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
@@ -5462,7 +5521,109 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3c is complete — all three steps, and all three kinds of evidence.** Step 1 put
+**Phase 2c-4a step 1 is complete: the revision-bound disk snapshot exists, and nothing draws it.**
+`SaveResult::Conflict` now carries `disk_text` — the whole file text of the fresh read, paired with
+`disk_revision` **by content-hash equality** in the one production construction site,
+`conflict_after_the_lock` in `src-tauri/src/commands.rs`. No screen changed, no control was added,
+no i18n key was added, and `conflictText`/`captureTheDiskText` in
+`src/lib/browser/workspace.svelte.ts` are untouched.
+
+**The commit is where a fresh session begins.** The exact first commands a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1326 passed, 46 files
+cargo test --workspace         # expect 1048 passed
+```
+
+(`npm run check` expects **411 files, 0 errors, 0 warnings**. `npm run build` expects **171
+modules** — unchanged, because step 1 adds no frontend module. The module count is a regression
+guard and the guard is the *shape* of a change to it, not the number: `CLAUDE.md` §6.)
+
+### Read this before writing a line of step 2
+
+**`docs/reviews/phase-2c-4a-design.md` is the consult that governs this whole phase**, and it
+changed the phase rather than confirming it. Its VERDICT and Q2 carry the ruling step 2 exists to
+implement. `docs/decisions/2c-4a-1-notes.md` is step 1's record, including its §6 correction blocks.
+
+### Next: Phase 2c-4a step 2 — the frontend conflict protocol
+
+**The consult's central ruling, and the reason this step is not cosmetic: the frontend's eager
+adoption of the disk projection on a conflict is a defect, not something to disclose.** Today all
+six writing wrappers in `src/lib/browser/workspace.svelte.ts` do
+`forgetTextOf(document)` + `installView(answer.value.disk)` + `repairAfter(...)` in their conflict
+arm — `moveMatch:2086`, `saveMatch:2184`, `createMatch:2265`, `deleteMatch:2328`,
+`duplicateMatch:2451`, `saveRawDocument:2538`. So **a conflict writes nothing, and yet the snippet
+list re-orders and the selection moves before the person has chosen anything**, leaving their draft
+on screen against a projection that no longer describes it. "Load the disk version separately" is
+true of the command layer and false of the window.
+
+Step 2 is the protocol, with no new control drawn:
+
+1. **Defer the frontend adoption.** The conflict arm captures the result and stops; it does not call
+   `forgetTextOf`, `installView` or `repairAfter`. A **confirmed reload** becomes the sole frontend
+   transition that installs the carried disk projection and repairs the selection. The Rust-side
+   refresh in `conflict_after_the_lock` **stays** — it is required for the two-observation truth and
+   for backend cache coherence, and removing it is not what this ruling asks.
+2. **Rewire the raw editor's reload.** `loadDiskVersion` in `src/lib/browser/rawEditor.ts:779-805`
+   currently assumes workspace adoption already happened before the answer arrived. That assumption
+   cannot survive (1), so adoption and `loadDiskVersion` must become **one deliberate operation**.
+3. **Stop treating a conflict as invalidation.** `matchDuplication.ts:825-829` sets `invalidated`
+   from the conflict arm itself, and `matchMove.ts` documents the same asymmetry — both are
+   consequences of the eager install and must go with it. Invalidation should follow **actual
+   projection adoption**, never the mere existence of a separately held snapshot.
+4. **Collapse the two authorities for conflict choices** (consult Q9 item 1). `describeConflict`
+   installs the global three into every `ConflictModel` (`saveOutcome.ts:285-302`, `:380-389`) while
+   each match model **ignores that field** and exposes a local `['keepEditing']`
+   (`matchEditor.ts:1600`, `matchCreation.ts:1256`, `matchDeletion.ts:692`, `matchMove.ts:1590`,
+   `matchDuplication.ts:1032`). **That split is exactly why a newly offered button can compile and
+   do nothing.** Capability and step must come from one surface-owned model authority.
+5. **Per-surface capability, by the consult's Q3/Q4 rule** — *does the draft contain user-authored
+   text a clipboard can preserve truthfully?* All six get a confirmed reload path. **Only the match
+   editor and the creator get `copyDraft`**: `MatchBuffers` and `CreationBuffers` hold authored
+   strings, while `MovePlacement` is a positional choice and `MatchId` is a protocol carrier, and
+   copying either would preserve nothing while looking like it preserved something. The copy is a
+   **labelled reference copy, never YAML** — serializing `MatchBuffers` as YAML would repeat the
+   exact preservation-promise mistake 2c-3c exists to prevent.
+6. **`diskText` supersedes the second read.** Step 1's field makes `conflictText`,
+   `captureTheDiskText` and `forgetConflictText` in `workspace.svelte.ts` redundant. Step 1 recorded
+   this and deliberately did **not** act on it. `2c-4a-1-notes.md` §4.1 also records a latent defect
+   in the thing being superseded: **`captureTheDiskText` reuses the viewer's *older* cached answer
+   when the viewer points at the same document** — an older text, not merely a later one.
+
+**A naming collision step 2 must resolve deliberately**, found during step 1's verification and
+judged by the review to belong here: `RawEditor.svelte` already has a `diskText` prop of type
+`RawDocumentText | null` (derived from `rawTextOf`), while the new `ConflictModel.diskText` is a
+`string`. The review's position is that TypeScript will reject accidental interchange because they
+sit at different typed boundaries — but two different things with the same name on the same screen
+is how a wrong value gets drawn, and a person reading the component has no type checker.
+
+**What step 2 must not do**, from the consult: no `saveAnyway`, no retry of the stale candidate, no
+automatic reload, no clearing of dirty state on conflict, **no cross-revision identification of "the
+same match"** (that is 2c-4b's confidence work), no YAML emitted from a projection, no diff, and
+**no control named or coded "keep my draft"** — `CLAUDE.md` §6 makes that absolute before 2c-4b.
+
+### Then: step 3 — components, i18n, mounted tests and the window reading
+
+The six panels drawn, new English and Spanish keys, `SourceText` for the disk side, the
+confirmation screens and copy-result disclosures. **Every newly offered `ConflictChoice` arm must
+act in the same change** — the five components' exhaustive switches protect against a new *member*
+of the union and **not** against a newly *offered* one, which is drawn as a control the moment the
+model names it and would do nothing.
+
+**The window reading is part of step 3's exit, not a follow-up**, and the consult's Q7 removed the
+excuse that has stood since 2c-3b: the true `conflict` outcome had never been provoked from a window
+for a move or a duplicate because those readings used **this application's own raw-save IPC** as the
+second writer, which refreshes the same Rust workspace cache so `view_at` answers
+`identityStaleRevision` before the transaction. That proved the **instrument** wrong, not the
+outcome unreachable. The recipe: open the surface at revision R0, then — without invoking any app
+command that reloads the document — use a **shell or editor process** to append a valid YAML comment
+to that exact file, producing R1. The frontend and the Rust cache stay at R0, `view_at` passes, and
+the core's locked read sees R1. Consult Q7 gives the per-surface steps for all six.
+
+---
+
+**Phase 2c-3c (superseded by the above, kept for its rationale) is complete — all three steps, and
+all three kinds of evidence.** Step 1 put
 `DocumentEdit::DuplicateItem` in the core as a **true** duplicate; step 2 put `duplicate_match`
 on the wire and `matchDuplication.ts` in the browser layer; **step 3 drew it**:
 `MatchDuplicator.svelte` is the sixth write surface, `MatchDuplicator.test.ts` is the seventh
@@ -8271,6 +8432,8 @@ _Updated at each phase boundary._
 | **2c-3c step 1** | **`e079161`** | ✅ pushed to `origin/main` | clean |
 | **2c-3c step 2** | **`78f34dd`** | ✅ pushed to `origin/main` | clean |
 | **2c-3c step 3 (closes 2c-3c)** | **`21b3573`** | ✅ pushed to `origin/main` | clean |
+| **2c-4a design consult** | **`ddf67ab`** | ⬜️ push pending | clean |
+| **2c-4a step 1** | recorded in the follow-up commit | ⬜️ push pending | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no

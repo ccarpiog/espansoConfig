@@ -172,6 +172,7 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
         expected: 'a'.repeat(64),
         found: 'b'.repeat(64),
         disk_revision: 'b'.repeat(64),
+        disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
         disk: DISK
       })
     ],
