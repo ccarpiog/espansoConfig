@@ -107,6 +107,16 @@ question the coordinator that owns the open editors can answer honestly at the m
 session. Nothing in TypeScript can check the boolean was computed rather than invented; the
 parameter being required is what stops silence compiling into "there are none".
 
+> **Correction (2c-3c-3).** The intended risk is a **dirty** draft, but the coordinator does not
+> supply that fact and never could. The predicate step 3 wired behind this arm —
+> `documentHasUnsavedDraft` in `src/lib/browser/matchDuplication.ts` — is deliberately
+> conservative and measures **any open match editor**, dirty or not: `isDirty` is derived inside
+> `MatchEditor.svelte`'s own session, so no coordinator can observe it (**R36**, argued at length
+> in `DetailPane.svelte`'s `unsavedDraftFor` JSDoc). It therefore answers `true` for a pristine
+> editor, and that is correct rather than a bug — over-refusing costs a person one closed editor,
+> under-refusing strands their edits. The refusal's own sentence claims an open editor and no
+> more; read this section as *open-editor* coordination, never as dirty-draft coordination.
+
 ### 2.5 D5 — the refusal precedence is the consult's order, and each adjacency is a test (consult Q6)
 
 `{mayHaveWritten, alreadyDuplicated, saveInFlight, conflict, outOfDate, notDuplicable}`, computed

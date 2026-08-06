@@ -10,12 +10,14 @@
     type UnknownRow,
     type ValueLine
   } from '../browser/detail';
+  import { documentHasUnsavedDraft } from '../browser/matchDuplication';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
   import type { BrowserState } from '../browser/workspace.svelte';
   import type { Reprojection } from '../browser/matchEditor';
   import type {
     ContentRevision,
+    DocumentId,
     DocumentSummary,
     DocumentView,
     MatchId,
@@ -23,6 +25,7 @@
   } from '../ipc/types';
   import MatchCreator from './MatchCreator.svelte';
   import MatchDeleter from './MatchDeleter.svelte';
+  import MatchDuplicator from './MatchDuplicator.svelte';
   import MatchEditor from './MatchEditor.svelte';
   import MatchMover from './MatchMover.svelte';
   import RawEditor from './RawEditor.svelte';
@@ -51,9 +54,16 @@
    * **This file is presentation.** Everything that decides what appears —
    * which rows exist, how a projected value flattens into lines, which option
    * belongs to which group, what order a variable's parameters come in — is in
-   * `../browser/detail.ts`, which has a test suite. Nothing in this repository
-   * renders a Svelte component in an automated test, so logic put here is logic
-   * nothing can check.
+   * `../browser/detail.ts`, which has a test suite.
+   *
+   * The reason is narrower than "markup cannot be tested", and saying it the
+   * broad way would be false of this file: `DetailPane.test.ts` opts into jsdom
+   * by its docblock and mounts this pane. A **model** test drives values and
+   * never markup, so a rule written into one renderer is a rule that renderer's
+   * own mounted suite has to carry alone — and a second renderer, or a
+   * harmless-looking refactor of this one, can omit it while walking the model
+   * faithfully. That, not untestability, is why the decisions live in
+   * `../browser/`.
    *
    * Three rules are visible in the markup below.
    *
@@ -329,6 +339,29 @@
   // panel owns the destination from then on.
   let movingMatch = $state.raw<MatchMovingSession | null>(null);
 
+  /** What one open duplicate is over: which snippet, of which parse, in which file. */
+  interface MatchDuplicatingSession {
+    /**
+     * The file's projection, captured **in the same assignment** as the snippet.
+     *
+     * `startMatchDuplication` checks the two against each other and refuses a pair
+     * this projection does not describe, exactly as `startMatchMove` does — and
+     * the copy is planned from the sequence position that one parse gives the
+     * snippet, so taking the two from two reads would copy the bytes at a position
+     * read off a parse nobody was shown.
+     */
+    readonly projection: DocumentView;
+    /** The snippet being copied, as it was projected when the panel opened. */
+    readonly match: MatchView;
+    /** The file it lives in, for the person to see which one it is. */
+    readonly file: DocumentSummary | null;
+  }
+
+  // The duplicate panel's session, or `null`. `$state.raw` for the reason the move
+  // panel's is: the three values are captured once and replaced whole, and the
+  // panel owns the acknowledgement from then on.
+  let duplicatingMatch = $state.raw<MatchDuplicatingSession | null>(null);
+
   // Whether the new-snippet form is open. It is a flag rather than a captured
   // value because the form captures nothing from this pane: `MatchCreator` reads
   // the files, the projections and the held selection through functions, so that
@@ -355,7 +388,7 @@
    * a coordinator is not.
    *
    * **Today it always answers `null` while a move panel is open**, and that is a
-   * fact about this pane rather than about the rule: the four write surfaces are
+   * fact about this pane rather than about the rule: the six write surfaces are
    * mutually exclusive through {@link busy}, so a snippet with an open editor is
    * not offered a move in the first place — which is the same conservative refusal
    * reached one step earlier. The wiring is here so the model's own arm becomes
@@ -368,6 +401,58 @@
   function unsavedDraftFor(): MatchId | null {
     return editingMatch === null ? null : editingMatch.match.id;
   } // End of function unsavedDraftFor()
+
+  /**
+   * Every snippet this window has a match editor open over.
+   *
+   * A list of at most one today, because this pane holds one small-editor
+   * session and {@link busy} keeps the write surfaces mutually exclusive. It is
+   * a list rather than a nullable identity because the question the model asks
+   * is plural — *any* draft in the file — and a second concurrent editor would
+   * then be a value added here rather than a rule rewritten in two places.
+   *
+   * **What it answers is "a draft is open", not "a draft is dirty"**, which is
+   * the same R36 over-refusal {@link unsavedDraftFor} records: `isDirty` lives
+   * inside `MatchEditor.svelte`'s own session and this pane cannot see it.
+   *
+   * @returns The identities, or an empty list.
+   */
+  function openMatchDrafts(): readonly MatchId[] {
+    return editingMatch === null ? [] : [editingMatch.match.id];
+  } // End of function openMatchDrafts()
+
+  /**
+   * Whether this window has a match editor open over any snippet of one file.
+   *
+   * **`duplicationEligibility`'s third argument, and document-wide on purpose**
+   * (consult Q6): a committed duplicate mints a new revision and invalidates
+   * every `MatchId` in the file, so a draft held for *any* snippet of it — not
+   * only the one being copied — would be stranded by the commit. The comparison
+   * itself is `documentHasUnsavedDraft` in `../browser/matchDuplication.ts`,
+   * where a test can reach it; what is here is only the pane's own knowledge of
+   * which editors are open.
+   *
+   * **It answers "open", never "dirty", and the refusal's sentence says so.**
+   * That is {@link openMatchDrafts}'s R36 over-refusal carried up: a pristine
+   * editor makes this `true`, which is correct, and
+   * `browser.matchDuplication.refused.unsavedDraftInDocument` therefore claims
+   * an open editor and that this application cannot tell whether anything was
+   * edited — never that unsaved edits exist.
+   *
+   * **Today it always answers `false` while a duplicate panel is open**, exactly
+   * as {@link unsavedDraftFor} always answers `null` while a move panel is: the
+   * write surfaces are mutually exclusive through {@link busy}, so a file with an
+   * open editor is not offered a duplicate in the first place — the same
+   * conservative refusal reached one step earlier. The wiring is here so the
+   * model's own arm becomes live the first moment that stops being true, and
+   * `MatchDuplicator.test.ts` is what drives the `true` case.
+   *
+   * @param document - The file a duplicate would be written to.
+   * @returns `true` when this window has a match editor open over that file.
+   */
+  function unsavedDraftInDocument(document: DocumentId): boolean {
+    return documentHasUnsavedDraft(document, openMatchDrafts());
+  } // End of function unsavedDraftInDocument()
 
   /**
    * The projection this window holds of one file, or `null`.
@@ -384,24 +469,26 @@
   } // End of function projectionOf()
 
   /**
-   * Whether one of this pane's five write surfaces is open.
+   * Whether one of this pane's six write surfaces is open.
    *
    * They outrank the pane's read-only subjects and each other: a draft, a pending
-   * confirmation, a chosen destination or a save in flight may not be dismissed by
-   * a click somewhere else in the window, so the openers below are withdrawn while
-   * any of them is showing rather than drawn beside it.
+   * confirmation, a chosen destination, an acknowledgement on screen or a save in
+   * flight may not be dismissed by a click somewhere else in the window, so the
+   * openers below are withdrawn while any of them is showing rather than drawn
+   * beside it.
    *
    * **This is also where the R36 refusal is actually enforced**: a snippet whose
    * draft is open — whether or not that draft's identity is still live — cannot be
-   * moved, because the move panel cannot be opened while the small editor is.
-   * {@link unsavedDraftFor} states the same rule one level down for the day this
-   * exclusion stops holding.
+   * moved or duplicated, because neither panel can be opened while the small
+   * editor is. {@link unsavedDraftFor} and {@link unsavedDraftInDocument} state
+   * the same rule one level down for the day this exclusion stops holding.
    */
   const busy = $derived(
     editing !== null ||
       editingMatch !== null ||
       deletingMatch !== null ||
       movingMatch !== null ||
+      duplicatingMatch !== null ||
       creating
   );
 </script>
@@ -615,6 +702,26 @@
       reload={(document) => browser.rereadDocument(document)}
       close={() => (movingMatch = null)}
     />
+  {:else if duplicatingMatch !== null}
+    {@const open = duplicatingMatch}
+    <!-- **`projections` is a function, for `MatchMover`'s reason.**
+         `MatchDuplicator` reads it **once** and derives both the view and the
+         identity `beginDuplicate` checks from that one array; a captured array
+         would be a snapshot, and a snapshot is what the live check exists to
+         notice. `unsavedDraftInDocument` is read the same way, when the panel
+         opens, and is document-wide rather than about the copied snippet: a
+         commit invalidates every `MatchId` in the file. -->
+    <MatchDuplicator
+      projection={open.projection}
+      match={open.match}
+      file={open.file}
+      projections={() => browser.views}
+      unsavedDraftInDocument={() => unsavedDraftInDocument(open.projection.id)}
+      duplicate={(id, baseRevision, acknowledgement) =>
+        browser.duplicateMatch(id, baseRevision, acknowledgement)}
+      reload={(document) => browser.rereadDocument(document)}
+      close={() => (duplicatingMatch = null)}
+    />
   {:else if creating}
     <!-- Every reader is a function, so a re-seed after a committed create sees
          the files as the window has just re-read them rather than as they were
@@ -736,6 +843,25 @@
             onclick={() => (movingMatch = { projection: parse, match: target, file: inFile })}
           >
             {t('browser.matchMove.open')}
+          </button>
+        </p>
+        <!-- **Offered whether or not the snippet may be duplicated**, for the
+             reason the other two panels are: the panel says why it may not,
+             inline and localized, and the core's own refusal is still the one
+             that decides. The one gate is the same one —
+             `startMatchDuplication` takes a `DocumentView`, and a file this
+             window could not read has none.
+
+             **The snippet and its parse are captured in one assignment**, so the
+             two cannot come from two reads and disagree afterwards; the bytes
+             copied are the ones that parse gives this snippet. -->
+        <p class="toggle">
+          <button
+            type="button"
+            onclick={() =>
+              (duplicatingMatch = { projection: parse, match: target, file: inFile })}
+          >
+            {t('browser.matchDuplication.open')}
           </button>
         </p>
       {/if}

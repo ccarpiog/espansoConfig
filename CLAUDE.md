@@ -154,11 +154,11 @@ in the one place nobody checks (2c-3c). And **every sub-phase of 2c owes three k
 model tests, a **mounted-component test** (taken deliberately in 2c-1b — `vite.config.ts` had held
 that decision open since 1b-1), and a manual window reading.
 
-**2c-2, the small editor, is split into two steps, and step 1 — the model layer — is complete.**
+**2c-2, the small editor, is split into two steps and both are complete.**
 `src/lib/browser/matchEditor.ts` is the whole editor as a value, exactly as `rawEditor.ts` is for
-the raw editor, and **no `.svelte` file was touched**: the component, its mounted test and the
-window reading are step 2's, and all three are still owed. Its decisions are
-`docs/reviews/phase-2c-2-design.md` (the consult) and `docs/decisions/2c-2-1-notes.md` (the record).
+the raw editor, and `MatchEditor.svelte` draws it. Its decisions are
+`docs/reviews/phase-2c-2-design.md` (the consult), `docs/decisions/2c-2-1-notes.md` (the record)
+and `docs/decisions/2c-2-2-window-reading.md` (the reading).
 
 **2c-3a is split the same way, and both its steps are complete: `matchCreation.ts` and
 `matchDeletion.ts` are new and delete as values, and `MatchCreator.svelte` and `MatchDeleter.svelte`
@@ -176,31 +176,47 @@ installed** when a committed move's re-read failed, and `forgetFileText()` where
 `forgetTextOf(document)` belongs. All three are closed. Its decisions are
 `docs/reviews/phase-2c-3b-design.md` and `docs/decisions/2c-3b-1-notes.md`.
 
-**2c-3c — Duplicate — is under way as three steps, and step 1 is complete:
-`DocumentEdit::DuplicateItem` is a true duplicate in the core, and nothing calls it.** The owner
-decision `2c-split-notes.md` §4 demanded is taken: a **true duplicate** — the clone is the item's
-exact owned runs, byte-identical, trigger included — never a projection copy. The clone lands
-immediately after its source, same sequence, with no placement choice; the batch that holds a
-`DuplicateItem` holds nothing else (R25's precedent); the seam refusals are destination-only on
-purpose, because the original never moves. The save carries an acknowledgeable
-`FindingCode::DuplicateKeepsTriggerDefinition` that claims risk, never espanso semantics (D2u), and
-is content-addressed by the candidate's `ContentRevision` so consent for one clone cannot spend on
-another. Its decisions are `docs/reviews/phase-2c-3c-design.md` (the consult; its Q7 cut the phase
-into three steps) and `docs/decisions/2c-3c-1-notes.md`; the review is
-`docs/reviews/phase-2c-3c-1-code.md` — two rounds, both `NOT READY`, all five findings closed
-before the commit.
+**2c-3c — Duplicate — is complete: three steps, and all three kinds of evidence.** The owner
+decision `2c-split-notes.md` §4 demanded was taken first — a **true duplicate**, the item's exact
+owned runs cloned byte-identically, trigger included, never a projection copy. **2c-3c-1** is
+`DocumentEdit::DuplicateItem` in the core: the clone lands immediately after its source, same
+sequence, with no placement choice; the batch that holds one holds nothing else (R25's precedent);
+the seam refusals are destination-only, because the original never moves; and the save carries an
+acknowledgeable `FindingCode::DuplicateKeepsTriggerDefinition` claiming risk, never espanso
+semantics (D2u), content-addressed by the candidate's `ContentRevision` so consent for one clone
+cannot spend on another. **2c-3c-2** is `duplicate_match` — the twelfth command, the sixth writer —
+`BrowserState.duplicateMatch` and `matchDuplication.ts`. **2c-3c-3** is `MatchDuplicator.svelte`,
+the sixth write surface, its mounted suite, the `unsavedDraftInDocument` producer, and the reading
+(`docs/decisions/2c-3c-3-window-reading.md`: 24 launches, PASS on all seven items, no High and no
+Medium, no defect in what is written to disk). Its decisions are
+`docs/reviews/phase-2c-3c-design.md` (the consult; its Q7 cut the phase into three steps) and
+`docs/decisions/2c-3c-{1,2,3}-notes.md`.
 
-**2c-3c step 2 is also complete: `duplicate_match` is the twelfth command and the sixth writer,
-`BrowserState.duplicateMatch` the sixth writing wrapper, and `matchDuplication.ts` duplicate as a
-value — nothing draws it yet.** Its review ran four rounds (`docs/reviews/phase-2c-3c-2-code.md`;
-round 4 `READY`, no findings), and the High that took three of them is the lesson: **the
-selection-follow guard holds at the write, not before it** — a `DuplicateIntent` captured before
-the command is re-validated after the adoption's own await in the same synchronous block as
-`replaceSelection`, because a leave-and-return during any await on that path must never end with
-the clone hijacking a selection the person moved. `moved: null` claims only that the clone could
-not be identified in the read that followed the write. Step 3 (the component, the
-`unsavedDraftInDocument` producer, the mounted test, the bilingual window reading) is owed, and
-2c-3c is not done without all three kinds of evidence.
+**The selection-follow guard holds at the write, not before it** — step 2's High, which took three
+of that review's four rounds. A `DuplicateIntent` captured before the command is re-validated after
+the adoption's own await, **in the same synchronous block as `replaceSelection`**, because a
+leave-and-return during any await on that path must never end with the clone hijacking a selection
+the person moved. `moved: null` claims only that the clone could not be identified in the read that
+followed the write.
+
+**The rule that decides between two refusal arms belongs in the model** — step 3's Medium.
+`matchDuplicationView.notDuplicableToShow` gives the frozen `notDuplicable` reason **only when
+`cannotDuplicate === 'notDuplicable'`**, written against that value rather than against `outOfDate`,
+so a refusal added above it suppresses the frozen detail by construction; the unsuppressed verdict
+stays on `MatchDuplicationSession.eligibility`. The reason is **not** that markup cannot be tested —
+`MatchDuplicator.test.ts` mounts this renderer and checks it — but that **a rule written into one
+renderer is carried by that renderer's mounted suite alone, and a second renderer can omit it while
+walking the model faithfully**. `MatchMover.svelte:511` still holds the shape duplicate moved away
+from, shipped at 2c-3b and window-read there.
+
+**A refusal's sentence must be true of its predicate, not of its name.** `documentHasUnsavedDraft`
+measures **any open match editor**, dirty or not: `isDirty` is derived inside `MatchEditor.svelte`'s
+own session, so no coordinator can observe it (R36), and over-refusing costs one closed editor where
+under-refusing strands edits. Both `unsavedDraftInDocument` sentences therefore claim an open editor
+and this application's inability to tell whether it was edited, never that unsaved edits exist —
+**"document-wide dirty-draft coordination" is not what shipped**, and `2c-3c-2-notes.md` §2.4 and
+`phase-2c-3c-design.md` carry correction blocks saying so.
+`browser.matchMove.refused.unsavedDraft` has the identical defect, shipped and untouched.
 
 **"Same sequence" is the invariant a move keeps, and "same file" is not it.** D2r makes `ItemMove`
 same-sequence only; today's projection happens to give a snippet file exactly one snippet list, and
@@ -281,7 +297,7 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**156** as of 2c-2-1, and the guard is not the number but the *shape of a change to it*. A count
+**171** as of 2c-3c-3, and the guard is not the number but the *shape of a change to it*. A count
 that moves by exactly the number of new source modules is a new module; a jump to ~180 with
 `svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine
 `git archive HEAD` copy and subtracting; never by editing the condition.
@@ -358,10 +374,14 @@ type.
 sliced **in Rust**: a JavaScript string index is a UTF-16 code unit and a `ByteSpan` counts bytes, so
 `text.slice(span.start, span.end)` is wrong for any document with a non-ASCII character before the span.
 
-**Nothing in this project renders a Svelte component in an automated test.** The frontend suite passes
-without instantiating one, so a component that throws produces a blank pane the suite cannot see. A
-claim about a screen therefore needs a **reading of a screen**, re-taken after any change to a
-component — `docs/decisions/1c-1-notes.md` §10 records the technique.
+**Only the seven files that opt into jsdom by docblock render a Svelte component in an automated
+test**, and a mounted test proves a handler fires, not that a window draws — so a component that
+throws in any of the other six produces a blank pane the suite cannot see. A claim about a screen
+therefore needs a **reading of a screen**, re-taken after any change to a component —
+`docs/decisions/1c-1-notes.md` §10 records the technique. **The reason a decision belongs in
+`src/lib/browser/` is narrower than "markup cannot be tested"**: a *model* test drives values and
+never markup, so a rule written into one renderer is carried by that renderer's mounted suite alone
+and a second renderer can omit it while walking the model faithfully (2c-3c-3).
 
 **A component renders a code by calling an accessor, never by building a key.**
 `src/lib/i18n/codes.ts` gives twelve typed `describe*` functions over sixteen enum namespaces, and

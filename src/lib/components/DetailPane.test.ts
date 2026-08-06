@@ -24,7 +24,7 @@
 
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
+import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
 import {
   createBrowserState,
   type BrowserCommands,
@@ -65,7 +65,17 @@ function documentA(): DocumentView {
     relativePath: 'match/a.yml',
     revision: 'a'.repeat(64),
     matches: [
-      makeMatch({ node: 10, document: 1, revision: 'a'.repeat(64), trigger: ':a', replace: 'ay' })
+      makeMatch({
+        node: 10,
+        document: 1,
+        revision: 'a'.repeat(64),
+        trigger: ':a',
+        replace: 'ay',
+        // The address that makes it an *item of a sequence*, which is what a
+        // duplicate copies: a snippet without one is `noSequencePosition` and
+        // cannot be copied at all.
+        path: matchListPath(0)
+      })
     ]
   });
 } // End of function documentA()
@@ -82,7 +92,14 @@ function documentB(): DocumentView {
     readOnly: true,
     revision: 'b'.repeat(64),
     matches: [
-      makeMatch({ node: 20, document: 2, revision: 'b'.repeat(64), trigger: ':b', replace: 'bee' })
+      makeMatch({
+        node: 20,
+        document: 2,
+        revision: 'b'.repeat(64),
+        trigger: ':b',
+        replace: 'bee',
+        path: matchListPath(0)
+      })
     ]
   });
 } // End of function documentB()
@@ -321,6 +338,37 @@ describe('the mounted detail pane', () => {
     expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.open']);
     pane.stop();
   }); // End of the "deletion reachable" case
+
+  it('opens the duplicate panel from the pane, over the snippet and its own parse', async () => {
+    // **Reachability, which no test of `MatchDuplicator.svelte` can establish.**
+    // That suite mounts the panel directly; this is the claim that a person can
+    // get to it at all, that what it opens over is the selected snippet, and that
+    // the pane's own `unsavedDraftInDocument` producer answers rather than
+    // throwing — a `true` from it would refuse a snippet nothing is being edited.
+    const pane = await mountPane();
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+
+    control(pane.target, 'browser.matchDuplication.open').click();
+    flushSync();
+
+    expect(pane.target.textContent).toContain(':a');
+    expect(pane.target.textContent).toContain('match/a.yml');
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.matchDuplication.landsAfterSource']
+    );
+    // No editor is open, so no draft is held for this file and the copy is
+    // offered rather than refused.
+    expect(pane.target.textContent).not.toContain(
+      DICTIONARIES.en['browser.matchDuplication.refused.unsavedDraftInDocument']
+    );
+    expect(control(pane.target, 'browser.matchDuplication.duplicate').disabled).toBe(false);
+    // The panel outranks the pane's read-only subjects while it is open, so the
+    // openers beside it are withdrawn rather than drawn under it.
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchEditor.open']);
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.open']);
+    pane.stop();
+  }); // End of the "duplicate reachable" case
 
   it('opens the new-snippet form with nothing selected, and offers every file', async () => {
     // The form asks which file itself rather than inheriting the selection, so it

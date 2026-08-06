@@ -4,7 +4,7 @@
  * Five groups:
  *
  * 1. **eligibility** — the four refusals of the consult's Q6, including the
- *    document-wide dirty-draft rule as an input rather than a lookup;
+ *    document-wide open-editor rule as an input rather than a lookup;
  * 2. **starting a duplicate** — the live-identity gate, the frozen base
  *    revision, and every way this module refuses to produce something to send;
  * 3. **the answer** — the three arms, the acknowledgement round trip that is
@@ -45,6 +45,7 @@ import {
   canDuplicate,
   conflictOf,
   dismissDuplicationOutcome,
+  documentHasUnsavedDraft,
   duplicationCouldNotBeSent,
   duplicationEligibility,
   duplicationRecoveryChoices,
@@ -126,7 +127,7 @@ function reread(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentVie
 } // End of function reread()
 
 /**
- * A session over one snippet of {@link file}, with no dirty draft anywhere.
+ * A session over one snippet of {@link file}, with no editor open anywhere.
  *
  * @param position - Which snippet of the list the duplicate is about.
  * @param document - The projection to take the pair from.
@@ -293,12 +294,15 @@ describe('whether one snippet may be duplicated at all', () => {
     });
   });
 
-  it('refuses while any snippet of the file has unsaved edits, not only the source', () => {
+  it('refuses while any snippet of the file is open in the editor, not only the source', () => {
     // **Document-wide, on purpose** (consult Q6): a committed duplicate mints a
-    // new revision, which strands a dirty draft held for *any* snippet of the
-    // file. The fact is a boolean the coordinator supplies — a `{document,node}`
-    // pair could not be followed across a reparse, which is the recorded hole
-    // `moveEligibility`'s narrower rule carries and this one designs out.
+    // new revision, which strands whatever an editor open over *any* snippet of
+    // the file has not saved. The fact is a boolean the coordinator supplies — a
+    // `{document,node}` pair could not be followed across a reparse, which is
+    // the recorded hole `moveEligibility`'s narrower rule carries and this one
+    // designs out. **It is "open", never "dirty"** (R36): nothing outside
+    // `MatchEditor.svelte` can see `isDirty`, so the honest question is the
+    // wider one and the refusal's sentence claims no more than it asks.
     const document = file();
     expect(duplicationEligibility(document, document.matches[0]!, true)).toEqual({
       kind: 'refused',
@@ -307,6 +311,38 @@ describe('whether one snippet may be duplicated at all', () => {
     expect(duplicationEligibility(document, document.matches[0]!, false)).toEqual({
       kind: 'duplicable'
     });
+  });
+
+  it('answers the document-wide question from the drafts the coordinator holds', () => {
+    // **The producer step 2 deliberately left missing** (`2c-3c-2-notes.md`
+    // section 4, hole 3). Three claims: an empty list is `false` rather than a
+    // caller's silence; a draft in **another** file does not refuse this one; and
+    // a draft for a snippet that is not the source **does**, because a commit
+    // strands every `MatchId` in the file rather than only the copied one.
+    const inThisFile: MatchId = { document: 2, revision: BASE, node: 11 };
+    const inAnotherFile: MatchId = { document: 3, revision: BASE, node: 10 };
+    expect(documentHasUnsavedDraft(2, [])).toBe(false);
+    expect(documentHasUnsavedDraft(2, [inAnotherFile])).toBe(false);
+    expect(documentHasUnsavedDraft(2, [inThisFile])).toBe(true);
+    expect(documentHasUnsavedDraft(2, [inAnotherFile, inThisFile])).toBe(true);
+  });
+
+  it('counts a draft minted over an earlier parse of the same file', () => {
+    // **Only the file is compared, and that is the point.** A draft held over a
+    // parse the window has replaced is stranded by the commit exactly as a
+    // current one is, so comparing the whole identity would let the very draft
+    // this rule protects slip through — and following a `{document, node}` pair
+    // across a reparse is the hole the consult designed out by asking a wider
+    // question (Q6).
+    const stale: MatchId = { document: 2, revision: AFTER, node: 99 };
+    expect(documentHasUnsavedDraft(2, [stale])).toBe(true);
+
+    // And it really is the argument `duplicationEligibility` takes: the refusal
+    // it produces is the document-wide one.
+    const document = file();
+    expect(
+      duplicationEligibility(document, document.matches[0]!, documentHasUnsavedDraft(2, [stale]))
+    ).toEqual({ kind: 'refused', reason: 'unsavedDraftInDocument' });
   });
 
   it('has a sentence for every refusal, in both languages', () => {
@@ -714,7 +750,7 @@ describe('the view a screen draws', () => {
     expect(view.match).toEqual(live(0));
     expect(view.document).toBe(2);
     expect(view.canDuplicate).toBe(true);
-    expect(view.notDuplicable).toBeNull();
+    expect(view.notDuplicableToShow).toBeNull();
     expect(view.cannotDuplicate).toBeNull();
     expect(view.duplicating).toBe(false);
     expect(view.duplicated).toBe(false);
@@ -733,9 +769,56 @@ describe('the view a screen draws', () => {
       [packaged]
     );
     expect(view.canDuplicate).toBe(false);
-    expect(view.notDuplicable).toBe('readOnly');
+    expect(view.notDuplicableToShow).toBe('readOnly');
     expect(view.cannotDuplicate).toBe('notDuplicable');
   });
+
+  it('withholds the frozen reason once the weaker live claim has won', () => {
+    // **Step 3's Medium finding, closed in the model.** A panel opened over a
+    // read-only projection and then left standing while the window reads the
+    // file again is both `readOnly` — frozen, definite, and about a parse that
+    // is gone — and `outOfDate`, which is live and claims less. `refusalGiven`
+    // ranks them, and until this was fixed the ranking was undone by the view
+    // handing the frozen reason out anyway: the only thing keeping the two
+    // apart was a condition in `MatchDuplicator.svelte` — decision logic no
+    // model test like this one can drive, and logic a second renderer or a
+    // markup refactor could omit while walking the model faithfully.
+    // `MatchDuplicator.test.ts` mounts that panel and asserts both rendered
+    // halves; what this case owns is the decision itself.
+    const packaged = file({ kind: 'Package', readOnly: true });
+    const opened = startMatchDuplication(packaged, packaged.matches[0]!, false);
+
+    // Live: the frozen verdict *is* what disables the control, so it is
+    // presented. This half is what makes the other half non-vacuous.
+    const held = matchDuplicationView(opened, [packaged]);
+    expect(held.cannotDuplicate).toBe('notDuplicable');
+    expect(held.notDuplicableToShow).toBe('readOnly');
+
+    // The same session, against the projection this window holds after a
+    // re-read: one sentence, and it is the one that claims less.
+    const stale = matchDuplicationView(opened, [reread({ kind: 'Package', readOnly: true })]);
+    expect(stale.cannotDuplicate).toBe('outOfDate');
+    expect(stale.notDuplicableToShow).toBeNull();
+    expect(stale.canDuplicate).toBe(false);
+
+    // And the fact itself is not lost — a caller that wants the frozen verdict
+    // rather than the sentence still has it on the session.
+    expect(opened.eligibility).toEqual({ kind: 'refused', reason: 'readOnly' });
+  }); // End of the "frozen reason withheld" case
+
+  it('withholds it for the flag-borne staleness too, not only for a replaced projection', () => {
+    // The other way into `outOfDate`: a recovery re-read that failed leaves the
+    // projection installed and spends the session through `invalidated`. The
+    // suppression is a rule about the *refusal that won*, so it does not care
+    // which of the two produced it.
+    const packaged = file({ kind: 'Package', readOnly: true });
+    const opened = duplicationRecoveryFailed(
+      startMatchDuplication(packaged, packaged.matches[0]!, false)
+    );
+    const view = matchDuplicationView(opened, [packaged]);
+    expect(view.cannotDuplicate).toBe('outOfDate');
+    expect(view.notDuplicableToShow).toBeNull();
+  }); // End of the "flag-borne staleness" case
 
   it('carries whatever presentation notes the save reported, unchanged', () => {
     // A duplicate produces none today, and that is read off the core rather

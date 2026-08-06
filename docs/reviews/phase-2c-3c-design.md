@@ -160,6 +160,15 @@ can be stranded, not only a draft for the source. Make the coordinator supply th
 do not repeat `matchMove.ts`'s recorded hole by trying to follow an old `{document,node}` pair across
 a reparse. Core hazard/refusal remains authoritative; a projection eligibility is an affordance.
 
+> **Correction (2c-3c-3).** The **dirty** draft is the risk, but it is not the fact the coordinator
+> supplies. What shipped — `documentHasUnsavedDraft` in `src/lib/browser/matchDuplication.ts` — is
+> deliberately conservative and measures **any open match editor**, dirty or not, because `isDirty`
+> is derived inside `MatchEditor.svelte`'s own session and no coordinator can observe it (**R36**,
+> argued at length in `DetailPane.svelte`'s `unsavedDraftFor` JSDoc). A pristine editor therefore
+> refuses the duplicate: over-refusing costs a person one closed editor, under-refusing strands
+> their edits. The `unsavedDraftInDocument` name is kept for the risk; both localized sentences
+> claim an open editor and no more.
+
 Submission refusals should include, in precedence order: `mayHaveWritten`, `alreadyDuplicated`,
 `saveInFlight`, `conflict`, `outOfDate`, and `notDuplicable`. The first arm is above every definite
 claim by the standing rule that **the arm which claims less wins**. A committed duplicate, any owed
@@ -246,4 +255,11 @@ window reading.
   `committed:false`, `forgetTextOf` and total stale-projection removal after a known commit.
 - Document-wide dirty-draft coordination, live-projection submission validation and selection that is
   never reclaimed after the person moves it.
+
+  > **Correction (2c-3c-3).** "Document-wide **dirty-draft** coordination" is **not** what shipped,
+  > and a future session must not read this criterion as met. What shipped is document-wide
+  > **open-editor** coordination — the deliberate over-refusal recorded in the Q6 correction above
+  > and in `documentHasUnsavedDraft`'s JSDoc in `src/lib/browser/matchDuplication.ts` (**R36**:
+  > `isDirty` is unobservable from outside `MatchEditor.svelte`'s session, over-refusing costs one
+  > closed editor, under-refusing strands edits).
 - Rust/model/wrapper tests, a mounted interaction test, and a fresh bilingual window reading.

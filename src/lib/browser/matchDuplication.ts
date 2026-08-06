@@ -1,14 +1,21 @@
 /**
  * Duplicating one snippet in place: the whole operation as a value.
  *
- * **No component and no screen.** This is step 2 of 2c-3c, and it is the same
- * arrangement `./matchMove.ts`, `./matchCreation.ts` and `./matchDeletion.ts`
- * are in: every decision a duplicate makes lives here, where a test can drive
- * it, and step 3's component is a rule-free walk over
- * {@link MatchDuplicationView}. The standing reason is
- * `docs/decisions/1c-1-notes.md` hole 1 — nothing in this repository renders a
- * Svelte component in an automated test unless the file opts into jsdom, so a
- * decision written in markup is a decision nothing can check.
+ * **Every decision lives here and the component decides nothing.** This is the
+ * same arrangement `./matchMove.ts`, `./matchCreation.ts` and
+ * `./matchDeletion.ts` are in: the rules live where a test can drive them, and
+ * `MatchDuplicator.svelte` — added in step 3 — is a rule-free walk over
+ * {@link MatchDuplicationView}. The standing reason, and it is narrower than
+ * "markup cannot be tested": a **model** test drives values and never markup, so
+ * a rule written into one renderer is a rule that renderer's own mounted suite
+ * has to carry alone, and a second renderer — or a harmless-looking refactor of
+ * the first — can omit it while walking the model faithfully. That, not
+ * untestability, is the architectural problem. `MatchDuplicator.test.ts` does
+ * mount this panel and does check it; it opts into jsdom by its docblock, as
+ * `docs/decisions/2c-split-notes.md` section 7 allows and the six components
+ * before `RawEditor.svelte` deliberately do not. What the split buys is that the
+ * decision is owned here, where every renderer shares it and this file's suite
+ * drives it.
  *
  * The authority for what follows is `docs/reviews/phase-2c-3c-design.md`, its
  * Q6 and Q8 above all. Where this module and that consult disagree, the consult
@@ -40,15 +47,25 @@
  * ## The `unsavedDraftInDocument` eligibility is document-wide, on purpose
  *
  * A committed duplicate mints a new revision and therefore invalidates
- * **every** `MatchId` in the file, so a dirty draft held for *any* snippet of
- * the file — not only the source — would be stranded by the commit. The
+ * **every** `MatchId` in the file, so a draft held for *any* snippet of the
+ * file — not only the source — would be stranded by the commit. The
  * coordinator supplies that fact as a boolean it computed from what it owns,
  * rather than this module trying to follow a `{document, node}` pair across a
  * reparse — the hole `moveEligibility`'s `unsavedDraft` arm records is not
  * repeated here, it is designed out by asking a wider question the caller can
- * answer honestly (consult Q6). **Nothing in TypeScript can check the boolean
- * was computed rather than invented**; it is required and undefaulted so a
- * caller that did not look cannot compile silence into "there are none".
+ * answer honestly (consult Q6). {@link documentHasUnsavedDraft} is the producer
+ * step 3 wired behind it, kept in this module for the same reason everything
+ * else is. **Nothing in TypeScript can check the boolean was computed rather
+ * than invented**; it is required and undefaulted so a caller that did not look
+ * cannot compile silence into "there are none".
+ *
+ * **What that boolean measures is an *open* editor, never a *dirty* one**, and
+ * the name is broader than the fact on purpose (R36). No coordinator can see
+ * `isDirty`, because it is derived inside `MatchEditor.svelte`'s own session, so
+ * the honest producer answers *a snippet of this file is open in the editor*.
+ * The refusal's sentence says exactly that and claims no edits — a sentence
+ * asserting unsaved changes would be false of every pristine editor, which is
+ * the defect step 3's review found in it.
  *
  * ## Where two refusal arms are true at once, the one that claims less wins
  *
@@ -58,6 +75,16 @@
  * included; and `outOfDate` outranks `notDuplicable`, because `eligibility`
  * was frozen at {@link startMatchDuplication} and a definite claim about the
  * snippet read off a replaced projection may no longer be true.
+ *
+ * **The precedence is carried all the way into what a screen draws**, which is
+ * step 3's Medium finding: ranking `outOfDate` above `notDuplicable` inside
+ * `refusalGiven` suppresses nothing if the frozen reason is still handed to the
+ * screen through a second field, and until this was fixed the only thing
+ * keeping the two apart was a condition written in `MatchDuplicator.svelte`.
+ * {@link MatchDuplicationView.notDuplicableToShow} is the presentation-ready
+ * answer — a component renders it and asks nothing else — and the raw frozen
+ * verdict stays on {@link MatchDuplicationSession.eligibility} for a caller
+ * that wants the fact rather than the sentence.
  *
  * ## What spends a session, and what dismissal does not clear
  *
@@ -86,9 +113,10 @@
  * the draft's candidate — but `MatchId` carries no brand and nothing can say
  * where the argument came from, so a caller that hands back `session.match`
  * defeats the check entirely. `identityInProjection` in `./matchDeletion.ts`
- * is what a caller uses *instead*, and step 3's component must derive the
- * view, the eligibility and the submission identity from **one synchronous
- * projection read**, exactly as `MatchMover.svelte` does. Nor can anything
+ * is what a caller uses *instead*, and a component must derive the view, the
+ * eligibility and the submission identity from **one synchronous projection
+ * read** — which `MatchDuplicator.svelte` does, exactly as `MatchMover.svelte`
+ * does, and which nothing in this file can require. Nor can anything
  * here stop a component importing `duplicateMatch` from `../ipc/commands` and
  * calling it with no session at all — the hole every writing command has had
  * since 2b-2a.
@@ -183,12 +211,21 @@ export type DuplicationRefusal =
   /** The projection gives it no address as an item of any sequence. */
   | 'noSequencePosition'
   /**
-   * This window is holding unsaved edits to **some snippet of this file**.
+   * A match editor is open over **some snippet of this file**.
+   *
+   * **The name is broader than what is measured, and deliberately so.** What
+   * {@link documentHasUnsavedDraft} answers is that an editor is *open*, never
+   * that it is *dirty* — no coordinator can see `isDirty` in `./draft.ts`,
+   * because it is derived inside `MatchEditor.svelte`'s own session (R36). The
+   * name is kept because the *risk* it names is the unsaved edits such an
+   * editor may hold; the sentence
+   * `browser.matchDuplication.refused.unsavedDraftInDocument` renders is
+   * therefore written to claim an open editor and no more.
    *
    * Document-wide on purpose, and this application's workflow policy rather
    * than the core's rule: a committed duplicate invalidates every `MatchId` in
-   * the file, so a dirty draft for any snippet in it would be stranded, not
-   * only a draft for the source. See this module's header.
+   * the file, so a draft for any snippet in it would be stranded, not only a
+   * draft for the source. See this module's header.
    */
   | 'unsavedDraftInDocument';
 
@@ -215,6 +252,57 @@ export type DuplicationEligibility =
 const DUPLICABLE: DuplicationEligibility = Object.freeze({ kind: 'duplicable' as const });
 
 /**
+ * Whether this window has a match editor open over any snippet of one file.
+ *
+ * **The producer of {@link duplicationEligibility}'s third argument**, which
+ * step 2 deliberately left without one so the debt stayed visible
+ * (`docs/decisions/2c-3c-2-notes.md` section 4, hole 3). It lives here rather
+ * than in a component because a rule written into one renderer's markup is a
+ * rule no model test can drive and a second renderer can omit — the mounted
+ * suite of the renderer that has it is real cover, but it is cover for that one
+ * file — and it takes the open drafts as an argument rather than reading them,
+ * because the surfaces that hold them are Svelte components and this directory
+ * is what a test can reach.
+ *
+ * **Only the file is compared, and that is the point.** A draft minted over an
+ * *earlier* parse of the same file is stranded by a commit exactly as a current
+ * one is — the new revision invalidates every `MatchId` in the file — so
+ * comparing the whole identity would let the very draft this rule protects slip
+ * through. That is also why the consult made the fact document-wide instead of
+ * a `{document, node}` pair nothing can follow across a reparse (Q6).
+ *
+ * **It answers "a draft is open", not "a draft is dirty", and the difference is
+ * a deliberate over-refusal.** `isDirty` in `./draft.ts` is derived inside the
+ * editor's own session, which lives in `MatchEditor.svelte`, so no coordinator
+ * can see it — the same R36 reasoning `DetailPane.svelte`'s `unsavedDraftFor`
+ * records for a move. Over-refusing costs a person one closed editor;
+ * under-refusing strands their edits. **`true` for a pristine editor is
+ * therefore correct rather than a bug**, and the sentence the refusal renders
+ * is written to be true of that case: it says a snippet of this file is open in
+ * the editor and that this application cannot tell whether it has been edited,
+ * never that unsaved edits exist. Step 3's review found the older sentence
+ * claiming the latter, which no test can fail because a sentence is data.
+ *
+ * **What it does not cover, in the same sentence as what it does**: a
+ * whole-document raw draft is not a match draft and is not counted here —
+ * widening the rule to the raw editor would need its own sentence rather than a
+ * silently broadened predicate. Nothing in TypeScript can check that a caller
+ * passes every editor it holds open, either; the argument being required is what
+ * stops silence compiling into "there are none".
+ *
+ * @param document - The file a duplicate would be written to.
+ * @param drafts - The identity of every snippet this window has a match editor
+ *   open over, in any order. Every one of them, dirty or not.
+ * @returns `true` when at least one of those editors is open over that file.
+ */
+export function documentHasUnsavedDraft(
+  document: DocumentId,
+  drafts: readonly MatchId[]
+): boolean {
+  return drafts.some((draft) => draft.document === document);
+} // End of function documentHasUnsavedDraft()
+
+/**
  * Whether one snippet of one projected file may be duplicated.
  *
  * **The first two arguments are checked against each other**, which is
@@ -236,11 +324,13 @@ const DUPLICABLE: DuplicationEligibility = Object.freeze({ kind: 'duplicable' as
  *
  * @param document - The file's projection, exactly as this window holds it.
  * @param match - The snippet's projection, from that same file.
- * @param unsavedDraftInDocument - Whether this window is holding unsaved edits
- *   for **any** snippet of that file. **Required and not defaulted**: a default
- *   would be this function inventing "there are none" for a caller that simply
- *   did not look — and only the coordinator that owns the open editors can
- *   answer it.
+ * @param unsavedDraftInDocument - Whether this window has a match editor open
+ *   over **any** snippet of that file, dirty or not — see
+ *   {@link documentHasUnsavedDraft} for why the open editor and not the dirty
+ *   one is what can honestly be measured. **Required and not defaulted**: a
+ *   default would be this function inventing "there are none" for a caller that
+ *   simply did not look — and only the coordinator that owns the open editors
+ *   can answer it.
  * @returns The verdict, with a reason code when it is a refusal.
  */
 export function duplicationEligibility(
@@ -395,8 +485,8 @@ export interface MatchDuplicationSession {
  *
  * @param document - The file's projection, exactly as this window holds it.
  * @param match - The snippet's projection, from that same file.
- * @param unsavedDraftInDocument - Whether this window is holding unsaved edits
- *   for any snippet of that file. Required, for
+ * @param unsavedDraftInDocument - Whether this window has a match editor open
+ *   over any snippet of that file, dirty or not. Required, for
  *   {@link duplicationEligibility}'s reason.
  * @returns A session with nothing sent and nothing said.
  */
@@ -950,18 +1040,32 @@ export interface MatchDuplicationView {
   /** Whether the duplicate control does anything. */
   readonly canDuplicate: boolean;
   /**
-   * Why this snippet cannot be duplicated at all, as a code, or `null`.
+   * The reason to draw beside the snippet, as a code, or `null`.
    *
-   * **This is the session's frozen eligibility, and
-   * {@link MatchDuplicationView.cannotDuplicate} is the live refusal.** They
-   * are two fields because they answer at two times, and `refusalGiven` puts
-   * `outOfDate` **above** `notDuplicable` for exactly that reason. **A screen
-   * must therefore not draw this beside a `cannotDuplicate` of `outOfDate`**,
-   * or the definite claim the precedence just suppressed comes back through
-   * the other field. Nothing in TypeScript can enforce that; the rule is here
-   * because the only place it can be broken is a component.
+   * **Presentation-ready, which is what makes it different from the session's
+   * `eligibility`.** That verdict is frozen at {@link startMatchDuplication}
+   * and no transition recomputes it, so after a reprojection it is a definite
+   * claim about a snippet read off a parse this window has replaced;
+   * {@link MatchDuplicationView.cannotDuplicate} is the live refusal, and
+   * `refusalGiven` ranks `outOfDate` **above** `notDuplicable` precisely so
+   * that the weaker live claim wins. This field carries that same precedence
+   * into what is drawn: it is the frozen reason **only when
+   * `cannotDuplicate` is `notDuplicable`** — that is, only when the frozen
+   * verdict is what won — and `null` otherwise.
+   *
+   * **So a component renders this and asks nothing else.** Before step 3's
+   * review the view handed out the frozen reason unconditionally and a
+   * condition in `MatchDuplicator.svelte` was the only thing keeping the
+   * suppressed certainty off the screen — a decision in markup, which no model
+   * test can drive and any second renderer or markup refactor could drop.
+   * `MatchDuplicator.test.ts` mounts that panel and asserts both rendered
+   * halves, so this renderer is checked; what moved here is the decision
+   * itself, which every renderer now inherits. A caller that wants the raw
+   * frozen verdict rather than the sentence reads
+   * {@link MatchDuplicationSession.eligibility}, which is unchanged and still
+   * says everything.
    */
-  readonly notDuplicable: DuplicationRefusal | null;
+  readonly notDuplicableToShow: DuplicationRefusal | null;
   /** Why the control does nothing as things stand, as a code, or `null`. */
   readonly cannotDuplicate: DuplicationSubmissionRefusal | null;
   /** Whether a duplicate is in flight. */
@@ -1012,13 +1116,49 @@ export interface MatchDuplicationView {
 }
 
 /**
+ * The frozen refusal a screen may draw beside the snippet, or `null`.
+ *
+ * **The precedence rule, expressed once and where a test can drive it.** The
+ * frozen verdict is drawn exactly when the live refusal *is* the frozen one —
+ * when `refusalGiven` answered `notDuplicable`, nothing weaker was true and the
+ * definite claim about the snippet is the reason the control is disabled. Every
+ * other live refusal outranks it, so the detail is withheld and the weaker
+ * sentence stands alone: `outOfDate` is the reachable case (the session is
+ * stale and the frozen claim was read off a parse that is gone), and the other
+ * four are unreachable beside a refused eligibility only because such a session
+ * can never send at all, which is a fact about today's transitions rather than
+ * a guarantee worth relying on.
+ *
+ * A refused eligibility always makes `refusalGiven` answer something, so a
+ * `null` live refusal never coexists with a frozen reason; the check is written
+ * against `'notDuplicable'` rather than against `outOfDate` alone so that a
+ * refusal added above it in the order suppresses the frozen detail by
+ * construction instead of by a later edit here.
+ *
+ * @param session - The session the frozen verdict belongs to.
+ * @param cannotDuplicate - The live refusal, as `refusalGiven` answered it for
+ *   this same read of the projections.
+ * @returns The frozen reason to draw, or `null` when a weaker live claim won.
+ */
+function notDuplicableToShow(
+  session: MatchDuplicationSession,
+  cannotDuplicate: DuplicationSubmissionRefusal | null
+): DuplicationRefusal | null {
+  if (cannotDuplicate !== 'notDuplicable' || session.eligibility.kind !== 'refused') {
+    return null;
+  }
+  return session.eligibility.reason;
+} // End of function notDuplicableToShow()
+
+/**
  * Everything a screen needs about one duplication.
  *
  * Derived on every call and stored nowhere, which is 2c-1a's D2 carried up.
  *
  * **It takes the live projections** for {@link duplicationSubmissionRefusal}'s
- * reason, and the refusal is computed **once** here with `canDuplicate` read
- * off it, so the two fields of this view cannot contradict each other.
+ * reason, and the refusal is computed **once** here with `canDuplicate` and
+ * {@link MatchDuplicationView.notDuplicableToShow} both read off that one
+ * answer, so the three fields of this view cannot contradict each other.
  *
  * @param session - The session to describe.
  * @param views - Every projection this window holds **now**, in any order.
@@ -1039,7 +1179,7 @@ export function matchDuplicationView(
     match: session.match,
     document: session.document,
     canDuplicate: cannotDuplicate === null,
-    notDuplicable: session.eligibility.kind === 'refused' ? session.eligibility.reason : null,
+    notDuplicableToShow: notDuplicableToShow(session, cannotDuplicate),
     cannotDuplicate,
     duplicating: session.phase === 'saving',
     duplicated: session.duplicated,

@@ -2228,6 +2228,59 @@ write is what is on disk would be wrong for the same reason.
 
 ---
 
+## Phase 2c-3c-3 review disposition
+
+**Two rounds, four findings, `NOT READY` both times** (`docs/reviews/phase-2c-3c-3-code.md`; round 2
+is the confirmation pass, appended there). **Both verdicts were accepted rather than argued with**,
+and all four were fixed before the commit, so no commit holds a demonstrated defect.
+
+**The standing rule held again: each round's fix produced the next round's finding.** Round 1's two
+fixes were behaviourally correct — round 2 confirmed the Medium *closed, not relocated*, and both
+localized sentences correct — and **both of round 2's findings were prose those fixes introduced**.
+That is this project's named worst defect class, twice, in the round commissioned to look for it.
+
+| # | Where | Finding | Disposition |
+|---|---|---|---|
+| R1-1 | `MatchDuplicator.svelte:443`, `matchDuplication.ts:1000,1088` | **Medium — the component was not a rule-free walk.** It decided that the frozen `notDuplicable` reason loses to a live `outOfDate`; the view handed the frozen reason out unconditionally and a markup condition was the only thing keeping the suppressed certainty off the screen | **Fixed in the model.** `MatchDuplicationView.notDuplicable` is replaced by the presentation-ready `notDuplicableToShow`, computed from the same `cannotDuplicate` answer that drives `canDuplicate`, and returning the frozen reason **only when `cannotDuplicate === 'notDuplicable'`** — written against that value rather than against `outOfDate`, so any refusal added above it in the order suppresses the detail **by construction**. The unsuppressed verdict stays on `MatchDuplicationSession.eligibility`. The component keeps a null check; two new model cases drive both sides, and the two mounted cases are kept as this renderer's regression cover |
+| R1-2 | `matchDuplication.ts:201,233`, `DetailPane.svelte:407`, `en.json:349`, `es.json:349` | **Low — a sentence false of its own predicate.** `documentHasUnsavedDraft` returns `true` for every *open* match editor identity, pristine or not, while the refusal said the snippet *has edits that have not been saved* | **Fixed in words, not in the predicate.** R36 is kept: `isDirty` is derived inside `MatchEditor.svelte`'s own session, so no coordinator can observe it, and over-refusing costs one closed editor where under-refusing strands edits. Both sentences were rewritten to claim an open editor and this app's inability to tell whether it was edited; the Spanish was written natively to the same claim, with the consequence in the subjunctive |
+| R2-1 | `matchDuplication.ts:9`, `matchDuplication.test.ts:783`, `MatchDuplicator.test.ts:1` | **Low — the R1-1 fix introduced a false testability record.** The new prose said a decision in markup is something "nothing can check" and that no test can drive `MatchDuplicator.svelte` — which opts into jsdom, mounts, and whose live/stale pair drove the very condition round 1 removed | **Fixed, with the accurate claim.** A **model** test drives values and never markup, so a rule in one renderer is carried by that renderer's mounted suite **alone** and a second renderer can omit it while walking the model faithfully — *that*, not untestability, is the architectural problem. Applied in the module header, the model test's comment and the component's note |
+| R2-2 | `2c-3c-2-notes.md:101`, `phase-2c-3c-design.md:156,247` | **Low — the governing records still claimed dirty-draft coordination**, including as a completion criterion, so they asserted a guarantee the implementation deliberately does not give | **Fixed by correction blocks appended in place**, not by rewriting either record: both now say the intended risk is a dirty draft while the implemented, deliberately conservative predicate measures any open match editor |
+| O-1 | `DetailPane.svelte` header | **The orchestrator's own correction, outside both rounds.** The file header carried the pre-existing absolute "Nothing in this repository renders a Svelte component in an automated test, so logic put here is logic nothing can check" — false of that very file: `DetailPane.test.ts:1` opts into jsdom and mounts the pane at line 181 | **Corrected directly.** The worker had proposed leaving it because it predated the step; a known false absolute in a file this step edits is not left standing. The header now gives the narrow reason |
+
+**Confirmed sound by round 2, and worth recording as checked rather than assumed:** the panel reads
+`projections()` **once** in one `$derived.by` and takes both the view and the identity handed to
+`beginDuplicate` from that read; it calls `BrowserState.duplicateMatch` and never the raw IPC
+wrapper, and writes nothing to `selected`, `selectGeneration` or `projectionGenerations`, so the
+step-2 selection-follow race is not reopened; the acknowledgement is produced by
+`acknowledgeDuplicationFindings` and the mounted retry compares the **complete** accepted finding,
+`DuplicateKeepsTriggerDefinition.revision` included; the six write surfaces are mutually exclusive in
+both directions through `busy`; the `path: matchListPath(0)` additions in `DetailPane.test.ts` only
+make the fixtures genuine sequence items, with no existing assertion removed or weakened; and all 31
+`browser.matchDuplication.*` keys exist in both dictionaries with no key built by hand in any
+component.
+
+### Two defects this step found in a sibling screen and did NOT fix
+
+Both are in **move**, both shipped, and both are left by the standing rule that changing a sentence
+or a decision in a shipped screen obliges a **re-taken window reading** of the sub-phase that owns
+it — 2c-3b-2's:
+
+- **`browser.matchMove.refused.unsavedDraft` (`en.json:316`, `es.json:316`) has R1-2's exact
+  defect.** It says *"This snippet has edits that have not been saved"*, while its producer —
+  `unsavedDraftFor()` in `DetailPane.svelte`, which answers `editingMatch.match.id` — asks the same
+  open-editor question `documentHasUnsavedDraft` asks.
+- **`MatchMover.svelte:511` carries R1-1's exact shape**:
+  `{#if current.view.notMovable !== null && current.view.cannotMove !== 'outOfDate'}` — the
+  precedence decision written into a `.svelte` file. Duplicate's model-side fix now **diverges** from
+  it, so two sibling panels resolve the same rule in two places and only one of them is a decision a
+  model test can drive.
+
+**The standing debt ledger is therefore four items**: `browser.matchDeletion.sendFailed`,
+`browser.rawEditor.discardWarning`, `browser.matchMove.refused.unsavedDraft`, and
+`MatchMover.svelte:511`'s in-component rule.
+
+---
+
 ## Phase 2c-3b-2 review disposition
 
 **Two rounds, nine findings, `NOT READY` both times.** The mandatory once-per-phase aggregate review
@@ -3350,6 +3403,66 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-3c step 3
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+each of the two review rounds and after the window reading's probe scaffolding was removed. None was
+taken on a worker's word.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1324 passed, 46 files** (from 1302 / 45 at step 2) |
+| `npm run check` | 411 files, **0 errors, 0 warnings** |
+| `npm run build` | **171 modules** (from 169) |
+| `cargo test --workspace` | **1046 passed, 0 failed** — unchanged; step 3 wrote no Rust |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **no match** — the architecture rule, checked the D2x way |
+| `cargo test -p espansoconfig-core --test corpus_integrity` | **17 passed** |
+| `git status --short --untracked-files=all` | **no path under `tests/corpus/real/`** |
+
+**The module guard moved 169 → 171 and the delta is exactly the new-module shape**: one new `.svelte`
+file contributes its own module **and** its scoped-style virtual module, which is 2c-3a-2's
++4-for-two-components arithmetic seen once. `vite.config.ts` was not touched; no
+`svelte/internal/server` and no `node:async_hooks` in the bundle.
+
+**The test delta was derived rather than asserted, and it reconciles exactly.** +22 = **13**
+(`MatchDuplicator.test.ts`, measured by running it alone) + **4** (`matchDuplication.test.ts`,
+34 → 38) + **1** (`DetailPane.test.ts`) + **4** generated: `scripts/lint/ipc-detail.test.ts` emits
+one case per `.ts` or `.svelte` file under `src/` and gains two — the component and its test file —
+while `scripts/lint/hardcoded-strings.test.ts` and `scripts/lint/built-translation-keys.test.ts`
+each emit one case per `.svelte` file and gain one apiece. 1302 + 22 = 1324.
+
+### Re-derived by the orchestrator rather than accepted from a worker or a reviewer
+
+1. **The probe scaffolding is gone.** `rg "render_probe|probe_plan|ECFG_PROBE|startProbe"` over
+   `src`, `src-tauri/src` and `scripts` finds nothing, and the module count is back to **171** — the
+   reading itself measured 172, which was 171 plus `probe.ts`.
+2. **The old contradictory view member is gone.** `rg "view\.notDuplicable\b|notDuplicable:"` over
+   `src/lib` finds nothing, while `notDuplicable` survives correctly as a refusal **code** — the
+   union member, the `refusalGiven` arm and the two `cannotDuplicate.notDuplicable` sentences.
+3. **The dictionaries hold 699 keys each, with identical key sets** — counted from the files, not
+   taken from a record. The `browser.matchDuplication.*` namespace is unchanged at 31 per language:
+   this step rewrote one sentence and added no key.
+4. **`DetailPane.test.ts:1` opts into jsdom and mounts the pane at line 181.** That is what falsified
+   the worker's justification for leaving `DetailPane.svelte`'s "nothing can check" absolute in
+   place, and the orchestrator corrected that header directly rather than leaving a known false
+   claim standing because it predated the step.
+
+### The three kinds of evidence 2c-split-notes §7 requires — all three exist, and 2c-3c is therefore complete
+
+1. **Model tests** — `matchDuplication.test.ts`, 34 → 38, the two new pairs owning the suppression
+   rule and the `documentHasUnsavedDraft` producer.
+2. **A mounted-component test** — `MatchDuplicator.test.ts`, the **seventh** file to opt into jsdom
+   by its docblock, 13 cases, the last suite over a **real** `BrowserState`; plus the new
+   `DetailPane.test.ts` case, which is the reachability claim no test of the panel alone can make.
+3. **A window reading** — `docs/decisions/2c-3c-3-window-reading.md`, **24 launches**, all reaching
+   `--- end` with zero-byte `probe.err`, **PASS on all seven items, no High and no Medium**, two Lows
+   and three Observations, and no defect in what is written to disk. **Its §12 lists nine things the
+   evidence is not**, carried into `docs/decisions/2c-3c-3-notes.md` §4 rather than left in one file.
 
 ---
 
@@ -5349,7 +5462,130 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-3c step 2 is complete: `duplicate_match` is the twelfth command and the sixth
+**Phase 2c-3c is complete — all three steps, and all three kinds of evidence.** Step 1 put
+`DocumentEdit::DuplicateItem` in the core as a **true** duplicate; step 2 put `duplicate_match`
+on the wire and `matchDuplication.ts` in the browser layer; **step 3 drew it**:
+`MatchDuplicator.svelte` is the sixth write surface, `MatchDuplicator.test.ts` is the seventh
+jsdom-opted mounted suite, and `docs/decisions/2c-3c-3-window-reading.md` is the bilingual
+window reading — **24 launches, PASS on all seven items, no High and no Medium, and no defect
+in what is written to disk.**
+
+**`<SHA-TO-FILL>` is 2c-3c's closing commit and is where a fresh session begins.** The exact
+first command a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1324 passed, 46 files
+```
+
+(`cargo test --workspace` expects **1046**, unchanged — step 3 wrote no Rust. `npm run check`
+expects **411 files, 0 errors, 0 warnings**. `npm run build` expects **171 modules** — the +2
+over step 2's 169 is one new `.svelte` file: its module and its scoped-style virtual module.)
+
+### What step 3 contains
+
+`src/lib/components/MatchDuplicator.svelte`: the panel as a rule-free walk over
+`matchDuplicationView`, with **one** `$derived.by` that calls `projections()` once and hands both
+the view and the identity `beginDuplicate` checks out of that single read; the
+acknowledge-and-retry round trip, the three outcome arms, the one `reloadFile` recovery and the
+sticky action row. `src/lib/components/MatchDuplicator.test.ts`: 13 mounted cases in two suites,
+the last over a **real** `BrowserState`. `documentHasUnsavedDraft(document, drafts)` in
+`src/lib/browser/matchDuplication.ts` — the producer step 2 deliberately left missing — with
+`openMatchDrafts()` in `DetailPane.svelte` supplying it through `unsavedDraftInDocument()`; the
+pane's `duplicatingMatch` session, its opener, its `{:else if}` branch and `busy` grown to **six**
+write surfaces; one new `DetailPane.test.ts` case for reachability. Two dictionary sentences
+rewritten, **no key added** — 699 per language, at parity, 31 in the
+`browser.matchDuplication.*` namespace. 1302 → **1324** frontend tests over 46 files; Rust
+unchanged at 1046. The decision record is `docs/decisions/2c-3c-3-notes.md`.
+
+### The two review rounds (`docs/reviews/phase-2c-3c-3-code.md`)
+
+Round 1 (`NOT READY`): a Medium — the component decided that the frozen `notDuplicable` reason
+loses to a live `outOfDate`, a rule living in markup; and a Low — the `unsavedDraftInDocument`
+sentence was false of its own predicate, which measures an **open** editor and not a dirty one.
+Round 2, the confirmation pass (`NOT READY`): both behavioural fixes confirmed closed, plus two
+Lows that were **prose those fixes introduced** — a false testability record, and two governing
+documents still claiming dirty-draft coordination. **Each round's fix produced the next round's
+finding, again**, and both `NOT READY` verdicts were accepted rather than argued with. All four
+were fixed before the commit; the fifth entry in the disposition table is the orchestrator's own
+correction of `DetailPane.svelte`'s pre-existing "nothing can check" absolute. Dispositions:
+`## Phase 2c-3c-3 review disposition` above, and `docs/decisions/2c-3c-3-notes.md` §6.
+
+### What 2c-3c decided that a later session must not silently undo
+
+- **The rule that decides between two refusal arms belongs to the model, not to a renderer.**
+  `notDuplicableToShow` returns the frozen reason **only when `cannotDuplicate ===
+  'notDuplicable'`** — written against that value, not against `outOfDate`, so a refusal added
+  above it in `refusalGiven`'s order suppresses the frozen detail **by construction**. The
+  unsuppressed verdict stays on `MatchDuplicationSession.eligibility`. The reason is not that
+  markup cannot be tested — `MatchDuplicator.test.ts` mounts and checks this renderer — but that
+  a rule in one renderer is carried by that renderer's mounted suite **alone**, and a second
+  renderer can omit it while walking the model faithfully.
+- **`documentHasUnsavedDraft` measures an *open* match editor, never a *dirty* one, and that is
+  correct rather than a bug** (R36). `isDirty` is derived inside `MatchEditor.svelte`'s own
+  session, so no coordinator can observe it; over-refusing costs one closed editor,
+  under-refusing strands edits. Both sentences claim an open editor and this app's inability to
+  tell whether it was edited — **never** that unsaved edits exist. "Document-wide dirty-draft
+  coordination" is **not** what shipped, and the correction blocks in `2c-3c-2-notes.md` §2.4 and
+  `phase-2c-3c-design.md` say so where the older records claim otherwise.
+- **The clone is the source's exact owned runs, byte-identical, trigger included** (step 1), it
+  lands immediately after its source with no placement choice (consult Q4), and the batch that
+  holds a `DuplicateItem` holds nothing else (R25's precedent). The acknowledgeable
+  `DuplicateKeepsTriggerDefinition` claims **risk, never espanso semantics** (D2u) and is
+  content-addressed by the candidate's own `ContentRevision`.
+- **The selection-follow guard holds at the write, not before it** (step 2) — a
+  `DuplicateIntent { held, generation }` is re-validated after the adoption's own await, in the
+  same synchronous block as `replaceSelection`. `moved: null` claims only that the clone could
+  not be identified in the read that followed the write.
+- **Nothing on this surface is presented as reversible.** The reading's complete roll of controls
+  contains no undo, revert, restore or "keep my draft".
+
+### The debt ledger carried forward — now four items
+
+**`browser.matchDeletion.sendFailed`** and **`browser.rawEditor.discardWarning`** still carry
+2c-3b-2's F4 pattern; this step touched neither screen. Step 3 adds two, both in **move**, both
+shipped, both left because changing a sentence or a decision in a shipped screen obliges a
+re-taken window reading of the sub-phase that owns it (2c-3b-2's):
+**`browser.matchMove.refused.unsavedDraft`** (`en.json:316`, `es.json:316`) has the identical
+open-versus-dirty defect, and **`MatchMover.svelte:511`** —
+`current.view.notMovable !== null && current.view.cannotMove !== 'outOfDate'` — is the round-1
+Medium's exact shape, still in a `.svelte` file, and duplicate's model-side fix now diverges from
+it. Step 2's own recorded twins (`movedNotIdentified`, `createdNotIdentified`, the shared
+`after_a_save` prose residue) stand unchanged for the follow-up that owns them.
+
+### Next: Phase 2c-4a — conflict capture and preservation
+
+`docs/decisions/2c-split-notes.md` §2 is the scope, verbatim: **retain the draft, load the disk
+version separately, compare, copy, reload — overwriting neither side.** It **fails as a
+both-sides data-loss mistake**, which is why it is its own sub-phase and why neither side of the
+comparison may be quietly dropped to make a screen simpler.
+
+**The constraint that binds it before any code is written** (`CLAUDE.md` §6): **no control
+anywhere may be named or coded "keep my draft" before 2c-4b.** There the words mean *rebase the
+draft onto the newly parsed document* — identify the intended match in the new parse and apply
+only when confidence suffices — and using them in 2c-4a makes that phase look done. 2c-4a
+preserves both sides and offers a copy; it does not reapply anything.
+
+The conflict machinery it builds on already exists and is **unevenly drawn**, which is the first
+thing to check rather than assume. `ConflictChoice` has `keepEditing`, `copyDraft`,
+`reloadDiskVersion` and `confirmReload`. The **raw editor** already offers three at a time —
+`rawEditor.ts`'s `CONFLICT_FIRST_STEP` is `['keepEditing', 'copyDraft', 'reloadDiskVersion']` and
+`CONFLICT_CONFIRM_STEP` swaps the last for `confirmReload`. The **five match-level panels** —
+editor, creator, deleter, mover, duplicator — each hold a local
+`const CONFLICT_CHOICES = ['keepEditing']` and offer that alone. Those five constants, and the
+`conflictAction` switches that walk them, are where 2c-4a lands.
+`MatchDuplicator.svelte`'s switch states what the exhaustive `switch` forces and what it does
+not: a *new member* of `ConflictChoice` fails to compile there, but a **newly offered** member
+does not — the arm is drawn as a control the moment the model names it, and it would do nothing.
+The standing hole to carry in: **the true `conflict` outcome has never been provoked from a
+window** for a move or a duplicate — the command's identity gate answers first — so those
+sentences have model-suite and mounted evidence only (`2c-3c-3-window-reading.md` §12 item 4,
+`2c-3b-2-window-reading.md` §10.2). By the rule every sub-phase since 2b-2c has followed, 2c-4a's
+first act is its **design consult**.
+
+---
+
+**Phase 2c-3c step 2 (superseded by the above, kept for its rationale) is complete:
+`duplicate_match` is the twelfth command and the sixth
 writer, `BrowserState.duplicateMatch` is the sixth writing wrapper, and `matchDuplication.ts`
 is duplicate as a value. Nothing draws it — the component, the mounted test and the bilingual
 window reading are step 3's, and 2c-3c does not close without them.**
