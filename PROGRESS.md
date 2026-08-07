@@ -5926,8 +5926,9 @@ choices have now been **seen on a screen** rather than inferred from a suite.
 found two more of the same kind: **six of the eight findings across step 3c were sentences or
 records claiming something the code does not do.** None of them changed a byte written to disk.
 
-`ea7c1ff` is step 3c's commit and is where a fresh session begins (`eb19c36` was the base). The
-exact first commands to run:
+**`3f34007`** is step 3c's commit — the implementation, both Codex rounds' fixes, the review file and
+all five decision records together, so no commit holds a demonstrated defect — and it is where a
+fresh session begins (`eb19c36` was the base). The exact first commands to run:
 
 ```sh
 npm install && npm test        # expect 1482 passed, 47 files
