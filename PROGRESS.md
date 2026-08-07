@@ -5740,7 +5740,8 @@ are both on screen, all three revisions always. The other three match surfaces s
 operation-choice surfaces)**, 3c (the window reading). The rationale and the failure-mode table are
 in "Verification — Phase 2c-4a step 3a" above. **Step 3b is next.**
 
-**Step 3a's commit is where a fresh session begins.** The exact first commands to run:
+**`96d7e06` is step 3a's commit, pushed to `origin/main`, and is where a fresh session begins**
+(`061e75e` was the base). The exact first commands to run:
 
 ```sh
 npm install && npm test        # expect 1404 passed, 46 files
@@ -8853,6 +8854,7 @@ _Updated at each phase boundary._
 | **2c-4a design consult** | **`ddf67ab`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a step 1** | **`fa5bb93`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a step 2** | **`53874d7`** | ✅ pushed to `origin/main` | clean |
+| **2c-4a step 3a** | **`96d7e06`** | ✅ pushed to `origin/main` | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
