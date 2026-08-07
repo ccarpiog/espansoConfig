@@ -53,7 +53,11 @@
  * helpers here do.
  */
 
-import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
+import {
+  conflictChoiceKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
@@ -64,7 +68,7 @@ import {
   type BrowserState,
   type MatchSaveAnswer
 } from '../browser/workspace.svelte';
-import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
+import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import type { CommandResult } from '../ipc/commands';
 import type { IpcFailure } from '../ipc/errors';
 import { locale } from '../stores/locale.svelte';
@@ -231,6 +235,27 @@ const AFTER_THE_RENAME: IpcFailure = {
   }
 };
 
+/**
+ * The whole file text the conflict's fresh read carried.
+ *
+ * Distinguishable from anything the panel holds, so a case can tell the disk side
+ * of the panel from the operation summary by looking at the rendered text.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/** A word that appears in {@link DISK_TEXT} and nowhere else on the screen. */
+const DISK_TEXT_MARKER = 'theirs';
+
+/** A duplicate the file had moved on under. */
+const CONFLICTED: SaveResult = {
+  outcome: 'conflict',
+  expected: BASE,
+  found: AFTER,
+  disk_revision: AFTER,
+  disk_text: DISK_TEXT,
+  disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: AFTER })
+};
+
 /** A rejection that says this window and the file disagree about an address. */
 const STALE_IDENTITY: IpcFailure = {
   kind: 'command',
@@ -271,6 +296,14 @@ interface Mounted {
   readonly target: HTMLElement;
   /** Every call the panel made, in order. */
   readonly calls: RecordedDuplicate[];
+  /**
+   * Every conflict the panel asked the window to adopt, in order.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing until a
+   * reload has been asked for *and* confirmed, so an entry here in a case that
+   * only reached the panel is the pre-emptive install the consult's Q2 ruled out.
+   */
+  readonly adoptions: ConflictModel<MatchId>[];
   /** How many times the panel asked to be closed. */
   readonly closed: () => number;
   /** How many times the panel asked for the file to be read again. */
@@ -291,6 +324,12 @@ interface Opened {
   readonly draft?: boolean;
   /** What a re-read answers. */
   readonly reload?: IpcFailure | null;
+  /**
+   * What the window answers when the panel asks it to adopt the disk observation.
+   *
+   * All three values are real production answers; `installed` is the default.
+   */
+  readonly adoption?: DiskAdoptionOutcome;
 }
 
 /**
@@ -307,6 +346,7 @@ function mountDuplicator(
   const projection = opened.projection ?? file();
   const remaining = [...answers];
   const calls: RecordedDuplicate[] = [];
+  const adoptions: ConflictModel<MatchId>[] = [];
   let closes = 0;
   let reloads = 0;
   const target = document.createElement('div');
@@ -348,10 +388,13 @@ function mountDuplicator(
         reloads += 1;
         return Promise.resolve(opened.reload ?? null);
       },
-      // **The window's own adoption**, which no case here reaches: the five match
-      // surfaces declare `offersReload: false`, so no control that could spend a
-      // confirmation is drawn. `matchDuplication.test.ts` drives the transition directly.
-      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+      // **The window's own adoption**, recorded rather than assumed. Since
+      // 2c-4a-3b this surface offers the reload, so a case can press the two
+      // controls that reach it and see exactly when — and whether — it is called.
+      adoptDiskVersion: (conflict: ConflictModel<MatchId>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return opened.adoption ?? 'installed';
+      },
       close: (): void => {
         closes += 1;
       }
@@ -360,6 +403,7 @@ function mountDuplicator(
   return {
     target,
     calls,
+    adoptions,
     closed: () => closes,
     reloads: () => reloads,
     stop: () => {
@@ -687,6 +731,144 @@ describe('the mounted duplicate panel', () => {
   }); // End of the "failed re-read" case
 }); // End of the "mounted duplicate panel" suite
 
+/**
+ * Reaches the conflict panel: press duplicate, and answer with a conflict.
+ *
+ * @param adoption - What the window answers when asked to adopt.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflicted(adoption: DiskAdoptionOutcome = 'installed'): Promise<Mounted> {
+  const panel = mountDuplicator([{ result: CONFLICTED }], { adoption });
+  control(panel.target, 'browser.matchDuplication.duplicate').click();
+  await settle();
+  return panel;
+} // End of function conflicted()
+
+describe('the duplicate panel’s conflict', () => {
+  it('shows the operation beside the disk text, and copies nothing', async () => {
+    // **The comparison the consult's Q5 ruled, on a surface that drafts no text.**
+    // The retained side is the model's summary of what was asked for — never a
+    // `MatchId` rendered as though it were content — and the disk side is the whole
+    // file text the command layer read, through `SourceText`.
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.retainedOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operation.duplicateSnippet')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operationIdentityIsOld')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.diskVersion')).toBe(true);
+    expect(panel.target.textContent).toContain(DISK_TEXT_MARKER);
+    expect(panel.target.querySelectorAll('.panel .sourceText')).toHaveLength(1);
+    // All three revisions, always.
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDuplication.revisionExpected', { revision: BASE })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDuplication.revisionFound', { revision: AFTER })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDuplication.revisionDisk', { revision: AFTER })
+    );
+    // Two choices, and the destructive one is a second step away. No copy, ever.
+    expect(button(panel.target, conflictChoiceKey('keepEditing', 'operationChoice'))).not.toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).not.toBeNull();
+    expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
+    expect(button(panel.target, conflictChoiceKey('copyDraft', 'operationChoice'))).toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "both sides" case
+
+  it('warns that the reload closes this panel, never that it replaces text', async () => {
+    // **2c-4a-3b's verification of `reloadOutcome`.** `reloadClosesSurface` ends
+    // *copy it first if you want to keep it*, and there is no control here that
+    // could — consult Q4 refuses one as a property of what this surface drafts.
+    const panel = await conflicted();
+    expect(says(panel.target, 'browser.saveOutcome.reloadAbandonsOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.reloadClosesSurface')).toBe(false);
+    expect(says(panel.target, 'browser.saveOutcome.reloadDiscardsDraft')).toBe(false);
+    expect(says(panel.target, 'browser.saveOutcome.operationKeptInMemory')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.draftKeptInMemory')).toBe(false);
+    panel.stop();
+  }); // End of the "surface-aware warning" case
+
+  it('adopts the disk version and closes only when the reload is confirmed', async () => {
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.matchDuplication.reloadIdentifiesNoSnippet')).toBe(false);
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.matchDuplication.reloadIdentifiesNoSnippet')).toBe(true);
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(panel.closed()).toBe(1);
+    // Nothing was sent a second time: a conflict is not a retry.
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "confirmed reload" case
+
+  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+    // **`alreadyThere` is a success**: the window already holds the bytes that
+    // were asked for. `refused` is the only answer that means it did not move.
+    for (const [answer, closes] of [
+      ['alreadyThere', 1],
+      ['installed', 1],
+      ['refused', 0]
+    ] as const) {
+      const panel = await conflicted(answer);
+      control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+      flushSync();
+      control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+      flushSync();
+
+      expect(panel.adoptions, answer).toHaveLength(1);
+      expect(panel.closed(), answer).toBe(closes);
+      expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
+        closes === 0
+      );
+      panel.stop();
+    } // End of the loop over the three adoption answers
+  }); // End of the "three adoption answers" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
+    // only be refused again is gone, and the sentence takes its place.
+    const panel = await conflicted('refused');
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(says(panel.target, 'browser.matchDuplication.reloadIdentifiesNoSnippet')).toBe(false);
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+
+    // And *Keep editing* gives the panel back, with the duplicate still sendable.
+    control(panel.target, conflictChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(false);
+    expect(control(panel.target, 'browser.matchDuplication.duplicate').disabled).toBe(false);
+    panel.stop();
+  }); // End of the "refused reload stops being offered" case
+}); // End of the "duplicate panel's conflict" suite
+
 /** The workspace summary the state below is opened over; nothing reads it. */
 const SUMMARY: WorkspaceSummary = {
   root: '/tmp/espanso',
@@ -754,9 +936,10 @@ describe('a duplicate panel over the real workspace state', () => {
         ): Promise<MatchSaveAnswer> => state.duplicateMatch(id, baseRevision, acknowledgement),
         reload: (document: DocumentId): Promise<IpcFailure | null> =>
           state.rereadDocument(document),
-        // **The window's own adoption**, which no case here reaches: the five match
-        // surfaces declare `offersReload: false`, so no control that could spend a
-        // confirmation is drawn. `matchDuplication.test.ts` drives the transition directly.
+        // **The window's own adoption**, which no case in this suite reaches: it
+        // never opens the conflict panel, and a conflict installs nothing until a
+        // reload has been asked for *and* confirmed. The conflict suite above
+        // records every call instead.
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         close: (): void => undefined
       }

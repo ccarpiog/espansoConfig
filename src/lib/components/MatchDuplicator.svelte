@@ -9,6 +9,7 @@
     baseRevisionOf,
     beginDuplicate,
     confirmDiskReload,
+    CONFLICT_CAPABILITIES,
     dismissDuplicationOutcome,
     duplicationCouldNotBeSent,
     duplicationRecoveryFailed,
@@ -22,9 +23,11 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { ConflictChoice } from '../browser/saveOutcome';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import SourceText from './SourceText.svelte';
   import {
     t,
     tConflictChoice,
+    tConflictOperation,
     tDetailField,
     tDraftError,
     tDuplicationRecovery,
@@ -138,6 +141,17 @@
    * `view.cannotDuplicate` renders is what tells the person to close this and
    * pick the snippet in the list again. Offering a *Duplicate it anyway* would be
    * a control that cannot work.
+   *
+   * **The conflict panel shows two sides and identifies nothing across them.** The
+   * retained side is `view.conflictOperation` — the model's summary of what this
+   * session asked for — because a `MatchId` is a revision-scoped protocol carrier
+   * and not authored text, which is why the consult's Q4 refuses a copy here as a
+   * property of the drafted value and `conflictChoicesFor` refuses it whatever this
+   * surface declares. The disk side is the whole file text the command layer read,
+   * through `SourceText`; which arm of it is drawn is `conflictDiskText`'s decision
+   * and not this markup's. The confirmed reload installs the disk projection and
+   * **closes** this panel: nothing is loaded in its place, because finding "the
+   * same" snippet in another revision is 2c-4b.
    *
    * **The panel cannot be left while a duplicate is in flight**, for 2c-1b's
    * reason: the request is authorized and cannot be cancelled, so unmounting
@@ -403,21 +417,21 @@
   /**
    * Does what one conflict choice says.
    *
-   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
-   * same.** `matchDuplication.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
+   * **Three of the four arms are reachable as of 2c-4a-3b.**
+   * `matchDuplication.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
    * `operationChoice` — a `MatchId` is a revision-scoped protocol carrier, not user
    * content — so *Copy draft* can never be offered here, whatever a later change
-   * sets. The reload adopts the disk projection and **closes** the duplicator; it
-   * exists, is called below and is driven by `matchDuplication.test.ts`, and
-   * 2c-4a-3 flips the capability boolean that draws its control.
+   * sets; `offersReload` is now `true`, so `conflictChoicesFor` names the two
+   * reload labels and this panel draws them. The reload adopts the disk projection
+   * and **closes** the duplicator; it was built and wired at 2c-4a-2 and is driven
+   * by `matchDuplication.test.ts`.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
    * and there is no `default`. A *newly offered* member does not — offering is the
    * model's, and a choice becomes a control the moment `conflictChoicesFor` names
-   * it. That is why the arms below are **implemented before they are offered**:
-   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
-   * have forced that order.
+   * it. No type in this file could have forced that an arm does anything, which is
+   * why the mounted suite presses every control this panel draws.
    *
    * @param choice - The choice the person picked.
    */
@@ -652,10 +666,48 @@
         <p class="kind">
           {t('browser.matchDuplication.revisionDisk', { revision: conflict.diskRevision })}
         </p>
+
+        <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
+        <!-- What this session asked for, as the model summarises it. Nothing was
+             typed here and there is no destination to hold — the clone lands
+             immediately after its source — so there is no draft to render and no
+             copy to offer (consult Q4); the snippet it is about is named at the top
+             of this panel, from the projection this session opened over. -->
+        {#if current.view.conflictOperation !== null}
+          <p>{tConflictOperation(current.view.conflictOperation)}</p>
+        {/if}
+        <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
+
+        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+        <!-- The whole file as the command layer read it, paired with
+             `diskRevision`, and never a projection of "the same snippet" — which
+             this application will not identify across revisions (consult Q5).
+             Which arm is drawn is `conflictDiskText`'s decision and not this
+             markup's (2c-4a-3a review, finding 5). -->
+        {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
+          <SourceText text={current.view.diskText.text} documentStart />
+        {:else}
+          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+        {/if}
+
+        <!-- The second step's warning. The shared line above is the whole
+             close/abandon guarantee and this one never restates it (2c-4a-3b
+             review, finding 3); it says only what this surface alone can say —
+             that no snippet in the new version will be guessed at, and what to do
+             about that afterwards. -->
+        {#if current.view.awaitingReloadConfirmation}
+          <p class="kind">{t('browser.matchDuplication.reloadIdentifiesNoSnippet')}</p>
+        {/if}
+
+        <!-- A control that has just gone, with the reason in its place. -->
+        {#if current.view.reloadUnavailable}
+          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+        {/if}
+
         <p class="choices">
           {#each current.view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -682,6 +734,13 @@
 
   h2 {
     margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  /* The conflict panel's two headings: what was asked for, and what is on disk. */
+  h3 {
+    margin: 0.375rem 0 0;
     font-size: 0.8125rem;
     font-weight: 600;
   }

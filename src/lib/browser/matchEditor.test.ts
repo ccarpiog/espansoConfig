@@ -1084,10 +1084,14 @@ describe('the conflict, which is terminal in this sub-phase', () => {
     ]);
     for (const locale of LOCALES) {
       for (const choice of choices) {
-        const label = DICTIONARIES[locale][conflictChoiceKey(choice)].toLowerCase();
-        expect(label).not.toContain('keep my draft');
-        expect(label).not.toContain('mantener mi borrador');
-      }
+        // Both draft kinds, because `confirmReload` has one label per kind since
+        // 2c-4a-3b and a forbidden phrase could hide in either of them.
+        for (const draftKind of ['authoredText', 'operationChoice'] as const) {
+          const label = DICTIONARIES[locale][conflictChoiceKey(choice, draftKind)].toLowerCase();
+          expect(label).not.toContain('keep my draft');
+          expect(label).not.toContain('mantener mi borrador');
+        } // End of the loop over the two draft kinds
+      } // End of the loop over the choices this surface offers
     } // End of the loop over the two locales
   });
 

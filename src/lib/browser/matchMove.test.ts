@@ -730,10 +730,13 @@ describe('starting a move', () => {
     // And the view a screen draws from the same live projections agrees, which is
     // the half a refusal computed off the frozen session alone would have missed.
     expect(matchMoveView(held, [again]).cannotMove).toBe('outOfDate');
-    // The frozen reason survives on its own field, deliberately — it is what a
-    // panel would have said, and the rule that it may not be drawn beside an
-    // `outOfDate` sentence is `MatchMoveView.notMovable`'s, enforceable only there.
-    expect(matchMoveView(held, [again]).notMovable).toBe('readOnly');
+    // **And the view withholds the frozen reason**, since 2c-4a-3b: the precedence
+    // that puts `outOfDate` above `notMovable` is undone if the definite claim
+    // reaches the screen through a second field, and until then a condition in
+    // `MatchMover.svelte` was the only thing stopping it. The raw frozen verdict is
+    // still on the session for a caller that wants the fact rather than a sentence.
+    expect(matchMoveView(held, [again]).notMovableToShow).toBeNull();
+    expect(held.eligibility).toEqual({ kind: 'refused', reason: 'readOnly' });
     // Nothing is sendable either way; `beginMove` refuses both without saying why.
     expect(beginMove(held, live(0, again))).toBeNull();
   });
@@ -883,7 +886,16 @@ describe('what comes back', () => {
     const conflicted = applyMove(inFlight(), CONFLICT, NOT_OWED);
     expect(conflictOf(conflicted)).not.toBeNull();
     expect(canMove(conflicted, HELD)).toBe(false);
-    expect(matchMoveView(conflicted, HELD).conflictChoices).toEqual(['keepEditing']);
+    // Two, since 2c-4a-3b flipped `offersReload`: the non-destructive way out and
+    // the first step of the reload. Never a copy — a placement is a positional
+    // choice, and `conflictChoicesFor` refuses one whatever this surface declares.
+    expect(matchMoveView(conflicted, HELD).conflictChoices).toEqual([
+      'keepEditing',
+      'reloadDiskVersion'
+    ]);
+    // The summary is read off the placement the conflict retained, so it says what
+    // this session asked for and not what the session now holds.
+    expect(matchMoveView(conflicted, HELD).conflictOperation).toBe('moveToEnd');
     const dismissed = dismissMoveOutcome(conflicted);
     expect(conflictOf(dismissed)).toBeNull();
     // **Dismissing the panel gives the session back, and 2c-4a-2 is where that
@@ -1089,8 +1101,9 @@ describe('the view a screen draws', () => {
     expect(view.document).toBe(2);
     expect(view.placement).toEqual({ kind: 'end' });
     expect(view.canMove).toBe(true);
-    expect(view.notMovable).toBeNull();
+    expect(view.notMovableToShow).toBeNull();
     expect(view.cannotMove).toBeNull();
+    expect(view.conflictOperation).toBeNull();
     expect(view.moving).toBe(false);
     expect(view.moved).toBe(false);
     expect(view.spent).toBe(false);
@@ -1103,9 +1116,31 @@ describe('the view a screen draws', () => {
     const packaged = file({ kind: 'Package', readOnly: true });
     const view = matchMoveView(session(0, packaged), [packaged]);
     expect(view.canMove).toBe(false);
-    expect(view.notMovable).toBe('readOnly');
+    expect(view.notMovableToShow).toBe('readOnly');
     expect(view.cannotMove).toBe('notMovable');
   });
+
+  it('gives the frozen reason only when the frozen verdict is the one that won', () => {
+    // **2c-3c-3's Medium, brought here at 2c-4a-3b.** The rule is written against
+    // `'notMovable'` and not against `outOfDate`, so a refusal added above it in
+    // `refusalGiven`'s order suppresses the frozen detail by construction rather
+    // than by a later edit. Driven from both sides, because a view that never
+    // answered a frozen reason at all would satisfy the suppression half trivially.
+    const packaged = file({ kind: 'Package', readOnly: true });
+    const live = matchMoveView(session(0, packaged), [packaged]);
+    expect(live.cannotMove).toBe('notMovable');
+    expect(live.notMovableToShow).toBe('readOnly');
+
+    // **A refusal above it that is not `outOfDate`.** A session cannot reach a
+    // conflict with a refused eligibility — it can never send — so the reachable
+    // proof that the rule is written against the *value* rather than against
+    // `outOfDate` is `saveInFlight`, which `refusalGiven` also ranks above
+    // `notMovable`. A rule written the old way would still be drawing *this
+    // snippet cannot be moved* here.
+    const inFlight = matchMoveView({ ...session(0, packaged), phase: 'saving' }, [packaged]);
+    expect(inFlight.cannotMove).toBe('saveInFlight');
+    expect(inFlight.notMovableToShow).toBeNull();
+  }); // End of the "frozen reason only when it won" case
 
   it('carries whatever presentation notes the save reported, unchanged', () => {
     // **A move produces none today, and that is read off the core rather than
@@ -1165,15 +1200,16 @@ describe('the identities a session holds', () => {
   });
 }); // End of the "identities" suite
 
-describe('the confirmed reload, which is built but not offered yet', () => {
-  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
-  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
-  // this surface's control is right, and withholding the **transition** was not —
-  // an unoffered transition can be built and driven without drawing anything, and
-  // leaving it out would have made step 3 invent five model machines on top of
-  // five panels. So the transition below is built **and** wired: this surface's
-  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
-  // screen reaches it. Every case here calls it directly, as that arm does.
+describe('the confirmed reload, offered since 2c-4a-3b', () => {
+  // **2c-4a-2's High finding, and the trade it made paying off at 2c-4a-3b.** The
+  // consult's Q3 gives every one of the six surfaces a confirmed reload;
+  // withholding the *offering* until a panel was drawn for it was right, and
+  // withholding the **transition** was not — an unoffered transition can be built
+  // and driven without drawing anything, and leaving it out would have made step 3
+  // invent five model machines on top of five panels. So this suite drove the
+  // transition before any control could reach it, and 2c-4a-3b then flipped one
+  // boolean. Every case here calls the transition directly, as the component's
+  // `conflictAction` arm does.
 
   /**
    * A conflicted move of a chosen destination.
@@ -1216,7 +1252,7 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     // Straight to the destructive transition, with no warning behind it.
     expect(reloadTheDiskVersion(stuck, recorder.adopt)).toBe(stuck);
     const asked = askToReloadDiskVersion(stuck);
-    expect(matchMoveView(asked, HELD).awaitingReloadConfirmation).toBe(true);
+    expect(matchMoveView(asked, HELD).reloadWarning).toBe('positionalDestination');
     // The warning alone is not a confirmation either.
     expect(reloadTheDiskVersion(asked, recorder.adopt)).toBe(asked);
     expect(recorder.adoptions).toEqual([]);
@@ -1264,7 +1300,7 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     // *Keep editing* and the copy remain (2c-4a-3a review, finding 3).
     expect(after.reload.kind).toBe('refused');
     expect(matchMoveView(after, HELD).reloadUnavailable).toBe(true);
-    expect(matchMoveView(after, HELD).awaitingReloadConfirmation).toBe(false);
+    expect(matchMoveView(after, HELD).reloadWarning).toBeNull();
     expect(matchMoveView(after, HELD).conflictChoices).not.toContain('confirmReload');
     expect(matchMoveView(after, HELD).conflictChoices).not.toContain('reloadDiskVersion');
     expect(matchMoveView(after, HELD).conflictChoices).toContain('keepEditing');
@@ -1274,16 +1310,103 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     expect(conflictOf(after)).not.toBeNull();
   }); // End of the "window refused" case
 
-  it('does not offer the reload, so no control is drawn for it', () => {
-    // The half of the review's judgement that stands: the transition exists, is
-    // driven here and is called by this surface's `conflictAction`; `offersReload`
-    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
-    // boolean to flip.
-    const asked = askToReloadDiskVersion(conflicted());
-    expect(matchMoveView(asked, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
-      'keepEditing'
+  it('offers the second step once the first has been taken, and never both', () => {
+    // **2c-4a-3b flipped `offersReload`**, over machinery this suite already drove:
+    // the transition existed and this surface's `conflictAction` already called it,
+    // so what the flip added is the control. The two labels are never offered
+    // together — the destructive one is a second step, by `conflictChoicesFor`.
+    const conflict = conflicted();
+    expect(matchMoveView(conflict, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
+      'keepEditing',
+      'reloadDiskVersion'
     ]);
-  });
+    expect(matchMoveView(conflict, HELD).reloadWarning).toBeNull();
+
+    const asked = askToReloadDiskVersion(conflict);
+    expect(matchMoveView(asked, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
+      'keepEditing',
+      'confirmReload'
+    ]);
+    expect(matchMoveView(asked, HELD).reloadWarning).toBe('positionalDestination');
+    // And still no copy: the Q4 rule is about what this draft *is*.
+    expect(matchMoveView(asked, HELD).conflictChoices).not.toContain('copyDraft');
+  }); // End of the "two-step reload is offered" case
+
+  it('warns about the destination it really retained, arm by arm', () => {
+    // **The 2c-4a-3b review's finding 1.** The one sentence this replaces said the
+    // destination *names snippets of the version this window read* — true of an
+    // `after`, and false of `top` and `end`, which name a position and no snippet
+    // at all. The claim now depends on the arm, and it depends on it here rather
+    // than in `MatchMover.svelte`: a rule written into one renderer is carried by
+    // that renderer's mounted suite alone.
+    for (const [placement, warning] of [
+      [{ kind: 'top' as const }, 'positionalDestination'],
+      [{ kind: 'end' as const }, 'positionalDestination'],
+      [{ kind: 'after' as const, anchor: live(2) }, 'anchoredDestination']
+    ] as const) {
+      const started = beginMove(choosePlacement(session(1), placement), live(1));
+      if (started === null) {
+        throw new Error(`this case needs ${warning} to be sendable`);
+      }
+      const asked = askToReloadDiskVersion(applyMove(started.session, CONFLICT, NOT_OWED));
+      expect(matchMoveView(asked, HELD).reloadWarning, warning).toBe(warning);
+    } // End of the loop over the three placement arms
+  }); // End of the "warning per arm" case
+
+  it('summarises the placement the conflict retained, one code per arm', () => {
+    // **The `operationChoice` side of the comparison** (consult Q5). Every arm of
+    // `MovePlacement` gets its own summary, and the `after` one names no anchor:
+    // an anchor is a revision-scoped identity, and the destination list the panel
+    // still draws is what marks which one was chosen.
+    // The middle snippet, so all three placements really move it and `beginMove`
+    // produces something to send for each.
+    for (const [placement, summary] of [
+      [{ kind: 'top' as const }, 'moveToTop'],
+      [{ kind: 'end' as const }, 'moveToEnd'],
+      [{ kind: 'after' as const, anchor: live(2) }, 'moveAfterSnippet']
+    ] as const) {
+      const started = beginMove(choosePlacement(session(1), placement), live(1));
+      if (started === null) {
+        throw new Error(`this case needs ${summary} to be sendable`);
+      }
+      const conflict = applyMove(started.session, CONFLICT, NOT_OWED);
+      expect(matchMoveView(conflict, HELD).conflictOperation, summary).toBe(summary);
+    } // End of the loop over the three placement arms
+  }); // End of the "placement summary" case
+
+  it('stops pointing at a marked destination once the reprojection has dropped it', () => {
+    // **The 2c-4a-3b review's finding 2.** The `after` summary sends the reader to
+    // the destination the list above marks, and `movePlacementOptionsOf` stops
+    // offering an anchor whose parse this window has replaced — so a reprojection
+    // arriving *while the conflict is still displayed* took the mark away and left
+    // the sentence pointing at nothing. The two arms are decided from the same
+    // option list the panel draws, so they cannot disagree with it.
+    const started = beginMove(
+      choosePlacement(session(1), { kind: 'after', anchor: live(2) }),
+      live(1)
+    );
+    if (started === null) {
+      throw new Error('an anchored destination is sendable');
+    }
+    const conflict = applyMove(started.session, CONFLICT, NOT_OWED);
+    // While the window still holds the parse the anchor was minted from, the
+    // option is offered and marked, and the sentence may point at it.
+    const held = matchMoveView(conflict, HELD);
+    expect(held.conflictOperation).toBe('moveAfterSnippet');
+    expect(
+      movePlacementOptionsOf(conflict, HELD).some((one) => one.chosen && one.anchor !== null)
+    ).toBe(true);
+
+    // The window reads the file again — from the sidebar, from another surface's
+    // committed save — and nothing about the conflict changes. The destination
+    // list does: the anchor belongs to a parse that is gone.
+    const now: readonly DocumentView[] = [reread()];
+    expect(movePlacementOptionsOf(conflict, now).some((one) => one.chosen)).toBe(false);
+    expect(matchMoveView(conflict, now).conflictOperation).toBe('moveAfterSnippetNoLongerShown');
+    // And the conflict is still the one being shown: this is a sentence changing,
+    // never the panel moving on.
+    expect(matchMoveView(conflict, now).conflict).not.toBeNull();
+  }); // End of the "dropped anchor" case
 
   it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {
     // A confirmation is a person's answer to **one** conflict. Reaching the

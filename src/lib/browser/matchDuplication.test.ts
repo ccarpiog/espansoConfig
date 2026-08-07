@@ -488,7 +488,16 @@ describe('what comes back', () => {
     expect(conflicted.invalidated).toBe(false);
     expect(conflictOf(conflicted)).not.toBeNull();
     expect(duplicationSubmissionRefusal(conflicted, HELD)).toBe('conflict');
-    expect(matchDuplicationView(conflicted, HELD).conflictChoices).toEqual(['keepEditing']);
+    // Two, since 2c-4a-3b flipped `offersReload`: the non-destructive way out and
+    // the first step of the reload. Never a copy — a `MatchId` is a protocol
+    // carrier, and `conflictChoicesFor` refuses one whatever this surface declares.
+    expect(matchDuplicationView(conflicted, HELD).conflictChoices).toEqual([
+      'keepEditing',
+      'reloadDiskVersion'
+    ]);
+    expect(matchDuplicationView(conflicted, HELD).conflictOperation).toBe(
+      'duplicateSnippet'
+    );
     // Dismissing the panel gives the session back, against the projection this
     // window still holds. What has not changed is the file: a resend carries the
     // frozen base revision, which the command refuses. Nothing here sends one, so
@@ -878,15 +887,16 @@ describe('the identities a session holds', () => {
   });
 }); // End of the "identities" suite
 
-describe('the confirmed reload, which is built but not offered yet', () => {
-  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
-  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
-  // this surface's control is right, and withholding the **transition** was not —
-  // an unoffered transition can be built and driven without drawing anything, and
-  // leaving it out would have made step 3 invent five model machines on top of
-  // five panels. So the transition below is built **and** wired: this surface's
-  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
-  // screen reaches it. Every case here calls it directly, as that arm does.
+describe('the confirmed reload, offered since 2c-4a-3b', () => {
+  // **2c-4a-2's High finding, and the trade it made paying off at 2c-4a-3b.** The
+  // consult's Q3 gives every one of the six surfaces a confirmed reload;
+  // withholding the *offering* until a panel was drawn for it was right, and
+  // withholding the **transition** was not — an unoffered transition can be built
+  // and driven without drawing anything, and leaving it out would have made step 3
+  // invent five model machines on top of five panels. So this suite drove the
+  // transition before any control could reach it, and 2c-4a-3b then flipped one
+  // boolean. Every case here calls the transition directly, as the component's
+  // `conflictAction` arm does.
 
   /**
    * A conflicted duplicate of a live session.
@@ -987,16 +997,26 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     expect(conflictOf(after)).not.toBeNull();
   }); // End of the "window refused" case
 
-  it('does not offer the reload, so no control is drawn for it', () => {
-    // The half of the review's judgement that stands: the transition exists, is
-    // driven here and is called by this surface's `conflictAction`; `offersReload`
-    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
-    // boolean to flip.
-    const asked = askToReloadDiskVersion(conflicted());
+  it('offers the second step once the first has been taken, and never both', () => {
+    // **2c-4a-3b flipped `offersReload`**, over machinery this suite already drove:
+    // the transition existed and this surface's `conflictAction` already called it,
+    // so what the flip added is the control. The two labels are never offered
+    // together — the destructive one is a second step, by `conflictChoicesFor`.
+    const conflict = conflicted();
+    expect(matchDuplicationView(conflict, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>(
+      ['keepEditing', 'reloadDiskVersion']
+    );
+    expect(matchDuplicationView(conflict, HELD).awaitingReloadConfirmation).toBe(false);
+
+    const asked = askToReloadDiskVersion(conflict);
     expect(matchDuplicationView(asked, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
-      'keepEditing'
+      'keepEditing',
+      'confirmReload'
     ]);
-  });
+    expect(matchDuplicationView(asked, HELD).awaitingReloadConfirmation).toBe(true);
+    // And still no copy: the Q4 rule is about what this draft *is*.
+    expect(matchDuplicationView(asked, HELD).conflictChoices).not.toContain('copyDraft');
+  }); // End of the "two-step reload is offered" case
 
   it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {
     // A confirmation is a person's answer to **one** conflict. Reaching the

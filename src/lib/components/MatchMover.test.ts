@@ -13,9 +13,13 @@
  * suite drives the value over plain fixtures; it cannot see any of the four
  * claims this sub-phase's screen makes and only a screen can break:
  *
- * 1. **the frozen `notMovable` reason is never drawn beside a live `outOfDate`**
- *    — the one rule `matchMove.ts` states and cannot enforce, because the only
- *    place it can be broken is a `.svelte` file;
+ * 1. **the panel renders the model's `notMovableToShow` and decides nothing about
+ *    it** — the precedence between the frozen reason and a live `outOfDate` is
+ *    `matchMoveView`'s since 2c-4a-3b, and the two cases below are its rendered
+ *    halves rather than the rule itself. They are also this renderer's standing
+ *    regression cover for the shape the duplicator left behind at 2c-3c-3: the
+ *    condition they drive used to live in this markup, and a mounted suite is
+ *    exactly what can see a rule that lives there;
  * 2. **the identity handed to `beginMove` is read from the live projections**,
  *    so a panel retained across a re-read of the file sends nothing;
  * 3. **`unsavedDraftFor` has a producer at all**, which every model test supplied
@@ -42,7 +46,12 @@
  * helpers here do.
  */
 
-import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
+import {
+  conflictChoiceKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
+import type { MovePlacement } from '../browser/matchMove';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
@@ -219,6 +228,27 @@ const AFTER_THE_RENAME: IpcFailure = {
   }
 };
 
+/**
+ * The whole file text the conflict's fresh read carried.
+ *
+ * Distinguishable from anything the panel holds, so a case can tell the disk side
+ * of the panel from the operation summary by looking at the rendered text.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/** A word that appears in {@link DISK_TEXT} and nowhere else on the screen. */
+const DISK_TEXT_MARKER = 'theirs';
+
+/** A move the file had moved on under. */
+const CONFLICTED: SaveResult = {
+  outcome: 'conflict',
+  expected: BASE,
+  found: AFTER,
+  disk_revision: AFTER,
+  disk_text: DISK_TEXT,
+  disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: AFTER })
+};
+
 /** A rejection that says this window and the file disagree about an address. */
 const STALE_IDENTITY: IpcFailure = {
   kind: 'command',
@@ -261,6 +291,14 @@ interface Mounted {
   readonly target: HTMLElement;
   /** Every call the panel made, in order. */
   readonly calls: RecordedMove[];
+  /**
+   * Every conflict the panel asked the window to adopt, in order.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing until a
+   * reload has been asked for *and* confirmed, so an entry here in a case that
+   * only reached the panel is the pre-emptive install the consult's Q2 ruled out.
+   */
+  readonly adoptions: ConflictModel<MovePlacement>[];
   /** How many times the panel asked to be closed. */
   readonly closed: () => number;
   /** How many times the panel asked for the file to be read again. */
@@ -281,6 +319,12 @@ interface Opened {
   readonly draft?: MatchId | null;
   /** What a re-read answers. */
   readonly reload?: IpcFailure | null;
+  /**
+   * What the window answers when the panel asks it to adopt the disk observation.
+   *
+   * All three values are real production answers; `installed` is the default.
+   */
+  readonly adoption?: DiskAdoptionOutcome;
 }
 
 /**
@@ -294,6 +338,7 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
   const projection = opened.projection ?? file();
   const remaining = [...answers];
   const calls: RecordedMove[] = [];
+  const adoptions: ConflictModel<MovePlacement>[] = [];
   let closes = 0;
   let reloads = 0;
   const target = document.createElement('div');
@@ -336,10 +381,13 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
         reloads += 1;
         return Promise.resolve(opened.reload ?? null);
       },
-      // **The window's own adoption**, which no case here reaches: the five match
-      // surfaces declare `offersReload: false`, so no control that could spend a
-      // confirmation is drawn. `matchMove.test.ts` drives the transition directly.
-      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+      // **The window's own adoption**, recorded rather than assumed. Since
+      // 2c-4a-3b this surface offers the reload, so a case can press the two
+      // controls that reach it and see exactly when — and whether — it is called.
+      adoptDiskVersion: (conflict: ConflictModel<MovePlacement>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return opened.adoption ?? 'installed';
+      },
       close: (): void => {
         closes += 1;
       }
@@ -348,6 +396,7 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
   return {
     target,
     calls,
+    adoptions,
     closed: () => closes,
     reloads: () => reloads,
     stop: () => {
@@ -730,6 +779,183 @@ describe('the mounted destination panel', () => {
   }); // End of the "failed re-read" case
 }); // End of the "mounted destination panel" suite
 
+/**
+ * Reaches the conflict panel: choose a destination, move, and answer with one.
+ *
+ * @param adoption - What the window answers when asked to adopt.
+ * @param label - Which destination to choose first. The default names a snippet,
+ *   which is the arm most of these cases are about; a case checking what the
+ *   confirmation warns has to be able to pick a positional one instead.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflicted(
+  adoption: DiskAdoptionOutcome = 'installed',
+  label: string = afterLabel(':date')
+): Promise<Mounted> {
+  const panel = mountMover([{ result: CONFLICTED }], { adoption });
+  destination(panel.target, label).click();
+  flushSync();
+  control(panel.target, 'browser.matchMove.move').click();
+  await settle();
+  return panel;
+} // End of function conflicted()
+
+describe('the destination panel’s conflict', () => {
+  it('shows the chosen placement beside the disk text, and moves nothing', async () => {
+    // **The comparison the consult's Q5 ruled, on a surface that drafts no text.**
+    // The retained side is the model's summary of the placement the conflict kept —
+    // never a `MovePlacement` rendered as though it were content — and the disk side
+    // is the whole file text the command layer read, through `SourceText`.
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.retainedOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operation.moveAfterSnippet')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operationIdentityIsOld')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.diskVersion')).toBe(true);
+    expect(panel.target.textContent).toContain(DISK_TEXT_MARKER);
+    expect(panel.target.querySelectorAll('.panel .sourceText')).toHaveLength(1);
+    // All three revisions, always.
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchMove.revisionExpected', { revision: BASE })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchMove.revisionFound', { revision: AFTER })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchMove.revisionDisk', { revision: AFTER })
+    );
+    // The destination list still marks the chosen one, which is where the summary's
+    // "the one marked as chosen above" points; the model names no anchor itself.
+    expect(destination(panel.target, afterLabel(':date')).getAttribute('aria-pressed')).toBe(
+      'true'
+    );
+    // Two choices, and the destructive one is a second step away. No copy, ever.
+    expect(button(panel.target, conflictChoiceKey('keepEditing', 'operationChoice'))).not.toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).not.toBeNull();
+    expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
+    expect(button(panel.target, conflictChoiceKey('copyDraft', 'operationChoice'))).toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "both sides" case
+
+  it('warns that the reload closes this panel, never that it replaces text', async () => {
+    // **2c-4a-3b's verification of `reloadOutcome`.** `reloadClosesSurface` ends
+    // *copy it first if you want to keep it*, and there is no control here that
+    // could — consult Q4 refuses one as a property of what this surface drafts.
+    const panel = await conflicted();
+    expect(says(panel.target, 'browser.saveOutcome.reloadAbandonsOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.reloadClosesSurface')).toBe(false);
+    expect(says(panel.target, 'browser.saveOutcome.reloadDiscardsDraft')).toBe(false);
+    expect(says(panel.target, 'browser.saveOutcome.operationKeptInMemory')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.draftKeptInMemory')).toBe(false);
+    panel.stop();
+  }); // End of the "surface-aware warning" case
+
+  it('adopts the disk version and closes only when the reload is confirmed', async () => {
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.matchMove.reloadDropsAnchoredDestination')).toBe(false);
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.matchMove.reloadDropsAnchoredDestination')).toBe(true);
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(panel.closed()).toBe(1);
+    // Nothing was sent a second time: a conflict is not a retry.
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "confirmed reload" case
+
+  it('warns about the destination it really holds, and never about a snippet for a position', async () => {
+    // **The 2c-4a-3b review's finding 1, on the screen that draws it.** The one
+    // sentence this replaces claimed the destination *names snippets of the
+    // version this window read*, which is false of `top` and of `end`. This panel
+    // decides nothing: it draws the arm `matchMoveView` chose, and the two cases
+    // below are that choice rendered.
+    const positional = await conflicted(
+      'installed',
+      DICTIONARIES.en['browser.matchMove.position.end']
+    );
+    control(positional.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(says(positional.target, 'browser.matchMove.reloadDropsPositionalDestination')).toBe(
+      true
+    );
+    expect(says(positional.target, 'browser.matchMove.reloadDropsAnchoredDestination')).toBe(false);
+    positional.stop();
+
+    const anchored = await conflicted();
+    control(anchored.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(says(anchored.target, 'browser.matchMove.reloadDropsAnchoredDestination')).toBe(true);
+    expect(says(anchored.target, 'browser.matchMove.reloadDropsPositionalDestination')).toBe(false);
+    anchored.stop();
+  }); // End of the "warning per arm on screen" case
+
+  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+    // **`alreadyThere` is a success**: the window already holds the bytes that
+    // were asked for. `refused` is the only answer that means it did not move.
+    for (const [answer, closes] of [
+      ['alreadyThere', 1],
+      ['installed', 1],
+      ['refused', 0]
+    ] as const) {
+      const panel = await conflicted(answer);
+      control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+      flushSync();
+      control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+      flushSync();
+
+      expect(panel.adoptions, answer).toHaveLength(1);
+      expect(panel.closed(), answer).toBe(closes);
+      expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
+        closes === 0
+      );
+      panel.stop();
+    } // End of the loop over the three adoption answers
+  }); // End of the "three adoption answers" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
+    // only be refused again is gone, and the sentence takes its place.
+    const panel = await conflicted('refused');
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(says(panel.target, 'browser.matchMove.reloadDropsAnchoredDestination')).toBe(false);
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+
+    // And *Keep editing* gives the panel back, with the destination still chosen.
+    control(panel.target, conflictChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(false);
+    expect(control(panel.target, 'browser.matchMove.move').disabled).toBe(false);
+    panel.stop();
+  }); // End of the "refused reload stops being offered" case
+}); // End of the "destination panel's conflict" suite
+
 /** The workspace summary the state below is opened over; nothing reads it. */
 const SUMMARY: WorkspaceSummary = {
   root: '/tmp/espanso',
@@ -800,9 +1026,10 @@ describe('a move panel over the real workspace state', () => {
         ): Promise<MatchSaveAnswer> => state.moveMatch(id, after, baseRevision, acknowledgement),
         reload: (document: DocumentId): Promise<IpcFailure | null> =>
           state.rereadDocument(document),
-        // **The window's own adoption**, which no case here reaches: the five match
-        // surfaces declare `offersReload: false`, so no control that could spend a
-        // confirmation is drawn. `matchMove.test.ts` drives the transition directly.
+        // **The window's own adoption**, which no case in this suite reaches: it
+        // never opens the conflict panel, and a conflict installs nothing until a
+        // reload has been asked for *and* confirmed. The conflict suite above
+        // records every call instead.
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         close: (): void => undefined
       }
@@ -838,4 +1065,101 @@ describe('a move panel over the real workspace state', () => {
     void unmount(component);
     target.remove();
   }); // End of the "recovery over the real state" case
+
+  it('stops pointing at a marked destination when a reprojection drops it under an open conflict', async () => {
+    // **The 2c-4a-3b review's finding 2, and the coverage the review named as
+    // missing.** The `after` summary sends the reader to the destination the list
+    // above marks. Every mounted case before this one held one static projection,
+    // so nothing could see what happens when the window replaces that parse
+    // *while the conflict is still displayed* — which a re-read from the sidebar
+    // or another surface's committed save does. Only a real `BrowserState` can
+    // stage it: `state.views` is `$state`, so the panel re-derives on its own, and
+    // an array a test swapped would not be noticed at all.
+    const refusal: CommandResult<never> = {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    };
+    const commands: BrowserCommands = {
+      openWorkspace: vi.fn(async (): Promise<CommandResult<WorkspaceSummary>> => {
+        return { ok: true, value: SUMMARY };
+      }),
+      listDocuments: vi.fn(async (): Promise<CommandResult<readonly DocumentSummary[]>> => {
+        return { ok: true, value: [FILE] };
+      }),
+      getDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => {
+        return { ok: true, value: file() };
+      }),
+      getMatch: vi.fn(async (): Promise<CommandResult<MatchView>> => refusal),
+      reloadDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => {
+        return { ok: true, value: reread() };
+      }),
+      documentText: vi.fn(async (): Promise<CommandResult<string>> => refusal),
+      moveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => {
+        return { ok: true, value: CONFLICTED };
+      }),
+      saveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      saveRawDocument: vi.fn(async () => refusal)
+    };
+    const state: BrowserState = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(MatchMover, {
+      target,
+      props: {
+        projection: state.views[0]!,
+        match: state.views[0]!.matches[0]!,
+        file: FILE,
+        projections: (): readonly DocumentView[] => state.views,
+        unsavedDraftFor: (): MatchId | null => null,
+        move: (
+          id: MatchId,
+          after: MatchId | null,
+          baseRevision: ContentRevision,
+          acknowledgement: Acknowledgement
+        ): Promise<MatchSaveAnswer> => state.moveMatch(id, after, baseRevision, acknowledgement),
+        reload: (document: DocumentId): Promise<IpcFailure | null> =>
+          state.rereadDocument(document),
+        // Never reached: this case never confirms a reload, and a conflict
+        // installs nothing on its own.
+        adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+        close: (): void => undefined
+      }
+    });
+    flushSync();
+
+    destination(target, afterLabel(':date')).click();
+    flushSync();
+    control(target, 'browser.matchMove.move').click();
+    await settle();
+
+    // The conflict is on screen, the anchor is still offered and still marked, and
+    // the summary is the one that sends the reader to it.
+    expect(destination(target, afterLabel(':date')).getAttribute('aria-pressed')).toBe('true');
+    expect(says(target, 'browser.saveOutcome.operation.moveAfterSnippet')).toBe(true);
+    expect(says(target, 'browser.saveOutcome.operation.moveAfterSnippetNoLongerShown')).toBe(false);
+
+    // The window reads the file again — nothing here asked it to, which is the
+    // point — and the conflict panel stays exactly where it was.
+    expect(await state.rereadDocument(2)).toBeNull();
+    flushSync();
+
+    expect(state.views[0]?.revision).toBe(AFTER);
+    expect(destinations(target).map((one) => one.textContent?.trim())).toEqual([
+      DICTIONARIES.en['browser.matchMove.position.top'],
+      DICTIONARIES.en['browser.matchMove.position.end']
+    ]);
+    expect(says(target, 'browser.saveOutcome.operation.moveAfterSnippet')).toBe(false);
+    expect(says(target, 'browser.saveOutcome.operation.moveAfterSnippetNoLongerShown')).toBe(true);
+    // Still a conflict, and still nothing written or installed.
+    expect(says(target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(commands.moveMatch).toHaveBeenCalledTimes(1);
+
+    void unmount(component);
+    target.remove();
+  }); // End of the "reprojection under an open conflict" case
 }); // End of the "move panel over the real state" suite

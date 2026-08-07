@@ -8,6 +8,7 @@
     baseRevisionOf,
     cancelDelete,
     confirmDelete,
+    CONFLICT_CAPABILITIES,
     confirmDiskReload,
     deletionCouldNotBeSent,
     dismissDeletionOutcome,
@@ -21,9 +22,11 @@
   import type { ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import SourceText from './SourceText.svelte';
   import {
     t,
     tConflictChoice,
+    tConflictOperation,
     tDeletionRefusal,
     tDetailField,
     tDraftError,
@@ -92,6 +95,17 @@
    * in this file holds a `MatchId` that outlives the commit except the session's
    * record of *what was deleted*, which is offered as nothing and cannot be acted
    * on: `deleted` is set and no transition in the model clears it.
+   *
+   * **The conflict panel shows two sides and identifies nothing across them.** The
+   * retained side is `view.conflictOperation` — the model's summary of what this
+   * session asked for — because a `MatchId` is a revision-scoped protocol carrier
+   * and not authored text, which is why the consult's Q4 refuses a copy here as a
+   * property of the drafted value and `conflictChoicesFor` refuses it whatever this
+   * surface declares. The disk side is the whole file text the command layer read,
+   * through `SourceText`. Which arm of the disk text is drawn is
+   * `conflictDiskText`'s decision and not this markup's. The confirmed reload
+   * installs the disk projection and **closes** this panel: nothing is loaded in
+   * its place, because finding "the same" snippet in another revision is 2c-4b.
    */
 
   const {
@@ -264,21 +278,21 @@
   /**
    * Does what one conflict choice says.
    *
-   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
-   * same.** `matchDeletion.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
+   * **Three of the four arms are reachable as of 2c-4a-3b.**
+   * `matchDeletion.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
    * `operationChoice` — a `MatchId` is a revision-scoped protocol carrier, not user
    * content — so *Copy draft* can never be offered here, whatever a later change
-   * sets. The reload adopts the disk projection and **closes** the deleter; it
-   * exists, is called below and is driven by `matchDeletion.test.ts`, and 2c-4a-3
-   * flips the capability boolean that draws its control.
+   * sets; `offersReload` is now `true`, so `conflictChoicesFor` names the two
+   * reload labels and this panel draws them. The reload adopts the disk projection
+   * and **closes** the deleter; it was built and wired at 2c-4a-2 and is driven by
+   * `matchDeletion.test.ts`.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
    * and there is no `default`. A *newly offered* member does not — offering is the
    * model's, and a choice becomes a control the moment `conflictChoicesFor` names
-   * it. That is why the arms below are **implemented before they are offered**:
-   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
-   * have forced that order.
+   * it. No type in this file could have forced that an arm does anything, which is
+   * why the mounted suite presses every control this panel draws.
    *
    * @param choice - The choice the person picked.
    */
@@ -467,10 +481,47 @@
         <p class="kind">
           {t('browser.matchDeletion.revisionDisk', { revision: conflict.diskRevision })}
         </p>
+
+        <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
+        <!-- What this session asked for, as the model summarises it. Nothing was
+             typed here, so there is no draft to render and no copy to offer
+             (consult Q4); the snippet it is about is named at the top of this
+             panel, from the projection this session opened over. -->
+        {#if view.conflictOperation !== null}
+          <p>{tConflictOperation(view.conflictOperation)}</p>
+        {/if}
+        <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
+
+        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+        <!-- The whole file as the command layer read it, paired with
+             `diskRevision`, and never a projection of "the same snippet" — which
+             this application will not identify across revisions (consult Q5).
+             Which arm is drawn is `conflictDiskText`'s decision and not this
+             markup's (2c-4a-3a review, finding 5). -->
+        {#if view.diskText !== null && view.diskText.kind === 'text'}
+          <SourceText text={view.diskText.text} documentStart />
+        {:else}
+          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+        {/if}
+
+        <!-- The second step's warning. The shared line above is the whole
+             close/abandon guarantee and this one never restates it (2c-4a-3b
+             review, finding 3); it says only what this surface alone can say —
+             that no snippet in the new version will be guessed at, and what to do
+             about that afterwards. -->
+        {#if view.awaitingReloadConfirmation}
+          <p class="kind">{t('browser.matchDeletion.reloadIdentifiesNoSnippet')}</p>
+        {/if}
+
+        <!-- A control that has just gone, with the reason in its place. -->
+        {#if view.reloadUnavailable}
+          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+        {/if}
+
         <p class="choices">
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -497,6 +548,13 @@
 
   h2 {
     margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  /* The conflict panel's two headings: what was asked for, and what is on disk. */
+  h3 {
+    margin: 0.375rem 0 0;
     font-size: 0.8125rem;
     font-weight: 600;
   }

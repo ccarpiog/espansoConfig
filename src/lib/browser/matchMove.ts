@@ -283,6 +283,7 @@ import {
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictOperation,
   type ConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
@@ -1725,20 +1726,132 @@ export function moveRecoveryFailed(session: MatchMoveSession): MatchMoveSession 
  * be offered, and `conflictChoicesFor` refuses it even if `offersCopyDraft` were
  * set. The chosen placement is shown in the retained panel instead.
  *
- * A confirmed reload — install the disk projection and **close** the mover — is **built and wired**: {@link askToReloadDiskVersion},
+ * A confirmed reload — install the disk projection and **close** the mover — is
+ * **offered as of 2c-4a-3b**: {@link askToReloadDiskVersion},
  * {@link confirmDiskReload} and {@link reloadTheDiskVersion} are the transition,
- * and `MatchMover.svelte`'s `conflictAction` calls them. It is only *unoffered* —
- * `conflictChoicesFor` names nothing this boolean does not admit, so no control
- * that could reach the arm is drawn, which is why an unoffered arm is not a dead
- * control. **Phase 2c-4a-3 flips the boolean**, over machinery that already exists
- * and is already driven by this module's tests.
+ * `MatchMover.svelte`'s `conflictAction` calls them, and its panel now draws the
+ * two labels `conflictChoicesFor` names. Flipping the boolean was the whole of
+ * that step's capability change here, because the machinery it turns on was built
+ * and driven by this module's tests at 2c-4a-2.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: false
+  offersReload: true
 };
+
+/**
+ * What one retained placement asked for, as a summary code.
+ *
+ * **Read off the placement the *conflict* retained, never off the session's
+ * current draft.** They are equal today — {@link canChoose} refuses while a
+ * conflict is on screen — but that is a fact about today's transitions and not
+ * about this summary, which describes the operation that was refused.
+ *
+ * **The `after` arm is chosen from what the panel is drawing now**, which is the
+ * 2c-4a-3b review's finding 2. Its sentence sends the reader to the destination
+ * the list above still marks; {@link movePlacementOptionsOf} stops offering an
+ * anchor whose parse this window has replaced, so a reprojection arriving while
+ * the conflict is displayed took that mark away and left the sentence pointing at
+ * nothing. Asking the option list itself — rather than re-deriving the same
+ * condition here — is what makes the two agree by construction.
+ *
+ * @param session - The session the conflict belongs to, for the option list.
+ * @param placement - The placement the conflict is carrying.
+ * @param views - Every projection this window holds **now**, the same list the
+ *   panel's destinations are built from. Nothing here can check that it is.
+ * @returns The summary to show beside the disk text.
+ */
+function operationOf(
+  session: MatchMoveSession,
+  placement: MovePlacement,
+  views: readonly DocumentView[]
+): ConflictOperation {
+  switch (placement.kind) {
+    case 'top':
+      return 'moveToTop';
+    case 'end':
+      return 'moveToEnd';
+    case 'after':
+      return markedAmongTheDestinations(session, placement, views)
+        ? 'moveAfterSnippet'
+        : 'moveAfterSnippetNoLongerShown';
+  }
+} // End of function operationOf()
+
+/**
+ * Whether the destination list a screen is drawing marks this placement.
+ *
+ * **Both halves are asked of {@link movePlacementOptionsOf}'s own answer**, and
+ * deliberately: the sentence this decides claims that a particular row of that
+ * list carries the chosen mark, so anything short of reading the rows is a second
+ * opinion about what the screen shows. An anchor the current projections cannot
+ * resolve is not among them at all, and `chosen` is the very flag the panel draws
+ * the mark from.
+ *
+ * @param session - The session whose options the panel draws.
+ * @param placement - The placement the conflict retained.
+ * @param views - Every projection this window holds now.
+ * @returns Whether a drawn destination carries that placement and is marked.
+ */
+function markedAmongTheDestinations(
+  session: MatchMoveSession,
+  placement: MovePlacement,
+  views: readonly DocumentView[]
+): boolean {
+  return movePlacementOptionsOf(session, views).some(
+    (option) => option.chosen && samePlacement(option.placement, placement)
+  );
+} // End of function markedAmongTheDestinations()
+
+/**
+ * What a confirmed reload takes with it that only this surface can say.
+ *
+ * **Two arms rather than one sentence, and the 2c-4a-3b review's finding 1 is
+ * why.** The single line this replaces said the destination *names snippets of the
+ * version this window read* — true of an `after` and false of `top` and `end`,
+ * which name a position and no snippet at all. A claim that holds for one arm of
+ * {@link MovePlacement} may not be shown for the other two.
+ *
+ * **Neither arm restates the close/abandon guarantee.** That is
+ * `saveOutcome.ts`'s `reloadWarningFor`, drawn once at the top of the same panel;
+ * saying it here too is the duplication the same review's finding 3 named.
+ */
+export type MoveReloadWarning =
+  /** The retained destination is a position: the mover's `top` or `end`. */
+  | 'positionalDestination'
+  /** The retained destination names another snippet: the mover's `after`. */
+  | 'anchoredDestination';
+
+/**
+ * Which warning one retained placement earns.
+ *
+ * @param placement - The placement the conflict is carrying.
+ * @returns The arm to show at the confirmation step.
+ */
+function reloadWarningOf(placement: MovePlacement): MoveReloadWarning {
+  return placement.kind === 'after' ? 'anchoredDestination' : 'positionalDestination';
+} // End of function reloadWarningOf()
+
+/**
+ * The dictionary key holding one reload warning's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom of every other
+ * describer in this module: a renamed key is a compile error here, and a new
+ * member of {@link MoveReloadWarning} with no sentence is one too.
+ *
+ * @param warning - What the confirmation step has to say about the destination.
+ * @returns The key holding that warning's sentence.
+ */
+export function moveReloadWarningKey(warning: MoveReloadWarning): TranslationKey {
+  switch (warning) {
+    case 'positionalDestination':
+      return 'browser.matchMove.reloadDropsPositionalDestination';
+    case 'anchoredDestination':
+      return 'browser.matchMove.reloadDropsAnchoredDestination';
+  }
+} // End of function moveReloadWarningKey()
 
 /**
  * One destination a screen may offer, with whatever it needs to name it.
@@ -1868,21 +1981,27 @@ export interface MatchMoveView {
   /** Whether the move control does anything. */
   readonly canMove: boolean;
   /**
-   * Why this snippet cannot be moved at all, as a code, or `null`.
+   * The frozen refusal a screen may draw beside the snippet, as a code, or `null`.
    *
-   * **This is the session's frozen eligibility, and {@link cannotMove} is the live
-   * refusal.** They are two fields because they answer at two times:
-   * `eligibility` was computed once at {@link startMatchMove} and no transition
-   * recomputes it, so after a reprojection this field can still name a reason that
-   * was read off a parse the window has replaced. `refusalGiven` puts `outOfDate`
-   * **above** `notMovable` for exactly that reason.
+   * **Presentation-ready, which is what makes it different from the session's
+   * `eligibility`.** That verdict is computed once at {@link startMatchMove} and no
+   * transition recomputes it, so after a reprojection it is a definite claim about
+   * a snippet read off a parse this window has replaced;
+   * {@link MatchMoveView.cannotMove} is the live refusal, and `refusalGiven` ranks
+   * `outOfDate` **above** `notMovable` precisely so that the weaker live claim
+   * wins. This field carries that same precedence into what is drawn: it is the
+   * frozen reason **only when `cannotMove` is `notMovable`** — only when the frozen
+   * verdict is what won — and `null` otherwise.
    *
-   * **A screen must therefore not draw this beside a `cannotMove` of `outOfDate`**,
-   * or the definite claim the precedence just suppressed comes back through the
-   * other field. Nothing in TypeScript can enforce that; the rule is here because
-   * the only place it can be broken is a component.
+   * **So a component renders this and asks nothing else**, which is 2c-3c-3's
+   * Medium applied here at 2c-4a-3b. Until then this field handed out the frozen
+   * reason unconditionally and a condition in `MatchMover.svelte` was the only
+   * thing keeping the suppressed certainty off the screen — a decision in markup,
+   * which no model test can drive and a second renderer could omit while walking
+   * this view faithfully. A caller that wants the raw frozen verdict rather than
+   * the sentence reads {@link MatchMoveSession.eligibility}, which is unchanged.
    */
-  readonly notMovable: MoveRefusal | null;
+  readonly notMovableToShow: MoveRefusal | null;
   /** Why the control does nothing as things stand, as a code, or `null`. */
   readonly cannotMove: MoveSubmissionRefusal | null;
   /** Whether a move is in flight. */
@@ -1939,8 +2058,20 @@ export interface MatchMoveView {
   readonly conflict: ConflictModel<MovePlacement> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
-  /** Whether the warning is showing and the destructive choice is one click away. */
-  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * What the confirmation step warns about the destination, or `null`.
+   *
+   * **Non-`null` is exactly "the warning is showing and the destructive choice is
+   * one click away"** — the boolean the other five surfaces carry, replaced here
+   * rather than joined by a second field. Two fields that have to agree is how a
+   * capability came to be expressed twice at 2c-4a-2, and there is nothing for
+   * them to disagree about: this is that condition and the arm it selects, decided
+   * together.
+   *
+   * The arm is {@link MoveReloadWarning}, and the 2c-4a-3b review's finding 1 is
+   * why there is an arm at all.
+   */
+  readonly reloadWarning: MoveReloadWarning | null;
   /**
    * Whether a confirmed reload was spent and the window refused it.
    *
@@ -1960,6 +2091,27 @@ export interface MatchMoveView {
    */
   readonly diskText: ConflictDiskText | null;
   /**
+   * What the retained draft **asked for**, or `null` when no conflict is showing.
+   *
+   * **The `operationChoice` side of the comparison the consult's Q5 ruled**
+   * (2c-4a-3b). A `MovePlacement` is a positional choice and not authored text, so
+   * what goes beside the disk text is a description of the operation — decided
+   * here rather than assembled in markup, because a description written into one
+   * renderer is carried by that renderer's mounted suite alone (2c-3c-3's Medium).
+   *
+   * **It names the shape of the destination and not the anchor.** An `after`
+   * placement carries a revision-scoped `MatchId`, and the panel's own destination
+   * list — drawn from the projection this session opened over — is what marks
+   * which one was chosen. Naming a snippet of the *disk* side would be the
+   * cross-revision identification 2c-4b owns.
+   *
+   * **Which of the two `after` arms it is depends on the live projections**, which
+   * is why this view takes them: the sentence that points at the marked
+   * destination may be shown only while a marked destination is there. See
+   * {@link operationOf}.
+   */
+  readonly conflictOperation: ConflictOperation | null;
+  /**
    * Whether a confirmed reload has ended this session.
    *
    * The panel that reads this calls its own `close`: a match-level reload adopts
@@ -1967,6 +2119,33 @@ export interface MatchMoveView {
    */
   readonly closed: boolean;
 }
+
+/**
+ * The frozen refusal a screen may draw beside the snippet, or `null`.
+ *
+ * **The precedence rule, expressed once and where a test can drive it**, and
+ * written against `'notMovable'` rather than against `outOfDate` alone so that a
+ * refusal added above it in `refusalGiven`'s order suppresses the frozen detail by
+ * construction instead of by a later edit here. `matchDuplication.ts` reached this
+ * shape at 2c-3c-3 and this is the same rule for the same reason.
+ *
+ * A refused eligibility always makes `refusalGiven` answer something, so a `null`
+ * live refusal never coexists with a frozen reason.
+ *
+ * @param session - The session the frozen verdict belongs to.
+ * @param cannotMove - The live refusal, as `refusalGiven` answered it for this
+ *   same read of the projections.
+ * @returns The frozen reason to draw, or `null` when a weaker live claim won.
+ */
+function notMovableToShow(
+  session: MatchMoveSession,
+  cannotMove: MoveSubmissionRefusal | null
+): MoveRefusal | null {
+  if (cannotMove !== 'notMovable' || session.eligibility.kind !== 'refused') {
+    return null;
+  }
+  return session.eligibility.reason;
+} // End of function notMovableToShow()
 
 /**
  * Everything a screen needs about one move.
@@ -1982,7 +2161,9 @@ export interface MatchMoveView {
  * @param session - The session to describe.
  * @param views - Every projection this window holds **now**, in any order — the
  *   same list {@link movePlacementOptionsOf} is given. Nothing here can check that
- *   it is that list, or that it is current.
+ *   it is that list, or that it is current. Since 2c-4a-3b's fix round the conflict
+ *   summary is derived from it too, so a caller that passed a stale list here and a
+ *   fresh one to the options would get a sentence about a screen it is not drawing.
  * @returns The view.
  */
 export function matchMoveView(
@@ -2000,7 +2181,7 @@ export function matchMoveView(
     document: session.document,
     placement: session.draft.value,
     canMove: cannotMove === null,
-    notMovable: session.eligibility.kind === 'refused' ? session.eligibility.reason : null,
+    notMovableToShow: notMovableToShow(session, cannotMove),
     cannotMove,
     moving: session.phase === 'saving',
     moved: session.moved,
@@ -2019,9 +2200,13 @@ export function matchMoveView(
       conflict === null
         ? []
         : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
-    awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
+    reloadWarning:
+      conflict !== null && atTheReloadWarning(session.reload)
+        ? reloadWarningOf(conflict.draft.value)
+        : null,
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
     diskText: conflictDiskText(conflict),
+    conflictOperation: conflict === null ? null : operationOf(session, conflict.draft.value, views),
     closed: session.closed
   };
 } // End of function matchMoveView()

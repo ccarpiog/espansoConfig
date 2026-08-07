@@ -999,12 +999,12 @@ describe('the mounted small editor', () => {
     // Three choices as of 2c-4a-3a, and the destructive one is not among them
     // yet: *Confirm reload* is the second step's label and is never offered beside
     // the first's.
-    expect(button(editor.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('confirmReload'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
 
-    control(editor.target, conflictChoiceKey('keepEditing')).click();
+    control(editor.target, conflictChoiceKey('keepEditing', 'authoredText')).click();
     flushSync();
     expect(box(editor.target, 'replace').readOnly).toBe(false);
     editor.stop();
@@ -1056,20 +1056,20 @@ describe('the mounted small editor', () => {
     await settle();
 
     expect(editor.adoptions).toEqual([]);
-    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(false);
+    expect(says(editor.target, 'browser.matchEditor.reloadIdentifiesNoSnippet')).toBe(false);
 
-    control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+    control(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
     flushSync();
 
     // The second step: the warning that says what happens *here*, the copy still
     // offered beside it, and the first step's label gone.
-    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(true);
-    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(says(editor.target, 'browser.matchEditor.reloadIdentifiesNoSnippet')).toBe(true);
+    expect(button(editor.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
     expect(editor.adoptions).toEqual([]);
     expect(editor.closed()).toBe(0);
 
-    control(editor.target, conflictChoiceKey('confirmReload')).click();
+    control(editor.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
     expect(editor.adoptions).toHaveLength(1);
@@ -1092,9 +1092,9 @@ describe('the mounted small editor', () => {
       type(editor.target, 'replace', 'c');
       control(editor.target, 'browser.matchEditor.save').click();
       await settle();
-      control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+      control(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
       flushSync();
-      control(editor.target, conflictChoiceKey('confirmReload')).click();
+      control(editor.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
       flushSync();
 
       expect(editor.adoptions, answer).toHaveLength(1);
@@ -1118,23 +1118,23 @@ describe('the mounted small editor', () => {
     type(editor.target, 'replace', 'c');
     control(editor.target, 'browser.matchEditor.save').click();
     await settle();
-    control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+    control(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
     flushSync();
-    control(editor.target, conflictChoiceKey('confirmReload')).click();
+    control(editor.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
     expect(says(editor.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
-    expect(button(editor.target, conflictChoiceKey('confirmReload'))).toBeNull();
-    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
-    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
     // The warning is gone with the control it belonged to.
-    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(false);
+    expect(says(editor.target, 'browser.matchEditor.reloadIdentifiesNoSnippet')).toBe(false);
     expect(editor.adoptions).toHaveLength(1);
     expect(editor.closed()).toBe(0);
 
     // And *Keep editing* is a real way out: the panel goes and the draft is back.
-    control(editor.target, conflictChoiceKey('keepEditing')).click();
+    control(editor.target, conflictChoiceKey('keepEditing', 'authoredText')).click();
     flushSync();
     expect(box(editor.target, 'replace').readOnly).toBe(false);
     expect(box(editor.target, 'replace').value).toBe('c');
@@ -1169,7 +1169,7 @@ describe('the mounted small editor', () => {
       control(editor.target, 'browser.matchEditor.save').click();
       await settle();
 
-      control(editor.target, conflictChoiceKey('copyDraft')).click();
+      control(editor.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
       await settle();
 
       expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(true);
@@ -1231,7 +1231,7 @@ describe('the mounted small editor', () => {
       control(editor.target, 'browser.matchEditor.save').click();
       await settle();
 
-      control(editor.target, conflictChoiceKey('copyDraft')).click();
+      control(editor.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
       await settle();
 
       expect(attempts).toBe(0);
@@ -1267,12 +1267,13 @@ describe('the mounted small editor', () => {
     ];
     for (const one of LOCALES) {
       for (const choice of choices) {
-        expect(DICTIONARIES[one][conflictChoiceKey(choice)].toLowerCase()).not.toContain(
-          forbidden[0]
-        );
-        expect(DICTIONARIES[one][conflictChoiceKey(choice)].toLowerCase()).not.toContain(
-          forbidden[1]
-        );
+        // Both draft kinds, because `confirmReload` has one label per kind since
+        // 2c-4a-3b and the forbidden phrase could hide in either of them.
+        for (const draftKind of ['authoredText', 'operationChoice'] as const) {
+          const label = DICTIONARIES[one][conflictChoiceKey(choice, draftKind)].toLowerCase();
+          expect(label).not.toContain(forbidden[0]);
+          expect(label).not.toContain(forbidden[1]);
+        } // End of the loop over the two draft kinds
       } // End of the loop over the four conflict choices
     } // End of the loop over the two locales
 

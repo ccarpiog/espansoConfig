@@ -7,6 +7,7 @@
     baseRevisionOf,
     beginSave,
     confirmDiskReload,
+    CONFLICT_CAPABILITIES,
     editField,
     focusField,
     keepEditing,
@@ -821,11 +822,13 @@
           <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
         {/if}
 
-        <!-- The second step's warning. The shared line above says what a reload
-             does to *any* panel that closes; this one says what only this surface
-             can say — that no snippet in the new version will be guessed at. -->
+        <!-- The second step's warning. The shared line above is the whole
+             close/abandon guarantee and this one never restates it (2c-4a-3b
+             review, finding 3); it says only what this surface alone can say —
+             that no snippet in the new version will be guessed at, and what to do
+             about that afterwards. -->
         {#if view.awaitingReloadConfirmation}
-          <p class="kind">{t('browser.matchEditor.reloadClosesEditor')}</p>
+          <p class="kind">{t('browser.matchEditor.reloadIdentifiesNoSnippet')}</p>
         {/if}
 
         <!-- A control that has just gone, with the reason in its place. The reload
@@ -845,7 +848,7 @@
         <p class="choices">
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>

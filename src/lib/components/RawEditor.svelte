@@ -3,6 +3,7 @@
     acknowledgeFindings,
     acknowledgementOf,
     askToReload,
+    CONFLICT_CAPABILITIES,
     beginSave,
     confirmReload,
     editText,
@@ -558,7 +559,7 @@
               disabled={choice === 'confirmReload' && !view.canReload}
               onclick={() => conflictAction(choice)}
             >
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>

@@ -31,7 +31,11 @@
  * helpers here do.
  */
 
-import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
+import {
+  conflictChoiceKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
@@ -43,7 +47,7 @@ import {
   type BrowserState,
   type MatchSaveAnswer
 } from '../browser/workspace.svelte';
-import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
+import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
 import type { CommandResult } from '../ipc/commands';
 import type {
@@ -109,6 +113,27 @@ const REFUSED: SaveResult = {
 };
 
 /**
+ * The whole file text the conflict's fresh read carried.
+ *
+ * Distinguishable from anything the panel holds, so a case can tell the disk side
+ * of the panel from the operation summary by looking at the rendered text.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/** A word that appears in {@link DISK_TEXT} and nowhere else on the screen. */
+const DISK_TEXT_MARKER = 'theirs';
+
+/** A deletion the file had moved on under. */
+const CONFLICTED: SaveResult = {
+  outcome: 'conflict',
+  expected: BASE,
+  found: AFTER,
+  disk_revision: AFTER,
+  disk_text: DISK_TEXT,
+  disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: AFTER })
+};
+
+/**
  * A deletion that ran to the end and wrote the file.
  *
  * **`moved` is `null` by construction**: the snippet that was deleted has no
@@ -149,6 +174,14 @@ interface Mounted {
   readonly target: HTMLElement;
   /** Every call the component made, in order. */
   readonly calls: RecordedDelete[];
+  /**
+   * Every conflict the component asked the window to adopt, in order.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing until a
+   * reload has been asked for *and* confirmed, so an entry here in a case that
+   * only reached the panel is the pre-emptive install the consult's Q2 ruled out.
+   */
+  readonly adoptions: ConflictModel<MatchId>[];
   /** How many times the panel asked to be closed. */
   readonly closed: () => number;
   /** Replaces what the projections reader answers, as a re-read would. */
@@ -163,15 +196,19 @@ interface Mounted {
  * @param answers - What each successive deletion answers, in order.
  * @param projection - The file's projection to open over.
  * @param at - Which of its snippets to open over.
+ * @param adoption - What the window answers when the panel asks it to adopt the
+ *   disk observation. All three values are real production answers.
  * @returns The mounted panel.
  */
 function mountDeleter(
   answers: readonly ScriptedAnswer[] = [],
   projection: DocumentView = file(),
-  at = 0
+  at = 0,
+  adoption: DiskAdoptionOutcome = 'installed'
 ): Mounted {
   const remaining = [...answers];
   const calls: RecordedDelete[] = [];
+  const adoptions: ConflictModel<MatchId>[] = [];
   let closes = 0;
   let views: readonly DocumentView[] = [projection];
   const target = document.createElement('div');
@@ -201,10 +238,13 @@ function mountDeleter(
             (next.result.outcome === 'saved' && next.result.committed ? ADOPTED : NOT_OWED)
         });
       },
-      // **The window's own adoption**, which no case here reaches: the five match
-      // surfaces declare `offersReload: false`, so no control that could spend a
-      // confirmation is drawn. `matchDeletion.test.ts` drives the transition directly.
-      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+      // **The window's own adoption**, recorded rather than assumed. Since
+      // 2c-4a-3b this surface offers the reload, so a case can press the two
+      // controls that reach it and see exactly when — and whether — it is called.
+      adoptDiskVersion: (conflict: ConflictModel<MatchId>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return adoption;
+      },
       close: (): void => {
         closes += 1;
       }
@@ -213,6 +253,7 @@ function mountDeleter(
   return {
     target,
     calls,
+    adoptions,
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
@@ -421,6 +462,156 @@ describe('the mounted deletion panel', () => {
   }); // End of the "nothing attempted" case
 }); // End of the "mounted deletion panel" suite
 
+/**
+ * Reaches the conflict panel: confirm the question, and answer with a conflict.
+ *
+ * @param adoption - What the window answers when asked to adopt.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflicted(adoption: DiskAdoptionOutcome = 'installed'): Promise<Mounted> {
+  const panel = mountDeleter([{ result: CONFLICTED }], file(), 0, adoption);
+  control(panel.target, 'browser.matchDeletion.confirm').click();
+  await settle();
+  return panel;
+} // End of function conflicted()
+
+describe('the deletion panel’s conflict', () => {
+  it('shows the operation beside the disk text, and deletes nothing', async () => {
+    // **The comparison the consult's Q5 ruled, on a surface that drafts no text.**
+    // The retained side is the model's summary of what was asked for — never a
+    // `MatchId` rendered as though it were content — and the disk side is the whole
+    // file text the command layer read, through `SourceText`.
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.retainedOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operation.deleteSnippet')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.operationIdentityIsOld')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.diskVersion')).toBe(true);
+    expect(panel.target.textContent).toContain(DISK_TEXT_MARKER);
+    // One rendering surface for file text, and only the disk side needs it.
+    expect(panel.target.querySelectorAll('.panel .sourceText')).toHaveLength(1);
+    // All three revisions, always.
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDeletion.revisionExpected', { revision: BASE })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDeletion.revisionFound', { revision: AFTER })
+    );
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.matchDeletion.revisionDisk', { revision: AFTER })
+    );
+    // Two choices, and the destructive one is a second step away. No copy, ever:
+    // the Q4 rule is a property of what this surface drafts.
+    expect(button(panel.target, conflictChoiceKey('keepEditing', 'operationChoice'))).not.toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).not.toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))
+    ).toBeNull();
+    expect(button(panel.target, conflictChoiceKey('copyDraft', 'operationChoice'))).toBeNull();
+    // And nothing has moved: no adoption, and the panel is still open.
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "both sides" case
+
+  it('warns that the reload closes this panel, never that it replaces text', async () => {
+    // **2c-4a-3b's verification of `reloadOutcome`.** This surface declares
+    // `closesSurface` and drafts an `operationChoice`, so the shared line is the
+    // one that promises no copy — `reloadClosesSurface` ends *copy it first if you
+    // want to keep it*, and there is no control here that could.
+    const panel = await conflicted();
+    expect(says(panel.target, 'browser.saveOutcome.reloadAbandonsOperation')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.reloadClosesSurface')).toBe(false);
+    expect(says(panel.target, 'browser.saveOutcome.reloadDiscardsDraft')).toBe(false);
+    // And what was retained is described as an operation, not as text.
+    expect(says(panel.target, 'browser.saveOutcome.operationKeptInMemory')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.draftKeptInMemory')).toBe(false);
+    panel.stop();
+  }); // End of the "surface-aware warning" case
+
+  it('adopts the disk version and closes only when the reload is confirmed', async () => {
+    const panel = await conflicted();
+
+    expect(says(panel.target, 'browser.matchDeletion.reloadIdentifiesNoSnippet')).toBe(false);
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+
+    // The second step: the warning that says what happens *here* — the window
+    // crosses, this panel closes, and the snippet is not deleted.
+    expect(says(panel.target, 'browser.matchDeletion.reloadIdentifiesNoSnippet')).toBe(true);
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(panel.closed()).toBe(1);
+    // Nothing was sent a second time: a conflict is not a retry.
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "confirmed reload" case
+
+  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+    // **`alreadyThere` is a success**: the window already holds the bytes that
+    // were asked for. `refused` is the only answer that means it did not move.
+    for (const [answer, closes] of [
+      ['alreadyThere', 1],
+      ['installed', 1],
+      ['refused', 0]
+    ] as const) {
+      const panel = await conflicted(answer);
+      control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+      flushSync();
+      control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+      flushSync();
+
+      expect(panel.adoptions, answer).toHaveLength(1);
+      expect(panel.closed(), answer).toBe(closes);
+      // A refused adoption leaves the conflict on screen rather than reporting a
+      // reload that did not happen.
+      expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
+        closes === 0
+      );
+      panel.stop();
+    } // End of the loop over the three adoption answers
+  }); // End of the "three adoption answers" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
+    // only be refused again is gone, and the sentence takes its place; *Keep
+    // editing* stays and resets the step.
+    const panel = await conflicted('refused');
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
+    expect(
+      button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ).toBeNull();
+    expect(says(panel.target, 'browser.matchDeletion.reloadIdentifiesNoSnippet')).toBe(false);
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+
+    // And *Keep editing* gives the panel back, with the deletion still askable.
+    control(panel.target, conflictChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(false);
+    expect(button(panel.target, 'browser.matchDeletion.request')).not.toBeNull();
+    panel.stop();
+  }); // End of the "refused reload stops being offered" case
+}); // End of the "deletion panel's conflict" suite
+
 /** The workspace summary the state below is opened over; nothing reads it. */
 const SUMMARY: WorkspaceSummary = {
   root: '/tmp/espanso',
@@ -530,9 +721,10 @@ describe('a committed deletion, over the real workspace state', () => {
           baseRevision: ContentRevision,
           acknowledgement: Acknowledgement
         ): Promise<MatchSaveAnswer> => state.deleteMatch(id, baseRevision, acknowledgement),
-        // **The window's own adoption**, which no case here reaches: the five match
-        // surfaces declare `offersReload: false`, so no control that could spend a
-        // confirmation is drawn. `matchDeletion.test.ts` drives the transition directly.
+        // **The window's own adoption**, which no case in this suite reaches: it
+        // never opens the conflict panel, and a conflict installs nothing until a
+        // reload has been asked for *and* confirmed. The conflict suite above
+        // records every call instead.
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         close: (): void => undefined
       }

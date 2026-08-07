@@ -9,6 +9,7 @@
     beginCreate,
     chooseDestination,
     choosePlacement,
+    CONFLICT_CAPABILITIES,
     confirmDiskReload,
     createCouldNotBeSent,
     editCreationField,
@@ -742,11 +743,13 @@
           <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
         {/if}
 
-        <!-- The second step's warning. The shared line above says what a reload
-             does to any panel that closes; this one says what only this surface
-             can say — that a file on disk holds no half-written snippet. -->
+        <!-- The second step's warning. The shared line above is the whole
+             close/abandon guarantee and this one never restates it (2c-4a-3b
+             review, finding 3); it says only what this surface alone can say —
+             that a file on disk holds no half-written snippet, and what a form
+             opened afterwards starts from. -->
         {#if view.awaitingReloadConfirmation}
-          <p class="kind">{t('browser.matchCreation.reloadClosesForm')}</p>
+          <p class="kind">{t('browser.matchCreation.reloadSeedsNoForm')}</p>
         {/if}
 
         <!-- A control that has just gone, with the reason in its place. -->
@@ -764,7 +767,7 @@
         <p class="choices">
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>

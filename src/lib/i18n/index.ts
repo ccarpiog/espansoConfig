@@ -33,9 +33,11 @@ import {
 import {
   moveRecoveryKey,
   moveRefusalKey,
+  moveReloadWarningKey,
   moveSubmissionRefusalKey,
   type MoveRecovery,
   type MoveRefusal,
+  type MoveReloadWarning,
   type MoveSubmissionRefusal
 } from '../browser/matchMove';
 import {
@@ -55,10 +57,13 @@ import {
 } from '../browser/rawSave';
 import {
   conflictChoiceKey,
+  conflictOperationKey,
   draftFieldStatusKey,
   referenceCopyOf,
   saveOutcomeMessageKey,
   type ConflictChoice,
+  type ConflictDraftKind,
+  type ConflictOperation,
   type DraftFieldStatus,
   type RetainedDraftField,
   type SaveOutcomeMessage
@@ -567,6 +572,26 @@ export function tMoveRecovery(choice: MoveRecovery): string {
 } // End of function tMoveRecovery()
 
 /**
+ * Renders what a confirmed reload takes with it on the destination panel.
+ *
+ * The accessor over `MoveReloadWarning`, here for {@link tConflictOperation}'s
+ * reason: a component that turned the code into a key in markup would be doing
+ * the one thing CLAUDE.md section 2 forbids — and there is an arm to turn only
+ * because the single sentence this replaces claimed the destination named a
+ * snippet, which is false of `top` and of `end`.
+ *
+ * **Neither arm repeats the close/abandon guarantee.** That is one sentence,
+ * chosen by `reloadWarningFor` in `../browser/saveOutcome` and drawn once at the
+ * top of the same panel.
+ *
+ * @param warning - What the model said the confirmation step has to say.
+ * @returns The translated sentence.
+ */
+export function tMoveReloadWarning(warning: MoveReloadWarning): string {
+  return translate(locale.current, moveReloadWarningKey(warning));
+} // End of function tMoveReloadWarning()
+
+/**
  * Renders why one snippet may not be duplicated at all.
  *
  * @param reason - What `duplicationEligibility` answered.
@@ -626,12 +651,37 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
  * phrase means *reapply the draft to the newly parsed document*, which is Phase
  * 2c-4b (`docs/decisions/2c-split-notes.md` section 6).
  *
+ * **The draft kind travels with the choice**, because the confirmation's label
+ * says what is discarded and the three `operationChoice` surfaces discard no text
+ * (2c-4a-3b). It is the calling surface's own `CONFLICT_CAPABILITIES.draftKind`;
+ * nothing here can check that it is.
+ *
  * @param choice - What the model offers.
+ * @param draftKind - What the calling surface's retained draft is.
  * @returns The translated label.
  */
-export function tConflictChoice(choice: ConflictChoice): string {
-  return translate(locale.current, conflictChoiceKey(choice));
+export function tConflictChoice(choice: ConflictChoice, draftKind: ConflictDraftKind): string {
+  return translate(locale.current, conflictChoiceKey(choice, draftKind));
 } // End of function tConflictChoice()
+
+/**
+ * Renders what an `operationChoice` surface's retained draft asked for.
+ *
+ * The accessor over `ConflictOperation`, here for `tConflictChoice`'s reason: a
+ * component that turned the code into a key in markup would be doing the one
+ * thing CLAUDE.md section 2 forbids.
+ *
+ * **It carries no operand and names no snippet.** Which snippet the panel is
+ * about is drawn from the projection the session opened over, above this line;
+ * naming one from the disk side would be the cross-revision identification
+ * 2c-4b owns.
+ *
+ * @param operation - What the model said the retained draft asked for.
+ * @returns The translated sentence.
+ */
+export function tConflictOperation(operation: ConflictOperation): string {
+  return translate(locale.current, conflictOperationKey(operation));
+} // End of function tConflictOperation()
 
 /**
  * Renders what a save would do with one field of a retained draft.

@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DICTIONARIES, placeholdersOf } from '../i18n/dictionaries';
+import { DICTIONARIES, placeholdersOf, type TranslationKey } from '../i18n/dictionaries';
 import { LOCALES } from '../i18n/locale';
 import type {
   ConflictResult,
@@ -40,6 +40,7 @@ import {
   authorizeDiskAdoption,
   conflictChoiceKey,
   conflictChoicesFor,
+  conflictOperationKey,
   confirmReloadDiskVersion,
   copyOfDraft,
   describeEditSave,
@@ -51,7 +52,9 @@ import {
   saveOutcomeMessageKey,
   type ConflictCapabilities,
   type ConflictChoice,
+  type ConflictDraftKind,
   type ConflictModel,
+  type ConflictOperation,
   type DraftFieldStatus,
   type RetainedDraftField,
   type SaveOutcomeMessage
@@ -84,6 +87,28 @@ const EVERY_CONFLICT_CHOICE = Object.keys({
   reloadDiskVersion: true,
   confirmReload: true
 } satisfies Record<ConflictChoice, true>) as readonly ConflictChoice[];
+
+/**
+ * Every draft kind a label can be asked for, by the same construction.
+ *
+ * `conflictChoiceKey` takes one since 2c-4a-3b, because `confirmReload`'s label
+ * says what is discarded and the three `operationChoice` surfaces discard no
+ * text. A case that said *every choice* while asking for one kind would say half
+ * of it.
+ */
+const EVERY_DRAFT_KIND = Object.keys({
+  authoredText: true,
+  operationChoice: true
+} satisfies Record<ConflictDraftKind, true>) as readonly ConflictDraftKind[];
+
+/** Every label a conflict panel can put on a control, over both draft kinds. */
+const EVERY_CONFLICT_LABEL: readonly TranslationKey[] = [
+  ...new Set(
+    EVERY_CONFLICT_CHOICE.flatMap((choice) =>
+      EVERY_DRAFT_KIND.map((draftKind) => conflictChoiceKey(choice, draftKind))
+    )
+  )
+];
 
 /** The revision a save was based on. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -353,11 +378,26 @@ describe('a conflict, which is terminal and honest', () => {
     expect(conflictModel(AFTER, draftInHand(), RAW_EDITOR).messages).toContainEqual({
       kind: 'reloadDiscardsDraft'
     });
-    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+    for (const surface of [MATCH_EDITOR, CREATOR]) {
       const messages = describeEditSave(conflictWith(), draftInHand(), surface).messages;
       expect(messages).toContainEqual({ kind: 'reloadClosesSurface' });
       expect(messages).not.toContainEqual({ kind: 'reloadDiscardsDraft' });
-    } // End of the loop over the five match surfaces
+    } // End of the loop over the two authored-text match surfaces
+    // **The third arm, and 2c-4a-3b's verification of `reloadOutcome` is why.**
+    // `reloadClosesSurface` ends *copy it first if you want to keep it*, which is
+    // an instruction with no control behind it on the three surfaces where consult
+    // Q4 refuses a copy as a property of the drafted value. The pair
+    // `closesSurface` + `operationChoice` gets its own sentence, and neither of the
+    // other two reaches those panels.
+    for (const surface of [MOVER, DELETER, DUPLICATOR]) {
+      const messages = describeEditSave(conflictWith(), draftInHand(), surface).messages;
+      expect(messages).toContainEqual({ kind: 'reloadAbandonsOperation' });
+      expect(messages).not.toContainEqual({ kind: 'reloadClosesSurface' });
+      expect(messages).not.toContainEqual({ kind: 'reloadDiscardsDraft' });
+      // And what was retained is described as an operation, never as text.
+      expect(messages).toContainEqual({ kind: 'operationKeptInMemory' });
+      expect(messages).not.toContainEqual({ kind: 'draftKeptInMemory' });
+    } // End of the loop over the three operation-choice surfaces
     // And the six declarations are what that rests on: one surface reseeds, five
     // close, and a surface cannot omit the field.
     expect(RAW_EDITOR.reloadOutcome).toBe('reseedsDraft');
@@ -446,12 +486,16 @@ describe('a conflict, which is terminal and honest', () => {
     // owner the wrong meaning and make 2c-4b look already-done.
     for (const choice of EVERY_CONFLICT_CHOICE) {
       expect(choice).not.toBe('keepMyDraft');
-      for (const locale of LOCALES) {
-        const label = DICTIONARIES[locale][conflictChoiceKey(choice)].toLowerCase();
-        expect(label, `${locale}:${choice}`).not.toContain('keep my draft');
-        expect(label, `${locale}:${choice}`).not.toContain('conservar mi borrador');
-      }
     }
+    // Over both draft kinds, so the label a surface that drafts no text gets is
+    // checked too (2c-4a-3b).
+    for (const key of EVERY_CONFLICT_LABEL) {
+      for (const locale of LOCALES) {
+        const label = DICTIONARIES[locale][key].toLowerCase();
+        expect(label, `${locale}:${key}`).not.toContain('keep my draft');
+        expect(label, `${locale}:${key}`).not.toContain('conservar mi borrador');
+      } // End of the loop over the two locales
+    } // End of the loop over every label a conflict panel can draw
   }); // End of the "names no control" case
 }); // End of the "conflict" suite
 
@@ -549,12 +593,40 @@ describe('the one authority that decides what a conflict offers', () => {
   });
 
   it('gives every choice it can name a sentence in both languages', () => {
-    for (const choice of EVERY_CONFLICT_CHOICE) {
+    for (const key of EVERY_CONFLICT_LABEL) {
       for (const locale of LOCALES) {
-        expect(DICTIONARIES[locale][conflictChoiceKey(choice)].length).toBeGreaterThan(0);
+        expect(DICTIONARIES[locale][key].length, `${locale}:${key}`).toBeGreaterThan(0);
       }
-    } // End of the loop over every choice
+    } // End of the loop over every label, over both draft kinds
   });
+
+  it('labels the confirmation by what the surface drafts, and never by its name', () => {
+    // **2c-4a-3b's verification of the labels the three new panels draw.** *Discard
+    // my text and load it* is what the confirmation does where the draft is
+    // authored text; on the mover, the deleter and the duplicator nobody typed
+    // anything, and a label claiming otherwise is this project's worst defect class
+    // on a control that had never been drawn there before.
+    expect(conflictChoiceKey('confirmReload', 'authoredText')).toBe(
+      'browser.saveOutcome.choice.confirmReload'
+    );
+    expect(conflictChoiceKey('confirmReload', 'operationChoice')).toBe(
+      'browser.saveOutcome.choice.confirmReloadClosing'
+    );
+    // The other three say the same thing either way, so they have one label.
+    for (const choice of ['keepEditing', 'copyDraft', 'reloadDiskVersion'] as const) {
+      expect(conflictChoiceKey(choice, 'authoredText'), choice).toBe(
+        conflictChoiceKey(choice, 'operationChoice')
+      );
+    } // End of the loop over the draft-kind-neutral choices
+    // And no `operationChoice` label claims text, in either language.
+    for (const locale of LOCALES) {
+      const label = DICTIONARIES[locale][
+        conflictChoiceKey('confirmReload', 'operationChoice')
+      ].toLowerCase();
+      expect(label, locale).not.toContain('my text');
+      expect(label, locale).not.toContain('mi texto');
+    } // End of the loop over the two locales
+  }); // End of the "labels the confirmation" case
 
   it('declares what each of the six surfaces drafts, by the Q3/Q4 rule', () => {
     // **The rule is one rule and the six declarations are where it lands.** The
@@ -571,7 +643,7 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(DUPLICATOR.draftKind).toBe('operationChoice');
   }); // End of the "six declarations" case
 
-  it('draws all three on the authored-text surfaces and one on the other three', () => {
+  it('draws three on the authored-text surfaces and two on the other three', () => {
     // **What this establishes, and what it cannot.** It reads six capability
     // objects and this module's one mapping, so it can say what each surface
     // currently *offers*. It **cannot** say that a component acts on what it is
@@ -579,11 +651,10 @@ describe('the one authority that decides what a conflict offers', () => {
     // evidence is each surface's own model suite driving `reloadTheDiskVersion`
     // and each component's mounted suite pressing the control.
     //
-    // 2c-4a-3a flipped both booleans on the two authored-text match surfaces, so
-    // the three surfaces whose draft a clipboard can preserve now offer the same
-    // three choices. The mover, the deleter and the duplicator wait for 2c-4a-3b's
-    // panels — and their copy stays refused for ever, because the Q4 rule is about
-    // what their draft *is*.
+    // 2c-4a-3a flipped both booleans on the two authored-text match surfaces and
+    // 2c-4a-3b flipped `offersReload` on the other three, so **all six now offer
+    // the reload**. The copy stays refused on three of them for ever, because the
+    // Q4 rule is about what their draft *is* and not about what they declare.
     for (const surface of [RAW_EDITOR, MATCH_EDITOR, CREATOR]) {
       expect(conflictChoicesFor(surface, 'idle')).toEqual([
         'keepEditing',
@@ -597,8 +668,12 @@ describe('the one authority that decides what a conflict offers', () => {
       ]);
     } // End of the loop over the three authored-text surfaces
     for (const surface of [MOVER, DELETER, DUPLICATOR]) {
-      expect(conflictChoicesFor(surface, 'idle')).toEqual(['keepEditing']);
-      expect(conflictChoicesFor(surface, 'confirming')).toEqual(['keepEditing']);
+      expect(conflictChoicesFor(surface, 'idle')).toEqual(['keepEditing', 'reloadDiskVersion']);
+      expect(conflictChoicesFor(surface, 'confirming')).toEqual(['keepEditing', 'confirmReload']);
+      // And a spend the window refused takes both away again, on these three as on
+      // the other three.
+      expect(conflictChoicesFor(surface, 'unavailable')).toEqual(['keepEditing']);
+      expect(surface.offersCopyDraft).toBe(false);
     } // End of the loop over the three operation-choice surfaces
   }); // End of the "what each surface draws" case
 }); // End of the "one authority" suite
@@ -706,19 +781,29 @@ describe('the sentences behind the model', () => {
     { kind: 'nothingWasWritten' },
     { kind: 'changedElsewhere' },
     { kind: 'draftKeptInMemory' },
+    { kind: 'operationKeptInMemory' },
     { kind: 'reloadDiscardsDraft' },
     { kind: 'reloadClosesSurface' },
+    { kind: 'reloadAbandonsOperation' },
     { kind: 'changedAgainSinceRefusal' },
     { kind: 'windowOutOfStep' }
   ];
 
-  /** Every choice a conflict can name, the confirmation label included. */
-  const CHOICES: readonly ConflictChoice[] = [
-    'keepEditing',
-    'copyDraft',
-    'reloadDiskVersion',
-    'confirmReload'
-  ];
+  /**
+   * Every operation summary an `operationChoice` surface can show.
+   *
+   * Written out for {@link EVERY_CONFLICT_CHOICE}'s reason: a union has no
+   * run-time extent, and the `satisfies` below makes a new member with no entry
+   * here a compile error in this file.
+   */
+  const OPERATIONS = Object.keys({
+    deleteSnippet: true,
+    duplicateSnippet: true,
+    moveToTop: true,
+    moveToEnd: true,
+    moveAfterSnippet: true,
+    moveAfterSnippetNoLongerShown: true
+  } satisfies Record<ConflictOperation, true>) as readonly ConflictOperation[];
 
   it('map to the key that names them, so two cannot be swapped', () => {
     for (const message of MESSAGES) {
@@ -726,14 +811,25 @@ describe('the sentences behind the model', () => {
         `browser.saveOutcome.${message.kind}`
       );
     }
+    for (const operation of OPERATIONS) {
+      expect(conflictOperationKey(operation), operation).toBe(
+        `browser.saveOutcome.operation.${operation}`
+      );
+    }
     // The one that reuses an existing label rather than adding a second string
     // that reads the same: it is the same offer about a different refusal.
-    expect(conflictChoiceKey('keepEditing')).toBe('browser.rawSave.choice.keepEditing');
-    expect(conflictChoiceKey('copyDraft')).toBe('browser.saveOutcome.choice.copyDraft');
-    expect(conflictChoiceKey('reloadDiskVersion')).toBe(
+    expect(conflictChoiceKey('keepEditing', 'authoredText')).toBe(
+      'browser.rawSave.choice.keepEditing'
+    );
+    expect(conflictChoiceKey('copyDraft', 'authoredText')).toBe(
+      'browser.saveOutcome.choice.copyDraft'
+    );
+    expect(conflictChoiceKey('reloadDiskVersion', 'authoredText')).toBe(
       'browser.saveOutcome.choice.reloadDiskVersion'
     );
-    expect(conflictChoiceKey('confirmReload')).toBe('browser.saveOutcome.choice.confirmReload');
+    expect(conflictChoiceKey('confirmReload', 'authoredText')).toBe(
+      'browser.saveOutcome.choice.confirmReload'
+    );
   }); // End of the "map to the key" case
 
   it.each(LOCALES)('all read as a sentence in %s', (locale) => {
@@ -742,17 +838,26 @@ describe('the sentences behind the model', () => {
       expect(value.trim().split(/\s+/u).length, `${locale}:${message.kind}`).toBeGreaterThan(4);
       expect(value.trim().endsWith('.'), `${locale}:${message.kind}`).toBe(true);
     }
+    for (const operation of OPERATIONS) {
+      const value = DICTIONARIES[locale][conflictOperationKey(operation)];
+      expect(value.trim().split(/\s+/u).length, `${locale}:${operation}`).toBeGreaterThan(4);
+      expect(value.trim().endsWith('.'), `${locale}:${operation}`).toBe(true);
+    }
     // A choice is a button label, so it is checked the other way round: short,
     // and never punctuated like a sentence.
-    for (const choice of CHOICES) {
-      const value = DICTIONARIES[locale][conflictChoiceKey(choice)];
-      expect(value.trim(), `${locale}:${choice}`).not.toBe('');
-      expect(value.trim().endsWith('.'), `${locale}:${choice}`).toBe(false);
+    for (const key of EVERY_CONFLICT_LABEL) {
+      const value = DICTIONARIES[locale][key];
+      expect(value.trim(), `${locale}:${key}`).not.toBe('');
+      expect(value.trim().endsWith('.'), `${locale}:${key}`).toBe(false);
     }
   }); // End of the "all read as a sentence" case
 
   it('are translated, and no two of them read the same', () => {
-    const keys = [...MESSAGES.map(saveOutcomeMessageKey), ...CHOICES.map(conflictChoiceKey)];
+    const keys = [
+      ...MESSAGES.map(saveOutcomeMessageKey),
+      ...OPERATIONS.map(conflictOperationKey),
+      ...EVERY_CONFLICT_LABEL
+    ];
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) {
       expect(DICTIONARIES.es[key], key).not.toBe(DICTIONARIES.en[key]);
@@ -772,6 +877,13 @@ describe('the sentences behind the model', () => {
         const named = placeholdersOf(DICTIONARIES[locale][saveOutcomeMessageKey(message)]);
         expect(named, `${locale}:${message.kind}`).toEqual([]);
       }
-    }
+      // An operation summary carries none either: it names the *shape* of the
+      // operation and never a snippet, because identifying one across revisions is
+      // 2c-4b (consult Q5).
+      for (const operation of OPERATIONS) {
+        const named = placeholdersOf(DICTIONARIES[locale][conflictOperationKey(operation)]);
+        expect(named, `${locale}:${operation}`).toEqual([]);
+      }
+    } // End of the loop over the two locales
   }); // End of the "name no placeholder" case
 }); // End of the "sentences behind the model" suite

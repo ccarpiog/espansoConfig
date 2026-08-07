@@ -10,6 +10,7 @@
     beginMove,
     canChoose,
     choosePlacement,
+    CONFLICT_CAPABILITIES,
     confirmDiskReload,
     dismissMoveOutcome,
     matchMoveView,
@@ -27,9 +28,11 @@
   import type { MovePlacement } from '../browser/matchMove';
   import type { ConflictChoice } from '../browser/saveOutcome';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import SourceText from './SourceText.svelte';
   import {
     t,
     tConflictChoice,
+    tConflictOperation,
     tDetailField,
     tDraftError,
     tEditError,
@@ -37,6 +40,7 @@
     tIpcFailure,
     tMoveRecovery,
     tMoveRefusal,
+    tMoveReloadWarning,
     tMoveSubmissionRefusal,
     tPresentationNote,
     tRawSaveChoice,
@@ -81,15 +85,17 @@
    * against another. This is the caller that closes that half, and nothing in
    * TypeScript checks that it stays closed.
    *
-   * **`view.notMovable` is never drawn beside a `cannotMove` of `outOfDate`.**
-   * They answer at two different times: `notMovable` is the eligibility frozen at
-   * `startMatchMove` and no transition recomputes it, so after a reprojection it
-   * is a definite claim about the snippet read off a parse the window has
-   * replaced. `refusalGiven` puts `outOfDate` above `notMovable` for exactly that
-   * reason, and drawing the frozen reason beside the live one would put the
-   * suppressed certainty straight back on screen through the other field. The
-   * rule is on the field's own doc comment because a component is the only place
-   * it can be broken, and nothing in TypeScript can enforce it.
+   * **`view.notMovableToShow` is drawn whenever it is not `null`, and the rule
+   * behind that is the model's.** The frozen eligibility and the live refusal
+   * answer at two different times: the first was read off the parse this panel
+   * opened over and no transition recomputes it, so after a reprojection it is a
+   * definite claim about a snippet the window has replaced. `refusalGiven` puts
+   * `outOfDate` above `notMovable` for exactly that reason, and handing the frozen
+   * reason to a screen unconditionally would put the suppressed certainty straight
+   * back on through the other field. Until 2c-4a-3b a condition in *this markup*
+   * was the only thing stopping it — the shape `matchDuplication.ts` moved away
+   * from at 2c-3c-3's Medium — and the rule now lives in `matchMove.ts`, where a
+   * model test drives it and no second renderer can omit it.
    *
    * **The identity `beginMove` checks is read from the live projections, here,
    * at the moment of the click.** `identityInProjection(current.views, …)` and
@@ -142,6 +148,18 @@
    * and pick the snippet in the list again, and the header's *Leave it where it
    * is* is that exit. Offering a *Move it anyway* would be a control that cannot
    * work.
+   *
+   * **The conflict panel shows two sides and identifies nothing across them.** The
+   * retained side is `view.conflictOperation` — the model's summary of the
+   * placement the conflict kept — because a `MovePlacement` is a positional choice
+   * and not authored text, which is why the consult's Q4 refuses a copy here as a
+   * property of the drafted value and `conflictChoicesFor` refuses it whatever this
+   * surface declares. The disk side is the whole file text the command layer read,
+   * through `SourceText`; which arm of it is drawn is `conflictDiskText`'s decision
+   * and not this markup's. The confirmed reload installs the disk projection and
+   * **closes** this panel, and the destination goes with it: an anchor names a
+   * snippet of the parse this window read, and finding "the same" one in another
+   * revision is 2c-4b.
    *
    * **The panel cannot be left while a move is in flight**, for 2c-1b's reason:
    * the request is authorized and cannot be cancelled, so unmounting would leave
@@ -466,21 +484,20 @@
   /**
    * Does what one conflict choice says.
    *
-   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
-   * same.** `matchMove.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
-   * `operationChoice` — a placement is a positional choice and not authored text —
-   * so *Copy draft* can never be offered here, whatever a later change sets. The
-   * reload adopts the disk projection and **closes** the mover; it exists, is
-   * called below and is driven by `matchMove.test.ts`, and 2c-4a-3 flips the
-   * capability boolean that draws its control.
+   * **Three of the four arms are reachable as of 2c-4a-3b.** `matchMove.ts`'s
+   * `CONFLICT_CAPABILITIES` declares this draft an `operationChoice` — a placement
+   * is a positional choice and not authored text — so *Copy draft* can never be
+   * offered here, whatever a later change sets; `offersReload` is now `true`, so
+   * `conflictChoicesFor` names the two reload labels and this panel draws them. The
+   * reload adopts the disk projection and **closes** the mover; it was built and
+   * wired at 2c-4a-2 and is driven by `matchMove.test.ts`.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
    * and there is no `default`. A *newly offered* member does not — offering is the
    * model's, and a choice becomes a control the moment `conflictChoicesFor` names
-   * it. That is why the arms below are **implemented before they are offered**:
-   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
-   * have forced that order.
+   * it. No type in this file could have forced that an arm does anything, which is
+   * why the mounted suite presses every control this panel draws.
    *
    * @param choice - The choice the person picked.
    */
@@ -544,13 +561,13 @@
     {/if}
   </dl>
 
-  <!-- **The frozen reason, and never beside the live `outOfDate` one.** See this
-       file's own note: `notMovable` was read off the parse this panel opened
-       over, and after a reprojection it is a definite claim about a snippet
-       nobody can still see. `refusalGiven` suppresses it there and this condition
-       is what stops the other field putting it back. -->
-  {#if current.view.notMovable !== null && current.view.cannotMove !== 'outOfDate'}
-    <p class="blocked">{tMoveRefusal(current.view.notMovable)}</p>
+  <!-- **One condition, and it is a null check rather than a rule.** The model has
+       already applied the precedence: `notMovableToShow` is the frozen reason only
+       when it is the reason the control is disabled, and `null` whenever a weaker
+       live claim — an `outOfDate` above all — won instead. See this file's own note
+       on why that decision is no longer made here. -->
+  {#if current.view.notMovableToShow !== null}
+    <p class="blocked">{tMoveRefusal(current.view.notMovableToShow)}</p>
   {/if}
 
   {#if current.view.moving}
@@ -746,10 +763,50 @@
         <p class="kind">
           {t('browser.matchMove.revisionDisk', { revision: conflict.diskRevision })}
         </p>
+
+        <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
+        <!-- What this session asked for, as the model summarises it from the
+             placement the conflict retained. Nothing was typed here, so there is no
+             draft to render and no copy to offer (consult Q4). Whether the summary
+             may send the reader to the marked destination above is decided against
+             the same option list this panel draws, in `matchMove.ts` and not here
+             (2c-4a-3b review, finding 2). -->
+        {#if current.view.conflictOperation !== null}
+          <p>{tConflictOperation(current.view.conflictOperation)}</p>
+        {/if}
+        <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
+
+        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+        <!-- The whole file as the command layer read it, paired with
+             `diskRevision`, and never a projection of "the same snippet" — which
+             this application will not identify across revisions (consult Q5).
+             Which arm is drawn is `conflictDiskText`'s decision and not this
+             markup's (2c-4a-3a review, finding 5). -->
+        {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
+          <SourceText text={current.view.diskText.text} documentStart />
+        {:else}
+          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+        {/if}
+
+        <!-- The second step's warning. The shared line above is the whole
+             close/abandon guarantee and this one never restates it (2c-4a-3b
+             review, finding 3); it says only what becomes of the destination, and
+             **which** of its two sentences that is belongs to the model, because a
+             destination that names a snippet and one that names a position lose
+             different things (finding 1). -->
+        {#if current.view.reloadWarning !== null}
+          <p class="kind">{tMoveReloadWarning(current.view.reloadWarning)}</p>
+        {/if}
+
+        <!-- A control that has just gone, with the reason in its place. -->
+        {#if current.view.reloadUnavailable}
+          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+        {/if}
+
         <p class="choices">
           {#each current.view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice)}
+              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -776,6 +833,13 @@
 
   h2 {
     margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  /* The conflict panel's two headings: what was asked for, and what is on disk. */
+  h3 {
+    margin: 0.375rem 0 0;
     font-size: 0.8125rem;
     font-weight: 600;
   }

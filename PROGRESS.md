@@ -62,7 +62,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4a-1** | The **revision-bound disk snapshot**, in Rust and on the wire, with no frontend behaviour change and no control on any screen: `SaveResult::Conflict::disk_text`, paired with `disk_revision` by content-hash equality in the one production construction site | ✅ complete — after the review fix round below. The review returned **NOT READY** on a Medium (three tests claimed byte-exactness and **none could have falsified it** — none crossed the serializer) and a Low (two documents overstating what the code gives). **Both were fixed before the commit**, and the new dispatcher test's falsifiability was **proved by mutation**, not asserted |
 | **2c-4a-2** | The **frontend conflict protocol**, with no control drawn: the eager adoption removed from all six writing wrappers, `adoptDiskVersion` as the one door answering three outcomes, the spend bound to the conflict's origin, and the three-step reload machine shared by every surface | ✅ complete — after **four** review rounds, the last two existing only because the round before each left a **narrower instance** of the finding it had just closed |
 | **2c-4a-3a** | **The two authored-text conflict panels**: `offersReload` flipped on the match editor and the creator only, both panels drawn over step 2's transitions, `referenceCopyOf` as the one model behind the copy, and `clipboard.ts` — the module that **refuses** the `<textarea>` carrier for text holding a `\r` rather than copying normalised bytes and reporting success | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on seven findings, two High; round 2 closed six, found **no new defect introduced by the fixes**, and left the one this project's history predicts — a **narrower instance** of the High, surviving in two test comments |
-| 2c-4a-3b, 3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
+| **2c-4a-3b** | **The three operation-choice conflict panels**: `offersReload` flipped on the mover, the deleter and the duplicator, their panels drawn with a **retained operation summary** where the other three show authored text, `ConflictOperation` as that summary's model, `reloadWarningFor` as the one place the close/abandon guarantee is decided, and `MatchMover.svelte:511`'s in-component precedence rule migrated into `notMovableToShow` | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on two Medium (both blocking) and one Low, all three this project's named worst defect class or its cause; round 2 returned **READY with no findings**. The step **went beyond its brief and found a defect by doing so** — the shared conflict sentences described text nobody typed on these three surfaces — and round 1 **ruled the widening justified** and verified the three existing panels come out byte-identical in rendered wording |
+| 2c-4a-3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started — **2c-4a-3c, the window reading for all six write surfaces, is next and is step 3's exit** |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3411,6 +3412,121 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4a step 3b
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+the fix round. The counts are the final ones.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1426 passed, 46 files** (baseline 1404 at step 3a) |
+| `npm run check` | **412 files, 0 errors, 0 warnings** |
+| `npm run build` | **172 modules**, unchanged from step 3a, and `svelte/internal/server` absent from `dist/` |
+| `cargo test --workspace` | **1048 passed, 0 failed**, measured against this tree after the fix round — not carried forward. `git status` over `src-tauri/` and `crates/` is **empty**, so no Rust file was touched and the count is unchanged from step 3a |
+| `cargo clippy` / `cargo fmt --check` | **not run, and that is correct**, for the same reason |
+
+**The module count did not move, and that is the expected shape.** Step 3b adds **no** new source
+module — every new type lives in a file that already existed — so 172 → 172 is the guard passing.
+`CLAUDE.md` §6 gives the rule: the guard is the *shape* of a change to that number, and the
+regression it exists to catch is a jump to ~180 with Svelte's server build in the bundle. `dist/`
+was grepped for `svelte/internal/server` and it is absent.
+
+**i18n is 726 keys per language, at parity** — 711 at step 3a, 724 after the first cut of step 3b,
+then **+7 new and −5 removed** in the fix round.
+
+### What step 3b shipped
+
+- **`offersReload: true` on the remaining three surfaces.** `matchDeletion.ts`, `matchMove.ts` and
+  `matchDuplication.ts`. `offersCopyDraft: false` is untouched on all three and is **permanent** —
+  consult Q4 refuses a copy for a `MovePlacement` or a `MatchId` as a property of the drafted
+  value, and `conflictChoicesFor` refuses it even if the boolean were set.
+- **The three panels.** `MatchDeleter.svelte`, `MatchMover.svelte` and `MatchDuplicator.svelte`
+  draw the disk side through `SourceText documentStart`, all three revisions always, the two-step
+  `reloadDiskVersion` → `confirmReload` machine over 2c-4a-2's transitions, and the
+  `reloadUnavailable` disclosure that those three surfaces had carried since 3a with **nothing
+  rendering it**.
+- **A retained *operation summary*, not a retained draft.** `ConflictOperation` in
+  `saveOutcome.ts` is the consult's Q5 summary as a six-arm value with `conflictOperationKey`
+  behind it; `browser.saveOutcome.operationIdentityIsOld` says on all three panels that the
+  summary names the snippet as this window read it and that this application does not look for a
+  corresponding snippet in the disk version. **No cross-revision identification** — that is
+  2c-4b's.
+- **The scope widening, ruled justified by the reviewer.** Verifying the sentence
+  `ConflictCapabilities.reloadOutcome` produces exposed a defect: `reloadClosesSurface` ended
+  *"Copy it first if you want to keep it"* and `draftKeptInMemory` said *"Your text is still
+  here"* — neither true on a panel where a copy is permanently refused and nobody typed anything.
+  So `describeConflict` now branches on `draftKind`, `conflictChoiceKey` takes a **required**
+  `ConflictDraftKind`, and `MatchEditor.svelte`, `MatchCreator.svelte`, `RawEditor.svelte`,
+  `rawEditor.ts` and ~50 test call sites were touched. **Round 1 verified those three surfaces come
+  out byte-identical in rendered wording**, their new branches selecting their previous keys.
+- **`MatchMover.svelte:511`'s in-component rule is gone.** `MatchMoveView.notMovable` became
+  `notMovableToShow`, computed in `matchMove.ts` against `cannotMove === 'notMovable'` exactly as
+  `matchDuplicationView.notDuplicableToShow` does since 2c-3c-3, with the mover's markup reduced to
+  a null check and the raw frozen verdict left on `session.eligibility`. **This closes the item the
+  previous "Next action" flagged**, and the standing debt ledger loses it;
+  `browser.matchMove.refused.unsavedDraft` remains on it, untouched.
+
+The record is `docs/decisions/2c-4a-3b-notes.md`; both review rounds are
+`docs/reviews/phase-2c-4a-3b-code.md`.
+
+---
+
+## Phase 2c-4a step 3b review disposition
+
+**Two rounds, three findings, `NOT READY` then `READY`** (`docs/reviews/phase-2c-4a-3b-code.md`;
+round 2 is the confirmation pass, appended there). Both Codex jobs were dispatched **read-only**,
+so neither could create the review file and the orchestrator copied each reply into it verbatim —
+the file says so at the top of each round. **All three were fixed before the commit**, so no
+commit holds a demonstrated defect.
+
+**Both Mediums were this project's named worst defect class** — a sentence claiming something the
+code does not do — and the Low was named by the reviewer as *the cause of the first Medium*
+rather than as a cosmetic duplication.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Medium (blocking)** — `browser.matchMove.reloadClosesMover` said the chosen destination could not be kept *because it names snippets of the version this window read*. True of `MovePlacement`'s `after` arm; **`top` and `end` name no snippet at all** | **Accepted.** The key is **deleted**. `MatchMoveView.awaitingReloadConfirmation` is replaced by `reloadWarning: MoveReloadWarning \| null` (`positionalDestination` \| `anchoredDestination`), chosen in `matchMove.ts` by `reloadWarningOf` from the **retained** placement's own arm and rendered through a new `tMoveReloadWarning`. Only the anchored arm may say the destination names another snippet. **One field rather than a boolean plus an arm**, so the condition and the arm it selects are decided together and cannot drift — two fields that have to agree is how a capability came to be expressed twice at 2c-4a-2. Round 2 confirmed the derivation is from the retained conflict placement and not from the current draft |
+| 2 | **Medium (blocking)** — `browser.saveOutcome.operation.moveAfterSnippet` promised its anchor was *"still marked as chosen among the destinations above"*, but `movePlacementOptionsOf` **removes old-revision anchors after a live reprojection while the conflict is still displayed**, so the sentence could point at a mark that had gone. The review named the cause: **the mounted test drove only a static projection** | **Accepted.** `ConflictOperation` gains `moveAfterSnippetNoLongerShown`; `operationOf` now takes the live projections and asks `movePlacementOptionsOf`'s **own answer** whether a drawn destination carries the retained placement **and is marked**, so the "marked as chosen above" sentence is gated by the actual drawn mark. **No cross-revision identification** — the other arm says the destination is gone and names nothing of the disk side. Mounted reprojection coverage was added over a **real `BrowserState`** (`state.rereadDocument` under an open conflict), which round 2 confirmed is falsifiable and exercises the claimed production path |
+| 3 | **Low** — at the confirmation step, `reloadAbandonsOperation` and each surface-specific `reloadCloses*` sentence **repeated the same close/abandon guarantee in different wording**. Consistent and reachable at the time, but that duplication is what let finding 1's narrower sentence become false | **Accepted, and treated as finding 1's cause.** `reloadWarningFor` in `saveOutcome.ts` is now the **sole** model decision for the guarantee; `reloadClosesSurface` absorbed the missing *operation not carried out / file not written* clause; the five surface confirmation lines were stripped to reason-plus-next-step and **renamed to match what they now say** — `reloadIdentifiesNoSnippet` ×3, `reloadSeedsNoForm`, and the mover's two. **That rewrote rendered wording on five surfaces, four of which were the subject of no finding**, which is exactly why round 2 exists |
+
+**The fix round's own sweep found one narrower instance of finding 2's shape, before the reviewer
+did.** The new `moveAfterSnippetNoLongerShown` sentence first blamed the disappearance on *"this
+window has read this file again"*, which is only one of the ways `movePlacementOptionsOf` drops an
+anchor; it now claims only that the window no longer holds that reading. **The sweep was written
+from what the type now says, not from the words the finding used** — the discipline
+`2c-4a-2-notes.md` §7.6.2 named after three rounds each left a narrower instance standing — and
+this is the first time in this phase that it caught something first.
+
+**Mutation-falsifiability checks, performed rather than claimed.** Step 3b: replacing the
+`confirmReload` arm in all three panels with a bare `confirmDiskReload` turned **9 tests red**
+across the three mounted suites; rewriting `notMovableToShow`'s guard back to
+`cannotMove === 'outOfDate'` turned its model test red. Fix round: making `operationOf` return
+`'moveAfterSnippet'` unconditionally turned **both** the model test and the mounted reprojection
+test red; flipping `reloadWarningOf` to key off `'end'` turned **5 tests red** across both suites.
+All were restored and the suite is green.
+
+**Round 1's clean categories, recorded as given:** the reload transitions treat `installed` **and
+`alreadyThere`** as success and stop only on `refused`; no forbidden conflict behaviour was added;
+the selection-generation writes remain sound; and the new tests are not vacuous — their only
+weakness was the missing mover placement/reprojection coverage, which finding 2's fix supplied.
+
+**Round 2's, likewise:** the three fixes are in the code rather than merely reworded; the renamed
+keys are **fully migrated in executable source, tests and both dictionaries**, the one remaining
+old-key occurrence being an explicitly historical "now gone" comment at `saveOutcome.ts:619` and
+not a lookup; the surface lines make no additional close, abandon or write guarantee in either
+language; the forbidden behaviours remain absent with `offersCopyDraft: false` intact on all three
+surfaces; and the confirmed mover reload adopts the disk observation and closes **only after a
+successful adoption**, neither retrying the stale move nor carrying its placement forward.
+
+**What no test can catch here, and the record says so rather than implying otherwise.** Nothing
+enforces that a future renderer walks `reloadWarning` rather than re-deriving the arm from the
+retained placement, and nothing enforces that `matchMoveView`'s caller passes the **live**
+projections — a caller that passed a stale list there and a fresh one to the options would get a
+sentence about a screen it is not drawing. The i18n suites check parity and placeholder agreement,
+**not meaning**, so none of the five renamed sentences is pinned by anything executable.
+
+---
+
 ## Verification — Phase 2c-4a step 3a
 
 Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
@@ -5730,8 +5846,99 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-4a step 3a is complete: two of the six write surfaces now draw a conflict panel, and a
-person can choose for the first time.** The match editor and the creator offer *Reload disk
+**Phase 2c-4a step 3b is complete: all six write surfaces now draw a conflict panel.** The mover,
+the deleter and the duplicator declare `offersReload: true`, and their panels show the disk side
+through `SourceText`, a **retained operation summary** where the other three show authored text,
+all three revisions, the two-step *Load the version on disk* → *Close this and load it*, and the
+refused-reload disclosure they had carried since 3a with nothing rendering it.
+**`offersCopyDraft: false` is untouched on all three and is permanent** — consult Q4 refuses a copy
+for a `MovePlacement` or a `MatchId` as a property of the drafted value.
+
+Step 3b also **went beyond its brief and found a defect by doing so**: the shared conflict
+sentences described text nobody typed on those three panels, so `describeConflict` now branches on
+`draftKind` and `conflictChoiceKey` takes a **required** `ConflictDraftKind`. Round 1 ruled the
+widening justified and verified the three pre-existing panels come out **byte-identical in rendered
+wording**. It also closed the item the previous checkpoint flagged: `MatchMover.svelte:511`'s
+in-component precedence rule is now `notMovableToShow` in `matchMove.ts`.
+
+**Two review rounds: NOT READY on two Medium and one Low, then READY with no findings.** The
+disposition is "Phase 2c-4a step 3b review disposition" above; the counts are in "Verification —
+Phase 2c-4a step 3b".
+
+**Step 3c is next, and it is step 3's exit.**
+
+<<<COMMIT-SHA>>>
+
+is step 3b's commit and is where a fresh session begins (`59c8105` was the base). The exact first
+commands to run:
+
+```sh
+npm install && npm test        # expect 1426 passed, 46 files
+cargo test --workspace         # expect 1048 passed, untouched since 2c-4a-1
+```
+
+(`npm run check` expects **412 files, 0 errors, 0 warnings**. `npm run build` expects **172
+modules** — **unchanged**, because step 3b added no source module; the guard is the *shape* of a
+change to that number, `CLAUDE.md` §6. i18n is **726** keys per language, at parity.)
+
+### Read this before starting step 3c
+
+`docs/reviews/phase-2c-4a-design.md` governs the whole phase, and its **Q7** is the recipe below —
+read it first, because the instrument is the thing this step is most likely to get wrong.
+`docs/decisions/2c-4a-3b-notes.md` is step 3b's record; its §8 is written as the handover to this
+step and names three things worth putting on the reading's list. `docs/reviews/phase-2c-4a-3b-code.md`
+holds both review rounds. `docs/decisions/2c-4a-3a-notes.md` §4 lists the holes 3a left that a
+reading is the right instrument to judge.
+
+### Next: Phase 2c-4a step 3c — the window reading, for all six write surfaces
+
+**The reading is owed for six surfaces, not three.** It was already owed for six before this step:
+3a's fix round migrated `RawEditor.svelte` onto the shared clipboard module, and **a window reading
+is re-taken after any change to a component**. Step 3b then added three panels that have never been
+seen *and* its fix round put **new prose on five surfaces**, four of which were the subject of no
+finding — so the reading has more to check than it did when 3a handed it over.
+
+**The recipe, from consult Q7.** Open the surface at revision R0, then — **without invoking any app
+command that reloads the document** — use a **shell or editor process** to append a valid YAML
+comment to that exact file, producing R1. The frontend and the Rust cache stay at R0, `view_at`
+passes, and the core's locked read sees R1. This application's own raw-save IPC does **not** work as
+the second writer, which is what made a true conflict look unreachable since 2c-3b: it refreshes the
+same Rust workspace cache, so `view_at` answers `identityStaleRevision` before the transaction. That
+proved the *instrument* wrong, not the outcome unreachable.
+
+**One plan per launch, into a fresh bundle path**, and set the language **explicitly through the
+picker** — the webview's `localStorage` follows the **bundle identifier**, not `HOME`, so an
+override set by one launch is still in force in the next, and two launches of 2c-2-2's reading
+failed by looking for an English control on a Spanish screen. A WKWebView whose window is occluded
+stops running `setTimeout` about six seconds after launch; `open -a` does not restart it and
+LaunchServices silently drops `--env` for a bundle path it thinks is already running.
+`docs/decisions/1c-2b-2b-2-notes.md` §6.1 is the technique.
+
+**What the reading must judge that no suite can.** The clipboard on the two authored-text panels —
+jsdom proves the fallback route runs, not what lands on the pasteboard, and the carriage-return
+refusal is a claim about a real WKWebView. The legibility of a two-column comparison beside a whole
+file's text. Whether the operation summary reads as a description of what was asked for rather than
+as an instruction. The mover's **two** `reloadWarning` arms, which need a `top`/`end` conflict and
+an `after` conflict to both be staged. And the five renamed confirmation lines checked against the
+shared warning above them, in **both** languages, for the duplication step 3b's finding 3 removed.
+
+**One thing step 3c inherits and must not undo.** After a match conflict is dismissed, a second
+submission is refused by `view_at` with `identityStaleRevision` — **not** by a second conflict —
+because `conflict_after_the_lock` already refreshed the Rust cache. Only a raw save reaches the
+locked check twice. Write-safe either way, but they are different sentences.
+
+**What step 3c must not do**, unchanged from the consult: no `saveAnyway`, no retry of the stale
+candidate, no automatic reload, no clearing of dirty state on conflict, **no cross-revision
+identification of "the same match"** (that is 2c-4b's confidence work), no YAML emitted from a
+projection, no diff, and **no control named or coded "keep my draft"** — `CLAUDE.md` §6 makes that
+absolute before 2c-4b. A defect the reading finds is fixed and the reading **re-taken**, by the
+standing rule 2c-1b and 2c-3b-2 both paid.
+
+---
+
+**Phase 2c-4a step 3a (superseded by the above, kept for its rationale) is complete: two of the six
+write surfaces draw a conflict panel, and a person could choose for the first time.** The match
+editor and the creator offer *Reload disk
 version* → *Confirm reload*, *Copy my text* and *Keep editing*; the disk side and the retained draft
 are both on screen, all three revisions always. The other three match surfaces still declare
 `offersReload: false` and are untouched.

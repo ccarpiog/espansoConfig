@@ -124,6 +124,20 @@ export type SaveOutcomeMessage =
     }
   | {
       /**
+       * The operation the panel was set up to perform is still set up, untouched.
+       *
+       * **The `operationChoice` half of {@link SaveOutcomeMessage} `draftKeptInMemory`,
+       * and 2c-4a-3b is why it exists.** *Your text is still here, exactly as you
+       * wrote it* is true of the raw editor, the match editor and the creator, and
+       * false of the mover, the deleter and the duplicator: nobody typed anything
+       * on those three, so a sentence about text describes something the person
+       * never produced. {@link ConflictCapabilities.draftKind} chooses between the
+       * two, in this module, and not in six markup files.
+       */
+      readonly kind: 'operationKeptInMemory';
+    }
+  | {
+      /**
        * Loading the version on disk **replaces the draft with it**, irreversibly.
        *
        * True of the raw editor and of nothing else, which is the 2c-4a-3a review's
@@ -143,8 +157,32 @@ export type SaveOutcomeMessage =
        * disk-side `MatchBuffers`, `CreationBuffers`, `MovePlacement` or `MatchId`
        * to seed, and manufacturing one would be the cross-revision identification
        * 2c-4b owns.
+       *
+       * **It states the whole guarantee, including that the operation is not
+       * carried out and the file is not written** — the 2c-4a-3b review's finding
+       * 3. It used to say only what became of the draft, so the creator's own
+       * confirmation line carried *and the snippet is not added* while the other
+       * three surfaces got that clause from
+       * {@link SaveOutcomeMessage} `reloadAbandonsOperation`: one guarantee decided
+       * in two places, which is how the mover's half of it drifted into being
+       * false.
        */
       readonly kind: 'reloadClosesSurface';
+    }
+  | {
+      /**
+       * Loading the version on disk **closes the panel** and the operation is not
+       * carried out.
+       *
+       * **The third arm, and 2c-4a-3b's verification of `reloadOutcome` is why.**
+       * {@link SaveOutcomeMessage} `reloadClosesSurface` ends *copy it first if you
+       * want to keep it*, which is sound advice on the two surfaces that offer a
+       * copy and an instruction with no control behind it on the three that never
+       * can: consult Q4 refuses a copy for a `MovePlacement` or a `MatchId` as a
+       * property of the drafted value. This sentence promises no copy, because
+       * there is nothing here a clipboard could preserve.
+       */
+      readonly kind: 'reloadAbandonsOperation';
     }
   | {
       /** The file changed *again* between the refusal and the read that followed it. */
@@ -241,10 +279,12 @@ export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
  *
  * **Offered is not the same as implemented, and since the 2c-4a-2 confirmation
  * pass this distinction is the whole point.** Every surface's reload transition
- * exists and every component's `conflictAction` calls it; what `offersReload: false`
- * withholds is the *control*. Phase 2c-4a-3a flipped the two booleans on the two
+ * exists and every component's `conflictAction` calls it; what a `false` here
+ * withholds is the *control*. Phase 2c-4a-3a flipped both booleans on the two
  * authored-text match surfaces over machinery that was already there and already
- * tested, and 2c-4a-3b does the same for the reload on the other three.
+ * tested, and 2c-4a-3b flipped `offersReload` on the other three the same way. All
+ * six now offer the reload; three of them will never offer the copy, because that
+ * one is refused by {@link conflictChoicesFor} for what their draft *is*.
  */
 export interface ConflictCapabilities {
   /** What the retained draft is, which decides whether a copy could ever be honest. */
@@ -275,10 +315,12 @@ export interface ConflictCapabilities {
    *
    * Consult Q3 gives **all six** surfaces a confirmed reload, and **all six have
    * one**: the raw editor reseeds its draft from the disk text, the five match
-   * surfaces adopt the disk projection and close. Three *offer* it as of 2c-4a-3a
-   * — the raw editor, the match editor and the creator — and the mover, the
-   * deleter and the duplicator wait for 2c-4a-3b's panels and sentences, which is
-   * a question about what a panel says rather than about what it can do.
+   * surfaces adopt the disk projection and close. Three began offering it at
+   * 2c-4a-3a — the raw editor, the match editor and the creator — and the mover,
+   * the deleter and the duplicator at 2c-4a-3b, when their panels and sentences
+   * were drawn. **It is still a boolean rather than a constant**, because what it
+   * records is what a surface draws today and a surface without a panel for it
+   * must be able to say so.
    */
   readonly offersReload: boolean;
 }
@@ -558,6 +600,43 @@ function describeRefused(result: RefusedResult, wholeDocument: boolean): Refused
 } // End of function describeRefused()
 
 /**
+ * The line one surface's conflict shows about what a reload would do.
+ *
+ * **Read off the two permanent fields together, and never off a caller's word.**
+ * `reloadOutcome` says whether the draft is replaced or the panel closes;
+ * `draftKind` says whether there is anything a copy could preserve. The pair has
+ * three inhabited combinations today and this names all three, so a surface
+ * cannot inherit a sentence that promises a control it does not have.
+ *
+ * **This is the one place the close/abandon guarantee is decided**, and the
+ * 2c-4a-3b review's finding 3 is why it is written down here. Each of the five
+ * match surfaces also draws a line of its own at the confirmation step; that line
+ * says only what this application cannot bring back on *that* surface and what to
+ * do about it afterwards, and it must never restate what these three sentences
+ * already promise — that the panel closes, that the operation is not carried out,
+ * that the file is not written, or what becomes of the draft. Two wordings of one
+ * guarantee is how the mover's half of it drifted into claiming something
+ * (`browser.matchMove.reloadClosesMover`, now gone) that was false of two of its
+ * three placement arms.
+ *
+ * **Nothing here can enforce that**, and no test in this repository pins prose:
+ * the i18n suites check parity and placeholders, never meaning (`CLAUDE.md`
+ * section 6). What is enforced is that a surface cannot pick its own arm — the
+ * three sentences are chosen from the declared capabilities and from nothing else.
+ *
+ * @param capabilities - What the surface declares about itself.
+ * @returns The warning to show.
+ */
+function reloadWarningFor(capabilities: ConflictCapabilities): SaveOutcomeMessage {
+  if (capabilities.reloadOutcome === 'reseedsDraft') {
+    return { kind: 'reloadDiscardsDraft' };
+  }
+  return capabilities.draftKind === 'authoredText'
+    ? { kind: 'reloadClosesSurface' }
+    : { kind: 'reloadAbandonsOperation' };
+} // End of function reloadWarningFor()
+
+/**
  * Builds the `conflict` arm around the draft that was refused.
  *
  * The disk side's text is carried through **unchanged** — copied, never rebuilt
@@ -575,17 +654,23 @@ function describeConflict<T>(
   capabilities: ConflictCapabilities
 ): ConflictModel<T> {
   const changedAgain = result.found !== result.disk_revision;
+  const authored = capabilities.draftKind === 'authoredText';
   const messages: SaveOutcomeMessage[] = [
     { kind: 'nothingWasWritten' },
     { kind: 'changedElsewhere' },
-    { kind: 'draftKeptInMemory' },
+    // **What was retained is what the drafted value *is*.** Three surfaces hold
+    // strings a person typed; the other three hold a placement or an identity
+    // nobody typed at all, and a sentence about text would describe something
+    // they never produced (2c-4a-3b).
+    authored ? { kind: 'draftKeptInMemory' } : { kind: 'operationKeptInMemory' },
     // **The surface's own declaration, not a shared guess.** The raw editor loads
     // the disk text into its box; every match surface closes instead, and telling
     // a person their text is about to be replaced by it would describe an action
-    // that surface does not perform (2c-4a-3a review, finding 2).
-    capabilities.reloadOutcome === 'reseedsDraft'
-      ? { kind: 'reloadDiscardsDraft' }
-      : { kind: 'reloadClosesSurface' }
+    // that surface does not perform (2c-4a-3a review, finding 2). The third arm
+    // splits `closesSurface` by what the draft is, because the sentence for an
+    // authored draft ends by advising a copy that an `operationChoice` surface has
+    // no control for and — by consult Q4 — never may.
+    reloadWarningFor(capabilities)
   ];
   if (changedAgain) {
     messages.push({ kind: 'changedAgainSinceRefusal' });
@@ -702,6 +787,89 @@ export function conflictDiskText<T>(conflict: ConflictModel<T> | null): Conflict
   }
   return conflict.diskText === '' ? NO_CHARACTERS : { kind: 'text', text: conflict.diskText };
 } // End of function conflictDiskText()
+
+/**
+ * What an `operationChoice` surface's retained draft **asked for**, as a code.
+ *
+ * **The consult's Q5 "retained operation summary", as a value rather than as
+ * three markup files.** The mover, the deleter and the duplicator draft no text,
+ * so the side of the comparison that the other three fill with
+ * `RetainedDraftField`s has to be filled with a description of the operation —
+ * and a description assembled in a `.svelte` file is a decision no model test can
+ * drive and a second renderer can quietly get wrong (2c-3c-3's Medium).
+ *
+ * **It says what was asked for and never what became of it.** *Nothing was
+ * written* is already on screen as {@link SaveOutcomeMessage} `nothingWasWritten`;
+ * repeating the claim here would be two sentences that have to be kept in step.
+ *
+ * **It names no snippet.** A `MatchId` is revision-scoped and identifying the
+ * corresponding snippet in another revision is 2c-4b's work, so the summary
+ * describes the *shape* of the operation and the panel's own header — drawn from
+ * the projection this session opened over — is what names the snippet.
+ *
+ * **A summary that points at something else on the screen is an arm of its own,
+ * chosen from what that screen is drawing now.** The 2c-4a-3b review's finding 2:
+ * the `after` sentence sends the reader to the destination the list still marks,
+ * and `movePlacementOptionsOf` drops an anchor whose parse this window has since
+ * replaced — so a reprojection arriving while the conflict is displayed left a
+ * sentence pointing at a mark that had gone. Which of the two `after` arms is
+ * shown is `matchMove.ts`'s decision, taken against the same option list the
+ * panel renders.
+ */
+export type ConflictOperation =
+  /** Remove this snippet from its file. The deleter. */
+  | 'deleteSnippet'
+  /** Copy this snippet immediately after itself. The duplicator. */
+  | 'duplicateSnippet'
+  /** Move this snippet to the front of its list. The mover's `top` placement. */
+  | 'moveToTop'
+  /** Move this snippet to the end of its list. The mover's `end` placement. */
+  | 'moveToEnd'
+  /**
+   * Move this snippet after another one of its list, **still offered above**.
+   *
+   * The mover's `after`, while the destination list this panel draws still holds
+   * that anchor and still marks it as chosen. Only then may the sentence send the
+   * reader to it.
+   */
+  | 'moveAfterSnippet'
+  /**
+   * Move this snippet after another one of its list, **no longer offered above**.
+   *
+   * The same `after`, once this window has replaced the parse the anchor was
+   * minted from: `movePlacementOptionsOf` stops offering it, so nothing on screen
+   * is marked and the sentence has to say so. It says the anchor is gone from the
+   * list and **never** which snippet of the disk version it was — that would be
+   * the cross-revision identification 2c-4b owns.
+   */
+  | 'moveAfterSnippetNoLongerShown';
+
+/**
+ * The dictionary key holding one operation summary's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom of every other
+ * describer in this directory: a renamed key is a compile error here, and a new
+ * member of {@link ConflictOperation} with no sentence is one too.
+ *
+ * @param operation - What the retained draft asked for.
+ * @returns The key holding that summary's sentence.
+ */
+export function conflictOperationKey(operation: ConflictOperation): TranslationKey {
+  switch (operation) {
+    case 'deleteSnippet':
+      return 'browser.saveOutcome.operation.deleteSnippet';
+    case 'duplicateSnippet':
+      return 'browser.saveOutcome.operation.duplicateSnippet';
+    case 'moveToTop':
+      return 'browser.saveOutcome.operation.moveToTop';
+    case 'moveToEnd':
+      return 'browser.saveOutcome.operation.moveToEnd';
+    case 'moveAfterSnippet':
+      return 'browser.saveOutcome.operation.moveAfterSnippet';
+    case 'moveAfterSnippetNoLongerShown':
+      return 'browser.saveOutcome.operation.moveAfterSnippetNoLongerShown';
+  }
+} // End of function conflictOperationKey()
 
 /**
  * The draft's value, for the *Copy draft* affordance.
@@ -1044,10 +1212,14 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
       return 'browser.saveOutcome.changedElsewhere';
     case 'draftKeptInMemory':
       return 'browser.saveOutcome.draftKeptInMemory';
+    case 'operationKeptInMemory':
+      return 'browser.saveOutcome.operationKeptInMemory';
     case 'reloadDiscardsDraft':
       return 'browser.saveOutcome.reloadDiscardsDraft';
     case 'reloadClosesSurface':
       return 'browser.saveOutcome.reloadClosesSurface';
+    case 'reloadAbandonsOperation':
+      return 'browser.saveOutcome.reloadAbandonsOperation';
     case 'changedAgainSinceRefusal':
       return 'browser.saveOutcome.changedAgainSinceRefusal';
     case 'windowOutOfStep':
@@ -1062,10 +1234,27 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
  * string that reads the same: it is the same offer, made about a different
  * refusal.
  *
+ * **The draft kind is required rather than defaulted, and 2c-4a-3b is why.**
+ * *Discard my text and load it* is what the confirmation does on a surface whose
+ * draft is authored text, and it is a claim about text nobody typed on the mover,
+ * the deleter and the duplicator — the three panels that first drew this control
+ * at 2c-4a-3b. A default here would let one of them inherit the other's sentence
+ * silently, which is the argument that made
+ * {@link ConflictCapabilities.reloadOutcome} required one field along.
+ *
+ * **What no type forces**: that the caller passes the draft kind its own surface
+ * declares. It is an ordinary {@link ConflictDraftKind}, so a component may hand
+ * over the wrong one; what is closed is that it cannot omit the question.
+ *
  * @param choice - What the person may do.
+ * @param draftKind - What the calling surface's retained draft is, from its own
+ *   `CONFLICT_CAPABILITIES`.
  * @returns The key holding that choice's label.
  */
-export function conflictChoiceKey(choice: ConflictChoice): TranslationKey {
+export function conflictChoiceKey(
+  choice: ConflictChoice,
+  draftKind: ConflictDraftKind
+): TranslationKey {
   switch (choice) {
     case 'keepEditing':
       return 'browser.rawSave.choice.keepEditing';
@@ -1074,6 +1263,8 @@ export function conflictChoiceKey(choice: ConflictChoice): TranslationKey {
     case 'reloadDiskVersion':
       return 'browser.saveOutcome.choice.reloadDiskVersion';
     case 'confirmReload':
-      return 'browser.saveOutcome.choice.confirmReload';
+      return draftKind === 'authoredText'
+        ? 'browser.saveOutcome.choice.confirmReload'
+        : 'browser.saveOutcome.choice.confirmReloadClosing';
   }
 } // End of function conflictChoiceKey()

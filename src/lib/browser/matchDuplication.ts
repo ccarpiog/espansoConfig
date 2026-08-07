@@ -188,6 +188,7 @@ import {
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictOperation,
   type ConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
@@ -1162,19 +1163,18 @@ export function duplicationRecoveryFailed(
  * `conflictChoicesFor` refuses it even if `offersCopyDraft` were set.
  *
  * A confirmed reload — install the disk projection and **close** the duplicator —
- * is **built and wired**: {@link askToReloadDiskVersion},
+ * is **offered as of 2c-4a-3b**: {@link askToReloadDiskVersion},
  * {@link confirmDiskReload} and {@link reloadTheDiskVersion} are the transition,
- * and `MatchDuplicator.svelte`'s `conflictAction` calls them. It is only *unoffered* —
- * `conflictChoicesFor` names nothing this boolean does not admit, so no control
- * that could reach the arm is drawn, which is why an unoffered arm is not a dead
- * control. **Phase 2c-4a-3 flips the boolean**, over machinery that already exists
- * and is already driven by this module's tests.
+ * `MatchDuplicator.svelte`'s `conflictAction` calls them, and its panel now draws
+ * the two labels `conflictChoicesFor` names. Flipping the boolean was the whole of
+ * that step's model change here, because the machinery it turns on was built and
+ * driven by this module's tests at 2c-4a-2.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: false
+  offersReload: true
 };
 
 /** Everything a screen needs about one duplication, derived on every read. */
@@ -1280,6 +1280,19 @@ export interface MatchDuplicationView {
    */
   readonly diskText: ConflictDiskText | null;
   /**
+   * What the retained draft **asked for**, or `null` when no conflict is showing.
+   *
+   * **The `operationChoice` side of the comparison the consult's Q5 ruled**
+   * (2c-4a-3b). Nothing here was typed, so what goes beside the disk text is a
+   * description of the operation — decided in this module rather than assembled in
+   * markup, because a description written into one renderer is carried by that
+   * renderer's mounted suite alone (2c-3c-3's Medium).
+   *
+   * Constant while a conflict is showing: a duplicate has no placement to choose,
+   * because the clone lands immediately after its source (2c-3c-1).
+   */
+  readonly conflictOperation: ConflictOperation | null;
+  /**
    * Whether a confirmed reload has ended this session.
    *
    * The panel that reads this calls its own `close`: a match-level reload adopts
@@ -1374,6 +1387,7 @@ export function matchDuplicationView(
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
     diskText: conflictDiskText(conflict),
+    conflictOperation: conflict === null ? null : 'duplicateSnippet',
     closed: session.closed
   };
 } // End of function matchDuplicationView()

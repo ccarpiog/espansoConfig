@@ -212,10 +212,13 @@ const NOTHING_SAID_YET: RawSaveModel = describeRawSave(null);
  * reason `copyDraft` is offered here and not to the mover, the deleter or the
  * duplicator. Both booleans are `true`, and since 2c-4a-3a so are the match
  * editor's and the creator's, whose drafts are authored text too. The mover, the
- * deleter and the duplicator have the same reload transition, built and called by
- * their components, and keep `offersReload: false` until 2c-4a-3b draws their
- * panels — a model that names a choice draws a control, and *offered* is a
- * different question from *implemented*.
+ * deleter and the duplicator offer the reload as of 2c-4a-3b, over the same
+ * transition their components had been calling since 2c-4a-2 — a model that names
+ * a choice draws a control, and *offered* was a different question from
+ * *implemented* for exactly one sub-phase. Their copy stays refused for ever.
+ *
+ * **This surface is the only one that reseeds**, and `reloadOutcome` is where that
+ * is said: its draft is replaced by the disk text rather than the panel closing.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',

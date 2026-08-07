@@ -855,10 +855,10 @@ describe('the mounted new-snippet form', () => {
       t('browser.matchCreation.revisionDisk', { revision: AFTER })
     );
     // Three choices, and the destructive one is a second step away.
-    expect(button(form.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
-    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).not.toBeNull();
-    expect(button(form.target, conflictChoiceKey('confirmReload'))).toBeNull();
+    expect(button(form.target, conflictChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
     // And nothing has moved: no adoption, and the form is still open.
     expect(form.adoptions).toEqual([]);
     expect(form.closed()).toBe(0);
@@ -871,19 +871,19 @@ describe('the mounted new-snippet form', () => {
     control(form.target, 'browser.matchCreation.create').click();
     await settle();
 
-    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(false);
-    control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+    expect(says(form.target, 'browser.matchCreation.reloadSeedsNoForm')).toBe(false);
+    control(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
     flushSync();
 
     // The second step: the warning that says what happens *here* — the window
     // crosses, this form closes, and the snippet is not added.
-    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(true);
-    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(says(form.target, 'browser.matchCreation.reloadSeedsNoForm')).toBe(true);
+    expect(button(form.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
     expect(form.adoptions).toEqual([]);
     expect(form.closed()).toBe(0);
 
-    control(form.target, conflictChoiceKey('confirmReload')).click();
+    control(form.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
     expect(form.adoptions).toHaveLength(1);
@@ -906,9 +906,9 @@ describe('the mounted new-snippet form', () => {
       fillIn(form);
       control(form.target, 'browser.matchCreation.create').click();
       await settle();
-      control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+      control(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
       flushSync();
-      control(form.target, conflictChoiceKey('confirmReload')).click();
+      control(form.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
       flushSync();
 
       expect(form.adoptions, answer).toHaveLength(1);
@@ -930,21 +930,21 @@ describe('the mounted new-snippet form', () => {
     fillIn(form);
     control(form.target, 'browser.matchCreation.create').click();
     await settle();
-    control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+    control(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
     flushSync();
-    control(form.target, conflictChoiceKey('confirmReload')).click();
+    control(form.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
     expect(says(form.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
-    expect(button(form.target, conflictChoiceKey('confirmReload'))).toBeNull();
-    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
-    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
-    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(false);
+    expect(button(form.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
+    expect(button(form.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(says(form.target, 'browser.matchCreation.reloadSeedsNoForm')).toBe(false);
     expect(form.adoptions).toHaveLength(1);
     expect(form.closed()).toBe(0);
 
     // And *Keep editing* gives the form back with what was typed still in it.
-    control(form.target, conflictChoiceKey('keepEditing')).click();
+    control(form.target, conflictChoiceKey('keepEditing', 'authoredText')).click();
     flushSync();
     expect(box(form.target, 'trigger').value).toBe(':new');
     expect(box(form.target, 'trigger').readOnly).toBe(false);
@@ -977,7 +977,7 @@ describe('the mounted new-snippet form', () => {
       control(form.target, 'browser.matchCreation.create').click();
       await settle();
 
-      control(form.target, conflictChoiceKey('copyDraft')).click();
+      control(form.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
       await settle();
 
       expect(says(form.target, 'browser.saveOutcome.draftCopied')).toBe(true);
