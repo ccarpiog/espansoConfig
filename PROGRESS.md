@@ -8635,6 +8635,7 @@ _Updated at each phase boundary._
 | **2c-3c step 3 (closes 2c-3c)** | **`21b3573`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a design consult** | **`ddf67ab`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a step 1** | **`fa5bb93`** | ✅ pushed to `origin/main` | clean |
+| **2c-4a step 2** | **`53874d7`** | ✅ pushed to `origin/main` | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
