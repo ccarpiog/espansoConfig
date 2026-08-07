@@ -5867,10 +5867,9 @@ Phase 2c-4a step 3b".
 
 **Step 3c is next, and it is step 3's exit.**
 
-<<<COMMIT-SHA>>>
-
-is step 3b's commit and is where a fresh session begins (`59c8105` was the base). The exact first
-commands to run:
+**`5f39499`** is step 3b's commit — implementation, both review rounds' fixes, the review file and
+the decision record together, so no commit holds a demonstrated defect — and it is where a fresh
+session begins (`59c8105` was the base). The exact first commands to run:
 
 ```sh
 npm install && npm test        # expect 1426 passed, 46 files
