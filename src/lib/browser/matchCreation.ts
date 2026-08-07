@@ -147,20 +147,29 @@ import {
 import {
   conflictArm,
   consentForRefusal,
+  offeredReloadStep,
   offeredRefusalChoices,
+  reloadAsked,
+  reloadConfirmed,
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  spendTheConfirmedReload,
   submissionIsStale,
+  NOT_RELOADING,
+  type AdoptTheDiskVersion,
   type EditorPhase,
+  type ReloadStep,
   type SendFailure,
   type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import type { RawSaveChoice } from './rawSave';
 import {
+  conflictChoicesFor,
   describeEditSave,
   invalidationFailureMessage,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
   type SaveOutcomeMessage,
@@ -516,6 +525,24 @@ export interface MatchCreationSession {
   /** How the last attempt failed to produce an outcome at all, or `null`. */
   readonly sendFailure: SendFailure | null;
   /**
+   * How far a confirmed reload of the disk version has got.
+   *
+   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
+   * stops a confirmation collected for one conflict from being spendable while a
+   * later one is on screen. The window refuses a spent confirmation too, but this
+   * is the guard that means the situation never arises.
+   */
+  readonly reload: ReloadStep;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * **The match-level reload result the consult's Q3 ruled**: install the disk
+   * projection and *close* this panel, never re-seed anything from a fresh
+   * projection — identifying a match across revisions is 2c-4b. The panel that
+   * reads this closes itself; everything here refuses once it is `true`.
+   */
+  readonly closed: boolean;
+  /**
    * Whether a create has committed through this form.
    *
    * Set by a committed save and cleared by **nothing**. Every destination this
@@ -621,6 +648,8 @@ export function startMatchCreation(
     outcome: null,
     extraMessages: [],
     sendFailure: null,
+    reload: NOT_RELOADING,
+    closed: false,
     committed: false,
     created: null,
     clock
@@ -689,7 +718,12 @@ export function conflictOf(session: MatchCreationSession): ConflictModel<Creatio
  * @returns `true` when the controls may change anything.
  */
 export function isEditable(session: MatchCreationSession): boolean {
-  return session.phase === 'editing' && !session.committed && conflictOf(session) === null;
+  return (
+    !session.closed &&
+    session.phase === 'editing' &&
+    !session.committed &&
+    conflictOf(session) === null
+  );
 } // End of function isEditable()
 
 /**
@@ -1152,6 +1186,9 @@ export function applyCreate(
       group: null,
       outcome,
       extraMessages,
+      // **A new outcome resets the reload**, so a confirmation collected for an
+      // earlier conflict cannot be spent while this one is on screen.
+      reload: NOT_RELOADING,
       sendFailure: null
     };
   }
@@ -1167,6 +1204,7 @@ export function applyCreate(
     group: null,
     outcome,
     extraMessages,
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function applyCreate()
@@ -1237,23 +1275,104 @@ export function keepDrafting(session: MatchCreationSession): MatchCreationSessio
     outcome: null,
     extraMessages: [],
     group: null,
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function keepDrafting()
 
 /**
- * The choices a conflict offers in this sub-phase.
+ * Asks to load the version on disk, which is the step **before** confirming.
  *
- * **One**, and the two that are missing are missing on purpose. *Copy draft*
- * copies a text, and this draft is two fields. *Load the version on disk* would
- * mean re-seeding the destinations from a fresh read, which is conflict capture
- * and preservation — Phase 2c-4a — and a rough version of it here would make that
- * phase look already done.
+ * @param session - The session showing a conflict.
+ * @returns The session at the warning, or the same session when no conflict is
+ *   showing or one has already been asked about.
+ */
+export function askToReloadDiskVersion(session: MatchCreationSession): MatchCreationSession {
+  const next = reloadAsked(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function askToReloadDiskVersion()
+
+/**
+ * Confirms abandoning this new snippet for the version on disk.
+ *
+ * Issues the token the adoption checks, for **this** conflict. Reachable only from
+ * the warning step, so a confirmation cannot be produced by a screen that never
+ * showed the warning.
+ *
+ * @param session - The session at the warning.
+ * @returns The session holding the confirmation, or the same session.
+ */
+export function confirmDiskReload(session: MatchCreationSession): MatchCreationSession {
+  const next = reloadConfirmed(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function confirmDiskReload()
+
+/**
+ * Adopts the disk version into the window and ends this session.
+ *
+ * **The match-level reload the consult's Q3 ruled, and it is not a reseed.** There
+ * is no disk-side `CreationBuffers` to load: a file on disk holds no half-written snippet, and inventing one would be this application making up content nobody typed. So the window crosses to the disk
+ * observation and this panel **closes**, which is what the confirmation was
+ * collected for.
+ *
+ * **Nothing is closed for an adoption the window refused.** A `refused` from
+ * `adopt` — a spent confirmation, a conflict this window did not produce, or a
+ * projection replaced since it arrived — leaves the session exactly as it was,
+ * because closing over a window that did not move would report a reload that did
+ * not happen. **`alreadyThere` is not a refusal**: the window already holds the
+ * bytes that were asked for, so the request is satisfied and this session ends.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, and that the
+ * panel reading the view's `closed` really closes.
+ *
+ * @param session - The session holding a confirmation.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
+ * @returns The closed session, or the same session.
+ */
+export function reloadTheDiskVersion(
+  session: MatchCreationSession,
+  adopt: AdoptTheDiskVersion<CreationBuffers>
+): MatchCreationSession {
+  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+    return session;
+  }
+  return {
+    ...session,
+    group: null,
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    reload: NOT_RELOADING,
+    sendFailure: null,
+    closed: true
+  };
+} // End of function reloadTheDiskVersion()
+
+/**
+ * What this surface offers about a conflict.
+ *
+ * **`draftKind` is the permanent fact and the two booleans are not.**
+ * {@link CreationBuffers} holds the trigger and the replacement a person typed, so
+ * the consult's Q3/Q4 rule gives this surface *Copy draft* — labelled, never
+ * YAML — and a confirmed reload that installs the disk projection and **closes**
+ * the form, because there is no disk-side `CreationBuffers` to reload.
+ *
+ * **The reload is built and wired; it is only unoffered.**
+ * {@link askToReloadDiskVersion}, {@link confirmDiskReload} and
+ * {@link reloadTheDiskVersion} are the transition, and `MatchCreator.svelte`'s
+ * `conflictAction` calls them. `conflictChoicesFor` names only what these booleans
+ * admit, so no control that could reach either arm is drawn. **Phase 2c-4a-3 flips
+ * them**: the reload over machinery that already exists, *Copy draft* over a
+ * labelled field renderer still to be written.
  *
  * **None of these is "keep my draft"** and none may become one: that phrase means
  * *reapply the draft to the newly parsed document*, which is 2c-4b.
  */
-const CONFLICT_CHOICES: readonly ConflictChoice[] = ['keepEditing'];
+export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
+  draftKind: 'authoredText',
+  offersCopyDraft: false,
+  offersReload: false
+};
 
 /** Everything a screen needs about one form, derived on every read. */
 export interface MatchCreationView {
@@ -1304,6 +1423,15 @@ export interface MatchCreationView {
   readonly conflict: ConflictModel<CreationBuffers> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
+  /** Whether the warning is showing and the destructive choice is one click away. */
+  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * The panel that reads this calls its own `close`: a match-level reload adopts
+   * the disk projection and closes, because there is no disk-side draft to seed.
+   */
+  readonly closed: boolean;
   /**
    * Whether a create has committed and this form must be seeded again.
    *
@@ -1354,7 +1482,12 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    conflictChoices: conflict === null ? [] : CONFLICT_CHOICES,
+    conflictChoices:
+      conflict === null
+        ? []
+        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    closed: session.closed,
     committed: session.committed,
     created: session.created
   };

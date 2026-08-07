@@ -44,11 +44,13 @@ import { identityInProjection } from './matchDeletion';
 import {
   acknowledgeMoveFindings,
   applyMove,
+  askToReloadDiskVersion,
   baseRevisionOf,
   beginMove,
   canChoose,
   canMove,
   choosePlacement,
+  confirmDiskReload,
   conflictOf,
   dismissMoveOutcome,
   lowerPlacement,
@@ -56,20 +58,26 @@ import {
   membersOfSequence,
   moveCouldNotBeSent,
   moveEligibility,
+  movePlacementOptionsOf,
   moveRecoveryChoices,
   moveRecoveryFailed,
   moveRecoveryKey,
   moveRefusalKey,
   moveSubmissionRefusal,
   moveSubmissionRefusalKey,
-  movePlacementOptionsOf,
   placementOf,
+  reloadTheDiskVersion,
   sameSequence,
   sequenceOf,
   startMatchMove,
+  type MatchMoveSession,
+  type MovePlacement,
   type MoveRefusal,
   type MoveSubmissionRefusal
 } from './matchMove';
+import type { AdoptTheDiskVersion } from './editorSave';
+import type { DiskAdoptionOutcome } from './saveOutcome';
+import type { ConflictChoice, ConflictModel } from './saveOutcome';
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -796,25 +804,28 @@ describe('what comes back', () => {
     expect(choosePlacement(done, { kind: 'top' })).toBe(done);
   });
 
-  it('spends the session on a conflict, whose adoption is always `notOwed`', () => {
-    // **The confirmation pass's second finding.** `BrowserState.moveMatch` installs
-    // the projection a conflict carries on `disk` — which replaces every identity
-    // this session holds — and reports `adoption: notOwed` for it, because it
-    // re-read nothing and wrote nothing. So the adoption cannot be the evidence
-    // here and the arm is. The pair below is the one production really produces;
-    // the case this replaces paired a *refused* arm with an adoption, which
-    // `BrowserState.moveMatch` cannot answer at all.
+  it('does not spend the session on a conflict, whose adoption is always `notOwed`', () => {
+    // **The consult's Q2, and this case said the opposite until 2c-4a-2.**
+    // `BrowserState.moveMatch` then installed the projection a conflict carries on
+    // `disk` — replacing every identity this session held — while reporting
+    // `adoption: notOwed`, so the arm had to be the evidence. It installs nothing
+    // now: a save that wrote no byte must not re-order the list or move the
+    // selection before the person has chosen. So these identities are still the
+    // ones the window is projecting, and invalidation follows actual adoption.
     const conflicted = applyMove(inFlight(), CONFLICT, NOT_OWED);
     expect(conflicted.moved).toBe(false);
-    expect(conflicted.invalidated).toBe(true);
-    // And it survives the panel being dismissed, which is the state the finding was
-    // filed about: `canChoose` used to come back and `spent` used to stay false for
-    // a session whose identities had been replaced.
+    expect(conflicted.invalidated).toBe(false);
+    // The panel refuses while the conflict is showing, and hands the session back
+    // once it is dismissed — against the projection the window still holds.
+    expect(canChoose(conflicted)).toBe(false);
     const dismissed = dismissMoveOutcome(conflicted);
-    expect(canChoose(dismissed)).toBe(false);
-    expect(matchMoveView(dismissed, [CONFLICT.disk]).spent).toBe(true);
+    expect(canChoose(dismissed)).toBe(true);
+    expect(matchMoveView(dismissed, HELD).spent).toBe(false);
+    expect(matchMoveView(dismissed, HELD).cannotMove).toBeNull();
+    // A window that *has* adopted the disk side is a different question, and the
+    // live check is what answers it — nothing about this session changed.
     expect(matchMoveView(dismissed, [CONFLICT.disk]).cannotMove).toBe('outOfDate');
-  }); // End of the "conflict spends the session" case
+  }); // End of the "a conflict does not spend the session" case
 
   it('invalidates an arm that is not `saved` when the adoption was owed anyway', () => {
     // **A structural guard, and deliberately not a pair production can answer** —
@@ -875,19 +886,21 @@ describe('what comes back', () => {
     expect(matchMoveView(conflicted, HELD).conflictChoices).toEqual(['keepEditing']);
     const dismissed = dismissMoveOutcome(conflicted);
     expect(conflictOf(dismissed)).toBeNull();
-    // **Dismissing the panel is not getting the session back.** A conflict wrote
-    // nothing, so `moved` stays `false` — but `BrowserState.moveMatch` installs
-    // the projection the conflict carried, and these identities came from the one
-    // it replaced. Two independent things refuse the move now: the invalidation the
-    // arm itself sets, and the live check.
+    // **Dismissing the panel gives the session back, and 2c-4a-2 is where that
+    // changed.** A conflict wrote nothing and now replaces nothing, so `moved`
+    // stays `false`, nothing was invalidated, and the identities this session holds
+    // are the ones the window is still projecting. What has not changed is the
+    // file: a resend carries the frozen base revision, which the command refuses.
+    // Nothing here sends one, so this says nothing about which refusal — see
+    // `dismissMoveOutcome`'s note for why it is `identityStaleRevision`.
+    expect(canMove(dismissed, HELD)).toBe(true);
+    expect(moveSubmissionRefusal(dismissed, HELD)).toBeNull();
+    expect(beginMove(dismissed, live(0))).not.toBeNull();
+    // A window that really has moved on is the live check's question, and it still
+    // answers it: the session says nothing about a projection nobody told it about.
     expect(canMove(dismissed, [CONFLICT.disk])).toBe(false);
     expect(moveSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
     expect(beginMove(dismissed, identityInProjection([CONFLICT.disk], dismissed.match))).toBeNull();
-    // Including against the projection the session was opened over, which is what a
-    // window that had not yet installed the disk side would be holding: the
-    // invalidation is not conditional on the live check noticing.
-    expect(canMove(dismissed, HELD)).toBe(false);
-    expect(beginMove(dismissed, live(0))).toBeNull();
   });
 
   it('records a send that produced no outcome, in its two arms', () => {
@@ -970,14 +983,13 @@ describe('what comes back', () => {
     expect(beforehand.mayHaveWritten).toBe(true);
     expect(moveSubmissionRefusal(beforehand, HELD)).toBe('mayHaveWritten');
 
-    // **And the invalidated-plus-uncertain pair.** A dismissed conflict leaves a
-    // session whose identities were replaced and nothing written, which on its own
-    // reads `outOfDate` — *nothing has been written*. An uncertain send after it
-    // must not be reported with that sentence.
+    // **And the stale-plus-uncertain pair.** A session whose window has moved on —
+    // measured by the live projections, since 2c-4a-2 a dismissed conflict spends
+    // nothing — reads `outOfDate` on its own, which says *nothing has been
+    // written*. An uncertain send after it must not be reported with that sentence.
     const dismissed = dismissMoveOutcome(applyMove(inFlight(), CONFLICT, NOT_OWED));
     expect(moveSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
     const uncertain = moveCouldNotBeSent(dismissed, true, UNCERTAIN);
-    expect(uncertain.invalidated).toBe(true);
     expect(uncertain.moved).toBe(false);
     expect(moveSubmissionRefusal(uncertain, [CONFLICT.disk])).toBe('mayHaveWritten');
     expect(beginMove(uncertain, identityInProjection([CONFLICT.disk], uncertain.match))).toBeNull();
@@ -1152,3 +1164,123 @@ describe('the identities a session holds', () => {
     expect(held.sequence?.segments[0]).not.toBe(document.matches[0]!.path?.segments[0]);
   });
 }); // End of the "identities" suite
+
+describe('the confirmed reload, which is built but not offered yet', () => {
+  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
+  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
+  // this surface's control is right, and withholding the **transition** was not —
+  // an unoffered transition can be built and driven without drawing anything, and
+  // leaving it out would have made step 3 invent five model machines on top of
+  // five panels. So the transition below is built **and** wired: this surface's
+  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
+  // screen reaches it. Every case here calls it directly, as that arm does.
+
+  /**
+   * A conflicted move of a chosen destination.
+   *
+   * @returns The session showing the conflict.
+   */
+  function conflicted(): MatchMoveSession {
+    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
+    if (started === null) {
+      throw new Error('a chosen destination is sendable');
+    }
+    return applyMove(started.session, CONFLICT, NOT_OWED);
+  } // End of function conflicted()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers. `refused` is a real production
+   *   answer — a spent confirmation, a conflict this window did not produce, or a
+   *   projection replaced since it arrived.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MovePlacement>;
+    readonly adoptions: ConflictModel<MovePlacement>[];
+  } {
+    const adoptions: ConflictModel<MovePlacement>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  it('needs two deliberate steps before anything can be spent', () => {
+    const stuck = conflicted();
+    const recorder = adopting();
+    // Straight to the destructive transition, with no warning behind it.
+    expect(reloadTheDiskVersion(stuck, recorder.adopt)).toBe(stuck);
+    const asked = askToReloadDiskVersion(stuck);
+    expect(matchMoveView(asked, HELD).awaitingReloadConfirmation).toBe(true);
+    // The warning alone is not a confirmation either.
+    expect(reloadTheDiskVersion(asked, recorder.adopt)).toBe(asked);
+    expect(recorder.adoptions).toEqual([]);
+    expect(matchMoveView(asked, HELD).closed).toBe(false);
+  }); // End of the "two steps" case
+
+  it('adopts the disk projection once, and closes the session', () => {
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, recorder.adopt);
+
+    // **The conflict itself crosses**, not a payload assembled from it: the window
+    // authorizes and installs in one call, so nothing here can retain an adoption.
+    expect(recorder.adoptions).toHaveLength(1);
+    expect(recorder.adoptions[0]).toBe(conflictOf(confirmed));
+    // And this session is over. There is no disk-side draft to seed — finding "the
+    // same" thing in a revision nobody has described is 2c-4b — so the panel closes.
+    expect(after.closed).toBe(true);
+    expect(matchMoveView(after, HELD).closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+    expect(canChoose(after)).toBe(false);
+  }); // End of the "adopt and close" case
+
+  it('finishes the reload when the window was already at the disk version', () => {
+    // **`alreadyThere` is a success**, so this session closes exactly as it does
+    // for an install: the window holds the disk projection either way, and treating
+    // the answer as a failure would leave a confirm control that could never work.
+    const satisfied = adopting('alreadyThere');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, satisfied.adopt);
+    expect(after.closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+  }); // End of the "already at the disk version" case
+
+  it('closes nothing when the window refuses the adoption', () => {
+    // Closing over a window that never moved would report a reload that did not
+    // happen, and take the conflict panel off the screen with it.
+    const refusing = adopting('refused');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, refusing.adopt);
+    expect(after).toBe(confirmed);
+    expect(after.closed).toBe(false);
+    expect(conflictOf(after)).not.toBeNull();
+  }); // End of the "window refused" case
+
+  it('does not offer the reload, so no control is drawn for it', () => {
+    // The half of the review's judgement that stands: the transition exists, is
+    // driven here and is called by this surface's `conflictAction`; `offersReload`
+    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
+    // boolean to flip.
+    const asked = askToReloadDiskVersion(conflicted());
+    expect(matchMoveView(asked, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
+      'keepEditing'
+    ]);
+  });
+
+  it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {
+    // A confirmation is a person's answer to **one** conflict. Reaching the
+    // confirmed step and then dismissing must not leave it spendable.
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const dismissed = dismissMoveOutcome(confirmed);
+    expect(dismissed.reload.kind).toBe('idle');
+    expect(reloadTheDiskVersion(dismissed, recorder.adopt)).toBe(dismissed);
+    expect(recorder.adoptions).toEqual([]);
+  }); // End of the "dismissal forgets the confirmation" case
+}); // End of the "confirmed reload" suite

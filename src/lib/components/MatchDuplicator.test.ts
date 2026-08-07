@@ -53,6 +53,7 @@
  * helpers here do.
  */
 
+import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
@@ -347,6 +348,10 @@ function mountDuplicator(
         reloads += 1;
         return Promise.resolve(opened.reload ?? null);
       },
+      // **The window's own adoption**, which no case here reaches: the five match
+      // surfaces declare `offersReload: false`, so no control that could spend a
+      // confirmation is drawn. `matchDuplication.test.ts` drives the transition directly.
+      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
       close: (): void => {
         closes += 1;
       }
@@ -749,6 +754,10 @@ describe('a duplicate panel over the real workspace state', () => {
         ): Promise<MatchSaveAnswer> => state.duplicateMatch(id, baseRevision, acknowledgement),
         reload: (document: DocumentId): Promise<IpcFailure | null> =>
           state.rereadDocument(document),
+        // **The window's own adoption**, which no case here reaches: the five match
+        // surfaces declare `offersReload: false`, so no control that could spend a
+        // confirmation is drawn. `matchDuplication.test.ts` drives the transition directly.
+        adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         close: (): void => undefined
       }
     });

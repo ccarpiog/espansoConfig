@@ -39,6 +39,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sealWholeDocumentSave } from '../browser/invalidation';
 import type { RawSaveAnswer } from '../browser/workspace.svelte';
 import type { RawSaveReload } from '../ipc/commands';
+import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
+import type { RoundTripText } from '../browser/rawEditor';
 import { makeDocument, makeSummary } from '../browser/fixtures';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
@@ -102,15 +104,30 @@ const COMMITTED: SaveResult = {
   moved: null
 };
 
-/** A save the file had moved on under. */
-const CONFLICTED: SaveResult = {
-  outcome: 'conflict',
-  expected: BASE,
-  found: AFTER,
-  disk_revision: AFTER,
-  disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
-  disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision: AFTER })
-};
+/**
+ * A save the file had moved on under.
+ *
+ * **The disk side is on the payload since 2c-4a-2**, so a case that is about a
+ * particular disk text puts it here rather than in a prop: the editor is handed
+ * no `diskText` any more, and the naming collision that removed it is
+ * `RawEditor.svelte`'s own note.
+ *
+ * @param diskText - The whole file text the fresh read found.
+ * @returns The conflict as it crosses the boundary.
+ */
+function conflictWith(diskText: string = DISK): SaveResult {
+  return {
+    outcome: 'conflict',
+    expected: BASE,
+    found: AFTER,
+    disk_revision: AFTER,
+    disk_text: diskText,
+    disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision: AFTER })
+  };
+} // End of function conflictWith()
+
+/** A save the file had moved on under, over the ordinary disk text. */
+const CONFLICTED: SaveResult = conflictWith();
 
 /** One call the component made to the boundary. */
 interface RecordedSave {
@@ -132,6 +149,14 @@ interface Mounted {
   readonly calls: RecordedSave[];
   /** How many times the editor asked to be closed. */
   readonly closed: () => number;
+  /**
+   * Every disk observation the component asked the window to install.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing into
+   * the window since 2c-4a-2, so this stays empty until a reload is confirmed —
+   * and one entry is what a confirmed reload owes.
+   */
+  readonly adoptions: ConflictModel<RoundTripText>[];
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -159,19 +184,15 @@ interface ScriptedAnswer {
  *
  * @param answers - What each successive save answers, in order. A save with no
  *   answer left behaves as a command that failed with nothing written.
- * @param disk - What this window holds of this file's text, for the conflict arm.
  * @param loaded - The file's text as the editor is handed it. Only the carriage
  *   return cases give this, because only they are about the text this editor
  *   refuses to open at all.
  * @returns The mounted editor.
  */
-function mountEditor(
-  answers: readonly ScriptedAnswer[],
-  disk: string | null = DISK,
-  loaded: string = ORIGINAL
-): Mounted {
+function mountEditor(answers: readonly ScriptedAnswer[], loaded: string = ORIGINAL): Mounted {
   const remaining = [...answers];
   const calls: RecordedSave[] = [];
+  const adoptions: ConflictModel<RoundTripText>[] = [];
   let closes = 0;
   const target = document.createElement('div');
   document.body.append(target);
@@ -181,7 +202,10 @@ function mountEditor(
       file: FILE,
       baseRevision: BASE,
       text: loaded,
-      diskText: disk === null ? null : { kind: 'text', text: disk },
+      adoptDiskVersion: (conflict: ConflictModel<RoundTripText>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return 'installed';
+      },
       save: (
         document_: DocumentId,
         baseRevision: ContentRevision,
@@ -215,6 +239,7 @@ function mountEditor(
     target,
     calls,
     closed: () => closes,
+    adoptions,
     stop: () => {
       void unmount(component);
       target.remove();
@@ -599,7 +624,7 @@ describe('the mounted raw editor', () => {
     // break to LF, so a CRLF document used to lose its carriage returns on the
     // first keystroke and the save wrote the normalized text. There is now no box
     // to type into, no save control, and a sentence saying why.
-    const editor = mountEditor([{ result: COMMITTED }], DISK, CRLF);
+    const editor = mountEditor([{ result: COMMITTED }], CRLF);
 
     expect(maybeTextArea(editor.target)).toBeNull();
     expect(button(editor.target, 'browser.rawEditor.save')).toBeNull();
@@ -617,7 +642,7 @@ describe('the mounted raw editor', () => {
   it('opens the same document once its carriage returns are gone', async () => {
     // The oracle for the case above, and the proof that the refusal is about the
     // carriage returns and not about the fixture.
-    const editor = mountEditor([{ result: COMMITTED }], DISK, CRLF.replaceAll('\r\n', '\n'));
+    const editor = mountEditor([{ result: COMMITTED }], CRLF.replaceAll('\r\n', '\n'));
 
     expect(maybeTextArea(editor.target)).not.toBeNull();
     expect(says(editor.target, 'browser.rawEditor.lineEndingsNotPreserved')).toBe(false);
@@ -629,7 +654,7 @@ describe('the mounted raw editor', () => {
     // *shown* — `SourceText` names a carriage return rather than dropping it — so a
     // control that silently did nothing would read as a bug; it is disabled, with
     // the same sentence beside it.
-    const editor = mountEditor([{ result: CONFLICTED }], CRLF);
+    const editor = mountEditor([{ result: conflictWith(CRLF) }]);
     type(editor.target, `${ORIGINAL}# one more line\n`);
     control(editor.target, 'browser.rawEditor.save').click();
     await settle();
@@ -641,6 +666,8 @@ describe('the mounted raw editor', () => {
     expect(control(editor.target, 'browser.saveOutcome.choice.confirmReload').disabled).toBe(true);
     // And the draft is untouched: nothing was loaded over it.
     expect(textArea(editor.target).value).toBe(`${ORIGINAL}# one more line\n`);
+    // Nor was the window moved: a reload that refuses adopts nothing.
+    expect(editor.adoptions).toEqual([]);
     editor.stop();
   }); // End of the "disk version with carriage returns" case
 
@@ -759,19 +786,54 @@ describe('the mounted raw editor', () => {
     editor.stop();
   }); // End of the "copy failed" case
 
-  it('will not offer to load a disk version it has not got', async () => {
-    const editor = mountEditor([{ result: CONFLICTED }], null);
+  it('draws an emptied file as empty, and still offers to load it', async () => {
+    // **There is no "the disk version cannot be read" state, and 2c-4a-1's D1 is
+    // why**: a conflict cannot exist unless the read that produced `disk_text`
+    // succeeded, so the sentence that used to stand here described something this
+    // application cannot produce, and it is gone from both dictionaries. A file of
+    // zero characters is a text of zero characters — a fact about the file — and
+    // loading it is a legitimate thing to ask for.
+    const editor = mountEditor([{ result: conflictWith('') }]);
     type(editor.target, `${ORIGINAL}# one more line\n`);
     control(editor.target, 'browser.rawEditor.save').click();
     await settle();
 
+    expect(says(editor.target, 'browser.detail.fileTextEmpty')).toBe(true);
     control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
     flushSync();
 
-    expect(says(editor.target, 'browser.rawEditor.diskVersionUnavailable')).toBe(true);
-    expect(control(editor.target, 'browser.saveOutcome.choice.confirmReload').disabled).toBe(true);
+    expect(control(editor.target, 'browser.saveOutcome.choice.confirmReload').disabled).toBe(false);
+    control(editor.target, 'browser.saveOutcome.choice.confirmReload').click();
+    flushSync();
+
+    expect(textArea(editor.target).value).toBe('');
     editor.stop();
-  }); // End of the "no disk version" case
+  }); // End of the "empty disk version" case
+
+  it('installs the disk projection only when the reload is confirmed', async () => {
+    // **The consult's Q2 seen from the screen.** The conflict panel is drawn, the
+    // warning is read, and the window has still not moved; the adoption happens in
+    // the same click that reseeds the box, because `loadDiskVersion` performs it.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    expect(editor.adoptions).toEqual([]);
+    control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
+    flushSync();
+    expect(editor.adoptions).toEqual([]);
+
+    control(editor.target, 'browser.saveOutcome.choice.confirmReload').click();
+    flushSync();
+
+    expect(editor.adoptions).toHaveLength(1);
+    expect(editor.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(editor.adoptions[0]?.diskText).toBe(DISK);
+    // And the box holds the disk version, from the same click.
+    expect(textArea(editor.target).value).toBe(DISK);
+    editor.stop();
+  }); // End of the "adoption only on a confirmed reload" case
 
   it('asks before leaving with unsaved text, and leaves at once without any', () => {
     const clean = mountEditor([]);

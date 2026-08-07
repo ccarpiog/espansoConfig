@@ -168,7 +168,6 @@
   "browser.rawEditor.draftCopied": "Your text was copied to the clipboard.",
   "browser.rawEditor.draftCopyFailed": "Your text could not be copied to the clipboard. It is still in the box above, so it can be selected and copied by hand.",
   "browser.rawEditor.diskVersion": "The version on disk",
-  "browser.rawEditor.diskVersionUnavailable": "The version on disk cannot be read here, so it cannot be loaded in place of your text.",
   "browser.rawEditor.revisionExpected": "Your text was loaded from version {revision}.",
   "browser.rawEditor.revisionFound": "The file held version {revision} when the save was refused.",
   "browser.rawEditor.revisionDisk": "The version read from disk afterwards is {revision}.",

@@ -37,7 +37,9 @@ import { editDraft, startDraft, textDraftRules, type Draft } from './draft';
 import { makeDocument } from './fixtures';
 import type { WholeDocumentSaved } from './invalidation';
 import {
+  authorizeDiskAdoption,
   conflictChoiceKey,
+  conflictChoicesFor,
   confirmReloadDiskVersion,
   copyOfDraft,
   describeEditSave,
@@ -45,10 +47,39 @@ import {
   invalidationFailureMessage,
   reloadDiskVersion,
   saveOutcomeMessageKey,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
   type SaveOutcomeMessage
 } from './saveOutcome';
+
+// The six surfaces' own declarations, imported under names that say which is
+// which. **The consult's Q3/Q4 rule lands in six places and is checked in one**:
+// nothing but a test can compare them, because each is private to the model that
+// draws from it and no type relates them to each other.
+import { CONFLICT_CAPABILITIES as CREATOR } from './matchCreation';
+import { CONFLICT_CAPABILITIES as DELETER } from './matchDeletion';
+import { CONFLICT_CAPABILITIES as DUPLICATOR } from './matchDuplication';
+import { CONFLICT_CAPABILITIES as MATCH_EDITOR } from './matchEditor';
+import { CONFLICT_CAPABILITIES as MOVER } from './matchMove';
+import { CONFLICT_CAPABILITIES as RAW_EDITOR } from './rawEditor';
+
+/**
+ * Every member of {@link ConflictChoice}, and **exhaustively** so.
+ *
+ * A union has no run-time extent, so the members have to be written out — and the
+ * 2c-4a-2 review was right that `readonly ConflictChoice[]` does not make that
+ * list complete: a fifth member leaves a four-element array compiling perfectly.
+ * A `Record<ConflictChoice, true>` does not. Adding a member without adding a key
+ * here is a compile error in this file, which is what the two cases below need in
+ * order to say *every*.
+ */
+const EVERY_CONFLICT_CHOICE = Object.keys({
+  keepEditing: true,
+  copyDraft: true,
+  reloadDiskVersion: true,
+  confirmReload: true
+} satisfies Record<ConflictChoice, true>) as readonly ConflictChoice[];
 
 /** The revision a save was based on. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -303,19 +334,16 @@ describe('a conflict, which is terminal and honest', () => {
     expect(copyOfDraft(model)).toBe(draft.value);
   }); // End of the "states that nothing was written" case
 
-  it('offers a copy before the destructive choice, and never a retry', () => {
-    // Retrying a whole-document candidate against a base the file has moved past
-    // is how the other writer's work is destroyed — the refusal is the check that
-    // prevented it — so there is no `saveAnyway` here and no acknowledgement to
-    // build one from.
+  it('carries no choices of its own, so there is one authority and not two', () => {
+    // **The consult's Q9 item 1, as the assertion that would have caught it.**
+    // `describeConflict` used to install a global three-choice array on every
+    // model while all five match models ignored it and exported a local
+    // `['keepEditing']`. A field nobody reads is not a default, it is a second
+    // answer — and it is why a newly offered button could compile and do nothing.
     const model = conflictModel();
-    expect(model.choices).toEqual(['keepEditing', 'copyDraft', 'reloadDiskVersion']);
-    expect(model.choices).not.toContain('saveAnyway');
-    expect(model.choices.indexOf('copyDraft')).toBeLessThan(
-      model.choices.indexOf('reloadDiskVersion')
-    );
+    expect(model).not.toHaveProperty('choices');
     expect(model).not.toHaveProperty('acknowledgement');
-  }); // End of the "offers a copy before the destructive choice" case
+  }); // End of the "no second authority" case
 
   it('reloads only through a confirmation issued for that conflict', () => {
     // A boolean saying a confirmation is needed is not a confirmation. This is
@@ -384,7 +412,7 @@ describe('a conflict, which is terminal and honest', () => {
     // The phrase means *reapply the draft to the newly parsed document* — Phase
     // 2c-4b, the dangerous algorithmic half — and using it early would teach the
     // owner the wrong meaning and make 2c-4b look already-done.
-    for (const choice of conflictModel().choices) {
+    for (const choice of EVERY_CONFLICT_CHOICE) {
       expect(choice).not.toBe('keepMyDraft');
       for (const locale of LOCALES) {
         const label = DICTIONARIES[locale][conflictChoiceKey(choice)].toLowerCase();
@@ -394,6 +422,137 @@ describe('a conflict, which is terminal and honest', () => {
     }
   }); // End of the "names no control" case
 }); // End of the "conflict" suite
+
+describe('the one authority that decides what a conflict offers', () => {
+  /**
+   * A capability record, with every field overridable.
+   *
+   * @param over - What this case is about.
+   * @returns The capabilities.
+   */
+  function capabilities(over: Partial<ConflictCapabilities> = {}): ConflictCapabilities {
+    return { draftKind: 'authoredText', offersCopyDraft: true, offersReload: true, ...over };
+  } // End of function capabilities()
+
+  it('always offers the non-destructive way out, first', () => {
+    for (const draftKind of ['authoredText', 'operationChoice'] as const) {
+      for (const offersCopyDraft of [true, false]) {
+        for (const offersReload of [true, false]) {
+          for (const step of ['idle', 'confirming'] as const) {
+            const offered = conflictChoicesFor(
+              capabilities({ draftKind, offersCopyDraft, offersReload }),
+              step
+            );
+            expect(offered[0], `${draftKind}/${step}`).toBe('keepEditing');
+          }
+        } // End of the loop over the reload capability
+      } // End of the loop over the copy capability
+    } // End of the loop over the two kinds of draft
+  }); // End of the "keep editing is always first" case
+
+  it('puts the copy before the destructive choice, and never both reload labels', () => {
+    const first = conflictChoicesFor(capabilities(), 'idle');
+    expect(first).toEqual(['keepEditing', 'copyDraft', 'reloadDiskVersion']);
+    const second = conflictChoicesFor(capabilities(), 'confirming');
+    expect(second).toEqual(['keepEditing', 'copyDraft', 'confirmReload']);
+    // The destructive one is never nearest to hand, and the copy is what makes
+    // the destruction survivable — so it is still offered at the second step.
+    expect(second.indexOf('copyDraft')).toBeLessThan(second.indexOf('confirmReload'));
+    expect(first).not.toContain('confirmReload');
+    expect(second).not.toContain('reloadDiskVersion');
+  }); // End of the "ordering and the two steps" case
+
+  it('refuses a copy of a draft a clipboard cannot preserve, whatever the caller says', () => {
+    // **The consult's Q4 rule, enforced against the value rather than trusted of
+    // the caller.** A `MovePlacement` is a positional choice and a `MatchId` is a
+    // protocol carrier; copying either preserves nothing while looking like it
+    // preserved something. A surface that set `offersCopyDraft` beside
+    // `operationChoice` still gets no copy control.
+    expect(
+      conflictChoicesFor(capabilities({ draftKind: 'operationChoice' }), 'idle')
+    ).toEqual(['keepEditing', 'reloadDiskVersion']);
+    expect(
+      conflictChoicesFor(
+        capabilities({ draftKind: 'operationChoice', offersReload: false }),
+        'confirming'
+      )
+    ).toEqual(['keepEditing']);
+  }); // End of the "copy refused for an operation choice" case
+
+  it('offers nothing but keeping editing to a surface that declares neither', () => {
+    // Which is what the five match models declare in 2c-4a-2 — **and the reason is
+    // not that their arms are missing**: their reload transitions exist and their
+    // components call them. What is withheld is the *offering*, because a model
+    // that names a choice draws a control, and 2c-4a-3 is where that is drawn.
+    const unoffered = capabilities({ offersCopyDraft: false, offersReload: false });
+    expect(conflictChoicesFor(unoffered, 'idle')).toEqual(['keepEditing']);
+    expect(conflictChoicesFor(unoffered, 'confirming')).toEqual(['keepEditing']);
+  });
+
+  it('gives every choice it can name a sentence in both languages', () => {
+    for (const choice of EVERY_CONFLICT_CHOICE) {
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][conflictChoiceKey(choice)].length).toBeGreaterThan(0);
+      }
+    } // End of the loop over every choice
+  });
+
+  it('declares what each of the six surfaces drafts, by the Q3/Q4 rule', () => {
+    // **The rule is one rule and the six declarations are where it lands.** The
+    // raw editor's whole file text, the match editor's `MatchBuffers` and the
+    // creator's `CreationBuffers` are strings a person typed; the mover's
+    // `MovePlacement` is a positional choice and the deleter's and duplicator's
+    // `MatchId` is an opaque revision-scoped carrier. A surface whose drafted type
+    // changed and whose declaration did not would be caught here and nowhere else.
+    expect(RAW_EDITOR.draftKind).toBe('authoredText');
+    expect(MATCH_EDITOR.draftKind).toBe('authoredText');
+    expect(CREATOR.draftKind).toBe('authoredText');
+    expect(MOVER.draftKind).toBe('operationChoice');
+    expect(DELETER.draftKind).toBe('operationChoice');
+    expect(DUPLICATOR.draftKind).toBe('operationChoice');
+  }); // End of the "six declarations" case
+
+  it('draws only *Keep editing* for the five surfaces whose panels do not act yet', () => {
+    // **What this establishes, and what it cannot.** It reads six capability
+    // objects and this module's one mapping, so it can say that the five match
+    // surfaces currently *offer* nothing but `keepEditing` and that the raw editor
+    // offers all three. It **cannot** say that a component acts on what it is
+    // offered: no component is imported, mounted or invoked here, and the
+    // 2c-4a-2 review was right that once 2c-4a-3 edits these expectations the case
+    // stops relating to any `conflictAction` arm at all. The wiring evidence is
+    // each surface's own model suite driving `reloadTheDiskVersion`, and — from
+    // 2c-4a-3 — each component's mounted suite pressing the control.
+    expect(conflictChoicesFor(RAW_EDITOR, 'idle')).toEqual([
+      'keepEditing',
+      'copyDraft',
+      'reloadDiskVersion'
+    ]);
+    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+      expect(conflictChoicesFor(surface, 'idle')).toEqual(['keepEditing']);
+      expect(conflictChoicesFor(surface, 'confirming')).toEqual(['keepEditing']);
+    } // End of the loop over the five match surfaces
+  }); // End of the "only keep editing is drawn" case
+}); // End of the "one authority" suite
+
+describe('the authorized disk adoption', () => {
+  it('carries the projection, the revision and the text of one conflict', () => {
+    const model = conflictModel();
+    const adoption = authorizeDiskAdoption(model, confirmReloadDiskVersion(model));
+    expect(adoption?.disk).toBe(model.disk);
+    expect(adoption?.diskRevision).toBe(model.diskRevision);
+    // Byte for byte, because this is the text a reload seeds a draft from: the
+    // BOM, the CRLF pair and the missing final newline all survive.
+    expect(adoption?.diskText).toBe(DISK_TEXT);
+  }); // End of the "carries one conflict's observation" case
+
+  it('refuses a confirmation collected for a different conflict', () => {
+    // The same check `reloadDiskVersion` makes, on the same token, so a screen
+    // cannot collect one answer and install another conflict's projection with it.
+    const first = conflictModel();
+    const second = conflictModel(AGAIN);
+    expect(authorizeDiskAdoption(second, confirmReloadDiskVersion(first))).toBeNull();
+  });
+}); // End of the "authorized disk adoption" suite
 
 describe('a committed save whose invalidation failed', () => {
   it('is still a committed save, with the failure as an extra line', () => {

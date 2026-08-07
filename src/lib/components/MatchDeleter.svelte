@@ -4,16 +4,20 @@
     acknowledgeDeletionFindings,
     acknowledgementOf,
     applyDeletion,
+    askToReloadDiskVersion,
     baseRevisionOf,
     cancelDelete,
     confirmDelete,
+    confirmDiskReload,
     deletionCouldNotBeSent,
     dismissDeletionOutcome,
     identityInProjection,
     matchDeletionView,
+    reloadTheDiskVersion,
     requestDelete,
     startMatchDeletion
   } from '../browser/matchDeletion';
+  import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
@@ -96,6 +100,7 @@
     file,
     projections,
     remove,
+    adoptDiskVersion,
     close
   }: {
     /**
@@ -137,6 +142,17 @@
       acknowledgement: Acknowledgement
     ) => Promise<MatchSaveAnswer>;
     /** Leaves the deletion panel. */
+    /**
+     * Installs the disk observation a conflict carried into the window.
+     *
+     * `BrowserState.adoptDiskVersion`, the sole frontend transition that moves
+     * this window to the disk side of a conflict. It is called by
+     * `reloadTheDiskVersion` and by nothing here, so the projection cannot be
+     * replaced without this deleter closing in the same call — and a `refused` from
+     * it is honoured by closing nothing, while an `alreadyThere` is a success the
+     * transition finishes on.
+     */
+    adoptDiskVersion: AdoptTheDiskVersion<MatchId>;
     close: () => void;
   } = $props();
 
@@ -248,11 +264,21 @@
   /**
    * Does what one conflict choice says.
    *
-   * **One arm is reachable today.** `matchDeletion.ts` offers *Keep editing*
-   * alone: *Copy draft* copies a text and there is no text here, and *Load the
-   * version on disk* is conflict capture and preservation — Phase 2c-4a. A *new
-   * member* of `ConflictChoice` fails to compile here; a newly *offered* one does
-   * not, and would draw a control that does nothing.
+   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
+   * same.** `matchDeletion.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
+   * `operationChoice` — a `MatchId` is a revision-scoped protocol carrier, not user
+   * content — so *Copy draft* can never be offered here, whatever a later change
+   * sets. The reload adopts the disk projection and **closes** the deleter; it
+   * exists, is called below and is driven by `matchDeletion.test.ts`, and 2c-4a-3
+   * flips the capability boolean that draws its control.
+   *
+   * **What the exhaustive switch forces, and what it does not.** A *new member* of
+   * `ConflictChoice` fails to compile here, because every existing member is named
+   * and there is no `default`. A *newly offered* member does not — offering is the
+   * model's, and a choice becomes a control the moment `conflictChoicesFor` names
+   * it. That is why the arms below are **implemented before they are offered**:
+   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
+   * have forced that order.
    *
    * @param choice - The choice the person picked.
    */
@@ -261,9 +287,26 @@
       case 'keepEditing':
         session = dismissDeletionOutcome(session);
         return;
-      case 'copyDraft':
       case 'reloadDiskVersion':
-      case 'confirmReload':
+        session = askToReloadDiskVersion(session);
+        return;
+      case 'confirmReload': {
+        // **Two calls, one click**, exactly as the raw editor's reload is: the
+        // two steps a person sees are the warning and this press. The window
+        // is what decides whether the adoption happened, and the session ends
+        // only if it did — so a refusal leaves this panel open rather than
+        // closing over a window that never moved.
+        const reloaded = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        session = reloaded;
+        if (reloaded.closed) {
+          close();
+        }
+        return;
+      }
+      case 'copyDraft':
+        // Never offered here: this surface's `CONFLICT_CAPABILITIES` says what
+        // its draft is, and `conflictChoicesFor` refuses a copy of anything but
+        // authored text. The arm exists so the `switch` stays exhaustive.
         return;
     }
   } // End of function conflictAction()

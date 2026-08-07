@@ -63,9 +63,12 @@ import {
   startRawEditor,
   textToCopy,
   undoEdit,
-  type RawEditorSession
+  type RawEditorSession,
+  type RoundTripText
 } from './rawEditor';
-import { conflictChoiceKey, type ConflictChoice } from './saveOutcome';
+import type { AdoptTheDiskVersion } from './editorSave';
+import type { DiskAdoptionOutcome } from './saveOutcome';
+import { conflictChoiceKey, type ConflictChoice, type ConflictModel } from './saveOutcome';
 
 /** The document every case here edits. */
 const DOCUMENT = 7;
@@ -165,22 +168,55 @@ function saved(committed = true): SaveResult {
   };
 } // End of function saved()
 
+/** What the other writer left on disk, which the conflict carries. */
+const DISK = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
 /**
  * A save the file had moved on under.
  *
  * @param diskRevision - What the read after the refusal found.
+ * @param diskText - The whole file text at that revision. **Since 2c-4a-2 this is
+ *   where a reload's text comes from**: the payload's own, paired with the
+ *   revision by the command layer, rather than a second read a caller supplies.
  * @returns The conflict as it crosses the boundary.
  */
-function conflict(diskRevision: ContentRevision = AFTER): SaveResult {
+function conflict(diskRevision: ContentRevision = AFTER, diskText: string = DISK): SaveResult {
   return {
     outcome: 'conflict',
     expected: BASE,
     found: AFTER,
     disk_revision: diskRevision,
-    disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
+    disk_text: diskText,
     disk: makeDocument({ id: DOCUMENT, revision: diskRevision })
   };
 } // End of function conflict()
+
+/**
+ * A recorder for the workspace adoption a reload performs.
+ *
+ * **A counter and not a spy, because what is being pinned is a count.** The
+ * adoption must happen exactly once, on a reload that really happens, and never
+ * on one this module refuses.
+ *
+ * @param answer - What the window answers. `refused` is a real production answer —
+ *   a spent confirmation, a conflict this window did not produce, or a projection
+ *   replaced since it arrived — and a reload that took it for a success would
+ *   reseed over a window that never moved.
+ * @returns The callback to pass, and what it was handed.
+ */
+function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+  readonly adopt: AdoptTheDiskVersion<RoundTripText>;
+  readonly adoptions: ConflictModel<RoundTripText>[];
+} {
+  const adoptions: ConflictModel<RoundTripText>[] = [];
+  return {
+    adopt: (conflict) => {
+      adoptions.push(conflict);
+      return answer;
+    },
+    adoptions
+  };
+} // End of function adopting()
 
 /**
  * Seals one outcome the way `BrowserState.saveRawDocument` does.
@@ -223,10 +259,14 @@ function roundTrip(
  * Drives a session all the way into a conflict.
  *
  * @param diskRevision - What the read after the refusal found.
+ * @param diskText - The whole file text at that revision.
  * @returns The session showing the conflict.
  */
-function inConflict(diskRevision: ContentRevision = AFTER): RawEditorSession {
-  return roundTrip(editText(fresh(), EDITED), conflict(diskRevision)).session;
+function inConflict(
+  diskRevision: ContentRevision = AFTER,
+  diskText: string = DISK
+): RawEditorSession {
+  return roundTrip(editText(fresh(), EDITED), conflict(diskRevision, diskText)).session;
 } // End of function inConflict()
 
 describe('a text this editor cannot give back unchanged', () => {
@@ -287,16 +327,22 @@ describe('a text this editor cannot give back unchanged', () => {
     const typed = editText(editText(fresh(), EDITED), `${EDITED}\r`);
     expect(beginSave(typed)?.submission.candidate).toBe(EDITED);
 
-    // Reloading a disk version: refused, and the draft is left exactly as it was.
-    const confirmed = confirmReload(askToReload(inConflict()));
-    const unchanged = loadDiskVersion(confirmed, AFTER, CRLF);
-    expect(unchanged).toBe(confirmed);
+    // Reloading a disk version: refused, and the draft is left exactly as it was —
+    // **and the window is not moved either**, which is what the recorder pins. The
+    // disk text is the conflict's own since 2c-4a-2, so the carriage returns are
+    // put there rather than handed in at the call.
+    const carriage = adopting();
+    const refusedReload = confirmReload(askToReload(inConflict(AFTER, CRLF)));
+    const unchanged = loadDiskVersion(refusedReload, carriage.adopt);
+    expect(unchanged).toBe(refusedReload);
     expect(rawEditorView(unchanged).text).toBe(EDITED);
-    // The same call with an LF disk version does reload, so that guard is a refusal
+    expect(carriage.adoptions).toEqual([]);
+    // The same call over an LF disk version does reload, so that guard is a refusal
     // and not a broken transition either.
-    expect(rawEditorView(loadDiskVersion(confirmed, AFTER, 'matches: []\n')).text).toBe(
-      'matches: []\n'
-    );
+    const clean = adopting();
+    const confirmed = confirmReload(askToReload(inConflict()));
+    expect(rawEditorView(loadDiskVersion(confirmed, clean.adopt)).text).toBe(DISK);
+    expect(clean.adoptions).toHaveLength(1);
 
     // And the last line before the wire re-checks, because the brand is a cast at
     // bottom and a cast written anywhere would reach a user's file. Driven the only
@@ -635,34 +681,114 @@ describe('the conflict state', () => {
   }); // End of the "copy before the destructive choice" case
 
   it('never reloads without a confirmation, and never automatically', () => {
+    const recorder = adopting();
     const stuck = inConflict();
     // Straight to the destructive transition, with no warning step behind it.
-    expect(loadDiskVersion(stuck, AFTER, 'whatever is on disk')).toBe(stuck);
+    expect(loadDiskVersion(stuck, recorder.adopt)).toBe(stuck);
     // And the warning step alone is not a confirmation either.
     const asked = askToReload(stuck);
-    expect(loadDiskVersion(asked, AFTER, 'whatever is on disk')).toBe(asked);
+    expect(loadDiskVersion(asked, recorder.adopt)).toBe(asked);
     expect(rawEditorView(asked).text).toBe(EDITED);
+    // **Neither moved the window**, which is the half 2c-4a-2 adds: the conflict
+    // itself installs nothing now, so an unconfirmed reload that installed
+    // something would be the eager adoption back by another door.
+    expect(recorder.adoptions).toEqual([]);
   }); // End of the "no reload without confirmation" case
 
   it('reloads once confirmed, and starts a clean draft over the disk version', () => {
+    const recorder = adopting();
     const confirmed = confirmReload(askToReload(inConflict()));
-    const reloaded = loadDiskVersion(confirmed, AFTER, 'matches: []\n');
+    const reloaded = loadDiskVersion(confirmed, recorder.adopt);
     const view = rawEditorView(reloaded);
-    expect(view.text).toBe('matches: []\n');
+    // The text and the revision are the conflict's own, which is what makes the
+    // reseeded draft's base describe the bytes it holds.
+    expect(view.text).toBe(DISK);
     expect(view.dirty).toBe(false);
     expect(view.canUndo).toBe(false);
     expect(view.outcome).toBeNull();
     expect(reloaded.draft.baseRevision).toBe(AFTER);
   }); // End of the "reload" case
 
+  it('adopts the disk projection exactly once, in the same call that reseeds', () => {
+    // **The consult's Q2 repair, as one operation.** A conflict installs nothing,
+    // so the reload has to do both — and neither half is reachable without the
+    // other: the adoption is minted from the conflict and its confirmation, and it
+    // is handed over inside the transition rather than by the caller.
+    const recorder = adopting();
+    const confirmed = confirmReload(askToReload(inConflict()));
+    loadDiskVersion(confirmed, recorder.adopt);
+    expect(recorder.adoptions).toHaveLength(1);
+    // **The conflict itself is what crosses**, not a payload assembled from it:
+    // authorization and installation happen in one call on `BrowserState`, so
+    // there is no adoption value for a surface to keep, replay or forward.
+    expect(recorder.adoptions[0]).toBe(conflictOf(confirmed));
+    expect(recorder.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(recorder.adoptions[0]?.diskText).toBe(DISK);
+  }); // End of the "one adoption, one call" case
+
+  it('finishes the reload when the window was already at the disk version', () => {
+    // **`alreadyThere` is a success, and the confirmation pass is why.** A window
+    // that has already reached the requested disk projection has satisfied the
+    // request; reporting that as a refusal left the person on a confirm control
+    // that could never do anything. The draft is reseeded exactly as it is for an
+    // install, because the bytes it is seeded from are the same either way.
+    const satisfied = adopting('alreadyThere');
+    const confirmed = confirmReload(askToReload(inConflict()));
+    const after = loadDiskVersion(confirmed, satisfied.adopt);
+    expect(after).not.toBe(confirmed);
+    expect(rawEditorView(after).text).toBe(DISK);
+    expect(conflictOf(after)).toBeNull();
+  }); // End of the "already at the disk version" case
+
+  it('reseeds nothing when the window refuses the adoption', () => {
+    // **A `refused` is a real production answer** — a spent confirmation, a
+    // conflict this window did not produce, a document it no longer projects, or a
+    // projection replaced since the conflict arrived — and taking it for a success
+    // would give the person a clean draft over a window that never moved, with the
+    // conflict panel gone and nothing to say what happened. Bytes the window
+    // already holds are **not** in that list: that is `alreadyThere`, and the case
+    // above is what it does.
+    const refusing = adopting('refused');
+    const confirmed = confirmReload(askToReload(inConflict()));
+    const after = loadDiskVersion(confirmed, refusing.adopt);
+    expect(after).toBe(confirmed);
+    expect(rawEditorView(after).text).toBe(EDITED);
+    expect(conflictOf(after)).not.toBeNull();
+  }); // End of the "window refused the adoption" case
+
   it('refuses a confirmation issued for another conflict', () => {
+    const recorder = adopting();
     const one = confirmReload(askToReload(inConflict()));
     const other = askToReload(inConflict(AGAIN));
     // The token travels, the conflict it was issued for does not.
     const spent: RawEditorSession = { ...other, reload: one.reload };
-    expect(loadDiskVersion(spent, AFTER, 'matches: []\n')).toBe(spent);
+    expect(loadDiskVersion(spent, recorder.adopt)).toBe(spent);
     expect(rawEditorView(spent).text).toBe(EDITED);
+    // And nothing was installed on the strength of a token issued elsewhere.
+    expect(recorder.adoptions).toEqual([]);
   }); // End of the "confirmation from another conflict" case
+
+  it('says what the disk side holds, and whether it can be loaded at all', () => {
+    // The disk side is view data now rather than a prop the pane supplies, and the
+    // refusal that disables the confirm control is decided here rather than in
+    // markup — a rule written into one renderer is carried by that renderer's
+    // mounted suite alone.
+    const ordinary = rawEditorView(inConflict());
+    expect(ordinary.diskText).toBe(DISK);
+    expect(ordinary.diskRefusal).toBeNull();
+    expect(ordinary.canReload).toBe(true);
+
+    const carriage = rawEditorView(inConflict(AFTER, CRLF));
+    expect(carriage.diskText).toBe(CRLF);
+    expect(carriage.diskRefusal).toEqual({ kind: 'lineEndingsNotPreserved' });
+    expect(carriage.canReload).toBe(false);
+
+    // No conflict, nothing to say about a disk side.
+    const clean = rawEditorView(fresh());
+    expect(clean.diskText).toBeNull();
+    expect(clean.diskRefusal).toBeNull();
+    expect(clean.canReload).toBe(false);
+  }); // End of the "disk side on the view" case
 
   it('calls no choice "keep my draft", in either language', () => {
     // The prohibition of `2c-split-notes.md` section 6, checked against the

@@ -95,24 +95,31 @@ import {
 import {
   conflictArm,
   consentForRefusal,
+  offeredReloadStep,
   offeredRefusalChoices,
+  reloadAsked,
+  reloadConfirmed,
   refusedArm,
   sendFailureOf,
+  spendTheConfirmedReload,
   submissionIsStale,
+  NOT_RELOADING,
+  type AdoptTheDiskVersion,
   type EditorPhase,
+  type ReloadStep,
   type SendFailure
 } from './editorSave';
 import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import { describeRawSave, type RawSaveChoice, type RawSaveModel } from './rawSave';
 import {
-  confirmReloadDiskVersion,
+  conflictChoicesFor,
   copyOfDraft,
   describeWholeDocumentSave,
   invalidationFailureMessage,
   reloadDiskVersion,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
-  type ReloadConfirmation,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -131,25 +138,12 @@ export type { SendFailure } from './editorSave';
 /**
  * How far the conflict's reload has got.
  *
- * Three steps, because the middle one is the warning and *Copy draft*: the
- * destructive act is never one click away from the panel that announces the
- * conflict (`docs/decisions/2c-split-notes.md` section 6).
+ * `./editorSave.ts`'s since 2c-4a-2, because the five match surfaces need the
+ * identical three-step machine and a second copy of a rule about a destructive
+ * confirmation is a second place for it to be relaxed. Re-exported under this
+ * module's name, exactly as {@link RawEditorPhase} re-exports `EditorPhase`.
  */
-export type ReloadStep =
-  | {
-      /** Nothing has been asked for. */
-      readonly kind: 'idle';
-    }
-  | {
-      /** The person asked to load the disk version and has not confirmed yet. */
-      readonly kind: 'confirming';
-    }
-  | {
-      /** The person confirmed, and this is the proof, issued for that conflict. */
-      readonly kind: 'confirmed';
-      /** What {@link confirmReloadDiskVersion} issued. */
-      readonly confirmation: ReloadConfirmation;
-    };
+export type { ReloadStep } from './editorSave';
 
 /**
  * One editing session over one file's whole text.
@@ -204,17 +198,24 @@ export interface RawEditorSession {
  */
 const NOTHING_SAID_YET: RawSaveModel = describeRawSave(null);
 
-/** The conflict's choices before the person has asked to reload. */
-const CONFLICT_FIRST_STEP: readonly ConflictChoice[] = ['keepEditing', 'copyDraft', 'reloadDiskVersion'];
-
 /**
- * The conflict's choices once the person has asked, and before they confirm.
+ * What this surface offers about a conflict.
  *
- * *Copy draft* is still offered, and still before the destructive one: the whole
- * point of the second step is that the copy is available at the moment the warning
- * is read.
+ * **The declaration `conflictChoicesFor` reads, and the only place this editor's
+ * conflict capability is stated.** Its draft is the file's whole text, so a
+ * clipboard preserves it exactly — which is the consult's Q3/Q4 rule and the
+ * reason `copyDraft` is offered here and not to the mover, the deleter or the
+ * duplicator. Both booleans are `true` because this is the surface whose controls
+ * are drawn today; the five match surfaces have the same reload transition, built
+ * and called by their components, and set `offersReload` to `false` until 2c-4a-3
+ * draws it — a model that names a choice draws a control, and *offered* is a
+ * different question from *implemented*.
  */
-const CONFLICT_CONFIRM_STEP: readonly ConflictChoice[] = ['keepEditing', 'copyDraft', 'confirmReload'];
+export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
+  draftKind: 'authoredText',
+  offersCopyDraft: true,
+  offersReload: true
+};
 
 /**
  * Why this editor will not open a text at all.
@@ -384,7 +385,7 @@ export function startRawEditor(
     submitted: null,
     outcome: null,
     extraMessages: [],
-    reload: { kind: 'idle' },
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function startRawEditor()
@@ -644,7 +645,7 @@ export function applySave(
     // the whole of the save.
     outcome: describeWholeDocumentSave(outcome, session.draft),
     extraMessages: failed === null ? [] : [failed],
-    reload: { kind: 'idle' },
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function applySave()
@@ -700,7 +701,7 @@ export function keepEditing(session: RawEditorSession): RawEditorSession {
     submitted: null,
     outcome: null,
     extraMessages: [],
-    reload: { kind: 'idle' },
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function keepEditing()
@@ -728,10 +729,8 @@ export function textToCopy(session: RawEditorSession): RoundTripText | null {
  *   showing.
  */
 export function askToReload(session: RawEditorSession): RawEditorSession {
-  if (conflictOf(session) === null || session.reload.kind !== 'idle') {
-    return session;
-  }
-  return { ...session, reload: { kind: 'confirming' } };
+  const next = reloadAsked(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
 } // End of function askToReload()
 
 /**
@@ -745,22 +744,25 @@ export function askToReload(session: RawEditorSession): RawEditorSession {
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmReload(session: RawEditorSession): RawEditorSession {
-  const conflict = conflictOf(session);
-  if (conflict === null || session.reload.kind !== 'confirming') {
-    return session;
-  }
-  return {
-    ...session,
-    reload: { kind: 'confirmed', confirmation: confirmReloadDiskVersion(conflict) }
-  };
+  const next = reloadConfirmed(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
 } // End of function confirmReload()
 
 /**
- * Discards the draft and starts again from the version on disk.
+ * Adopts the disk version into the window and starts again from it.
  *
- * **The destructive transition.** It goes through `reloadDiskVersion`, which
- * refuses a confirmation issued for a different conflict and answers `null` — in
- * which case nothing is discarded and the session is returned as it was.
+ * **The destructive transition, and since 2c-4a-2 it is one operation rather than
+ * two.** It used to take a revision and a text the *caller* had obtained from
+ * somewhere else, on the assumption that `BrowserState` had already installed the
+ * disk projection before the answer arrived. The consult's Q2 removed that
+ * assumption: a conflict now installs nothing, so this function performs the
+ * workspace adoption itself, through the `adopt` callback, in the same call that
+ * reseeds the draft. Neither half can happen without the other, and neither can
+ * happen without a confirmation issued for **this** conflict.
+ *
+ * The text and the revision are the conflict's own — `diskText` and
+ * `diskRevision`, paired by the command layer — rather than a second read's, which
+ * is what makes the reseeded draft's base revision describe the bytes it holds.
  *
  * **It refuses a disk version this editor could not hold unchanged**, for
  * {@link rawEditorRefusal}'s reason and by the same test. This is the one path
@@ -771,26 +773,49 @@ export function confirmReload(session: RawEditorSession): RawEditorSession {
  * function*, not about every way `reloadedDraft` can be reached — `draft.ts`
  * exports that too, which is `2c-1a-notes.md` section 4.8 and is unchanged.
  *
+ * **Nothing is reseeded for an adoption the window refused.** The draft is
+ * computed first because it is pure, `adopt` is called only once every check here
+ * has passed, and a `refused` from it leaves both the window and the draft exactly
+ * as they were — a confirmation issued for another conflict, one already spent, a
+ * conflict this window did not produce, or a projection replaced since it arrived.
+ * A carriage return in the disk text is refused one step earlier, here.
+ * **`alreadyThere` reseeds**: the window already holds the bytes the draft would be
+ * seeded from, so the request is satisfied and the draft follows it.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything.
+ * `() => 'installed'` type-checks, exactly as `openWholeDocumentSave`'s `forget`
+ * does (`2c-1a-notes.md` section 4.3) — the type constrains the *answer* to a
+ * {@link DiskAdoptionOutcome} and not the work behind it. What it forces is that
+ * the caller cannot obtain the reseeded draft without this function having called
+ * it and been told the window holds the disk version.
+ *
  * @param session - The session holding a confirmation.
- * @param revision - The revision the disk version was read at.
- * @param text - The disk version's whole text.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and only
+ *   when this reload really happens.
  * @returns A clean session over the disk version, or the same session.
  */
 export function loadDiskVersion(
   session: RawEditorSession,
-  revision: ContentRevision,
-  text: string
+  adopt: AdoptTheDiskVersion<RoundTripText>
 ): RawEditorSession {
   const conflict = conflictOf(session);
   if (conflict === null || session.reload.kind !== 'confirmed') {
     return session;
   }
-  const held = roundTripText(text);
+  const held = roundTripText(conflict.diskText);
   if (held === null) {
     return session;
   }
-  const reloaded = reloadDiskVersion(conflict, session.reload.confirmation, revision, held);
+  const reloaded = reloadDiskVersion(
+    conflict,
+    session.reload.confirmation,
+    conflict.diskRevision,
+    held
+  );
   if (reloaded === null) {
+    return session;
+  }
+  if (!spendTheConfirmedReload(conflict, session.reload, adopt)) {
     return session;
   }
   return {
@@ -799,7 +824,7 @@ export function loadDiskVersion(
     submitted: null,
     outcome: null,
     extraMessages: [],
-    reload: { kind: 'idle' },
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function loadDiskVersion()
@@ -852,10 +877,39 @@ export interface RawEditorView {
   readonly findingsAreStale: boolean;
   /** The conflict being shown, or `null`. */
   readonly conflict: ConflictModel<RoundTripText> | null;
+  /**
+   * The disk side's **whole file text**, or `null` when no conflict is showing.
+   *
+   * The conflict payload's own `diskText`, paired with `conflict.diskRevision` by
+   * the command layer. **There is no unavailable arm**, and that is 2c-4a-1's D1
+   * rather than an omission here: a `SaveResult::Conflict` cannot exist without the
+   * read that produced this text having succeeded, so a state saying *the version
+   * on disk cannot be read* would be a sentence about something this application
+   * cannot produce. An empty file is an empty string, which is a fact about the
+   * file and not an absence.
+   */
+  readonly diskText: string | null;
+  /**
+   * Why the version on disk cannot be loaded into this editor, or `null`.
+   *
+   * Shown rather than hidden, because the disk version is still *drawn* —
+   * `SourceText` names a carriage return rather than dropping it — and a control
+   * that silently did nothing would read as a bug.
+   */
+  readonly diskRefusal: RawEditorRefusal | null;
   /** What to offer about the conflict, at whichever step it has reached. */
   readonly conflictChoices: readonly ConflictChoice[];
   /** Whether the warning is showing and the destructive choice is one click away. */
   readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether confirming the reload would do anything.
+   *
+   * `false` for a disk version carrying a carriage return, which is the one thing
+   * {@link loadDiskVersion} refuses on its own. The decision is here rather than in
+   * markup for this directory's standing reason: a rule written into one renderer
+   * is carried by that renderer's mounted suite alone.
+   */
+  readonly canReload: boolean;
 }
 
 /**
@@ -873,6 +927,7 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
   const conflict = conflictOf(session);
   const stale = outcomeIsStale(session);
   const refused = refusedArm(outcome);
+  const diskRefusal = conflict === null ? null : rawEditorRefusal(conflict.diskText);
   return {
     text: session.draft.value,
     dirty: isDirty(session.draft),
@@ -889,13 +944,17 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
+    diskText: conflict === null ? null : conflict.diskText,
+    diskRefusal,
     conflictChoices:
       conflict === null
         ? []
-        : session.reload.kind === 'idle'
-          ? CONFLICT_FIRST_STEP
-          : CONFLICT_CONFIRM_STEP,
-    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle'
+        : conflictChoicesFor(
+            CONFLICT_CAPABILITIES,
+            offeredReloadStep(session.reload)
+          ),
+    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    canReload: conflict !== null && diskRefusal === null
   };
 } // End of function rawEditorView()
 

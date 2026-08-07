@@ -3409,6 +3409,106 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4a step 2
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+each of the four fix rounds. The counts here are the final ones, on the committed tree.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1380 passed, 46 files** (baseline 1326 at step 1; 1342 after round 1, 1372 after round 2, 1380 after round 3, unmoved by the two prose rounds) |
+| `npm run check` | **411 files, 0 errors, 0 warnings** |
+| `npm run build` | **171 modules**, and `svelte/internal/server` absent from `dist/` |
+| `cargo test --workspace` | **1048 passed**, unchanged — this step wrote no Rust |
+| `cargo clippy` / `cargo fmt --check` | **not run, and that is correct**: no file under `crates/` or `src-tauri/` was touched |
+
+**The module count did not move, and that is the expected shape.** Step 2 adds fields,
+transitions, a prop and a great deal of prose, but **no new source module** — so a count that
+stayed at 171 is the guard passing, not the guard being ignored. `CLAUDE.md` §6 gives the rule:
+the guard is the *shape* of a change, and a jump to ~180 with Svelte's server build in the bundle
+is the `resolve.conditions` regression it exists to catch.
+
+**i18n is 698 keys per language, at parity** — one fewer than the 699 at 2c-3c-3, because
+`browser.rawEditor.diskVersionUnavailable` was **deleted**. That deletion was challenged in review
+and survived: `SaveResult::Conflict.disk_text` is a required `String`, the sole production
+constructor returns no conflict when `Workspace::refresh` cannot read valid UTF-8, and there is no
+pre-step-1 constructor that omits the field — so the state the key described is unreachable rather
+than merely rare. Empty text, a BOM, CR characters and a missing final newline all remain
+representable and rendered.
+
+## Phase 2c-4a step 2 review disposition
+
+**Four review rounds, and the last two exist only because the round before each of them left a
+narrower instance of the finding it had just closed.** All four are in one file,
+`docs/reviews/phase-2c-4a-2-code.md`, appended in order and never rewritten:
+`## Findings`, `## Confirmation pass`, `## Round 3 pass`, `## Round 4 pass`, then
+`## Round 5 — disposition of the round-4 pass`. The first four verdicts were **NOT READY** and all
+four were accepted rather than argued with; the fifth is READY.
+
+**Round 1 — one High, two Mediums, one Low.** The High rejected this step's own first resolution
+of its central tension. The implementation had declared a per-surface capability but built the
+reload *transition* for the raw editor only, on the reasoning that a match model naming
+`reloadDiskVersion` would put a live-looking control on screen before step 3 wired it. The review's
+answer is the one to keep: **withholding the offering was right and withholding the transition was
+not** — "an unoffered transition and its callback can be implemented and tested without drawing its
+choice." As built, step 3 would have had to invent five model transitions, five close/adopt
+integrations and their `DetailPane` props *on top of* drawing them, contrary to the approved split,
+which assigns per-surface close/reseed behaviour and the `DetailPane` props to **this** step.
+The Mediums were the adoption brand unguarded at the spend boundary, and a record claiming a
+dismissed match conflict "conflicts again" — true of raw save, **false of all five match commands**,
+because `conflict_after_the_lock` has already refreshed the Rust cache so `view_at` answers
+`identityStaleRevision` before the locked check is ever reached.
+
+**Round 2 fixed all four and introduced two more.** The new High is the sharpest defect this phase
+produced: `adoptDiskVersion` checked the confirmation, the document's existence and a projection
+already at `diskRevision`, but **never that the projection still was the one the conflict was
+created against** — so a `rereadDocument` landing between *Reload disk version* and *Confirm
+reload* left the session at `confirming`, the guard passed, and the window **installed the older
+snapshot over the newer projection and reported success**. Its mirror image was equally wrong: when
+the intervening projection *was* the disk revision, the method answered `false`, so raw reload did
+not reseed and match reload did not close, and confirming again repeated the refusal forever.
+A boolean cannot carry three answers. The new Medium was ten-plus sites still saying the arms this
+round had just wired "return without doing anything".
+
+**Round 3 closed both and the code has been sound since.** The spend is bound to the conflict's
+**origin**: `rememberTheConflict` records, as each conflict arrives, which document it is about and
+that document's projection generation, in a `WeakMap` keyed on the wire value `ConflictModel.source`
+carries whole. A conflict with no entry is refused — which also closed the cross-`BrowserState`
+residue round 1 had left open — and so is one whose projection has been replaced since.
+**The generation is the right guard and `conflict.expected` is not**: `expected` is the *session's*
+frozen base and legitimately differs from what the window projects. `AdoptTheDiskVersion` now answers
+`DiskAdoptionOutcome` = `installed | alreadyThere | refused`, `alreadyThere` is checked first so a
+reprojection that reached the requested revision is satisfaction rather than over-refusal, and a
+refused confirmation still leaves through the always-present *Keep editing*. The round-3 pass
+verified both guards by removing each and watching its test fail.
+
+**Rounds 4 and 5 were record accuracy only, and both found what the sweep before them had missed.**
+Round 4 named four sites still describing the old `boolean` contract — including the record's own
+**primary design section**, which had survived a sweep that did touch the code. Round 5 named two
+more, both saying `close()` fires "only when the window says it installed", which quietly collapses
+two successful outcomes back into one. **The root cause of the first miss is recorded rather than
+tidied away**: a round-3 edit script asserted through several replacements, threw on a later one,
+discarded all its writes including §2.1's, and the retry re-applied only the edit that had failed.
+The durable lesson is in `2c-4a-2-notes.md` §7.6.2 — **sweep for what the type now says, not for the
+words the old type used**, which is why three consecutive rounds each left a narrower instance
+standing.
+
+Round 5 was closed by the orchestrator directly rather than by a fifth adversarial pass: the fix was
+three sentences whose exact locations round 4 had already given, and the confirming sweep was run
+here instead. That choice, the sweep and its six remaining legitimate hits are written down in the
+review file rather than assumed.
+
+**No behavioural finding from any round remains open.** The round-3 pass separately re-confirmed,
+after the rewrite, that the six conflict arms still install nothing, that the two-counter selection
+invariant holds (`installView` bumps only the adopted document's `projectionGenerations`;
+`repairAfter` writes through `replaceSelection`, which bumps the global `selectGeneration` in the
+same synchronous block, with **no `await` between them**), that `offersReload` is still `false`
+everywhere, and that none of the prohibitions crept in — no `saveAnyway`, no stale-candidate retry,
+no automatic reload, no dirty-state clearing on conflict, no cross-revision match identification, no
+YAML from a projection, no diff, and no control named or coded "keep my draft".
+
+---
+
 ## Verification — Phase 2c-4a step 1
 
 Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
@@ -5521,7 +5621,103 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-4a step 1 is complete: the revision-bound disk snapshot exists, and nothing draws it.**
+**Phase 2c-4a step 2 is complete: the frontend conflict protocol exists end to end, and nothing
+draws it.** A conflict now installs nothing in the window — it captures and stops. Adoption happens
+in exactly one place, only for a confirmed reload, and all six write surfaces have the transition
+that reaches it. What is deliberately withheld is the *offering*: every match surface still declares
+`offersReload: false`, so `conflictChoicesFor` names neither `reloadDiskVersion` nor `confirmReload`
+and no control is drawn. **2c-4a-3 flips one boolean per surface and draws the panels; it does not
+have to invent the machinery.**
+
+**`ee79c5d` was the base; step 2's commit is where a fresh session begins.** The exact first
+commands a fresh session should run:
+
+```sh
+npm install && npm test        # expect 1380 passed, 46 files
+cargo test --workspace         # expect 1048 passed
+```
+
+(`npm run check` expects **411 files, 0 errors, 0 warnings**. `npm run build` expects **171
+modules** — unchanged, because step 2 adds no frontend module; the guard is the *shape* of a change
+to it, `CLAUDE.md` §6. i18n is **698** keys per language, at parity — one fewer than 2c-3c-3,
+because `browser.rawEditor.diskVersionUnavailable` was deleted as unreachable.)
+
+### Read this before writing a line of step 3
+
+`docs/reviews/phase-2c-4a-design.md` governs the whole phase; its Q7 gives the six per-surface
+recipes for provoking a real conflict in a window. `docs/decisions/2c-4a-2-notes.md` is step 2's
+record — read **§7.6.2** whatever else you skip. `docs/reviews/phase-2c-4a-2-code.md` holds four
+review passes; the round-3 pass is the one that confirms the code and explains why the guards are
+the guards.
+
+### What step 2 built, in the four sentences step 3 needs
+
+- **One adoption door.** `BrowserState.adoptDiskVersion(conflict, confirmation)` authorizes and
+  installs in a single call and answers `DiskAdoptionOutcome` = `installed | alreadyThere |
+  refused`. **`alreadyThere` is success**, not a refusal: the window already holds the revision that
+  was asked for, and treating it as failure is the stuck confirmation it was added to prevent. All
+  six callers must stop only on `refused` — `spendTheConfirmedReload` is what collapses the two
+  successful arms, deliberately.
+- **The spend is bound to the conflict's origin, not to its content.** `rememberTheConflict` keys a
+  `WeakMap` on the wire value that `ConflictModel.source` carries whole, recording the document and
+  its projection generation at the moment the conflict arrived. A conflict this window never
+  produced is refused, and so is one whose projection has since been replaced. It is **not** keyed
+  on `conflict.expected` — that is the session's frozen base and legitimately differs from what the
+  window projects.
+- **The three-step machine is shared and already wired.** `editorSave.ts` owns `ReloadStep`,
+  `NOT_RELOADING`, `AdoptTheDiskVersion<T>`, `reloadAsked`, `reloadConfirmed`,
+  `spendTheConfirmedReload` and `offeredReloadStep`. All five match models carry `reload` and
+  `closed` on the session and `awaitingReloadConfirmation`/`closed` on the view, every `apply*` and
+  every dismissal writes `NOT_RELOADING` back, and the five components' `reloadDiskVersion` and
+  `confirmReload` arms **already call the transitions**. `DetailPane` already passes
+  `adoptDiskVersion` to all six.
+- **`conflictChoicesFor(capabilities, step)` is the only producer of a choice list**, fed by one
+  exported `CONFLICT_CAPABILITIES` per surface. `draftKind` is a permanent fact about the drafted
+  value; `offersCopyDraft` and `offersReload` say what the panel *acts on today* and are hand-set.
+  A copy is refused for an `operationChoice` draft regardless of the boolean, because the Q4 rule is
+  a property of the value and not of a caller's opinion about it.
+
+### Next: Phase 2c-4a step 3 — components, i18n, mounted tests and the window reading
+
+1. **Flip `offersReload` to `true` on the five match surfaces** and draw the panels: the disk side
+   through `SourceText`, the retained draft or operation summary beside it, both revisions always
+   shown. **Only the match editor and the creator get `copyDraft`** — `MatchBuffers` and
+   `CreationBuffers` hold authored strings; `MovePlacement` is a positional choice and `MatchId` is
+   a protocol carrier, and copying either preserves nothing while looking like it preserved
+   something. The copy is a **labelled reference copy, never YAML**.
+2. **New English and Spanish keys, at parity**, for the confirmation screens and the copy-result
+   disclosures. A component renders a code by calling an accessor, never by building a key.
+3. **Five new mounted jsdom suites**, one per match component — the seven that opt in today do not
+   include them for these arms. Read `copyBySelecting` in `RawEditor.svelte` before writing any
+   clipboard code.
+4. **The window reading is part of step 3's exit, not a follow-up.** Consult Q7 removed the excuse
+   that has stood since 2c-3b: the true `conflict` outcome had never been provoked from a window for
+   a move or a duplicate because those readings used **this application's own raw-save IPC** as the
+   second writer, which refreshes the same Rust workspace cache so `view_at` answers
+   `identityStaleRevision` before the transaction. That proved the *instrument* wrong, not the
+   outcome unreachable. The recipe: open the surface at revision R0, then — **without invoking any
+   app command that reloads the document** — use a **shell or editor process** to append a valid
+   YAML comment to that exact file, producing R1. The frontend and the Rust cache stay at R0,
+   `view_at` passes, and the core's locked read sees R1. One plan per launch, into a fresh bundle
+   path, and set the language **explicitly through the picker** — the webview's `localStorage`
+   follows the bundle identifier, not `HOME`.
+
+**What step 3 must not do**, unchanged from the consult: no `saveAnyway`, no retry of the stale
+candidate, no automatic reload, no clearing of dirty state on conflict, **no cross-revision
+identification of "the same match"** (that is 2c-4b's confidence work), no YAML emitted from a
+projection, no diff, and **no control named or coded "keep my draft"** — `CLAUDE.md` §6 makes that
+absolute before 2c-4b.
+
+**One thing step 3 inherits and must not undo.** After a match conflict is dismissed, a second
+submission is refused by `view_at` with `identityStaleRevision` — **not** by a second conflict —
+because `conflict_after_the_lock` already refreshed the Rust cache. Only a raw save reaches the
+locked check twice. It is write-safe either way, but the two are different sentences and the record
+said the wrong one for two review rounds.
+
+---
+
+**Phase 2c-4a step 1 (superseded by the above, kept for its rationale) is complete: the
+revision-bound disk snapshot exists, and nothing draws it.**
 `SaveResult::Conflict` now carries `disk_text` — the whole file text of the fresh read, paired with
 `disk_revision` **by content-hash equality** in the one production construction site,
 `conflict_after_the_lock` in `src-tauri/src/commands.rs`. No screen changed, no control was added,
@@ -8230,6 +8426,9 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`src/lib/browser/saveOutcome.ts`](src/lib/browser/saveOutcome.ts) | **The one authority for what a conflict offers, as of 2c-4a-2.** `conflictChoicesFor(capabilities, step)` is the only producer of a `ConflictChoice` list in the repository; before it, capability was expressed twice — an ignored `choices` field on every `ConflictModel` and a local `['keepEditing']` in each of the five match models — **and that split is exactly why a newly offered button could compile and do nothing**. `ConflictCapabilities.draftKind` is a permanent fact about the drafted value; `offersCopyDraft` and `offersReload` say what the panel *acts on today* and are hand-set, because **nothing in TypeScript can force a component to act on a choice its model names**, and the doc says so in the same sentence as what it does force. A copy is refused for an `operationChoice` draft regardless of the boolean |
+| [`src/lib/browser/editorSave.ts`](src/lib/browser/editorSave.ts) | **The shared reload machine — `ReloadStep`, `NOT_RELOADING`, `AdoptTheDiskVersion<T>`, `reloadAsked`, `reloadConfirmed`, `spendTheConfirmedReload`, `offeredReloadStep`.** Built in 2c-4a-2 *without* being offered, which is the shape worth copying: an unoffered transition can be implemented and tested without drawing its choice, and the first review round rejected the opposite trade. `spendTheConfirmedReload` treats **both** `installed` and `alreadyThere` as success and stops only on `refused` — collapsing those two back into one is the defect round 2 shipped and round 3 removed |
+| [`docs/reviews/phase-2c-4a-2-code.md`](docs/reviews/phase-2c-4a-2-code.md) | **Four review passes in one file, and the clearest record in this project of a fix becoming the next defect three times running.** Round 2's fix of round 1's High introduced a window that installed an **older** snapshot over a **newer** projection and reported success; rounds 4 and 5 each found a narrower instance of the prose finding the round before had just closed. The reason is one sentence and it generalizes: **each sweep was written from the previous wording rather than from the new contract** |
 | [`src/lib/browser/matchCreation.ts`](src/lib/browser/matchCreation.ts) | **The new-snippet form as a value, and 2c-3a-2 draws it without adding a rule to it.** Its own module rather than a mode of `matchEditor.ts` (consult Q3): creation has no projection, no baseline and no absent-key semantics, so the `Unchanged`-versus-`Set("")` distinction that dominates the small editor has no meaning here and must not be imported. `destinationsOf(documents, views)` maps the **summaries**, so a file the sidebar names as unreadable appears as ineligible rather than vanishing — five typed refusals, rendered with `tDestinationRefusal`, **never a built key**. The `After` anchor is an **identity** and a change of destination clears or replaces an incompatible one. `chooseDestination`/`choosePlacement` **withdraw the consent, the submission and the outcome**, which is round 1's first High finding: a create refused in file A and acknowledged there could otherwise be redirected to file B and committed on consent nobody gave for it |
 | [`src/lib/browser/matchDeletion.ts`](src/lib/browser/matchDeletion.ts) | **Deletion as a two-phase value (consult Q2), because the protocol's own acknowledgement round trip only engages when there are findings** — a clean delete produces none, so without this one click writes a user's file and there is no in-app undo until 2c-5. `confirmDelete(session, projected)` is the **only** producer of a `StartedDeletion`, and its second argument must come from the **live projection**: the module's header says in the same sentence that nothing enforces where it came from, and a component handing back `session.match` defeats the whole check — that was round 1's fifth finding, where the comparison observed nothing about the world. The last-snippet refusal is an **affordance derived from current state, never authorization**; the core refuses it too and that refusal is what reaches the screen |
 | [`src/lib/browser/typing.ts`](src/lib/browser/typing.ts) | The coalescing boundary — `Clock`, `TYPING_GROUP_IDLE_MS`, `TypingRun<F>`, `recordTyping` — **extracted** from `matchEditor.ts` in 2c-3a-1 rather than copied a second time, because two editors now share it. What did **not** move is which actions *close* a run; those are transitions of an editor and each still decides its own. `matchEditor.ts` re-exports `Clock` and `TYPING_GROUP_IDLE_MS` because `MatchEditor.svelte` imports the first from there and step 1 could not touch a `.svelte` file |
@@ -8237,8 +8436,8 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`src/lib/browser/rawEditor.ts`](src/lib/browser/rawEditor.ts) | **The editor's whole state machine as a value, and the model 2c-2's field editor should follow** — the component is a thin walk over it, which is what let the protocol be tested at all. Its drafted value is `RoundTripText`, a **branded** string whose only constructor applies the carriage-return check, so a bare `string` cannot type-check into a draft, a submission, a history step or a candidate; all three doors mint one or refuse, and `beginSave` re-checks because **a brand is a cast at bottom** and that is the last line before a wire that replaces a user's file. **The brand does not generalize to 2c-2**: a `replace` block scalar drafted through a `<textarea>` meets the identical API-value normalization, and that must be decided deliberately rather than assumed covered |
 | [`src/lib/components/RawEditor.svelte`](src/lib/components/RawEditor.svelte) | **The first screen in this project that writes a user's file**, and the first of the three components with a mounted test — `MatchEditor.svelte` and `DetailPane.svelte` gained theirs in 2c-2-2. **The harness is scoped by docblock opt-in, not by default**: `environment: 'node'` stays the suite's default, a file opts in with `/** @vitest-environment jsdom */` as its first line, and the five components with no mounted test are deliberately **not** back-filled — each of the three that has one gained it in the sub-phase that changed it. Read `copyBySelecting` before writing any clipboard code: `navigator.clipboard` is not sufficient on its own here, the carrier must be **offscreen rather than `hidden`** (an unrendered element cannot hold a selection), and every step of putting the screen back is separately non-throwing — because the first version restored focus in an unguarded `finally`, so a throw there produced **no** disclosure at all, neither success nor failure, on the one control that exists to keep a draft from being lost |
 | [`docs/decisions/2c-1b-notes.md`](docs/decisions/2c-1b-notes.md) **§9** | **The two window readings, and the reason this project's third kind of evidence is not ceremony.** They found two real defects that 883 passing tests, `svelte-check` and two Codex passes had all sailed past — one of which silently rewrote every line ending in a user's file. §9.11 is the re-take, taken because the fixes changed three components. **§13 is the honesty rule's third occurrence in one phase**: a decision record asserting a guarantee the code did not give. D13 is the corrected shape to copy — three named categories, one of them *what merely happens to be true of the current component path*, written as no guarantee at all |
-| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default and component test files opt in by docblock; the components with no mounted test are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **The module count is the regression guard and it moves with the source: 154 at 2c-1b, 156 at 2c-2-1, 158 at 2c-2-2, 161 at 2c-3a-1, 165 at 2c-3a-2, 166 at 2c-3b-1.** The guard is not the number but the *shape of a change to it* — a delta equal to the new source modules is a new module, a jump to ~180 with `svelte/internal/server` in the bundle is the regression. Rebaseline by building a pristine `git archive HEAD` copy and subtracting; **never by editing the condition** |
-| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **The only place a writing command is wired to real state.** `moveMatch` (2b-2a), `saveRawDocument` (2b-2c-3b) and `saveMatch` (2c-2-1), `createMatch` and `deleteMatch` (2c-3a-1) are all in `BrowserCommands`, `REAL_COMMANDS` and `BrowserState`: **all five writing commands are now wired**, and **four of the five are called from a screen — `moveMatch` is the one that is not, and 2c-3b step 2 is the step that draws it.** **All five take a caller-supplied `baseRevision` and forward it unchanged**; `saveMatch` was the last, closed at 2c-3a-2 with its `DetailPane.svelte` caller in the same commit. **`moveMatch` was repaired at 2c-3b-1 and is the last of the five to be given the shape the others had**: it answers `MatchSaveAnswer` rather than `SaveResult \| null`, it **reads `adoptTheDocumentOnDisk`'s return value** so a committed move whose re-read fails reports `adoption: failed` beside the committed outcome instead of leaving a stale projection installed, and it calls `forgetTextOf(match.id.document)` where it called `forgetFileText()` — the per-document conflict capture that was never dropped. It is still the only one that identifies a snippet by `MatchView` rather than by `MatchId`; only `.id` is read, and step 2 decides whether to resolve identities or change the signature. The selection machinery is now **two** counters, not one: a per-document `projectionGenerations` map bumped by `installView`/`forgetTheReplacedDocument` for their own file, and the global `selectGeneration` as *selection intent* bumped by `replaceSelection`. Collapsing them back into one is exactly the cross-document identity-stranding bug the confirmation round found. `saveMatch` answers **`MatchSaveAnswer`** (`answered` / `notAttempted` / `failed` with a **required** `IpcFailure`), never `SaveResult \| null`, and performs the identity adoption **before** the answer is handed back. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. `forgetFileText()` still has callers to gain |
+| [`vite.config.ts`](vite.config.ts) | **The jsdom decision, taken in 2c-1b and scoped**: `environment: 'node'` stays the default and component test files opt in by docblock; the components with no mounted test are **not** back-filled. **`resolve.conditions` is set conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's **server** build with nothing failing. **The module count is the regression guard and it moves with the source: 154 at 2c-1b, 156 at 2c-2-1, 158 at 2c-2-2, 161 at 2c-3a-1, 165 at 2c-3a-2, 166 at 2c-3b-1, 169 at 2c-3c-2, 171 at 2c-3c-3, and 171 still at 2c-4a-2 — a step that adds fields, transitions and a prop but no module, so an unmoved count is the guard passing.** The guard is not the number but the *shape of a change to it* — a delta equal to the new source modules is a new module, a jump to ~180 with `svelte/internal/server` in the bundle is the regression. Rebaseline by building a pristine `git archive HEAD` copy and subtracting; **never by editing the condition** |
+| [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **The only place a writing command is wired to real state.** `moveMatch` (2b-2a), `saveRawDocument` (2b-2c-3b) and `saveMatch` (2c-2-1), `createMatch` and `deleteMatch` (2c-3a-1) are all in `BrowserCommands`, `REAL_COMMANDS` and `BrowserState`: **all five writing commands are now wired**, and **four of the five are called from a screen — `moveMatch` is the one that is not, and 2c-3b step 2 is the step that draws it.** **All five take a caller-supplied `baseRevision` and forward it unchanged**; `saveMatch` was the last, closed at 2c-3a-2 with its `DetailPane.svelte` caller in the same commit. **`moveMatch` was repaired at 2c-3b-1 and is the last of the five to be given the shape the others had**: it answers `MatchSaveAnswer` rather than `SaveResult \| null`, it **reads `adoptTheDocumentOnDisk`'s return value** so a committed move whose re-read fails reports `adoption: failed` beside the committed outcome instead of leaving a stale projection installed, and it calls `forgetTextOf(match.id.document)` where it called `forgetFileText()` — the per-document conflict capture that was never dropped. It is still the only one that identifies a snippet by `MatchView` rather than by `MatchId`; only `.id` is read, and step 2 decides whether to resolve identities or change the signature. The selection machinery is now **two** counters, not one: a per-document `projectionGenerations` map bumped by `installView`/`forgetTheReplacedDocument` for their own file, and the global `selectGeneration` as *selection intent* bumped by `replaceSelection`. Collapsing them back into one is exactly the cross-document identity-stranding bug the confirmation round found. `saveMatch` answers **`MatchSaveAnswer`** (`answered` / `notAttempted` / `failed` with a **required** `IpcFailure`), never `SaveResult \| null`, and performs the identity adoption **before** the answer is handed back. The two wirings are **not interchangeable**: `adoptTheDocumentOnDisk` re-points a selection **by identity**, while `forgetTheReplacedDocument` + `adoptTheReplacedDocument` must re-resolve **positionally and then check**, because a whole-document replacement leaves no identity to re-point with. `forgetTheReplacedDocument` runs **synchronously, before any `await`** — that ordering is the fix for the 3b review's Medium and is not incidental. **As of 2c-4a-2 a conflict installs nothing here**: all six writing wrappers capture and stop, `forgetTextOf`/`conflictText`/`captureTheDiskText`/`forgetConflictText` are gone with the second text cache they served, and `adoptDiskVersion(conflict, confirmation)` is the single door — bound to the conflict's origin by `rememberTheConflict`'s `WeakMap` on `ConflictModel.source`, answering `installed \| alreadyThere \| refused`, where **`alreadyThere` is success** |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) | **The eleven wrappers, five of which write.** `saveRawDocument` is the only one that does not return `CommandResult<SaveResult>`: it returns **`RawSaveOutcome`**, whose success arm always carries the `SaveResult` **plus** a required `reload` discriminant (`notOwed` / `done` / `failed`). That shape exists because the 3b review found **D2 broken in TypeScript** — a rejecting reload callback threw past the return type and hid a *committed* write. **A sixth writing wrapper inherits the rule, not the shape**: whatever it returns, a committed write may never come back as a rejection or an error |
 | [`src/lib/browser/rawSave.ts`](src/lib/browser/rawSave.ts) | The Q8 presentation model, in the tested layer rather than in a component. `describeRawSave` puts **"this replaces the entire document"** first in every model — the mode's identity, not a warning — then the owner's ruling when the candidate does not parse: espanso will not load the file, the parser's position **or the explicit no-position case**, and the choice. **`saveAnyway` is withheld for verdicts no acknowledgement can move.** `detail` is the parser's own message: carried, never localized, and deliberately not rendered |
 | [`docs/decisions/2b-2c-3b-notes.md`](docs/decisions/2b-2c-3b-notes.md) | Nine decisions with their reasons and the fix round. **§2.2 is the one to read before adding a writing command**: a raw save takes **no `view_at`**, because a replacement turns nothing into a position and — in consult Q7's scenario exactly — the session's cache still holds the loaded revision, so a pre-check would *pass*. Only the transaction's locked read sees it, and `SaveResult::Conflict` is strictly richer than `IdentityStaleRevision` |

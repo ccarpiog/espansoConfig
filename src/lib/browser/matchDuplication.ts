@@ -92,13 +92,24 @@
  * {@link MatchDuplicationSession.duplicated} — a commit happened through this
  * session; {@link MatchDuplicationSession.invalidated} — the projection these
  * identities came from has been replaced (a committed save, an adoption the
- * wrapper owed at all, the conflict arm that installs a disk projection while
- * reporting `adoption: notOwed`, or a recovery re-read that failed); and
+ * wrapper owed at all, or a recovery re-read that failed); and
  * {@link MatchDuplicationSession.mayHaveWritten} — a send this application
  * cannot account for. {@link dismissDuplicationOutcome} clears the panel, not
  * those facts. A `committed: false` whose adoption was not owed replaced
  * nothing and spends nothing — practically unreachable for an insertion, and
  * the arm is honest rather than hopeful.
+ *
+ * **A conflict is not one of them, and 2c-4a-2 is where that changed.** The
+ * wrapper used to install the projection a conflict carries on `disk` while
+ * reporting `adoption: notOwed`, so the arm was the evidence; the consult's Q2
+ * ruled that install a defect and it installs nothing now, so the panel refuses
+ * only **while the conflict is showing** and dismissing it hands the session
+ * back. The file is what has not changed, so a resend carrying the frozen base
+ * revision is **refused** — and 2c-4a-2's review is why that refusal is named
+ * carefully: `conflict_after_the_lock` refreshed the Rust workspace cache when it
+ * produced the conflict, so `duplicate_match`'s leading `view_at` answers
+ * `identityStaleRevision` before the locked check is reached. Write-safe either
+ * way; a different sentence on screen.
  *
  * **What spends the session is uncertainty and stale identity, never a fear of
  * writing twice**: a session resends its frozen base revision, so a successful
@@ -146,12 +157,19 @@ import {
 import {
   conflictArm,
   consentForRefusal,
+  offeredReloadStep,
   offeredRefusalChoices,
+  reloadAsked,
+  reloadConfirmed,
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  spendTheConfirmedReload,
   submissionIsStale,
+  NOT_RELOADING,
+  type AdoptTheDiskVersion,
   type EditorPhase,
+  type ReloadStep,
   type SendFailure,
   type SendFailureLine
 } from './editorSave';
@@ -160,8 +178,10 @@ import { identityInProjection, plainIdentity } from './matchDeletion';
 import { sequenceOf, type SequenceAddress } from './matchMove';
 import type { RawSaveChoice } from './rawSave';
 import {
+  conflictChoicesFor,
   describeEditSave,
   invalidationFailureMessage,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
   type SaveOutcomeMessage,
@@ -404,6 +424,24 @@ export interface MatchDuplicationSession {
   /** How the last attempt failed to produce an outcome at all, or `null`. */
   readonly sendFailure: SendFailure | null;
   /**
+   * How far a confirmed reload of the disk version has got.
+   *
+   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
+   * stops a confirmation collected for one conflict from being spendable while a
+   * later one is on screen. The window refuses a spent confirmation too, but this
+   * is the guard that means the situation never arises.
+   */
+  readonly reload: ReloadStep;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * **The match-level reload result the consult's Q3 ruled**: install the disk
+   * projection and *close* this panel, never re-seed anything from a fresh
+   * projection — identifying a match across revisions is 2c-4b. The panel that
+   * reads this closes itself; everything here refuses once it is `true`.
+   */
+  readonly closed: boolean;
+  /**
    * Whether a duplicate has committed through this session.
    *
    * **The file was rewritten, and nothing else.** Set by a committed save and
@@ -415,16 +453,19 @@ export interface MatchDuplicationSession {
   /**
    * Whether this session's identities can no longer be vouched for.
    *
-   * **A second fact, because it is a second fact.** Four producers:
-   * {@link applyDuplication} sets it from a committed save, from an adoption
+   * **A second fact, because it is a second fact.** Three producers:
+   * {@link applyDuplication} sets it from a committed save and from an adoption
    * `BrowserState.duplicateMatch` owed at all — so it is set whenever that
-   * wrapper re-read the file, whether or not the duplicate committed — **and**
-   * from the conflict arm, which the wrapper reports `adoption: notOwed` for
-   * while installing the projection the conflict carried; and
+   * wrapper re-read the file, whether or not the duplicate committed; and
    * {@link duplicationRecoveryFailed} sets it **without** a replacement, from
    * a recovery re-read that failed — there the projection is still installed
    * and what happened is that the command contradicted this session's identity
    * and the window then could not obtain a better one. Cleared by nothing.
+   *
+   * **A conflict was a fourth producer until 2c-4a-2**, because the wrapper
+   * installed the projection the conflict carried while reporting
+   * `adoption: notOwed`. It installs nothing now (consult Q2), so invalidation
+   * follows actual projection adoption and a conflict is not one.
    *
    * **It is what this session was told, never everything that is true.** A
    * reprojection the wrapper did not perform is visible only to the live
@@ -507,6 +548,8 @@ export function startMatchDuplication(
     outcome: null,
     extraMessages: [],
     sendFailure: null,
+    reload: NOT_RELOADING,
+    closed: false,
     duplicated: false,
     invalidated: false,
     mayHaveWritten: false,
@@ -684,7 +727,7 @@ export function canDuplicate(
   session: MatchDuplicationSession,
   views: readonly DocumentView[]
 ): boolean {
-  return duplicationSubmissionRefusal(session, views) === null;
+  return !session.closed && duplicationSubmissionRefusal(session, views) === null;
 } // End of function canDuplicate()
 
 /** A duplicate about to be sent: the session that is waiting, and what to send. */
@@ -743,7 +786,11 @@ export function beginDuplicate(
     projected !== null &&
     sameIdentity(projected, session.match) &&
     sameIdentity(projected, session.draft.value);
-  if (refusalGiven(session, live) !== null) {
+  // **A closed session sends nothing.** A confirmed reload adopted the disk
+  // projection and ended this panel, so its identities describe a parse the window
+  // has crossed away from. No refusal *code* is added for it, and that is
+  // deliberate: a code is a sentence on a screen, and a closed panel is not on one.
+  if (session.closed || refusalGiven(session, live) !== null) {
     return null;
   }
   const submission = submissionOf(session.draft);
@@ -777,14 +824,15 @@ export function beginDuplicate(
  * `done` or `failed` — means `BrowserState.duplicateMatch` re-read and
  * re-projected the file, so every identity this session holds is stale
  * whatever the arm said about writing. That sets `invalidated`, which spends
- * the session on its own. **A conflict sets `invalidated` from the arm rather
- * than from the adoption, and that asymmetry is deliberate**, exactly as it is
- * for a move: the wrapper installs the projection the conflict carries on
- * `disk` while reporting `adoption: notOwed`, because it re-read nothing and
- * wrote nothing — so the arm is the only evidence there is. Nothing here can
- * check that the caller really installed that projection; a caller that did
- * not gets a session refusing more than it has to, which is the direction this
- * application errs in.
+ * the session on its own. **A conflict does not, and 2c-4a-2 is where that
+ * changed**, exactly as it is for a move: the wrapper used to install the
+ * projection the conflict carries on `disk` while reporting
+ * `adoption: notOwed`, so the arm was the only evidence there was. The
+ * consult's Q2 ruled that eager install a defect — a conflict writes nothing
+ * and now replaces nothing — so the identities this session holds are still
+ * the ones the window is projecting, and invalidation follows **actual
+ * projection adoption**. Nothing here can check that the caller really left
+ * its projection alone, any more than it could check the opposite before.
  *
  * **A failed adoption is a line beside the outcome, never in place of it.**
  * The clone really is in the file; telling the person the duplicate failed
@@ -817,16 +865,13 @@ export function applyDuplication(
   // second, and the second does not imply the first. Both are `session.<flag> ||`
   // and neither is a plain assignment, so "cleared by nothing" is what the code
   // does: a second answer handed to a session that has already committed cannot
-  // take the commit back. And a conflict is the third producer — the wrapper
-  // installs the projection the conflict carried and reports `notOwed` for it,
-  // so the arm is the only evidence. See this function's JSDoc.
+  // take the commit back. **A conflict is not a third producer, and it was until
+  // 2c-4a-2** — the wrapper installed the projection the conflict carried and
+  // reported `notOwed` for it, so the arm was the only evidence; it installs
+  // nothing now. See this function's JSDoc.
   const committed = result.outcome === 'saved' && result.committed;
   const duplicated = session.duplicated || committed;
-  const invalidated =
-    session.invalidated ||
-    committed ||
-    adoption.kind !== 'notOwed' ||
-    result.outcome === 'conflict';
+  const invalidated = session.invalidated || committed || adoption.kind !== 'notOwed';
   if (result.outcome !== 'saved') {
     return {
       ...session,
@@ -834,6 +879,9 @@ export function applyDuplication(
       invalidated,
       outcome,
       extraMessages,
+      // **A new outcome resets the reload**, so a confirmation collected for an
+      // earlier conflict cannot be spent while this one is on screen.
+      reload: NOT_RELOADING,
       sendFailure: null
     };
   }
@@ -846,6 +894,7 @@ export function applyDuplication(
     phase: 'editing',
     outcome,
     extraMessages,
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function applyDuplication()
@@ -935,9 +984,77 @@ export function dismissDuplicationOutcome(
     submitted: null,
     outcome: null,
     extraMessages: [],
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function dismissDuplicationOutcome()
+
+/**
+ * Asks to load the version on disk, which is the step **before** confirming.
+ *
+ * @param session - The session showing a conflict.
+ * @returns The session at the warning, or the same session when no conflict is
+ *   showing or one has already been asked about.
+ */
+export function askToReloadDiskVersion(session: MatchDuplicationSession): MatchDuplicationSession {
+  const next = reloadAsked(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function askToReloadDiskVersion()
+
+/**
+ * Confirms abandoning this duplicate for the version on disk.
+ *
+ * Issues the token the adoption checks, for **this** conflict. Reachable only from
+ * the warning step, so a confirmation cannot be produced by a screen that never
+ * showed the warning.
+ *
+ * @param session - The session at the warning.
+ * @returns The session holding the confirmation, or the same session.
+ */
+export function confirmDiskReload(session: MatchDuplicationSession): MatchDuplicationSession {
+  const next = reloadConfirmed(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function confirmDiskReload()
+
+/**
+ * Adopts the disk version into the window and ends this session.
+ *
+ * **The match-level reload the consult's Q3 ruled, and it is not a reseed.** There
+ * is no disk-side `MatchId` to load: an identity is minted from one parse, and finding "the same" snippet in another is cross-revision identity work — 2c-4b, and forbidden here. So the window crosses to the disk
+ * observation and this panel **closes**, which is what the confirmation was
+ * collected for.
+ *
+ * **Nothing is closed for an adoption the window refused.** A `refused` from
+ * `adopt` — a spent confirmation, a conflict this window did not produce, or a
+ * projection replaced since it arrived — leaves the session exactly as it was,
+ * because closing over a window that did not move would report a reload that did
+ * not happen. **`alreadyThere` is not a refusal**: the window already holds the
+ * bytes that were asked for, so the request is satisfied and this session ends.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, and that the
+ * panel reading the view's `closed` really closes.
+ *
+ * @param session - The session holding a confirmation.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
+ * @returns The closed session, or the same session.
+ */
+export function reloadTheDiskVersion(
+  session: MatchDuplicationSession,
+  adopt: AdoptTheDiskVersion<MatchId>
+): MatchDuplicationSession {
+  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+    return session;
+  }
+  return {
+    ...session,
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    reload: NOT_RELOADING,
+    sendFailure: null,
+    closed: true
+  };
+} // End of function reloadTheDiskVersion()
 
 /**
  * What the person may do about a command that produced no outcome.
@@ -1022,14 +1139,29 @@ export function duplicationRecoveryFailed(
 } // End of function duplicationRecoveryFailed()
 
 /**
- * The choices a conflict offers in this sub-phase.
+ * What this surface offers about a conflict.
  *
- * **One**, for `matchDeletion.ts`'s reason: *Copy draft* copies a text and
- * there is no text here, and *Load the version on disk* is conflict capture
- * and preservation — Phase 2c-4a. **None of these is "keep my draft"**, which
- * means something specific and belongs to 2c-4b.
+ * **`operationChoice` is permanent here, and it is the consult's Q4 ruling rather
+ * than a limitation of this sub-phase.** The drafted value is a `MatchId`: an
+ * opaque, revision-scoped protocol carrier, not user content. Copying its JSON
+ * would expose an implementation token while preserving nothing, so *Copy draft*
+ * is not merely unwired for this surface — it can never be offered, and
+ * `conflictChoicesFor` refuses it even if `offersCopyDraft` were set.
+ *
+ * A confirmed reload — install the disk projection and **close** the duplicator —
+ * is **built and wired**: {@link askToReloadDiskVersion},
+ * {@link confirmDiskReload} and {@link reloadTheDiskVersion} are the transition,
+ * and `MatchDuplicator.svelte`'s `conflictAction` calls them. It is only *unoffered* —
+ * `conflictChoicesFor` names nothing this boolean does not admit, so no control
+ * that could reach the arm is drawn, which is why an unoffered arm is not a dead
+ * control. **Phase 2c-4a-3 flips the boolean**, over machinery that already exists
+ * and is already driven by this module's tests.
  */
-const CONFLICT_CHOICES: readonly ConflictChoice[] = ['keepEditing'];
+export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
+  draftKind: 'operationChoice',
+  offersCopyDraft: false,
+  offersReload: false
+};
 
 /** Everything a screen needs about one duplication, derived on every read. */
 export interface MatchDuplicationView {
@@ -1113,6 +1245,15 @@ export interface MatchDuplicationView {
   readonly conflict: ConflictModel<MatchId> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
+  /** Whether the warning is showing and the destructive choice is one click away. */
+  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * The panel that reads this calls its own `close`: a match-level reload adopts
+   * the disk projection and closes, because there is no disk-side draft to seed.
+   */
+  readonly closed: boolean;
 }
 
 /**
@@ -1194,7 +1335,12 @@ export function matchDuplicationView(
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    conflictChoices: conflict === null ? [] : CONFLICT_CHOICES
+    conflictChoices:
+      conflict === null
+        ? []
+        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    closed: session.closed
   };
 } // End of function matchDuplicationView()
 

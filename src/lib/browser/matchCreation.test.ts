@@ -37,11 +37,15 @@ import { makeDocument, makeMatch, makeSummary } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeCreationFindings,
+  applyCreate,
+  askToReloadDiskVersion,
+  baseRevisionOf,
   beginCreate,
   canCreate,
   chooseDestination,
   choosePlacement,
   chosenDestination,
+  confirmDiskReload,
   conflictOf,
   createCouldNotBeSent,
   creationRefusal,
@@ -49,7 +53,6 @@ import {
   destinationRefusalKey,
   destinationsOf,
   editCreationField,
-  baseRevisionOf,
   focusCreationField,
   isEditable,
   keepDrafting,
@@ -57,14 +60,18 @@ import {
   newMatchOf,
   placementOptionsOf,
   redoCreation,
+  reloadTheDiskVersion,
   startMatchCreation,
   undoCreation,
   wirePosition,
-  applyCreate,
+  type CreationBuffers,
   type CreationRefusal,
   type DestinationRefusal,
   type MatchCreationSession
 } from './matchCreation';
+import type { AdoptTheDiskVersion } from './editorSave';
+import type { DiskAdoptionOutcome } from './saveOutcome';
+import type { ConflictChoice, ConflictModel } from './saveOutcome';
 import { TYPING_GROUP_IDLE_MS } from './typing';
 
 /** The revision every projection below is minted from. */
@@ -833,3 +840,123 @@ describe('the base revision a screen sends', () => {
     expect(started!.submission.baseRevision).toBe(baseRevisionOf(started!.session));
   });
 }); // End of the "base revision" suite
+
+describe('the confirmed reload, which is built but not offered yet', () => {
+  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
+  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
+  // this surface's control is right, and withholding the **transition** was not —
+  // an unoffered transition can be built and driven without drawing anything, and
+  // leaving it out would have made step 3 invent five model machines on top of
+  // five panels. So the transition below is built **and** wired: this surface's
+  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
+  // screen reaches it. Every case here calls it directly, as that arm does.
+
+  /**
+   * A conflicted create of a ready form.
+   *
+   * @returns The session showing the conflict.
+   */
+  function conflicted(): MatchCreationSession {
+    const started = beginCreate(ready());
+    if (started === null) {
+      throw new Error('a ready form is sendable');
+    }
+    return applyCreate(started.session, CONFLICT, NOT_OWED);
+  } // End of function conflicted()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers. `refused` is a real production
+   *   answer — a spent confirmation, a conflict this window did not produce, or a
+   *   projection replaced since it arrived.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<CreationBuffers>;
+    readonly adoptions: ConflictModel<CreationBuffers>[];
+  } {
+    const adoptions: ConflictModel<CreationBuffers>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  it('needs two deliberate steps before anything can be spent', () => {
+    const stuck = conflicted();
+    const recorder = adopting();
+    // Straight to the destructive transition, with no warning behind it.
+    expect(reloadTheDiskVersion(stuck, recorder.adopt)).toBe(stuck);
+    const asked = askToReloadDiskVersion(stuck);
+    expect(matchCreationView(asked).awaitingReloadConfirmation).toBe(true);
+    // The warning alone is not a confirmation either.
+    expect(reloadTheDiskVersion(asked, recorder.adopt)).toBe(asked);
+    expect(recorder.adoptions).toEqual([]);
+    expect(matchCreationView(asked).closed).toBe(false);
+  }); // End of the "two steps" case
+
+  it('adopts the disk projection once, and closes the session', () => {
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, recorder.adopt);
+
+    // **The conflict itself crosses**, not a payload assembled from it: the window
+    // authorizes and installs in one call, so nothing here can retain an adoption.
+    expect(recorder.adoptions).toHaveLength(1);
+    expect(recorder.adoptions[0]).toBe(conflictOf(confirmed));
+    // And this session is over. There is no disk-side draft to seed — finding "the
+    // same" thing in a revision nobody has described is 2c-4b — so the panel closes.
+    expect(after.closed).toBe(true);
+    expect(matchCreationView(after).closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+    expect(isEditable(after)).toBe(false);
+  }); // End of the "adopt and close" case
+
+  it('finishes the reload when the window was already at the disk version', () => {
+    // **`alreadyThere` is a success**, so this session closes exactly as it does
+    // for an install: the window holds the disk projection either way, and treating
+    // the answer as a failure would leave a confirm control that could never work.
+    const satisfied = adopting('alreadyThere');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, satisfied.adopt);
+    expect(after.closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+  }); // End of the "already at the disk version" case
+
+  it('closes nothing when the window refuses the adoption', () => {
+    // Closing over a window that never moved would report a reload that did not
+    // happen, and take the conflict panel off the screen with it.
+    const refusing = adopting('refused');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, refusing.adopt);
+    expect(after).toBe(confirmed);
+    expect(after.closed).toBe(false);
+    expect(conflictOf(after)).not.toBeNull();
+  }); // End of the "window refused" case
+
+  it('does not offer the reload, so no control is drawn for it', () => {
+    // The half of the review's judgement that stands: the transition exists, is
+    // driven here and is called by this surface's `conflictAction`; `offersReload`
+    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
+    // boolean to flip.
+    const asked = askToReloadDiskVersion(conflicted());
+    expect(matchCreationView(asked).conflictChoices).toEqual<readonly ConflictChoice[]>([
+      'keepEditing'
+    ]);
+  });
+
+  it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {
+    // A confirmation is a person's answer to **one** conflict. Reaching the
+    // confirmed step and then dismissing must not leave it spendable.
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const dismissed = keepDrafting(confirmed);
+    expect(dismissed.reload.kind).toBe('idle');
+    expect(reloadTheDiskVersion(dismissed, recorder.adopt)).toBe(dismissed);
+    expect(recorder.adoptions).toEqual([]);
+  }); // End of the "dismissal forgets the confirmation" case
+}); // End of the "confirmed reload" suite

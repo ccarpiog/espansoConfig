@@ -31,6 +31,7 @@
  * helpers here do.
  */
 
+import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
@@ -200,6 +201,10 @@ function mountDeleter(
             (next.result.outcome === 'saved' && next.result.committed ? ADOPTED : NOT_OWED)
         });
       },
+      // **The window's own adoption**, which no case here reaches: the five match
+      // surfaces declare `offersReload: false`, so no control that could spend a
+      // confirmation is drawn. `matchDeletion.test.ts` drives the transition directly.
+      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
       close: (): void => {
         closes += 1;
       }
@@ -525,6 +530,10 @@ describe('a committed deletion, over the real workspace state', () => {
           baseRevision: ContentRevision,
           acknowledgement: Acknowledgement
         ): Promise<MatchSaveAnswer> => state.deleteMatch(id, baseRevision, acknowledgement),
+        // **The window's own adoption**, which no case here reaches: the five match
+        // surfaces declare `offersReload: false`, so no control that could spend a
+        // confirmation is drawn. `matchDeletion.test.ts` drives the transition directly.
+        adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         close: (): void => undefined
       }
     });

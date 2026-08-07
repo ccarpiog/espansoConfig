@@ -130,15 +130,19 @@
  * nothing: moving one of two byte-identical snippets produces a byte-identical
  * candidate, no revision moved, and the session goes on being usable.
  *
- * **A conflict spends the session too, and the reason is the caller's behaviour
- * rather than the answer's shape.** `BrowserState.moveMatch` installs the
- * projection a conflict carries on its `disk` field, which replaces this window's
- * projection of the file — and it reports `adoption: notOwed` for it, because
- * nothing was written and no re-read was performed. So the adoption cannot be the
- * evidence here and {@link applyMove} derives the invalidation from the arm
- * instead. **Nothing in TypeScript forces a caller to install that projection**;
- * what a caller that did not install it gets is a session refusing more than it
- * has to, which is the direction this application errs in.
+ * **A conflict does not spend the session, and 2c-4a-2 is where that changed.**
+ * `BrowserState.moveMatch` used to install the projection a conflict carries on
+ * its `disk` field — replacing this window's projection of the file while
+ * reporting `adoption: notOwed` — so the adoption could not be the evidence and
+ * {@link applyMove} derived the invalidation from the arm instead. The design
+ * consult's Q2 ruled that install a defect: a conflict writes nothing, and a save
+ * that wrote nothing must not re-order the list or move the selection before the
+ * person has chosen. Nothing is replaced now, so these identities are still the
+ * ones the window is projecting and the panel refuses only **while the conflict is
+ * showing** ({@link MoveSubmissionRefusal} `conflict`). Dismissing it hands the
+ * session back; the file is what has not changed, so a resend carries the frozen
+ * base revision, which the command refuses — see {@link dismissMoveOutcome} for
+ * why that refusal is an `identityStaleRevision` rather than a second conflict.
  *
  * ## A send that may already have written is terminal, and it outranks the rest
  *
@@ -173,10 +177,9 @@
  * - {@link MatchMoveSession.invalidated} — **identities this session can no longer
  *   vouch for**, which it was **told** about. It has **two** producers, and they
  *   differ in whether a projection was replaced at all:
- *   {@link applyMove} sets it from a replacement, on two kinds of evidence — a
- *   committed save or an adoption the wrapper owed at all, **and** the conflict
- *   arm, which replaces this window's projection while reporting
- *   `adoption: notOwed` (the section above says why); and
+ *   {@link applyMove} sets it from a replacement, on one kind of evidence — a
+ *   committed save, or an adoption the wrapper owed at all, which is the same
+ *   question asked of the wrapper's own report; and
  *   {@link moveRecoveryFailed} sets it **without** a replacement, from a recovery
  *   re-read that failed. There the projection is still installed and the parse is
  *   not gone — what happened is that the command **contradicted** the identity
@@ -250,12 +253,19 @@ import {
 import {
   conflictArm,
   consentForRefusal,
+  offeredReloadStep,
   offeredRefusalChoices,
+  reloadAsked,
+  reloadConfirmed,
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  spendTheConfirmedReload,
   submissionIsStale,
+  NOT_RELOADING,
+  type AdoptTheDiskVersion,
   type EditorPhase,
+  type ReloadStep,
   type SendFailure,
   type SendFailureLine
 } from './editorSave';
@@ -263,8 +273,10 @@ import type { InvalidationStatus } from './invalidation';
 import { identityInProjection, plainIdentity } from './matchDeletion';
 import type { RawSaveChoice } from './rawSave';
 import {
+  conflictChoicesFor,
   describeEditSave,
   invalidationFailureMessage,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
   type SaveOutcomeMessage,
@@ -668,6 +680,24 @@ export interface MatchMoveSession {
   /** How the last attempt failed to produce an outcome at all, or `null`. */
   readonly sendFailure: SendFailure | null;
   /**
+   * How far a confirmed reload of the disk version has got.
+   *
+   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
+   * stops a confirmation collected for one conflict from being spendable while a
+   * later one is on screen. The window refuses a spent confirmation too, but this
+   * is the guard that means the situation never arises.
+   */
+  readonly reload: ReloadStep;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * **The match-level reload result the consult's Q3 ruled**: install the disk
+   * projection and *close* this panel, never re-seed anything from a fresh
+   * projection — identifying a match across revisions is 2c-4b. The panel that
+   * reads this closes itself; everything here refuses once it is `true`.
+   */
+  readonly closed: boolean;
+  /**
    * Whether a move has committed through this session.
    *
    * **The file was rewritten, and nothing else.** Set by a committed save and
@@ -681,18 +711,21 @@ export interface MatchMoveSession {
    * Whether this session's identities can no longer be vouched for.
    *
    * **A second fact, because it is a second fact** — see this module's header.
-   * {@link applyMove} sets it from a committed save, from an adoption
+   * {@link applyMove} sets it from a committed save and from an adoption
    * `BrowserState.moveMatch` owed at all — so it is set whenever that wrapper
-   * re-read the file, whether or not the move committed — **and** from the
-   * conflict arm, which the wrapper reports `notOwed` for while installing the
-   * projection the conflict carried. {@link moveRecoveryFailed} is the fourth
-   * producer, and the only one where the projection was **not** replaced: the
-   * recovery is offered precisely because the command said this window's address
-   * does not describe the file it read, so a re-read that then fails leaves a
-   * session whose identities are known to disagree with the file and cannot be
-   * refreshed. Cleared by nothing: `match`, `members` and `anchors` were all minted
-   * from a parse that is gone or from one the file has contradicted, and no
-   * transition here can mint them again.
+   * re-read the file, whether or not the move committed. {@link moveRecoveryFailed}
+   * is the third producer, and the only one where the projection was **not**
+   * replaced: the recovery is offered precisely because the command said this
+   * window's address does not describe the file it read, so a re-read that then
+   * fails leaves a session whose identities are known to disagree with the file and
+   * cannot be refreshed. Cleared by nothing: `match`, `members` and `anchors` were
+   * all minted from a parse that is gone or from one the file has contradicted, and
+   * no transition here can mint them again.
+   *
+   * **A conflict was a fourth producer until 2c-4a-2**, because the wrapper
+   * installed the projection the conflict carried while reporting `notOwed`. It
+   * installs nothing now (consult Q2), so invalidation follows actual projection
+   * adoption and a conflict is not one.
    *
    * **It is what this session was told, never everything that is true.** A
    * reprojection the wrapper did not perform — the window re-reading the file for
@@ -798,6 +831,8 @@ export function startMatchMove(
     outcome: null,
     extraMessages: [],
     sendFailure: null,
+    reload: NOT_RELOADING,
+    closed: false,
     moved: false,
     invalidated: false,
     mayHaveWritten: false,
@@ -836,6 +871,7 @@ export function conflictOf(session: MatchMoveSession): ConflictModel<MovePlaceme
  */
 export function canChoose(session: MatchMoveSession): boolean {
   return (
+    !session.closed &&
     session.phase === 'editing' &&
     !session.moved &&
     !session.invalidated &&
@@ -1178,7 +1214,7 @@ export function moveSubmissionRefusal(
  * @returns `true` when {@link moveSubmissionRefusal} answers `null`.
  */
 export function canMove(session: MatchMoveSession, views: readonly DocumentView[]): boolean {
-  return moveSubmissionRefusal(session, views) === null;
+  return !session.closed && moveSubmissionRefusal(session, views) === null;
 } // End of function canMove()
 
 /** A move about to be sent: the session that is waiting, and what to send. */
@@ -1249,7 +1285,11 @@ export function beginMove(
   // computation once, and it omitted the live check — so a screen reported
   // `canMove: true` about a session this function refuses.
   const live = projected !== null && sameIdentity(projected, session.match);
-  if (refusalGiven(session, live) !== null) {
+  // **A closed session sends nothing.** A confirmed reload adopted the disk
+  // projection and ended this panel, so its identities describe a parse the window
+  // has crossed away from. No refusal *code* is added for it, and that is
+  // deliberate: a code is a sentence on a screen, and a closed panel is not on one.
+  if (session.closed || refusalGiven(session, live) !== null) {
     return null;
   }
   const submission = submissionOf(session.draft);
@@ -1298,19 +1338,24 @@ export function beginMove(
  * revision this window was not already projecting is exactly the answer that does
  * it without a byte being written. Nothing here clears either flag.
  *
- * **A conflict sets `invalidated` from the arm rather than from the adoption, and
- * that asymmetry is deliberate.** `BrowserState.moveMatch` installs the projection
- * the conflict carries on `disk` — replacing this window's projection of the file,
- * and therefore every identity this session holds — while reporting
- * `adoption: notOwed`, because it re-read nothing and wrote nothing. So the
- * evidence has to come from the arm here. It is derived on **this** side rather
- * than by widening what the wrapper reports, because `saveMatch`, `createMatch`,
- * `deleteMatch` and `saveRawDocument` answer the same `adoption` field through the
- * same helpers, and making a conflict report `done` for a move alone would leave
- * that field meaning one thing for one caller and another for the rest. **What no
- * type forces**, in the same sentence: nothing here can check that the caller
- * really installed that projection — a caller that did not gets a session refusing
- * more than it has to, which is the safe direction.
+ * **A conflict does not set `invalidated`, and 2c-4a-2 is where that changed.**
+ * Until then `BrowserState.moveMatch` installed the projection the conflict
+ * carries on `disk` — replacing this window's projection of the file, and
+ * therefore every identity this session holds — while reporting
+ * `adoption: notOwed`, so the arm was the only evidence there was and this
+ * function derived staleness from it. The consult's Q2 ruled that eager install a
+ * defect: a conflict writes nothing and now **replaces nothing**, so the
+ * identities this session holds are still the ones the window is projecting, and
+ * claiming otherwise would refuse a move that has become possible again for no
+ * reason a person could see. Invalidation follows **actual projection adoption**,
+ * which is `adoption.kind !== 'notOwed'` and, from 2c-4a-3, a confirmed reload
+ * that closes this session outright.
+ *
+ * **What no type forces**, in the same sentence: nothing here can check that the
+ * caller really left its projection alone, any more than it could check that the
+ * caller installed one before. What keeps the two sides agreeing is that
+ * `BrowserState.moveMatch` has exactly one conflict rule and it is written down at
+ * both ends.
  *
  * **A failed adoption is a line beside the outcome, never in place of it.** The
  * snippet really did move; telling the person the move failed would invite a
@@ -1345,16 +1390,13 @@ export function applyMove(
   // nothing" is what the code does and not only what the reachable call graph
   // happens to allow: a second answer handed to a session that has already
   // committed cannot take the commit back.
-  // And a conflict is the third producer: the wrapper installs the projection the
-  // conflict carried and reports `notOwed` for it, so the arm is the only evidence
-  // there is. See this function's JSDoc for why it is not reported as an adoption.
+  // **A conflict is not a third producer, and it was until 2c-4a-2.** The wrapper
+  // installed the projection the conflict carried and reported `notOwed` for it,
+  // so the arm was the only evidence; it installs nothing now, so there is nothing
+  // to be evidence of. See this function's JSDoc.
   const committed = result.outcome === 'saved' && result.committed;
   const moved = session.moved || committed;
-  const invalidated =
-    session.invalidated ||
-    committed ||
-    adoption.kind !== 'notOwed' ||
-    result.outcome === 'conflict';
+  const invalidated = session.invalidated || committed || adoption.kind !== 'notOwed';
   if (result.outcome !== 'saved') {
     return {
       ...session,
@@ -1362,6 +1404,9 @@ export function applyMove(
       invalidated,
       outcome,
       extraMessages,
+      // **A new outcome resets the reload**, so a confirmation collected for an
+      // earlier conflict cannot be spent while this one is on screen.
+      reload: NOT_RELOADING,
       sendFailure: null
     };
   }
@@ -1374,6 +1419,7 @@ export function applyMove(
     phase: 'editing',
     outcome,
     extraMessages,
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function applyMove()
@@ -1454,13 +1500,21 @@ export function acknowledgeMoveFindings(session: MatchMoveSession): MatchMoveSes
  * it clears is the *message*; the flag that spends the session is a separate field
  * for exactly this reason.
  *
- * **Dismissing a conflict is the case that needs it.** A conflict wrote nothing, so
- * `moved` is `false` and the panel that refused the control goes away with the
- * outcome — but `BrowserState.moveMatch` installs the disk projection the conflict
- * carried, which replaces this window's projection of the file. {@link applyMove}
- * therefore sets `invalidated` from the conflict arm itself, and
- * {@link moveSubmissionRefusal}'s reading of the live projections says the same
- * thing independently, since the installed projection is a different revision.
+ * **Dismissing a conflict gives the session back, and 2c-4a-2 is where that
+ * changed.** A conflict wrote nothing and — since the consult's Q2 removed the
+ * eager install — replaces nothing, so `moved` stays `false`, `invalidated` stays
+ * whatever it was, and the identities this session holds are still the ones the
+ * window is projecting. The panel goes away with the outcome and the move may be
+ * decided again. What has *not* changed is the file, so a resend is **refused**
+ * rather than allowed to overwrite the other writer's bytes — and the 2c-4a-2
+ * review's third finding is that *which* refusal is not the conflict this panel
+ * showed. `conflict_after_the_lock` refreshed the Rust workspace cache to the disk
+ * revision when it produced that conflict, so `move_match`'s leading `view_at`
+ * compares the frozen base against **that** and answers `identityStaleRevision`
+ * before the locked save check is ever reached (`src-tauri/src/commands.rs`). The
+ * write safety is the same; the sentence a person sees is not. Until 2c-4a-2 the wrapper installed the
+ * disk projection here and {@link applyMove} therefore spent the session from the
+ * conflict arm itself.
  *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last attempt.
@@ -1471,9 +1525,77 @@ export function dismissMoveOutcome(session: MatchMoveSession): MatchMoveSession 
     submitted: null,
     outcome: null,
     extraMessages: [],
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function dismissMoveOutcome()
+
+/**
+ * Asks to load the version on disk, which is the step **before** confirming.
+ *
+ * @param session - The session showing a conflict.
+ * @returns The session at the warning, or the same session when no conflict is
+ *   showing or one has already been asked about.
+ */
+export function askToReloadDiskVersion(session: MatchMoveSession): MatchMoveSession {
+  const next = reloadAsked(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function askToReloadDiskVersion()
+
+/**
+ * Confirms abandoning this move for the version on disk.
+ *
+ * Issues the token the adoption checks, for **this** conflict. Reachable only from
+ * the warning step, so a confirmation cannot be produced by a screen that never
+ * showed the warning.
+ *
+ * @param session - The session at the warning.
+ * @returns The session holding the confirmation, or the same session.
+ */
+export function confirmDiskReload(session: MatchMoveSession): MatchMoveSession {
+  const next = reloadConfirmed(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function confirmDiskReload()
+
+/**
+ * Adopts the disk version into the window and ends this session.
+ *
+ * **The match-level reload the consult's Q3 ruled, and it is not a reseed.** There
+ * is no disk-side `MovePlacement` to load: a destination is a position among identities minted from one parse, and the anchors this session holds name nothing in the revision on disk. So the window crosses to the disk
+ * observation and this panel **closes**, which is what the confirmation was
+ * collected for.
+ *
+ * **Nothing is closed for an adoption the window refused.** A `refused` from
+ * `adopt` — a spent confirmation, a conflict this window did not produce, or a
+ * projection replaced since it arrived — leaves the session exactly as it was,
+ * because closing over a window that did not move would report a reload that did
+ * not happen. **`alreadyThere` is not a refusal**: the window already holds the
+ * bytes that were asked for, so the request is satisfied and this session ends.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, and that the
+ * panel reading the view's `closed` really closes.
+ *
+ * @param session - The session holding a confirmation.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
+ * @returns The closed session, or the same session.
+ */
+export function reloadTheDiskVersion(
+  session: MatchMoveSession,
+  adopt: AdoptTheDiskVersion<MovePlacement>
+): MatchMoveSession {
+  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+    return session;
+  }
+  return {
+    ...session,
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    reload: NOT_RELOADING,
+    sendFailure: null,
+    closed: true
+  };
+} // End of function reloadTheDiskVersion()
 
 /**
  * What the person may do about a command that produced no outcome.
@@ -1580,14 +1702,29 @@ export function moveRecoveryFailed(session: MatchMoveSession): MatchMoveSession 
 } // End of function moveRecoveryFailed()
 
 /**
- * The choices a conflict offers in this sub-phase.
+ * What this surface offers about a conflict.
  *
- * **One**, for `matchDeletion.ts`'s reason: *Copy draft* copies a text and there
- * is no text here, and *Load the version on disk* is conflict capture and
- * preservation — Phase 2c-4a. **None of these is "keep my draft"**, which means
- * something specific and belongs to 2c-4b.
+ * **`operationChoice` is permanent here, and it is the consult's Q4 ruling rather
+ * than a limitation of this sub-phase.** The drafted value is a
+ * {@link MovePlacement}: *top*, *end* or *after this session-local `MatchId`*. A
+ * localized sentence describing it would be a description that cannot restore the
+ * operation, so *Copy draft* is not merely unwired for this surface — it can never
+ * be offered, and `conflictChoicesFor` refuses it even if `offersCopyDraft` were
+ * set. The chosen placement is shown in the retained panel instead.
+ *
+ * A confirmed reload — install the disk projection and **close** the mover — is **built and wired**: {@link askToReloadDiskVersion},
+ * {@link confirmDiskReload} and {@link reloadTheDiskVersion} are the transition,
+ * and `MatchMover.svelte`'s `conflictAction` calls them. It is only *unoffered* —
+ * `conflictChoicesFor` names nothing this boolean does not admit, so no control
+ * that could reach the arm is drawn, which is why an unoffered arm is not a dead
+ * control. **Phase 2c-4a-3 flips the boolean**, over machinery that already exists
+ * and is already driven by this module's tests.
  */
-const CONFLICT_CHOICES: readonly ConflictChoice[] = ['keepEditing'];
+export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
+  draftKind: 'operationChoice',
+  offersCopyDraft: false,
+  offersReload: false
+};
 
 /**
  * One destination a screen may offer, with whatever it needs to name it.
@@ -1788,6 +1925,15 @@ export interface MatchMoveView {
   readonly conflict: ConflictModel<MovePlacement> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
+  /** Whether the warning is showing and the destructive choice is one click away. */
+  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * The panel that reads this calls its own `close`: a match-level reload adopts
+   * the disk projection and closes, because there is no disk-side draft to seed.
+   */
+  readonly closed: boolean;
 }
 
 /**
@@ -1837,7 +1983,12 @@ export function matchMoveView(
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    conflictChoices: conflict === null ? [] : CONFLICT_CHOICES
+    conflictChoices:
+      conflict === null
+        ? []
+        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    closed: session.closed
   };
 } // End of function matchMoveView()
 

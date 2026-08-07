@@ -35,7 +35,15 @@ import type { DraftError, EditError, SaveError } from '../ipc/types';
 import type { Draft, DraftSubmission } from './draft';
 import { acknowledgeRefusal } from './draft';
 import type { RawSaveChoice } from './rawSave';
-import type { ConflictModel, RefusedModel, SaveOutcomeModel } from './saveOutcome';
+import { confirmReloadDiskVersion } from './saveOutcome';
+import type {
+  ConflictModel,
+  ConflictReloadStep,
+  DiskAdoptionOutcome,
+  RefusedModel,
+  ReloadConfirmation,
+  SaveOutcomeModel
+} from './saveOutcome';
 
 /**
  * What an editor is doing.
@@ -219,6 +227,142 @@ export function refusedArm<T>(outcome: SaveOutcomeModel<T> | null): RefusedModel
 export function conflictArm<T>(outcome: SaveOutcomeModel<T> | null): ConflictModel<T> | null {
   return outcome !== null && outcome.kind === 'conflict' ? outcome : null;
 } // End of function conflictArm()
+
+/**
+ * How far one surface's confirmed reload has got.
+ *
+ * Three steps, because the middle one is the warning and — where the surface has
+ * one — *Copy draft*: the destructive act is never one click away from the panel
+ * that announces the conflict (`docs/decisions/2c-split-notes.md` section 6).
+ *
+ * **Shared at 2c-4a-2 rather than copied six times.** It was `rawEditor.ts`'s own
+ * type until the five match surfaces needed the identical machine, and a second
+ * copy of a rule about a destructive confirmation is a second place for it to be
+ * relaxed — this module's founding argument.
+ */
+export type ReloadStep =
+  | {
+      /** Nothing has been asked for. */
+      readonly kind: 'idle';
+    }
+  | {
+      /** The person asked to load the disk version and has not confirmed yet. */
+      readonly kind: 'confirming';
+    }
+  | {
+      /** The person confirmed, and this is the proof, issued for that conflict. */
+      readonly kind: 'confirmed';
+      /** What `confirmReloadDiskVersion` issued. */
+      readonly confirmation: ReloadConfirmation;
+    };
+
+/**
+ * The step every session starts at, and returns to.
+ *
+ * A shared frozen value rather than a literal per call site, so "a new outcome
+ * resets the reload" is one object in one place.
+ */
+export const NOT_RELOADING: ReloadStep = Object.freeze({ kind: 'idle' as const });
+
+/**
+ * What installs the disk observation a conflict carried, as a surface sees it.
+ *
+ * **The conflict and its confirmation travel together, and no value in between
+ * does.** `BrowserState.adoptDiskVersion` authorizes and spends in one call, so
+ * there is no adoption object for a surface to retain, replay or hand to another
+ * window — which is what the 2c-4a-2 review's second finding was about.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict being resolved.
+ * @param confirmation - What was issued for **that** conflict.
+ * @returns What became of it. `refused` is a refusal, and a surface that gets one
+ *   must not act as though the reload happened; `alreadyThere` is a **success**
+ *   with nothing to install.
+ */
+export type AdoptTheDiskVersion<T> = (
+  conflict: ConflictModel<T>,
+  confirmation: ReloadConfirmation
+) => DiskAdoptionOutcome;
+
+/**
+ * The step after *Reload disk version*, or `null` when there is no transition.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict the session is showing, or `null`.
+ * @param step - Where the reload has got to.
+ * @returns The next step, or `null` when the session must be returned unchanged.
+ */
+export function reloadAsked<T>(
+  conflict: ConflictModel<T> | null,
+  step: ReloadStep
+): ReloadStep | null {
+  return conflict === null || step.kind !== 'idle' ? null : { kind: 'confirming' };
+} // End of function reloadAsked()
+
+/**
+ * The step after the warning is read, or `null` when there is no transition.
+ *
+ * **Reachable only from the warning step**, so a confirmation cannot be produced
+ * by a screen that never showed it.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict the session is showing, or `null`.
+ * @param step - Where the reload has got to.
+ * @returns The next step, or `null` when the session must be returned unchanged.
+ */
+export function reloadConfirmed<T>(
+  conflict: ConflictModel<T> | null,
+  step: ReloadStep
+): ReloadStep | null {
+  return conflict === null || step.kind !== 'confirming'
+    ? null
+    : { kind: 'confirmed', confirmation: confirmReloadDiskVersion(conflict) };
+} // End of function reloadConfirmed()
+
+/**
+ * Spends a confirmed reload against the window, and says whether it happened.
+ *
+ * **The one place a surface asks the window to cross to the disk side.** It
+ * refuses without a conflict and without a confirmation, and otherwise hands the
+ * decision to the window, which refuses a spent confirmation, a conflict it never
+ * produced, and a projection replaced since that conflict arrived.
+ *
+ * **`alreadyThere` counts as done**, and the confirmation pass is why: a window
+ * that has already reached the requested disk projection has satisfied the
+ * request, and reporting that as a failure left a surface stuck on a confirm
+ * control that could never succeed. What a surface must not do is act on
+ * `refused`, which is the only value that means the window did not move.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict the session is showing, or `null`.
+ * @param step - Where the reload has got to.
+ * @param adopt - `BrowserState.adoptDiskVersion`.
+ * @returns Whether the window now holds the disk observation, by either route.
+ */
+export function spendTheConfirmedReload<T>(
+  conflict: ConflictModel<T> | null,
+  step: ReloadStep,
+  adopt: AdoptTheDiskVersion<T>
+): boolean {
+  if (conflict === null || step.kind !== 'confirmed') {
+    return false;
+  }
+  return adopt(conflict, step.confirmation) !== 'refused';
+} // End of function spendTheConfirmedReload()
+
+/**
+ * Which choices the conflict panel is at, for {@link conflictChoicesFor}.
+ *
+ * `confirmed` is spent in the same handler that reaches it, so it never draws a
+ * list of its own; it collapses to `confirming`, which is what the panel showed
+ * when the click happened.
+ *
+ * @param step - Where the reload has got to.
+ * @returns The step the choices are chosen for.
+ */
+export function offeredReloadStep(step: ReloadStep): ConflictReloadStep {
+  return step.kind === 'idle' ? 'idle' : 'confirming';
+} // End of function offeredReloadStep()
 
 /**
  * Records that the person accepted the findings of the refusal on screen.

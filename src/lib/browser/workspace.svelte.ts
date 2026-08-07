@@ -60,6 +60,7 @@ import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  ConflictResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -78,6 +79,8 @@ import {
   type SealedWholeDocumentSave
 } from './invalidation';
 import type { RepairAttribution, SelectionNotice } from './notices';
+import { authorizeDiskAdoption } from './saveOutcome';
+import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
@@ -592,28 +595,80 @@ export interface BrowserState {
    */
   readonly fileText: RawDocumentText | null;
   /**
-   * What this window last read of **one named document's** text, or `null`.
+   * Installs the disk observation a conflict carried, and repairs the selection.
    *
-   * {@link BrowserState.fileText} answers about whatever the viewer is pointed at,
-   * which is the wrong question for the raw editor: an editor open on file A must
-   * be able to show and to load the version on disk for **A** even when the rest
-   * of the window has moved to file B. That is the 2c-1b review's fifth finding —
-   * without it, a conflict on A while the pane points elsewhere leaves *Reload
-   * disk version* permanently disabled, losing one of the eight requirements of
-   * `docs/decisions/2c-split-notes.md` section 6.
+   * **The sole frontend transition that moves this window to the disk side of a
+   * conflict, and the consult's Q2 is why it exists.** Until 2c-4a-2 all six
+   * writing wrappers did this eagerly in their own conflict arm — so a save that
+   * wrote **nothing** re-ordered the snippet list and moved the selection before
+   * the person had chosen anything, leaving their draft on screen against a
+   * projection that no longer described it. The Rust-side refresh that produces
+   * `ConflictResult.disk` stays: it is required for the two-observation truth and
+   * for the command layer's own cache coherence, and the disagreement between this
+   * window and that cache until a person chooses is the design rather than a bug.
    *
-   * Two sources, in this order: the text captured when a save of that document
-   * **conflicted**, which is the version that refused the save and therefore the
-   * one the conflict is about; and otherwise the viewer's own snapshot, when the
-   * viewer happens to hold that document. `null` when this window holds neither.
+   * **It authorizes and spends in one call**, which is the 2c-4a-2 review's second
+   * finding. The first version took a `DiskAdoption` a surface had obtained
+   * earlier: authorization was bound to its conflict and *spending* was bound to
+   * nothing, so a retained value could be replayed, handed to another
+   * `BrowserState`, or spent while a later conflict was on screen. There is no
+   * such value to retain now. Five things are checked here, in order:
    *
-   * A method rather than a field because the question names a document. It reads
-   * reactive state, so a `$derived` over it re-runs when either source moves.
+   * 1. the confirmation was issued for **this** conflict (`authorizeDiskAdoption`);
+   * 2. it has not already been spent through this state — one click, one install;
+   * 3. **this state produced that conflict**, and about the file the payload names.
+   *    `rememberTheConflict` wrote the entry when the conflict arrived, keyed by
+   *    the wire value itself, so a conflict from a *second* `BrowserState` — whose
+   *    session-local `DocumentId` may collide with one of this state's — installs
+   *    nothing. That is the confirmation pass's residual half of the brand finding;
+   * 4. the document is still projected here;
+   * 5. **that projection has not been replaced since the conflict arrived.**
    *
-   * @param document - The file to ask about.
-   * @returns What this window holds of that file's text, or `null`.
+   * **Item 5 is the confirmation pass's High, and the check is a generation rather
+   * than `conflict.expected`.** The defect was real: a `rereadDocument` landing
+   * while a person read the warning left the window on a *newer* parse, and the
+   * confirm then installed the conflict's older snapshot over it and reported
+   * success. Comparing the held revision against `conflict.expected` would also
+   * catch that — and would refuse legitimate reloads besides, because a session's
+   * base revision is frozen at *its* start and the window may have reprojected
+   * before the save was even sent. The projection generation asks the narrower
+   * question that actually matters: *has anything replaced this file's parse since
+   * this conflict was reported?*
+   *
+   * **A window already holding the disk revision is `alreadyThere`, not a
+   * refusal** — the request is satisfied, and the surface may finish. Reporting it
+   * as a failure left a confirm control that could never succeed.
+   *
+   * **What none of this forces**: that a surface honours the answer. Nor can this
+   * method know which conflict a surface is *currently* resolving; what closes that
+   * is each session resetting its reload step whenever a new outcome arrives.
+   *
+   * It replaces the projection through the same `installView` every adoption uses,
+   * so the snippet list, the counts and every `MatchId` minted from the old parse
+   * move together; the selection is put back positionally and then checked (R27).
+   * Everything that invalidates this window happens **synchronously**; the raw
+   * viewer's re-read is fired afterwards and is not waited for, because the answer
+   * this method owes — *did the window move* — is settled before it starts.
+   *
+   * **This superseded `rawTextOf`, which is gone.** That method answered *what
+   * this window holds of one named document's text*, preferring a per-document
+   * capture taken by a second `document_text` call. `ConflictModel.diskText`
+   * carries the disk text on the conflict payload, revision-bound, so the capture
+   * had nothing left to add — and it kept two defects, a second-read race and the
+   * reuse of the viewer's **older** cached answer for the same file
+   * (`docs/decisions/2c-4a-1-notes.md` section 4.1).
+   *
+   * @typeParam T - The drafted value the conflict retained.
+   * @param conflict - The conflict being resolved.
+   * @param confirmation - What `confirmReloadDiskVersion` issued for it.
+   * @returns What became of the request. **`refused` is the only value a caller
+   *   must not act on**: a surface that closed its panel on one would be reporting
+   *   a reload that did not happen, and `alreadyThere` is a success.
    */
-  rawTextOf(document: DocumentId): RawDocumentText | null;
+  adoptDiskVersion<T>(
+    conflict: ConflictModel<T>,
+    confirmation: ReloadConfirmation
+  ): DiskAdoptionOutcome;
   /**
    * Opens a configuration directory and loads every file that holds matches.
    *
@@ -668,9 +723,8 @@ export interface BrowserState {
    * list, the counts and every `MatchId` minted from the old parse move together,
    * and the selection is put back the ordinary way — positionally and then checked,
    * so a different snippet at the held position drops it with a notice (R27) rather
-   * than being silently adopted. The raw viewer's snapshot and any captured
-   * conflict text for that file go too, because they describe bytes this state has
-   * just stopped vouching for.
+   * than being silently adopted. The raw viewer's snapshot goes too, because it
+   * describes bytes this state has just stopped vouching for.
    *
    * A re-read that fails is reported on the one channel every other failure of this
    * state uses **and answered**, so a caller can say on screen that the file could
@@ -697,8 +751,8 @@ export interface BrowserState {
    * **What no type forces**, in the same sentence as what one does: nothing makes a
    * caller act on the answer, and nothing here can tell a recovery a person asked
    * for from a re-read some other code path wanted. What it does force is that the
-   * projection, the two text caches and the selection move together, which is the
-   * invariant `installView` exists for.
+   * projection, the viewer's held text and the selection move together, which is
+   * the invariant `installView` exists for.
    *
    * @param document - The file to read again.
    * @returns The failure of the read, or `null` when it did not fail.
@@ -1168,14 +1222,13 @@ export function createBrowserState(
   // the 2c-1b review's first finding, which is that `installView` can move the
   // projection under a held snapshot without moving the snapshot.
   let fileTextRevision = $state<ContentRevision | null>(null);
-  // The disk text of a document whose save conflicted, kept **by document** and
-  // not by whatever the viewer is pointed at. The conflict UI has to be able to
-  // offer the version on disk for the file being edited even when the rest of the
-  // window has moved somewhere else, which is the review's fifth finding.
-  let conflictText = $state<{
-    readonly document: DocumentId;
-    readonly answer: CommandResult<string>;
-  } | null>(null);
+  // **There is no second text cache, and 2c-4a-2 removed the one there was.** It
+  // kept the disk text of a conflicted save by document, filled by a separate
+  // `document_text` call — which could answer a later text than the conflict was
+  // about, or an earlier one when the viewer happened to hold the same file
+  // (`docs/decisions/2c-4a-1-notes.md` section 4.1). `ConflictModel.diskText`
+  // arrives on the conflict payload paired with `diskRevision`, so that capture had
+  // nothing left to add and two defects left to keep.
 
   // The generation counters. None is `$state`: nothing renders them, and they are
   // read only by the request that took one, immediately after its own `await`.
@@ -1211,6 +1264,28 @@ export function createBrowserState(
   // what covers a replaced workspace, and monotonic counters cannot collide with a
   // capture that has already been invalidated by it.
   const rereadGenerations = new Map<DocumentId, number>();
+  // **Every reload confirmation this state has already spent.** A confirmation is
+  // one person's answer to one question, and `adoptDiskVersion` refuses a second
+  // spend of it: replaying one would install a projection again, bumping that
+  // document's generation and repairing the selection on the strength of one
+  // click. A `WeakSet` because a confirmation is an opaque object nobody else
+  // holds once its session is gone — this must not keep it alive.
+  const spentConfirmations = new WeakSet<ReloadConfirmation>();
+  // **Every conflict this state has seen, and the window it was seen against.**
+  // Keyed by the wire value itself, so a conflict some *other* `BrowserState`
+  // produced — or one a caller assembled — has no entry and can install nothing:
+  // a `DocumentId` is session-local, and without this the two states' document
+  // number 2 were indistinguishable here. The recorded generation is the second
+  // half: if anything replaced that document's projection between the conflict
+  // arriving and the person confirming, the disk snapshot the conflict carries may
+  // be **older** than what the window now holds, and installing it would move the
+  // window backwards. That is the confirmation pass's High, and the check is a
+  // generation rather than `conflict.expected` because a session's frozen base
+  // legitimately differs from what the window projects.
+  const conflictOrigins = new WeakMap<
+    ConflictResult,
+    { readonly document: DocumentId; readonly generation: number }
+  >();
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -1247,6 +1322,24 @@ export function createBrowserState(
   function invalidateProjectionOf(document: DocumentId): void {
     projectionGenerations.set(document, projectionGenerationOf(document) + 1);
   } // End of function invalidateProjectionOf()
+
+  /**
+   * Records that one conflict arrived, and against which projection.
+   *
+   * **The only thing a conflict arm does**, and it installs nothing: it writes down
+   * the window this conflict describes, so that a confirmed reload much later can
+   * be checked against it. Registering is not adopting — the snippet list, the
+   * selection and the viewer are all untouched by this call.
+   *
+   * @param document - The file the conflicted save aimed at.
+   * @param conflict - The conflict exactly as it crossed the boundary.
+   */
+  function rememberTheConflict(document: DocumentId, conflict: ConflictResult): void {
+    conflictOrigins.set(conflict, {
+      document,
+      generation: projectionGenerationOf(document)
+    });
+  } // End of function rememberTheConflict()
 
   /**
    * Takes the next re-read generation for one document.
@@ -1469,47 +1562,6 @@ export function createBrowserState(
   } // End of function forgetFileText()
 
   /**
-   * Drops the disk text captured for one document, when it is that document's.
-   *
-   * **The second text cache, and the one `forgetFileText` cannot reach.**
-   * `conflictText` is keyed by document rather than by whatever the viewer is
-   * pointed at — that is the whole reason it exists — so forgetting the viewer's
-   * snapshot leaves it untouched, and `rawTextOf` prefers it. The 2c-2 confirmation
-   * pass found the consequence: a raw save that conflicted captured version A, a
-   * later field save committed version B, and `rawTextOf` still answered A. Nothing
-   * on screen would have said the text was two writes old.
-   *
-   * Another document's capture is left alone, because nothing about it changed.
-   *
-   * @param document - The file whose captured text can no longer be vouched for.
-   */
-  function forgetConflictText(document: DocumentId): void {
-    if (conflictText !== null && conflictText.document === document) {
-      conflictText = null;
-    }
-  } // End of function forgetConflictText()
-
-  /**
-   * Drops **every** text this window holds that could be about one document.
-   *
-   * There are two caches and they are keyed differently — the viewer's snapshot by
-   * whatever it is pointed at, the conflict capture by document — so "forget this
-   * file's text" is two calls and was one until the 2c-2 confirmation pass. A call
-   * site that makes the second question answerable and only asks the first leaves a
-   * text behind that `rawTextOf` will happily serve.
-   *
-   * The viewer's half is dropped unconditionally rather than only when it names
-   * this document, which is what `forgetFileText` has always done: it also cancels
-   * a read in flight, and a read in flight for another file is cheap to retake.
-   *
-   * @param document - The file whose bytes this window can no longer vouch for.
-   */
-  function forgetTextOf(document: DocumentId): void {
-    forgetFileText();
-    forgetConflictText(document);
-  } // End of function forgetTextOf()
-
-  /**
    * Reads the target file's text, if the viewer is showing a different file.
    *
    * Called from the toggle and from every place the target can move — a sidebar
@@ -1706,19 +1758,71 @@ export function createBrowserState(
       return documentTextState(target.id === fileTextDocument ? fileTextAnswer : null);
     },
 
-    rawTextOf(document: DocumentId): RawDocumentText | null {
-      const captured = conflictText;
-      if (captured !== null && captured.document === document) {
-        return documentTextState(captured.answer);
+    adoptDiskVersion<T>(
+      conflict: ConflictModel<T>,
+      confirmation: ReloadConfirmation
+    ): DiskAdoptionOutcome {
+      // **Authorized and spent in one call**, which is what the first review's
+      // second finding asked for: nothing that authorizes an install exists outside
+      // these few lines, so no surface can retain, replay or forward one.
+      const adoption = authorizeDiskAdoption(conflict, confirmation);
+      if (adoption === null) {
+        // The confirmation was issued for another conflict.
+        return 'refused';
       }
-      // The viewer's own snapshot, and only when it is really about this file.
-      // `loading` is deliberately not answered here: a read in flight for the
-      // viewer says nothing about a document the caller named, and a caller that
-      // is not the viewer has no reason to be told to wait for it.
-      return fileTextDocument === document && fileTextAnswer !== null
-        ? documentTextState(fileTextAnswer)
-        : null;
-    }, // End of function rawTextOf()
+      if (spentConfirmations.has(confirmation)) {
+        // **One-shot.** A confirmation is a person's answer to one question, and
+        // spending it twice would install a projection a second time — bumping the
+        // projection generation and repairing the selection again — on the strength
+        // of one click.
+        return 'refused';
+      }
+      const origin = conflictOrigins.get(conflict.source);
+      if (origin === undefined || origin.document !== adoption.disk.id) {
+        // **A conflict this state never produced.** Its `DocumentId` is another
+        // session's number, or the payload has been re-pointed at a different file
+        // since; either way this window has no business installing it.
+        return 'refused';
+      }
+      const held = viewOf(origin.document);
+      if (held === undefined) {
+        // The document is no longer projected here at all — a replaced workspace,
+        // or a file dropped after a commit this window could not re-read.
+        return 'refused';
+      }
+      if (held.revision === adoption.diskRevision) {
+        // **Satisfied, not refused**, and the confirmation pass is why: the window
+        // already holds exactly the bytes that were asked for, so there is nothing
+        // to install and a surface may finish its transition. Installing anyway
+        // would repair the selection for no change at all. The confirmation is
+        // spent, because the question it answered has been answered.
+        spentConfirmations.add(confirmation);
+        return 'alreadyThere';
+      }
+      if (origin.generation !== projectionGenerationOf(origin.document)) {
+        // **The window moved after this conflict arrived**, so the disk snapshot it
+        // carries may be *older* than the projection now installed — a re-read that
+        // found a third revision, a commit adopted elsewhere. Content revisions are
+        // hashes and carry no order, so this application cannot tell which of the
+        // two is fresher; installing the older one would move the window backwards
+        // and report success for it. The way forward is *Keep editing* and a fresh
+        // attempt, which will meet the file as it now is.
+        return 'refused';
+      }
+      spentConfirmations.add(confirmation);
+      // **Everything the six conflict arms used to do eagerly, done here once**,
+      // synchronously and before anything can await, for
+      // `forgetTheReplacedDocument`'s reason: an asynchronous invalidation has a
+      // window in which a getter can still read what it is replacing.
+      forgetFileText();
+      installView(adoption.disk);
+      repairAfter(adoption.disk);
+      // The viewer's re-read is a separate step, exactly as it is after every other
+      // projection replacement, and it is fired rather than returned — the answer
+      // this method owes is *what became of the request*, which is already settled.
+      void readFileText();
+      return 'installed';
+    }, // End of function adoptDiskVersion()
 
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
@@ -1972,13 +2076,10 @@ export function createBrowserState(
         // have replaced.
         return null;
       }
-      // The two text caches go with the projection, for `installView`'s own
+      // The viewer's snapshot goes with the projection, for `installView`'s own
       // reason one level down: a snapshot taken against the parse being replaced
       // draws bytes from one revision beside a snippet list drawn from another.
-      // `installView` drops the viewer's when it is pointed at this file;
-      // `forgetTextOf` also reaches the conflict capture, which is keyed by
-      // document and which `installView` cannot see.
-      forgetTextOf(document);
+      forgetFileText();
       installView(fresh.value);
       repairAfter(fresh.value);
       await readFileText();
@@ -2029,7 +2130,7 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(match.document);
+          forgetFileText();
           await adoptTheDocumentOnDisk(match.document, null, null);
           await readFileText();
         }
@@ -2048,11 +2149,10 @@ export function createBrowserState(
         // a file some other program changed under the lock's two reads.
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          // Both text caches, not only the viewer's snapshot: `forgetFileText`
-          // alone left a conflict capture for this same file in place, which
-          // `rawTextOf` would then serve for bytes that have just been replaced.
-          // The identical omission the 2c-2 confirmation pass found in `saveMatch`.
-          forgetTextOf(match.document);
+          // The viewer's snapshot is of bytes that have just been replaced. There
+          // is one text cache to drop since 2c-4a-2; there were two, and forgetting
+          // only this one left a conflict capture for this same file behind.
+          forgetFileText();
           // **The one adoption that passes an attribution**, which is the fix
           // `docs/decisions/2c-3b-2-window-reading.md` section 7.1 prescribes: a
           // repair after a committed move must not tell the person their file
@@ -2084,16 +2184,19 @@ export function createBrowserState(
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
-        // Nothing was written, and the command has already refreshed its own
-        // cache from the disk. Taking the projection it handed back keeps this
-        // state describing the same bytes the next save will be checked against.
-        // The viewer's snapshot is of the bytes the *caller* read, which are not
-        // the ones on disk, so it goes too — and so does an earlier capture of
-        // that file's text, which describes bytes older still.
-        forgetTextOf(match.document);
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
+        // **A conflict installs nothing here, and that is 2c-4a-2's central
+        // change.** Nothing was written; the command layer refreshed its own cache
+        // and handed back what it read, and this state deliberately does not take
+        // it. Installing it re-ordered the snippet list and moved the selection for
+        // a save that changed no byte, leaving the person's draft beside a
+        // projection that no longer described it (consult Q2).
+        // `BrowserState.adoptDiskVersion` is the one transition that installs it,
+        // and only a confirmed reload can reach it.
+        //
+        // What this arm does do is **write down** which projection the conflict
+        // describes, which is what lets that adoption refuse a window that has
+        // moved on since. Registering is not adopting.
+        rememberTheConflict(match.document, answer.value);
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function moveMatch()
@@ -2142,7 +2245,7 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(id.document);
+          forgetFileText();
           await adoptTheDocumentOnDisk(id.document, null, null);
           await readFileText();
         }
@@ -2159,7 +2262,7 @@ export function createBrowserState(
         // other program changed under the lock's two reads.
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          forgetTextOf(id.document);
+          forgetFileText();
           // **The adoption the consult's Q6 asks for**, performed here so that a
           // caller cannot obtain this result without it. `moved` is the snippet's
           // identity in the new revision, and the selection follows it — but only
@@ -2182,14 +2285,10 @@ export function createBrowserState(
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
-        // Nothing was written, and the command has already refreshed its own cache
-        // from the disk. Taking the projection it handed back keeps this state
-        // describing the same bytes the next save will be checked against — and an
-        // earlier capture of that file's text describes bytes older still.
-        forgetTextOf(id.document);
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
+        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+        // says why, and the rule is one rule for all six writing wrappers. What is
+        // written down is which projection the conflict describes.
+        rememberTheConflict(id.document, answer.value);
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function saveMatch()
@@ -2232,7 +2331,7 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(document);
+          forgetFileText();
           await adoptTheDocumentOnDisk(document, null, null);
           await readFileText();
         }
@@ -2248,7 +2347,7 @@ export function createBrowserState(
         // other program changed under the lock's two reads.
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          forgetTextOf(document);
+          forgetFileText();
           const stale = await adoptTheCreatedSnippet(document, heldBefore, answer.value.moved);
           if (stale === null) {
             adoption = { kind: 'done' };
@@ -2263,13 +2362,10 @@ export function createBrowserState(
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
-        // Nothing was written, and the command has already refreshed its own cache
-        // from the disk. Taking the projection it handed back keeps this state
-        // describing the bytes the next attempt will be checked against.
-        forgetTextOf(document);
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
+        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+        // says why, and the rule is one rule for all six writing wrappers. What is
+        // written down is which projection the conflict describes.
+        rememberTheConflict(document, answer.value);
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function createMatch()
@@ -2304,7 +2400,7 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(id.document);
+          forgetFileText();
           await adoptTheDocumentOnDisk(id.document, null, null);
           await readFileText();
         }
@@ -2315,7 +2411,7 @@ export function createBrowserState(
       if (answer.value.outcome === 'saved') {
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          forgetTextOf(id.document);
+          forgetFileText();
           const stale = await adoptAfterTheDeletion(id.document, heldBefore);
           if (stale === null) {
             adoption = { kind: 'done' };
@@ -2326,10 +2422,10 @@ export function createBrowserState(
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
-        forgetTextOf(id.document);
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
+        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+        // says why, and the rule is one rule for all six writing wrappers. What is
+        // written down is which projection the conflict describes.
+        rememberTheConflict(id.document, answer.value);
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function deleteMatch()
@@ -2397,7 +2493,7 @@ export function createBrowserState(
         report(answer.failure);
         const written = mayHaveWritten(answer.failure);
         if (written) {
-          forgetTextOf(match.document);
+          forgetFileText();
           await adoptTheDocumentOnDisk(match.document, null, null);
           await readFileText();
         }
@@ -2414,9 +2510,9 @@ export function createBrowserState(
         // changed under the lock's two reads.
         const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
         if (outOfDate) {
-          // Both text caches, not only the viewer's snapshot — the same rule
-          // every writing wrapper follows since the 2c-2 confirmation pass.
-          forgetTextOf(match.document);
+          // The viewer's snapshot, which is the one text cache this window keeps
+          // since 2c-4a-2 — the same rule every writing wrapper follows.
+          forgetFileText();
           // **The duplicate's own adoption, and the intent capture goes in
           // whole** (the confirmation pass's finding): the decision to follow
           // the clone is taken inside `adoptAfterTheDuplicate`, after its own
@@ -2449,16 +2545,10 @@ export function createBrowserState(
           await readFileText();
         }
       } else if (answer.value.outcome === 'conflict') {
-        // Nothing was written, and the command has already refreshed its own
-        // cache from the disk. Taking the projection it handed back keeps this
-        // state describing the same bytes the next save will be checked
-        // against — and the caller's session derives its invalidation from
-        // this very arm, because the adoption stays `notOwed`: nothing was
-        // re-read and nothing was written, exactly as a move's conflict.
-        forgetTextOf(match.document);
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
+        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+        // says why, and the rule is one rule for all six writing wrappers. What is
+        // written down is which projection the conflict describes.
+        rememberTheConflict(match.document, answer.value);
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function duplicateMatch()
@@ -2469,9 +2559,6 @@ export function createBrowserState(
       text: string,
       acknowledgement: Acknowledgement
     ): Promise<RawSaveAnswer> {
-      // A capture from an earlier conflict describes a file this call is about to
-      // move on from, so it goes before anything else does.
-      conflictText = null;
       // **The invalidation is this module's, not the caller's.** The wrapper's
       // parameter cannot make a body do anything — `() => {}` type-checks — so
       // what closes the obligation on the running path is that the state which
@@ -2535,17 +2622,17 @@ export function createBrowserState(
       // byte-identical to what the locked read found, and the locked read already
       // agreed with `baseRevision` or this would be a conflict — so the revision
       // the answer carries is the one that was sent.
+      //
+      // **And a conflict installs nothing here** — `BrowserState.moveMatch`'s own
+      // note says why. There is no second read of the file's text either: the
+      // conflict payload carries `disk_text`, paired with `disk_revision` by the
+      // command layer, so the capture this used to make had nothing to add and a
+      // race to lose (`docs/decisions/2c-4a-1-notes.md` section 4.1). What is
+      // written down is which projection the conflict describes.
       if (answer.value.outcome === 'conflict') {
-        // Nothing was written, and the command has already refreshed its own
-        // cache from the disk. Same handling as a conflicted move: adopt the
-        // projection it handed back, so this state describes the bytes the next
-        // save will be checked against.
-        forgetFileText();
-        installView(answer.value.disk);
-        repairAfter(answer.value.disk);
-        await readFileText();
-        await captureTheDiskText(document);
+        rememberTheConflict(document, answer.value);
       }
+      //
       // Sealed here and nowhere else: this is the one place that knows which
       // document was aimed at, what the transaction answered, and what this
       // state's own invalidation made of it.
@@ -2887,12 +2974,11 @@ export function createBrowserState(
       // file's snapshot is untouched, because nothing about it changed.
       forgetFileText();
     }
-    // **Both text caches, because this function claims to be total for one
-    // document.** The conflict capture is keyed by document rather than by the
-    // viewer's target, so the branch above cannot reach it, and a capture left
-    // behind here is a text `rawTextOf` would serve for a file that has just been
-    // rewritten. The 2c-2 confirmation pass found the same omission in `saveMatch`.
-    forgetConflictText(document);
+    // **One text cache since 2c-4a-2, so the branch above is the whole of it.**
+    // There used to be a second, keyed by document rather than by the viewer's
+    // target, which this function had to reach separately or leave behind a text
+    // for a file that had just been rewritten. It is gone with the second read
+    // that filled it.
     return held;
   } // End of function forgetTheReplacedDocument()
 
@@ -2940,37 +3026,6 @@ export function createBrowserState(
     await readFileText();
     return null;
   } // End of function adoptTheReplacedDocument()
-
-  /**
-   * Keeps the disk text of a document whose save conflicted, by that document.
-   *
-   * **Not the viewer's snapshot.** The raw editor may be open on file A while the
-   * rest of the window points at file B, and the conflict state has to be able to
-   * show the version on disk for A and to offer to load it — the fifth of the
-   * eight requirements of `docs/decisions/2c-split-notes.md` section 6. Keying on
-   * the viewer's target loses that affordance the moment the person clicks
-   * elsewhere, which is the 2c-1b review's fifth finding.
-   *
-   * The viewer's own answer is reused when it happens to be about the same file,
-   * so the ordinary case costs no second read; the second read happens only when
-   * the window really is looking somewhere else.
-   *
-   * @param document - The file whose save conflicted.
-   */
-  async function captureTheDiskText(document: DocumentId): Promise<void> {
-    if (fileTextDocument === document && fileTextAnswer !== null) {
-      conflictText = { document, answer: fileTextAnswer };
-      return;
-    }
-    const answer = await commands.documentText(document);
-    conflictText = { document, answer };
-    if (!answer.ok) {
-      // The typed refusal is what the conflict state draws in place of the disk
-      // version, and the developer sees it on the one channel every other failure
-      // of this state uses.
-      report(answer.failure);
-    }
-  } // End of function captureTheDiskText()
 
   /**
    * The notice a repair raises when the selection was found again.

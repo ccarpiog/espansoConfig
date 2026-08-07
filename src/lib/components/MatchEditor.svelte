@@ -3,22 +3,27 @@
     acknowledgeFindings,
     acknowledgementOf,
     applySave,
+    askToReloadDiskVersion,
     baseRevisionOf,
     beginSave,
+    confirmDiskReload,
     editField,
     focusField,
     keepEditing,
     matchEditorView,
     redoEdit,
+    reloadTheDiskVersion,
     removeField,
     restoreField,
     saveCouldNotBeSent,
     startMatchEditor,
-    undoEdit,
     type Clock,
     type EditableField,
-    type Reprojection
+    type Reprojection,
+    undoEdit
   } from '../browser/matchEditor';
+  import type { AdoptTheDiskVersion } from '../browser/editorSave';
+  import type { MatchBuffers } from '../browser/matchEditor';
   import type { ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
@@ -143,6 +148,7 @@
     file,
     save,
     reproject,
+    adoptDiskVersion,
     close,
     clock = () => Date.now()
   }: {
@@ -203,6 +209,17 @@
      */
     reproject: (id: MatchId) => Reprojection;
     /** Leaves the editor. */
+    /**
+     * Installs the disk observation a conflict carried into the window.
+     *
+     * `BrowserState.adoptDiskVersion`, the sole frontend transition that moves
+     * this window to the disk side of a conflict. It is called by
+     * `reloadTheDiskVersion` and by nothing here, so the projection cannot be
+     * replaced without this editor closing in the same call — and a `refused` from
+     * it is honoured by closing nothing, while an `alreadyThere` is a success the
+     * transition finishes on.
+     */
+    adoptDiskVersion: AdoptTheDiskVersion<MatchBuffers>;
     close: () => void;
     /**
      * Where the typing group's boundary readings come from.
@@ -378,17 +395,21 @@
   /**
    * Does what one conflict choice says.
    *
-   * **One arm is reachable today.** `matchEditor.ts` offers *Keep editing* alone:
-   * *Copy draft* copies a text and this draft is six fields, and *Load the version
-   * on disk* would have to re-seed the baselines from a fresh projection, which is
-   * conflict capture and preservation — Phase 2c-4a.
+   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
+   * same.** `matchEditor.ts`'s `CONFLICT_CAPABILITIES` records that this surface's
+   * draft **is** authored text a clipboard could preserve, and that neither *Copy
+   * draft* nor the reload is *offered* yet — so no control reaches the arms below.
+   * The reload transition they call exists and is driven by `matchEditor.test.ts`;
+   * 2c-4a-3 flips the boolean and draws the control. *Copy draft* is the one arm
+   * still to be implemented, and it needs field labels this step has no keys for.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
-   * and there is no `default`. A *newly offered* member does not: the three arms
-   * below are drawn as controls the moment `CONFLICT_CHOICES` names one of them,
-   * and they would do nothing. The sub-phase that offers one has to implement it
-   * here in the same commit, and no type in this file can make that happen.
+   * and there is no `default`. A *newly offered* member does not — offering is the
+   * model's, and a choice becomes a control the moment `conflictChoicesFor` names
+   * it. That is why the arms below are **implemented before they are offered**:
+   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
+   * have forced that order.
    *
    * @param choice - The choice the person picked.
    */
@@ -397,9 +418,26 @@
       case 'keepEditing':
         session = keepEditing(session);
         return;
-      case 'copyDraft':
       case 'reloadDiskVersion':
-      case 'confirmReload':
+        session = askToReloadDiskVersion(session);
+        return;
+      case 'confirmReload': {
+        // **Two calls, one click**, exactly as the raw editor's reload is: the
+        // two steps a person sees are the warning and this press. The window
+        // is what decides whether the adoption happened, and the session ends
+        // only if it did — so a refusal leaves this panel open rather than
+        // closing over a window that never moved.
+        const reloaded = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        session = reloaded;
+        if (reloaded.closed) {
+          close();
+        }
+        return;
+      }
+      case 'copyDraft':
+        // Never offered here: this surface's `CONFLICT_CAPABILITIES` says what
+        // its draft is, and `conflictChoicesFor` refuses a copy of anything but
+        // authored text. The arm exists so the `switch` stays exhaustive.
         return;
     }
   } // End of function conflictAction()

@@ -45,7 +45,15 @@ import {
   type InvalidationStatus,
   type WholeDocumentOutcome
 } from './invalidation';
-import { createBrowserState, type BrowserCommands, type RawSaveAnswer } from './workspace.svelte';
+import { startDraft, textDraftRules } from './draft';
+import { confirmReloadDiskVersion, describeEditSave } from './saveOutcome';
+import type { ConflictModel } from './saveOutcome';
+import {
+  createBrowserState,
+  type BrowserCommands,
+  type BrowserState,
+  type RawSaveAnswer
+} from './workspace.svelte';
 
 /**
  * Opens what the state's raw save answered.
@@ -1792,25 +1800,25 @@ describe('moving a snippet', () => {
 
     expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
     expect(outcome.kind === 'answered' ? outcome.result.outcome : null).toBe('conflict');
-    // The disk side replaced the parse the caller was editing against, without a
-    // second command: the conflict already carried it.
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    // **The disk side is carried, not installed** (consult Q2). This case pinned
+    // the opposite until 2c-4a-2, and what it pinned was the defect: a move that
+    // wrote nothing re-ordered the snippet list and dropped the selection with a
+    // notice saying the file had changed under the person.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
-    // The selection was made against bytes that are gone, and the snippet at its
-    // position is a different one, so it is dropped with a notice rather than
-    // silently re-pointed (R27).
-    expect(state.selected).toBeNull();
-    expect(state.notice).toBe('differentMatch');
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
   }); // End of the "conflict" case
 
-  it('spends a move session it answered a conflict to, through the real answer', async () => {
-    // **The confirmation pass's second finding, asserted from the production
-    // wrapper rather than from a hand-built pair.** A conflict installs its disk
-    // projection here — every identity a session holds came from the one it
-    // replaced — and reports `adoption: notOwed`, because nothing was written and
-    // nothing was re-read. `applyMove` therefore derives the invalidation from the
-    // arm. The case this replaces handed `applyMove` a *refused* result beside an
-    // adoption, which this method cannot answer at all.
+  it('leaves a move session usable after a conflict, through the real answer', async () => {
+    // **The consult's Q2 asserted from the production wrapper rather than from a
+    // hand-built pair, and this case says the opposite of what it said until
+    // 2c-4a-2.** A conflict then installed its disk projection here while
+    // reporting `adoption: notOwed`, so every identity the session held came from
+    // a parse this window had just replaced and `applyMove` derived the
+    // invalidation from the arm. Nothing is installed now: the session's
+    // identities are still the ones the window is projecting, so it is refused
+    // while the conflict is showing and usable again once the panel is dismissed.
     const before = makeDocument({
       id: 2,
       relativePath: 'match/base.yml',
@@ -1881,15 +1889,26 @@ describe('moving a snippet', () => {
     expect(answer.adoption).toEqual({ kind: 'notOwed' });
 
     const done = applyMove(started!.session, answer.result, answer.adoption);
-    expect(done.invalidated).toBe(true);
-    // And it survives the dismissal, which is the state the finding was filed
-    // about: choosing came back and `spent` stayed false for a session whose
-    // identities this method had just replaced.
+    expect(done.invalidated).toBe(false);
+    // The panel refuses while the conflict is on screen, and hands the session
+    // back once it is dismissed — against the projection this window still holds,
+    // which is the one the session was opened over.
+    expect(canChoose(done)).toBe(false);
     const dismissed = dismissMoveOutcome(done);
-    expect(canChoose(dismissed)).toBe(false);
-    expect(matchMoveView(dismissed, [disk]).spent).toBe(true);
-    expect(beginMove(dismissed, disk.matches[1]!.id)).toBeNull();
-  }); // End of the "conflict spends the session" case
+    expect(canChoose(dismissed)).toBe(true);
+    expect(matchMoveView(dismissed, [before]).spent).toBe(false);
+    expect(beginMove(dismissed, before.matches[1]!.id)).not.toBeNull();
+    // What has *not* changed is the file, so a retry carrying the frozen base is
+    // **refused** rather than allowed to overwrite the other writer's bytes. This
+    // case sends no second command and therefore says nothing about *which*
+    // refusal: `conflict_after_the_lock` refreshed the Rust cache when it produced
+    // the conflict, so `move_match`'s `view_at` answers `identityStaleRevision`
+    // ahead of the locked check. What is asserted here is the base itself.
+    expect(baseRevisionOf(dismissed)).toBe(before.revision);
+    // And `disk` was carried, never installed.
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe(before.revision);
+    expect(disk.revision).toBe('rev-c');
+  }); // End of the "a conflict leaves the session usable" case
 
   it('reports a failed save and changes nothing on the screen', async () => {
     // **The fixture fails at the rename**, which is the step that means the
@@ -2171,61 +2190,6 @@ describe('moving a snippet', () => {
     expect(state.selected).toBeNull();
     expect(state.scopedDocument).toBeNull();
   }); // End of the "failed adoption" case
-
-  it('drops the captured disk text of the file it moved a snippet in', async () => {
-    // **The third of the three latent shapes.** `conflictText` is keyed by document
-    // and `forgetFileText` is keyed by the viewer's target, so forgetting the
-    // viewer's snapshot left the capture behind — and `rawTextOf` prefers it. The
-    // identical omission the 2c-2 confirmation pass found in `saveMatch`, which had
-    // no case here because nothing could reach this path.
-    const conflict: CommandResult<SaveResult> = {
-      ok: true,
-      value: {
-        outcome: 'conflict',
-        expected: 'rev-a',
-        found: 'rev-c',
-        disk_revision: 'rev-c',
-        disk_text: DISK_TEXT,
-        disk: replacedDocument()
-      }
-    };
-    const moved = movedDocument();
-    const committed: CommandResult<SaveResult> = {
-      ok: true,
-      value: {
-        outcome: 'saved',
-        revision: 'rev-b',
-        committed: true,
-        notes: [],
-        backup_taken: false,
-        moved: moved.matches[1]!.id
-      }
-    };
-    const documents = new Map<number, CommandResult<DocumentView>>([
-      [1, { ok: true, value: profileDocument() }],
-      [2, { ok: true, value: baseDocument() }],
-      [3, { ok: true, value: otherDocument() }]
-    ]);
-    const commands = scriptedCommands({ documents, raws: [conflict], moves: [committed] });
-    const state = createBrowserState(commands, () => undefined);
-    await state.open(null);
-    // The viewer is closed, so the capture is the only text this window holds and
-    // the assertion below cannot be satisfied by the viewer's snapshot instead.
-    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
-    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
-
-    // The raw conflict installed the disk projection, so the move is decided
-    // against the identities that projection carries.
-    documents.set(2, { ok: true, value: moved });
-    await state.moveMatch(
-      replacedDocument().matches[0]!.id,
-      null,
-      'rev-c',
-      NOTHING_ACKNOWLEDGED
-    );
-
-    expect(state.rawTextOf(2)).toBeNull();
-  }); // End of the "captured text dropped by a move" case
 
   it('keeps a mid-flight selection the reorder did not move, and drops one it did', async () => {
     // **The answer to the consult's Q5, measured rather than reasoned about.**
@@ -2569,19 +2533,17 @@ describe('duplicating a snippet', () => {
       NOTHING_ACKNOWLEDGED
     );
 
-    // The adoption stays `notOwed` — nothing was written and nothing was
-    // re-read — which is exactly why `applyDuplication` derives the session's
-    // invalidation from the arm rather than from this field.
+    // The adoption stays `notOwed` — nothing was written, nothing was re-read
+    // and, since 2c-4a-2, nothing was replaced either, which is why
+    // `applyDuplication` no longer derives the session's invalidation from the arm.
     expect(outcome).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
     expect(outcome.kind === 'answered' ? outcome.result.outcome : null).toBe('conflict');
-    // The disk side replaced the parse the caller was deciding against,
-    // without a second command: the conflict already carried it.
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31, 32]);
+    // **The disk side is carried, not installed** (consult Q2). Until 2c-4a-2 this
+    // case asserted the clone's projection here, for a duplicate that wrote nothing.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
-    // The selection was made against bytes that are gone; the repair keeps the
-    // external sentences, because the file really did move under the person.
-    expect(state.selected?.id.node).toBe(30);
-    expect(state.notice).toBe('kept');
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
   }); // End of the "conflict" case
 
   it('reports a failed save and changes nothing on the screen', async () => {
@@ -3621,7 +3583,7 @@ describe('saving one snippet’s fields', () => {
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
   }); // End of the "refused field save" case
 
-  it('adopts the disk projection a conflict handed back', async () => {
+  it('carries the disk projection a conflict handed back, and installs nothing', async () => {
     const disk = movedDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
@@ -3649,13 +3611,12 @@ describe('saving one snippet’s fields', () => {
 
     expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
     expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('conflict');
-    // Nothing was written, and this state now describes the bytes the next save
-    // will be checked against.
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
-    // R27: what is at the held position is a different snippet, so the selection
-    // is dropped with a notice rather than silently re-pointed.
-    expect(state.selected).toBeNull();
-    expect(state.notice).toBe('differentMatch');
+    // **Nothing was written, so nothing here moves** (consult Q2). Until 2c-4a-2
+    // this case asserted the disk projection, and the screen it described was a
+    // person's draft sitting beside a list that had re-ordered under it.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
   }); // End of the "conflicted field save" case
 
   it('re-reads the file when a failure may already have written it', async () => {
@@ -4054,12 +4015,14 @@ describe("replacing a file's whole text", () => {
     );
 
     expect(outcome?.outcome).toBe('conflict');
-    // Nothing was written by this call, and the answer already carried the parse
-    // of what the file really holds, so no second read was needed.
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40]);
+    // **Nothing was written by this call, so nothing here moves** (consult Q2).
+    // The parse of what the file really holds is carried on the answer, where a
+    // confirmed reload can install it; until 2c-4a-2 this case asserted that it
+    // had already been installed.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
-    expect(state.selected).toBeNull();
-    expect(state.notice).toBe('differentMatch');
+    expect(state.selected?.id.node).toBe(10);
+    expect(state.notice).toBeNull();
   }); // End of the "conflict" case
 
   it('re-reads the file when the failure says the rename may have completed', async () => {
@@ -4299,12 +4262,13 @@ describe("replacing a file's whole text", () => {
     expect(state.fileTextRevision).toBeNull();
   }); // End of the "captured revision" case
 
-  it('keeps the disk text of a conflicted save by document, not by what the pane shows', async () => {
-    // **The 2c-1b review's fifth finding.** The editor may be open on file 2 while
-    // the rest of the window points at file 3, and the conflict state still has to
-    // be able to show the version on disk and to offer to load it — one of the
-    // eight requirements of `2c-split-notes.md` section 6. Keyed on the viewer's
-    // target, that affordance vanished on a click somewhere else.
+  it('reads the file no second time on a conflict, and leaves the viewer alone', async () => {
+    // **What 2c-4a-2 replaced, stated as the thing that must not happen again.**
+    // A conflicted raw save used to call `document_text` a second time to capture
+    // the disk side, keyed by document — a read that could answer a *later* text
+    // than the conflict was about, or an **earlier** one when the viewer happened
+    // to be pointed at the same file (`2c-4a-1-notes.md` section 4.1). The text is
+    // on the payload now, so there is no second call to be raced.
     const conflict: CommandResult<SaveResult> = {
       ok: true,
       value: {
@@ -4322,82 +4286,16 @@ describe("replacing a file's whole text", () => {
     // The window is looking at document 3; the save is of document 2.
     state.show({ kind: 'document', id: 3 });
     await state.showFileText(true);
+    // One read: the viewer's, of document 3.
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
 
     await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
 
-    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
     // And the viewer is untouched: it is still showing the file it was showing.
     expect(state.fileTextTarget?.id).toBe(3);
     expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 3\n' });
-  }); // End of the "disk text by document" case
-
-  it('drops that captured text when a field save moves the same file on', async () => {
-    // **The 2c-2 confirmation pass's first finding.** `conflictText` is keyed by
-    // document and `forgetFileText` is keyed by the viewer's target, so forgetting
-    // the viewer's snapshot left the capture behind — and `rawTextOf` prefers it. A
-    // raw save conflicts and captures version A; a field save then commits version
-    // B; and this window went on answering A, two writes old, with nothing on
-    // screen to say so.
-    const conflict: CommandResult<SaveResult> = {
-      ok: true,
-      value: {
-        outcome: 'conflict',
-        expected: 'rev-a',
-        found: 'rev-c',
-        disk_revision: 'rev-c',
-        disk_text: DISK_TEXT,
-        disk: replacedDocument()
-      }
-    };
-    const committed: CommandResult<SaveResult> = {
-      ok: true,
-      value: {
-        outcome: 'saved',
-        revision: 'rev-d',
-        committed: true,
-        notes: [],
-        backup_taken: false,
-        moved: null
-      }
-    };
-    const documents = new Map<number, CommandResult<DocumentView>>([
-      [1, { ok: true, value: profileDocument() }],
-      [2, { ok: true, value: baseDocument() }],
-      [3, { ok: true, value: otherDocument() }]
-    ]);
-    const commands = scriptedCommands({ documents, raws: [conflict], saves: [committed] });
-    const state = createBrowserState(commands, () => undefined);
-    await state.open(null);
-    // The viewer is closed, so the capture is the only text this window holds and
-    // the assertion below cannot be satisfied by the viewer's snapshot instead.
-    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
-    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
-
-    await state.saveMatch(
-      baseDocument().matches[0]!.id,
-      editedDraft(),
-      'rev-a',
-      NOTHING_ACKNOWLEDGED
-    );
-
-    expect(state.rawTextOf(2)).toBeNull();
-    // Another file's capture would be untouched, because nothing about it changed —
-    // there is none here, and that is what makes the drop above document-scoped
-    // rather than a blanket clear.
-    expect(state.rawTextOf(3)).toBeNull();
-  }); // End of the "field save drops the captured text" case
-
-  it('answers nothing for a document this window holds no text of', async () => {
-    const commands = scriptedCommands();
-    const state = createBrowserState(commands, () => undefined);
-    await state.open(null);
-
-    expect(state.rawTextOf(2)).toBeNull();
-    state.show({ kind: 'document', id: 2 });
-    await state.showFileText(true);
-    expect(state.rawTextOf(2)).toEqual({ kind: 'text', text: '# text of document 2\n' });
-    expect(state.rawTextOf(3)).toBeNull();
-  }); // End of the "no text held" case
+  }); // End of the "no second read on a conflict" case
 
   it('sends the document, the base revision, the text and the acknowledgement, and no flag', async () => {
     const commands = scriptedCommands({ raws: [RAW_COMMITTED] });
@@ -4837,7 +4735,7 @@ describe('creating a snippet', () => {
     expect(state.selected).toBeNull();
   }); // End of the "adoption failed" case
 
-  it('adopts the disk projection a conflict handed back', async () => {
+  it('carries the disk projection a conflict handed back, and installs nothing', async () => {
     const disk = grownDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
@@ -4859,7 +4757,11 @@ describe('creating a snippet', () => {
 
     expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
     expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('conflict');
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40, 41, 42]);
+    // **Nothing was written, so nothing here moves** (consult Q2): the list this
+    // window shows is the one it loaded, not the one the conflict carried. Until
+    // 2c-4a-2 this case asserted `[40, 41, 42]` — the disk side, installed.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(disk.matches.map((match) => match.id.node)).toEqual([40, 41, 42]);
   }); // End of the "conflicted create" case
 }); // End of the "creating a snippet" suite
 
@@ -5179,7 +5081,7 @@ describe('deleting a snippet', () => {
     expect(state.selected).toBeNull();
   }); // End of the "adoption failed" case
 
-  it('adopts the disk projection a conflict handed back', async () => {
+  it('carries the disk projection a conflict handed back, and installs nothing', async () => {
     const disk = thinnedDocument();
     const conflict: CommandResult<SaveResult> = {
       ok: true,
@@ -5201,7 +5103,11 @@ describe('deleting a snippet', () => {
 
     expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'notOwed' } });
     expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('conflict');
-    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([50, 51]);
+    // **Nothing was written, so nothing here moves** (consult Q2). Until 2c-4a-2
+    // this case asserted `[50, 51]` — the disk side, installed for a deletion that
+    // deleted nothing.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+    expect(disk.matches.map((match) => match.id.node)).toEqual([50, 51]);
   }); // End of the "conflicted deletion" case
 }); // End of the "deleting a snippet" suite
 
@@ -5399,3 +5305,302 @@ describe('what cancels a selection lookup, and what does not', () => {
     expect(commands.reloadDocument).not.toHaveBeenCalled();
   }); // End of the "another file's create took the selection" case
 }); // End of the "what cancels a selection lookup" suite
+
+describe('what a conflict does to this window, and what only a confirmed reload does', () => {
+  /**
+   * A conflict answer over `match/base.yml`, carrying a whole different parse.
+   *
+   * `replacedDocument()` is a **new revision with a new node and one snippet**,
+   * so a window that installed it could not fail to show: the list would go from
+   * two rows to one and every identity it holds would stop resolving.
+   */
+  const CONFLICT: CommandResult<SaveResult> = {
+    ok: true,
+    value: {
+      outcome: 'conflict',
+      expected: 'rev-a',
+      found: 'rev-c',
+      disk_revision: 'rev-c',
+      disk_text: DISK_TEXT,
+      disk: replacedDocument()
+    }
+  };
+
+  /**
+   * Opens a workspace with the second snippet of `match/base.yml` selected, and
+   * the raw viewer **showing**.
+   *
+   * **The viewer is opened on purpose**, which is the 2c-4a-2 review's third Low —
+   * and what the open viewer buys is stated exactly rather than as "re-reads
+   * nothing". `readFileText` returns early when `fileTextShown` is `false`, so with
+   * the viewer closed a `document_text` count could not notice anything at all.
+   * With it open the count catches the pair the six conflict arms really used:
+   * `forgetFileText()` followed by `readFileText()` — **measured**, by reinstating
+   * exactly that in `moveMatch` and watching this case fail.
+   *
+   * What it still cannot catch is a *bare* `readFileText()` with no forgetting in
+   * front of it, and that is not a coverage hole: `readFileText` returns early when
+   * the viewer already holds the target document, so such a call reads nothing and
+   * changes nothing. The eager install itself is caught three times over by the
+   * revision, the list and the selection below.
+   *
+   * @param commands - The scripted boundary.
+   * @returns The state, ready for one writing call.
+   */
+  async function withTheSecondSnippetSelected(commands: BrowserCommands): Promise<BrowserState> {
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[1]!);
+    await state.showFileText(true);
+    return state;
+  } // End of function withTheSecondSnippetSelected()
+
+  /**
+   * Every writing wrapper, driven into a conflict, one per entry.
+   *
+   * A table rather than six cases, because the property is *one rule for all
+   * six*: the consult's Q2 ruling is not about a particular command.
+   */
+  const WRITERS: readonly {
+    readonly name: string;
+    readonly script: Script;
+    readonly send: (state: BrowserState) => Promise<unknown>;
+  }[] = [
+    {
+      name: 'moveMatch',
+      script: { moves: [CONFLICT] },
+      send: (state) =>
+        state.moveMatch(baseDocument().matches[0]!.id, null, 'rev-a', NOTHING_ACKNOWLEDGED)
+    },
+    {
+      name: 'saveMatch',
+      script: { saves: [CONFLICT] },
+      send: (state) =>
+        state.saveMatch(baseDocument().matches[0]!.id, editedDraft(), 'rev-a', NOTHING_ACKNOWLEDGED)
+    },
+    {
+      name: 'createMatch',
+      script: { creates: [CONFLICT] },
+      send: (state) => state.createMatch(2, NEW_MATCH, AT_END, OPEN_REVISION, NOTHING_ACKNOWLEDGED)
+    },
+    {
+      name: 'deleteMatch',
+      script: { deletes: [CONFLICT] },
+      send: (state) =>
+        state.deleteMatch(baseDocument().matches[0]!.id, 'rev-a', NOTHING_ACKNOWLEDGED)
+    },
+    {
+      name: 'duplicateMatch',
+      script: { duplicates: [CONFLICT] },
+      send: (state) =>
+        state.duplicateMatch(baseDocument().matches[0]!.id, 'rev-a', NOTHING_ACKNOWLEDGED)
+    },
+    {
+      name: 'saveRawDocument',
+      script: { raws: [CONFLICT] },
+      send: (state) => state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)
+    }
+  ];
+
+  it.each(WRITERS)(
+    'installs no projection and moves no selection when $name conflicts',
+    async ({ script, send }) => {
+      // **The consult's Q2, as the assertion that would have caught it.** A
+      // conflict writes nothing, and until 2c-4a-2 all six of these installed the
+      // projection it carried: the snippet list re-ordered and the selection moved
+      // for a save that changed no byte, leaving the person's draft beside a
+      // projection that no longer described it.
+      const commands = scriptedCommands(script);
+      const state = await withTheSecondSnippetSelected(commands);
+      const held = state.selected;
+      // One projection per file at load, and one text read for the open viewer.
+      expect(commands.getDocument).toHaveBeenCalledTimes(3);
+      expect(commands.documentText).toHaveBeenCalledTimes(1);
+
+      await send(state);
+
+      // The list is the one this window loaded, not the one the conflict carried.
+      expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+      expect(state.scopedMatches).toHaveLength(2);
+      // The selection is the very object it was: `replaceSelection` installs a
+      // fresh one on every write, so identity is exactly the question *did
+      // anything move it?*
+      expect(state.selected).toBe(held);
+      expect(state.notice).toBeNull();
+      // **Neither read happened again.** The viewer is open, so the second count
+      // is the guard this helper's own note describes; the third assertion is what
+      // says the held snapshot was not dropped and left unrefilled.
+      expect(commands.getDocument).toHaveBeenCalledTimes(3);
+      expect(commands.documentText).toHaveBeenCalledTimes(1);
+      expect(state.fileText).toEqual({ kind: 'text', text: '# text of document 2\n' });
+    }
+  ); // End of the per-writer "a conflict installs nothing" case
+
+  /**
+   * The conflict model a surface would be holding, for one scripted conflict.
+   *
+   * @param answer - The conflict as it crossed the boundary.
+   * @returns The model, which carries the retained draft.
+   */
+  function modelOf(answer: CommandResult<SaveResult> = CONFLICT): ConflictModel<string> {
+    if (!answer.ok) {
+      throw new Error('this case needs an outcome');
+    }
+    const model = describeEditSave(
+      answer.value,
+      startDraft('rev-a', 'matches: []\n', textDraftRules)
+    );
+    if (model.kind !== 'conflict') {
+      throw new Error('this case is about a conflict');
+    }
+    return model;
+  } // End of function modelOf()
+
+  it('installs the disk projection and repairs the selection on a confirmed adoption', async () => {
+    // **The sole frontend transition that crosses to the disk side**, and it
+    // authorizes and installs in one call: nothing a surface holds can install a
+    // projection, because there is no value between the two halves.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    const model = modelOf();
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+
+    // Now — and only now — the window describes the bytes the other writer left.
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    expect(state.scopedMatches).toHaveLength(1);
+    // The selection was repaired positionally and then checked: the snippet that
+    // was at position 1 is gone, so it is dropped with a notice rather than
+    // silently re-pointed (R27).
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBe('gone');
+  }); // End of the "confirmed adoption installs" case
+
+  it('refuses a confirmation issued for another conflict', async () => {
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    const other = modelOf();
+    expect(state.adoptDiskVersion(modelOf(), confirmReloadDiskVersion(other))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+  });
+
+  it('refuses a second spend of one confirmation, and answers a fresh one honestly', async () => {
+    // **One click, one install.** A replay would bump that document's projection
+    // generation and repair the selection a second time on the strength of one
+    // person's single answer.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    const model = modelOf();
+    const confirmation = confirmReloadDiskVersion(model);
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('installed');
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('refused');
+    // **A fresh confirmation for the same conflict is `alreadyThere`, not
+    // refused**, which is the confirmation pass's correction: the window holds
+    // exactly the bytes that were asked for, so the request is satisfied and a
+    // surface may finish its transition. Nothing is installed a second time.
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('alreadyThere');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "one-shot confirmation" case
+
+  it('installs nothing over a projection replaced since the conflict arrived', async () => {
+    // **The confirmation pass's High, driven in its own order.** A conflict arrives
+    // for a window at `rev-a` carrying disk snapshot `rev-c`. The person presses
+    // *Reload disk version* and reads the warning; before they confirm, a re-read
+    // lands and installs `rev-d`. A workspace reprojection is neither an `apply*`
+    // outcome nor a dismissal, so the session survives at `confirming` with a
+    // perfectly valid token. Installing `rev-c` then would move the window
+    // **backwards** onto an observation older than the one it now holds, and report
+    // success for it. Revisions are content hashes and carry no order, so this
+    // application cannot tell which is fresher — it refuses.
+    const later = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-d',
+      matches: [makeMatch({ node: 70, document: 2, revision: 'rev-d', trigger: ':later' })]
+    });
+    const commands = scriptedCommands({ raws: [CONFLICT], reload: { ok: true, value: later } });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    // The token is minted while the window is still at `rev-a` — the warning step.
+    const model = modelOf();
+    const confirmation = confirmReloadDiskVersion(model);
+    // And then something else replaces the projection.
+    expect(await state.rereadDocument(2)).toBeNull();
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('refused');
+    // The window is exactly where the re-read left it.
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([70]);
+  }); // End of the "projection replaced since the conflict" case
+
+  it('refuses a conflict this window never produced', async () => {
+    // **A `DocumentId` is session-local**, so a second `BrowserState`'s conflict
+    // about "document 2" is not about this one's — and a hand-assembled model names
+    // no conflict at all. Both are refused by the same check: the wire value must be
+    // one this state registered when it arrived.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    // Same document, same revisions, same text — a different object.
+    const lookalike = modelOf({
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
+        disk: replacedDocument()
+      }
+    });
+    expect(state.adoptDiskVersion(lookalike, confirmReloadDiskVersion(lookalike))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+  }); // End of the "conflict this window never produced" case
+
+  it('refuses a conflict about a document this window does not project', async () => {
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+    const elsewhere = modelOf({
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        expected: 'rev-a',
+        found: 'rev-c',
+        disk_revision: 'rev-c',
+        disk_text: DISK_TEXT,
+        disk: makeDocument({ id: 99, relativePath: 'match/gone.yml', revision: 'rev-c' })
+      }
+    });
+    expect(state.adoptDiskVersion(elsewhere, confirmReloadDiskVersion(elsewhere))).toBe('refused');
+    expect(state.views.some((view) => view.id === 99)).toBe(false);
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+  }); // End of the "unprojected document" case
+
+  it('refuses an adoption held across a later conflict', async () => {
+    // **The retained-callback scenario the first review named.** A first conflict is
+    // resolved and the window crosses to `rev-c`; a stale reference to that first
+    // conflict is then spent while a second one is being resolved. It installs
+    // nothing, because the confirmation is spent.
+    const commands = scriptedCommands({ raws: [CONFLICT, CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const first = modelOf();
+    const spent = confirmReloadDiskVersion(first);
+    expect(state.adoptDiskVersion(first, spent)).toBe('installed');
+
+    await state.saveRawDocument(2, 'rev-c', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.adoptDiskVersion(first, spent)).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "retained across a later conflict" case
+}); // End of the "deferred adoption" suite

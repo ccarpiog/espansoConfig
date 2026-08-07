@@ -192,6 +192,53 @@ Medium, no defect in what is written to disk). Its decisions are
 `docs/reviews/phase-2c-3c-design.md` (the consult; its Q7 cut the phase into three steps) and
 `docs/decisions/2c-3c-{1,2,3}-notes.md`.
 
+**2c-4a — conflict capture and preservation — is complete through step 2, and a conflict now
+installs nothing in the window.** Until 2c-4a-2 all six writing wrappers eagerly did
+`forgetTextOf` + `installView` + `repairAfter` in their conflict arm, so **a conflict wrote nothing
+to disk and yet the snippet list re-ordered and the selection moved before the person had chosen
+anything** — leaving their draft on screen against a projection that no longer described it.
+"Load the disk version separately" was true of the command layer and false of the window. Step 1
+gave `SaveResult::Conflict` a `disk_text` paired with `disk_revision` by content-hash equality;
+step 2 deferred the frontend adoption to a **confirmed reload** and built the protocol for all six
+surfaces. The Rust-side refresh in `conflict_after_the_lock` **stays** — it is required for the
+two-observation truth and for backend cache coherence. Its decisions are
+`docs/reviews/phase-2c-4a-design.md` (the consult), `docs/decisions/2c-4a-{1,2}-notes.md` and
+`docs/reviews/phase-2c-4a-2-code.md` (four review passes).
+
+**`adoptDiskVersion` is the only door, and `alreadyThere` is success.** It authorizes and installs
+in one call and answers `DiskAdoptionOutcome` = `installed | alreadyThere | refused`; every caller
+stops only on `refused`. **A boolean cannot carry three answers**, and the round that tried shipped
+a window that could not progress: when a reprojection had already reached the requested revision the
+method said `false`, so raw reload did not reseed, match reload did not close, and confirming again
+repeated the refusal forever. The spend is bound to the conflict's **origin** —
+`rememberTheConflict` keys a `WeakMap` on the wire value `ConflictModel.source` carries whole,
+recording the document and its projection generation when the conflict arrived — and **not** to
+`conflict.expected`, which is the session's frozen base and legitimately differs from what the
+window projects. Without the generation check, a `rereadDocument` landing between *Reload disk
+version* and *Confirm reload* **installed the older snapshot over the newer projection and reported
+success**.
+
+**An unoffered transition can be built and tested without drawing its choice, and that is the right
+trade.** Every match surface declares `offersReload: false`, so `conflictChoicesFor` names neither
+`reloadDiskVersion` nor `confirmReload` and no control is drawn — but the transitions exist, the
+component arms call them, and 2c-4a-3 flips one boolean per surface. The first review round rejected
+the opposite trade, where the *transition* was withheld too: that would have made step 3 invent five
+model transitions and their `DetailPane` props on top of drawing them. **`conflictChoicesFor` is the
+only producer of a choice list**; before it, capability was expressed twice, and that split is why a
+newly offered button could compile and do nothing.
+
+**Sweep for what the type now says, not for the words the old type used.** 2c-4a-2 took four review
+passes, and the last three each closed a finding and left a **narrower instance of it standing** —
+every time because the search was written from the previous wording. `2c-4a-2-notes.md` §7.6.2 is
+the record, including the mechanical cause of the worst miss: an edit script asserted through
+several replacements, threw on a later one, discarded all its writes including the record's own
+primary section, and the retry re-applied only the edit that had failed.
+
+**A dismissed match conflict is refused by `identityStaleRevision`, not by a second conflict.**
+`conflict_after_the_lock` has already refreshed the Rust cache, so `view_at` rejects the frozen base
+before the locked check. Only a raw save reaches that check twice. Write-safe either way — but they
+are different sentences, and the record said the wrong one for two review rounds.
+
 **The selection-follow guard holds at the write, not before it** — step 2's High, which took three
 of that review's four rounds. A `DuplicateIntent` captured before the command is re-validated after
 the adoption's own await, **in the same synchronous block as `replaceSelection`**, because a
@@ -297,7 +344,9 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**171** as of 2c-3c-3, and the guard is not the number but the *shape of a change to it*. A count
+**171** as of 2c-4a-2 (unchanged from 2c-3c-3 — that step adds fields, transitions and a prop but no
+module, so an unmoved count is the guard passing), and the guard is not the number but the *shape of
+a change to it*. A count
 that moves by exactly the number of new source modules is a new module; a jump to ~180 with
 `svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine
 `git archive HEAD` copy and subtracting; never by editing the condition.

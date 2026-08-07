@@ -168,7 +168,6 @@
   "browser.rawEditor.draftCopied": "Tu texto se ha copiado al portapapeles.",
   "browser.rawEditor.draftCopyFailed": "Tu texto no se ha podido copiar al portapapeles. Sigue en el cuadro de arriba, así que puedes seleccionarlo y copiarlo a mano.",
   "browser.rawEditor.diskVersion": "La versión del disco",
-  "browser.rawEditor.diskVersionUnavailable": "Aquí no se puede leer la versión del disco, así que no se puede cargar en lugar de tu texto.",
   "browser.rawEditor.revisionExpected": "Tu texto se cargó desde la versión {revision}.",
   "browser.rawEditor.revisionFound": "El archivo tenía la versión {revision} cuando se rechazó el guardado.",
   "browser.rawEditor.revisionDisk": "La versión leída del disco después es {revision}.",

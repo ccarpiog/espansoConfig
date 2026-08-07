@@ -15,10 +15,11 @@
     startRawEditor,
     textToCopy,
     undoEdit,
-    applySave
+    applySave,
+    type RoundTripText
   } from '../browser/rawEditor';
-  import type { RawDocumentText } from '../browser/rawDocument';
   import type { RawSaveAnswer } from '../browser/workspace.svelte';
+  import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { ConflictChoice } from '../browser/saveOutcome';
   import {
@@ -97,17 +98,26 @@
    * started is withdrawn when one does, because that dialog says the changes have
    * not been written.
    *
-   * **`diskText` is the disk version of the *edited* file**, which is not the same
-   * question as "what is the viewer showing". `DetailPane` answers it with
-   * `browser.rawTextOf(id)`, so an editor open on one file keeps its *Reload disk
-   * version* affordance when the rest of the window moves to another.
+   * **There is no `diskText` prop, and there was one until 2c-4a-2.** It carried
+   * `browser.rawTextOf(id)` — a `RawDocumentText | null` from a *separate* read —
+   * while `ConflictModel.diskText` is a `string` on the conflict payload. Two
+   * different things under one name on one screen is how a wrong value gets drawn,
+   * and a person reading this file has no type checker. The prop is gone; the disk
+   * side is `view.diskText`, which is the conflict's own text paired with
+   * `conflict.diskRevision` by the command layer.
+   *
+   * **`adoptDiskVersion` is what makes the reload one operation.** A conflict no
+   * longer installs anything into the window (consult Q2), so confirming the reload
+   * has to install the disk projection *and* reseed the draft; `loadDiskVersion`
+   * does both, calling this prop itself, and nothing here can do one without the
+   * other.
    */
 
   const {
     file,
     baseRevision,
     text,
-    diskText,
+    adoptDiskVersion,
     save,
     close
   }: {
@@ -118,16 +128,16 @@
     /** Its whole text, as `document_text` answered it. */
     text: string;
     /**
-     * What the *workspace* now holds for this file's text, or `null`.
+     * Installs the disk observation a conflict carried into the window.
      *
-     * **This is the disk version, and it is not the draft.** On a conflict the
-     * workspace refreshes its own projection and re-reads the file, so this
-     * becomes the bytes some other writer left — which is exactly what the
-     * conflict state has to show and to offer to load. It is passed *in* rather
-     * than read from the draft precisely so that the two cannot be confused: the
-     * draft lives in the session and nothing here writes to it from this prop.
+     * `BrowserState.adoptDiskVersion`, which is the sole frontend transition that
+     * moves this window to the disk side of a conflict. It is called by
+     * `loadDiskVersion` and by nothing here, so the projection cannot be replaced
+     * without the draft being reseeded in the same call — and a `refused` from it is
+     * a refusal `loadDiskVersion` honours by reseeding nothing, while an
+     * `alreadyThere` is a success it finishes on.
      */
-    diskText: RawDocumentText | null;
+    adoptDiskVersion: AdoptTheDiskVersion<RoundTripText>;
     /**
      * Sends one save.
      *
@@ -220,53 +230,22 @@
   } // End of function runSave()
 
   /**
-   * The disk version's text, or `null` when it cannot be had.
-   *
-   * A file of zero characters is a text of zero characters, not an absence: the
-   * `empty` arm is a fact about the file and reloading it is a legitimate thing to
-   * ask for.
-   *
-   * @returns The text, or `null` when the workspace has none to give.
-   */
-  function diskVersionText(): string | null {
-    if (diskText === null) {
-      return null;
-    }
-    if (diskText.kind === 'text') {
-      return diskText.text;
-    }
-    return diskText.kind === 'empty' ? '' : null;
-  } // End of function diskVersionText()
-
-  /**
-   * Why the version on disk cannot be loaded into this editor, or `null`.
-   *
-   * The same refusal that keeps the editor from opening a file with carriage
-   * returns, applied to the one other way a text can enter a session. It is drawn
-   * beside the disk version rather than hidden, because the disk version is still
-   * *shown* — `SourceText` names a carriage return rather than dropping it — and a
-   * control that simply did nothing would read as a bug.
-   */
-  const diskRefusal = $derived.by(() => {
-    const disk = diskVersionText();
-    return disk === null ? null : rawEditorRefusal(disk);
-  });
-
-  /**
-   * Discards the draft and starts again from the version on disk.
+   * Adopts the version on disk and starts again from it.
    *
    * The confirmation is issued and spent in one handler because the *two steps
    * the person sees* are the warning and this click, not two clicks after the
    * warning. What the token still buys is that `reloadDiskVersion` refuses one
    * issued for a different conflict, which is checked in `rawEditor.test.ts`.
+   *
+   * **The workspace adoption is not performed here.** `loadDiskVersion` calls
+   * `adoptDiskVersion` itself, after every check has passed, so a refused reload
+   * cannot move the window and this handler cannot move it without reseeding.
    */
   function loadTheDiskVersion(): void {
-    const conflict = view?.conflict ?? null;
-    const disk = diskVersionText();
-    if (session === null || conflict === null || disk === null) {
+    if (session === null) {
       return;
     }
-    session = loadDiskVersion(confirmReload(session), conflict.diskRevision, disk);
+    session = loadDiskVersion(confirmReload(session), adoptDiskVersion);
     copied = 'none';
   } // End of function loadTheDiskVersion()
 
@@ -697,16 +676,18 @@
         </p>
 
         <h3>{t('browser.rawEditor.diskVersion')}</h3>
-        {#if diskText !== null && diskText.kind === 'text'}
-          <SourceText text={diskText.text} documentStart />
-        {:else if diskText !== null && diskText.kind === 'empty'}
+        <!-- `conflict.diskText` is a `string` and never absent: a conflict cannot
+             exist without the read that produced it having succeeded, which is
+             2c-4a-1's D1. An empty file is an empty text, which is a fact about the
+             file rather than a failure to obtain one. -->
+        {#if conflict.diskText === ''}
           <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
         {:else}
-          <p class="marker warn">{t('browser.rawEditor.diskVersionUnavailable')}</p>
+          <SourceText text={conflict.diskText} documentStart />
         {/if}
 
-        {#if diskRefusal !== null}
-          <p class="marker warn">{tRawEditorRefusal(diskRefusal)}</p>
+        {#if view.diskRefusal !== null}
+          <p class="marker warn">{tRawEditorRefusal(view.diskRefusal)}</p>
         {/if}
 
         {#if copied === 'copied'}
@@ -719,8 +700,7 @@
           {#each view.conflictChoices as choice (choice)}
             <button
               type="button"
-              disabled={choice === 'confirmReload' &&
-                (diskVersionText() === null || diskRefusal !== null)}
+              disabled={choice === 'confirmReload' && !view.canReload}
               onclick={() => conflictAction(choice)}
             >
               {tConflictChoice(choice)}

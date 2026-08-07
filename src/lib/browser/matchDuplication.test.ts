@@ -40,9 +40,11 @@ import { identityInProjection } from './matchDeletion';
 import {
   acknowledgeDuplicationFindings,
   applyDuplication,
+  askToReloadDiskVersion,
   baseRevisionOf,
   beginDuplicate,
   canDuplicate,
+  confirmDiskReload,
   conflictOf,
   dismissDuplicationOutcome,
   documentHasUnsavedDraft,
@@ -55,11 +57,15 @@ import {
   duplicationSubmissionRefusal,
   duplicationSubmissionRefusalKey,
   matchDuplicationView,
+  reloadTheDiskVersion,
   startMatchDuplication,
   type DuplicationRefusal,
   type DuplicationSubmissionRefusal,
   type MatchDuplicationSession
 } from './matchDuplication';
+import type { AdoptTheDiskVersion } from './editorSave';
+import type { DiskAdoptionOutcome } from './saveOutcome';
+import type { ConflictChoice, ConflictModel } from './saveOutcome';
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -471,33 +477,33 @@ describe('what comes back', () => {
     expect(beginDuplicate(done, identityInProjection([reread()], done.match))).toBeNull();
   });
 
-  it('spends the session on a conflict, whose adoption is always `notOwed`', () => {
-    // `BrowserState.duplicateMatch` installs the projection a conflict carries
-    // on `disk` — which replaces every identity this session holds — and
-    // reports `adoption: notOwed` for it, because it re-read nothing and wrote
-    // nothing. So the adoption cannot be the evidence here and the arm is,
-    // exactly as `applyMove` derives it.
+  it('does not spend the session on a conflict, whose adoption is always `notOwed`', () => {
+    // **The consult's Q2, and this case said the opposite until 2c-4a-2.**
+    // `BrowserState.duplicateMatch` then installed the projection a conflict
+    // carries on `disk` — replacing every identity this session held — while
+    // reporting `adoption: notOwed`, so the arm had to be the evidence. It
+    // installs nothing now, exactly as `applyMove` no longer derives it.
     const conflicted = applyDuplication(inFlight(), CONFLICT, NOT_OWED);
     expect(conflicted.duplicated).toBe(false);
-    expect(conflicted.invalidated).toBe(true);
+    expect(conflicted.invalidated).toBe(false);
     expect(conflictOf(conflicted)).not.toBeNull();
-    expect(duplicationSubmissionRefusal(conflicted, [CONFLICT.disk])).toBe('conflict');
-    expect(matchDuplicationView(conflicted, [CONFLICT.disk]).conflictChoices).toEqual([
-      'keepEditing'
-    ]);
-    // Dismissing the panel is not getting the session back: the conflict goes,
-    // the invalidation stays, and two independent things refuse the send — the
-    // arm's own flag and the live check.
+    expect(duplicationSubmissionRefusal(conflicted, HELD)).toBe('conflict');
+    expect(matchDuplicationView(conflicted, HELD).conflictChoices).toEqual(['keepEditing']);
+    // Dismissing the panel gives the session back, against the projection this
+    // window still holds. What has not changed is the file: a resend carries the
+    // frozen base revision, which the command refuses. Nothing here sends one, so
+    // this says nothing about which refusal — see this module's header.
     const dismissed = dismissDuplicationOutcome(conflicted);
     expect(conflictOf(dismissed)).toBeNull();
+    expect(duplicationSubmissionRefusal(dismissed, HELD)).toBeNull();
+    expect(matchDuplicationView(dismissed, HELD).spent).toBe(false);
+    expect(beginDuplicate(dismissed, live(0))).not.toBeNull();
+    // A window that really has adopted the disk side is the live check's question,
+    // and it still answers it.
     expect(duplicationSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
-    expect(matchDuplicationView(dismissed, [CONFLICT.disk]).spent).toBe(true);
     expect(
       beginDuplicate(dismissed, identityInProjection([CONFLICT.disk], dismissed.match))
     ).toBeNull();
-    // Including against the projection the session was opened over: the
-    // invalidation is not conditional on the live check noticing.
-    expect(beginDuplicate(dismissed, live(0))).toBeNull();
   });
 
   it('invalidates an arm that is not `saved` when the adoption was owed anyway', () => {
@@ -714,13 +720,13 @@ describe('the refusal precedence — the arm that claims less wins', () => {
     expect(duplicationSubmissionRefusal(both, [CONFLICT.disk])).toBe('saveInFlight');
   });
 
-  it('answers the conflict ahead of the staleness it itself causes', () => {
-    // `conflict` and `outOfDate` — adjacent in the order, and this pair is the
-    // one production really produces: a conflict sets `invalidated` in the
-    // same transition, and while the panel is up the person is told about the
-    // conflict, not about staleness. Dismissing it is what leaves `outOfDate`.
+  it('answers the conflict ahead of a staleness it no longer causes', () => {
+    // `conflict` and `outOfDate` — adjacent in the order. Since 2c-4a-2 a conflict
+    // does not set `invalidated`, so the pair is constructed by handing the live
+    // check a projection the window really did move to: while the panel is up the
+    // person is told about the conflict, not about staleness.
     const conflicted = applyDuplication(inFlight(), CONFLICT, NOT_OWED);
-    expect(conflicted.invalidated).toBe(true);
+    expect(conflicted.invalidated).toBe(false);
     expect(duplicationSubmissionRefusal(conflicted, [CONFLICT.disk])).toBe('conflict');
     expect(
       duplicationSubmissionRefusal(dismissDuplicationOutcome(conflicted), [CONFLICT.disk])
@@ -871,3 +877,123 @@ describe('the identities a session holds', () => {
     expect(held.sequence?.segments[0]).not.toBe(document.matches[0]!.path?.segments[0]);
   });
 }); // End of the "identities" suite
+
+describe('the confirmed reload, which is built but not offered yet', () => {
+  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
+  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
+  // this surface's control is right, and withholding the **transition** was not —
+  // an unoffered transition can be built and driven without drawing anything, and
+  // leaving it out would have made step 3 invent five model machines on top of
+  // five panels. So the transition below is built **and** wired: this surface's
+  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
+  // screen reaches it. Every case here calls it directly, as that arm does.
+
+  /**
+   * A conflicted duplicate of a live session.
+   *
+   * @returns The session showing the conflict.
+   */
+  function conflicted(): MatchDuplicationSession {
+    const started = beginDuplicate(session(0), live(0));
+    if (started === null) {
+      throw new Error('a live session is sendable');
+    }
+    return applyDuplication(started.session, CONFLICT, NOT_OWED);
+  } // End of function conflicted()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers. `refused` is a real production
+   *   answer — a spent confirmation, a conflict this window did not produce, or a
+   *   projection replaced since it arrived.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MatchId>;
+    readonly adoptions: ConflictModel<MatchId>[];
+  } {
+    const adoptions: ConflictModel<MatchId>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  it('needs two deliberate steps before anything can be spent', () => {
+    const stuck = conflicted();
+    const recorder = adopting();
+    // Straight to the destructive transition, with no warning behind it.
+    expect(reloadTheDiskVersion(stuck, recorder.adopt)).toBe(stuck);
+    const asked = askToReloadDiskVersion(stuck);
+    expect(matchDuplicationView(asked, HELD).awaitingReloadConfirmation).toBe(true);
+    // The warning alone is not a confirmation either.
+    expect(reloadTheDiskVersion(asked, recorder.adopt)).toBe(asked);
+    expect(recorder.adoptions).toEqual([]);
+    expect(matchDuplicationView(asked, HELD).closed).toBe(false);
+  }); // End of the "two steps" case
+
+  it('adopts the disk projection once, and closes the session', () => {
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, recorder.adopt);
+
+    // **The conflict itself crosses**, not a payload assembled from it: the window
+    // authorizes and installs in one call, so nothing here can retain an adoption.
+    expect(recorder.adoptions).toHaveLength(1);
+    expect(recorder.adoptions[0]).toBe(conflictOf(confirmed));
+    // And this session is over. There is no disk-side draft to seed — finding "the
+    // same" thing in a revision nobody has described is 2c-4b — so the panel closes.
+    expect(after.closed).toBe(true);
+    expect(matchDuplicationView(after, HELD).closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+    expect(canDuplicate(after, HELD)).toBe(false);
+  }); // End of the "adopt and close" case
+
+  it('finishes the reload when the window was already at the disk version', () => {
+    // **`alreadyThere` is a success**, so this session closes exactly as it does
+    // for an install: the window holds the disk projection either way, and treating
+    // the answer as a failure would leave a confirm control that could never work.
+    const satisfied = adopting('alreadyThere');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, satisfied.adopt);
+    expect(after.closed).toBe(true);
+    expect(conflictOf(after)).toBeNull();
+  }); // End of the "already at the disk version" case
+
+  it('closes nothing when the window refuses the adoption', () => {
+    // Closing over a window that never moved would report a reload that did not
+    // happen, and take the conflict panel off the screen with it.
+    const refusing = adopting('refused');
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const after = reloadTheDiskVersion(confirmed, refusing.adopt);
+    expect(after).toBe(confirmed);
+    expect(after.closed).toBe(false);
+    expect(conflictOf(after)).not.toBeNull();
+  }); // End of the "window refused" case
+
+  it('does not offer the reload, so no control is drawn for it', () => {
+    // The half of the review's judgement that stands: the transition exists, is
+    // driven here and is called by this surface's `conflictAction`; `offersReload`
+    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
+    // boolean to flip.
+    const asked = askToReloadDiskVersion(conflicted());
+    expect(matchDuplicationView(asked, HELD).conflictChoices).toEqual<readonly ConflictChoice[]>([
+      'keepEditing'
+    ]);
+  });
+
+  it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {
+    // A confirmation is a person's answer to **one** conflict. Reaching the
+    // confirmed step and then dismissing must not leave it spendable.
+    const recorder = adopting();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
+    const dismissed = dismissDuplicationOutcome(confirmed);
+    expect(dismissed.reload.kind).toBe('idle');
+    expect(reloadTheDiskVersion(dismissed, recorder.adopt)).toBe(dismissed);
+    expect(recorder.adoptions).toEqual([]);
+  }); // End of the "dismissal forgets the confirmation" case
+}); // End of the "confirmed reload" suite

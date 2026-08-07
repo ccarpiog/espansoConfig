@@ -121,20 +121,29 @@ import {
 import {
   conflictArm,
   consentForRefusal,
+  offeredReloadStep,
   offeredRefusalChoices,
+  reloadAsked,
+  reloadConfirmed,
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  spendTheConfirmedReload,
   submissionIsStale,
+  NOT_RELOADING,
+  type AdoptTheDiskVersion,
   type EditorPhase,
+  type ReloadStep,
   type SendFailure,
   type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import type { RawSaveChoice } from './rawSave';
 import {
+  conflictChoicesFor,
   describeEditSave,
   invalidationFailureMessage,
+  type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
   type SaveOutcomeMessage,
@@ -342,6 +351,24 @@ export interface MatchDeletionSession {
   /** How the last attempt failed to produce an outcome at all, or `null`. */
   readonly sendFailure: SendFailure | null;
   /**
+   * How far a confirmed reload of the disk version has got.
+   *
+   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
+   * stops a confirmation collected for one conflict from being spendable while a
+   * later one is on screen. The window refuses a spent confirmation too, but this
+   * is the guard that means the situation never arises.
+   */
+  readonly reload: ReloadStep;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * **The match-level reload result the consult's Q3 ruled**: install the disk
+   * projection and *close* this panel, never re-seed anything from a fresh
+   * projection — identifying a match across revisions is 2c-4b. The panel that
+   * reads this closes itself; everything here refuses once it is `true`.
+   */
+  readonly closed: boolean;
+  /**
    * Whether a deletion has committed through this session.
    *
    * Set by a committed save and cleared by **nothing**. Every `MatchId` held for
@@ -412,6 +439,8 @@ export function startMatchDeletion(
     outcome: null,
     extraMessages: [],
     sendFailure: null,
+    reload: NOT_RELOADING,
+    closed: false,
     deleted: false
   };
 } // End of function startMatchDeletion()
@@ -437,6 +466,7 @@ export function conflictOf(session: MatchDeletionSession): ConflictModel<MatchId
  */
 export function canRequestDelete(session: MatchDeletionSession): boolean {
   return (
+    !session.closed &&
     session.eligibility.kind === 'deletable' &&
     session.phase === 'editing' &&
     !session.deleted &&
@@ -601,6 +631,9 @@ export function applyDeletion(
       phase: 'editing',
       outcome,
       extraMessages,
+      // **A new outcome resets the reload**, so a confirmation collected for an
+      // earlier conflict cannot be spent while this one is on screen.
+      reload: NOT_RELOADING,
       sendFailure: null
     };
   }
@@ -611,6 +644,7 @@ export function applyDeletion(
     phase: 'editing',
     outcome,
     extraMessages,
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function applyDeletion()
@@ -677,19 +711,101 @@ export function dismissDeletionOutcome(session: MatchDeletionSession): MatchDele
     submitted: null,
     outcome: null,
     extraMessages: [],
+    reload: NOT_RELOADING,
     sendFailure: null
   };
 } // End of function dismissDeletionOutcome()
 
 /**
- * The choices a conflict offers in this sub-phase.
+ * Asks to load the version on disk, which is the step **before** confirming.
  *
- * **One**, for `matchEditor.ts`'s reason: *Copy draft* copies a text and there is
- * no text here, and *Load the version on disk* is conflict capture and
- * preservation — Phase 2c-4a. **None of these is "keep my draft"**, which means
- * something specific and belongs to 2c-4b.
+ * @param session - The session showing a conflict.
+ * @returns The session at the warning, or the same session when no conflict is
+ *   showing or one has already been asked about.
  */
-const CONFLICT_CHOICES: readonly ConflictChoice[] = ['keepEditing'];
+export function askToReloadDiskVersion(session: MatchDeletionSession): MatchDeletionSession {
+  const next = reloadAsked(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function askToReloadDiskVersion()
+
+/**
+ * Confirms abandoning this deletion for the version on disk.
+ *
+ * Issues the token the adoption checks, for **this** conflict. Reachable only from
+ * the warning step, so a confirmation cannot be produced by a screen that never
+ * showed the warning.
+ *
+ * @param session - The session at the warning.
+ * @returns The session holding the confirmation, or the same session.
+ */
+export function confirmDiskReload(session: MatchDeletionSession): MatchDeletionSession {
+  const next = reloadConfirmed(conflictOf(session), session.reload);
+  return next === null ? session : { ...session, reload: next };
+} // End of function confirmDiskReload()
+
+/**
+ * Adopts the disk version into the window and ends this session.
+ *
+ * **The match-level reload the consult's Q3 ruled, and it is not a reseed.** There
+ * is no disk-side `MatchId` to load: an identity is minted from one parse, and finding "the same" snippet in another is cross-revision identity work — 2c-4b, and forbidden here. So the window crosses to the disk
+ * observation and this panel **closes**, which is what the confirmation was
+ * collected for.
+ *
+ * **Nothing is closed for an adoption the window refused.** A `refused` from
+ * `adopt` — a spent confirmation, a conflict this window did not produce, or a
+ * projection replaced since it arrived — leaves the session exactly as it was,
+ * because closing over a window that did not move would report a reload that did
+ * not happen. **`alreadyThere` is not a refusal**: the window already holds the
+ * bytes that were asked for, so the request is satisfied and this session ends.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, and that the
+ * panel reading the view's `closed` really closes.
+ *
+ * @param session - The session holding a confirmation.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
+ * @returns The closed session, or the same session.
+ */
+export function reloadTheDiskVersion(
+  session: MatchDeletionSession,
+  adopt: AdoptTheDiskVersion<MatchId>
+): MatchDeletionSession {
+  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+    return session;
+  }
+  return {
+    ...session,
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    reload: NOT_RELOADING,
+    sendFailure: null,
+    closed: true
+  };
+} // End of function reloadTheDiskVersion()
+
+/**
+ * What this surface offers about a conflict.
+ *
+ * **`operationChoice` is permanent here, and it is the consult's Q4 ruling rather
+ * than a limitation of this sub-phase.** The drafted value is a `MatchId`: an
+ * opaque, revision-scoped protocol carrier, not user content. Copying its JSON
+ * would expose an implementation token while preserving nothing, so *Copy draft*
+ * is not merely unwired for this surface — it can never be offered, and
+ * `conflictChoicesFor` refuses it even if `offersCopyDraft` were set.
+ *
+ * A confirmed reload — install the disk projection and **close** the deleter — is **built and wired**: {@link askToReloadDiskVersion},
+ * {@link confirmDiskReload} and {@link reloadTheDiskVersion} are the transition,
+ * and `MatchDeleter.svelte`'s `conflictAction` calls them. It is only *unoffered* —
+ * `conflictChoicesFor` names nothing this boolean does not admit, so no control
+ * that could reach the arm is drawn, which is why an unoffered arm is not a dead
+ * control. **Phase 2c-4a-3 flips the boolean**, over machinery that already exists
+ * and is already driven by this module's tests.
+ */
+export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
+  draftKind: 'operationChoice',
+  offersCopyDraft: false,
+  offersReload: false
+};
 
 /** Everything a screen needs about one deletion, derived on every read. */
 export interface MatchDeletionView {
@@ -731,6 +847,15 @@ export interface MatchDeletionView {
   readonly conflict: ConflictModel<MatchId> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
+  /** Whether the warning is showing and the destructive choice is one click away. */
+  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload has ended this session.
+   *
+   * The panel that reads this calls its own `close`: a match-level reload adopts
+   * the disk projection and closes, because there is no disk-side draft to seed.
+   */
+  readonly closed: boolean;
 }
 
 /**
@@ -762,7 +887,12 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    conflictChoices: conflict === null ? [] : CONFLICT_CHOICES
+    conflictChoices:
+      conflict === null
+        ? []
+        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    closed: session.closed
   };
 } // End of function matchDeletionView()
 

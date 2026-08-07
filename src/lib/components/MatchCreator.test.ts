@@ -32,6 +32,7 @@
  * helpers here do.
  */
 
+import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
@@ -281,6 +282,10 @@ function mountCreator(
             (next.result.outcome === 'saved' && next.result.committed ? ADOPTED : NOT_OWED)
         });
       },
+      // **The window's own adoption**, which no case here reaches: the five match
+      // surfaces declare `offersReload: false`, so no control that could spend a
+      // confirmation is drawn. `matchCreation.test.ts` drives the transition directly.
+      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
       close: (): void => {
         closes += 1;
       }

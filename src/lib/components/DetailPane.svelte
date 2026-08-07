@@ -13,6 +13,11 @@
   import { documentHasUnsavedDraft } from '../browser/matchDuplication';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
+  import type {
+    ConflictModel,
+    DiskAdoptionOutcome,
+    ReloadConfirmation
+  } from '../browser/saveOutcome';
   import type { BrowserState } from '../browser/workspace.svelte';
   import type { Reprojection } from '../browser/matchEditor';
   import type {
@@ -187,23 +192,36 @@
   let editing = $state.raw<EditingSession | null>(null);
 
   /**
-   * What this window holds of the **edited file's** text, or `null`.
+   * Installs the disk observation a conflict carried, for every write surface.
    *
-   * **The disk version, and never the draft.** On a conflict the workspace re-reads
-   * the file and keeps that text by document, so this is what some other writer
-   * left; the editor shows it beside the draft and can load it in place of one,
-   * behind a confirmation.
+   * **This replaced the raw editor's `diskText` prop, and the replacement is the
+   * point.** That prop carried `browser.rawTextOf(id)` — a text from a *second*
+   * read, kept by document — so that a conflict on file A could still show and
+   * load the version on disk while the window pointed at file B. The requirement
+   * is now met by the conflict payload itself: `ConflictModel.diskText` travels
+   * with the outcome, revision-bound, and no click anywhere in this window can
+   * move it. What a surface needs from here is the other half — the one
+   * transition that installs the disk projection — and each calls it from inside
+   * its own reload transition, so the window and the session move together.
    *
-   * `browser.rawTextOf(id)` rather than `browser.fileText`, which is the 2c-1b
-   * review's fifth finding: `fileText` answers about whatever the *viewer* is
-   * pointed at, so an editor open on file A while the sidebar shows file B got
-   * `null` and its *Reload disk version* control stayed permanently disabled —
-   * losing one of the eight requirements of `docs/decisions/2c-split-notes.md`
-   * section 6 to a click somewhere else in the window.
+   * **It forwards the answer**, which is what keeps the refusal honest: the
+   * method says what became of the request, and every surface's reload declines to
+   * close or reseed on a `refused` — while treating `alreadyThere` as done. A wrapper returning `void` would
+   * have thrown that answer away. It is a function rather than a captured
+   * reference because `browser` is a prop, and a reference taken at the top level
+   * would freeze whichever state was passed first.
+   *
+   * @typeParam T - The drafted value the conflict retained.
+   * @param conflict - The conflict being resolved.
+   * @param confirmation - What was issued for that conflict.
+   * @returns What became of the request.
    */
-  const diskTextForEditor = $derived(
-    editing === null ? null : browser.rawTextOf(editing.file.id)
-  );
+  function adoptDiskVersion<T>(
+    conflict: ConflictModel<T>,
+    confirmation: ReloadConfirmation
+  ): DiskAdoptionOutcome {
+    return browser.adoptDiskVersion(conflict, confirmation);
+  } // End of function adoptDiskVersion()
 
   /**
    * Opens the editor over the file's text as it is on screen right now.
@@ -652,7 +670,7 @@
       file={open.file}
       baseRevision={open.baseRevision}
       text={open.text}
-      diskText={diskTextForEditor}
+      {adoptDiskVersion}
       save={(document, baseRevision, text, acknowledgement) =>
         browser.saveRawDocument(document, baseRevision, text, acknowledgement)}
       close={() => (editing = null)}
@@ -665,6 +683,7 @@
       save={(id, draft, baseRevision, acknowledgement) =>
         browser.saveMatch(id, draft, baseRevision, acknowledgement)}
       reproject={reprojectMatch}
+      {adoptDiskVersion}
       close={() => (editingMatch = null)}
     />
   {:else if deletingMatch !== null}
@@ -681,6 +700,7 @@
       projections={() => browser.views}
       remove={(id, baseRevision, acknowledgement) =>
         browser.deleteMatch(id, baseRevision, acknowledgement)}
+      {adoptDiskVersion}
       close={() => (deletingMatch = null)}
     />
   {:else if movingMatch !== null}
@@ -700,6 +720,7 @@
       move={(id, after, baseRevision, acknowledgement) =>
         browser.moveMatch(id, after, baseRevision, acknowledgement)}
       reload={(document) => browser.rereadDocument(document)}
+      {adoptDiskVersion}
       close={() => (movingMatch = null)}
     />
   {:else if duplicatingMatch !== null}
@@ -720,6 +741,7 @@
       duplicate={(id, baseRevision, acknowledgement) =>
         browser.duplicateMatch(id, baseRevision, acknowledgement)}
       reload={(document) => browser.rereadDocument(document)}
+      {adoptDiskVersion}
       close={() => (duplicatingMatch = null)}
     />
   {:else if creating}
@@ -732,6 +754,7 @@
       held={() => browser.selectedMatch?.id ?? null}
       create={(document, newMatch, position, baseRevision, acknowledgement) =>
         browser.createMatch(document, newMatch, position, baseRevision, acknowledgement)}
+      {adoptDiskVersion}
       close={() => (creating = false)}
     />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}
