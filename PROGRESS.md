@@ -69,7 +69,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4a-3c-4** | **The review fix round**: Codex round 1 returned **NOT READY** on a Medium and two Lows, and the orchestrator's own sweep added a fourth. The rule is now stated **once**, in the new `src/lib/browser/draftKind.ts`, with five callers | ✅ complete — 22 launches, which **drew the refusal arm for the first time in this project**. That arm's absence had been the previous round's whole justification for deferring the Medium, and the review ruled the deferral unsound: *the age of a module does not make its output truthful, and absence from a prior transcript is a gap in evidence* |
 | **2c-4a-3c-5** | **The confirmation pass's one Medium, and the probe's removal**: three passages claimed `adoptDiskVersion` refuses for three causes where the code has **five** | ✅ complete — the narrow conclusion was right and the proof was not; all three now name five guards and argue the UI's unreachability separately. The harness is deleted, both hook files restored by hand to byte-identical, and the gates are back at their production numbers |
 | **Phase 2c-4a** | **Conflict capture and preservation** — plan §12's "retain the draft, load the disk version separately, compare, copy, reload, overwriting neither side" | ✅ **complete.** Two Codex rounds, both **NOT READY** (three findings, then one); **six of step 3c's eight findings were sentences or records claiming something the code does not do**, and none of the eight changed a byte written to disk |
-| 2c-4b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-4b is next** — reapply, in the plan's strong sense |
+| **2c-4b design consult** | **Phase 2c-4b put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4b-design.md`. It **narrowed the phase and split its confidence rule in two**: the match editor may fall back from exact item identity to a unique unchanged trigger, while delete, move, duplicate and every positional anchor require exact correspondence and **never** use the item index as a tie-break. The raw editor is ruled **out of reapply entirely** — a whole-document text draft has no match to identify — and three steps keep the correspondence proof separate from the visible promise |
+| 2c-4b-1 … 2c-4b-3 | Reapply, in the plan's strong sense. See the step table under "Next action" | ⬜️ **2c-4b-1 is next** — the core `reconcile` primitive and `ConflictResult.reapply` as evidence, with no control added |
+| 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -5916,7 +5918,76 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Phase 2c-4a is complete. **2c-4b is next.**
+### Phase 2c-4b's design consult is taken. **Step 2c-4b-1 is next.**
+
+**`56d4817` is `HEAD`**: `docs/reviews/phase-2c-4b-design.md`, committed alone before any line of the
+phase is written, exactly as `ddf67ab` did for 2c-4a. It changes no code, so the four baselines below
+are the ones step 1 starts from and were re-measured at the head of this session, all four matching
+what the previous checkpoint predicted:
+
+```sh
+npm test                       # 1482 passed, 47 files          — measured, exit 0
+cargo test --workspace         # 1048 passed, 0 failed          — measured, exit 0
+npm run check                  # 415 files, 0 errors, 0 warnings — measured, exit 0
+npm run build                  # 174 modules                     — measured, exit 0
+```
+
+i18n is **729** keys per language, at parity — measured, not assumed.
+
+#### The consult's verdict, and the cut it forces
+
+**2c-4b is one honest path from a retained conflict to a new ordinary save attempt — not a general
+merge or recovery system.** Adopt the revision-bound disk snapshot 2c-4a already captured, establish
+a **conservative correspondence** in that snapshot, rebuild the pending edit or operation against the
+new projection, withdraw the old consent, and submit through the existing command and the one save
+transaction. **An ambiguous or missing target is a refusal that writes nothing**, and recovery when
+reapply refuses stays 2c-4c's, whole.
+
+**Correspondence has two confidence policies, and that asymmetry is the phase's core decision.** The
+match editor may fall back from exact item identity to a **unique unchanged trigger**, then performs
+per-field collision checks. **Delete, move, duplicate and every positional anchor require exact item
+correspondence** — the item index is never a tie-break. The creator is targetless and is revalidated
+against the new destination instead.
+
+**The raw editor gets no reapply at all.** A whole-document text draft has no match to identify and
+blindly overwriting is forbidden by the plan itself, so raw answers `unsupported` and its only
+honest options remain 2c-4a's plus 2c-4c's fallback.
+
+| Step | Scope | State |
+|---|---|---|
+| **2c-4b-1** | The core `reconcile` primitive, the anchor/fingerprint construction, the refusal enum, and `ConflictResult.reapply` on the wire — **built from the same fresh snapshot as `disk_revision`**. No control is added, so 2c-4a's behaviour is unchanged and the new payload is only evidence | ⬜️ **next** |
+| **2c-4b-2** | Reapply as browser-model transitions, one per surface, with **`offersReapply: false`** — the proven trade of building and testing an unoffered transition before drawing it. No component changes, so no mounted or window evidence is owed | ⬜️ |
+| **2c-4b-3** | `keepMyDraft` added to `ConflictChoice` and to **`conflictChoicesFor` only**, the capability flipped on the five eligible surfaces, both dictionaries, the mounted suites, and the deterministic R0→R1 window matrix | ⬜️ |
+
+**Why not two steps, in the consult's own words:** if core and UI land together, one review must
+simultaneously prove byte ownership, cross-revision identity, field collision, adoption spending,
+five handlers and prose — and *the algorithmic error the split warns about hides under presentation
+volume*. If the label lands before the transitions, the UI claims the phase exists while still
+meaning *keep editing*, which is the exact naming prohibition this phase was created to lift.
+**Splitting by surface is also wrong**: it duplicates one confidence rule and makes the first
+renderer the de facto authority for the others.
+
+#### Three things the consult says will bite, recorded before they do
+
+1. **A sentence will claim a guarantee the predicate does not give** — *"same snippet"* on a
+   trigger-only provisional match, *"all changes reapplied"* when some were merely already satisfied,
+   *"nothing changed"* when only the target's owned bytes matched. This repository's worst defect
+   class, and no test can fail one.
+2. **Evidence from R0 or R2 will be presented as if it belonged to the conflict's R1.** The old
+   anchor must be made *before* the transaction and the resolution taken from the exact fresh
+   snapshot, bound to `disk_revision`; `conflict_after_the_lock`'s single construction site is what
+   holds that today (`src-tauri/src/commands.rs:1288-1313`, verified this session). A convenient
+   later `get_document` destroys it, and then a perfectly correct algorithm resolves the wrong
+   observation.
+3. **Reprojection will make a correct model act on a stale selection or a stale move anchor after an
+   `await`.** Revalidate document, projection generation, selected intent, target, anchor and the
+   same-sequence relation **at the call boundary**, in the final synchronous block — the guard this
+   project has already needed once. For move, R25 stays visible in the test: the submitted batch is
+   still exactly one move.
+
+---
+
+### The record that closed 2c-4a (superseded by the above, kept for its rationale)
 
 **Step 3c closed the whole of 2c-4a**, and with it plan §12's "conflict capture and preservation".
 All six write surfaces draw a conflict panel, a person can choose on every one of them, and the
