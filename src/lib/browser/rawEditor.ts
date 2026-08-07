@@ -358,6 +358,41 @@ export function rawEditorRefusalKey(refusal: RawEditorRefusal): TranslationKey {
 } // End of function rawEditorRefusalKey()
 
 /**
+ * The dictionary key holding one refusal's sentence **about a reload**.
+ *
+ * **The same refusal, a different door, and 2c-4a-3c's finding 10.5 is why there
+ * are two functions.** {@link rawEditorRefusal} is asked twice for two different
+ * texts: once about the file this editor is being asked to *open*, and once about
+ * the version on disk a conflict is being asked to *load into an editor that is
+ * already open* ({@link RawEditorView.diskRefusal}). Until this step both drew
+ * `browser.rawEditor.lineEndingsNotPreserved`, which ends *"…it will not open this
+ * file for editing"* — so the reason for a **disabled reload confirmation** was
+ * carried by a sentence about a **different control**, beside an editor the person
+ * was looking at with their own draft still in it. The window reading printed the
+ * two side by side.
+ *
+ * **Two key functions over one union rather than a second union**, because the
+ * refusal is genuinely the same fact — a carriage return this editor cannot give
+ * back — and only the door differs. A new arm of {@link RawEditorRefusal} is a
+ * compile error in **both** functions, which is what a `switch` over literal keys
+ * buys and what a template would not.
+ *
+ * **What no type forces**: that a caller asks the right one. `RawEditorView`
+ * separates `diskRefusal` from the opening refusal as two fields, and
+ * `RawEditor.svelte` draws each with its own accessor; nothing stops a third
+ * caller from drawing the opening sentence beside a reload.
+ *
+ * @param refusal - Why the version on disk will not be loaded.
+ * @returns The key holding that reason's sentence.
+ */
+export function rawEditorDiskRefusalKey(refusal: RawEditorRefusal): TranslationKey {
+  switch (refusal.kind) {
+    case 'lineEndingsNotPreserved':
+      return 'browser.rawEditor.diskLineEndingsNotPreserved';
+  }
+} // End of function rawEditorDiskRefusalKey()
+
+/**
  * Starts an editing session over one file's text, or refuses the text.
  *
  * **The refusal is in the return type, so there is no session to misuse.** A text

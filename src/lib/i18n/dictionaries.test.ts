@@ -87,6 +87,83 @@ describe('the untranslated-value heuristic (identity only, never "is it Spanish"
   });
 }); // End of the untranslated-value heuristic suite
 
+/**
+ * The six keys that name the revision a conflicted save was drafted from.
+ *
+ * One per write surface, drawn as the first of three revision lines on that
+ * surface's conflict panel — a few lines under
+ * `browser.saveOutcome.nothingWasWritten`, which is the panel's whole reason for
+ * existing. The list is asserted below to be **exactly** the family, so a seventh
+ * surface's line cannot join the dictionary without joining the check.
+ */
+const REVISION_EXPECTED_KEYS = [
+  'browser.rawEditor.revisionExpected',
+  'browser.matchEditor.revisionExpected',
+  'browser.matchCreation.revisionExpected',
+  'browser.matchDeletion.revisionExpected',
+  'browser.matchMove.revisionExpected',
+  'browser.matchDuplication.revisionExpected'
+] as const satisfies readonly TranslationKey[];
+
+/**
+ * Words that claim, in one locale, that something **was written**.
+ *
+ * Deliberately a small list of the exact forms this project's own *nothing was
+ * written* sentence uses, and not an attempt at a lexicon. What makes it evidence
+ * rather than decoration is the second case below: a list that had been typo'd
+ * into matching nothing would fail there.
+ */
+const CLAIMS_A_WRITE: Readonly<Record<(typeof LOCALES)[number], readonly string[]>> = {
+  en: ['written', 'wrote', 'writes', 'saved'],
+  es: ['escrito', 'escrita', 'escribió', 'escribe', 'guardado', 'guardó']
+};
+
+describe('the conflict panel does not say the file was written (2c-4a-3c, finding 10.1)', () => {
+  /*
+   * **The one check `CLAUDE.md` section 6 says these suites cannot give — narrowed
+   * until it can.** The window reading found `browser.matchCreation.revisionExpected`
+   * reading *"Este fragmento **se ha escrito** sobre la versión {revision}"* four
+   * lines under *"No se ha escrito nada"*: a false claim about whether the person's
+   * file had been written, on the one panel whose entire job is to make that
+   * unambiguous. Nothing failed, because parity and placeholder agreement were both
+   * intact and no suite in this repository pins meaning.
+   *
+   * This does not pin meaning either, and saying so is the point. It pins one
+   * property of one family of sentences: **a line that names the revision a draft
+   * was made from may not use the vocabulary of writing to a file**, because the
+   * same panel says a few lines above that nothing was written. That is the exact
+   * defect, stated as an invariant rather than as a sentence. What it cannot say is
+   * whether the replacement verb is the right one, whether it is grammatical, or
+   * whether it is even Spanish — the honest limit `dictionaries.test.ts`'s own
+   * header states for the identity heuristic, and it is the same limit here.
+   */
+  it('covers every key of that family, so a seventh surface cannot escape it', () => {
+    const family = englishKeys.filter((key) => key.endsWith('.revisionExpected'));
+    expect([...family].sort()).toEqual([...REVISION_EXPECTED_KEYS].sort());
+  });
+
+  it('never uses a verb of writing, in either locale', () => {
+    for (const locale of LOCALES) {
+      for (const key of REVISION_EXPECTED_KEYS) {
+        const value = DICTIONARIES[locale][key].toLowerCase();
+        const claimed = CLAIMS_A_WRITE[locale].filter((word) => value.includes(word));
+        expect(claimed, `${locale}:${key}`).toEqual([]);
+      } // End of the loop over the six revision-expected keys
+    } // End of the loop over the two locales
+  });
+
+  it('keeps that word list capable of firing', () => {
+    // The panel's own *nothing was written* line is the control: if none of a
+    // locale's listed words appears in it, the list matches nothing and the case
+    // above passes for a reason that has nothing to do with the dictionary.
+    for (const locale of LOCALES) {
+      const written = DICTIONARIES[locale]['browser.saveOutcome.nothingWasWritten'].toLowerCase();
+      const found = CLAIMS_A_WRITE[locale].filter((word) => written.includes(word));
+      expect(found.length, locale).toBeGreaterThan(0);
+    } // End of the loop over the two locales
+  });
+}); // End of the "conflict panel does not say the file was written" suite
+
 describe('placeholders', () => {
   it('agree between the two locales', () => {
     for (const key of englishKeys) {

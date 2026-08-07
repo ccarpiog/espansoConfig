@@ -81,6 +81,7 @@ import type {
   SaveVerdict
 } from '../ipc/types';
 import { reloadedDraft, type Draft } from './draft';
+import { draftKindWording, type ConflictDraftKind } from './draftKind';
 import type { InvalidationStatus, WholeDocumentOutcome } from './invalidation';
 import {
   describeRawSave,
@@ -218,16 +219,12 @@ export type ConflictChoice = 'keepEditing' | 'copyDraft' | 'reloadDiskVersion' |
 /**
  * What one surface's retained draft **is**.
  *
- * The consult's Q3/Q4 deciding rule as a value rather than as six ad hoc
- * decisions: *does the draft contain user-authored text a clipboard can preserve
- * truthfully?* `authoredText` is the raw editor's whole file text, the match
- * editor's `MatchBuffers` and the creator's `CreationBuffers` — every one of them
- * strings a person typed. `operationChoice` is the mover's `MovePlacement`, a
- * positional selection, and the deleter's and duplicator's `MatchId`, an opaque
- * revision-scoped protocol carrier. Copying either of those would preserve
- * nothing while looking like it preserved something.
+ * **Declared in `./draftKind` since 2c-4a-3c-4 and re-exported here**, so every
+ * existing importer keeps working while the module that owns the *rule* keyed on
+ * it can be imported by `./rawSave` too — which `./saveOutcome` imports, so the
+ * type could not stay here without making that a cycle.
  */
-export type ConflictDraftKind = 'authoredText' | 'operationChoice';
+export type { ConflictDraftKind };
 
 /**
  * What a confirmed reload **does** on one surface.
@@ -631,9 +628,13 @@ function reloadWarningFor(capabilities: ConflictCapabilities): SaveOutcomeMessag
   if (capabilities.reloadOutcome === 'reseedsDraft') {
     return { kind: 'reloadDiscardsDraft' };
   }
-  return capabilities.draftKind === 'authoredText'
-    ? { kind: 'reloadClosesSurface' }
-    : { kind: 'reloadAbandonsOperation' };
+  // The same rule the three key functions use, over a message code rather than a
+  // key: `draftKindWording` is generic precisely so that a describer choosing a
+  // code and a key function choosing a key are not two rules (3c-4).
+  return draftKindWording<SaveOutcomeMessage>(capabilities.draftKind, {
+    authoredText: { kind: 'reloadClosesSurface' },
+    operationChoice: { kind: 'reloadAbandonsOperation' }
+  });
 } // End of function reloadWarningFor()
 
 /**
@@ -654,15 +655,18 @@ function describeConflict<T>(
   capabilities: ConflictCapabilities
 ): ConflictModel<T> {
   const changedAgain = result.found !== result.disk_revision;
-  const authored = capabilities.draftKind === 'authoredText';
   const messages: SaveOutcomeMessage[] = [
     { kind: 'nothingWasWritten' },
     { kind: 'changedElsewhere' },
     // **What was retained is what the drafted value *is*.** Three surfaces hold
     // strings a person typed; the other three hold a placement or an identity
     // nobody typed at all, and a sentence about text would describe something
-    // they never produced (2c-4a-3b).
-    authored ? { kind: 'draftKeptInMemory' } : { kind: 'operationKeptInMemory' },
+    // they never produced (2c-4a-3b). Chosen by the one shared rule, like every
+    // other authored-text/operation pair in this application (3c-4).
+    draftKindWording<SaveOutcomeMessage>(capabilities.draftKind, {
+      authoredText: { kind: 'draftKeptInMemory' },
+      operationChoice: { kind: 'operationKeptInMemory' }
+    }),
     // **The surface's own declaration, not a shared guess.** The raw editor loads
     // the disk text into its box; every match surface closes instead, and telling
     // a person their text is about to be replaced by it would describe an action
@@ -1230,9 +1234,19 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
 /**
  * The dictionary key holding one conflict choice's label.
  *
- * `keepEditing` reuses the raw editor's own label rather than adding a second
- * string that reads the same: it is the same offer, made about a different
- * refusal.
+ * **Two of the four choices branch on the draft kind, and the second branch is
+ * 2c-4a-3c's finding 10.2.** This comment used to say that `keepEditing`
+ * *"reuses the raw editor's own label rather than adding a second string that
+ * reads the same: it is the same offer, made about a different refusal"*, and
+ * that was written before the operation-choice panels existed. It is not the same
+ * offer: nothing is being edited on the mover, the deleter or the duplicator, so
+ * *Keep editing* named an activity the person never started — a **narrower
+ * instance of the finding step 3b closed for the sentences on those three exact
+ * surfaces**, which is `CLAUDE.md` section 6's *sweep for what the type now says,
+ * not for the words the old finding used* failure, made once more. The window
+ * reading is what caught it: `docs/decisions/2c-4a-3c-2-window-reading.md`
+ * section 10.2 has *Keep editing* / *Seguir editando* beside a panel about a
+ * deletion, a move and a copy.
  *
  * **The draft kind is required rather than defaulted, and 2c-4a-3b is why.**
  * *Discard my text and load it* is what the confirmation does on a surface whose
@@ -1242,9 +1256,23 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
  * silently, which is the argument that made
  * {@link ConflictCapabilities.reloadOutcome} required one field along.
  *
+ * **The branch itself moved to `./draftKind` at 3c-4 and is not repeated here.**
+ * The review that followed 3c-3 found the *same* rule missing from the refused
+ * arm's own way out, and the orchestrator found it a third time in
+ * `browser.saveOutcome.reloadUnavailable`; three sentences deciding one thing in
+ * three places is a rule that can be fixed twice. {@link draftKindWording} is
+ * that decision, and this function, {@link reloadUnavailableKey} and
+ * `rawSaveChoiceKey` are its three callers.
+ *
  * **What no type forces**: that the caller passes the draft kind its own surface
  * declares. It is an ordinary {@link ConflictDraftKind}, so a component may hand
- * over the wrong one; what is closed is that it cannot omit the question.
+ * over the wrong one; what is closed is that it cannot omit the question. Nor can
+ * any type here force that the two labels *say* what this comment claims —
+ * `browser.saveOutcome.choice.keepOperation` could be re-worded to read exactly
+ * like `browser.rawSave.choice.keepEditing` and every suite would stay green. The
+ * i18n suites check parity and placeholders, never meaning (`CLAUDE.md`
+ * section 6); what a test **can** hold is that the two keys are different and
+ * that each kind reaches its own, and `saveOutcome.test.ts` holds that.
  *
  * @param choice - What the person may do.
  * @param draftKind - What the calling surface's retained draft is, from its own
@@ -1257,14 +1285,175 @@ export function conflictChoiceKey(
 ): TranslationKey {
   switch (choice) {
     case 'keepEditing':
-      return 'browser.rawSave.choice.keepEditing';
+      return draftKindWording(draftKind, {
+        authoredText: 'browser.rawSave.choice.keepEditing',
+        operationChoice: 'browser.saveOutcome.choice.keepOperation'
+      });
     case 'copyDraft':
       return 'browser.saveOutcome.choice.copyDraft';
     case 'reloadDiskVersion':
       return 'browser.saveOutcome.choice.reloadDiskVersion';
     case 'confirmReload':
-      return draftKind === 'authoredText'
-        ? 'browser.saveOutcome.choice.confirmReload'
-        : 'browser.saveOutcome.choice.confirmReloadClosing';
+      return draftKindWording(draftKind, {
+        authoredText: 'browser.saveOutcome.choice.confirmReload',
+        operationChoice: 'browser.saveOutcome.choice.confirmReloadClosing'
+      });
   }
 } // End of function conflictChoiceKey()
+
+/**
+ * The dictionary key holding the sentence a withdrawn reload control leaves
+ * behind.
+ *
+ * **The third instance of the same rule, and the orchestrator's own finding
+ * rather than the review's.** The single sentence this replaces ended *"Keep
+ * editing, or stop and open the file again"* and was drawn by a bare key literal
+ * on all six surfaces, three of which draft an operation and edit nothing. It is
+ * the same defect as `conflictChoiceKey`'s `keepEditing` and as
+ * `rawSaveChoiceKey`'s, one sentence along, and all three are now decided by
+ * {@link draftKindWording}.
+ *
+ * **This arm is not reachable through the controls a conflict panel draws, and
+ * the argument is written out rather than asserted from a short list.**
+ * `reloadUnavailable` is drawn for a {@link DiskAdoptionOutcome} of `refused`, and
+ * `BrowserState.adoptDiskVersion` has **five** refusal returns, not three:
+ *
+ * 1. the confirmation was issued for another conflict —
+ *    {@link authorizeDiskAdoption} answers `null`;
+ * 2. the confirmation has already been spent through that state;
+ * 3. the conflict is one that state never registered, or the origin recorded when
+ *    it arrived names a different document from the one the payload carries;
+ * 4. the document is no longer projected there;
+ * 5. that document's projection generation has moved since the conflict arrived.
+ *
+ * **Why the current window supplies none of the five, which is a separate claim
+ * from the list.** The first two are closed by how a confirmation is minted and
+ * spent: `reloadConfirmed` issues it from the conflict the session is showing and
+ * stores it on that session's `ReloadStep`, every surface mints and spends in
+ * **one synchronous expression**, and `DetailPane.svelte` forwards the conflict and
+ * that confirmation together while retaining neither — so no control can pair a
+ * confirmation with another conflict, nor present a spent one, because the spend
+ * leaves the `confirmed` step in the same handler (`NOT_RELOADING` on a success,
+ * `RELOAD_REFUSED` on a refusal) and `offeredReloadStep` then names no reload label
+ * at all. The third is closed because every conflict a surface can show arrived
+ * through one of the six writing wrappers, each of which calls
+ * `rememberTheConflict` for that document at the moment it arrived. The last two
+ * ask about the projection, and no control drawn while a conflict panel owns the
+ * interaction removes or replaces one: the panel offers *Keep editing*, the copy
+ * where it is honest, and the reload pair, and the one control that calls
+ * `BrowserState.rereadDocument` — the mover's and the duplicator's `reloadFile` —
+ * is offered only from a `sendFailure`, which a conflict outcome does not set.
+ *
+ * **What that argument is worth, in the same place as the argument.** It is about
+ * the controls this window draws; it is not a proof that no reprojection begun
+ * before the panel appeared can land while it is open, which is precisely what
+ * guard 5 exists for. What covers this sentence is the six mounted suites, which
+ * script the adoption answer directly and therefore do **not** establish which of
+ * the five guards produced it. The window readings drew the sentence's siblings and
+ * not this one; that is evidence about those launches, not an exhaustive proof.
+ *
+ * @param draftKind - What the calling surface's retained draft is, from its own
+ *   `CONFLICT_CAPABILITIES`.
+ * @returns The key holding that surface's version of the sentence.
+ */
+export function reloadUnavailableKey(draftKind: ConflictDraftKind): TranslationKey {
+  return draftKindWording(draftKind, {
+    authoredText: 'browser.saveOutcome.reloadUnavailable',
+    operationChoice: 'browser.saveOutcome.reloadUnavailableOperation'
+  });
+} // End of function reloadUnavailableKey()
+
+/**
+ * Which arm of a save outcome a panel is showing.
+ *
+ * **Derived from {@link SaveOutcomeModel} rather than restated**, which is the
+ * 2c-4a-3c review's third finding: the first version of this union lived in
+ * `src/lib/components/reveal.ts` and was written out as three literals
+ * *specifically* to avoid depending on `src/lib/browser/`, which reverses the
+ * project's binding architecture rule instead of satisfying it. A new arm of a
+ * save outcome is now a compile error in {@link outcomeReveal} rather than a
+ * silent gap in the cue.
+ */
+export type OutcomeArm = SaveOutcomeModel<unknown>['kind'];
+
+/**
+ * What, if anything, to bring into view when an outcome panel changes.
+ *
+ * **Five values and not three, which is the 2c-4a-3c review's second finding.**
+ * The first version answered one `'panel'` for all three arms, so a component's
+ * `$effect` depended on a cue that did **not** change when one arm replaced
+ * another over the same bound element — and the concrete path is this
+ * application's most ordinary one: an acknowledgeable refusal followed by *Save
+ * anyway*. `beginSave` retains the outcome in flight, so `refused` is replaced by
+ * `saved` with no `null` interval, the panel node and the old cue both survive,
+ * and the effect need not run at all. The person is left near the controls at the
+ * bottom of the panel that has just gone, with the new panel's first line — *The
+ * file was written* — above the viewport.
+ *
+ * **The three panel values scroll identically**; what they are for is the
+ * *identity* of the arm, so a replacement is a change. `revealOutcome` in
+ * `src/lib/components/reveal.ts` maps all three to `block: 'start'`, which is
+ * where the sentence that says what happened is.
+ *
+ * **Two targets and not one**, which is finding 10.4 rather than an elaboration
+ * of 10.3. Pressing *Load the version on disk* adds the surface's confirmation
+ * line to a panel that is already at the end of the scroller, so the content
+ * grows *downwards* past a fixed `scrollTop` and the confirmation control lands
+ * outside the viewport again — measured at y = 771 and y = 788 in a 728 px
+ * window. A fix that only pointed at the panel's top would not have moved it,
+ * which the reading says in as many words.
+ */
+export type OutcomeReveal =
+  /** Nothing is showing, so nothing is scrolled. */
+  | 'none'
+  /** A save that ran to the end has just appeared: put its **first** line in view. */
+  | 'savedPanel'
+  /** A refusal has just appeared: put its **first** line in view. */
+  | 'refusedPanel'
+  /** A conflict has just appeared: put its **first** line in view. */
+  | 'conflictPanel'
+  /** The reload's second step has just appeared: put the **controls** in view. */
+  | 'conflictChoices';
+
+/**
+ * What to bring into view for one state of one outcome panel.
+ *
+ * **The panel's top, not its bottom, when it appears.** The first line of a
+ * conflict panel is *Nothing was written*, and that is the sentence the window
+ * reading found nobody could see; a reveal that framed the controls instead would
+ * put the destructive choice on screen and the statement that nothing had
+ * happened off it.
+ *
+ * **This is a rule and it lives here for that reason.** Pointing a viewport is a
+ * question only a document can answer, and the `scrollIntoView` machinery is
+ * still in `src/lib/components/reveal.ts` — but *which* thing must be revealed,
+ * and when, is decided from save-model state, and a decision written into a
+ * renderer is carried by that renderer's mounted suite alone (2c-3c-3's Medium).
+ *
+ * **What no type here can force**: that a component binds the elements it hands
+ * to `revealOutcome`, or that it runs the effect at all. Both are deletable in
+ * silence, and each of the six mounted suites carries a case for them.
+ *
+ * @param arm - Which arm is showing, or `null` when no outcome panel is drawn.
+ * @param awaitingConfirmation - Whether the reload's second step is on screen.
+ * @returns What to reveal.
+ */
+export function outcomeReveal(
+  arm: OutcomeArm | null,
+  awaitingConfirmation: boolean
+): OutcomeReveal {
+  switch (arm) {
+    case null:
+      return 'none';
+    case 'saved':
+      return 'savedPanel';
+    case 'refused':
+      return 'refusedPanel';
+    case 'conflict':
+      // Guarded on the arm as well as on the flag: only a conflict has a second
+      // step, and a surface whose view answered `true` beside a `saved` arm would
+      // otherwise scroll past the outcome to a row of controls that mean
+      // something else.
+      return awaitingConfirmation ? 'conflictChoices' : 'conflictPanel';
+  }
+} // End of function outcomeReveal()

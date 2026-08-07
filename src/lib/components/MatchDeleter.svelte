@@ -19,9 +19,10 @@
     startMatchDeletion
   } from '../browser/matchDeletion';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
-  import type { ConflictChoice } from '../browser/saveOutcome';
+  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import { revealOutcome } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -35,6 +36,7 @@
     tIpcFailure,
     tPresentationNote,
     tRawSaveChoice,
+    tReloadUnavailable,
     tSaveError,
     tSaveOutcomeMessage,
     tSaveVerdict,
@@ -188,6 +190,25 @@
    * that silently does nothing.
    */
   let confirmationRefused = $state(false);
+
+  /** The outcome panel's own element, so it can be brought into view. */
+  let outcomePanel = $state<HTMLElement | null>(null);
+  /** The conflict arm's row of controls, which is the second step's target. */
+  let outcomeChoices = $state<HTMLElement | null>(null);
+
+  /*
+   * **The outcome panel is scrolled into view when it appears** — 2c-4a-3c's
+   * findings 10.3 and 10.4. This panel opened highest of the six (y = 209) and its
+   * controls were still below the fold at y = 863 in a 728 px viewport, with
+   * `section.detail`'s `scrollTop` at `0` and nothing moving it. The decision is
+   * `./reveal.ts`'s and the two `bind:this` targets are this file's.
+   */
+  const reveal = $derived(
+    outcomeReveal(view.outcome?.kind ?? null, view.awaitingReloadConfirmation)
+  );
+  $effect(() => {
+    revealOutcome(reveal, outcomePanel, outcomeChoices);
+  });
 
   /** What the snippet fires from, for the person to recognise it by. */
   const named = $derived(triggerLabel(match));
@@ -420,7 +441,7 @@
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
-    <div class="panel" role="status">
+    <div class="panel" role="status" bind:this={outcomePanel}>
       {#each view.messages as message, index (index)}
         <p>{tSaveOutcomeMessage(message)}</p>
       {/each}
@@ -468,7 +489,7 @@
         <p class="choices">
           {#each view.refusalChoices as choice (choice)}
             <button type="button" onclick={() => refusalAction(choice)}>
-              {tRawSaveChoice(choice)}
+              {tRawSaveChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -515,10 +536,10 @@
 
         <!-- A control that has just gone, with the reason in its place. -->
         {#if view.reloadUnavailable}
-          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
-        <p class="choices">
+        <p class="choices" bind:this={outcomeChoices}>
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
               {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}

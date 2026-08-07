@@ -36,7 +36,12 @@
  * helpers here do.
  */
 
-import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
+import { rawSaveChoiceKey } from '../browser/rawSave';
+import {
+  reloadUnavailableKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detailFieldKey } from '../browser/detail';
@@ -1123,7 +1128,10 @@ describe('the mounted small editor', () => {
     control(editor.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
-    expect(says(editor.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    // The authored-text half of 3c-4's split: this surface's sentence is the
+    // one that was always here, and the operation wording is not drawn.
+    expect(says(editor.target, reloadUnavailableKey('authoredText'))).toBe(true);
+    expect(says(editor.target, reloadUnavailableKey('operationChoice'))).toBe(false);
     expect(button(editor.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
     expect(button(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
     expect(button(editor.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
@@ -1341,4 +1349,145 @@ describe('the mounted small editor', () => {
     expect(control(editor.target, 'browser.matchEditor.redo').disabled).toBe(false);
     editor.stop();
   }); // End of the "coalescing" case
+
+  it('keeps the authored-text way out saying “Keep editing”', async () => {
+    // **The other side of 2c-4a-3c's finding 10.2.** `conflictChoiceKey` branches
+    // `keepEditing` on the draft kind now, and this surface drafts authored text:
+    // the person really is editing, so its label must **not** have moved with the
+    // three operation-choice panels'.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+
+    expect(button(editor.target, 'browser.rawSave.choice.keepEditing')).not.toBeNull();
+    expect(button(editor.target, 'browser.saveOutcome.choice.keepOperation')).toBeNull();
+    editor.stop();
+  }); // End of the "authored-text way out" case
 }); // End of the "mounted small editor" suite
+
+describe('the small editor’s refused arm names what this surface drafts', () => {
+  /*
+   * **The 2c-4a-3c review's Medium, and the arm no window transcript had ever
+   * drawn.** `rawSaveChoiceKey` returned `browser.rawSave.choice.keepEditing`
+   * unconditionally, so a refusal carrying findings offered *Keep editing* on the
+   * mover, the deleter and the duplicator, where nobody typed anything. 3c-3
+   * deferred this on the grounds that no reading had seen it; the review's answer
+   * is that absence from a transcript is a gap in evidence and not evidence that
+   * a reachable label is correct.
+   */
+
+  it('labels the way out by the draft kind, and the same control still dismisses', async () => {
+    const editor = mountEditor([{ result: REFUSED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(button(editor.target, rawSaveChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, rawSaveChoiceKey('keepEditing', 'operationChoice'))).toBeNull();
+
+    // Nothing else moved: it is the same choice with the truthful label on it.
+    control(editor.target, rawSaveChoiceKey('keepEditing', 'authoredText')).click();
+    flushSync();
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(editor.calls).toHaveLength(1);
+    editor.stop();
+  }); // End of the "refused arm names what this surface drafts" case
+}); // End of the "small editor's refused arm" suite
+
+describe('the small editor’s outcome comes into view', () => {
+  /*
+   * **2c-4a-3c's finding 10.3, on the surface where it was a Medium.** The window
+   * reading measured this panel's top at y = 720 in English and y = 771 in Spanish
+   * in a 728 px viewport, 1 044 px tall, with `section.detail`'s `scrollTop` at `0`
+   * — eight pixels of a panel in one language and none of it in the other, with the
+   * editor above unchanged in size and position across the save, so nothing visible
+   * marked that anything had happened.
+   *
+   * The decision is `./reveal.ts`'s and has its own suite; what only a mounted case
+   * can say is that this file **binds** the two elements and **runs** the effect.
+   */
+
+  /** Every `scrollIntoView` the mounted component asked for, in order. */
+  const scrolled: { readonly target: Element; readonly block: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value(this: Element, options?: ScrollIntoViewOptions) {
+        scrolled.push({ target: this, block: options?.block });
+      }
+    });
+  });
+
+  afterEach(() => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  /**
+   * An editor showing a conflict, with the scroll record cleared of nothing.
+   *
+   * @returns The mounted editor.
+   */
+  async function conflicted(): Promise<ReturnType<typeof mountEditor>> {
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    return editor;
+  } // End of function conflicted()
+
+  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+    const editor = await conflicted();
+    const outcome = editor.target.querySelector('[role="status"]');
+    expect(outcome).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(outcome);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  });
+
+  it('scrolls the controls into view at the reload’s second step', async () => {
+    const editor = await conflicted();
+    scrolled.length = 0;
+    control(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+    flushSync();
+
+    const choices = editor.target.querySelector('[role="status"] .choices');
+    expect(choices).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(choices);
+    expect(scrolled[0]?.block).toBe('end');
+    editor.stop();
+  });
+
+  it('brings the replacing panel into view when one arm succeeds another', async () => {
+    // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
+    // `beginSave` retains the refusal while the retry is in flight, so `saved`
+    // replaces `refused` over the **same** bound element. While all three arms
+    // answered one `'panel'` cue the effect's dependency did not change, so it need
+    // not run and the new panel's first line was never brought into view. The spy
+    // is cleared before the second result, so what is asserted is a *new* reveal.
+    const editor = mountEditor([{ result: REFUSED }, { result: COMMITTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    const refusedPanel = editor.target.querySelector('[role="status"]');
+
+    scrolled.length = 0;
+    control(editor.target, 'browser.rawSave.choice.saveAnyway').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.fileWritten')).toBe(true);
+    const savedPanel = editor.target.querySelector('[role="status"]');
+    expect(savedPanel).toBe(refusedPanel);
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(savedPanel);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  }); // End of the "arm replacing an arm" case
+}); // End of the "small editor's outcome comes into view" suite

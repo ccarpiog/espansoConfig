@@ -47,8 +47,10 @@ import {
   describeWholeDocumentSave,
   draftFieldStatusKey,
   invalidationFailureMessage,
+  outcomeReveal,
   referenceCopyOf,
   reloadDiskVersion,
+  reloadUnavailableKey,
   saveOutcomeMessageKey,
   type ConflictCapabilities,
   type ConflictChoice,
@@ -56,9 +58,11 @@ import {
   type ConflictModel,
   type ConflictOperation,
   type DraftFieldStatus,
+  type OutcomeArm,
   type RetainedDraftField,
   type SaveOutcomeMessage
 } from './saveOutcome';
+import { draftKindWording } from './draftKind';
 
 // The six surfaces' own declarations, imported under names that say which is
 // which. **The consult's Q3/Q4 rule lands in six places and is checked in one**:
@@ -612,8 +616,10 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(conflictChoiceKey('confirmReload', 'operationChoice')).toBe(
       'browser.saveOutcome.choice.confirmReloadClosing'
     );
-    // The other three say the same thing either way, so they have one label.
-    for (const choice of ['keepEditing', 'copyDraft', 'reloadDiskVersion'] as const) {
+    // The other two say the same thing either way, so they have one label.
+    // **`keepEditing` used to be in this list and is not**, which is 2c-4a-3c's
+    // finding 10.2: see the case below.
+    for (const choice of ['copyDraft', 'reloadDiskVersion'] as const) {
       expect(conflictChoiceKey(choice, 'authoredText'), choice).toBe(
         conflictChoiceKey(choice, 'operationChoice')
       );
@@ -627,6 +633,49 @@ describe('the one authority that decides what a conflict offers', () => {
       expect(label, locale).not.toContain('mi texto');
     } // End of the loop over the two locales
   }); // End of the "labels the confirmation" case
+
+  it('labels the non-destructive way out by what the surface drafts too', () => {
+    // **2c-4a-3c's finding 10.2, and it was found by a window and by nothing
+    // else.** `conflictChoiceKey` branched `confirmReload` on the draft kind at
+    // 2c-4a-3b and left `keepEditing` returning the raw editor's own label
+    // unconditionally, so the deleter, the mover and the duplicator drew *Keep
+    // editing* / *Seguir editando* beside a panel about a deletion, a move and a
+    // copy — an activity the person never started. It is the narrower instance of
+    // the finding 3b closed for the *sentences* on those three exact surfaces.
+    expect(conflictChoiceKey('keepEditing', 'authoredText')).toBe(
+      'browser.rawSave.choice.keepEditing'
+    );
+    expect(conflictChoiceKey('keepEditing', 'operationChoice')).toBe(
+      'browser.saveOutcome.choice.keepOperation'
+    );
+    // Two keys, not one wearing two names: a "fix" that pointed both at the same
+    // key would satisfy every other assertion in this file.
+    expect(conflictChoiceKey('keepEditing', 'authoredText')).not.toBe(
+      conflictChoiceKey('keepEditing', 'operationChoice')
+    );
+    // And the `operationChoice` label does not claim an activity nobody started,
+    // in either language. **This is a word check and not a meaning check**: it
+    // fires on the exact defect the reading found — the word *editing* on a panel
+    // where nothing is being edited — and says nothing about whether the
+    // replacement reads well. Only a person can say that (`CLAUDE.md` section 6).
+    for (const locale of LOCALES) {
+      const label = DICTIONARIES[locale][
+        conflictChoiceKey('keepEditing', 'operationChoice')
+      ].toLowerCase();
+      expect(label, locale).not.toContain('editing');
+      expect(label, locale).not.toContain('editando');
+      expect(label, locale).not.toContain('editar');
+    } // End of the loop over the two locales
+    // The check above is only evidence if it is capable of firing: the label the
+    // three surfaces used to draw is exactly what it must reject.
+    for (const locale of LOCALES) {
+      const old = DICTIONARIES[locale]['browser.rawSave.choice.keepEditing'].toLowerCase();
+      expect(
+        old.includes('editing') || old.includes('editando') || old.includes('editar'),
+        locale
+      ).toBe(true);
+    } // End of the loop that keeps the word check falsifiable
+  }); // End of the "labels the non-destructive way out" case
 
   it('declares what each of the six surfaces drafts, by the Q3/Q4 rule', () => {
     // **The rule is one rule and the six declarations are where it lands.** The
@@ -887,3 +936,129 @@ describe('the sentences behind the model', () => {
     } // End of the loop over the two locales
   }); // End of the "name no placeholder" case
 }); // End of the "sentences behind the model" suite
+
+describe('the one rule every authored-text/operation pair shares', () => {
+  /** Both draft kinds, so no case below checks one surface's half only. */
+  const KINDS: readonly ConflictDraftKind[] = ['authoredText', 'operationChoice'];
+
+  it('picks by the draft kind and never by a caller’s preference', () => {
+    // The rule as a value. Five callers, all in `../browser`: `conflictChoiceKey`,
+    // `reloadUnavailableKey`, `reloadWarningFor` and `describeConflict` here, and
+    // `rawSaveChoiceKey` in `./rawSave`. A sixth thing that needs the distinction
+    // joins them there rather than growing a sixth
+    // `draftKind === 'authoredText'` somewhere else.
+    const wording = {
+      authoredText: 'browser.rawSave.choice.keepEditing',
+      operationChoice: 'browser.saveOutcome.choice.keepOperation'
+    } as const;
+    expect(draftKindWording('authoredText', wording)).toBe(wording.authoredText);
+    expect(draftKindWording('operationChoice', wording)).toBe(wording.operationChoice);
+  });
+
+  it('is generic, so a message code and a key are not two rules', () => {
+    // `reloadWarningFor` and `describeConflict` choose a `SaveOutcomeMessage` and
+    // leave the key to `saveOutcomeMessageKey`; the three key functions choose a
+    // key directly. Written as two functions those would be two rules, and the
+    // review's Medium is what one rule written twice costs.
+    const codes = {
+      authoredText: { kind: 'draftKeptInMemory' },
+      operationChoice: { kind: 'operationKeptInMemory' }
+    } as const satisfies Record<ConflictDraftKind, SaveOutcomeMessage>;
+    expect(draftKindWording<SaveOutcomeMessage>('authoredText', codes)).toEqual({
+      kind: 'draftKeptInMemory'
+    });
+    expect(draftKindWording<SaveOutcomeMessage>('operationChoice', codes)).toEqual({
+      kind: 'operationKeptInMemory'
+    });
+  });
+
+  it('gives the withdrawn reload its own sentence per draft kind', () => {
+    // **The orchestrator's finding at 3c-4, and the third instance of the same
+    // defect.** `browser.saveOutcome.reloadUnavailable` ends *"Keep editing, or
+    // stop and open the file again"* and was drawn by a bare key literal on all
+    // six surfaces, three of which edit nothing.
+    expect(reloadUnavailableKey('authoredText')).toBe('browser.saveOutcome.reloadUnavailable');
+    expect(reloadUnavailableKey('operationChoice')).toBe(
+      'browser.saveOutcome.reloadUnavailableOperation'
+    );
+    expect(reloadUnavailableKey('authoredText')).not.toBe(
+      reloadUnavailableKey('operationChoice')
+    );
+  });
+
+  it('keeps the word "editing" out of the operation sentence, in both languages', () => {
+    // A word check and not a meaning check, exactly as the two label cases above
+    // are: it fires on the defect that was found and says nothing about whether
+    // the replacement reads well. The falsifiability half is the second loop —
+    // the sentence the three surfaces used to draw is what the check must reject,
+    // so a word list typo'd into matching nothing cannot pass this vacuously.
+    for (const locale of LOCALES) {
+      const operation = DICTIONARIES[locale][reloadUnavailableKey('operationChoice')].toLowerCase();
+      expect(operation, locale).not.toContain('keep editing');
+      expect(operation, locale).not.toContain('sigue editando');
+      const authored = DICTIONARIES[locale][reloadUnavailableKey('authoredText')].toLowerCase();
+      expect(
+        authored.includes('keep editing') || authored.includes('sigue editando'),
+        locale
+      ).toBe(true);
+    } // End of the loop over the two locales
+  }); // End of the "no editing in the operation sentence" case
+
+  it('says the same guarantee in both sentences, whatever it advises afterwards', () => {
+    // The clause that differs is the advice; the guarantee — nothing written,
+    // nothing discarded — is the part a person acts on and must survive the
+    // split. Checked by the shared prefix rather than by a verbatim string, so a
+    // legitimate rewording of the advice does not fail this.
+    for (const locale of LOCALES) {
+      for (const kind of KINDS) {
+        const value = DICTIONARIES[locale][reloadUnavailableKey(kind)];
+        expect(placeholdersOf(value), `${locale}:${kind}`).toEqual([]);
+        expect(value.trim().endsWith('.'), `${locale}:${kind}`).toBe(true);
+      } // End of the loop over the two draft kinds
+      const shared = DICTIONARIES[locale][reloadUnavailableKey('authoredText')].split(':')[0];
+      expect(shared, locale).not.toBeUndefined();
+      expect(DICTIONARIES[locale][reloadUnavailableKey('operationChoice')], locale).toContain(
+        shared as string
+      );
+    } // End of the loop over the two locales
+  }); // End of the "same guarantee" case
+}); // End of the "one rule three sentences share" suite
+
+describe('what a changing outcome brings into view', () => {
+  /** Every arm a save outcome can be, from the model's own union. */
+  const ARMS: readonly OutcomeArm[] = ['saved', 'refused', 'conflict'];
+
+  it('reveals nothing when no outcome panel is drawn', () => {
+    expect(outcomeReveal(null, false)).toBe('none');
+    // Even a stale confirmation flag cannot conjure a target out of no panel.
+    expect(outcomeReveal(null, true)).toBe('none');
+  });
+
+  it('gives every arm a cue of its own, so one replacing another is a change', () => {
+    // **The 2c-4a-3c review's second finding.** All three used to answer one
+    // `'panel'`, so a component's `$effect` did not re-run when `refused` was
+    // replaced by `saved` over the same bound element — which is the ordinary path
+    // of *Save anyway*, since `beginSave` retains the outcome in flight and there
+    // is no `null` interval between them.
+    const cues = ARMS.map((arm) => outcomeReveal(arm, false));
+    expect(new Set(cues).size, cues.join(',')).toBe(ARMS.length);
+    expect(outcomeReveal('saved', false)).toBe('savedPanel');
+    expect(outcomeReveal('refused', false)).toBe('refusedPanel');
+    expect(outcomeReveal('conflict', false)).toBe('conflictPanel');
+  });
+
+  it('reveals the controls at the reload’s second step', () => {
+    // **Finding 10.4 as a decision.** The confirmation line grows the panel
+    // downwards past a `scrollTop` already at its end, so the second step needs its
+    // own target and not a second scroll to the same one.
+    expect(outcomeReveal('conflict', true)).toBe('conflictChoices');
+  });
+
+  it('never reveals the controls for an arm that has no second step', () => {
+    // A `saved` or `refused` arm's row of controls means something else entirely —
+    // *Dismiss*, *Save anyway* — and framing it would scroll the outcome off the
+    // screen to show them. Only a conflict has a confirmation step at all.
+    expect(outcomeReveal('saved', true)).toBe('savedPanel');
+    expect(outcomeReveal('refused', true)).toBe('refusedPanel');
+  });
+}); // End of the "what a changing outcome brings into view" suite

@@ -54,6 +54,7 @@
 
 import type { TranslationKey } from '../i18n/dictionaries';
 import type { Acknowledgement, Finding, FindingCode, RefusedResult } from '../ipc/types';
+import { draftKindWording, type ConflictDraftKind } from './draftKind';
 
 /**
  * The operands `DocumentDoesNotParse` carries, derived from the wire type.
@@ -148,6 +149,15 @@ export type RawSaveMessage =
  * proceed — see {@link RawSaveModel.acknowledgement}. Offering it beside a
  * verdict no acknowledgement can move would be this application promising
  * something it will refuse.
+ *
+ * **`keepEditing` is the choice's stable name and not its label.** The two
+ * labels are chosen by {@link rawSaveChoiceKey} from the surface's own
+ * {@link ConflictDraftKind}: *Keep editing* where a person typed something, and
+ * *Leave this as it is* on the mover, the deleter and the duplicator, where
+ * nothing is being edited at all. This union is deliberately **not** widened to
+ * a third member — a `keepOperation` value would make both arms nameable on
+ * every surface, so each of the six components' exhaustive `switch`es would grow
+ * an arm it can never reach.
  */
 export type RawSaveChoice = 'saveAnyway' | 'keepEditing';
 
@@ -373,14 +383,46 @@ export function rawSaveMessageParams(
 /**
  * The dictionary key holding one choice's label.
  *
+ * **The draft kind is required, and the 2c-4a-3c review's Medium is why.** This
+ * function returned `browser.rawSave.choice.keepEditing` unconditionally, so the
+ * duplicator's *ordinary* first outcome — a byte-exact copy keeps its source's
+ * trigger definition, the transaction says so with an acknowledgeable finding,
+ * and the panel offers *Save anyway* beside a way out — drew *Keep editing* /
+ * *Seguir editando* about a copy nobody typed. The mover and the deleter did the
+ * same for any refusal carrying findings.
+ *
+ * **3c-3 deferred this deliberately and the review overruled the deferral, in
+ * terms worth keeping.** The argument was that `rawSave.ts` is three sub-phases
+ * older than the finding, that giving `refusalChoices` a draft kind is a
+ * signature change, and that no window reading had ever drawn the arm. The
+ * answer: *the age of `rawSave.ts` does not make its current output truthful, and
+ * absence from a prior window transcript is a gap in evidence, not evidence that
+ * a reachable label is correct*. The signature change landed on the **accessor**
+ * rather than on the choice, so `refusalChoices` and every view that carries its
+ * answer are untouched.
+ *
+ * `saveAnyway` does not branch: *Save anyway* is a claim about the save and not
+ * about what the person was doing beforehand, and it reads the same on all six.
+ *
  * @param choice - What the person may do.
+ * @param draftKind - What the calling surface's retained draft is, from its own
+ *   `CONFLICT_CAPABILITIES`.
  * @returns The key holding that choice's label.
  */
-export function rawSaveChoiceKey(choice: RawSaveChoice): TranslationKey {
+export function rawSaveChoiceKey(
+  choice: RawSaveChoice,
+  draftKind: ConflictDraftKind
+): TranslationKey {
   switch (choice) {
     case 'saveAnyway':
       return 'browser.rawSave.choice.saveAnyway';
     case 'keepEditing':
-      return 'browser.rawSave.choice.keepEditing';
+      // The same pair `conflictChoiceKey` chooses between one arm along, chosen
+      // by the same rule and in the same place: this is one sentence of the
+      // application, not two that have to be kept in step.
+      return draftKindWording(draftKind, {
+        authoredText: 'browser.rawSave.choice.keepEditing',
+        operationChoice: 'browser.saveOutcome.choice.keepOperation'
+      });
   }
 } // End of function rawSaveChoiceKey()

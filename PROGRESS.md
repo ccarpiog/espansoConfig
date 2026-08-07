@@ -63,7 +63,13 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4a-2** | The **frontend conflict protocol**, with no control drawn: the eager adoption removed from all six writing wrappers, `adoptDiskVersion` as the one door answering three outcomes, the spend bound to the conflict's origin, and the three-step reload machine shared by every surface | ✅ complete — after **four** review rounds, the last two existing only because the round before each left a **narrower instance** of the finding it had just closed |
 | **2c-4a-3a** | **The two authored-text conflict panels**: `offersReload` flipped on the match editor and the creator only, both panels drawn over step 2's transitions, `referenceCopyOf` as the one model behind the copy, and `clipboard.ts` — the module that **refuses** the `<textarea>` carrier for text holding a `\r` rather than copying normalised bytes and reporting success | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on seven findings, two High; round 2 closed six, found **no new defect introduced by the fixes**, and left the one this project's history predicts — a **narrower instance** of the High, surviving in two test comments |
 | **2c-4a-3b** | **The three operation-choice conflict panels**: `offersReload` flipped on the mover, the deleter and the duplicator, their panels drawn with a **retained operation summary** where the other three show authored text, `ConflictOperation` as that summary's model, `reloadWarningFor` as the one place the close/abandon guarantee is decided, and `MatchMover.svelte:511`'s in-component precedence rule migrated into `notMovableToShow` | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on two Medium (both blocking) and one Low, all three this project's named worst defect class or its cause; round 2 returned **READY with no findings**. The step **went beyond its brief and found a defect by doing so** — the shared conflict sentences described text nobody typed on these three surfaces — and round 1 **ruled the widening justified** and verified the three existing panels come out byte-identical in rendered wording |
-| 2c-4a-3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started — **2c-4a-3c, the window reading for all six write surfaces, is next and is step 3's exit** |
+| **2c-4a-3c-1** | **The conflict instrument**, built and proven before the reading that depends on it: the window-reading probe harness, and the first demonstration from a running WKWebView that a **true `SaveResult::Conflict`** is reachable when the second writer is an external filesystem process | ✅ complete — `docs/decisions/2c-4a-3c-1-instrument.md`. Seven launches, all seven reaching `--- end` with a zero-byte `probe.err`; conflicts on the editor, the mover and the duplicator, in both languages, by two independent writer routes; **no launch wrote anything** — no `.espansoconfig-backups` directory was created at all. **The harness is deliberately uncommitted** |
+| **2c-4a-3c-2** | **The reading itself**, over that instrument: six write surfaces, both languages, the copy, the two-step reload, the geometry and the bytes | ✅ complete — `docs/decisions/2c-4a-3c-2-window-reading.md`. 25 launches, all reaching `--- end` with a zero-byte `probe.err`. **One High, two Mediums, two Lows, four Observations**, and **no defect in what is written to disk** |
+| **2c-4a-3c-3** | **The fixes and the re-take**: all five findings, the §10.6 Observation moved with the High, and every changed component read again in both languages | ✅ complete — `docs/decisions/2c-4a-3c-3-notes.md` and `docs/decisions/2c-4a-3c-3-retake.md`. 16 launches, all reaching `--- end` with a zero-byte `probe.err`; **all five closed**, plus `2c-3c-3`'s own committed-panel Low as a side effect |
+| **2c-4a-3c-4** | **The review fix round**: Codex round 1 returned **NOT READY** on a Medium and two Lows, and the orchestrator's own sweep added a fourth. The rule is now stated **once**, in the new `src/lib/browser/draftKind.ts`, with five callers | ✅ complete — 22 launches, which **drew the refusal arm for the first time in this project**. That arm's absence had been the previous round's whole justification for deferring the Medium, and the review ruled the deferral unsound: *the age of a module does not make its output truthful, and absence from a prior transcript is a gap in evidence* |
+| **2c-4a-3c-5** | **The confirmation pass's one Medium, and the probe's removal**: three passages claimed `adoptDiskVersion` refuses for three causes where the code has **five** | ✅ complete — the narrow conclusion was right and the proof was not; all three now name five guards and argue the UI's unreachability separately. The harness is deleted, both hook files restored by hand to byte-identical, and the gates are back at their production numbers |
+| **Phase 2c-4a** | **Conflict capture and preservation** — plan §12's "retain the draft, load the disk version separately, compare, copy, reload, overwriting neither side" | ✅ **complete.** Two Codex rounds, both **NOT READY** (three findings, then one); **six of step 3c's eight findings were sentences or records claiming something the code does not do**, and none of the eight changed a byte written to disk |
+| 2c-4b … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ **2c-4b is next** — reapply, in the plan's strong sense |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3412,6 +3418,70 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4a step 3c
+
+**Step 3c is the window reading 2c-4a-3 owed, and it ran in five steps.** The cut was forced by the
+*instrument*, not by the size: consult Q7's recipe — a second writer that is an external filesystem
+process — had **never been demonstrated**, and a reading plan written on an unproven instrument is a
+reading that discovers, twenty launches in, that it measured nothing.
+
+| Step | What | Launches |
+|---|---|---|
+| 3c-1 | The harness, and the proof a true conflict reaches a window | 7 |
+| 3c-2 | The reading: six surfaces, both languages | 25 |
+| 3c-3 | The reading's five fixes, and the re-take | 16 |
+| 3c-4 | The review fix round, and its re-take | 22 |
+| 3c-5 | The confirmation pass's Medium, and the probe's removal | — |
+
+**Seventy launches, and every one of them reached its own `--- end` with a zero-byte `probe.err`** —
+so no transcript in any of the four records is a partial run rounded up to a conclusion. Every launch
+was byte-checked against a pristine copy of the whole configuration tree taken before it. **No
+conflict launch wrote anything**; the launches that did write wrote exactly what they were asked to,
+as the byte check's own control.
+
+### The findings, and what class they were
+
+| # | Found by | Severity | What |
+|---|---|---|---|
+| 1 | the reading | **High** | the Spanish creator line said the snippet *se ha escrito* — *had been written* — **four lines under** *"No se ha escrito nada"* |
+| 2 | the reading | Medium | *Keep editing* drawn on three panels where nothing is being edited |
+| 3 | the reading | Medium | the match editor's conflict panel drawn **entirely below the fold**, `scrollTop` 0, nothing moving it |
+| 4 | the reading | Low | the second step's control pushed back out of the viewport by the sentence that justifies it |
+| 5 | the reading | Low | the raw editor's refused-reload sentence named a **different control** |
+| 6 | Codex round 1 | Medium | the same *Keep editing* defect on the **refused** arm — the deferral the previous round had argued for |
+| 7 | Codex round 1 | Low | the reveal cue collapsed every arm to one value, so `refused → saved` need not re-fire |
+| 8 | Codex round 1 | Low | the pure reveal rule sat in the renderer layer, restating the model's union to avoid depending on it |
+| 9 | the orchestrator | Medium | `reloadUnavailable`'s **sentence** — the third instance of finding 2, on all six surfaces |
+| 10 | Codex round 2 | Medium | three passages claimed **three** refusal causes where the code has **five** |
+
+**Six of the ten are sentences or records claiming something the code does not do**, and **none of
+the ten changed a byte written to disk.** That is the shape this project keeps producing, and the
+reason a window reading and a review are both owed rather than either alone.
+
+### The gates, with the probe removed
+
+| Gate | Result |
+|---|---|
+| `npm test` | **1482 passed, 47 files** (1426 at 3b; +56 across the model, the six mounted suites, `reveal.test.ts` and the i18n guards) |
+| `npm run check` | **415 files, 0 errors, 0 warnings** (412 at 3b) |
+| `npm run build` | **174 modules** — 172 at 3a plus `reveal.ts` and `draftKind.ts`, the "moved by exactly the number of new source modules" shape. No `svelte/internal/server`, no `node:async_hooks` |
+| `cargo test --workspace` | **1048 passed** — untouched since 2c-4a-1; **nothing in `src-tauri/` or `crates/` changed in the whole of step 3c** |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **nothing** — `CLAUDE.md` §3's check since 1b-1 |
+| i18n | **729 keys per language, at parity** |
+
+**The probe is gone and its removal was verified, not asserted.** `src/probe.ts` and
+`src-tauri/src/probe.rs` are deleted; `src/main.ts` and `src-tauri/src/main.rs` were restored **by
+hand** and `git diff` over both comes back empty, so neither appears in this commit. A sweep for
+`ECFG_PROBE|startProbe|register_with_probe|probe_second_writer` over `src`, `src-tauri/src` and
+`scripts` finds nothing — the only remaining mentions are the decision records that describe the
+harness in prose. Every scratch path lived outside the repository, and **the owner's real
+configuration was never opened**: `XDG_CONFIG_HOME` pointed at a synthetic tree rebuilt per launch
+and `HOME` at an empty directory, so neither candidate `resolve_config_dir()` probes could reach it.
+
+---
+
 ## Verification — Phase 2c-4a step 3b
 
 Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
@@ -5846,7 +5916,268 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-4a step 3b is complete: all six write surfaces now draw a conflict panel.** The mover,
+### Phase 2c-4a is complete. **2c-4b is next.**
+
+**Step 3c closed the whole of 2c-4a**, and with it plan §12's "conflict capture and preservation".
+All six write surfaces draw a conflict panel, a person can choose on every one of them, and the
+choices have now been **seen on a screen** rather than inferred from a suite.
+
+**The reading found a defect class no suite in this repository can fail**, and the two Codex rounds
+found two more of the same kind: **six of the eight findings across step 3c were sentences or
+records claiming something the code does not do.** None of them changed a byte written to disk.
+
+`ea7c1ff` is step 3c's commit and is where a fresh session begins (`eb19c36` was the base). The
+exact first commands to run:
+
+```sh
+npm install && npm test        # expect 1482 passed, 47 files
+cargo test --workspace         # expect 1048 passed, untouched since 2c-4a-1
+```
+
+(`npm run check` expects **415 files, 0 errors, 0 warnings**. `npm run build` expects **174
+modules** — 172 at 2c-4a-3a plus exactly two new source modules,
+`src/lib/components/reveal.ts` and `src/lib/browser/draftKind.ts`; the guard is the *shape* of a
+change to that number, `CLAUDE.md` §6. i18n is **729** keys per language, at parity — 726 at 3b plus
+`choice.keepOperation`, `rawEditor.diskLineEndingsNotPreserved` and the `reloadUnavailable`
+operation-choice twin.)
+
+### What step 3c settled, in one place
+
+**The instrument.** A true `SaveResult::Conflict` **is** reachable from a window, and the second
+writer must be an **external filesystem process**. This application's own raw-save IPC can never
+produce one — it refreshes the same Rust workspace cache, so `view_at` answers
+`identityStaleRevision` before the transaction. That excuse had stood since 2c-3b and it was the
+*instrument* that was wrong, not the outcome that was unreachable.
+`docs/decisions/2c-4a-3c-1-instrument.md` §2 is the recipe and **§5 is the list of mistakes already
+paid for** — read it before ever building this harness again.
+
+**The reading.** `docs/decisions/2c-4a-3c-2-window-reading.md`: 25 launches, six surfaces, both
+languages, **1 High, 2 Mediums, 2 Lows, 4 Observations**, and **no defect in what is written to
+disk**. The High was `browser.matchCreation.revisionExpected` in Spanish saying the snippet *se ha
+escrito* — *had been written* — **four lines under the sentence saying nothing was written**, on the
+one panel whose entire job is to make that unambiguous.
+
+**A rule stated once.** `src/lib/browser/draftKind.ts` is new and holds
+`draftKindWording<T>(draftKind, { authoredText, operationChoice })`, generic so a key function and a
+message-code describer are not two rules. **Five callers**: `conflictChoiceKey`,
+`reloadUnavailableKey`, `reloadWarningFor`, `describeConflict` and `rawSaveChoiceKey`. The one
+remaining bare `draftKind === 'authoredText'` in production is `conflictChoicesFor`'s copy guard,
+documented as deliberately not this rule and confirmed as such by review round 2.
+
+**Three instances of one defect, closed together.** *Keep editing* was drawn where nothing is being
+edited in **three** places, each found by a different instrument and each a narrower instance of the
+one before: `conflictChoiceKey`'s label (the reading), `rawSave.ts`'s refused-arm label (Codex round
+1), and `browser.saveOutcome.reloadUnavailable`'s sentence (the orchestrator's own sweep). **The
+round that fixed the first argued explicitly for deferring the second**, and review round 1 ruled
+that deferral unsound: *the age of `rawSave.ts` does not make its output truthful, and absence from a
+prior transcript is a gap in evidence, not evidence that a reachable label is correct.*
+`2c-4a-3c-3-notes.md` §2.2, §2.3, §4.3 and §7.3 carry correction blocks saying so, with the rejected
+reasoning left legible beside its refutation.
+
+**The refusal arm was drawn for the first time in this project** at 3c-4's re-take. It was the
+previous round's whole justification for deferring — *"no window reading has ever drawn that arm"* —
+and the fix round drew it: *Leave this as it is* / *Dejarlo como está* on the duplicator, the mover
+and the deleter, with *Keep editing* unchanged on the match editor.
+
+**A panel nobody could see.** The match editor's conflict panel opened at **y = 720** in English and
+**y = 771** in Spanish inside a **728 px** viewport, 1 044 px tall, with `section.detail`'s
+`scrollTop` at `0` and nothing moving it — so a person who pressed *Save this snippet* and hit a
+conflict saw **eight pixels of it in English and none of it in Spanish**, and what was invisible was
+*the statement that nothing was written*. The panel is `role="status"`, so a screen reader was told
+throughout: **this was never an accessibility failure and the fix is not an accessibility fix.**
+`outcomeReveal` now lives in `saveOutcome.ts` with `OutcomeArm` **derived from** `SaveOutcomeModel`
+rather than restated, and it carries **arm identity** (`savedPanel` / `refusedPanel` /
+`conflictPanel` / `conflictChoices`) — because a cue that mapped every arm to one value would not
+re-fire when `refused` was replaced by `saved` with no `null` interval between them, which is the
+`saveAnyway` path. `src/lib/components/reveal.ts` keeps only the guarded `scrollIntoView`.
+
+**An exhaustive claim is a claim.** Review round 2's only finding: three passages said
+`adoptDiskVersion` answers `refused` **only** for three causes, and the implementation has **five**.
+The narrow conclusion was right and the proof was not, so all three now name five guards and argue
+the UI's unreachability separately — keeping the mounted-only coverage limit and **not** turning the
+22-launch absence into stronger evidence than it is. `2c-4a-3c-5-notes.md` is that fix and the
+probe's removal.
+
+### What 2c-4b inherits, and the two things it must not misread
+
+1. **`reloadUnavailable`'s two sentences are not reachable from a window** and are covered by mounted
+   tests only. No control on a conflict panel can move a projection generation. That is stated
+   plainly in three records and must not be quietly upgraded.
+2. **"Keep my draft" is still forbidden as a name and as a code until 2c-4b, and 2c-4b is now.**
+   `CLAUDE.md` §6 makes it absolute *before* this phase; there it means **rebase the draft onto the
+   newly parsed document**, which is 2c-4b's actual work. The words become available exactly when the
+   thing exists.
+
+The 2c split table above is the plan of record for what remains: **2c-4b** (reapply — identify the
+intended match in the newly parsed document and apply only when confidence suffices; fails as an
+*algorithmic* mistake), then 2c-4c, 2c-5, and 2d.
+
+---
+
+### Step 3c ran in five steps, and this is the record of the cut (superseded, kept for its rationale)
+
+**Step 3c — the window reading for all six write surfaces — was cut, and the cut is recorded here
+because it is not in `2c-split-notes.md`.** The reason is the *instrument*, not the size: consult
+Q7's recipe — a second writer that is an external filesystem process — had **never been
+demonstrated**, and every earlier reading used this application's own raw-save IPC, which refreshes
+the same Rust workspace cache so `view_at` answers `identityStaleRevision` before the transaction
+and no conflict is ever reached. A reading plan written on an unproven instrument is a reading that
+discovers, twenty launches in, that it measured nothing.
+
+**It became four rather than three when 3c-2 found five defects.** Fixing them and re-taking the
+reading is a step's worth of work on its own, and doing it in the same breath as deleting the
+harness would have meant deleting the instrument the re-take needs.
+
+| Step | Scope | State |
+|---|---|---|
+| **3c-1** | The harness, and the proof that a true conflict reaches a window | ✅ complete |
+| **3c-2** | The reading itself, six surfaces, both languages | ✅ complete — 1 High, 2 Mediums, 2 Lows |
+| **3c-3** | The fixes, and the re-take over every component they touch | ✅ complete — all five closed |
+| **3c-4** | The probe's removal, the hooks restored by hand, and the commit | ⬜️ **next** |
+
+**3c-3's verdict: all five closed, and one more with them.**
+`docs/decisions/2c-4a-3c-3-notes.md` is what changed and why;
+`docs/decisions/2c-4a-3c-3-retake.md` is what a screen did afterwards — sixteen launches, L33
+through L48, **all sixteen reaching `--- end` with a zero-byte `probe.err`**, fourteen writing
+nothing at all and two writing deliberately as the byte check's own control.
+
+- **§10.1, the High** — the Spanish creator line claimed the snippet had been written, four lines
+  under *No se ha escrito nada*. It is *se redactó sobre* now, and **the English moved with it**
+  (§10.6's Observation): *drafted against*, not *written against*. The reason for moving both is in
+  `2c-4a-3c-3-notes.md` §2.1, and the point that decided it is that **a rule with a hole where the
+  defect was is worse than no rule**.
+- **§10.2** — `conflictChoiceKey` now branches `keepEditing` on the draft kind, so the deleter, the
+  mover and the duplicator draw *Leave this as it is* / *Dejarlo como está* instead of an offer to
+  keep editing something nobody was editing. **The doc comment that argued for the defect is
+  corrected in the same change.**
+- **§10.3 and §10.4** — `src/lib/components/reveal.ts` scrolls the outcome panel into view when it
+  appears and the controls into view at the reload's second step, on **all six** surfaces. The
+  match editor's panel went from y = 720 (en) / y = 771 (es) to **y = 44 in both**, and the
+  confirmation control lands at y = 666–667 `inView=true` on twelve launches.
+- **§10.5** — the raw editor's refused reload has a reload-specific sentence
+  (`rawEditorDiskRefusalKey`), so the reason for a disabled control is no longer a sentence about a
+  different one.
+- **And `2c-3c-3-window-reading.md` §10.2's own Low**, the committed panel below the fold, closed as
+  a side effect: the reveal is every arm's, not the conflict's, deliberately.
+
+**Two things 3c-4 inherits.** The wording invariant added in `src/lib/i18n/dictionaries.test.ts` is
+the first executable check in this repository over what a sentence *claims* rather than over its
+parity — it fires on any `revisionExpected` value, in either locale, that uses a verb of writing,
+and it keeps its own word list falsifiable. And **`rawSave.ts`'s `keepEditing` still says *Keep
+editing* on the refused arm** of the three operation-choice surfaces: the same defect one arm along,
+recorded and deliberately not fixed, because no window reading in this project has ever drawn that
+arm (`2c-4a-3c-3-notes.md` §2.2).
+
+**3c-1's verdict: the recipe works.** `docs/decisions/2c-4a-3c-1-instrument.md` is the record.
+Seven launches, **all seven reaching their own `--- end` with a zero-byte `probe.err`**; true
+`conflict` outcomes on `MatchEditor`, `MatchMover` and `MatchDuplicator`, in both languages, by two
+independent second-writer routes; the same three revisions in every one, with `expected ≠ found`,
+which is a real locked-read mismatch and not an identity refusal. **No launch wrote anything** —
+every tree was compared whole against a pristine pre-launch copy and the only difference was the
+external writer's own 36 bytes, with **no `.espansoconfig-backups` directory created at all**.
+
+Five things 3c-2 must not re-derive, all in §5 of that record: `npm run build` alone changes
+nothing (the bundle embeds `dist` at *cargo* build time, so `touch src-tauri/build.rs && cargo build
+-p espansoconfig --features custom-protocol` must follow it — that is what launch L06 cost); the
+second writer is **spawned inside the plan**, never scheduled by wall clock, because a `sleep`-timed
+writer races start-up and silently opens the surface at R1 where no conflict is possible; the probe
+registers its commands **beside** `main.rs`'s `generate_handler!` list rather than inside it,
+because `wire_contract::registered_commands()` parses that list textually; the picker beats the
+leaked `localStorage` override and the leak is real; and the conflict panel is **drawn below the
+fold** in an unscrolled pane, so a plan reporting only what is inside the viewport reports an empty
+panel. **`RawEditor`, `MatchCreator` and `MatchDeleter` were not driven** — consult Q7's points 1, 3
+and 4 remain claims.
+
+### The working tree is not clean, and that is deliberate
+
+**`eb19c36` is still `HEAD`, and the probe harness is uncommitted on purpose.** `src/probe.ts` and
+`src-tauri/src/probe.rs` are temporary and **may never be committed**; `src/main.ts` and
+`src-tauri/src/main.rs` each carry two clearly-marked temporary hook lines that are restored by hand
+when the probe is deleted. A fresh session resuming here inherits that tree, and the scratch harness
+with it:
+
+```
+src/probe.ts                                  new,      temporary — delete at 3c-4
+src-tauri/src/probe.rs                        new,      temporary — delete at 3c-4
+src/main.ts                                   modified, two hook lines — restore by hand at 3c-4
+src-tauri/src/main.rs                         modified, two hook lines — restore by hand at 3c-4
+docs/decisions/2c-4a-3c-1-instrument.md       new,      keep and commit
+docs/decisions/2c-4a-3c-2-window-reading.md   new,      keep and commit
+docs/decisions/2c-4a-3c-3-notes.md            new,      keep and commit
+docs/decisions/2c-4a-3c-3-retake.md           new,      keep and commit
+src/lib/components/reveal.ts (+ its suite)    new,      PRODUCTION — keep and commit
+```
+
+Everything 3c-3 changed under `src/lib/` **is production and is committed with the step**; only the
+five probe lines above are temporary. `src/probe.ts` carries three additions of its own from 3c-3
+(a `noscroll` flag, a `nowriter` flag and the `reveal:` scroll-position line) and they go with it.
+
+`<scratch>/launch.sh` and `<scratch>/launches/L01…L48/` live in
+`/private/tmp/claude-501/-Users-ccarpio-Developer-espansoConfig/5297a7df-1f6e-4dca-8b0a-f02a92f3b872/scratchpad`,
+outside the repository. **If that scratch directory is gone, rebuild `launch.sh` from
+`2c-4a-3c-1-instrument.md` §2 — the harness in `src/` and `src-tauri/src/` is the part that matters
+and it is on disk.**
+
+With the harness in the tree the gate numbers move, and each move is explained rather than
+tolerated. After 3c-3, and **only the last line of each is the probe's**:
+
+```sh
+npm test        # 47 files, 1464 tests. 1427 → 1464 is accounted for line by line in
+                #   2c-4a-3c-3-notes.md §6, including the +2 in `ipc-detail.test.ts`, which
+                #   sweeps every .ts under src/ and therefore counts reveal.ts and its suite.
+                #   Of the 1464, one is probe.ts's row in that same sweep
+npm run check   # 415 files. 413 → 415 is reveal.ts and reveal.test.ts; one of the 415 is probe.ts
+npm run build   # 174 modules — 172, plus reveal.ts, plus probe.ts. The "moved by exactly the
+                #   number of new source modules" shape, not the resolve.conditions regression:
+                #   checked, `rg -c "internal/server|async_hooks"` over the bundle finds nothing.
+                #   It returns to 173 when the probe is deleted
+cargo test --workspace   # 1048, unmoved. cargo test -p espansoconfig 149, unmoved
+```
+
+### Next: Phase 2c-4a step 3c-4 — remove the probe, then commit
+
+**Everything step 3 owes is delivered.** 3a and 3b drew the six panels, 3c-2 read them in a running
+window and 3c-3 fixed and re-read everything the reading found. What is left is mechanical and is a
+step of its own only because it must not be done before a re-take:
+
+1. **Delete `src/probe.ts` and `src-tauri/src/probe.rs`**, and restore the two hook lines in each of
+   `src/main.ts` and `src-tauri/src/main.rs` **by hand** — they are marked. `probe::register_with_probe`
+   calls `crate::register` and then replaces the handler, leaving `main.rs`'s own
+   `generate_handler![…]` untouched, which is why `wire_contract::registered_commands()` still
+   passes with the harness in the tree; restoring it is removing two lines, not reconstructing one.
+2. **Re-run every gate and check the numbers move the way removal predicts**: `npm run build` should
+   go **174 → 173** and `npm run check` **415 → 414**, both by exactly one, and `npm test` should
+   lose exactly the one `ipc-detail.test.ts` row `probe.ts` contributes. A different shape is a
+   different problem (`CLAUDE.md` §6).
+3. **Commit**, with `PROGRESS.md` updated in its own commit as every other step of this phase has
+   been. `docs/decisions/2c-4a-3c-{1,2}-*.md` and `2c-4a-3c-3-{notes,retake}.md` are all kept.
+
+**Nothing in `src/lib/` is temporary**, including `src/lib/components/reveal.ts` and its suite:
+those are 3c-3's fix for findings 10.3 and 10.4 and are production.
+
+**Two things step 3 hands on rather than closes**, both recorded rather than left to be rediscovered:
+
+- **`rawSave.ts`'s `keepEditing` still says *Keep editing* on the refused arm** of the mover, the
+  deleter and the duplicator — the same defect as finding 10.2, one arm along. Not fixed, because
+  `refusalChoices` carries no draft kind and **no window reading in this project has ever drawn that
+  arm**; fixing a sentence nobody has seen on the strength of a reading that did not see it is how
+  the previous round's fix became the next round's finding (`2c-4a-3c-3-notes.md` §2.2, §4.3).
+- **`browser.saveOutcome.reloadUnavailable`, `adoptDiskVersion`'s `alreadyThere` and `refused`, and
+  `moveAfterSnippetNoLongerShown` are unreachable from a window**, as a property of the screens
+  rather than of the launches (`2c-4a-3c-2-window-reading.md` §7.4, §11). They keep model-suite and
+  mounted evidence only, permanently, unless a later phase gives a conflict panel a control that can
+  move a projection generation.
+
+**What 2c-4a as a whole must still not do**, unchanged from the consult and carried into 2c-4b: no
+`saveAnyway`, no retry of the stale candidate, no automatic reload, no clearing of dirty state on
+conflict, **no cross-revision identification of "the same match"**, no YAML emitted from a
+projection, no diff, and **no control named or coded "keep my draft"** — `CLAUDE.md` §6 makes that
+absolute before 2c-4b.
+
+---
+
+**Phase 2c-4a step 3b (superseded by the above, kept for its rationale) is complete: all six write
+surfaces now draw a conflict panel.** The mover,
 the deleter and the duplicator declare `offersReload: true`, and their panels show the disk side
 through `SourceText`, a **retained operation summary** where the other three show authored text,
 all three revisions, the two-step *Load the version on disk* → *Close this and load it*, and the

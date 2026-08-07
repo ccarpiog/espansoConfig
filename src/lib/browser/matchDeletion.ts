@@ -783,7 +783,9 @@ export function reloadTheDiskVersion(
     // **A terminal step rather than the session unchanged**, which is the
     // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
     // no for a reason that asking again cannot change, so the control stops being
-    // offered and the panel says so. *Keep editing* writes NOT_RELOADING back.
+    // offered and the panel says so. The `keepEditing` choice writes
+    // NOT_RELOADING back; it is **labelled** *Leave this as it is* on this
+    // surface, because nothing here is being edited (2c-4a-3c's finding 10.2).
     return { ...session, reload: RELOAD_REFUSED };
   }
   return {
@@ -872,7 +874,7 @@ export interface MatchDeletionView {
    * reload is not offered again once a spend has been refused — asking again
    * could only be refused again — and a control that vanishes with nothing said
    * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
-   * and nothing was discarded; *Keep editing* resets the step.
+   * and nothing was discarded; the `keepEditing` choice resets the step.
    */
   readonly reloadUnavailable: boolean;
   /**

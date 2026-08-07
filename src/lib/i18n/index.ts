@@ -47,7 +47,11 @@ import {
   type ReprojectionRefusal
 } from '../browser/matchEditor';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
-import { rawEditorRefusalKey, type RawEditorRefusal } from '../browser/rawEditor';
+import {
+  rawEditorDiskRefusalKey,
+  rawEditorRefusalKey,
+  type RawEditorRefusal
+} from '../browser/rawEditor';
 import {
   rawSaveChoiceKey,
   rawSaveMessageKey,
@@ -60,6 +64,7 @@ import {
   conflictOperationKey,
   draftFieldStatusKey,
   referenceCopyOf,
+  reloadUnavailableKey,
   saveOutcomeMessageKey,
   type ConflictChoice,
   type ConflictDraftKind,
@@ -443,13 +448,21 @@ export function tRawSaveMessage(message: RawSaveMessage): string {
 } // End of function tRawSaveMessage()
 
 /**
- * Renders one thing the person may do about a refused raw save.
+ * Renders one thing the person may do about a **refused** save.
+ *
+ * **The draft kind travels with the choice, exactly as it does for
+ * {@link tConflictChoice}**, and the 2c-4a-3c review's Medium is why: the way out
+ * of a refusal said *Keep editing* on the mover, the deleter and the duplicator,
+ * where nothing is being edited — the duplicator's *ordinary* first outcome. It
+ * is the calling surface's own `CONFLICT_CAPABILITIES.draftKind`; nothing here
+ * can check that it is.
  *
  * @param choice - What the model offers.
+ * @param draftKind - What the calling surface's retained draft is.
  * @returns The translated label.
  */
-export function tRawSaveChoice(choice: RawSaveChoice): string {
-  return translate(locale.current, rawSaveChoiceKey(choice));
+export function tRawSaveChoice(choice: RawSaveChoice, draftKind: ConflictDraftKind): string {
+  return translate(locale.current, rawSaveChoiceKey(choice, draftKind));
 } // End of function tRawSaveChoice()
 
 /**
@@ -466,6 +479,22 @@ export function tRawSaveChoice(choice: RawSaveChoice): string {
 export function tRawEditorRefusal(refusal: RawEditorRefusal): string {
   return translate(locale.current, rawEditorRefusalKey(refusal));
 } // End of function tRawEditorRefusal()
+
+/**
+ * Renders why the version on disk will not be loaded into an open raw editor.
+ *
+ * The accessor over `rawEditorDiskRefusalKey`, and a **second** accessor over the
+ * same `RawEditorRefusal` rather than a parameter on the first one: a `scope`
+ * argument would make the door a caller's assertion, which is exactly the shape
+ * `saveOutcome.ts` refused for `describeRawSave`. 2c-4a-3c's finding 10.5 is why
+ * the two sentences are two sentences.
+ *
+ * @param refusal - Why the disk version will not be loaded.
+ * @returns The translated sentence.
+ */
+export function tRawEditorDiskRefusal(refusal: RawEditorRefusal): string {
+  return translate(locale.current, rawEditorDiskRefusalKey(refusal));
+} // End of function tRawEditorDiskRefusal()
 
 /**
  * Renders why one field of a snippet is shown rather than edited.
@@ -663,6 +692,26 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
 export function tConflictChoice(choice: ConflictChoice, draftKind: ConflictDraftKind): string {
   return translate(locale.current, conflictChoiceKey(choice, draftKind));
 } // End of function tConflictChoice()
+
+/**
+ * Renders why the reload control has gone from a conflict panel.
+ *
+ * The accessor over `reloadUnavailableKey`, and the **third** place this
+ * application chooses between an editing wording and an operation one — the
+ * orchestrator's finding at 2c-4a-3c-4. All three now branch in
+ * `../browser/draftKind`, so the sentence and the two labels beside it cannot
+ * drift apart.
+ *
+ * Six components drew this line as a bare key literal, which is legal only
+ * because there was one key; there are two now, and an accessor is how a code
+ * reaches a screen in this project.
+ *
+ * @param draftKind - What the calling surface's retained draft is.
+ * @returns The translated sentence.
+ */
+export function tReloadUnavailable(draftKind: ConflictDraftKind): string {
+  return translate(locale.current, reloadUnavailableKey(draftKind));
+} // End of function tReloadUnavailable()
 
 /**
  * Renders what an `operationChoice` surface's retained draft asked for.

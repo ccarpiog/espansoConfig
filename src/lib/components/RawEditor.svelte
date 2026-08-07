@@ -22,14 +22,16 @@
   import type { RawSaveAnswer } from '../browser/workspace.svelte';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { RawSaveChoice } from '../browser/rawSave';
-  import type { ConflictChoice } from '../browser/saveOutcome';
+  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import {
     t,
     tConflictChoice,
     tFindingCode,
     tPresentationNote,
+    tRawEditorDiskRefusal,
     tRawEditorRefusal,
     tRawSaveChoice,
+    tReloadUnavailable,
     tRawSaveMessage,
     tSaveOutcomeMessage,
     tSaveVerdict
@@ -41,6 +43,7 @@
     DocumentSummary
   } from '../ipc/types';
   import { copyReferenceText } from './clipboard';
+  import { revealOutcome } from './reveal';
   import SourceText from './SourceText.svelte';
 
   /*
@@ -193,6 +196,31 @@
   let copied = $state<'none' | 'copied' | 'failed'>('none');
   /** Whether leaving the editor is waiting on a confirmation. */
   let leaving = $state(false);
+
+  /** The outcome panel's own element, so it can be brought into view. */
+  let outcomePanel = $state<HTMLElement | null>(null);
+  /** The conflict arm's row of controls, which is the second step's target. */
+  let outcomeChoices = $state<HTMLElement | null>(null);
+
+  /*
+   * **The outcome panel is scrolled into view when it appears** — 2c-4a-3c's
+   * findings 10.3 and 10.4. The window reading measured every one of the six write
+   * surfaces putting its controls below a 728 px fold with `section.detail`'s
+   * `scrollTop` at `0` and nothing moving it; on the match editor the whole panel
+   * was below it, so the sentence *Nothing was written* was invisible in English
+   * and entirely absent from the screen in Spanish.
+   *
+   * The decision is `./reveal.ts`'s and the two `bind:this` targets are this
+   * file's. A `$derived` cue rather than the outcome object itself, so the effect
+   * re-runs when the *state* changes and not on every keystroke that leaves the
+   * same panel up.
+   */
+  const reveal = $derived(
+    outcomeReveal(view?.outcome?.kind ?? null, view?.awaitingReloadConfirmation ?? false)
+  );
+  $effect(() => {
+    revealOutcome(reveal, outcomePanel, outcomeChoices);
+  });
 
   /**
    * Sends the draft, optionally accepting the findings on screen first.
@@ -432,7 +460,7 @@
           {t('browser.rawEditor.discard')}
         </button>
         <button type="button" onclick={() => (leaving = false)}>
-          {tRawSaveChoice('keepEditing')}
+          {tRawSaveChoice('keepEditing', CONFLICT_CAPABILITIES.draftKind)}
         </button>
       </p>
     </div>
@@ -476,7 +504,7 @@
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
-    <div class="panel" role="status">
+    <div class="panel" role="status" bind:this={outcomePanel}>
       {#each view.messages as message, index (index)}
         <p>{tSaveOutcomeMessage(message)}</p>
       {/each}
@@ -511,7 +539,7 @@
         <p class="choices">
           {#each view.refusalChoices as choice (choice)}
             <button type="button" onclick={() => refusalAction(choice)}>
-              {tRawSaveChoice(choice)}
+              {tRawSaveChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -535,15 +563,23 @@
           <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
         {/if}
 
+        <!-- **The reload's own sentence, and not the opening refusal's** — 2c-4a-3c's
+             finding 10.5. Both come from one `rawEditorRefusal` call over two
+             different texts, and until this step both drew the same string, which
+             ends *"it will not open this file for editing"*: the reason for a
+             disabled **reload** confirmation, written about a **different** control,
+             beside an editor that is already open over the person's own draft.
+             `view.diskRefusal` was always a separate field from the opening refusal,
+             so the second sentence cost a second accessor and nothing else. -->
         {#if view.diskRefusal !== null}
-          <p class="marker warn">{tRawEditorRefusal(view.diskRefusal)}</p>
+          <p class="marker warn">{tRawEditorDiskRefusal(view.diskRefusal)}</p>
         {/if}
 
         <!-- A control that has just gone, with the reason in its place: the reload
              is not offered again once the window has refused a spend, because
              asking again could only be refused again. -->
         {#if view.reloadUnavailable}
-          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         {#if copied === 'copied'}
@@ -552,7 +588,7 @@
           <p class="kind">{t('browser.rawEditor.draftCopyFailed')}</p>
         {/if}
 
-        <p class="choices">
+        <p class="choices" bind:this={outcomeChoices}>
           {#each view.conflictChoices as choice (choice)}
             <button
               type="button"

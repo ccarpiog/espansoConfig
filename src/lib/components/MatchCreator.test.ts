@@ -32,8 +32,10 @@
  * helpers here do.
  */
 
+import { rawSaveChoiceKey } from '../browser/rawSave';
 import {
   conflictChoiceKey,
+  reloadUnavailableKey,
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
@@ -935,7 +937,10 @@ describe('the mounted new-snippet form', () => {
     control(form.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
     flushSync();
 
-    expect(says(form.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    // The authored-text half of 3c-4's split: this surface's sentence is the
+    // one that was always here, and the operation wording is not drawn.
+    expect(says(form.target, reloadUnavailableKey('authoredText'))).toBe(true);
+    expect(says(form.target, reloadUnavailableKey('operationChoice'))).toBe(false);
     expect(button(form.target, conflictChoiceKey('confirmReload', 'authoredText'))).toBeNull();
     expect(button(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText'))).toBeNull();
     expect(button(form.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
@@ -1008,4 +1013,165 @@ describe('the mounted new-snippet form', () => {
       }
     }
   }); // End of the "reference copy" case
+
+  it('keeps the authored-text way out saying “Keep editing”', async () => {
+    // **The other side of 2c-4a-3c's finding 10.2.** `conflictChoiceKey` branches
+    // `keepEditing` on the draft kind now, and this form drafts authored text: the
+    // person really is editing, so its label must **not** have moved with the three
+    // operation-choice panels'.
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(button(form.target, 'browser.rawSave.choice.keepEditing')).not.toBeNull();
+    expect(button(form.target, 'browser.saveOutcome.choice.keepOperation')).toBeNull();
+    form.stop();
+  }); // End of the "authored-text way out" case
+
+  it('says the snippet was drafted against a revision, never written to one', async () => {
+    // **2c-4a-3c's finding 10.1, on the screen that produced it.** The Spanish line
+    // read *"Este fragmento **se ha escrito** sobre la versión …"* four lines under
+    // *"No se ha escrito nada"*, on the one panel whose entire job is to make that
+    // unambiguous. `dictionaries.test.ts` holds the invariant over both locales'
+    // whole `revisionExpected` family; this case is the one that says the two
+    // sentences really are drawn on the same panel, which is what made the
+    // contradiction visible in the first place.
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    const panel = form.target.querySelector('[role="status"]');
+    expect(panel).not.toBeNull();
+    const drawn = panel?.textContent ?? '';
+    expect(drawn).toContain(DICTIONARIES.en['browser.saveOutcome.nothingWasWritten']);
+    expect(drawn).toContain(t('browser.matchCreation.revisionExpected', { revision: BASE }));
+    form.stop();
+  }); // End of the "drafted against, never written to" case
 }); // End of the "mounted new-snippet form" suite
+
+describe('the new-snippet form’s refused arm names what this surface drafts', () => {
+  /*
+   * **The 2c-4a-3c review's Medium, and the arm no window transcript had ever
+   * drawn.** `rawSaveChoiceKey` returned `browser.rawSave.choice.keepEditing`
+   * unconditionally, so a refusal carrying findings offered *Keep editing* on the
+   * mover, the deleter and the duplicator, where nobody typed anything. 3c-3
+   * deferred this on the grounds that no reading had seen it; the review's answer
+   * is that absence from a transcript is a gap in evidence and not evidence that
+   * a reachable label is correct.
+   */
+
+  it('labels the way out by the draft kind, and the same control still dismisses', async () => {
+    const form = mountCreator([{ result: REFUSED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(button(form.target, rawSaveChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
+    expect(button(form.target, rawSaveChoiceKey('keepEditing', 'operationChoice'))).toBeNull();
+
+    // Nothing else moved: it is the same choice with the truthful label on it.
+    control(form.target, rawSaveChoiceKey('keepEditing', 'authoredText')).click();
+    flushSync();
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(form.calls).toHaveLength(1);
+    form.stop();
+  }); // End of the "refused arm names what this surface drafts" case
+}); // End of the "new-snippet form's refused arm" suite
+
+describe('the new-snippet form’s outcome comes into view', () => {
+  /*
+   * **2c-4a-3c's findings 10.3 and 10.4, from this component's own markup.** This
+   * form is one of the two surfaces where the *confirmation* control was pushed
+   * back out of the viewport by the very sentence that justifies it — y = 771 in
+   * English and y = 788 in Spanish, in a 728 px window, after the pane had already
+   * been scrolled to its end. That is why the second step has a target of its own.
+   *
+   * The decision is `./reveal.ts`'s and has its own suite; what only a mounted case
+   * can say is that this file **binds** the two elements and **runs** the effect.
+   */
+
+  /** Every `scrollIntoView` the mounted component asked for, in order. */
+  const scrolled: { readonly target: Element; readonly block: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value(this: Element, options?: ScrollIntoViewOptions) {
+        scrolled.push({ target: this, block: options?.block });
+      }
+    });
+  });
+
+  afterEach(() => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  /**
+   * A form showing a conflict over a filled-in draft.
+   *
+   * @returns The mounted form.
+   */
+  async function conflicted(): Promise<ReturnType<typeof mountCreator>> {
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    return form;
+  } // End of function conflicted()
+
+  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+    const form = await conflicted();
+    const outcome = form.target.querySelector('[role="status"]');
+    expect(outcome).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(outcome);
+    expect(scrolled[0]?.block).toBe('start');
+    form.stop();
+  });
+
+  it('scrolls the controls into view at the reload’s second step', async () => {
+    const form = await conflicted();
+    scrolled.length = 0;
+    control(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+    flushSync();
+
+    const choices = form.target.querySelector('[role="status"] .choices');
+    expect(choices).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(choices);
+    expect(scrolled[0]?.block).toBe('end');
+    form.stop();
+  });
+
+  it('brings the replacing panel into view when one arm succeeds another', async () => {
+    // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
+    // `beginSave` retains the refusal while the retry is in flight, so `saved`
+    // replaces `refused` over the **same** bound element. While all three arms
+    // answered one `'panel'` cue the effect's dependency did not change, so it need
+    // not run and the new panel's first line was never brought into view. The spy
+    // is cleared before the second result, so what is asserted is a *new* reveal.
+    const form = mountCreator([{ result: REFUSED }, { result: COMMITTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    const refusedPanel = form.target.querySelector('[role="status"]');
+
+    scrolled.length = 0;
+    control(form.target, 'browser.rawSave.choice.saveAnyway').click();
+    await settle();
+
+    expect(says(form.target, 'browser.saveOutcome.fileWritten')).toBe(true);
+    const savedPanel = form.target.querySelector('[role="status"]');
+    expect(savedPanel).toBe(refusedPanel);
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(savedPanel);
+    expect(scrolled[0]?.block).toBe('start');
+    form.stop();
+  }); // End of the "arm replacing an arm" case
+}); // End of the "new-snippet form's outcome comes into view" suite

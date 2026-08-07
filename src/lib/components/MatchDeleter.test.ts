@@ -31,8 +31,10 @@
  * helpers here do.
  */
 
+import { rawSaveChoiceKey } from '../browser/rawSave';
 import {
   conflictChoiceKey,
+  reloadUnavailableKey,
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
@@ -594,7 +596,11 @@ describe('the deletion panel’s conflict', () => {
     control(panel.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
     flushSync();
 
-    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    // **The orchestrator's finding at 3c-4, from this screen.** The sentence a
+    // withdrawn reload leaves behind used to end *Keep editing* on all six
+    // surfaces; this one drafts an operation and edits nothing.
+    expect(says(panel.target, reloadUnavailableKey('operationChoice'))).toBe(true);
+    expect(says(panel.target, reloadUnavailableKey('authoredText'))).toBe(false);
     expect(button(panel.target, conflictChoiceKey('confirmReload', 'operationChoice'))).toBeNull();
     expect(
       button(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
@@ -606,11 +612,147 @@ describe('the deletion panel’s conflict', () => {
     // And *Keep editing* gives the panel back, with the deletion still askable.
     control(panel.target, conflictChoiceKey('keepEditing', 'operationChoice')).click();
     flushSync();
-    expect(says(panel.target, 'browser.saveOutcome.reloadUnavailable')).toBe(false);
+    expect(says(panel.target, reloadUnavailableKey('operationChoice'))).toBe(false);
     expect(button(panel.target, 'browser.matchDeletion.request')).not.toBeNull();
     panel.stop();
   }); // End of the "refused reload stops being offered" case
+
+  it('offers a way out that does not claim anything is being edited', async () => {
+    // **2c-4a-3c's finding 10.2, on the screen that produced it.** This panel is
+    // about a deletion: nobody typed anything and nothing is being edited, so the
+    // raw editor's *Keep editing* named an activity the person never started.
+    // `conflictChoiceKey` branches on the draft kind now, and this is the branch
+    // seen through the markup rather than through the model.
+    const panel = await conflicted();
+    expect(button(panel.target, 'browser.saveOutcome.choice.keepOperation')).not.toBeNull();
+    expect(button(panel.target, 'browser.rawSave.choice.keepEditing')).toBeNull();
+    // And it is the same control: pressing it still dismisses the panel.
+    control(panel.target, 'browser.saveOutcome.choice.keepOperation').click();
+    flushSync();
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(button(panel.target, 'browser.matchDeletion.request')).not.toBeNull();
+    panel.stop();
+  }); // End of the "way out that claims no editing" case
 }); // End of the "deletion panel's conflict" suite
+
+describe('the deletion panel’s refused arm names what this surface drafts', () => {
+  /*
+   * **The 2c-4a-3c review's Medium, and the arm no window transcript had ever
+   * drawn.** `rawSaveChoiceKey` returned `browser.rawSave.choice.keepEditing`
+   * unconditionally, so a refusal carrying findings offered *Keep editing* on the
+   * mover, the deleter and the duplicator, where nobody typed anything. 3c-3
+   * deferred this on the grounds that no reading had seen it; the review's answer
+   * is that absence from a transcript is a gap in evidence and not evidence that
+   * a reachable label is correct.
+   */
+
+  it('labels the way out by the draft kind, and the same control still dismisses', async () => {
+    const panel = mountDeleter([{ result: REFUSED }]);
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(button(panel.target, rawSaveChoiceKey('keepEditing', 'operationChoice'))).not.toBeNull();
+    expect(button(panel.target, rawSaveChoiceKey('keepEditing', 'authoredText'))).toBeNull();
+
+    // Nothing else moved: it is the same choice with the truthful label on it.
+    control(panel.target, rawSaveChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "refused arm names what this surface drafts" case
+}); // End of the "deletion panel's refused arm" suite
+
+describe('the deletion panel’s outcome comes into view', () => {
+  /*
+   * **2c-4a-3c's findings 10.3 and 10.4, from this component's own markup.** The
+   * decision is `./reveal.ts`'s and has its own suite; what only a mounted case can
+   * say is that this file **binds** the two elements and **runs** the effect — both
+   * of which can be deleted silently, and neither of which any model test can see.
+   */
+
+  /** Every `scrollIntoView` the mounted component asked for, in order. */
+  const scrolled: { readonly target: Element; readonly block: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value(this: Element, options?: ScrollIntoViewOptions) {
+        scrolled.push({ target: this, block: options?.block });
+      }
+    });
+  });
+
+  afterEach(() => {
+    // jsdom leaves the property absent, so it is deleted rather than restored:
+    // `reveal.test.ts` asserts that absence as the platform condition it guards.
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+    const panel = await conflicted();
+    const outcome = panel.target.querySelector('[role="status"]');
+    expect(outcome).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(outcome);
+    // `start`: the first line is *Nothing was written*, and that is the sentence
+    // the window reading found a person could not see.
+    expect(scrolled[0]?.block).toBe('start');
+    panel.stop();
+  });
+
+  it('scrolls the controls into view at the reload’s second step', async () => {
+    const panel = await conflicted();
+    scrolled.length = 0;
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+
+    const choices = panel.target.querySelector('[role="status"] .choices');
+    expect(choices).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(choices);
+    expect(scrolled[0]?.block).toBe('end');
+    panel.stop();
+  });
+
+  it('brings the replacing panel into view when one arm succeeds another', async () => {
+    // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
+    // This surface reaches it by a route of its own: *Save anyway* records consent
+    // and **re-raises the confirmation** — `confirmDelete` consumed the pending one
+    // — so the refusal panel stays on screen and it is the second *Delete it*
+    // that replaces `refused` with `saved` over the **same** bound element. While
+    // all three arms answered one `'panel'` cue the effect's dependency did not
+    // change, so it need not run and the new panel's first line was never brought
+    // into view. The spy is cleared before the second result, so what is asserted
+    // is a *new* reveal.
+    const panel = mountDeleter([{ result: REFUSED }, { result: COMMITTED }]);
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+
+    control(panel.target, 'browser.rawSave.choice.saveAnyway').click();
+    flushSync();
+    // Still the refusal, and the question with it: nothing has been sent again.
+    expect(says(panel.target, 'browser.matchDeletion.question')).toBe(true);
+    const refusedPanel = panel.target.querySelector('[role="status"]');
+    expect(refusedPanel).not.toBeNull();
+
+    scrolled.length = 0;
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+
+    expect(says(panel.target, 'browser.saveOutcome.fileWritten')).toBe(true);
+    const savedPanel = panel.target.querySelector('[role="status"]');
+    expect(savedPanel).toBe(refusedPanel);
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(savedPanel);
+    expect(scrolled[0]?.block).toBe('start');
+    panel.stop();
+  }); // End of the "arm replacing an arm" case
+}); // End of the "deletion panel's outcome comes into view" suite
 
 /** The workspace summary the state below is opened over; nothing reads it. */
 const SUMMARY: WorkspaceSummary = {

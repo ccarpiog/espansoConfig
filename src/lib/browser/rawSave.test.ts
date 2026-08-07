@@ -27,6 +27,7 @@ import { DICTIONARIES } from '../i18n/dictionaries';
 import { LOCALES } from '../i18n/locale';
 import { placeholdersOf } from '../i18n/dictionaries';
 import type { Finding, FindingCode, RefusedResult } from '../ipc/types';
+import type { ConflictDraftKind } from './draftKind';
 import {
   describeRawSave,
   parseRejectionOf,
@@ -226,6 +227,9 @@ describe('the sentences behind the model', () => {
   /** Every choice the model can offer. */
   const CHOICES: readonly RawSaveChoice[] = ['saveAnyway', 'keepEditing'];
 
+  /** Both draft kinds, so nothing below is checked on one surface's half only. */
+  const KINDS: readonly ConflictDraftKind[] = ['authoredText', 'operationChoice'];
+
   /** The key each message must map to, written out rather than derived. */
   const EXPECTED_KEYS: ReadonlyMap<RawSaveMessage['kind'], string> = new Map([
     ['replacesWholeDocument', 'browser.rawSave.replacesWholeDocument'],
@@ -238,9 +242,36 @@ describe('the sentences behind the model', () => {
     for (const message of MESSAGES) {
       expect(rawSaveMessageKey(message), message.kind).toBe(EXPECTED_KEYS.get(message.kind));
     }
-    expect(rawSaveChoiceKey('saveAnyway')).toBe('browser.rawSave.choice.saveAnyway');
-    expect(rawSaveChoiceKey('keepEditing')).toBe('browser.rawSave.choice.keepEditing');
+    // *Save anyway* is a claim about the save, so it reads the same on all six
+    // surfaces and does not branch.
+    for (const kind of KINDS) {
+      expect(rawSaveChoiceKey('saveAnyway', kind), kind).toBe('browser.rawSave.choice.saveAnyway');
+    }
+    // **The 2c-4a-3c review's Medium.** The way out of a refusal named an
+    // activity nobody started on the mover, the deleter and the duplicator.
+    expect(rawSaveChoiceKey('keepEditing', 'authoredText')).toBe(
+      'browser.rawSave.choice.keepEditing'
+    );
+    expect(rawSaveChoiceKey('keepEditing', 'operationChoice')).toBe(
+      'browser.saveOutcome.choice.keepOperation'
+    );
   });
+
+  it('labels a refusal by what the surface drafts, and never as editing', () => {
+    // A word check rather than a meaning check, and the suite says so: what it
+    // holds is that the two keys are different, that each kind reaches its own,
+    // and that the operation label carries no word from *editing* — with the
+    // authored-text label asserted to carry one, so the check is falsifiable
+    // rather than vacuous. Reverting `rawSaveChoiceKey`'s branch fails it.
+    const editing = { en: /edit/iu, es: /edit/iu } as const;
+    for (const locale of LOCALES) {
+      const authored = DICTIONARIES[locale][rawSaveChoiceKey('keepEditing', 'authoredText')];
+      const operation = DICTIONARIES[locale][rawSaveChoiceKey('keepEditing', 'operationChoice')];
+      expect(editing[locale].test(authored), `${locale}:authoredText`).toBe(true);
+      expect(editing[locale].test(operation), `${locale}:operationChoice`).toBe(false);
+      expect(operation, locale).not.toBe(authored);
+    }
+  }); // End of the "no editing label on an operation surface" case
 
   it.each(LOCALES)('all read as a sentence in %s', (locale) => {
     for (const message of MESSAGES) {
@@ -251,14 +282,22 @@ describe('the sentences behind the model', () => {
     // A choice is a button label rather than a sentence, so it is checked the
     // other way round: short, and never punctuated like a sentence.
     for (const choice of CHOICES) {
-      const value = DICTIONARIES[locale][rawSaveChoiceKey(choice)];
-      expect(value.trim(), `${locale}:${choice}`).not.toBe('');
-      expect(value.trim().endsWith('.'), `${locale}:${choice}`).toBe(false);
+      // Both kinds, so an operation surface's label is held to the same shape.
+      for (const kind of KINDS) {
+        const value = DICTIONARIES[locale][rawSaveChoiceKey(choice, kind)];
+        expect(value.trim(), `${locale}:${choice}:${kind}`).not.toBe('');
+        expect(value.trim().endsWith('.'), `${locale}:${choice}:${kind}`).toBe(false);
+      } // End of the loop over the two draft kinds
     }
   });
 
   it('are translated, and no two of them read the same', () => {
-    const keys = [...MESSAGES.map(rawSaveMessageKey), ...CHOICES.map(rawSaveChoiceKey)];
+    const keys = [
+      ...MESSAGES.map(rawSaveMessageKey),
+      // `saveAnyway` gives one key for both kinds, so the set is deduplicated
+      // before it is counted.
+      ...new Set(CHOICES.flatMap((choice) => KINDS.map((kind) => rawSaveChoiceKey(choice, kind))))
+    ];
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) {
       expect(DICTIONARIES.es[key], key).not.toBe(DICTIONARIES.en[key]);

@@ -39,7 +39,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sealWholeDocumentSave } from '../browser/invalidation';
 import type { RawSaveAnswer } from '../browser/workspace.svelte';
 import type { RawSaveReload } from '../ipc/commands';
-import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
+import { rawSaveChoiceKey } from '../browser/rawSave';
+import {
+  reloadUnavailableKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
 import type { RoundTripText } from '../browser/rawEditor';
 import { makeDocument, makeSummary } from '../browser/fixtures';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
@@ -658,8 +663,15 @@ describe('the mounted raw editor', () => {
   it('will not load a disk version whose line endings it cannot keep', async () => {
     // The one other way a text can enter a session. The disk version is still
     // *shown* — `SourceText` names a carriage return rather than dropping it — so a
-    // control that silently did nothing would read as a bug; it is disabled, with
-    // the same sentence beside it.
+    // control that silently did nothing would read as a bug; it is disabled, with a
+    // sentence beside it.
+    //
+    // **That sentence is the reload's own since 2c-4a-3c's finding 10.5.** It used
+    // to be `browser.rawEditor.lineEndingsNotPreserved`, which ends *"it will not
+    // open this file for editing"* — the reason for a disabled **reload**
+    // confirmation, carried by a sentence about a **different** control, on a panel
+    // where the editor is open and the person's own draft is in the box. The window
+    // reading printed the two beside each other (L29).
     const editor = mountEditor([{ result: conflictWith(CRLF) }]);
     type(editor.target, `${ORIGINAL}# one more line\n`);
     control(editor.target, 'browser.rawEditor.save').click();
@@ -668,7 +680,11 @@ describe('the mounted raw editor', () => {
     control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
     flushSync();
 
-    expect(says(editor.target, 'browser.rawEditor.lineEndingsNotPreserved')).toBe(true);
+    expect(says(editor.target, 'browser.rawEditor.diskLineEndingsNotPreserved')).toBe(true);
+    // And the opening refusal is **not** what is drawn here. Both come from one
+    // `rawEditorRefusal` call over two different texts, so a fix that pointed the
+    // new accessor back at the old key would pass every other assertion in this file.
+    expect(says(editor.target, 'browser.rawEditor.lineEndingsNotPreserved')).toBe(false);
     expect(control(editor.target, 'browser.saveOutcome.choice.confirmReload').disabled).toBe(true);
     // And the draft is untouched: nothing was loaded over it.
     expect(textArea(editor.target).value).toBe(`${ORIGINAL}# one more line\n`);
@@ -857,7 +873,10 @@ describe('the mounted raw editor', () => {
     control(editor.target, 'browser.saveOutcome.choice.confirmReload').click();
     flushSync();
 
-    expect(says(editor.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    // The authored-text half of 3c-4's split: this surface's sentence is the
+    // one that was always here, and the operation wording is not drawn.
+    expect(says(editor.target, reloadUnavailableKey('authoredText'))).toBe(true);
+    expect(says(editor.target, reloadUnavailableKey('operationChoice'))).toBe(false);
     expect(button(editor.target, 'browser.saveOutcome.choice.confirmReload')).toBeNull();
     expect(button(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion')).toBeNull();
     expect(button(editor.target, 'browser.saveOutcome.choice.copyDraft')).not.toBeNull();
@@ -886,4 +905,166 @@ describe('the mounted raw editor', () => {
     expect(dirty.closed()).toBe(1);
     dirty.stop();
   }); // End of the "leaving" case
+
+  it('keeps the authored-text way out saying “Keep editing”', async () => {
+    // **The other side of 2c-4a-3c's finding 10.2.** `conflictChoiceKey` branches
+    // `keepEditing` on the draft kind now, and this editor drafts authored text —
+    // it is the surface the label was borrowed *from* — so its own must not have
+    // moved with the three operation-choice panels'.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    expect(button(editor.target, 'browser.rawSave.choice.keepEditing')).not.toBeNull();
+    expect(button(editor.target, 'browser.saveOutcome.choice.keepOperation')).toBeNull();
+    editor.stop();
+  }); // End of the "authored-text way out" case
 }); // End of the "mounted raw editor" suite
+
+describe('the raw editor’s refused arm names what this surface drafts', () => {
+  /*
+   * **The 2c-4a-3c review's Medium, and the arm no window transcript had ever
+   * drawn.** `rawSaveChoiceKey` returned `browser.rawSave.choice.keepEditing`
+   * unconditionally, so a refusal carrying findings offered *Keep editing* on the
+   * mover, the deleter and the duplicator, where nobody typed anything. 3c-3
+   * deferred this on the grounds that no reading had seen it; the review's answer
+   * is that absence from a transcript is a gap in evidence and not evidence that
+   * a reachable label is correct.
+   */
+
+  it('labels the way out by the draft kind, and the same control still dismisses', async () => {
+    const editor = mountEditor([{ result: REFUSED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(button(editor.target, rawSaveChoiceKey('keepEditing', 'authoredText'))).not.toBeNull();
+    expect(button(editor.target, rawSaveChoiceKey('keepEditing', 'operationChoice'))).toBeNull();
+
+    // Nothing else moved: it is the same choice with the truthful label on it.
+    control(editor.target, rawSaveChoiceKey('keepEditing', 'authoredText')).click();
+    flushSync();
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(editor.calls).toHaveLength(1);
+    editor.stop();
+  }); // End of the "refused arm names what this surface drafts" case
+}); // End of the "raw editor's refused arm" suite
+
+describe('the raw editor’s outcome comes into view', () => {
+  /*
+   * **2c-4a-3c's findings 10.3 and 10.4, from this component's own markup.** This
+   * surface's panel opened highest of the three authored-text ones (y = 369) and
+   * its controls were still below a 728 px fold at y = 916, with `section.detail`'s
+   * `scrollTop` at `0` and nothing moving it.
+   *
+   * The decision is `./reveal.ts`'s and has its own suite; what only a mounted case
+   * can say is that this file **binds** the two elements and **runs** the effect —
+   * both of which can be deleted silently, and neither of which any model test can
+   * see.
+   */
+
+  /** Every `scrollIntoView` the mounted component asked for, in order. */
+  const scrolled: { readonly target: Element; readonly block: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value(this: Element, options?: ScrollIntoViewOptions) {
+        scrolled.push({ target: this, block: options?.block });
+      }
+    });
+  });
+
+  afterEach(() => {
+    // jsdom leaves the property absent, so it is deleted rather than restored:
+    // `reveal.test.ts` asserts that absence as the platform condition it guards.
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  /**
+   * An editor showing a conflict over an edited draft.
+   *
+   * @returns The mounted editor.
+   */
+  async function conflicted(): Promise<ReturnType<typeof mountEditor>> {
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+    return editor;
+  } // End of function conflicted()
+
+  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+    const editor = await conflicted();
+    const outcome = editor.target.querySelector('[role="status"]');
+    expect(outcome).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(outcome);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  });
+
+  it('scrolls the controls into view at the reload’s second step', async () => {
+    const editor = await conflicted();
+    scrolled.length = 0;
+    control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
+    flushSync();
+
+    const choices = editor.target.querySelector('[role="status"] .choices');
+    expect(choices).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(choices);
+    expect(scrolled[0]?.block).toBe('end');
+    editor.stop();
+  });
+
+  it('brings a committed save’s panel into view too', async () => {
+    // **Not a conflict, and deliberately included.** `2c-3c-3-window-reading.md`
+    // section 10.2 recorded the same class as a Low for the *committed* panel, and
+    // `outcomeReveal` answers `panel` for every arm rather than for the conflict
+    // alone — so the earlier Low is closed by the same change, and a later edit
+    // that narrowed the reveal to conflicts would fail here.
+    const editor = mountEditor([{ result: COMMITTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    const outcome = editor.target.querySelector('[role="status"]');
+    expect(outcome).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(outcome);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  });
+
+  it('brings the replacing panel into view when one arm succeeds another', async () => {
+    // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
+    // `beginSave` retains the refusal while the retry is in flight, so `saved`
+    // replaces `refused` over the **same** bound element. While all three arms
+    // answered one `'panel'` cue the effect's dependency did not change, so it need
+    // not run and the new panel's first line was never brought into view. The spy
+    // is cleared before the second result, so what is asserted is a *new* reveal.
+    const editor = mountEditor([{ result: REFUSED }, { result: COMMITTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    const refusedPanel = editor.target.querySelector('[role="status"]');
+
+    scrolled.length = 0;
+    control(editor.target, 'browser.rawSave.choice.saveAnyway').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.fileWritten')).toBe(true);
+    const savedPanel = editor.target.querySelector('[role="status"]');
+    expect(savedPanel).toBe(refusedPanel);
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(savedPanel);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  }); // End of the "arm replacing an arm" case
+}); // End of the "raw editor's outcome comes into view" suite

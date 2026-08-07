@@ -25,10 +25,11 @@
   } from '../browser/matchEditor';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { MatchBuffers } from '../browser/matchEditor';
-  import type { ConflictChoice } from '../browser/saveOutcome';
+  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { copyReferenceText } from './clipboard';
+  import { revealOutcome } from './reveal';
   import {
     t,
     tConflictChoice,
@@ -44,6 +45,7 @@
     tOptionGroup,
     tPresentationNote,
     tRawSaveChoice,
+    tReloadUnavailable,
     tReprojectionRefusal,
     tSaveError,
     tSaveOutcomeMessage,
@@ -267,6 +269,31 @@
 
   /** What became of the last *Copy my text*, so the person is told either way. */
   let copied = $state<'none' | 'copied' | 'failed'>('none');
+
+  /** The outcome panel's own element, so it can be brought into view. */
+  let outcomePanel = $state<HTMLElement | null>(null);
+  /** The conflict arm's row of controls, which is the second step's target. */
+  let outcomeChoices = $state<HTMLElement | null>(null);
+
+  /*
+   * **The outcome panel is scrolled into view when it appears** — 2c-4a-3c's
+   * findings 10.3 and 10.4, and **this surface is where 10.3 was a Medium rather
+   * than a Low**. The window reading measured this panel's top at y = 720 in
+   * English and y = 771 in Spanish in a 728 px viewport, 1 044 px tall, with
+   * `section.detail`'s `scrollTop` at `0` and nothing moving it — so a person who
+   * pressed *Save this snippet* and hit a conflict saw eight pixels of it in
+   * English and none of it at all in Spanish, and the editor above was unchanged in
+   * size and position across the save, so nothing in the visible region marked that
+   * anything had happened.
+   *
+   * The decision is `./reveal.ts`'s and the two `bind:this` targets are this file's.
+   */
+  const reveal = $derived(
+    outcomeReveal(view.outcome?.kind ?? null, view.awaitingReloadConfirmation)
+  );
+  $effect(() => {
+    revealOutcome(reveal, outcomePanel, outcomeChoices);
+  });
 
   /**
    * The projection this editor would re-seed from, or `null`.
@@ -562,7 +589,7 @@
           {t('browser.matchEditor.discard')}
         </button>
         <button type="button" onclick={() => (leaving = false)}>
-          {tRawSaveChoice('keepEditing')}
+          {tRawSaveChoice('keepEditing', CONFLICT_CAPABILITIES.draftKind)}
         </button>
       </p>
     </div>
@@ -723,7 +750,7 @@
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
-    <div class="panel" role="status">
+    <div class="panel" role="status" bind:this={outcomePanel}>
       {#each view.messages as message, index (index)}
         <p>{tSaveOutcomeMessage(message)}</p>
       {/each}
@@ -780,7 +807,7 @@
         <p class="choices">
           {#each view.refusalChoices as choice (choice)}
             <button type="button" onclick={() => refusalAction(choice)}>
-              {tRawSaveChoice(choice)}
+              {tRawSaveChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
             </button>
           {/each}
         </p>
@@ -835,7 +862,7 @@
              is not offered again once the window has refused a spend, because
              asking again could only be refused again. -->
         {#if view.reloadUnavailable}
-          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
@@ -845,7 +872,7 @@
           <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
         {/if}
 
-        <p class="choices">
+        <p class="choices" bind:this={outcomeChoices}>
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
               {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
