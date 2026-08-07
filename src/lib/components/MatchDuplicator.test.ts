@@ -251,6 +251,7 @@ const DISK_TEXT_MARKER = 'theirs';
 /** A duplicate the file had moved on under. */
 const CONFLICTED: SaveResult = {
   outcome: 'conflict',
+  reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,

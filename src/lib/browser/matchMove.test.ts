@@ -263,6 +263,7 @@ const REFUSED: SaveResult = {
  */
 const CONFLICT: ConflictResult = {
   outcome: 'conflict',
+  reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,

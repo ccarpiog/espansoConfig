@@ -1779,6 +1779,7 @@ describe('moving a snippet', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
@@ -1853,6 +1854,7 @@ describe('moving a snippet', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
@@ -2515,6 +2517,7 @@ describe('duplicating a snippet', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
@@ -3590,6 +3593,7 @@ describe('saving one snippet’s fields', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
@@ -3998,6 +4002,7 @@ describe("replacing a file's whole text", () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
@@ -4274,6 +4279,7 @@ describe("replacing a file's whole text", () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
@@ -4742,6 +4748,7 @@ describe('creating a snippet', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-b',
         disk_revision: 'rev-b',
@@ -5088,6 +5095,7 @@ describe('deleting a snippet', () => {
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
@@ -5319,6 +5327,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     ok: true,
     value: {
       outcome: 'conflict',
+      reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
       expected: 'rev-a',
       found: 'rev-c',
       disk_revision: 'rev-c',
@@ -5560,6 +5569,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',
@@ -5580,6 +5590,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       ok: true,
       value: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'rev-a',
         found: 'rev-c',
         disk_revision: 'rev-c',

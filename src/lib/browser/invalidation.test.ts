@@ -75,6 +75,7 @@ function saved(committed: boolean): SavedResult {
 /** A save the file had moved on under. */
 const CONFLICT: ConflictResult = {
   outcome: 'conflict',
+  reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,

@@ -178,6 +178,20 @@ impl CodeEnum {
 /// made the deletion a build requirement rather than a note in a decision
 /// record — the exhaustiveness checks above would have passed with the exclusion
 /// left standing and the thirty-two sentences unwritten.
+///
+/// **Three were added by Phase 2c-4b-1**, and each by the route the table's own
+/// rule predicts. `ReapplyResolution` and `ReapplyPlacement` are the two halves
+/// of `SaveResult::Conflict`'s new evidence operand — the operation's own item
+/// and the item it is placed after — and `ReapplyRefusal` is what either one's
+/// refusing arm carries, so all three cross the boundary the moment a conflict
+/// does. `ReapplyPlacement` arrived at the review round, when a move's `after`
+/// anchor stopped being answered by the subject's enum: two slots that answer two
+/// questions may not share one set of sentences, because *"this change brings its
+/// own snippet"* and *"this change is not placed after a named one"* are two
+/// facts. None of the three has a renderer yet — 2c-4b-3 is what draws them — and
+/// that is deliberately not a reason to withhold their strings: *a code with no
+/// string is worse than a code with no caller*, which is the rule this file has
+/// applied since Phase 1b-2b.
 const CODE_ENUMS: &[CodeEnum] = &[
     CodeEnum {
         source: "crates/espansoconfig-core/src/model/diagnostic.rs",
@@ -335,6 +349,18 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/patch/edit.rs",
         name: "PresentationNote",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/reconcile.rs",
+        name: "ReapplyResolution",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/reconcile.rs",
+        name: "ReapplyRefusal",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/reconcile.rs",
+        name: "ReapplyPlacement",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -384,6 +410,9 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("saveResult", 3),
     ("draftError", 32),
     ("presentationNote", 2),
+    ("reapplyResolution", 4),
+    ("reapplyRefusal", 9),
+    ("reapplyPlacement", 3),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.

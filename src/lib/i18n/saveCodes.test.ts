@@ -169,6 +169,7 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
       'SaveResult.conflict',
       describeSaveResult(locale, {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'a'.repeat(64),
         found: 'b'.repeat(64),
         disk_revision: 'b'.repeat(64),

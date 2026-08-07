@@ -95,6 +95,9 @@ import type {
   NotReencodable,
   PathError,
   PresentationNote,
+  ReapplyPlacement,
+  ReapplyRefusal,
+  ReapplyResolution,
   RotationOutcome,
   SaveError,
   SaveResult,
@@ -133,6 +136,9 @@ import {
   describePathError,
   describeNotReencodable,
   describePresentationNote,
+  describeReapplyPlacement,
+  describeReapplyRefusal,
+  describeReapplyResolution,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -191,6 +197,9 @@ export {
   describePathError,
   describeNotReencodable,
   describePresentationNote,
+  describeReapplyPlacement,
+  describeReapplyRefusal,
+  describeReapplyResolution,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -221,6 +230,9 @@ export {
   pathErrorKey,
   notReencodableKey,
   presentationNoteKey,
+  reapplyPlacementKey,
+  reapplyRefusalKey,
+  reapplyResolutionKey,
   rotationOutcomeKey,
   saveErrorKey,
   saveResultKey,
@@ -1116,6 +1128,65 @@ export function tPresentationNote(note: PresentationNote): string {
 export function tSaveResult(result: SaveResult): string {
   return describeSaveResult(locale.current, result);
 } // End of function tSaveResult()
+
+// ---------------------------------------------------------------------------
+// The correspondence evidence a conflict carries — Phase 2c-4b-1
+// ---------------------------------------------------------------------------
+//
+// Three accessors with **no caller yet**, and deliberately so: 2c-4b-1 adds the
+// evidence and no control, and 2c-4b-3 is what draws it. They exist here because
+// a code with no string is worse than a code with no caller, and because the
+// only lawful way to reach a `code.` key is an accessor whose return type makes
+// a missing one a compile error.
+
+/**
+ * Renders what the search for a conflict's own snippet found, in the current
+ * language.
+ *
+ * **Evidence, not a promise.** Nothing here says a save would now succeed, that
+ * a draft still applies, that nothing else in the file changed, or that the file
+ * cannot change again. A screen that shows the refusing arm renders
+ * {@link tReapplyRefusal} beside this rather than instead of it, and a screen
+ * showing an operation placed after a named snippet renders
+ * {@link tReapplyPlacement} beside it too — this accessor says nothing about a
+ * destination.
+ *
+ * @param resolution - A resolution as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tReapplyResolution(resolution: ReapplyResolution): string {
+  return describeReapplyResolution(locale.current, resolution);
+} // End of function tReapplyResolution()
+
+/**
+ * Renders what the search for a conflict's positional anchor found, in the
+ * current language.
+ *
+ * The second half of one conflict's evidence, and a separate sentence set
+ * because it answers a separate question. *This change brings its own snippet*
+ * and *this change is not placed after a named one* are two facts, and one
+ * sentence for both would be untrue of one of them.
+ *
+ * @param placement - A placement resolution as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tReapplyPlacement(placement: ReapplyPlacement): string {
+  return describeReapplyPlacement(locale.current, placement);
+} // End of function tReapplyPlacement()
+
+/**
+ * Renders why a conflict's snippet could not be identified, in the current
+ * language.
+ *
+ * Each sentence is a **negative claim about evidence**: none of them says the
+ * snippet is gone, and none of them says who changed the file.
+ *
+ * @param reason - A refusal as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tReapplyRefusal(reason: ReapplyRefusal): string {
+  return describeReapplyRefusal(locale.current, reason);
+} // End of function tReapplyRefusal()
 
 // ---------------------------------------------------------------------------
 // The draft surface — Phase 2b-2b-3

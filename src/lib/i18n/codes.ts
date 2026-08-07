@@ -90,6 +90,11 @@ import type {
   PathErrorName,
   PresentationNote,
   PresentationNoteName,
+  ReapplyPlacement,
+  ReapplyPlacementName,
+  ReapplyRefusal,
+  ReapplyResolution,
+  ReapplyResolutionName,
   RotationOutcome,
   SaveError,
   SaveErrorName,
@@ -1164,6 +1169,101 @@ export function describePresentationNote(locale: Locale, note: PresentationNote)
 export function describeSaveResult(locale: Locale, result: SaveResult): string {
   return translate(locale, saveResultKey(result.outcome));
 } // End of function describeSaveResult()
+
+// ---------------------------------------------------------------------------
+// The correspondence evidence a conflict carries — Phase 2c-4b-1
+// ---------------------------------------------------------------------------
+//
+// Three enums with **no renderer yet**: 2c-4b-3 is what draws them. They have
+// strings anyway, because a code with no string is worse than a code with no
+// caller — the rule that put `ScalarStyle` and `LineEnding` here at 1b-2b.
+//
+// `ReapplyResolution` and `ReapplyPlacement` are the two slots of one
+// `ReapplyEvidence`, and each has its own describer because each answers its own
+// question. A screen that rendered the resolution's sentence for a placement
+// would be saying something untrue about one of them.
+
+/**
+ * The dictionary key for one arm of a conflict's correspondence evidence.
+ *
+ * @param name - The variant name of a `ReapplyResolution`.
+ * @returns The key holding that arm's message.
+ */
+export function reapplyResolutionKey(name: ReapplyResolutionName): TranslationKey {
+  return `code.reapplyResolution.${uncapitalize(name)}`;
+} // End of function reapplyResolutionKey()
+
+/**
+ * The dictionary key for one arm of a conflict's positional-anchor evidence.
+ *
+ * @param name - The variant name of a `ReapplyPlacement`.
+ * @returns The key holding that arm's message.
+ */
+export function reapplyPlacementKey(name: ReapplyPlacementName): TranslationKey {
+  return `code.reapplyPlacement.${uncapitalize(name)}`;
+} // End of function reapplyPlacementKey()
+
+/**
+ * The dictionary key for one reason a correspondence could not be established.
+ *
+ * @param name - The variant name of a `ReapplyRefusal`.
+ * @returns The key holding that reason's message.
+ */
+export function reapplyRefusalKey(name: ReapplyRefusal): TranslationKey {
+  return `code.reapplyRefusal.${uncapitalize(name)}`;
+} // End of function reapplyRefusalKey()
+
+/**
+ * The sentence one arm of a conflict's **subject** evidence reads as.
+ *
+ * **Four sentences about evidence, and not one of them is a promise.** The
+ * `Identified` one says a snippet carrying the recorded evidence was found and
+ * says in the same breath what that cannot establish; none of them says a save
+ * would now succeed, that a draft still applies, or that the file cannot change
+ * again. A screen that wants the *reason* behind the refusing arm renders
+ * {@link describeReapplyRefusal} beside this rather than instead of it, and a
+ * screen that wants the operation's destination renders
+ * {@link describeReapplyPlacement} beside it too.
+ *
+ * @param locale - The dictionary to read from.
+ * @param resolution - A resolution as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeReapplyResolution(
+  locale: Locale,
+  resolution: ReapplyResolution
+): string {
+  return translate(locale, reapplyResolutionKey(wireVariantName<ReapplyResolutionName>(resolution)));
+} // End of function describeReapplyResolution()
+
+/**
+ * The sentence one arm of a conflict's **placement** evidence reads as.
+ *
+ * Three sentences about the snippet an operation was placed after, and none of
+ * them is a promise either. They are separate from
+ * {@link describeReapplyResolution}'s because the two slots answer two
+ * questions: *this change brings its own snippet* and *this change is not placed
+ * after a named one* are two facts, and one sentence for both would be untrue of
+ * one of them.
+ *
+ * @param locale - The dictionary to read from.
+ * @param placement - A placement resolution as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeReapplyPlacement(locale: Locale, placement: ReapplyPlacement): string {
+  return translate(locale, reapplyPlacementKey(wireVariantName<ReapplyPlacementName>(placement)));
+} // End of function describeReapplyPlacement()
+
+/**
+ * The sentence one correspondence refusal reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A refusal as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function describeReapplyRefusal(locale: Locale, reason: ReapplyRefusal): string {
+  return translate(locale, reapplyRefusalKey(reason));
+} // End of function describeReapplyRefusal()
 
 // ---------------------------------------------------------------------------
 // The draft surface — Phase 2b-2b-3

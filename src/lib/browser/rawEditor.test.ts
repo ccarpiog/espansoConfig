@@ -183,6 +183,7 @@ const DISK = 'matches:\n  - trigger: x\n    replace: theirs\n';
 function conflict(diskRevision: ContentRevision = AFTER, diskText: string = DISK): SaveResult {
   return {
     outcome: 'conflict',
+    reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
     expected: BASE,
     found: AFTER,
     disk_revision: diskRevision,

@@ -229,6 +229,7 @@ const REFUSED: SaveResult = {
 /** A conflict: the file moved on and nothing was written. */
 const CONFLICT: ConflictResult = {
   outcome: 'conflict',
+  reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,

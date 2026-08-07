@@ -1054,6 +1054,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
     }
     const conflict: SaveResult = {
       outcome: 'conflict',
+      reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
       expected: BASE,
       found: AFTER,
       disk_revision: AFTER,
@@ -1136,6 +1137,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
       started.session,
       {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: BASE,
         found: AFTER,
         disk_revision: AFTER,
@@ -1226,6 +1228,7 @@ describe('the confirmed reload', () => {
     }
     const answer: SaveResult = {
       outcome: 'conflict',
+      reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
       expected: BASE,
       found: AFTER,
       disk_revision: AFTER,

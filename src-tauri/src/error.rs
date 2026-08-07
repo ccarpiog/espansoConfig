@@ -213,7 +213,7 @@ pub enum CommandError {
     /// with it, `create_match` refuses an anchor that is not an item of the list
     /// the new snippet would join, and `delete_match` refuses a match it cannot
     /// address as a sequence item — all three through `anchor_index` or
-    /// `addressed_item` in `crate::commands`. The variant's name still says
+    /// `item_address` in `crate::commands`. The variant's name still says
     /// *move*, which is now narrower than what it means; renaming it is a wire
     /// change and is recorded as a follow-up in
     /// `docs/decisions/2b-2c-2-notes.md` rather than done in passing. The two

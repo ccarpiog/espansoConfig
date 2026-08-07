@@ -7794,6 +7794,32 @@ fn entry_owned_runs(
     Some((lines, runs_between(lines, &merged)))
 } // End of function entry_owned_runs()
 
+/// The ordered, disjoint physical-line runs the sequence item `item` owns.
+///
+/// **[`entry_owned_runs`] with an item's key and value being the same node**,
+/// which is exactly how the removal guard and the duplicate's own oracle already
+/// call it. It exists so that `crate::reconcile` can hash what an item owns
+/// **without a second copy of the ownership rules**: a lift, a deletion, a true
+/// duplicate and a cross-revision correspondence must all agree about which
+/// bytes are the item's, and the only way to guarantee that is for all four to
+/// read the same derivation.
+///
+/// It is `pub(crate)` rather than `pub`: the runs are byte offsets into one
+/// parse, and handing them across the IPC boundary would be handing out a
+/// position again.
+///
+/// `None` when the item is not in the index or its frontier could not be found —
+/// a defect in this crate rather than a document a user can write, and one every
+/// caller refuses on rather than guessing past.
+pub(crate) fn item_owned_runs(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    item: NodeId,
+) -> Option<Vec<ByteSpan>> {
+    entry_owned_runs(source, index, trivia, item, item).map(|(_, runs)| runs)
+} // End of function item_owned_runs()
+
 /// Checks that a move wrote the bytes it took, and took nothing but the item.
 ///
 /// **The property the Phase 0c-3b-2a review found missing from production**, in

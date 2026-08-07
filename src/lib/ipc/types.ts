@@ -1571,6 +1571,101 @@ export type PresentationNote =
 export type SaveResultName = 'saved' | 'conflict' | 'refused';
 
 /**
+ * Why a conflict's snippet could not be identified in the file as it is now.
+ *
+ * Every member is a **negative claim about evidence**, never a claim about what
+ * somebody did, about where a snippet went, or about what espanso would accept.
+ * None of them says the snippet is gone: the strongest thing any of them says is
+ * that no candidate in the snapshot that was examined carried the evidence the
+ * operation permits, or that more than one did.
+ */
+export type ReapplyRefusal =
+  | 'NoAnchorInBase'
+  | 'WrongDocument'
+  | 'DiskDoesNotParse'
+  | 'SequenceMissing'
+  | 'AmbiguousExact'
+  | 'NoExactCorrespondence'
+  | 'TargetMissingOrTriggerChanged'
+  | 'AmbiguousTrigger'
+  | 'NoTriggerToMatch';
+
+/** The variant name of every {@link ReapplyResolution} arm. */
+export type ReapplyResolutionName = 'Unsupported' | 'Targetless' | 'Identified' | 'Refused';
+
+/**
+ * What the search for a refused operation's **own snippet** found — Phase
+ * 2c-4b-1.
+ *
+ * **Evidence, and only evidence.** It names no control, authorizes nothing, and
+ * nothing this application does with a conflict depends on it. `Identified` says
+ * exactly one snippet of the conflict's own file, in the snapshot
+ * {@link ConflictResult.disk_revision} names, carries evidence at a tier the
+ * command selected. It does **not** say the operation would now succeed, that a
+ * draft still applies, that nothing else changed, or that the file cannot change
+ * again — and where the tier that answered was the editor's trigger fallback, it
+ * does not establish that the snippet is the original one either.
+ *
+ * The two empty arms are deliberately two facts and not one. `Targetless` is a
+ * creation: it brings its own snippet and names no existing one to find again.
+ * `Unsupported` is a whole-document replacement: there is no snippet, no field
+ * and no action in it to find again, permanently and by construction.
+ *
+ * Every arm is a one-key object, including the two with no operands, so this can
+ * be type-guarded without a special case per variant — the convention the core's
+ * own tagged enums follow.
+ */
+export type ReapplyResolution =
+  | { readonly Unsupported: Record<string, never> }
+  | { readonly Targetless: Record<string, never> }
+  | { readonly Identified: { readonly target: MatchView } }
+  | { readonly Refused: { readonly reason: ReapplyRefusal } };
+
+/** The variant name of every {@link ReapplyPlacement} arm. */
+export type ReapplyPlacementName = 'NotAnchored' | 'Identified' | 'Refused';
+
+/**
+ * What the search for a refused operation's **positional anchor** found — Phase
+ * 2c-4b-1.
+ *
+ * A second enum rather than a reuse of {@link ReapplyResolution}, because the two
+ * slots answer two questions and their empty arms are two different facts:
+ * `Targetless` there says *this change brings its own snippet*, and
+ * `NotAnchored` here says *this change is not placed after a named one*. One
+ * sentence for both would be untrue of one of them.
+ *
+ * A placement always requires exact snippet correspondence: an anchor decides
+ * where bytes are put, and a snippet that merely still spells its trigger the
+ * same way is not evidence of a position. There is no arm for a weaker tier
+ * because there is no way to ask for one.
+ */
+export type ReapplyPlacement =
+  | { readonly NotAnchored: Record<string, never> }
+  | { readonly Identified: { readonly target: MatchView } }
+  | { readonly Refused: { readonly reason: ReapplyRefusal } };
+
+/**
+ * Both correspondence operands of one refused operation — Phase 2c-4b-1.
+ *
+ * **The whole answer, so half an answer cannot be mistaken for one.** A move sent
+ * after another snippet has two identities to find again: the snippet it moves
+ * and the snippet it is placed after. A reader that consulted only
+ * {@link ReapplyEvidence.subject} would have a correct identification of the
+ * moved snippet and no evidence at all about whether the destination it was sent
+ * to still exists.
+ *
+ * Both halves are answered against the same snapshot, in one Rust call. Nothing
+ * in TypeScript expresses that pairing; what it rests on is that one function
+ * builds them.
+ */
+export interface ReapplyEvidence {
+  /** What the search for the operation's own snippet found. */
+  readonly subject: ReapplyResolution;
+  /** What the search for the operation's positional anchor found. */
+  readonly placement: ReapplyPlacement;
+}
+
+/**
  * The save ran to the end: both gates passed and the transaction returned facts.
  *
  * **It does not say the file is now what you asked for.** The write lock excludes
@@ -1679,6 +1774,32 @@ export interface ConflictResult {
    * UTF-8, and the whole command then rejects instead of reporting a conflict.
    */
   readonly disk_text: string;
+  /**
+   * The answers to this operation's correspondence questions — one for its own
+   * snippet and one for the snippet it is placed after — and where answering one
+   * required a search, it is **that same fresh read** that was searched.
+   *
+   * **Several answers require no search at all**, and none of them is a claim
+   * about the disk: a whole-document replacement has no honest reapply, a
+   * creation brings its own snippet, an operation may name no positional anchor,
+   * and an operand whose evidence could not be recorded before the save was
+   * attempted is decided without consulting the current file at all. Only the
+   * anchored arms examine it.
+   *
+   * **Evidence only.** Nothing in this application reads it to decide anything;
+   * it exists so that a later phase can, and adding it changed no behaviour.
+   *
+   * It is bound to {@link ConflictResult.disk_revision} the way
+   * {@link ConflictResult.disk_text} is, and by the same construction: one Rust
+   * function computes all four from one workspace snapshot. The **questions** it
+   * answers are older than that snapshot — the evidence it searches for was
+   * recorded before the save was attempted, from the file as the command
+   * validated the request against it — which is the point: evidence recorded
+   * afterwards would describe the bytes that caused the conflict rather than the
+   * bytes the person was working on. TypeScript cannot express either pairing;
+   * what they rest on is that one Rust function builds them.
+   */
+  readonly reapply: ReapplyEvidence;
   /**
    * The projection of that fresh read: what the file holds, as far as a read
    * taken after the refusal can say.

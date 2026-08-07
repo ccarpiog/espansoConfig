@@ -123,6 +123,7 @@ const COMMITTED: SaveResult = {
 function conflictWith(diskText: string = DISK): SaveResult {
   return {
     outcome: 'conflict',
+    reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
     expected: BASE,
     found: AFTER,
     disk_revision: AFTER,

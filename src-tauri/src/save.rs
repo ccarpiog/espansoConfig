@@ -67,6 +67,19 @@
 //! to its own revision by construction, and `refresh` reuses one only after
 //! testing that same hash against the bytes it has this moment read off the disk.
 //!
+//! **Phase 2c-4b-1 adds a third operand to that same pairing.**
+//! [`SaveResult::Conflict::reapply`] is a [`ReapplyEvidence`] computed from
+//! the *same* `SourceDocument` as the text, the revision and the projection, so
+//! all four describe one snapshot. It carries **two** resolutions — one for the
+//! operation's own item and one for the item it is placed after — and both come
+//! out of that one snapshot in one call. It is **evidence and nothing else**: it
+//! names no control, offers no choice and changes nothing this application does
+//! with a conflict. The *anchors* it is computed against are older — captured
+//! before the save transaction, from the snapshot the command validated the
+//! request against — because an anchor derived afterwards would describe the
+//! bytes that caused the conflict rather than the bytes the person was working
+//! on.
+//!
 //! Two things it does not force. A [`ContentRevision`] collision would let a
 //! different text pass that test — the guarantee is a hash equality, never an
 //! identity of bytes. And Rust does not tie one field of a struct variant to
@@ -85,6 +98,7 @@ use serde::{Serialize, Serializer};
 use espansoconfig_core::model::{DocumentView, MatchId};
 use espansoconfig_core::patch::PresentationNote;
 use espansoconfig_core::persist::SaveVerdict;
+use espansoconfig_core::reconcile::ReapplyEvidence;
 use espansoconfig_core::validate::Finding;
 use espansoconfig_core::ContentRevision;
 
@@ -256,6 +270,49 @@ pub enum SaveResult {
         /// the code denies, and a caller would owe an unreachable branch a
         /// sentence.
         disk_text: String,
+        /// The answers to this operation's correspondence questions, and where
+        /// answering one required a search, it is **that same fresh read** that
+        /// was searched.
+        ///
+        /// Phase 2c-4b-1's operand, and **evidence only**: it names no control,
+        /// authorizes nothing and changes nothing this application does. It
+        /// reports, for each of the refused operation's identities, whether
+        /// exactly one candidate in the fresh snapshot carries evidence at a tier
+        /// the command selected; the trigger-only tier is provisional and does
+        /// not prove identity. It refuses rather than guessing when no candidate
+        /// or more than one carries that evidence.
+        ///
+        /// **Several answers require no search at all**, and none of them is a
+        /// claim about the disk: a whole-document replacement has no honest
+        /// reapply, a creation brings its own snippet, an operation may name no
+        /// positional anchor, and an operand whose evidence the *base* snapshot
+        /// could not produce is decided before the transaction runs. Only the
+        /// anchored arms consult the fresh read, so no string built on this
+        /// operand may say the current file was examined for every arm.
+        ///
+        /// **Two operands, because an operation can name two identities.**
+        /// [`ReapplyEvidence::subject`] is the item the operation is about and
+        /// [`ReapplyEvidence::placement`] is the item it is placed after, when it
+        /// names one. A move sent `after` another snippet is expressible again
+        /// only when both were found, so answering the subject alone would be
+        /// half an answer wearing a whole one's shape.
+        ///
+        /// **It is bound to [`SaveResult::Conflict::disk_revision`] the same way
+        /// [`SaveResult::Conflict::disk_text`] is**, and by the same
+        /// construction: `crate::commands::conflict_after_the_lock` computes it
+        /// from the one `SourceDocument` the refresh answers, so no second read
+        /// and no call ordering stands between the answer and the snapshot it is
+        /// about. The **anchor** it is computed against is older still — it is
+        /// captured before the transaction, from the snapshot the command
+        /// validated the request against — which is the whole point: an anchor
+        /// derived after the cache refreshed would describe the bytes that
+        /// caused the conflict rather than the bytes the person was working on.
+        ///
+        /// What Rust does not force here is the same thing it does not force for
+        /// the text: a struct variant ties no field to another, so a second
+        /// construction site could pair this with somebody else's snapshot and
+        /// compile. What holds the rule is that there is one production site.
+        reapply: ReapplyEvidence,
         /// The projection of that fresh read.
         ///
         /// What the file holds now, as far as a read taken after the refusal can
@@ -306,7 +363,7 @@ impl SaveResult {
     fn operand_count(&self) -> usize {
         match self {
             SaveResult::Saved { .. } => 5,
-            SaveResult::Conflict { .. } => 5,
+            SaveResult::Conflict { .. } => 6,
             SaveResult::Refused { .. } => 2,
         }
     }
@@ -342,12 +399,14 @@ impl Serialize for SaveResult {
                 found,
                 disk_revision,
                 disk_text,
+                reapply,
                 disk,
             } => {
                 out.serialize_field("expected", expected)?;
                 out.serialize_field("found", found)?;
                 out.serialize_field("disk_revision", disk_revision)?;
                 out.serialize_field("disk_text", disk_text)?;
+                out.serialize_field("reapply", reapply)?;
                 out.serialize_field("disk", disk)?;
             }
             SaveResult::Refused { verdict, findings } => {
@@ -386,6 +445,7 @@ pub(crate) const SAMPLE_SOURCE: &str = "matches:\n  - trigger: ':one'\n    repla
 #[cfg(test)]
 pub(crate) fn every_save_result() -> Vec<SaveResult> {
     use espansoconfig_core::model::DocumentContext;
+    use espansoconfig_core::reconcile::{ReapplyPlacement, ReapplyResolution};
     use espansoconfig_core::validate::FindingCode;
     use espansoconfig_core::workspace::project_source;
     use espansoconfig_core::{DocumentId, SyntaxIndex};
@@ -395,6 +455,7 @@ pub(crate) fn every_save_result() -> Vec<SaveResult> {
         SAMPLE_SOURCE,
     )
     .view;
+    let target = Box::new(view.matches[0].clone());
     let identity = MatchId {
         document: DocumentId(0),
         revision: view.revision,
@@ -422,6 +483,15 @@ pub(crate) fn every_save_result() -> Vec<SaveResult> {
             // `a_conflict_reports_the_refusing_revision_and_the_fresh_read_separately`
             // rehashes the text rather than trusting this comment.
             disk_text: SAMPLE_SOURCE.to_owned(),
+            // The `Identified` arms rather than the empty ones, because they are
+            // the only ones that carry an operand and therefore the only ones
+            // whose wire shape a fixture can get wrong.
+            reapply: ReapplyEvidence {
+                subject: ReapplyResolution::Identified {
+                    target: target.clone(),
+                },
+                placement: ReapplyPlacement::Identified { target },
+            },
             disk: Box::new(view),
         },
         SaveResult::Refused {
@@ -462,7 +532,14 @@ mod tests {
             ),
             (
                 "conflict",
-                vec!["disk", "disk_revision", "disk_text", "expected", "found"],
+                vec![
+                    "disk",
+                    "disk_revision",
+                    "disk_text",
+                    "expected",
+                    "found",
+                    "reapply",
+                ],
             ),
             ("refused", vec!["findings", "verdict"]),
         ];

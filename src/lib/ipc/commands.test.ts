@@ -482,6 +482,7 @@ describe('the reload a committed raw save owes', () => {
     outcome = {
       resolve: {
         outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
         expected: 'a'.repeat(64),
         found: 'b'.repeat(64),
         disk_revision: 'b'.repeat(64),

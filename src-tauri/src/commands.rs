@@ -49,6 +49,31 @@
 //! the YAML parser rejects, which the owner ruled on and the acknowledgement
 //! protocol — not a `force` flag — is what makes safe.
 //!
+//! # Every writing command now says what it would have to find again
+//!
+//! Phase 2c-4b-1 gives each of them a [`ReapplyRequest`], built **before** the
+//! save transaction from the snapshot [`document_at`] validated the request
+//! against, and carried through [`run_one_save`] to
+//! [`conflict_after_the_lock`], which turns it into the conflict payload's
+//! `reapply` operand against the fresh read.
+//!
+//! **A request has two operands, because an operation can name two identities.**
+//! Its `subject` is the item the operation is about and its `placement` is the
+//! item it is placed after, and each is answered separately: a drafted match save
+//! is the only subject that may fall back to a unique unchanged trigger; a move,
+//! a deletion and a duplication take exact item correspondence; a creation brings
+//! its own snippet and is `Targetless`; and a raw replacement is `Unsupported`,
+//! permanently. Every `after` anchor — a move's and a creation's alike — is a
+//! **placement** at exact item correspondence, and every other operation's
+//! placement is `NotAnchored`. Answering a move's subject alone would say the
+//! moved snippet is still there while saying nothing about whether the
+//! destination it was sent to still exists.
+//!
+//! **It adds no behaviour.** Nothing on any path reads the answer, no command
+//! refuses because of it and no byte written to disk depends on it. It is
+//! evidence a later sub-phase acts on, and the reason it is built here rather
+//! than later is written on [`run_one_save`].
+//!
 //! # Three constraints this module inherits and does not drop
 //!
 //! - **One writer, one entry point.** Every byte this application puts on a
@@ -102,8 +127,11 @@ use espansoconfig_core::persist::{
     save_document, Acknowledgement, BackupSession, SaveContent, SaveError, SaveRequest,
     SavedDocument,
 };
+use espansoconfig_core::reconcile::{
+    reconcile, PlacementMode, ReapplyConfidence, ReapplyMode, ReapplyRequest,
+};
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
-use espansoconfig_core::{ContentRevision, DocumentId};
+use espansoconfig_core::{ContentRevision, DocumentId, SourceDocument};
 
 use crate::error::CommandError;
 use crate::save::SaveResult;
@@ -707,26 +735,32 @@ fn sequence_of(path: &DocumentPath) -> Option<(DocumentPath, usize)> {
     ))
 } // End of function sequence_of()
 
-/// The address of the match `id` names, and the sequence it is an item of.
+/// The address of an already-resolved match, and the sequence it is an item of.
+///
+/// **It takes the [`MatchView`] rather than the [`MatchId`]**, because since
+/// Phase 2c-4b-1 every command that addresses a match is already holding one: it
+/// needs the projection to capture a reapply anchor from. Resolving the identity
+/// a second time here would be two lookups that agree today and are two places
+/// for them to stop agreeing.
 ///
 /// # Errors
 ///
-/// The identity refusals, unchanged from [`WorkspaceSession::match_view`], and
 /// [`CommandError::MoveNotWithinOneSequence`] for a match this projection cannot
-/// address as a sequence item. The second is a **negative** claim and is worded
-/// as one: the refusal is *this could not be shown to be an item of a sequence*,
-/// which covers a match with no path at all as honestly as it covers one whose
-/// path ends in a key.
-fn addressed_item(view: &DocumentView, id: MatchId) -> Result<(DocumentPath, usize), CommandError> {
-    let found = view.match_by_id(id)?;
+/// address as a sequence item. It is a **negative** claim and is worded as one:
+/// the refusal is *this could not be shown to be an item of a sequence*, which
+/// covers a match with no path at all as honestly as it covers one whose path
+/// ends in a key. The identity refusals themselves belong to
+/// [`DocumentView::match_by_id`], which the caller has already taken.
+fn item_address(found: &MatchView) -> Result<(DocumentPath, usize), CommandError> {
     let path = found
         .path
         .as_ref()
         .ok_or(CommandError::MoveNotWithinOneSequence)?;
     sequence_of(path).ok_or(CommandError::MoveNotWithinOneSequence)
-} // End of function addressed_item()
+} // End of function item_address()
 
-/// The index the anchor `anchor` names in `sequence`, resolved against `view`.
+/// The item the anchor `anchor` names and the index it holds in `sequence`,
+/// resolved against `view`.
 ///
 /// **The one place an identity becomes an index.** Every writing command that
 /// takes an anchor — a move's `after`, a creation's
@@ -734,66 +768,115 @@ fn addressed_item(view: &DocumentView, id: MatchId) -> Result<(DocumentPath, usi
 /// refusals on one path and another set on the next, and it cannot be resolved
 /// against two different parses.
 ///
+/// **It answers the projected item beside the index** because since Phase
+/// 2c-4b-1 an anchor is also a *correspondence operand*: the placement anchor of
+/// a move or a creation has to be captured as a [`PlacementMode`], and capturing
+/// it needs the [`MatchView`] this call already resolved. Resolving the same
+/// identity a second time for that would be two lookups that agree today and are
+/// two places for them to stop agreeing — the reason [`item_address`] takes a
+/// projected match rather than an identity.
+///
 /// # Errors
 ///
 /// [`CommandError::IdentityWrongDocument`] for an anchor in another file, and
 /// [`CommandError::MoveNotWithinOneSequence`] for an anchor this projection
 /// cannot address as an item of `sequence`.
 ///
-/// **The cross-document refusal is [`addressed_item`]'s**, not a check written
-/// here, and the two are the same answer rather than two answers that agree
-/// today: [`DocumentView::match_by_id`] compares the identity's document against
-/// the view's own before anything else, and `From<IdentityError>` turns that into
-/// exactly this code with exactly these operands. `PROGRESS.md` D2r — a move
-/// never crosses a file, and a snippet is created in one document for the same
-/// reason — is kept by that comparison, refused before anything is attempted,
-/// because there is no edit that could express the crossing.
-fn anchor_index(
-    view: &DocumentView,
+/// **The cross-document refusal is [`DocumentView::match_by_id`]'s**, not a check
+/// written here, and it is the same answer every other command's identity check
+/// gives rather than a second one that agrees today: that method compares the
+/// identity's document against the view's own before anything else, and
+/// `From<IdentityError>` turns
+/// that into exactly this code with exactly these operands. `PROGRESS.md` D2r — a
+/// move never crosses a file, and a snippet is created in one document for the
+/// same reason — is kept by that comparison, refused before anything is
+/// attempted, because there is no edit that could express the crossing.
+fn anchor_item<'a>(
+    view: &'a DocumentView,
     sequence: &DocumentPath,
     anchor: MatchId,
-) -> Result<usize, CommandError> {
-    let (anchor_sequence, at) = addressed_item(view, anchor)?;
+) -> Result<(&'a MatchView, usize), CommandError> {
+    let found = view.match_by_id(anchor)?;
+    let (anchor_sequence, at) = item_address(found)?;
     if &anchor_sequence != sequence {
         return Err(CommandError::MoveNotWithinOneSequence);
     }
-    Ok(at)
-} // End of function anchor_index()
+    Ok((found, at))
+} // End of function anchor_item()
 
-/// The projection of `document`, refused unless it is the revision the caller
+/// The **snapshot** of `document`, refused unless it is the revision the caller
 /// drafted, moved, anchored or addressed against.
 ///
 /// **The check every writing command takes first, written once.** A
-/// [`DocumentPath`] ending in an index is a *position*, and every one of the four
-/// commands turns an identity into one: a stale identity does not name a missing
-/// entry, it names a **different** one, and it succeeds. The refusal therefore
-/// happens before a batch is derived rather than being left to the transaction's
-/// own optimistic-concurrency check, which compares bytes and would let a
-/// well-formed edit of the wrong node through.
+/// [`DocumentPath`] ending in an index is a *position*, and every one of the five
+/// identity-aware commands turns an identity into one: a stale identity does not
+/// name a missing entry, it names a **different** one, and it succeeds. The
+/// refusal therefore happens before a batch is derived rather than being left to
+/// the transaction's own optimistic-concurrency check, which compares bytes and
+/// would let a well-formed edit of the wrong node through.
 ///
-/// The reborrow is sound because [`Workspace::document_view`] already hands out a
-/// `&DocumentView` from a `&mut self`: the caller's mutable borrow of the
-/// workspace lasts exactly as long as it keeps using the view.
+/// # Why the whole snapshot rather than its projection
+///
+/// Because Phase 2c-4b-1's reapply anchor is made of **bytes**, not of a
+/// projection: the item's ownership envelope and its trigger forms' exact source
+/// spelling both need the file's text and its parse. Handing the caller a
+/// `&DocumentView` and letting it fetch the text separately would put a second
+/// read between the two, which is precisely the pairing failure the conflict
+/// payload exists to avoid. `&snapshot.view` is what the addressing code uses,
+/// and it is the same value the projection-only accessor would have returned.
+///
+/// The reborrow is sound because [`Workspace::get_document`] already hands out a
+/// `&SourceDocument` from a `&mut self`: the caller's mutable borrow of the
+/// workspace lasts exactly as long as it keeps using the snapshot.
 ///
 /// # Errors
 ///
 /// [`CommandError::IdentityStaleRevision`], carrying the revision this session
 /// holds and the one the caller sent, plus the read model's own failure for a
-/// document that cannot be projected at all.
-fn view_at(
+/// document that cannot be read at all.
+fn document_at(
     workspace: &mut Workspace,
     document: DocumentId,
     base_revision: ContentRevision,
-) -> Result<&DocumentView, CommandError> {
-    let view = workspace.document_view(document)?;
-    if view.revision != base_revision {
+) -> Result<&SourceDocument, CommandError> {
+    let snapshot = workspace.get_document(document)?;
+    if snapshot.view.revision != base_revision {
         return Err(CommandError::IdentityStaleRevision {
-            expected: view.revision.to_hex(),
+            expected: snapshot.view.revision.to_hex(),
             found: base_revision.to_hex(),
         });
     }
-    Ok(view)
-} // End of function view_at()
+    Ok(snapshot)
+} // End of function document_at()
+
+/// One save's own inputs, beside the session it runs against.
+///
+/// A struct rather than six more parameters, and not only to keep the argument
+/// count down: every field here is **named at the call site**, which is what
+/// stops two `Option`s or two revisions of the same shape being passed in the
+/// wrong order. The shape deliberately mirrors
+/// [`espansoconfig_core::persist::SaveRequest`], which is what
+/// [`run_one_save`] turns most of it into.
+struct OneSave<'a> {
+    /// The file to write.
+    document: DocumentId,
+    /// The optimistic-concurrency token the caller drafted, moved, anchored or
+    /// addressed against.
+    base_revision: ContentRevision,
+    /// The whole of what the file should hold afterwards, in whichever of
+    /// [`SaveContent`]'s two modes the caller derived.
+    content: SaveContent<'a>,
+    /// The suspicions the caller has already shown someone, by content.
+    acknowledgement: &'a Acknowledgement,
+    /// Where the operation's match is **afterwards**, when it has one.
+    at: Option<&'a DocumentPath>,
+    /// **Both** of the identities this operation would have to find again if the
+    /// save conflicts — its subject and its positional anchor.
+    ///
+    /// Built by the caller from the snapshot it validated its request against,
+    /// **before** the transaction. See [`run_one_save`].
+    reapply: ReapplyRequest,
+} // End of struct OneSave
 
 /// Hands one save's content to the transaction, and brings the session's cache
 /// back in step with whatever happened.
@@ -820,6 +903,17 @@ fn view_at(
 /// [`delete_one_match`]'s routine answer and
 /// [`save_one_raw_document`]'s only possible one.
 ///
+/// `reapply` is **everything this operation would need to find again** if the
+/// save conflicts — its subject and, when it has one, the item it is placed
+/// after — and it is a value the caller has already built from the snapshot it
+/// validated its request against. It is carried through this function rather
+/// than derived inside it for one reason, and it is the reason the whole
+/// operand exists: by the time a conflict is being described, the session's
+/// cache has been refreshed, and an anchor made *here* would describe the bytes
+/// that caused the conflict instead of the bytes the person was working on
+/// (Phase 2c-4b design consult, Q9 item 2). Nothing reads it on any path but the
+/// conflict one, and nothing it can say changes what is written to disk.
+///
 /// # The four outcomes
 ///
 /// - **committed, or committed nothing** — [`after_a_save`], which re-reads and
@@ -841,12 +935,16 @@ fn view_at(
 fn run_one_save(
     workspace: &mut Workspace,
     backups: &BackupSession,
-    document: DocumentId,
-    base_revision: ContentRevision,
-    content: SaveContent<'_>,
-    acknowledgement: &Acknowledgement,
-    at: Option<&DocumentPath>,
+    save: OneSave<'_>,
 ) -> Result<SaveResult, CommandError> {
+    let OneSave {
+        document,
+        base_revision,
+        content,
+        acknowledgement,
+        at,
+        reapply,
+    } = save;
     // Cloned so that the immutable borrow of the workspace ends before the save;
     // the context is a handful of fields from the directory walk, not a parse.
     let context = workspace.document_context(document)?.clone();
@@ -862,7 +960,7 @@ fn run_one_save(
         Ok(saved) => Ok(after_a_save(workspace, document, at, saved)),
         Err(SaveError::RevisionMismatch {
             expected, found, ..
-        }) => conflict_after_the_lock(workspace, document, expected, found),
+        }) => conflict_after_the_lock(workspace, document, expected, found, &reapply),
         Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
             verdict: refusal.verdict,
             findings: refusal.findings,
@@ -892,11 +990,29 @@ fn move_one_match(
     // A caller editing against a parse this session no longer holds is refused
     // here: its paths are positions in that parse, so planning against them would
     // move whatever now occupies the position rather than what was selected.
-    let view = view_at(workspace, id.document, base_revision)?;
-    let (sequence, from) = addressed_item(view, id)?;
-    let destination = after
-        .map(|anchor| anchor_index(view, &sequence, anchor))
+    let base = document_at(workspace, id.document, base_revision)?;
+    let view = &base.view;
+    let found = view.match_by_id(id)?;
+    let (sequence, from) = item_address(found)?;
+    let anchor = after
+        .map(|anchor| anchor_item(view, &sequence, anchor))
         .transpose()?;
+    let destination = anchor.map(|(_, at)| at);
+    // **A move placed after another snippet names two identities, and both are
+    // captured here**, from the snapshot just validated, and not later. See
+    // `run_one_save`. The moved item is the subject and a move acts on its whole
+    // ownership envelope, so nothing weaker than exact item correspondence will
+    // do; the `after` item is a positional anchor, which takes exact item
+    // correspondence for the same reason and has no weaker tier to offer. A move
+    // to the top names no anchor, and says so rather than leaving the question
+    // unanswered.
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItem),
+        placement: match anchor {
+            None => PlacementMode::NotAnchored,
+            Some((item, _)) => PlacementMode::anchored(base, item),
+        },
+    };
 
     let edit = match destination {
         None => ItemMove::to_front(sequence.clone().with_index(from)),
@@ -909,11 +1025,14 @@ fn move_one_match(
     run_one_save(
         workspace,
         backups,
-        id.document,
-        base_revision,
-        SaveContent::Edits(&edits),
-        acknowledgement,
-        Some(&landed),
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: Some(&landed),
+            reapply,
+        },
     )
 } // End of function move_one_match()
 
@@ -968,24 +1087,37 @@ fn save_one_match(
     // refused here. See `WorkspaceSession::save_match`: a stale index names a
     // different entry rather than a missing one, so this is refused rather than
     // attempted.
-    let view = view_at(workspace, id.document, base_revision)?;
-    let found = view.match_by_id(id)?;
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
     // The match's own address, captured before the save because the projection it
     // comes from is about to be replaced. A scalar save does not relocate the
     // match, so this is where it still is afterwards — which is why this path
-    // does not use `addressed_item` and never refuses a match that is not a
+    // does not use `item_address` and never refuses a match that is not a
     // sequence item.
     let at = found.path.clone();
+    // **The one operation that may fall back to a unique unchanged trigger.** Its
+    // worst case is a rewritten field rather than a deleted or copied snippet,
+    // and the per-field collision checks that make that safe live one layer out.
+    // A match this projection carries no sequence-item path for — which this
+    // command, alone, does not refuse — captures no anchor and answers
+    // `NoAnchorInBase`. A drafted save moves nothing, so it names no anchor.
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItemOrUniqueTrigger),
+        placement: PlacementMode::NotAnchored,
+    };
     let edits =
         plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
     run_one_save(
         workspace,
         backups,
-        id.document,
-        base_revision,
-        SaveContent::Edits(&edits),
-        acknowledgement,
-        at.as_ref(),
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: at.as_ref(),
+            reapply,
+        },
     )
 } // End of function save_one_match()
 
@@ -1018,31 +1150,38 @@ fn match_list_of(view: &DocumentView) -> Result<DocumentPath, CommandError> {
     Ok(DocumentPath::root(LOADED_STREAM_DOCUMENT).with_key(MATCH_LIST_KEY))
 } // End of function match_list_of()
 
-/// Turns a wire position into the placement the patch engine takes.
+/// Turns a wire position into the placement the patch engine takes, **and hands
+/// back the anchor item it resolved**.
 ///
 /// Two of the three values are the same word on both sides of the boundary; the
 /// third carries an identity, and turning that into an index is
-/// [`anchor_index`]'s job rather than a second resolution written here. So a
+/// [`anchor_item`]'s job rather than a second resolution written here. So a
 /// creation's anchor gets exactly the refusals a move's anchor gets, from the
 /// same call against the same projection.
 ///
+/// The second half of the answer is `Some` exactly for
+/// [`NewMatchPosition::After`], and it is what the caller captures its
+/// [`PlacementMode`] from: a creation's `after` is a positional anchor and owes
+/// the same correspondence evidence a move's does.
+///
 /// # Errors
 ///
-/// [`anchor_index`]'s, unchanged: [`CommandError::IdentityWrongDocument`] for an
+/// [`anchor_item`]'s, unchanged: [`CommandError::IdentityWrongDocument`] for an
 /// anchor in another file — a snippet is created in one document, exactly as a
 /// move stays in one (`PROGRESS.md` D2r) — and
 /// [`CommandError::MoveNotWithinOneSequence`] for an anchor this projection
 /// cannot address as an item of `sequence`.
-fn placement_of(
-    view: &DocumentView,
+fn placement_of<'a>(
+    view: &'a DocumentView,
     sequence: &DocumentPath,
     position: &NewMatchPosition,
-) -> Result<ItemPlacement, CommandError> {
+) -> Result<(ItemPlacement, Option<&'a MatchView>), CommandError> {
     match position {
-        NewMatchPosition::Front {} => Ok(ItemPlacement::Front),
-        NewMatchPosition::End {} => Ok(ItemPlacement::End),
+        NewMatchPosition::Front {} => Ok((ItemPlacement::Front, None)),
+        NewMatchPosition::End {} => Ok((ItemPlacement::End, None)),
         NewMatchPosition::After { anchor } => {
-            Ok(ItemPlacement::After(anchor_index(view, sequence, *anchor)?))
+            let (item, at) = anchor_item(view, sequence, *anchor)?;
+            Ok((ItemPlacement::After(at), Some(item)))
         }
     } // End of the match over the three wire positions
 } // End of function placement_of()
@@ -1075,9 +1214,23 @@ fn create_one_match(
     // A caller that chose an anchor in a parse this session no longer holds is
     // refused here: an identity resolved against another parse names a position,
     // and a position is not an identity.
-    let view = view_at(workspace, document, base_revision)?;
+    let base = document_at(workspace, document, base_revision)?;
+    let view = &base.view;
     let sequence = match_list_of(view)?;
-    let placement = placement_of(view, &sequence, position)?;
+    let (placement, anchor) = placement_of(view, &sequence, position)?;
+    // **A creation brings its own snippet**, so its *subject* is `Targetless`
+    // whatever its placement is: there is no existing item to find again. `front`
+    // and `end` are semantic choices, lowered afresh against whatever list the
+    // file holds later, and name no anchor either. `after` names one, and it is
+    // a **placement** — the same operand a move's `after` is, at the same exact
+    // item correspondence — rather than a subject standing in for one.
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::Targetless,
+        placement: match anchor {
+            None => PlacementMode::NotAnchored,
+            Some(item) => PlacementMode::anchored(base, item),
+        },
+    };
     // Where the new item will be: the index it takes is the number of original
     // items above it, which is the engine's own arithmetic
     // (`ItemPlacement::items_above`) rather than a second copy of it. The count
@@ -1098,18 +1251,21 @@ fn create_one_match(
     run_one_save(
         workspace,
         backups,
-        document,
-        base_revision,
-        SaveContent::Edits(&edits),
-        acknowledgement,
-        Some(&landed),
+        OneSave {
+            document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: Some(&landed),
+            reapply,
+        },
     )
 } // End of function create_one_match()
 
 /// Plans and runs one deletion against an open workspace.
 ///
 /// A free function for [`move_one_match`]'s reason. It addresses the item through
-/// [`addressed_item`] — the move's own four gates, so a deletion and a relocation
+/// [`item_address`] — the move's own four gates, so a deletion and a relocation
 /// cannot disagree about which snippets are addressable — and issues exactly one
 /// [`RemoveItem`], which is that move's lift half in the core's own shared code.
 ///
@@ -1136,19 +1292,31 @@ fn delete_one_match(
 ) -> Result<SaveResult, CommandError> {
     // A stale identity is refused before it can be turned into an index that
     // still resolves — to a different snippet. See this function's own note above.
-    let view = view_at(workspace, id.document, base_revision)?;
-    let (sequence, at) = addressed_item(view, id)?;
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    let (sequence, at) = item_address(found)?;
+    // A deletion removes the item's whole ownership envelope, so a unique
+    // trigger is not enough to identify what it would remove: exact item
+    // correspondence, or nothing. It puts nothing anywhere, so it names no
+    // anchor.
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItem),
+        placement: PlacementMode::NotAnchored,
+    };
     let edits = [DocumentEdit::RemoveItem(RemoveItem::new(
         sequence.with_index(at),
     ))];
     run_one_save(
         workspace,
         backups,
-        id.document,
-        base_revision,
-        SaveContent::Edits(&edits),
-        acknowledgement,
-        None,
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: None,
+            reapply,
+        },
     )
 } // End of function delete_one_match()
 
@@ -1156,7 +1324,7 @@ fn delete_one_match(
 ///
 /// A free function for [`move_one_match`]'s reason, and it follows
 /// [`delete_one_match`]'s identity discipline exactly: resolve the projection
-/// through [`view_at`] first, address the held identity as a sequence item,
+/// through [`document_at`] first, address the held identity as a sequence item,
 /// construct exactly one [`DuplicateItem`], and hand it to the shared tail.
 ///
 /// # The landed address is the clone's, and the arithmetic is the primitive's
@@ -1168,12 +1336,12 @@ fn delete_one_match(
 /// every identity in the file stale). Reading the arithmetic off the request
 /// itself is what keeps this layer and the engine from holding two copies of
 /// where the clone went; the `None` arm of that `Option` is a path that does
-/// not end in an index, which [`addressed_item`] has already excluded, so the
+/// not end in an index, which [`item_address`] has already excluded, so the
 /// `ok_or` below is defensive rather than reachable.
 ///
 /// # The refusal is the duplicate's own code
 ///
-/// [`addressed_item`] answers [`CommandError::MoveNotWithinOneSequence`], whose
+/// [`item_address`] answers [`CommandError::MoveNotWithinOneSequence`], whose
 /// name says *move*; the consult's Q5 forbids leaking it as a duplicate's
 /// user-facing reason, so it is mapped to
 /// [`CommandError::DuplicateSourceNotASequenceItem`] here — the same negative
@@ -1188,11 +1356,20 @@ fn duplicate_one_match(
 ) -> Result<SaveResult, CommandError> {
     // A stale identity is refused before it can be turned into an index that
     // still resolves — to a different snippet, whose bytes would then be copied.
-    let view = view_at(workspace, id.document, base_revision)?;
-    let (sequence, from) = addressed_item(view, id).map_err(|error| match error {
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    let (sequence, from) = item_address(found).map_err(|error| match error {
         CommandError::MoveNotWithinOneSequence => CommandError::DuplicateSourceNotASequenceItem,
         other => other,
     })?;
+    // A duplicate copies the item's owned bytes verbatim, so identifying it by
+    // anything weaker than those bytes would be copying a snippet nobody
+    // reviewed. The clone lands immediately after its source and there is no
+    // placement to choose (2c-3c-1), so it names no anchor.
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItem),
+        placement: PlacementMode::NotAnchored,
+    };
     let edit = DuplicateItem::new(sequence.with_index(from));
     // Where the clone will be afterwards, from the engine's own arithmetic
     // rather than from a second copy of it (`DuplicateItem::resulting_path`).
@@ -1203,11 +1380,14 @@ fn duplicate_one_match(
     run_one_save(
         workspace,
         backups,
-        id.document,
-        base_revision,
-        SaveContent::Edits(&edits),
-        acknowledgement,
-        Some(&landed),
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: Some(&landed),
+            reapply,
+        },
     )
 } // End of function duplicate_one_match()
 
@@ -1219,10 +1399,10 @@ fn duplicate_one_match(
 /// it names the document, the revision the editor loaded and the bytes, and
 /// takes the shared tail.
 ///
-/// # It deliberately does **not** take [`view_at`]
+/// # It deliberately does **not** take [`document_at`]
 ///
 /// Every other writing command refuses a stale `base_revision` before the
-/// transaction, and the reason is written on [`view_at`]: each of them turns an
+/// transaction, and the reason is written on [`document_at`]: each of them turns an
 /// identity into a **position** in a particular parse, and a stale identity does
 /// not name a missing entry — it names a different one, and succeeds. A
 /// replacement turns nothing into a position. Its request is self-contained,
@@ -1256,11 +1436,25 @@ fn save_one_raw_document(
     run_one_save(
         workspace,
         backups,
-        document,
-        base_revision,
-        SaveContent::ReplaceText(text),
-        acknowledgement,
-        None,
+        OneSave {
+            document,
+            base_revision,
+            content: SaveContent::ReplaceText(text),
+            acknowledgement,
+            at: None,
+            // **Permanently, and not for want of an implementation.** A
+            // replacement has no target, no field intent and no operation to
+            // re-resolve, so the only things a reapply could mean are
+            // overwriting the newly read disk text with a stale string or
+            // inventing a text merge, and both are forbidden (design consult Q4
+            // and Q5). It names no anchor either — a whole document is not
+            // placed after anything — and that is `NotAnchored` rather than a
+            // second copy of the sentence above.
+            reapply: ReapplyRequest {
+                subject: ReapplyMode::Unsupported,
+                placement: PlacementMode::NotAnchored,
+            },
+        },
     )
 } // End of function save_one_raw_document()
 
@@ -1277,9 +1471,15 @@ fn save_one_raw_document(
 /// string it shows may present the two as descriptions of the same bytes.
 ///
 /// **The one place in production the payload is built**, so the rule cannot be
-/// half-kept by a later command: `disk`, `disk_revision` and `disk_text` come out
-/// of a single refresh here, and `found` is passed in from the error rather than
-/// re-derived. The refresh also leaves the session's cache describing the bytes
+/// half-kept by a later command: `disk`, `disk_revision`, `disk_text` and — since
+/// Phase 2c-4b-1 — `reapply` all come out of a single refresh here, and `found`
+/// is passed in from the error rather than re-derived. `reapply` is the one
+/// operand whose *question* is older than this call: the anchors inside the
+/// [`ReapplyRequest`] — the subject's and the placement's alike — were captured
+/// from the snapshot the command validated its request against, and only the
+/// **answers** are taken from the fresh read. Both answers come out of that one
+/// read, in one [`reconcile`] call, so a move's subject and its destination can
+/// never describe two observations. The refresh also leaves the session's cache describing the bytes
 /// the next save will be checked against, which is why the read serves both
 /// purposes. `crate::save::every_save_result` builds a **test-only** instance —
 /// the wire-contract fixture — and it is named here so that "one site" is not read
@@ -1325,15 +1525,23 @@ fn conflict_after_the_lock(
     document: DocumentId,
     expected: ContentRevision,
     found: ContentRevision,
+    reapply: &ReapplyRequest,
 ) -> Result<SaveResult, CommandError> {
     let fresh = workspace.refresh(document)?;
     let disk_text = fresh.source.clone();
+    // The fourth operand out of the same snapshot, and the reason it is computed
+    // here rather than anywhere else: `reapply` carries anchors made *before*
+    // the transaction, and this is the one moment the fresh snapshot exists as a
+    // value. A later `get_document` would answer a read this payload never
+    // described.
+    let reapply = reconcile(reapply, fresh);
     let disk = Box::new(fresh.view.clone());
     Ok(SaveResult::Conflict {
         expected,
         found,
         disk_revision: disk.revision,
         disk_text,
+        reapply,
         disk,
     })
 } // End of function conflict_after_the_lock()
@@ -1788,6 +1996,9 @@ mod tests {
     use espansoconfig_core::model::{DocumentView, MatchId};
     use espansoconfig_core::patch::PresentationNote;
     use espansoconfig_core::persist::Acknowledgement;
+    use espansoconfig_core::reconcile::{
+        ReapplyEvidence, ReapplyPlacement, ReapplyRefusal, ReapplyResolution,
+    };
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
     use tempfile::TempDir;
 
@@ -2865,12 +3076,31 @@ mod tests {
                 found,
                 disk_revision,
                 disk_text,
+                reapply,
                 disk,
             } => {
                 assert_eq!(expected, before.revision, "the base the caller sent");
                 assert_eq!(found, replaced, "the bytes that refused the save");
                 assert_eq!(disk_revision, replaced, "the fresh read taken afterwards");
                 assert_eq!(disk.revision, disk_revision);
+                // Phase 2c-4b-1's operand, end to end. The held snippet lost a
+                // key in the replacement, so its ownership envelope is not the
+                // one the anchor recorded — and a move acts on that envelope, so
+                // nothing weaker may identify it. The trigger is still unique and
+                // unchanged, which is exactly what an editor's weaker tier would
+                // have used and a move may not. The move was sent to the top, so
+                // it named no anchor and its second operand says so.
+                assert_eq!(
+                    reapply,
+                    espansoconfig_core::reconcile::ReapplyEvidence {
+                        subject: espansoconfig_core::reconcile::ReapplyResolution::Refused {
+                            reason:
+                                espansoconfig_core::reconcile::ReapplyRefusal::NoExactCorrespondence
+                        },
+                        placement: espansoconfig_core::reconcile::ReapplyPlacement::NotAnchored {},
+                    },
+                    "a move may not identify a snippet whose bytes changed"
+                );
                 assert_eq!(
                     disk.matches.len(),
                     2,
@@ -2972,7 +3202,21 @@ mod tests {
 
         let payload = session
             .with_workspace(|workspace| {
-                super::conflict_after_the_lock(workspace, id, expected, found)
+                super::conflict_after_the_lock(
+                    workspace,
+                    id,
+                    expected,
+                    found,
+                    // The request is a parameter here, so this call also pins
+                    // that the payload's fourth operand really is the one the
+                    // caller asked for rather than something derived on the
+                    // spot. It is deliberately the **anchorless** request:
+                    // whether an *anchored* answer comes out of the fresh read
+                    // rather than out of the read that refused is a different
+                    // claim, and `a_conflicts_anchored_answer_is_of_the_fresh_read`
+                    // below is what discriminates it.
+                    &anchorless_request(),
+                )
             })
             .expect("the fresh read succeeds");
         match payload {
@@ -2981,8 +3225,17 @@ mod tests {
                 found: refusing,
                 disk_revision,
                 disk_text,
+                reapply,
                 disk,
             } => {
+                assert_eq!(
+                    reapply,
+                    espansoconfig_core::reconcile::ReapplyEvidence {
+                        subject: espansoconfig_core::reconcile::ReapplyResolution::Unsupported {},
+                        placement: espansoconfig_core::reconcile::ReapplyPlacement::NotAnchored {},
+                    },
+                    "the request the caller selected is what the payload answers with"
+                );
                 assert_eq!(base, before.revision, "the base the caller sent");
                 assert_eq!(refusing, found, "the bytes that refused, carried unchanged");
                 assert_ne!(
@@ -3017,6 +3270,515 @@ mod tests {
             other => panic!("expected a conflict, got {other:?}"),
         }
     } // End of function a_conflict_describes_the_refusing_read_and_the_fresh_read_separately()
+
+    /// A request that asks about nothing, for the payload-shape tests.
+    fn anchorless_request() -> espansoconfig_core::reconcile::ReapplyRequest {
+        espansoconfig_core::reconcile::ReapplyRequest {
+            subject: espansoconfig_core::reconcile::ReapplyMode::Unsupported,
+            placement: espansoconfig_core::reconcile::PlacementMode::NotAnchored,
+        }
+    } // End of function anchorless_request()
+
+    /// A conflict's **anchored** answers are of the fresh read, not of the read
+    /// that refused the save.
+    ///
+    /// **The provenance claim, discriminated.** The test above passes an
+    /// anchorless request, and that arm never looks at a snapshot at all — so an
+    /// implementation that resolved the anchors against the bytes that refused
+    /// the save, while continuing to take `disk`, `disk_text` and
+    /// `disk_revision` from the later refresh, would leave it green. The
+    /// end-to-end conflict cannot close the gap either: nothing writes between
+    /// its refusal and its refresh, so R1 and R2 are the same bytes there.
+    ///
+    /// Here they are not. The anchors are captured from **R0**, the file is
+    /// replaced by **R1** before the save so a real refusal happens, and replaced
+    /// again by **R2** before the payload is built. The two later texts are chosen
+    /// so that the same anchors resolve *differently* in each:
+    ///
+    /// - the subject's trigger is duplicated in R1 and unique in R2, so R1 answers
+    ///   `AmbiguousTrigger` and R2 identifies;
+    /// - the placement anchor's bytes are gone in R1 and restored verbatim in R2,
+    ///   so R1 answers `NoExactCorrespondence` and R2 identifies.
+    ///
+    /// Both halves are then asserted to be R2's, and the identified subject's own
+    /// revision is asserted to equal `disk_revision` — which is what says the
+    /// answer describes the observation the rest of the payload describes.
+    #[test]
+    fn a_conflicts_anchored_answer_is_of_the_fresh_read() {
+        // R1: the subject's trigger now appears twice, and the second snippet's
+        // bytes are gone. Resolving R0's anchors here answers a refusal for both.
+        const REFUSING: &str = concat!(
+            "# A synthetic match file.\n",
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: rewritten once by somebody else\n",
+            "  - trigger: ':one'\n",
+            "    replace: and again\n",
+        );
+        // R2: the subject's trigger is unique again — with different bytes, so
+        // only the weaker tier can find it — and the second snippet is back,
+        // byte for byte as R0 wrote it.
+        const LATER: &str = concat!(
+            "# A synthetic match file.\n",
+            "matches:\n",
+            "  - trigger: ':one'\n",
+            "    replace: written after the lock was released\n",
+            "  - trigger: ':two'\n",
+            "    replace: second\n",
+            "    invented_by_a_later_espanso: yes\n",
+        );
+
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        // The anchors, captured from R0 — the snapshot this session still holds —
+        // and before anything else touches the file. The subject takes the
+        // editor's policy so that a weaker tier is available to tell R1 and R2
+        // apart; the placement takes the only policy a placement has.
+        let request = session
+            .with_workspace(|workspace| {
+                let base = workspace.get_document(id)?;
+                Ok(espansoconfig_core::reconcile::ReapplyRequest {
+                    subject: espansoconfig_core::reconcile::ReapplyMode::anchored(
+                        base,
+                        &base.view.matches[0],
+                        espansoconfig_core::reconcile::ReapplyConfidence::ExactItemOrUniqueTrigger,
+                    ),
+                    placement: espansoconfig_core::reconcile::PlacementMode::anchored(
+                        base,
+                        &base.view.matches[1],
+                    ),
+                })
+            })
+            .expect("the base snapshot is readable");
+
+        // R1 replaces the file, so a real refusal happens and `found` is a real
+        // locked read's revision.
+        fs::write(dir.path().join("match").join("base.yml"), REFUSING).unwrap();
+        let refusal = session
+            .move_match(held, None, before.revision, &Acknowledgement::none())
+            .expect("a conflict is an outcome, not a failure");
+        let (expected, found) = match refusal {
+            SaveResult::Conflict {
+                expected, found, ..
+            } => (expected, found),
+            other => panic!("expected a conflict, got {other:?}"),
+        };
+        assert_eq!(
+            found,
+            ContentRevision::of_bytes(REFUSING.as_bytes()),
+            "the premise: `found` is the revision of the bytes that refused the save"
+        );
+
+        // R2 replaces it again, in the window between the released lock and the
+        // fresh read.
+        fs::write(dir.path().join("match").join("base.yml"), LATER).unwrap();
+        let later = ContentRevision::of_bytes(LATER.as_bytes());
+        assert_ne!(found, later, "the fixture must move the file twice");
+
+        let payload = session
+            .with_workspace(|workspace| {
+                super::conflict_after_the_lock(workspace, id, expected, found, &request)
+            })
+            .expect("the fresh read succeeds");
+        let SaveResult::Conflict {
+            disk_revision,
+            reapply,
+            ..
+        } = payload
+        else {
+            panic!("expected a conflict");
+        };
+        assert_eq!(disk_revision, later, "the premise: the payload is of R2");
+
+        let espansoconfig_core::reconcile::ReapplyResolution::Identified { target } =
+            reapply.subject
+        else {
+            panic!(
+                "the subject must resolve against R2, where its trigger is unique again: {:?}",
+                reapply.subject
+            );
+        };
+        assert_eq!(
+            target.id.revision, disk_revision,
+            "the identified snippet must be of the snapshot the payload describes"
+        );
+        assert!(
+            target
+                .source_text
+                .contains("written after the lock was released"),
+            "the identified snippet must be R2's, not the one that refused the save"
+        );
+
+        let espansoconfig_core::reconcile::ReapplyPlacement::Identified { target: anchor } =
+            reapply.placement
+        else {
+            panic!(
+                "the placement must resolve against R2, where the anchor's bytes are back: {:?}",
+                reapply.placement
+            );
+        };
+        assert_eq!(
+            anchor.id.revision, disk_revision,
+            "and so must the anchor, out of the same read"
+        );
+    } // End of function a_conflicts_anchored_answer_is_of_the_fresh_read()
+
+    // -----------------------------------------------------------------------
+    // Which correspondence question each writing command actually asks
+    // -----------------------------------------------------------------------
+    //
+    // `crates/espansoconfig-core/tests/reconcile.rs` builds its `ReapplyRequest`
+    // values in its own helpers, so it establishes what the algorithm answers and
+    // **nothing about which request a command selects**. Mutating
+    // `move_one_match` to send `PlacementMode::NotAnchored`, or
+    // `delete_one_match` to send the editor's weaker confidence, leaves every one
+    // of those cases green. The four tests below drive the six writing commands
+    // through their public session methods and assert the answer each production
+    // request produces, over a fixture built so that the two confidence policies
+    // disagree.
+
+    /// The base every command-level conflict case below is planned against.
+    ///
+    /// Three snippets with three distinct triggers, hand-authored and neutral
+    /// (`CLAUDE.md` section 1).
+    const POLICY_BASE: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: first\n",
+        "  - trigger: ':two'\n",
+        "    replace: second\n",
+        "  - trigger: ':three'\n",
+        "    replace: third\n",
+    );
+
+    /// What another writer put on disk before any of those saves reached the
+    /// transaction.
+    ///
+    /// **This fixture is what makes a confidence mutation fail.** Only the first
+    /// snippet's `replace` value differs, so that snippet's owned-run envelope
+    /// *and* its whole mapping slice are both different while its trigger is
+    /// spelled exactly as it was and is still unique on both sides: exact
+    /// correspondence refuses for it and the editor's trigger tier identifies it,
+    /// and the two policies are therefore distinguishable by their answers. The
+    /// other two snippets are byte-identical, so exact correspondence identifies
+    /// them — which is what lets a positional anchor be pinned as *found* or as
+    /// *specifically refused* rather than merely as "not `NotAnchored`".
+    const POLICY_DISK: &str = concat!(
+        "matches:\n",
+        "  - trigger: ':one'\n",
+        "    replace: rewritten by somebody else\n",
+        "  - trigger: ':two'\n",
+        "    replace: second\n",
+        "  - trigger: ':three'\n",
+        "    replace: third\n",
+    );
+
+    /// The evidence one conflicting save produces, over a session that projected
+    /// [`POLICY_BASE`] and a file another writer has since replaced with
+    /// [`POLICY_DISK`].
+    ///
+    /// **A fresh session per case, and that is not tidiness.** The refresh a
+    /// conflict takes replaces this session's cached projection, so a second save
+    /// through the same session would be planned against the disk rather than
+    /// against the base — and every identity the first case held would be stale.
+    fn conflicting(
+        save: impl FnOnce(
+            &WorkspaceSession,
+            &DocumentView,
+            DocumentId,
+        ) -> Result<SaveResult, super::CommandError>,
+    ) -> ReapplyEvidence {
+        let opened = opened_on(POLICY_BASE);
+        fs::write(
+            opened.dir.path().join("match").join("base.yml"),
+            POLICY_DISK,
+        )
+        .unwrap();
+        let result = save(&opened.session, &opened.before, opened.id)
+            .expect("a conflict is an outcome, not a failure");
+        let SaveResult::Conflict { reapply, .. } = result else {
+            panic!("expected a conflict, got {result:?}");
+        };
+        reapply
+    } // End of function conflicting()
+
+    /// The trigger of the snippet a **subject** resolution identified.
+    fn subject_trigger(subject: &ReapplyResolution) -> String {
+        let ReapplyResolution::Identified { target } = subject else {
+            panic!("expected a subject identification, got {subject:?}");
+        };
+        trigger_text(target).to_owned()
+    } // End of function subject_trigger()
+
+    /// The trigger of the snippet a **placement** resolution identified.
+    fn placement_trigger(placement: &ReapplyPlacement) -> String {
+        let ReapplyPlacement::Identified { target } = placement else {
+            panic!("expected a placement identification, got {placement:?}");
+        };
+        trigger_text(target).to_owned()
+    } // End of function placement_trigger()
+
+    /// The exact-correspondence refusal, spelled once.
+    fn refused_exactly() -> ReapplyResolution {
+        ReapplyResolution::Refused {
+            reason: ReapplyRefusal::NoExactCorrespondence,
+        }
+    } // End of function refused_exactly()
+
+    /// **A drafted save is the only writing command that may fall back to a
+    /// unique unchanged trigger**, and a move, a deletion and a duplication may
+    /// not — asserted through the public session methods, over one snippet for
+    /// which the two policies give different answers.
+    ///
+    /// Mutating `save_one_match` to `ReapplyConfidence::ExactItem`, or any of
+    /// the other three to `ReapplyConfidence::ExactItemOrUniqueTrigger`, flips
+    /// exactly one assertion here — which is what the core's own acceptance cases
+    /// cannot do, because they build the request themselves.
+    ///
+    /// **The last case is why the three refusals are not vacuous.** A move of a
+    /// snippet whose bytes are *unchanged* identifies it, so a mutation that
+    /// captured no anchor at all, or refused constantly, fails too.
+    #[test]
+    fn a_drafted_save_is_the_only_writing_command_that_may_fall_back_to_a_trigger() {
+        let drafted = conflicting(|session, before, _| {
+            session.save_match(
+                before.matches[0].id,
+                &draft_replace("mine"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            subject_trigger(&drafted.subject),
+            ":one",
+            "a drafted save selects the editor's policy, whose trigger tier finds this snippet"
+        );
+        assert_eq!(
+            drafted.placement,
+            ReapplyPlacement::NotAnchored {},
+            "a drafted save relocates nothing, so it names no positional anchor"
+        );
+
+        let moved = conflicting(|session, before, _| {
+            session.move_match(
+                before.matches[0].id,
+                None,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            moved,
+            ReapplyEvidence {
+                subject: refused_exactly(),
+                placement: ReapplyPlacement::NotAnchored {},
+            },
+            "a move acts on the whole envelope, and a move to the top names no anchor"
+        );
+
+        let deleted = conflicting(|session, before, _| {
+            session.delete_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            deleted,
+            ReapplyEvidence {
+                subject: refused_exactly(),
+                placement: ReapplyPlacement::NotAnchored {},
+            },
+            "a deletion removes the whole envelope, and it puts nothing anywhere"
+        );
+
+        let duplicated = conflicting(|session, before, _| {
+            session.duplicate_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            duplicated,
+            ReapplyEvidence {
+                subject: refused_exactly(),
+                placement: ReapplyPlacement::NotAnchored {},
+            },
+            "a duplicate copies the envelope byte for byte, and the clone has no placement choice"
+        );
+
+        let unchanged = conflicting(|session, before, _| {
+            session.move_match(
+                before.matches[1].id,
+                None,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            subject_trigger(&unchanged.subject),
+            ":two",
+            "the exact tier really searches: a snippet whose bytes survived is identified"
+        );
+    } // End of function a_drafted_save_is_the_only_writing_command_that_may_fall_back_to_a_trigger()
+
+    /// **A creation names no existing snippet and a raw save has no honest
+    /// reapply at all**, and those are two different facts rather than one.
+    ///
+    /// Both are decided before the transaction and neither consults the disk, so
+    /// a mutation that swapped them — or that sent an anchored mode for either —
+    /// changes the answer here. Neither command names a positional anchor in
+    /// these three cases, and each says so rather than leaving the second operand
+    /// unanswered.
+    #[test]
+    fn a_creation_answers_targetless_and_a_raw_save_answers_unsupported() {
+        for position in [NewMatchPosition::Front {}, NewMatchPosition::End {}] {
+            let created = conflicting(|session, before, id| {
+                session.create_match(
+                    id,
+                    &new_snippet(),
+                    &position,
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+            });
+            assert_eq!(
+                created,
+                ReapplyEvidence {
+                    subject: ReapplyResolution::Targetless {},
+                    placement: ReapplyPlacement::NotAnchored {},
+                },
+                "a creation brings its own snippet, and front and end name no anchor"
+            );
+        } // End of the loop over the two semantic creation positions
+
+        let raw = conflicting(|session, before, id| {
+            session.save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':mine'\n    replace: mine\n",
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            raw,
+            ReapplyEvidence {
+                subject: ReapplyResolution::Unsupported {},
+                placement: ReapplyPlacement::NotAnchored {},
+            },
+            "a whole-document replacement has no target and is placed after nothing"
+        );
+    } // End of function a_creation_answers_targetless_and_a_raw_save_answers_unsupported()
+
+    /// **A move sent `after` a snippet asks about that snippet too**, and the
+    /// answer is exact correspondence or a refusal — never a trigger fallback.
+    ///
+    /// Two cases, one per side of the fixture. The anchor whose bytes survived is
+    /// identified, so a mutation sending `PlacementMode::NotAnchored` for every
+    /// move fails; the anchor whose bytes changed but whose trigger did not is
+    /// refused by name, so a mutation giving a placement the editor's weaker
+    /// policy fails as well. The subject is asserted in both, because the two
+    /// operands must not be able to answer each other's question.
+    #[test]
+    fn a_move_after_an_anchor_answers_that_anchors_correspondence() {
+        let after_a_surviving_anchor = conflicting(|session, before, _| {
+            session.move_match(
+                before.matches[0].id,
+                Some(before.matches[2].id),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            placement_trigger(&after_a_surviving_anchor.placement),
+            ":three",
+            "the anchor's bytes survived, so exact correspondence finds it"
+        );
+        assert_eq!(
+            after_a_surviving_anchor.subject,
+            refused_exactly(),
+            "and the moved snippet's own bytes did not, so its half still refuses"
+        );
+
+        let after_a_rewritten_anchor = conflicting(|session, before, _| {
+            session.move_match(
+                before.matches[2].id,
+                Some(before.matches[0].id),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            after_a_rewritten_anchor.placement,
+            ReapplyPlacement::Refused {
+                reason: ReapplyRefusal::NoExactCorrespondence
+            },
+            "the anchor keeps its unique trigger, and a placement may not use one"
+        );
+        assert_eq!(
+            subject_trigger(&after_a_rewritten_anchor.subject),
+            ":three",
+            "while the moved snippet itself is identified, out of the same read"
+        );
+    } // End of function a_move_after_an_anchor_answers_that_anchors_correspondence()
+
+    /// **A creation sent `after` a snippet asks about that snippet as a
+    /// placement**, and its own subject stays `Targetless` either way.
+    ///
+    /// The pair that stops a creation's anchor drifting back into the subject
+    /// slot, where `Identified` would have meant two different things depending
+    /// on which command produced it.
+    #[test]
+    fn a_creation_after_an_anchor_answers_that_anchors_correspondence() {
+        let after_a_surviving_anchor = conflicting(|session, before, id| {
+            session.create_match(
+                id,
+                &new_snippet(),
+                &NewMatchPosition::After {
+                    anchor: before.matches[2].id,
+                },
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            placement_trigger(&after_a_surviving_anchor.placement),
+            ":three",
+            "the anchor's bytes survived, so exact correspondence finds it"
+        );
+        assert_eq!(
+            after_a_surviving_anchor.subject,
+            ReapplyResolution::Targetless {},
+            "and a creation still names no existing snippet of its own"
+        );
+
+        let after_a_rewritten_anchor = conflicting(|session, before, id| {
+            session.create_match(
+                id,
+                &new_snippet(),
+                &NewMatchPosition::After {
+                    anchor: before.matches[0].id,
+                },
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        assert_eq!(
+            after_a_rewritten_anchor,
+            ReapplyEvidence {
+                subject: ReapplyResolution::Targetless {},
+                placement: ReapplyPlacement::Refused {
+                    reason: ReapplyRefusal::NoExactCorrespondence
+                },
+            },
+            "the anchor keeps its unique trigger, and a creation's placement may not use one"
+        );
+    } // End of function a_creation_after_an_anchor_answers_that_anchors_correspondence()
 
     /// A conflict's `disk_text` is the file **byte for byte**, distinguishing
     /// bytes included.
@@ -4759,11 +5521,25 @@ mod tests {
                 found,
                 disk_revision,
                 disk_text,
+                reapply,
                 disk,
             } => {
                 assert_eq!(expected, before.revision, "the base the editor loaded");
                 assert_eq!(found, theirs, "the bytes that refused the save");
                 assert_eq!(disk_revision, theirs, "the fresh read taken afterwards");
+                // The raw editor's permanent answer. A whole-document
+                // replacement has no target to find again and is placed after
+                // nothing, so there is nothing for either correspondence to be
+                // about — and this is a property of the operation rather than of
+                // what the disk happens to hold.
+                assert_eq!(
+                    reapply,
+                    espansoconfig_core::reconcile::ReapplyEvidence {
+                        subject: espansoconfig_core::reconcile::ReapplyResolution::Unsupported {},
+                        placement: espansoconfig_core::reconcile::ReapplyPlacement::NotAnchored {},
+                    },
+                    "a raw save answers unsupported, whatever the disk holds"
+                );
                 assert_eq!(
                     triggers_of(&disk),
                     [":one"],

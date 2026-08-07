@@ -217,6 +217,7 @@ const DISK_TEXT = '\u{feff}# theirs\r\nmatches:\n  - trigger: x\n    replace: th
 function conflictWith(diskRevision: ContentRevision = AFTER): ConflictResult {
   return {
     outcome: 'conflict',
+    reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
     expected: BASE,
     found: AFTER,
     disk_revision: diskRevision,

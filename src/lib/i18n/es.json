@@ -755,6 +755,25 @@
   "code.saveResult.conflict": "Este archivo cambió después de leerse, así que no se escribió nada.",
   "code.saveResult.refused": "espansoConfig no escribió este archivo por lo que encontró en el resultado.",
 
+  "code.reapplyResolution.identified": "espansoConfig encontró exactamente un fragmento en el archivo tal como está ahora que lleva los indicios que registró para este cambio. Eso no demuestra que sea el mismo fragmento: si alguien lo borró fuera de esta aplicación y puso otro idéntico, no hay forma de distinguirlos.",
+  "code.reapplyResolution.targetless": "Este cambio trae su propio fragmento, así que no nombra ninguno existente que haya que volver a encontrar.",
+  "code.reapplyResolution.unsupported": "Este cambio sustituye el documento entero, así que no hay ningún fragmento, ningún campo ni ninguna acción que volver a encontrar en el archivo tal como está ahora.",
+  "code.reapplyResolution.refused": "espansoConfig no pudo establecer la correspondencia de aquello a lo que se refería este cambio.",
+
+  "code.reapplyPlacement.notAnchored": "Este cambio no se coloca después de ningún fragmento concreto, así que no había ninguna posición que volver a encontrar.",
+  "code.reapplyPlacement.identified": "espansoConfig encontró exactamente un fragmento en el archivo tal como está ahora que lleva los indicios que registró para el fragmento tras el cual se colocaba este cambio.",
+  "code.reapplyPlacement.refused": "espansoConfig no pudo establecer la correspondencia del fragmento tras el cual se colocaba este cambio.",
+
+  "code.reapplyRefusal.noAnchorInBase": "espansoConfig no pudo registrar los indicios de correspondencia que requiere este cambio antes de intentar guardar, así que no puede buscarlos en el archivo actual. El archivo del disco no se examinó.",
+  "code.reapplyRefusal.wrongDocument": "El archivo que se examinó no es el archivo al que se refería este cambio.",
+  "code.reapplyRefusal.diskDoesNotParse": "El archivo tal como está ahora no se pudo analizar como YAML, así que espansoConfig no tiene una lista de fragmentos analizada donde buscar.",
+  "code.reapplyRefusal.sequenceMissing": "espansoConfig no encontró ningún fragmento candidato en la dirección de secuencia registrada en el archivo tal como está ahora.",
+  "code.reapplyRefusal.ambiguousExact": "Más de un fragmento de esa lista contiene los mismos indicios exactos de correspondencia registrados para este cambio, así que espansoConfig no puede distinguirlos.",
+  "code.reapplyRefusal.noExactCorrespondence": "Ningún fragmento de esa lista contiene los indicios exactos de correspondencia de las líneas propias registrados para este cambio. Esta operación o ancla de posición requiere una correspondencia exacta de las líneas propias, así que nada menos exacto sirve.",
+  "code.reapplyRefusal.targetMissingOrTriggerChanged": "Ningún fragmento de esa lista está escrito como el de este cambio, y ninguno escribe su disparador tal como lo escribía el archivo. Puede que alguien quitara el fragmento, o que reescribiera o volviera a escribir su disparador de otra manera.",
+  "code.reapplyRefusal.ambiguousTrigger": "El disparador del fragmento de este cambio está escrito igual en más de un fragmento — en el archivo tal como estaba, en el archivo tal como está ahora, o en ambos —, así que no identifica nada.",
+  "code.reapplyRefusal.noTriggerToMatch": "El fragmento de este cambio no escribe ni trigger, ni triggers, ni regex, así que no hay ningún disparador que buscar.",
+
   "code.draftError.matchHasNoPath": "espansoConfig no pudo determinar en qué punto del archivo está este fragmento, así que no puede cambiar nada dentro de él.",
   "code.draftError.matchNotEditable": "Este fragmento contiene una construcción que el editor visual no reescribe sin poner en riesgo el resto del archivo.",
   "code.draftError.ambiguousKey": "Este fragmento escribe una de sus claves más de una vez, así que ningún cambio puede señalar una única entrada.",

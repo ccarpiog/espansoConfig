@@ -72,6 +72,9 @@ use espansoconfig_core::persist::{
     Acknowledgement, BackupError, BackupRecord, BackupStep, Rotation, RotationOutcome, SaveError,
     SaveRefusal, SaveVerdict, TargetDifference, WriteError, WriteStep,
 };
+use espansoconfig_core::reconcile::{
+    ReapplyEvidence, ReapplyPlacement, ReapplyRefusal, ReapplyResolution,
+};
 use espansoconfig_core::syntax::{
     HazardKind, InvariantViolation, NodeKind, OffsetOutOfDomain, ParseFailure, SyntaxError,
 };
@@ -385,16 +388,115 @@ pub(crate) fn declared_type_names(source: &str) -> Vec<String> {
 /// message pointed at the wrong declaration entirely. Resolving the reference is
 /// deliberately not attempted; the referenced type is checked on its own, exactly
 /// as `ValueView`'s named-interface payloads are.
+///
+/// **`Record<string, never>` is the one reference it does resolve**, and it
+/// resolves to the empty operand set. It is the TypeScript spelling of *an
+/// object with no properties whatsoever* — the shape `serde` writes for a struct
+/// variant with no fields — and treating it as an unresolvable reference made
+/// every such variant a **skip**: nothing then pinned that Rust writes `{}` and
+/// that TypeScript declares no operands, so an operand added on one side only
+/// stayed green.
+///
+/// **The whole payload must be that spelling and nothing else**, up to the `}`
+/// that closes the one-key variant object. Merely *starting with* it is not
+/// enough and the difference is the finding this check exists for:
+/// `Record<string, never> | { readonly force: boolean }` starts with it, declares
+/// a real operand on the TypeScript side alone, and would still have been
+/// compared against `serde`'s `{}` and passed. A union, an intersection, an array
+/// suffix or any other continuation is therefore not this payload, and answering
+/// `None` for one makes it a counted skip rather than a silent check — which the
+/// `(checked, nested, unit)` assertion below then fails.
+///
+/// `{}` is deliberately **not** accepted as the same thing either: in TypeScript
+/// it means *any non-nullish value*, which is not an object with no properties,
+/// so a real operand could hide behind it.
 fn tagged_variant_fields(source: &str, union: &str, variant: &str) -> Option<BTreeSet<String>> {
     let body = union_body(source, union);
     let header = format!("readonly {variant}: ");
     let start = body.find(&header)? + header.len();
-    if !body[start..].trim_start().starts_with('{') {
+    let payload = body[start..].trim_start();
+    if let Some(rest) = payload.strip_prefix(EMPTY_PAYLOAD) {
+        // The enclosing variant boundary, and nothing between it and the
+        // spelling: `}` closes the `{ readonly Variant: … }` object.
+        if rest.trim_start().starts_with('}') {
+            return Some(BTreeSet::new());
+        }
+        return None;
+    }
+    if !payload.starts_with('{') {
         return None;
     }
     let what = format!("the {variant} payload of type {union}");
-    Some(block_fields(braced_block(&body[start..], &what), &what))
+    let block = braced_block(&body[start..], &what);
+    if block.trim().is_empty() {
+        return None;
+    }
+    Some(block_fields(block, &what))
 } // End of function tagged_variant_fields()
+
+/// A synthetic union declaring one variant with `payload` as its payload.
+///
+/// Written as text because [`tagged_variant_fields`] reads text: the point of
+/// the tests below is what the **parser** does with a spelling, and building the
+/// spelling by hand is the only way to exercise one `src/lib/ipc/types.ts` does
+/// not contain.
+fn one_variant_union(payload: &str) -> String {
+    format!("export type Probe =\n  | {{ readonly Only: {payload} }}\n  | {{ readonly Other: {{ readonly kept: string }} }};\n")
+} // End of function one_variant_union()
+
+/// The empty payload is recognised **only** as its exact spelling.
+///
+/// **The mutation this pins is one-sided, which is why the counts alone could
+/// not catch it.** Before the second review round the check accepted any payload
+/// that merely *started with* `Record<string, never>`, so
+/// `Record<string, never> | { readonly force: boolean }` came back as the empty
+/// field set, kept the `(checked, nested, unit)` totals exactly where they were,
+/// and compared clean against the `{}` `serde` writes — a real operand declared
+/// on the TypeScript side alone, admitted by the very check that claims to
+/// forbid it.
+///
+/// Each rejected spelling below is a distinct way of continuing the reference: a
+/// union, an intersection, an array suffix and an identifier suffix. `{}` is
+/// rejected for its own reason — it is TypeScript for *any non-nullish value*,
+/// not for an object with no properties — and the exact spelling is asserted
+/// accepted first, so this cannot pass by rejecting everything.
+#[test]
+fn only_the_exact_empty_payload_spelling_is_a_checked_zero_field_payload() {
+    let exact = one_variant_union(EMPTY_PAYLOAD);
+    assert_eq!(
+        tagged_variant_fields(&exact, "Probe", "Only"),
+        Some(BTreeSet::new()),
+        "the exact spelling is the one checked zero-field payload"
+    );
+    // The premise: a real payload beside it still reads as its own operands, so
+    // a rejection below is about the spelling and not about the harness.
+    assert_eq!(
+        tagged_variant_fields(&exact, "Probe", "Other"),
+        Some(BTreeSet::from(["kept".to_owned()])),
+        "an ordinary braced payload is unaffected"
+    );
+
+    for spelling in [
+        "Record<string, never> | { readonly force: boolean }",
+        "Record<string, never> & { readonly force: boolean }",
+        "Record<string, never>[]",
+        "Record<string, never>Extra",
+        "{}",
+    ] {
+        assert_eq!(
+            tagged_variant_fields(&one_variant_union(spelling), "Probe", "Only"),
+            None,
+            "`{spelling}` is not the empty payload and must not be read as one"
+        );
+    } // End of the loop over the spellings that are not the empty payload
+} // End of function only_the_exact_empty_payload_spelling_is_a_checked_zero_field_payload()
+
+/// How `src/lib/ipc/types.ts` spells *an object with no properties at all*.
+///
+/// Written once because [`tagged_variant_fields`] recognises it as a checked
+/// zero-field payload, and a second spelling of it would silently become a skip
+/// again.
+const EMPTY_PAYLOAD: &str = "Record<string, never>";
 
 /// The `{ code: { operand: 'shape' } }` table declared by `errors.ts`.
 ///
@@ -1604,6 +1706,58 @@ fn duplicate_seam_samples() -> Vec<DuplicateSeam> {
     ]
 } // End of function duplicate_seam_samples()
 
+/// One value of every [`ReapplyRefusal`] variant.
+fn reapply_refusal_samples() -> Vec<ReapplyRefusal> {
+    vec![
+        ReapplyRefusal::NoAnchorInBase,
+        ReapplyRefusal::WrongDocument,
+        ReapplyRefusal::DiskDoesNotParse,
+        ReapplyRefusal::SequenceMissing,
+        ReapplyRefusal::AmbiguousExact,
+        ReapplyRefusal::NoExactCorrespondence,
+        ReapplyRefusal::TargetMissingOrTriggerChanged,
+        ReapplyRefusal::AmbiguousTrigger,
+        ReapplyRefusal::NoTriggerToMatch,
+    ]
+} // End of function reapply_refusal_samples()
+
+/// One value of every [`ReapplyResolution`] variant.
+///
+/// The `Identified` arm carries a **projected** match rather than a synthesized
+/// one, because that is what the arm carries in production and a hand-built
+/// `MatchView` would be a second description of the read model.
+fn reapply_resolution_samples() -> Vec<ReapplyResolution> {
+    let view = project("match/synthetic.yml", MATCH_FILE);
+    vec![
+        ReapplyResolution::Unsupported {},
+        ReapplyResolution::Targetless {},
+        ReapplyResolution::Identified {
+            target: Box::new(view.matches[0].clone()),
+        },
+        ReapplyResolution::Refused {
+            reason: ReapplyRefusal::AmbiguousExact,
+        },
+    ]
+} // End of function reapply_resolution_samples()
+
+/// One value of every [`ReapplyPlacement`] variant.
+///
+/// The `Identified` arm carries a **projected** match for
+/// [`reapply_resolution_samples`]'s reason: a hand-built `MatchView` would be a
+/// second description of the read model.
+fn reapply_placement_samples() -> Vec<ReapplyPlacement> {
+    let view = project("match/synthetic.yml", MATCH_FILE);
+    vec![
+        ReapplyPlacement::NotAnchored {},
+        ReapplyPlacement::Identified {
+            target: Box::new(view.matches[0].clone()),
+        },
+        ReapplyPlacement::Refused {
+            reason: ReapplyRefusal::NoExactCorrespondence,
+        },
+    ]
+} // End of function reapply_placement_samples()
+
 /// One value of every [`MoveSeam`] variant.
 fn move_seam_samples() -> Vec<MoveSeam> {
     vec![
@@ -2197,6 +2351,13 @@ fn save_transaction_structs() -> Vec<(&'static str, Value)> {
                 rotation,
             }),
         ),
+        (
+            "ReapplyEvidence",
+            json_of(&ReapplyEvidence {
+                subject: ReapplyResolution::Targetless {},
+                placement: ReapplyPlacement::NotAnchored {},
+            }),
+        ),
     ]
 } // End of function save_transaction_structs()
 
@@ -2292,6 +2453,18 @@ fn save_transaction_enums() -> Vec<(&'static str, Vec<Value>)> {
             "PresentationNote",
             presentation_note_samples().iter().map(json_of).collect(),
         ),
+        (
+            "ReapplyRefusal",
+            reapply_refusal_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "ReapplyResolution",
+            reapply_resolution_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "ReapplyPlacement",
+            reapply_placement_samples().iter().map(json_of).collect(),
+        ),
     ]
 } // End of function save_transaction_enums()
 
@@ -2335,14 +2508,18 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 189,
+        variants, 205,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
          Phase 2b-2c-3 added FindingCode::DocumentDoesNotParse and its fix round \
-         added SaveError::ReplacementRequiresBackups, and Phase 2c-3c-1 added the \
+         added SaveError::ReplacementRequiresBackups, Phase 2c-3c-1 added the \
          duplicate's twelve — four EditError refusals, DuplicateSeam's three, \
-         VerificationFailure's four and FindingCode::DuplicateKeepsTriggerDefinition; \
+         VerificationFailure's four and FindingCode::DuplicateKeepsTriggerDefinition \
+         — and Phase 2c-4b-1 added the correspondence evidence's sixteen: \
+         ReapplyRefusal's nine, ReapplyResolution's four and — at the review \
+         round, where a move's placement anchor became an operand of its own — \
+         ReapplyPlacement's three; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -2424,15 +2601,21 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (115, 12, 62),
+        (122, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
          eight more struct ones, PresentationNote's two are two more, \
          Phase 2b-2c-3's DocumentDoesNotParse and ReplacementRequiresBackups are \
          two more, and Phase 2c-3c-1's duplicate added nine struct ones and \
-         three unit ones — its finding gained a revision operand at the review \
-         round; a struct variant that became a skip is a hole"
+         three unit ones, and Phase 2c-4b-1 added ReapplyRefusal's nine unit \
+         ones plus five checked struct ones: ReapplyResolution's four — its two \
+         **empty** arms included, because the review round taught \
+         `tagged_variant_fields` to read `Record<string, never>` as a checked \
+         zero-field payload rather than skip it — and, since the same round made \
+         a move's placement anchor an operand of its own, ReapplyPlacement's \
+         three, of which one is empty and two carry payloads; \
+         a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -2710,7 +2893,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 189,
+        checked, 205,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

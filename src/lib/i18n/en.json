@@ -755,6 +755,25 @@
   "code.saveResult.conflict": "This file changed after it was read, so nothing was written.",
   "code.saveResult.refused": "espansoConfig did not write this file, because of what it found in the result.",
 
+  "code.reapplyResolution.identified": "espansoConfig found exactly one snippet in the file as it is now carrying the evidence it recorded for this change. That is not proof it is the same snippet: a snippet removed outside this app and replaced by an indistinguishable one cannot be told apart from it.",
+  "code.reapplyResolution.targetless": "This change brings its own snippet, so it names no existing one to find again.",
+  "code.reapplyResolution.unsupported": "This change replaces the whole document, so there is no snippet, no field and no action in it to find again in the file as it is now.",
+  "code.reapplyResolution.refused": "espansoConfig could not establish correspondence for what this change was about.",
+
+  "code.reapplyPlacement.notAnchored": "This change is not placed after a named snippet, so there was no position to find again.",
+  "code.reapplyPlacement.identified": "espansoConfig found exactly one snippet in the file as it is now carrying the evidence it recorded for the snippet this change was placed after.",
+  "code.reapplyPlacement.refused": "espansoConfig could not establish correspondence for the snippet this change was placed after.",
+
+  "code.reapplyRefusal.noAnchorInBase": "espansoConfig could not record the correspondence evidence this change requires before it tried to save, so it cannot search the current file with that evidence. The file on disk was not examined.",
+  "code.reapplyRefusal.wrongDocument": "The file that was examined is not the file this change was about.",
+  "code.reapplyRefusal.diskDoesNotParse": "The file as it is now could not be parsed as YAML, so espansoConfig has no parsed snippet list to search.",
+  "code.reapplyRefusal.sequenceMissing": "espansoConfig found no snippet candidate at the recorded sequence address in the file as it is now.",
+  "code.reapplyRefusal.ambiguousExact": "More than one snippet in that list carries the same exact correspondence evidence recorded for this change, so espansoConfig cannot tell them apart.",
+  "code.reapplyRefusal.noExactCorrespondence": "No snippet in that list carries the exact owned-line correspondence evidence recorded for this change. This operation or positional anchor requires exact owned-line correspondence, so nothing weaker will do.",
+  "code.reapplyRefusal.targetMissingOrTriggerChanged": "No snippet in that list is written the way this change’s was, and none spells its trigger the way the file spelled it. The snippet may have been removed, or its trigger may have been rewritten or respelled.",
+  "code.reapplyRefusal.ambiguousTrigger": "The trigger of this change’s snippet is spelled the same on more than one snippet — in the file as it was, in the file as it is now, or in both — so it identifies nothing.",
+  "code.reapplyRefusal.noTriggerToMatch": "This change’s snippet writes no trigger, no triggers and no regex, so there is no trigger to look for.",
+
   "code.draftError.matchHasNoPath": "espansoConfig could not work out where this snippet sits in the file, so it cannot change anything in it.",
   "code.draftError.matchNotEditable": "This snippet holds a construct the visual editor will not rewrite without risking the rest of the file.",
   "code.draftError.ambiguousKey": "This snippet writes one of its keys more than once, so no change to it can name a single entry.",

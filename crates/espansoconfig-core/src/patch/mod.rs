@@ -92,3 +92,10 @@ pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,
     PathParseError, PathSegment, Resolved,
 };
+
+/// The item-ownership derivation `crate::reconcile` hashes.
+///
+/// Crate-visible on purpose: a run is a byte offset into one parse, and the
+/// whole reason `crate::reconcile` exists is that positions do not cross a
+/// revision boundary. What crosses is a digest.
+pub(crate) use edit::item_owned_runs;

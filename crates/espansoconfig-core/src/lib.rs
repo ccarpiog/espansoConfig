@@ -20,6 +20,7 @@
 //! | [`model`] | semantic projection (`MatchView`, …) |
 //! | [`draft`] | one match's drafted values → the minimal edit batch |
 //! | [`patch`] | the edit engine — byte-span surgery |
+//! | [`reconcile`] | which item of a later parse is the item an operation named |
 //! | [`emit`] | scalar style selection + block emitter |
 //! | [`validate`] | structural + espanso-semantic validation |
 //! | [`persist`] | atomic save transaction, backups |
@@ -108,6 +109,17 @@
 //!   does. It writes nothing and has **no caller**: no `#[tauri::command]`
 //!   reaches it, exactly as [`persist::save`] had none at 2a.
 //!
+//! - **2c-4b-1** — [`reconcile`]: the **evidence** half of *Keep my draft*. A
+//!   [`reconcile::ReapplyAnchor`] captured from the snapshot a command validated
+//!   its request against, and a conservative tier walk that says which item of a
+//!   *later* parse of the same file carries that evidence. **An operation has as
+//!   many operands as it has identities**, so a question is a
+//!   [`reconcile::ReapplyRequest`] — a subject and a placement — and an answer is
+//!   a [`reconcile::ReapplyEvidence`] with one resolution for each, both taken
+//!   from one snapshot. It writes nothing, plans nothing and decides nothing
+//!   about a screen; an ambiguous or missing candidate is a refusal, and the
+//!   item's index is never a tie-break.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step, and [`watch`] holds only [`ContentRevision`].
 
@@ -119,6 +131,7 @@ pub mod emit;
 pub mod model;
 pub mod patch;
 pub mod persist;
+pub mod reconcile;
 pub mod syntax;
 pub mod validate;
 pub mod watch;

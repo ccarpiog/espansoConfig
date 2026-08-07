@@ -70,7 +70,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4a-3c-5** | **The confirmation pass's one Medium, and the probe's removal**: three passages claimed `adoptDiskVersion` refuses for three causes where the code has **five** | ✅ complete — the narrow conclusion was right and the proof was not; all three now name five guards and argue the UI's unreachability separately. The harness is deleted, both hook files restored by hand to byte-identical, and the gates are back at their production numbers |
 | **Phase 2c-4a** | **Conflict capture and preservation** — plan §12's "retain the draft, load the disk version separately, compare, copy, reload, overwriting neither side" | ✅ **complete.** Two Codex rounds, both **NOT READY** (three findings, then one); **six of step 3c's eight findings were sentences or records claiming something the code does not do**, and none of the eight changed a byte written to disk |
 | **2c-4b design consult** | **Phase 2c-4b put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4b-design.md`. It **narrowed the phase and split its confidence rule in two**: the match editor may fall back from exact item identity to a unique unchanged trigger, while delete, move, duplicate and every positional anchor require exact correspondence and **never** use the item index as a tie-break. The raw editor is ruled **out of reapply entirely** — a whole-document text draft has no match to identify — and three steps keep the correspondence proof separate from the visible promise |
-| 2c-4b-1 … 2c-4b-3 | Reapply, in the plan's strong sense. See the step table under "Next action" | ⬜️ **2c-4b-1 is next** — the core `reconcile` primitive and `ConflictResult.reapply` as evidence, with no control added |
+| **2c-4b-1** | **The correspondence evidence and the conflict contract**: `crates/espansoconfig-core/src/reconcile.rs`, the anchor/fingerprint construction, the refusal enum, and `SaveResult::Conflict::reapply` / `ConflictResult.reapply` — built from the **same fresh snapshot** as `disk_text` and `disk_revision`. No control, no choice, no capability, no `.svelte` change | ✅ complete — after **three** rounds. Round 1 returned **NOT READY** on a High and five others; round 2 confirmed four closed and found **two still standing plus two new**; round 3 closed those and its own sweep found **three more**, one of which was the decision record claiming a guarantee the code did not give |
+| 2c-4b-2 … 2c-4b-3 | Reapply as browser-model transitions, then the offered choice. See the step table under "Next action" | ⬜️ **2c-4b-2 is next** — the per-surface transitions, built and tested with `offersReapply: false` |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -5918,21 +5919,97 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Phase 2c-4b's design consult is taken. **Step 2c-4b-1 is next.**
+### Phase 2c-4b-1 is complete. **Step 2c-4b-2 is next.**
 
-**`56d4817` is `HEAD`**: `docs/reviews/phase-2c-4b-design.md`, committed alone before any line of the
-phase is written, exactly as `ddf67ab` did for 2c-4a. It changes no code, so the four baselines below
-are the ones step 1 starts from and were re-measured at the head of this session, all four matching
-what the previous checkpoint predicted:
+**`ANCHOR_SHA_2C4B1` is `HEAD`** — step 1 with **all three review rounds folded in**, so, as with every
+phase since `8989c16`, no commit holds a demonstrated defect. The exact first commands to run:
 
 ```sh
-npm test                       # 1482 passed, 47 files          — measured, exit 0
-cargo test --workspace         # 1048 passed, 0 failed          — measured, exit 0
-npm run check                  # 415 files, 0 errors, 0 warnings — measured, exit 0
-npm run build                  # 174 modules                     — measured, exit 0
+npm install && npm test        # expect 1499 passed, 48 files
+cargo test --workspace         # expect 1086 passed, 0 failed
 ```
 
-i18n is **729** keys per language, at parity — measured, not assumed.
+(`npm run check` expects **416 files, 0 errors, 0 warnings** — 415 at the consult plus
+`src/lib/i18n/reapplyCodes.test.ts`. `npm run build` expects **174 modules**, *unchanged*: everything
+step 1 added to the frontend is a type, a dictionary entry or a test, and **no new source module**, so
+the guard's shape rule says the number must not move. i18n is **745** keys per language, at parity.)
+
+#### What step 1 actually shipped
+
+`crates/espansoconfig-core/src/reconcile.rs` is the correspondence primitive: `ReapplyAnchor`
+(document + sequence path + owned-run digest + mapping-slice digest + exact trigger-form fingerprint
++ base-uniqueness), `ReapplyConfidence`, `ReapplyMode`, `PlacementMode`, `ReapplyRequest`,
+`ReapplyPlacement`, `ReapplyEvidence`, nine `ReapplyRefusal` variants and four `ReapplyResolution`
+variants. **The tier walk never reads the item index** — it is carried for diagnostics only.
+Ownership evidence is a `pub(crate) item_owned_runs` over the **existing** `entry_owned_runs`, so no
+second copy of the ownership rules exists; the confirmation round verified that.
+
+**The anchor is captured before the transaction and resolved against the exact fresh snapshot.**
+`view_at` became `document_at` so the pre-transaction snapshot is returned rather than re-read, and
+`conflict_after_the_lock` remains the **sole** production `SaveResult::Conflict` construction site:
+it refreshes once and takes `subject`, `placement`, `disk`, `disk_text` and `disk_revision` from that
+one `SourceDocument`. That is consult Q9 item 2's failure mode designed out, and round 2 confirmed it
+in production.
+
+**The step is evidence only** — no path reads the answer and no written byte depends on it. Six
+writing commands build a request; raw answers `Unsupported` and a `Front`/`End` creation answers
+`Targetless`.
+
+#### The High, and why the wire shape changed mid-phase
+
+Round 1's High: **a move placed `after` another snippet carried only half its evidence.** Only the
+moved item's anchor was threaded, so 2c-4b-2 could not have learned whether the requested destination
+was still expressible without recreating the core algorithm or guessing by position. The fix is a
+deliberate wire-shape change — `ReapplyEvidence { subject, placement }`, with **placement always
+`ExactItem` and no parameter able to weaken it** — and round 2 ruled it closed in production, along
+with the two deviations it forced: a creation's `after` anchor now answers in `placement` rather than
+`subject` (a refinement of the consult's Q3 single-resolution sketch, not a departure from Q4), and
+`code.reapplyResolution.targetless` was reworded because moving that anchor made its old clause false.
+
+#### Three rounds, and what each one cost
+
+**Round 1 — NOT READY**, 1 High, 3 Mediums, 2 Lows. **Round 2 — NOT READY**: four closed, **two still
+standing, two new**. **Round 3** closed all four and its own sweep found **three more**. The recurrence
+is this repository's documented one — *each round's fix produced the next round's finding* — and every
+survivor was a **narrower instance** whose search had been written from the previous wording.
+
+The sharpest survivor: `NoExactCorrespondence` compares **owned-run digests**, while both dictionaries
+still claimed the whole snippet was not written exactly the same. The repo's own
+`a_comment_changing_hands_separates_the_two_exact_tiers` is the counterexample — the mapping is
+byte-identical while exact owned-run correspondence refuses. Two more of the same kind: the generic
+`Refused` sentences claimed a search "in the file as it is now" although `NoAnchorInBase` is returned
+**without ever consulting the fresh snapshot**, and `docs/decisions/2c-4b-1-notes.md` §4.3 claimed `{}`
+was "deliberately not accepted" while the code **did** accept it — the record claiming a guarantee the
+code did not give, which is this project's named worst defect class and which no test can fail.
+
+**Two tests could not have failed, and both were rebuilt.** The R1/R2 interleaving test passed
+`ReapplyMode::Unsupported`, an arm that never reads the snapshot — so the one property it existed to
+pin was unfalsifiable. And both corpus sweeps `continue`d on refusal, letting a mutation that newly
+refuses a class **delete that class from its own audit** while the count stayed above the threshold.
+Eligibility is now stated independently of `capture`, every eligible target must capture or the test
+panics with the fixture name, and a present real corpus must be non-zero.
+
+**Falsifiability was proved by mutation, not asserted.** Round 3's four command-level conflict tests
+were checked by applying and reverting four mutations one at a time — move placement→`NotAnchored`,
+create placement→`NotAnchored`, delete→weak confidence, save→`ExactItem` — each flipping exactly one
+assertion. That closed the hole where **nothing pinned the command-to-request mapping at all**: the
+core cases built `ReapplyRequest` directly in a test helper, so flipping the production move to
+`NotAnchored` would have left every test green.
+
+#### Two things 2c-4b-2 inherits as stated risk
+
+1. **`ReapplyEvidence` ties two fields nothing in Rust or TypeScript can bind together.** As with
+   `disk_text`/`disk_revision`, only the single production construction site holds the pairing. A
+   second site, or an anchor derived after the cache refreshed, makes a correct algorithm resolve the
+   wrong observation.
+2. **The command-level tests observe *answers*, not requests.** They pin each writer's policy only
+   through a fixture in which exact and trigger-only correspondence disagree — a later edit to
+   `POLICY_DISK` could make them agree and the discrimination would vanish silently. Nothing
+   enumerates the writers either, so a seventh writing command with a wrong request needs a fifth
+   test. Both are recorded in `2c-4b-1-notes.md` §7.4.
+
+The reviews are `docs/reviews/phase-2c-4b-1-code.md` and `phase-2c-4b-1-code-round2.md`; the record is
+`docs/decisions/2c-4b-1-notes.md`.
 
 #### The consult's verdict, and the cut it forces
 
@@ -5955,8 +6032,8 @@ honest options remain 2c-4a's plus 2c-4c's fallback.
 
 | Step | Scope | State |
 |---|---|---|
-| **2c-4b-1** | The core `reconcile` primitive, the anchor/fingerprint construction, the refusal enum, and `ConflictResult.reapply` on the wire — **built from the same fresh snapshot as `disk_revision`**. No control is added, so 2c-4a's behaviour is unchanged and the new payload is only evidence | ⬜️ **next** |
-| **2c-4b-2** | Reapply as browser-model transitions, one per surface, with **`offersReapply: false`** — the proven trade of building and testing an unoffered transition before drawing it. No component changes, so no mounted or window evidence is owed | ⬜️ |
+| **2c-4b-1** | The core `reconcile` primitive, the anchor/fingerprint construction, the refusal enum, and `ConflictResult.reapply` on the wire — **built from the same fresh snapshot as `disk_revision`**. No control is added, so 2c-4a's behaviour is unchanged and the new payload is only evidence | ✅ complete — three review rounds |
+| **2c-4b-2** | Reapply as browser-model transitions, one per surface, with **`offersReapply: false`** — the proven trade of building and testing an unoffered transition before drawing it. No component changes, so no mounted or window evidence is owed | ⬜️ **next** |
 | **2c-4b-3** | `keepMyDraft` added to `ConflictChoice` and to **`conflictChoicesFor` only**, the capability flipped on the five eligible surfaces, both dictionaries, the mounted suites, and the deterministic R0→R1 window matrix | ⬜️ |
 
 **Why not two steps, in the consult's own words:** if core and UI land together, one review must
