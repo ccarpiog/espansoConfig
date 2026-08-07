@@ -5921,7 +5921,7 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ### Phase 2c-4b-1 is complete. **Step 2c-4b-2 is next.**
 
-**`ANCHOR_SHA_2C4B1` is `HEAD`** — step 1 with **all three review rounds folded in**, so, as with every
+**`3451a81` is `HEAD`** — step 1 with **all three review rounds folded in**, so, as with every
 phase since `8989c16`, no commit holds a demonstrated defect. The exact first commands to run:
 
 ```sh
