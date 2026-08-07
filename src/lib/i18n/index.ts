@@ -55,8 +55,12 @@ import {
 } from '../browser/rawSave';
 import {
   conflictChoiceKey,
+  draftFieldStatusKey,
+  referenceCopyOf,
   saveOutcomeMessageKey,
   type ConflictChoice,
+  type DraftFieldStatus,
+  type RetainedDraftField,
   type SaveOutcomeMessage
 } from '../browser/saveOutcome';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
@@ -628,6 +632,45 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
 export function tConflictChoice(choice: ConflictChoice): string {
   return translate(locale.current, conflictChoiceKey(choice));
 } // End of function tConflictChoice()
+
+/**
+ * Renders what a save would do with one field of a retained draft.
+ *
+ * The accessor over `RetainedDraftField.status`, here for `tFieldRefusal`'s
+ * reason: a component that wrote `t(draftFieldStatusKey(status))` would be turning
+ * a code into a key in markup, which CLAUDE.md section 2 forbids.
+ *
+ * @param status - What the model said a save would do with the field.
+ * @returns The translated phrase.
+ */
+export function tDraftFieldStatus(status: DraftFieldStatus): string {
+  return translate(locale.current, draftFieldStatusKey(status));
+} // End of function tDraftFieldStatus()
+
+/**
+ * Renders a retained draft as the labelled reference copy a conflict offers.
+ *
+ * **The one adapter between the format and the sentences.** `referenceCopyOf` in
+ * `../browser/saveOutcome` decides the order, the heading's position and the fact
+ * that each field's text is inserted byte for byte — rules a test drives — and
+ * this supplies the three localized pieces it assembles them from. Two components
+ * call it, so neither holds a copy of the format and neither can drift from the
+ * other.
+ *
+ * **It is a reference copy and never YAML** (consult Q4): emitting YAML from a
+ * projection would drop comments, key order and scalar spelling while looking like
+ * something that could be pasted back into a configuration file.
+ *
+ * @param fields - The retained draft, in the surface's own field order.
+ * @returns The text to put on the clipboard.
+ */
+export function tDraftCopy(fields: readonly RetainedDraftField[]): string {
+  return referenceCopyOf(fields, {
+    heading: t('browser.saveOutcome.copyHeading'),
+    label: tDetailField,
+    status: tDraftFieldStatus
+  });
+} // End of function tDraftCopy()
 
 /**
  * Renders what kind of node a value is, in the current language.

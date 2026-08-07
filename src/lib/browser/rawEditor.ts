@@ -93,6 +93,7 @@ import {
   type DraftValueRules
 } from './draft';
 import {
+  atTheReloadWarning,
   conflictArm,
   consentForRefusal,
   offeredReloadStep,
@@ -101,9 +102,11 @@ import {
   reloadConfirmed,
   refusedArm,
   sendFailureOf,
+  reloadWasRefused,
   spendTheConfirmedReload,
   submissionIsStale,
   NOT_RELOADING,
+  RELOAD_REFUSED,
   type AdoptTheDiskVersion,
   type EditorPhase,
   type ReloadStep,
@@ -113,12 +116,14 @@ import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidat
 import { describeRawSave, type RawSaveChoice, type RawSaveModel } from './rawSave';
 import {
   conflictChoicesFor,
+  conflictDiskText,
   copyOfDraft,
   describeWholeDocumentSave,
   invalidationFailureMessage,
   reloadDiskVersion,
   type ConflictCapabilities,
   type ConflictChoice,
+  type ConflictDiskText,
   type ConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
@@ -205,14 +210,16 @@ const NOTHING_SAID_YET: RawSaveModel = describeRawSave(null);
  * conflict capability is stated.** Its draft is the file's whole text, so a
  * clipboard preserves it exactly — which is the consult's Q3/Q4 rule and the
  * reason `copyDraft` is offered here and not to the mover, the deleter or the
- * duplicator. Both booleans are `true` because this is the surface whose controls
- * are drawn today; the five match surfaces have the same reload transition, built
- * and called by their components, and set `offersReload` to `false` until 2c-4a-3
- * draws it — a model that names a choice draws a control, and *offered* is a
+ * duplicator. Both booleans are `true`, and since 2c-4a-3a so are the match
+ * editor's and the creator's, whose drafts are authored text too. The mover, the
+ * deleter and the duplicator have the same reload transition, built and called by
+ * their components, and keep `offersReload: false` until 2c-4a-3b draws their
+ * panels — a model that names a choice draws a control, and *offered* is a
  * different question from *implemented*.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
+  reloadOutcome: 'reseedsDraft',
   offersCopyDraft: true,
   offersReload: true
 };
@@ -643,7 +650,7 @@ export function applySave(
     // The conflict arm is given the draft as it was when the save was refused,
     // which is this one: nothing has changed it, because the box was read-only for
     // the whole of the save.
-    outcome: describeWholeDocumentSave(outcome, session.draft),
+    outcome: describeWholeDocumentSave(outcome, session.draft, CONFLICT_CAPABILITIES),
     extraMessages: failed === null ? [] : [failed],
     reload: NOT_RELOADING,
     sendFailure: null
@@ -815,8 +822,17 @@ export function loadDiskVersion(
   if (reloaded === null) {
     return session;
   }
-  if (!spendTheConfirmedReload(conflict, session.reload, adopt)) {
+  const spend = spendTheConfirmedReload(conflict, session.reload, adopt);
+  if (spend === 'notAttempted') {
     return session;
+  }
+  if (spend === 'refused') {
+    // **A terminal step rather than the session unchanged**, which is the 2c-4a-3a
+    // review's finding 3: the confirmation is spent and the window said no for a
+    // reason asking again cannot change, so the control stops being offered and the
+    // panel says so. Nothing is reseeded, and *Keep editing* writes `NOT_RELOADING`
+    // back for a fresh attempt.
+    return { ...session, reload: RELOAD_REFUSED };
   }
   return {
     ...session,
@@ -885,10 +901,15 @@ export interface RawEditorView {
    * rather than an omission here: a `SaveResult::Conflict` cannot exist without the
    * read that produced this text having succeeded, so a state saying *the version
    * on disk cannot be read* would be a sentence about something this application
-   * cannot produce. An empty file is an empty string, which is a fact about the
-   * file and not an absence.
+   * cannot produce.
+   *
+   * **A `ConflictDiskText` since 2c-4a-3a, and no longer a `string`.** An empty
+   * file is a fact about the file rather than an absence, and this component used
+   * to say so by comparing the string to `''` in its own markup — as did the two
+   * panels added by that step, which is why the decision moved to
+   * `conflictDiskText` in `./saveOutcome.ts` and all three now walk it.
    */
-  readonly diskText: string | null;
+  readonly diskText: ConflictDiskText | null;
   /**
    * Why the version on disk cannot be loaded into this editor, or `null`.
    *
@@ -901,6 +922,16 @@ export interface RawEditorView {
   readonly conflictChoices: readonly ConflictChoice[];
   /** Whether the warning is showing and the destructive choice is one click away. */
   readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload was spent and the window refused it.
+   *
+   * **The disclosure this panel owes for a control that has just gone.** The reload
+   * is not offered again once a spend has been refused — asking again could only be
+   * refused again — and a control that vanishes with nothing said in its place
+   * reads as a bug (2c-4a-3a review, finding 3). Nothing was written, nothing was
+   * discarded and nothing was reseeded; *Keep editing* resets the step.
+   */
+  readonly reloadUnavailable: boolean;
   /**
    * Whether confirming the reload would do anything.
    *
@@ -944,7 +975,7 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    diskText: conflict === null ? null : conflict.diskText,
+    diskText: conflictDiskText(conflict),
     diskRefusal,
     conflictChoices:
       conflict === null
@@ -953,7 +984,8 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
             CONFLICT_CAPABILITIES,
             offeredReloadStep(session.reload)
           ),
-    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
+    reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
     canReload: conflict !== null && diskRefusal === null
   };
 } // End of function rawEditorView()

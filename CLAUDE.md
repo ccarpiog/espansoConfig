@@ -219,13 +219,37 @@ version* and *Confirm reload* **installed the older snapshot over the newer proj
 success**.
 
 **An unoffered transition can be built and tested without drawing its choice, and that is the right
-trade.** Every match surface declares `offersReload: false`, so `conflictChoicesFor` names neither
-`reloadDiskVersion` nor `confirmReload` and no control is drawn — but the transitions exist, the
-component arms call them, and 2c-4a-3 flips one boolean per surface. The first review round rejected
-the opposite trade, where the *transition* was withheld too: that would have made step 3 invent five
-model transitions and their `DetailPane` props on top of drawing them. **`conflictChoicesFor` is the
-only producer of a choice list**; before it, capability was expressed twice, and that split is why a
-newly offered button could compile and do nothing.
+trade.** At 2c-4a-2 every match surface declared `offersReload: false`, so `conflictChoicesFor`
+named neither `reloadDiskVersion` nor `confirmReload` and no control was drawn — but the transitions
+existed, the component arms called them, and **2c-4a-3a then flipped one boolean per surface for
+two of them without inventing any machinery**, which is the trade paying off. The first review round
+rejected the opposite trade, where the *transition* was withheld too: that would have made step 3
+invent five model transitions and their `DetailPane` props on top of drawing them.
+**`conflictChoicesFor` is the only producer of a choice list**; before it, capability was expressed
+twice, and that split is why a newly offered button could compile and do nothing.
+
+**2c-4a-3 is split three ways, and 3a is complete: the match editor and the creator draw a conflict
+panel, and the other three match surfaces are untouched.** 3b draws the deleter, the mover and the
+duplicator; 3c is the window reading, owed for **six** surfaces because 3a's fix round migrated
+`RawEditor.svelte` onto the new shared clipboard module. **A copy is refused for an `operationChoice`
+draft as a property of the value, not of a caller's opinion** — `MovePlacement` is a positional
+choice and `MatchId` is a protocol carrier, so copying either preserves nothing while looking like
+it preserved something.
+
+**No clipboard route in this webview can be *claimed* to preserve a carriage return**, so
+`src/lib/components/clipboard.ts` **refuses** the `<textarea>` carrier for text holding a `\r`
+rather than copying normalised bytes and reporting success. Only `navigator.clipboard.writeText`
+preserves one, and a contenteditable carrier is unverifiable in jsdom. The failed-copy sentence
+therefore promises **no hand copy**: `SourceText` has already replaced the `\r` with its localized
+*name*, so what is on screen is a readable representation and not the value. The first version of
+that sentence said the opposite, and confirming a reload after it would have lost the draft.
+
+**The i18n suites check parity and placeholder agreement, not meaning.** No executable test pins
+what `draftCopyFailed`, `reloadClosesForm` or a JSDoc contract *claims* — reverting a prose fix while
+keeping its key leaves every suite green. Three of 2c-4a-3a's seven findings lived in that gap, and
+its round 2 found a **narrower instance** of the worst one still standing in two test comments after
+the fix round had closed it everywhere else. Sweep for what the type now says, not for the words the
+old finding used.
 
 **Sweep for what the type now says, not for the words the old type used.** 2c-4a-2 took four review
 passes, and the last three each closed a finding and left a **narrower instance of it standing** —
@@ -344,8 +368,8 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**171** as of 2c-4a-2 (unchanged from 2c-3c-3 — that step adds fields, transitions and a prop but no
-module, so an unmoved count is the guard passing), and the guard is not the number but the *shape of
+**172** as of 2c-4a-3a (171 through 2c-4a-2, plus exactly one new source module,
+`src/lib/components/clipboard.ts`), and the guard is not the number but the *shape of
 a change to it*. A count
 that moves by exactly the number of new source modules is a new module; a jump to ~180 with
 `svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine

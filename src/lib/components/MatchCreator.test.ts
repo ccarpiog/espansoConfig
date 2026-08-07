@@ -32,14 +32,23 @@
  * helpers here do.
  */
 
-import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
+import {
+  conflictChoiceKey,
+  type ConflictModel,
+  type DiskAdoptionOutcome
+} from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
-import { destinationRefusalKey, type DestinationRefusal } from '../browser/matchCreation';
+import {
+  destinationRefusalKey,
+  type CreationBuffers,
+  type DestinationRefusal
+} from '../browser/matchCreation';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
+import { t, tDraftCopy } from '../i18n';
 import { locale } from '../stores/locale.svelte';
 import type { IpcFailure } from '../ipc/errors';
 import type {
@@ -161,6 +170,27 @@ const COMMITTED: SaveResult = {
   moved: { document: 2, revision: AFTER, node: 12 }
 };
 
+/**
+ * The whole file text the conflict's fresh read carried.
+ *
+ * Distinguishable from anything the form holds, so a case can tell the disk side
+ * of the panel from the draft side by looking at the rendered text.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/** A word that appears in {@link DISK_TEXT} and nowhere else on the screen. */
+const DISK_TEXT_MARKER = 'theirs';
+
+/** A create the file had moved on under. */
+const CONFLICTED: SaveResult = {
+  outcome: 'conflict',
+  expected: BASE,
+  found: AFTER,
+  disk_revision: AFTER,
+  disk_text: DISK_TEXT,
+  disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: AFTER })
+};
+
 /** The one rejection only `create_match` can produce. */
 const NO_MATCH_LIST: IpcFailure = {
   kind: 'command',
@@ -205,6 +235,14 @@ interface Mounted {
   readonly target: HTMLElement;
   /** Every call the component made, in order. */
   readonly calls: RecordedCreate[];
+  /**
+   * Every conflict the component asked the window to adopt, in order.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing until a
+   * reload has been asked for *and* confirmed, so an entry here in a case that
+   * only reached the panel is the pre-emptive install the consult's Q2 ruled out.
+   */
+  readonly adoptions: ConflictModel<CreationBuffers>[];
   /** How many times the form asked to be closed. */
   readonly closed: () => number;
   /** Replaces what the projections reader answers, as a re-read would. */
@@ -224,6 +262,8 @@ interface Mounted {
  * @param answers - What each successive create answers, in order.
  * @param held - The snippet the window has selected, or `null`.
  * @param documents - Every file the window lists. Defaults to the six fixtures.
+ * @param adoption - What the window answers when the form asks it to adopt the
+ *   disk observation. All three values are real production answers.
  * @returns The mounted form.
  */
 function mountCreator(
@@ -235,10 +275,12 @@ function mountCreator(
     summaryOf(secondFile()),
     summaryOf(packageFile()),
     UNREADABLE
-  ]
+  ],
+  adoption: DiskAdoptionOutcome = 'installed'
 ): Mounted {
   const remaining = [...answers];
   const calls: RecordedCreate[] = [];
+  const adoptions: ConflictModel<CreationBuffers>[] = [];
   let closes = 0;
   let views: readonly DocumentView[] = [
     profile(),
@@ -282,10 +324,14 @@ function mountCreator(
             (next.result.outcome === 'saved' && next.result.committed ? ADOPTED : NOT_OWED)
         });
       },
-      // **The window's own adoption**, which no case here reaches: the five match
-      // surfaces declare `offersReload: false`, so no control that could spend a
-      // confirmation is drawn. `matchCreation.test.ts` drives the transition directly.
-      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+      // **The window's own adoption**, recorded rather than assumed. Since
+      // 2c-4a-3a this surface offers the reload, so a case can press the two
+      // controls and watch exactly when — and whether — the window is asked to
+      // move.
+      adoptDiskVersion: (conflict: ConflictModel<CreationBuffers>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return adoption;
+      },
       close: (): void => {
         closes += 1;
       }
@@ -294,6 +340,7 @@ function mountCreator(
   return {
     target,
     calls,
+    adoptions,
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
@@ -462,6 +509,43 @@ function fillIn(form: Mounted): void {
   type(form.target, 'trigger', ':new');
   type(form.target, 'replace', 'a body');
 } // End of function fillIn()
+
+/** What one scripted `execCommand('copy')` saw. */
+interface CopiedSelections {
+  /** The **selected** text of each copy, in order. */
+  readonly selections: string[];
+}
+
+/**
+ * Replaces `document.execCommand` with one that records what was *selected*.
+ *
+ * **It reads the carrier's selection and never its whole value**, which is the
+ * 2c-4a-3a review's finding 4: a mock that reads `.value` passes even when the
+ * component forgets to select anything, and a real `execCommand('copy')` over an
+ * empty selection copies nothing. Setting a text area's `value` leaves its
+ * selection collapsed at the end, so an unselected carrier records `''` here.
+ *
+ * The caller restores the original descriptor; this only installs.
+ *
+ * @returns The recorder the case reads.
+ */
+function recordTheSelectionCopied(): CopiedSelections {
+  const selections: string[] = [];
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    writable: true,
+    value: (command: string): boolean => {
+      const selected = document.activeElement;
+      if (selected instanceof HTMLTextAreaElement) {
+        selections.push(
+          selected.value.slice(selected.selectionStart ?? 0, selected.selectionEnd ?? 0)
+        );
+      }
+      return command === 'copy';
+    }
+  });
+  return { selections };
+} // End of function recordTheSelectionCopied()
 
 /**
  * Waits for the component's asynchronous handler to finish.
@@ -741,4 +825,187 @@ describe('the mounted new-snippet form', () => {
     expect(dirty.closed()).toBe(1);
     dirty.stop();
   }); // End of the "leaving" case
+
+  it('shows both sides of a conflict, and adds nothing', async () => {
+    // **The comparison the consult's Q5 ruled, on this screen.** The retained
+    // draft is the two typed strings under their labels, through `SourceText`, and
+    // the disk side is the whole file text the command layer read. There is no
+    // disk-side snippet to point at — this one was never written — so nothing here
+    // pretends to find one.
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(says(form.target, 'browser.saveOutcome.retainedDraft')).toBe(true);
+    expect(says(form.target, 'browser.saveOutcome.diskVersion')).toBe(true);
+    expect(form.target.textContent).toContain(DISK_TEXT_MARKER);
+    // The two drafted values plus the disk text, all through the one rendering
+    // surface for file text.
+    expect(form.target.querySelectorAll('.panel .sourceText')).toHaveLength(3);
+    // Both revisions, always, and the third beside them.
+    expect(form.target.textContent).toContain(
+      t('browser.matchCreation.revisionExpected', { revision: BASE })
+    );
+    expect(form.target.textContent).toContain(
+      t('browser.matchCreation.revisionFound', { revision: AFTER })
+    );
+    expect(form.target.textContent).toContain(
+      t('browser.matchCreation.revisionDisk', { revision: AFTER })
+    );
+    // Three choices, and the destructive one is a second step away.
+    expect(button(form.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('confirmReload'))).toBeNull();
+    // And nothing has moved: no adoption, and the form is still open.
+    expect(form.adoptions).toEqual([]);
+    expect(form.closed()).toBe(0);
+    form.stop();
+  }); // End of the "both sides" case
+
+  it('adopts the disk version and closes only when the reload is confirmed', async () => {
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(false);
+    control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+    flushSync();
+
+    // The second step: the warning that says what happens *here* — the window
+    // crosses, this form closes, and the snippet is not added.
+    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(true);
+    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(form.adoptions).toEqual([]);
+    expect(form.closed()).toBe(0);
+
+    control(form.target, conflictChoiceKey('confirmReload')).click();
+    flushSync();
+
+    expect(form.adoptions).toHaveLength(1);
+    expect(form.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(form.closed()).toBe(1);
+    // Nothing was sent a second time: a conflict is not a retry.
+    expect(form.calls).toHaveLength(1);
+    form.stop();
+  }); // End of the "confirmed reload" case
+
+  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+    // **`alreadyThere` is a success**: the window already holds the bytes that
+    // were asked for. `refused` is the only answer that means it did not move.
+    for (const [answer, closes] of [
+      ['alreadyThere', 1],
+      ['installed', 1],
+      ['refused', 0]
+    ] as const) {
+      const form = mountCreator([{ result: CONFLICTED }], null, undefined, answer);
+      fillIn(form);
+      control(form.target, 'browser.matchCreation.create').click();
+      await settle();
+      control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+      flushSync();
+      control(form.target, conflictChoiceKey('confirmReload')).click();
+      flushSync();
+
+      expect(form.adoptions, answer).toHaveLength(1);
+      expect(form.closed(), answer).toBe(closes);
+      // A refused adoption leaves the conflict on screen rather than reporting a
+      // reload that did not happen.
+      expect(says(form.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
+        closes === 0
+      );
+      form.stop();
+    } // End of the loop over the three adoption answers
+  }); // End of the "three adoption answers" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from the screen.** The control that could
+    // only be refused again is gone, and the sentence takes its place; *Keep
+    // editing* and the copy stay.
+    const form = mountCreator([{ result: CONFLICTED }], null, undefined, 'refused');
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    control(form.target, conflictChoiceKey('reloadDiskVersion')).click();
+    flushSync();
+    control(form.target, conflictChoiceKey('confirmReload')).click();
+    flushSync();
+
+    expect(says(form.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(form.target, conflictChoiceKey('confirmReload'))).toBeNull();
+    expect(button(form.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(button(form.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(says(form.target, 'browser.matchCreation.reloadClosesForm')).toBe(false);
+    expect(form.adoptions).toHaveLength(1);
+    expect(form.closed()).toBe(0);
+
+    // And *Keep editing* gives the form back with what was typed still in it.
+    control(form.target, conflictChoiceKey('keepEditing')).click();
+    flushSync();
+    expect(box(form.target, 'trigger').value).toBe(':new');
+    expect(box(form.target, 'trigger').readOnly).toBe(false);
+    form.stop();
+  }); // End of the "refused reload stops being offered" case
+
+  it('warns that the reload closes this form, never that it replaces the text', async () => {
+    // **The 2c-4a-3a review's finding 2**: this surface installs the disk
+    // projection and closes, and there is no half-written snippet on disk to load
+    // in the draft's place.
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(says(form.target, 'browser.saveOutcome.reloadClosesSurface')).toBe(true);
+    expect(says(form.target, 'browser.saveOutcome.reloadDiscardsDraft')).toBe(false);
+    form.stop();
+  }); // End of the "surface-aware warning" case
+
+  it('copies a labelled reference of the draft, and never YAML', async () => {
+    // The selection fallback, exactly as the webview takes it: jsdom has no
+    // clipboard, so `navigator.clipboard.writeText` rejects and the carrier route
+    // runs. What it carries is the same list the panel drew.
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    const copied = recordTheSelectionCopied();
+    try {
+      const form = mountCreator([{ result: CONFLICTED }]);
+      fillIn(form);
+      control(form.target, 'browser.matchCreation.create').click();
+      await settle();
+
+      control(form.target, conflictChoiceKey('copyDraft')).click();
+      await settle();
+
+      expect(says(form.target, 'browser.saveOutcome.draftCopied')).toBe(true);
+      expect(says(form.target, 'browser.saveOutcome.draftCopyFailed')).toBe(false);
+      // **Exactly what the model would render, and only what was selected.** The
+      // mock records the carrier's *selection*, so a carrier the component never
+      // selected copies an empty string and fails this (2c-4a-3a review,
+      // finding 4).
+      expect(copied.selections).toEqual([
+        tDraftCopy([
+          { label: 'trigger', text: ':new', status: 'setting' },
+          { label: 'replace', text: 'a body', status: 'setting' }
+        ])
+      ]);
+      const text = copied.selections[0] ?? '';
+      expect(text).toContain(DICTIONARIES.en['browser.saveOutcome.copyHeading']);
+      // Not YAML, and nothing that could be pasted back as one.
+      expect(text).not.toContain('matches:');
+      expect(text).not.toContain('trigger: :new');
+      // The carrier is gone again: the form's own body box is the only one left.
+      expect(document.querySelectorAll('textarea')).toHaveLength(1);
+      form.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "reference copy" case
 }); // End of the "mounted new-snippet form" suite

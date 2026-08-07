@@ -251,6 +251,7 @@ import {
   type DraftValueRules
 } from './draft';
 import {
+  atTheReloadWarning,
   conflictArm,
   consentForRefusal,
   offeredReloadStep,
@@ -260,9 +261,11 @@ import {
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  reloadWasRefused,
   spendTheConfirmedReload,
   submissionIsStale,
   NOT_RELOADING,
+  RELOAD_REFUSED,
   type AdoptTheDiskVersion,
   type EditorPhase,
   type ReloadStep,
@@ -274,10 +277,12 @@ import { identityInProjection, plainIdentity } from './matchDeletion';
 import type { RawSaveChoice } from './rawSave';
 import {
   conflictChoicesFor,
+  conflictDiskText,
   describeEditSave,
   invalidationFailureMessage,
   type ConflictCapabilities,
   type ConflictChoice,
+  type ConflictDiskText,
   type ConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
@@ -1379,7 +1384,7 @@ export function applyMove(
   if (submission === null) {
     return session;
   }
-  const outcome = describeEditSave(result, session.draft);
+  const outcome = describeEditSave(result, session.draft, CONFLICT_CAPABILITIES);
   const failed = invalidationFailureMessage(adoption);
   const extraMessages = failed === null ? [] : [failed];
   // **The two facts, kept apart.** `committed` says the file was rewritten; an
@@ -1583,8 +1588,16 @@ export function reloadTheDiskVersion(
   session: MatchMoveSession,
   adopt: AdoptTheDiskVersion<MovePlacement>
 ): MatchMoveSession {
-  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  if (spend === 'notAttempted') {
     return session;
+  }
+  if (spend === 'refused') {
+    // **A terminal step rather than the session unchanged**, which is the
+    // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
+    // no for a reason that asking again cannot change, so the control stops being
+    // offered and the panel says so. *Keep editing* writes NOT_RELOADING back.
+    return { ...session, reload: RELOAD_REFUSED };
   }
   return {
     ...session,
@@ -1722,6 +1735,7 @@ export function moveRecoveryFailed(session: MatchMoveSession): MatchMoveSession 
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
+  reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
   offersReload: false
 };
@@ -1928,6 +1942,24 @@ export interface MatchMoveView {
   /** Whether the warning is showing and the destructive choice is one click away. */
   readonly awaitingReloadConfirmation: boolean;
   /**
+   * Whether a confirmed reload was spent and the window refused it.
+   *
+   * **The disclosure the panel owes for a control that has just gone.** The
+   * reload is not offered again once a spend has been refused — asking again
+   * could only be refused again — and a control that vanishes with nothing said
+   * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
+   * and nothing was discarded; *Keep editing* resets the step.
+   */
+  readonly reloadUnavailable: boolean;
+  /**
+   * The disk side of that conflict, or `null` when none is showing.
+   *
+   * A union rather than a string, so *a file of zero characters is a fact about
+   * the file rather than a failure to obtain it* is decided in this directory
+   * once instead of in each renderer’s markup (2c-4a-3a review, finding 5).
+   */
+  readonly diskText: ConflictDiskText | null;
+  /**
    * Whether a confirmed reload has ended this session.
    *
    * The panel that reads this calls its own `close`: a match-level reload adopts
@@ -1987,7 +2019,9 @@ export function matchMoveView(
       conflict === null
         ? []
         : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
-    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
+    reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    diskText: conflictDiskText(conflict),
     closed: session.closed
   };
 } // End of function matchMoveView()

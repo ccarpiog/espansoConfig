@@ -60,7 +60,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-3c** | **Duplicate**: `DocumentEdit::DuplicateItem` as a **true** duplicate in the core, `duplicate_match` as the twelfth command and sixth writer, and `MatchDuplicator.svelte` as the sixth write surface. Three steps | ✅ **complete — all three kinds of evidence.** The owner decision `2c-split-notes.md` §4 demanded was taken first: the item's exact owned runs cloned byte-identically, trigger included, never a projection copy. The 24-launch bilingual window reading (`docs/decisions/2c-3c-3-window-reading.md`) is PASS on all seven items, no High and no Medium, and no defect in what is written to disk |
 | **2c-4a design consult** | **Phase 2c-4a put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4a-design.md`. It **changed the phase rather than confirming it**: the frontend's eager adoption of the disk projection on a conflict is ruled a **2c-4a defect**, not something to disclose. Three steps, and Q7 shows a true conflict is reachable from a window for all six surfaces once the second writer is a direct filesystem process |
 | **2c-4a-1** | The **revision-bound disk snapshot**, in Rust and on the wire, with no frontend behaviour change and no control on any screen: `SaveResult::Conflict::disk_text`, paired with `disk_revision` by content-hash equality in the one production construction site | ✅ complete — after the review fix round below. The review returned **NOT READY** on a Medium (three tests claimed byte-exactness and **none could have falsified it** — none crossed the serializer) and a Low (two documents overstating what the code gives). **Both were fixed before the commit**, and the new dispatcher test's falsifiability was **proved by mutation**, not asserted |
-| 2c-4a-2 … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
+| **2c-4a-2** | The **frontend conflict protocol**, with no control drawn: the eager adoption removed from all six writing wrappers, `adoptDiskVersion` as the one door answering three outcomes, the spend bound to the conflict's origin, and the three-step reload machine shared by every surface | ✅ complete — after **four** review rounds, the last two existing only because the round before each left a **narrower instance** of the finding it had just closed |
+| **2c-4a-3a** | **The two authored-text conflict panels**: `offersReload` flipped on the match editor and the creator only, both panels drawn over step 2's transitions, `referenceCopyOf` as the one model behind the copy, and `clipboard.ts` — the module that **refuses** the `<textarea>` carrier for text holding a `\r` rather than copying normalised bytes and reporting success | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on seven findings, two High; round 2 closed six, found **no new defect introduced by the fixes**, and left the one this project's history predicts — a **narrower instance** of the High, surviving in two test comments |
+| 2c-4a-3b, 3c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3409,6 +3411,113 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4a step 3a
+
+Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
+the fix round and again after the round-2 prose fixes. The counts are the final ones.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1404 passed, 46 files** (baseline 1380 at step 2; 1397 after the first cut, 1404 after the fix round, unmoved by the round-2 prose fixes) |
+| `npm run check` | **412 files, 0 errors, 0 warnings** |
+| `npm run build` | **172 modules**, and `svelte/internal/server` absent from `dist/` |
+| `cargo test --workspace` | **1048 passed** at the session baseline; **not re-run after the change**, and that is correct — no file under `crates/` or `src-tauri/` was touched |
+| `cargo clippy` / `cargo fmt --check` | **not run, and that is correct**, for the same reason |
+
+**The module count moved by exactly one, and that is the expected shape.** Step 3a adds exactly one
+source module — `src/lib/components/clipboard.ts` — so 171 → 172 is the guard passing. `CLAUDE.md`
+§6 gives the rule: the guard is the *shape* of a change, and the regression it exists to catch is a
+jump to ~180 with Svelte's server build in the bundle. `dist/` was grepped for
+`svelte/internal/server` and it is absent.
+
+**i18n is 711 keys per language, at parity** — 698 at step 2, plus 11 in the first cut and 2 more in
+the fix round.
+
+### The split, and why step 3 has three steps rather than one
+
+The checkpoint at step 2 described step 3 as one step: flip `offersReload` on five surfaces, draw
+five panels, add the keys, write five mounted suites, and take the window reading. That is five
+components averaging ~880 lines each plus a manual reading, and it was cut three ways on the
+dependency order every earlier split used, **by failure mode**:
+
+| Step | Scope | Fails as |
+|---|---|---|
+| **3a** | The two **authored-text** surfaces — `MatchEditor` and `MatchCreator` — the only two that get `copyDraft`, plus the shared model work and the i18n | a **fidelity** mistake — what a copy preserves, and what a sentence claims it preserves |
+| **3b** | The three **operation-choice** surfaces — `MatchDeleter`, `MatchMover`, `MatchDuplicator` — reload only, no copy | a **capability** mistake — offering a choice that preserves nothing |
+| **3c** | The **window reading** for all six write surfaces | an **instrument** mistake — see Q7 |
+
+The cut is not arbitrary: the step-3 brief already ruled that **only the editor and the creator get
+`copyDraft`**, because `MatchBuffers` and `CreationBuffers` hold authored strings while
+`MovePlacement` is a positional choice and `MatchId` is a protocol carrier — copying either
+preserves nothing while looking like it preserved something. So 3a is exactly the surfaces where
+the copy question is live, and 3b is exactly the surfaces where it is settled by the value's own
+nature.
+
+### What step 3a shipped
+
+- **`offersReload: true` on two surfaces only.** `matchEditor.ts` and `matchCreation.ts`. The mover,
+  the deleter and the duplicator still declare `false`, and **no component of theirs changed**.
+- **The panels.** Both draw the retained draft field by field through `SourceText`, the whole disk
+  text through `SourceText documentStart`, all three revisions always, the two-step
+  `reloadDiskVersion` → `confirmReload` machine over the transitions step 2 had already wired, and
+  *Copy my text* as a labelled reference copy that is **never YAML**.
+- **One model list behind both.** `view.retainedDraft` is new on both views; its format is
+  `referenceCopyOf` in `saveOutcome.ts` and its sentences are `tDraftCopy` in the i18n layer, so
+  **neither renderer holds a rule**. Each field's status is what a save *would do*
+  (`unchanged`/`setting`/`removing`, mapped from `fieldIntent`), never a presence flag.
+- **`src/lib/components/clipboard.ts`** — the one new module. It reuses `RawEditor`'s
+  `copyBySelecting` technique and adds one rule: it **refuses the `<textarea>` carrier for text
+  holding a `\r`** rather than copying normalised bytes and reporting success. `RawEditor.svelte`
+  was migrated onto it during the fix round, so the routine now has one home rather than two.
+
+### Phase 2c-4a step 3a review disposition
+
+**Two rounds, in `docs/reviews/phase-2c-4a-3a-code.md`, appended in order and never rewritten.**
+Both Codex jobs were dispatched **read-only**, so neither could create the review file and the
+orchestrator copied each reply into it verbatim — the file says so at the top of each round.
+
+Round 1 returned **NOT READY** on seven findings: two High, four Medium, one Low. Round 2 — the
+confirmation pass over the fixes, commissioned by the standing rule that **a fix is a change and the
+round that reviews it is not optional** — closed six, found **no new defect introduced by the
+fixes**, and left one **partially closed**.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **High** — the failed-copy sentence told the person they could select and copy the text by hand, but `SourceText` had already replaced any `\r` with its localized name, so a hand copy cannot recover the draft and confirming the reload afterwards loses it | **Accepted; behaviour examined first, sentence changed second.** No CR-safe route exists that can be *claimed* — only `navigator.clipboard.writeText` preserves a `\r`, and a contenteditable carrier is unverifiable in jsdom, so shipping one reporting success would repeat the finding. Both locales and three code comments now say the copy failed, that the panel writes the **name** of characters no font draws, and that reload discards the draft either way. **Partially closed at round 2** and finished there — see below |
+| 2 | **High** — match conflicts still displayed the raw editor's `reloadDiscardsDraft` ("replaces your text"), which is not what those surfaces do: they install the disk projection and close | **Accepted.** `ConflictCapabilities.reloadOutcome` is now a **required** field and `describeConflict` picks `reloadDiscardsDraft` (raw editor) or the new `reloadClosesSurface` (all five match surfaces). Round 2 confirmed the three unoffered surfaces were given `closesSurface` because it is **true of them** — their successful reload transitions set `closed: true` — not because it compiles |
+| 3 | **Medium** — after an adoption returned `refused`, the spent confirmation stayed presented as actionable, so confirming again could only be refused again, with nothing said | **Accepted, and fixed here rather than deferred to 3b as the implementer proposed.** `ReloadStep` gains a terminal `refused` arm, `spendTheConfirmedReload` answers `satisfied \| refused \| notAttempted`, `ConflictReloadStep` gains `unavailable` where no reload label is offered, and the three live panels disclose it. Deferring would have shipped a stuck-looking confirm step on two **live** surfaces — the exact defect step 2 existed to prevent — while the three surfaces that share the machinery declare `offersReload: false` and cannot reach the new arm, which is what makes adding it now safe |
+| 4 | **Medium** — the clipboard mocks inspected the textarea's whole value rather than its selection, so deleting `select()`/`setSelectionRange()` would have left the tests green while real copying failed | **Accepted.** The mocks now record `value.slice(selectionStart, selectionEnd)` and compare exactly against `tDraftCopy(...)`. **Proved by mutation, not asserted**: deleting the two selection calls turned both copy cases red; restored, green |
+| 5 | **Medium** — both renderers independently decided that `diskText === ''` means an empty file | **Accepted.** `ConflictDiskText` and `conflictDiskText()` in `saveOutcome.ts` own it, and the raw editor was moved onto them too, so the rule has one shape rather than three |
+| 6 | **Medium** — the creator's warning said the form restarts empty; the implementation closes it | **Accepted.** It now says the form **closes**, and that a form opened afterwards starts empty |
+| 7 | **Low** — the clipboard doc described a return contract the code does not have (cleanup failure returning `false`) | **Accepted.** The doc now says cleanup failure is swallowed and does not change the answer, and why: reporting a successful copy as a failure because a carrier would not detach would send a person to hand-copy text they already have |
+
+**Round 2's remaining Low is the pattern `2c-4a-2-notes.md` §7.6.2 named, hit again.** Finding 1's
+fix corrected every user-facing sentence and every production comment — and left two **test
+comments** carrying the framing it had just rejected: *"the panel still shows every byte"*, and the
+localized representation called *"the value … on screen for a manual selection"*. A fix closes a
+finding and leaves a **narrower instance standing**, because the sweep is written from the old
+wording. Both comments are now written against what `SourceText` does. The record's blanket "all
+seven are accepted and fixed" was premature for the same reason and now says six were closed by the
+fix round and the seventh needed a second.
+
+**A limit round 2 recorded, worth carrying forward: no executable test pins the semantic wording of
+`draftCopyFailed`, `reloadClosesForm` or the clipboard JSDoc.** Reverting those prose fixes while
+keeping the same keys leaves every suite green. The i18n suites check **parity and placeholder
+agreement, not meaning** — so what those sentences *claim* is confirmable only by reading them, and
+three of this step's seven findings lived in exactly that gap.
+
+Round 2's clean categories, recorded as given: all six `spendTheConfirmedReload` call sites handle
+all three answers and `alreadyThere` reaches the success path everywhere; every refused spend writes
+`RELOAD_REFUSED` and every dismissal and applied outcome writes `NOT_RELOADING`, so the terminal
+state is leavable through *Keep editing*; raw-editor clipboard behaviour is materially unchanged
+after its migration; origin-bound adoption is intact through `ConflictModel.source` and nothing was
+rebound to `conflict.expected`; no `saveAnyway`, stale retry, automatic reload, dirty-state clearing,
+cross-revision identity inference, YAML-from-projection, diff or *keep my draft* control was
+introduced; `conflictChoicesFor` remains the sole choice-list producer; and every user-facing
+addition is accessor-driven with no hand-built key.
+
+---
+
 ## Verification — Phase 2c-4a step 2
 
 Every command below was run **by the orchestrator**, each as its own invocation, and re-run after
@@ -5621,8 +5730,116 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-**Phase 2c-4a step 2 is complete: the frontend conflict protocol exists end to end, and nothing
-draws it.** A conflict now installs nothing in the window — it captures and stops. Adoption happens
+**Phase 2c-4a step 3a is complete: two of the six write surfaces now draw a conflict panel, and a
+person can choose for the first time.** The match editor and the creator offer *Reload disk
+version* → *Confirm reload*, *Copy my text* and *Keep editing*; the disk side and the retained draft
+are both on screen, all three revisions always. The other three match surfaces still declare
+`offersReload: false` and are untouched.
+
+**Step 3 was split three ways** — 3a (the two authored-text surfaces), **3b (the three
+operation-choice surfaces)**, 3c (the window reading). The rationale and the failure-mode table are
+in "Verification — Phase 2c-4a step 3a" above. **Step 3b is next.**
+
+**Step 3a's commit is where a fresh session begins.** The exact first commands to run:
+
+```sh
+npm install && npm test        # expect 1404 passed, 46 files
+cargo test --workspace         # expect 1048 passed, untouched since step 1
+```
+
+(`npm run check` expects **412 files, 0 errors, 0 warnings**. `npm run build` expects **172
+modules** — 171 plus exactly one new source module, `src/lib/components/clipboard.ts`; the guard is
+the *shape* of a change to that number, `CLAUDE.md` §6. i18n is **711** keys per language, at
+parity.)
+
+### Read this before writing a line of step 3b
+
+`docs/reviews/phase-2c-4a-design.md` governs the whole phase; its **Q4** is the rule that decides
+what 3b may offer, and its **Q7** gives the six per-surface recipes step 3c needs.
+`docs/decisions/2c-4a-3a-notes.md` is step 3a's record — its §7.8 is the round-2 disposition and
+§7.9 is what it hands the next reviewer. `docs/reviews/phase-2c-4a-3a-code.md` holds both rounds.
+
+### What 3a built that 3b inherits rather than invents
+
+- **`ConflictCapabilities.reloadOutcome` is required**, and all three of 3b's surfaces already
+  declare `closesSurface` — which is true of them, because their successful reload transitions set
+  `closed: true`. 3b does not choose this value; it verifies the sentence it produces is the one
+  its panel should show.
+- **The terminal `refused` arm exists and nothing draws it on those three surfaces.**
+  `ReloadStep` has it, `spendTheConfirmedReload` answers `satisfied | refused | notAttempted`, and
+  `ConflictReloadStep` has `unavailable`. The three unoffered surfaces **already carry a
+  `reloadUnavailable` field nothing renders**. 3b draws it.
+- **`ConflictDiskText` / `conflictDiskText()`** own the empty-file decision. A renderer walks the
+  union; it does not test `diskText === ''`.
+- **`src/lib/components/clipboard.ts`** is the one clipboard routine, and `RawEditor.svelte` was
+  migrated onto it. **3b's three surfaces must not offer a copy at all** — Q4's rule is a property
+  of the drafted value, not of a caller's opinion: `MovePlacement` is a positional choice and
+  `MatchId` is a protocol carrier, and copying either preserves nothing while looking like it
+  preserved something. `offersCopyDraft` stays `false` on all three.
+
+### Next: Phase 2c-4a step 3b — the three operation-choice panels
+
+1. **Flip `offersReload` to `true`** in `matchDeletion.ts`, `matchMove.ts` and
+   `matchDuplication.ts`. Leave `offersCopyDraft: false` on all three.
+2. **Draw the panels** in `MatchDeleter.svelte`, `MatchMover.svelte` and `MatchDuplicator.svelte`:
+   the disk side through `SourceText`, the **operation summary** rather than a retained draft
+   beside it, both revisions always shown, the two-step reload, and the `unavailable` disclosure
+   after a refused adoption. Components stay rule-free walks over the model — if a rule has to be
+   decided it goes in `src/lib/browser/`, because **a rule written into one renderer is carried by
+   that renderer's mounted suite alone**.
+3. **New keys at parity** for anything the operation summaries need. A component renders a code by
+   calling an accessor, never by building a key.
+4. **Extend the three existing mounted jsdom suites** — `MatchDeleter.test.ts`, `MatchMover.test.ts`
+   and `MatchDuplicator.test.ts` all already opt in by docblock. Cover the reload offer appearing,
+   the confirmation step, `adoptDiskVersion` being called, the caller stopping **only** on
+   `refused`, and the `unavailable` disclosure. Prove falsifiability by mutation where a test guards
+   a call that could be deleted silently.
+
+**One thing 3b must check rather than assume.** `MatchMover.svelte:511` still holds the shape the
+duplicator moved away from at 2c-3c-3's Medium — a refusal rule written against `outOfDate` rather
+than against the value that names the frozen reason. It was shipped at 2c-3b and window-read there,
+so it is not a regression; but 3b is in that file anyway, and the rule belongs in the model.
+
+**What step 3b must not do**, unchanged from the consult: no `saveAnyway`, no retry of the stale
+candidate, no automatic reload, no clearing of dirty state on conflict, **no cross-revision
+identification of "the same match"** (that is 2c-4b's confidence work), no YAML emitted from a
+projection, no diff, and **no control named or coded "keep my draft"** — `CLAUDE.md` §6 makes that
+absolute before 2c-4b.
+
+### Then: Phase 2c-4a step 3c — the window reading, for all six surfaces
+
+**The reading is step 3's exit, and it is owed for six surfaces rather than five.** The fix round
+migrated `RawEditor.svelte` onto the shared clipboard module, and **a window reading is re-taken
+after any change to a component** — so the raw editor's reading is owed again even though its
+behaviour is reported materially unchanged.
+
+Consult **Q7** removed the excuse that has stood since 2c-3b: the true `conflict` outcome had never
+been provoked from a window for a move or a duplicate, because those readings used **this
+application's own raw-save IPC** as the second writer, which refreshes the same Rust workspace cache
+so `view_at` answers `identityStaleRevision` before the transaction. That proved the *instrument*
+wrong, not the outcome unreachable. The recipe: open the surface at revision R0, then — **without
+invoking any app command that reloads the document** — use a **shell or editor process** to append a
+valid YAML comment to that exact file, producing R1. The frontend and the Rust cache stay at R0,
+`view_at` passes, and the core's locked read sees R1.
+
+**One plan per launch, into a fresh bundle path**, and set the language **explicitly through the
+picker** — the webview's `localStorage` follows the **bundle identifier**, not `HOME`, so an
+override set by one launch is still in force in the next. A WKWebView whose window is occluded stops
+running `setTimeout` about six seconds after launch. `docs/decisions/1c-2b-2b-2-notes.md` §6.1 is
+the technique.
+
+**The clipboard is what the reading matters most for.** jsdom proves the fallback route runs; it
+cannot prove what lands on the pasteboard. And the CR refusal is a claim about a real WKWebView.
+
+**One thing step 3 inherits and must not undo.** After a match conflict is dismissed, a second
+submission is refused by `view_at` with `identityStaleRevision` — **not** by a second conflict —
+because `conflict_after_the_lock` already refreshed the Rust cache. Only a raw save reaches the
+locked check twice. Write-safe either way, but they are different sentences.
+
+---
+
+**Phase 2c-4a step 2 (superseded by the above, kept for its rationale) is complete: the frontend
+conflict protocol exists end to end, and nothing draws it.** A conflict now installs nothing in the window — it captures and stops. Adoption happens
 in exactly one place, only for a confirmed reload, and all six write surfaces have the transition
 that reaches it. What is deliberately withheld is the *offering*: every match surface still declares
 `offersReload: false`, so `conflictChoicesFor` names neither `reloadDiskVersion` nor `confirmReload`

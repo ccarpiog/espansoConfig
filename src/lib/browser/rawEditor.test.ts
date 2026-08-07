@@ -751,9 +751,19 @@ describe('the conflict state', () => {
     const refusing = adopting('refused');
     const confirmed = confirmReload(askToReload(inConflict()));
     const after = loadDiskVersion(confirmed, refusing.adopt);
-    expect(after).toBe(confirmed);
     expect(rawEditorView(after).text).toBe(EDITED);
     expect(conflictOf(after)).not.toBeNull();
+    // **And the reload stops being offered rather than staying pressable**, which
+    // is the 2c-4a-3a review's finding 3: every reason the window refuses for is a
+    // reason asking again cannot change, so the step is terminal and the panel
+    // discloses it in place of the control. *Keep editing* and the copy remain.
+    expect(after.reload.kind).toBe('refused');
+    expect(rawEditorView(after).reloadUnavailable).toBe(true);
+    expect(rawEditorView(after).awaitingReloadConfirmation).toBe(false);
+    expect(rawEditorView(after).conflictChoices).toEqual(['keepEditing', 'copyDraft']);
+    // Asking again cannot spend anything a second time.
+    expect(loadDiskVersion(after, refusing.adopt)).toBe(after);
+    expect(refusing.adoptions).toHaveLength(1);
   }); // End of the "window refused the adoption" case
 
   it('refuses a confirmation issued for another conflict', () => {
@@ -774,14 +784,22 @@ describe('the conflict state', () => {
     // markup — a rule written into one renderer is carried by that renderer's
     // mounted suite alone.
     const ordinary = rawEditorView(inConflict());
-    expect(ordinary.diskText).toBe(DISK);
+    expect(ordinary.diskText).toEqual({ kind: 'text', text: DISK });
     expect(ordinary.diskRefusal).toBeNull();
     expect(ordinary.canReload).toBe(true);
 
     const carriage = rawEditorView(inConflict(AFTER, CRLF));
-    expect(carriage.diskText).toBe(CRLF);
+    expect(carriage.diskText).toEqual({ kind: 'text', text: CRLF });
     expect(carriage.diskRefusal).toEqual({ kind: 'lineEndingsNotPreserved' });
     expect(carriage.canReload).toBe(false);
+
+    // **A file of zero characters is its own arm**, decided in `saveOutcome.ts`
+    // since 2c-4a-3a rather than by three renderers each comparing a string to
+    // `''` in markup (that review's finding 5). It is a fact about the file, not a
+    // failure to obtain its text — 2c-4a-1's D1 — and loading it is legitimate.
+    const emptied = rawEditorView(inConflict(AFTER, ''));
+    expect(emptied.diskText).toEqual({ kind: 'empty' });
+    expect(emptied.canReload).toBe(true);
 
     // No conflict, nothing to say about a disk side.
     const clean = rawEditorView(fresh());

@@ -187,9 +187,15 @@ interface ScriptedAnswer {
  * @param loaded - The file's text as the editor is handed it. Only the carriage
  *   return cases give this, because only they are about the text this editor
  *   refuses to open at all.
+ * @param adoption - What the window answers when the editor asks it to adopt the
+ *   disk observation. All three values are real production answers.
  * @returns The mounted editor.
  */
-function mountEditor(answers: readonly ScriptedAnswer[], loaded: string = ORIGINAL): Mounted {
+function mountEditor(
+  answers: readonly ScriptedAnswer[],
+  loaded: string = ORIGINAL,
+  adoption: DiskAdoptionOutcome = 'installed'
+): Mounted {
   const remaining = [...answers];
   const calls: RecordedSave[] = [];
   const adoptions: ConflictModel<RoundTripText>[] = [];
@@ -204,7 +210,7 @@ function mountEditor(answers: readonly ScriptedAnswer[], loaded: string = ORIGIN
       text: loaded,
       adoptDiskVersion: (conflict: ConflictModel<RoundTripText>): DiskAdoptionOutcome => {
         adoptions.push(conflict);
-        return 'installed';
+        return adoption;
       },
       save: (
         document_: DocumentId,
@@ -834,6 +840,32 @@ describe('the mounted raw editor', () => {
     expect(textArea(editor.target).value).toBe(DISK);
     editor.stop();
   }); // End of the "adoption only on a confirmed reload" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from the screen.** A spent confirmation
+    // the window refused cannot be spent again — every reason it refuses for is a
+    // reason asking again cannot change — so the control goes and the sentence
+    // takes its place, with the draft untouched behind it.
+    const editor = mountEditor([{ result: CONFLICTED }], ORIGINAL, 'refused');
+    const candidate = `${ORIGINAL}# one more line\n`;
+    type(editor.target, candidate);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
+    flushSync();
+    control(editor.target, 'browser.saveOutcome.choice.confirmReload').click();
+    flushSync();
+
+    expect(says(editor.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(editor.target, 'browser.saveOutcome.choice.confirmReload')).toBeNull();
+    expect(button(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion')).toBeNull();
+    expect(button(editor.target, 'browser.saveOutcome.choice.copyDraft')).not.toBeNull();
+    // Nothing was reseeded and the window was asked exactly once.
+    expect(textArea(editor.target).value).toBe(candidate);
+    expect(editor.adoptions).toHaveLength(1);
+    editor.stop();
+  }); // End of the "refused reload stops being offered" case
 
   it('asks before leaving with unsaved text, and leaves at once without any', () => {
     const clean = mountEditor([]);

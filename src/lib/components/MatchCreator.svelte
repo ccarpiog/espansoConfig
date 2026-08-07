@@ -28,13 +28,17 @@
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { Clock } from '../browser/typing';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import { copyReferenceText } from './clipboard';
+  import SourceText from './SourceText.svelte';
   import {
     t,
     tConflictChoice,
     tCreationRefusal,
     tDestinationRefusal,
     tDetailField,
+    tDraftCopy,
     tDraftError,
+    tDraftFieldStatus,
     tEditError,
     tFindingCode,
     tIpcFailure,
@@ -132,6 +136,15 @@
    * **The form cannot be left while a save is in flight**, for 2c-1b's reason: the
    * request is authorized and cannot be cancelled, so unmounting would leave it
    * free to commit with its outcome drawn nowhere.
+   *
+   * **The conflict panel shows two sides and identifies nothing across them.** The
+   * retained draft is `view.retainedDraft` — the model's walk over the conflict's
+   * own buffers — and the disk side is `conflict.diskText`, the whole file as the
+   * command layer read it, through `SourceText`. The chosen destination and
+   * position are **not** in that list, because `Draft<CreationBuffers>` does not
+   * carry them (consult Q4); they stay in the form above, which is where they have
+   * always been. The confirmed reload closes this form, because a file on disk
+   * holds no half-written snippet to load in its place.
    */
 
   const {
@@ -225,6 +238,9 @@
 
   /** Whether leaving the form is waiting on a confirmation. */
   let leaving = $state(false);
+
+  /** What became of the last *Copy my text*, so the person is told either way. */
+  let copied = $state<'none' | 'copied' | 'failed'>('none');
 
   /**
    * Chooses the file the snippet goes in.
@@ -324,6 +340,11 @@
     // this save has just answered differently, and leaving is refused for as long
     // as one is in flight anyway.
     leaving = false;
+    // The copy disclosure belongs to the outcome that was on screen. Only
+    // *Keep editing* can reach a new create today, and that clears it too;
+    // clearing it here as well makes that an invariant rather than an argument
+    // about reachability.
+    copied = 'none';
     const answer = await create(
       started.document,
       started.newMatch,
@@ -362,24 +383,46 @@
   } // End of function refusalAction()
 
   /**
+   * Puts a labelled reference copy of the retained draft on the clipboard.
+   *
+   * **What is copied is what the panel drew**: `view.retainedDraft` is the one
+   * list, `tDraftCopy` is the one renderer of it, and neither is assembled here.
+   * The destination and the position are not in it, because the retained draft
+   * does not carry them and a copy that named them would be describing something
+   * else. It is a reference and **never YAML** (consult Q4).
+   *
+   * **A refusal is disclosed rather than swallowed, and the sentence does not
+   * promise a hand copy** — the 2c-4a-3a review's finding 1. `SourceText` writes
+   * the *name* of any character no font draws in place of the character, so
+   * selecting the panel by hand does not always give back what was typed; the
+   * disclosure says exactly that, and says that loading the disk version discards
+   * the draft either way.
+   */
+  async function copyTheDraft(): Promise<void> {
+    if (view.conflict === null) {
+      return;
+    }
+    copied = (await copyReferenceText(tDraftCopy(view.retainedDraft))) ? 'copied' : 'failed';
+  } // End of function copyTheDraft()
+
+  /**
    * Does what one conflict choice says.
    *
-   * **Only *Keep editing* is reachable today, and the reload arms are wired all the
-   * same.** `matchCreation.ts`'s `CONFLICT_CAPABILITIES` records that this draft
-   * **is** authored text a clipboard could preserve — the consult's Q3/Q4 rule —
-   * and that neither *Copy draft* nor the reload is *offered* yet, so no control
-   * reaches the arms below. The reload adopts the disk projection and **closes**
-   * the form, because there is no disk-side `CreationBuffers` to reload; it exists
-   * and is driven by `matchCreation.test.ts`, and 2c-4a-3 draws the control. *Copy
-   * draft* is the one arm still to be implemented.
+   * **All four arms are reachable as of 2c-4a-3a.** `matchCreation.ts`'s
+   * `CONFLICT_CAPABILITIES` records that this draft **is** authored text a
+   * clipboard can preserve — the consult's Q3/Q4 rule — and both its booleans are
+   * now `true`, so `conflictChoicesFor` names *Copy my text* and the two reload
+   * labels and this panel draws them. The reload adopts the disk projection and
+   * **closes** the form, because there is no disk-side `CreationBuffers` to
+   * reload; it was built and wired at 2c-4a-2 and is driven by
+   * `matchCreation.test.ts`.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
    * and there is no `default`. A *newly offered* member does not — offering is the
    * model's, and a choice becomes a control the moment `conflictChoicesFor` names
-   * it. That is why the arms below are **implemented before they are offered**:
-   * 2c-4a-3 has only to flip the capability boolean, and no type in this file could
-   * have forced that order.
+   * it. No type in this file could have forced that an arm does anything, which is
+   * why the mounted suite presses every control this panel draws.
    *
    * @param choice - The choice the person picked.
    */
@@ -387,6 +430,7 @@
     switch (choice) {
       case 'keepEditing':
         session = keepDrafting(session);
+        copied = 'none';
         return;
       case 'reloadDiskVersion':
         session = askToReloadDiskVersion(session);
@@ -405,9 +449,7 @@
         return;
       }
       case 'copyDraft':
-        // Never offered here: this surface's `CONFLICT_CAPABILITIES` says what
-        // its draft is, and `conflictChoicesFor` refuses a copy of anything but
-        // authored text. The arm exists so the `switch` stays exhaustive.
+        void copyTheDraft();
         return;
     }
   } // End of function conflictAction()
@@ -673,6 +715,52 @@
         <p class="kind">
           {t('browser.matchCreation.revisionDisk', { revision: conflict.diskRevision })}
         </p>
+
+        <h3>{t('browser.saveOutcome.retainedDraft')}</h3>
+        <!-- The conflict's own retained buffers, walked by the model, and the same
+             list the copy is built from. Through `SourceText` rather than into
+             boxes: the two controls above normalise a carriage return in opposite
+             ways, and this is a rendering of what is held rather than a place to
+             type. -->
+        {#each view.retainedDraft as field (field.label)}
+          <div class="shownValue">
+            <span class="marker">{tDetailField(field.label)}</span>
+            <span class="marker">{tDraftFieldStatus(field.status)}</span>
+            <SourceText text={field.text} />
+          </div>
+        {/each}
+
+        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+        <!-- The whole file as the command layer read it, paired with
+             `diskRevision`, and never a projection of "the same snippet" — which
+             does not exist for a snippet that was never written. Which arm is drawn
+             is `conflictDiskText`'s decision and not this markup's (2c-4a-3a
+             review, finding 5). -->
+        {#if view.diskText !== null && view.diskText.kind === 'text'}
+          <SourceText text={view.diskText.text} documentStart />
+        {:else}
+          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+        {/if}
+
+        <!-- The second step's warning. The shared line above says what a reload
+             does to any panel that closes; this one says what only this surface
+             can say — that a file on disk holds no half-written snippet. -->
+        {#if view.awaitingReloadConfirmation}
+          <p class="kind">{t('browser.matchCreation.reloadClosesForm')}</p>
+        {/if}
+
+        <!-- A control that has just gone, with the reason in its place. -->
+        {#if view.reloadUnavailable}
+          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
+        {/if}
+
+        <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
+        {#if copied === 'copied'}
+          <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
+        {:else if copied === 'failed'}
+          <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
+        {/if}
+
         <p class="choices">
           {#each view.conflictChoices as choice (choice)}
             <button type="button" onclick={() => conflictAction(choice)}>
@@ -705,6 +793,22 @@
     margin: 0;
     font-size: 0.8125rem;
     font-weight: 600;
+  }
+
+  /* The conflict panel's two headings: what was drafted, and what is on disk. */
+  h3 {
+    margin: 0.375rem 0 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  /* One field of the retained draft, with its name and its status above it. A
+     column, so the value below keeps the full width `SourceText` needs to scroll
+     sideways in. */
+  .shownValue {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
   }
 
   .field {

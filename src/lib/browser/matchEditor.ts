@@ -212,6 +212,7 @@ import {
 } from './draft';
 import { recordTyping, TYPING_GROUP_IDLE_MS, type Clock, type TypingRun } from './typing';
 import {
+  atTheReloadWarning,
   conflictArm,
   consentForRefusal,
   offeredReloadStep,
@@ -221,9 +222,11 @@ import {
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  reloadWasRefused,
   spendTheConfirmedReload,
   submissionIsStale,
   NOT_RELOADING,
+  RELOAD_REFUSED,
   type AdoptTheDiskVersion,
   type EditorPhase,
   type ReloadStep,
@@ -234,11 +237,16 @@ import type { RawSaveChoice } from './rawSave';
 import type { InvalidationStatus } from './invalidation';
 import {
   conflictChoicesFor,
+  conflictDiskText,
+  copyOfDraft,
   describeEditSave,
   invalidationFailureMessage,
   type ConflictCapabilities,
   type ConflictChoice,
+  type ConflictDiskText,
   type ConflictModel,
+  type DraftFieldStatus,
+  type RetainedDraftField,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -1501,7 +1509,7 @@ export function applySave(
   if (submission === null) {
     return session;
   }
-  const outcome = describeEditSave(result, session.draft);
+  const outcome = describeEditSave(result, session.draft, CONFLICT_CAPABILITIES);
   const failed = invalidationFailureMessage(adoption);
   const extraMessages = failed === null ? [] : [failed];
   if (result.outcome !== 'saved') {
@@ -1675,8 +1683,16 @@ export function reloadTheDiskVersion(
   session: MatchEditorSession,
   adopt: AdoptTheDiskVersion<MatchBuffers>
 ): MatchEditorSession {
-  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  if (spend === 'notAttempted') {
     return session;
+  }
+  if (spend === 'refused') {
+    // **A terminal step rather than the session unchanged**, which is the
+    // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
+    // no for a reason that asking again cannot change, so the control stops being
+    // offered and the panel says so. *Keep editing* writes NOT_RELOADING back.
+    return { ...session, reload: RELOAD_REFUSED };
   }
   return {
     ...session,
@@ -1699,22 +1715,22 @@ export function reloadTheDiskVersion(
  * never YAML — and a confirmed reload that installs the disk projection and
  * **closes** the editor.
  *
- * **The reload is built and wired; it is only unoffered.**
+ * **Both booleans were flipped at 2c-4a-3a, over machinery that already existed.**
  * {@link askToReloadDiskVersion}, {@link confirmDiskReload} and
- * {@link reloadTheDiskVersion} are the transition, and `MatchEditor.svelte`'s
- * `conflictAction` calls them. `conflictChoicesFor` names only what these booleans
- * admit, so no control that could reach either arm is drawn — which is why an
- * unoffered arm is not a dead control. **Phase 2c-4a-3 flips them**: the reload
- * over machinery that already exists and is already driven by this module's tests,
- * *Copy draft* over a labelled field renderer still to be written.
+ * {@link reloadTheDiskVersion} are the transition — built and wired at 2c-4a-2 and
+ * driven by this module's own suite since then — and `MatchEditor.svelte`'s
+ * `conflictAction` calls them from the two controls `conflictChoicesFor` now names.
+ * The copy is {@link MatchEditorView.retainedDraft} put through `tDraftCopy`: a
+ * labelled reference copy of the six buffers, **never YAML**.
  *
  * **None of these is "keep my draft"** and none may become one: that phrase means
  * *reapply the draft to the newly parsed document*, which is 2c-4b.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
-  offersCopyDraft: false,
-  offersReload: false
+  reloadOutcome: 'closesSurface',
+  offersCopyDraft: true,
+  offersReload: true
 };
 
 /** Everything a screen needs about one field, derived on every read. */
@@ -1793,10 +1809,42 @@ export interface MatchEditorView {
   readonly findingsAreStale: boolean;
   /** The conflict being shown, or `null`. */
   readonly conflict: ConflictModel<MatchBuffers> | null;
+  /**
+   * The draft that conflict retained, labelled, in {@link EDITABLE_FIELDS} order.
+   *
+   * Empty whenever no conflict is showing. The conflict panel draws this **and**
+   * the *Copy draft* control builds its text from the same list, so what a person
+   * is told they copied is what the panel showed them.
+   *
+   * **It is built from the conflict's own retained draft**, through
+   * `copyOfDraft`, and never from the session's current buffers: the two are
+   * equal today because a conflict refuses every edit until it is dismissed, and
+   * writing it that way would make the panel silently describe something else the
+   * first time that stops being true.
+   */
+  readonly retainedDraft: readonly RetainedDraftField[];
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
   /** Whether the warning is showing and the destructive choice is one click away. */
   readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload was spent and the window refused it.
+   *
+   * **The disclosure the panel owes for a control that has just gone.** The
+   * reload is not offered again once a spend has been refused — asking again
+   * could only be refused again — and a control that vanishes with nothing said
+   * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
+   * and nothing was discarded; *Keep editing* resets the step.
+   */
+  readonly reloadUnavailable: boolean;
+  /**
+   * The disk side of that conflict, or `null` when none is showing.
+   *
+   * A union rather than a string, so *a file of zero characters is a fact about
+   * the file rather than a failure to obtain it* is decided in this directory
+   * once instead of in each renderer’s markup (2c-4a-3a review, finding 5).
+   */
+  readonly diskText: ConflictDiskText | null;
   /**
    * Whether a confirmed reload has ended this session.
    *
@@ -1851,6 +1899,50 @@ function fieldModel(session: MatchEditorSession, field: EditableField): Editable
 } // End of function fieldModel()
 
 /**
+ * What a save would do with one field, as the phrase a copy names it by.
+ *
+ * The three arms of the wire's own `DraftField<string>` mapped onto the three of
+ * {@link DraftFieldStatus}, so the status beside a copied value is what
+ * {@link matchDraftOf} would actually send for it rather than a second opinion
+ * about presence. An absent field left blank is therefore *unchanged* and not
+ * *setting*, which is the rule the whole draft-versus-projection arrangement
+ * exists for.
+ *
+ * @param intent - What {@link fieldIntent} answered for the field.
+ * @returns The status to show and to copy.
+ */
+function statusOfIntent(intent: DraftField<string>): DraftFieldStatus {
+  if (intent === 'Unchanged') {
+    return 'unchanged';
+  }
+  return intent === 'Remove' ? 'removing' : 'setting';
+} // End of function statusOfIntent()
+
+/**
+ * The retained draft of one conflict, labelled, for the panel and for the copy.
+ *
+ * **All six fields, in {@link EDITABLE_FIELDS} order**, which is the consult's Q4
+ * read literally: a field left out of the copy is a piece of the drafted value
+ * that was not copied, and a removed field keeps its text in its buffer, so
+ * dropping either the text or the status would not preserve what was drafted.
+ *
+ * @param session - The session showing the conflict, for its baselines.
+ * @param conflict - The conflict holding the retained draft.
+ * @returns One entry per editable field, in the order a screen shows them.
+ */
+function retainedDraftOf(
+  session: MatchEditorSession,
+  conflict: ConflictModel<MatchBuffers>
+): readonly RetainedDraftField[] {
+  const buffers = copyOfDraft(conflict);
+  return EDITABLE_FIELDS.map((field) => ({
+    label: fieldLabelName(field),
+    text: buffers[field].text,
+    status: statusOfIntent(fieldIntent(session.baseline[field], buffers[field]))
+  }));
+} // End of function retainedDraftOf()
+
+/**
  * Everything a screen needs about one session.
  *
  * Derived on every call and stored nowhere, which is 2c-1a's D2 carried up: a
@@ -1883,11 +1975,14 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
+    retainedDraft: conflict === null ? [] : retainedDraftOf(session, conflict),
     conflictChoices:
       conflict === null
         ? []
         : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
-    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
+    reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    diskText: conflictDiskText(conflict),
     closed: session.closed,
     identityStale: session.identityStale,
     needsReprojection: session.needsReprojection

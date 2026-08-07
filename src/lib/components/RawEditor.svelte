@@ -39,6 +39,7 @@
     DocumentId,
     DocumentSummary
   } from '../ipc/types';
+  import { copyReferenceText } from './clipboard';
   import SourceText from './SourceText.svelte';
 
   /*
@@ -250,186 +251,32 @@
   } // End of function loadTheDiskVersion()
 
   /**
-   * What was focused and selected before the carrier took both.
-   *
-   * Two kinds, because the platform has two: a form control carries its own
-   * selection offsets, and everything else carries document ranges. Restoring only
-   * the focused element — which the first version did — puts the caret back at the
-   * start of whatever the person had highlighted.
-   */
-  interface SelectionSnapshot {
-    /** The element that had focus, or `null`. */
-    readonly element: HTMLElement | null;
-    /** The focused form control's selection offsets, when it had them. */
-    readonly offsets: { readonly start: number; readonly end: number } | null;
-    /** The document's own selection ranges, cloned so nothing aliases them. */
-    readonly ranges: readonly Range[];
-  }
-
-  /**
-   * Runs one step of putting the screen back, and swallows its failure.
-   *
-   * Named rather than inlined so that "this must not throw" is a property a reader
-   * can see at every call site instead of a `try` block they have to read past.
-   *
-   * @param step - The restoration step to attempt.
-   */
-  function quietly(step: () => void): void {
-    try {
-      step();
-    } catch {
-      // Cleanup that fails is not worth an error the person cannot act on: what
-      // matters is that the answer still reaches the screen.
-    }
-  } // End of function quietly()
-
-  /**
-   * Records what has focus and what is selected, before either is taken away.
-   *
-   * @returns The snapshot, empty rather than throwing when the platform refuses any
-   *   part of the question — `selectionStart` throws on some input types.
-   */
-  function captureSelection(): SelectionSnapshot {
-    const active = document.activeElement;
-    const element = active instanceof HTMLElement ? active : null;
-    let offsets: { readonly start: number; readonly end: number } | null = null;
-    quietly(() => {
-      if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
-        const start = element.selectionStart;
-        const end = element.selectionEnd;
-        if (start !== null && end !== null) {
-          offsets = { start, end };
-        }
-      }
-    });
-    const ranges: Range[] = [];
-    quietly(() => {
-      const selection = document.getSelection();
-      for (let index = 0; index < (selection?.rangeCount ?? 0); index += 1) {
-        const range = selection?.getRangeAt(index);
-        if (range !== undefined) {
-          ranges.push(range.cloneRange());
-        }
-      } // End of the loop over the document's selection ranges
-    });
-    return { element, offsets, ranges };
-  } // End of function captureSelection()
-
-  /**
-   * Puts focus and the selection back where {@link captureSelection} found them.
-   *
-   * Three independent steps, each swallowed on its own: a focus that will not
-   * return must not stop the offsets being restored, and neither must stop the
-   * caller answering.
-   *
-   * @param snapshot - What was there before.
-   */
-  function restoreSelection(snapshot: SelectionSnapshot): void {
-    const element = snapshot.element;
-    if (element !== null) {
-      quietly(() => element.focus({ preventScroll: true }));
-    }
-    const offsets = snapshot.offsets;
-    if (
-      offsets !== null &&
-      (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement)
-    ) {
-      quietly(() => element.setSelectionRange(offsets.start, offsets.end));
-      return;
-    }
-    if (snapshot.ranges.length === 0) {
-      return;
-    }
-    quietly(() => {
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      for (const range of snapshot.ranges) {
-        selection?.addRange(range);
-      } // End of the loop over the ranges that were there before
-    });
-  } // End of function restoreSelection()
-
-  /**
-   * Copies one text by selecting it in a carrier text area.
-   *
-   * **A second route, because the first one was seen to fail and it is not known
-   * why.** The 2c-1b window reading saw `navigator.clipboard.writeText` rejected
-   * with `NotAllowedError` — but the re-take established that the machine's screen
-   * was locked and `document.hasFocus()` was false throughout, and both clipboard
-   * routes are gated on a focused document, so **whether the shipped WKWebView
-   * refuses `navigator.clipboard` is unsettled** (notes sections 9.11.4 and 8.12);
-   * settling it needs a human at an unlocked machine. What stands on its own is
-   * that the conflict's *copy your text before discarding it* step should not rest
-   * on a single route: `document.execCommand('copy')` over a real selection needs
-   * neither a permission prompt nor a new dependency — deliberately not
-   * `@tauri-apps/plugin-clipboard-manager`, which would be a dependency plus Rust.
-   *
-   * The carrier is offscreen rather than `hidden` or `display: none`: an element
-   * that is not rendered cannot hold a selection, which is the usual way this
-   * fallback is written and does nothing.
-   *
-   * **It always answers a boolean, and every step of putting the screen back is
-   * separately non-throwing.** That is the second review pass's finding: the first
-   * version restored focus in an unguarded `finally`, so a throw there escaped the
-   * whole function, the caller's assignment never ran, and the person got **no**
-   * disclosure at all — neither success nor failure — on the one control that
-   * exists to keep a draft from being lost. Silence is the worst answer this path
-   * can give, so nothing in the cleanup is allowed to produce it.
-   *
-   * @param value - The text to put on the clipboard.
-   * @returns `true` when the copy command reported success, `false` for every other
-   *   ending including a failure of the cleanup itself.
-   */
-  function copyBySelecting(value: string): boolean {
-    const before = captureSelection();
-    const carrier = document.createElement('textarea');
-    let copied = false;
-    try {
-      // A text area normalizes carriage returns in its value — which is the whole
-      // reason this editor refuses to hold a text that has any — so nothing that
-      // reaches here can be changed by passing through one.
-      carrier.value = value;
-      carrier.setAttribute('aria-hidden', 'true');
-      carrier.style.position = 'fixed';
-      carrier.style.top = '-1000px';
-      carrier.style.opacity = '0';
-      document.body.append(carrier);
-      carrier.focus({ preventScroll: true });
-      carrier.select();
-      carrier.setSelectionRange(0, carrier.value.length);
-      copied = typeof document.execCommand === 'function' && document.execCommand('copy');
-    } catch {
-      copied = false;
-    }
-    // Outside the `try`, and each half guarded on its own, so a carrier that will
-    // not detach cannot stop focus being restored and neither can stop the answer.
-    quietly(() => carrier.remove());
-    restoreSelection(before);
-    return copied;
-  } // End of function copyBySelecting()
-
-  /**
    * Puts the draft on the clipboard, by whichever route this webview allows.
    *
-   * The asynchronous API first, because it is the one that works everywhere else
-   * and needs no selection; the selection fallback when it rejects or is absent.
-   * **A refusal by both is still disclosed** — replacing an honest failure with a
-   * silent one would be worse than the failure, and the read-only box above holds
-   * the same bytes for a manual selection either way.
+   * **The routine moved to `./clipboard.ts` at 2c-4a-3a and this component no
+   * longer carries its own copy of it.** It was duplicated the moment two more
+   * surfaces needed the same *copy your text before discarding it* step, and a
+   * second copy of a routine whose failure mode is silence is a second place for
+   * it to be relaxed. What it does is unchanged: the asynchronous API first,
+   * because it works everywhere else and needs no selection, then a selection
+   * carrier, with every step of putting the screen back separately non-throwing.
+   *
+   * **The carriage-return refusal `copyReferenceText` adds cannot fire here**, and
+   * saying so is the point: this editor refuses to open a text containing one at
+   * all (`startRawEditor`), so the draft handed over never holds a `\r`. The rule
+   * exists for the match editor, whose buffers can.
+   *
+   * **A refusal by both routes is still disclosed** — replacing an honest failure
+   * with a silent one would be worse than the failure, and the read-only box above
+   * holds the same bytes for a manual selection either way, which for *this*
+   * surface is true because the box is a `<textarea>` holding the draft itself.
    */
   async function copyTheDraft(): Promise<void> {
     const value = session === null ? null : textToCopy(session);
     if (value === null) {
       return;
     }
-    try {
-      await navigator.clipboard.writeText(value);
-      copied = 'copied';
-      return;
-    } catch {
-      // Refused, or absent outside a secure context. Fall through.
-    }
-    copied = copyBySelecting(value) ? 'copied' : 'failed';
+    copied = (await copyReferenceText(value)) ? 'copied' : 'failed';
   } // End of function copyTheDraft()
 
   /**
@@ -676,18 +523,26 @@
         </p>
 
         <h3>{t('browser.rawEditor.diskVersion')}</h3>
-        <!-- `conflict.diskText` is a `string` and never absent: a conflict cannot
-             exist without the read that produced it having succeeded, which is
-             2c-4a-1's D1. An empty file is an empty text, which is a fact about the
-             file rather than a failure to obtain one. -->
-        {#if conflict.diskText === ''}
-          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+        <!-- Which arm is drawn is `conflictDiskText`'s decision and not this
+             markup's since 2c-4a-3a: *an empty file is a fact about the file rather
+             than a failure to obtain its text* — 2c-4a-1's D1 — was written into
+             this renderer and then into two more, which is a semantic decision no
+             suite carried. -->
+        {#if view.diskText !== null && view.diskText.kind === 'text'}
+          <SourceText text={view.diskText.text} documentStart />
         {:else}
-          <SourceText text={conflict.diskText} documentStart />
+          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
         {/if}
 
         {#if view.diskRefusal !== null}
           <p class="marker warn">{tRawEditorRefusal(view.diskRefusal)}</p>
+        {/if}
+
+        <!-- A control that has just gone, with the reason in its place: the reload
+             is not offered again once the window has refused a spend, because
+             asking again could only be refused again. -->
+        {#if view.reloadUnavailable}
+          <p class="kind">{t('browser.saveOutcome.reloadUnavailable')}</p>
         {/if}
 
         {#if copied === 'copied'}

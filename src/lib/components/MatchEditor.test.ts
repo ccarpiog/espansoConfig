@@ -36,7 +36,7 @@
  * helpers here do.
  */
 
-import type { DiskAdoptionOutcome } from '../browser/saveOutcome';
+import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detailFieldKey } from '../browser/detail';
@@ -46,13 +46,14 @@ import {
   fieldLabelName,
   reprojectionRefusalKey,
   type EditableField,
+  type MatchBuffers,
   type Reprojection
 } from '../browser/matchEditor';
 import { conflictChoiceKey, type ConflictChoice } from '../browser/saveOutcome';
 import { sourceSegments, type InvisibleSegment } from '../browser/sourceText';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
-import { tDraftError, tInvisible, tIpcFailure } from '../i18n';
+import { t, tDraftCopy, tDraftError, tInvisible, tIpcFailure } from '../i18n';
 import { LOCALES } from '../i18n/locale';
 import { locale } from '../stores/locale.svelte';
 import type { IpcFailure } from '../ipc/errors';
@@ -117,13 +118,24 @@ const REFUSED: SaveResult = {
   findings: [SUSPICION]
 };
 
+/**
+ * The whole file text the conflict's fresh read carried.
+ *
+ * Distinguishable from anything the draft holds, so a case can tell the disk side
+ * of the panel from the draft side by looking at the rendered text.
+ */
+const DISK_TEXT = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+/** A word that appears in {@link DISK_TEXT} and nowhere else on the screen. */
+const DISK_TEXT_MARKER = 'theirs';
+
 /** A save the file had moved on under. */
 const CONFLICTED: SaveResult = {
   outcome: 'conflict',
   expected: BASE,
   found: AFTER,
   disk_revision: AFTER,
-  disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
+  disk_text: DISK_TEXT,
   disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision: AFTER })
 };
 
@@ -238,6 +250,15 @@ interface Mounted {
   readonly target: HTMLElement;
   /** Every call the component made, in order. */
   readonly calls: RecordedSave[];
+  /**
+   * Every conflict the component asked the window to adopt, in order.
+   *
+   * **Empty is the assertion in most cases.** A conflict installs nothing until a
+   * reload has been asked for *and* confirmed, so a case that reaches this panel
+   * and finds an entry here has found the pre-emptive install the consult's Q2
+   * ruled out.
+   */
+  readonly adoptions: ConflictModel<MatchBuffers>[];
   /** How many times the editor asked to be closed. */
   readonly closed: () => number;
   /** Moves the injected clock forward, in milliseconds. */
@@ -264,15 +285,19 @@ function projection(overrides: Parameters<typeof makeMatch>[0] = {}): MatchView 
  * @param match - The snippet to seed from.
  * @param fresh - What `reproject` answers for the session's identity. Defaults to
  *   the refusal a window that has moved elsewhere gives.
+ * @param adoption - What the window answers when the editor asks it to adopt the
+ *   disk observation. All three values are real production answers.
  * @returns The mounted editor.
  */
 function mountEditor(
   answers: readonly ScriptedAnswer[] = [],
   match: MatchView = projection(),
-  fresh: Reprojection = { kind: 'unavailable', reason: 'otherFile' }
+  fresh: Reprojection = { kind: 'unavailable', reason: 'otherFile' },
+  adoption: DiskAdoptionOutcome = 'installed'
 ): Mounted {
   const remaining = [...answers];
   const calls: RecordedSave[] = [];
+  const adoptions: ConflictModel<MatchBuffers>[] = [];
   let closes = 0;
   let now = 0;
   const target = document.createElement('div');
@@ -315,10 +340,14 @@ function mountEditor(
         });
       },
       reproject: (): Reprojection => fresh,
-      // **The window's own adoption**, which no case here reaches: the five match
-      // surfaces declare `offersReload: false`, so no control that could spend a
-      // confirmation is drawn. `matchEditor.test.ts` drives the transition directly.
-      adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+      // **The window's own adoption**, recorded rather than assumed. Since
+      // 2c-4a-3a this surface offers the reload, so a case can press the two
+      // controls and watch exactly when — and whether — the window is asked to
+      // move.
+      adoptDiskVersion: (conflict: ConflictModel<MatchBuffers>): DiskAdoptionOutcome => {
+        adoptions.push(conflict);
+        return adoption;
+      },
       close: (): void => {
         closes += 1;
       }
@@ -327,6 +356,7 @@ function mountEditor(
   return {
     target,
     calls,
+    adoptions,
     closed: () => closes,
     advance: (by: number) => {
       now += by;
@@ -458,6 +488,44 @@ function control(target: HTMLElement, key: TranslationKey): HTMLButtonElement {
 function says(target: HTMLElement, key: TranslationKey): boolean {
   return (target.textContent ?? '').includes(DICTIONARIES.en[key]);
 } // End of function says()
+
+/** What one scripted `execCommand('copy')` saw. */
+interface CopiedSelections {
+  /** The **selected** text of each copy, in order. */
+  readonly selections: string[];
+}
+
+/**
+ * Replaces `document.execCommand` with one that records what was *selected*.
+ *
+ * **It reads the carrier's selection and never its whole value**, which is the
+ * 2c-4a-3a review's finding 4: a mock that reads `.value` passes even when the
+ * component forgets to select anything, and a real `execCommand('copy')` over an
+ * empty selection copies nothing. Setting a text area's `value` leaves its
+ * selection collapsed at the end, so a carrier that is not selected records `''`
+ * here and every expectation below fails.
+ *
+ * The caller restores the original descriptor; this only installs.
+ *
+ * @returns The recorder the case reads.
+ */
+function recordTheSelectionCopied(): CopiedSelections {
+  const selections: string[] = [];
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    writable: true,
+    value: (command: string): boolean => {
+      const selected = document.activeElement;
+      if (selected instanceof HTMLTextAreaElement) {
+        selections.push(
+          selected.value.slice(selected.selectionStart ?? 0, selected.selectionEnd ?? 0)
+        );
+      }
+      return command === 'copy';
+    }
+  });
+  return { selections };
+} // End of function recordTheSelectionCopied()
 
 /**
  * Waits for the component's asynchronous save handler to finish.
@@ -928,18 +996,263 @@ describe('the mounted small editor', () => {
     // No retry of a candidate the file has moved past, and no second save.
     expect(button(editor.target, 'browser.rawSave.choice.saveAnyway')).toBeNull();
     expect(control(editor.target, 'browser.matchEditor.save').disabled).toBe(true);
-    // One choice, and the two that are missing are missing on purpose: *Copy
-    // draft* copies a text and this draft is six fields, and *Load the version on
-    // disk* is Phase 2c-4a.
+    // Three choices as of 2c-4a-3a, and the destructive one is not among them
+    // yet: *Confirm reload* is the second step's label and is never offered beside
+    // the first's.
     expect(button(editor.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
-    expect(button(editor.target, conflictChoiceKey('copyDraft'))).toBeNull();
-    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('confirmReload'))).toBeNull();
 
     control(editor.target, conflictChoiceKey('keepEditing')).click();
     flushSync();
     expect(box(editor.target, 'replace').readOnly).toBe(false);
     editor.stop();
   }); // End of the "conflict" case
+
+  it('shows both sides of a conflict, and identifies no snippet across them', async () => {
+    // **The comparison the consult's Q5 ruled, on a screen.** The retained draft
+    // is drawn field by field — through `SourceText`, so a value a control would
+    // normalise is named rather than misdrawn — and the disk side is the whole
+    // file text as the command layer read it. Nothing here claims a snippet in the
+    // disk version corresponds to the one being edited: that is 2c-4b.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.retainedDraft')).toBe(true);
+    expect(says(editor.target, 'browser.saveOutcome.diskVersion')).toBe(true);
+    // Six fields of the draft plus the disk text, all through the one rendering
+    // surface for file text.
+    expect(editor.target.querySelectorAll('.panel .sourceText')).toHaveLength(7);
+    expect(editor.target.textContent).toContain(DISK_TEXT_MARKER);
+    // Both revisions, always, and the third beside them — each with its own digest
+    // substituted, which is what makes them two statements rather than one.
+    expect(editor.target.textContent).toContain(
+      t('browser.matchEditor.revisionExpected', { revision: BASE })
+    );
+    expect(editor.target.textContent).toContain(
+      t('browser.matchEditor.revisionFound', { revision: AFTER })
+    );
+    expect(editor.target.textContent).toContain(
+      t('browser.matchEditor.revisionDisk', { revision: AFTER })
+    );
+    // What a save would do with each field, and never a presence flag: the edited
+    // one would be written, and the untouched ones would not.
+    expect(says(editor.target, 'browser.saveOutcome.field.setting')).toBe(true);
+    expect(says(editor.target, 'browser.saveOutcome.field.unchanged')).toBe(true);
+    editor.stop();
+  }); // End of the "both sides" case
+
+  it('adopts the disk version and closes only when the reload is confirmed', async () => {
+    // **The consult's Q2 seen from this screen.** The panel is drawn and the
+    // window has not moved; the warning is read and it still has not; the confirm
+    // click adopts once and ends the session, because there is no disk-side
+    // `MatchBuffers` to seed and inventing one would be 2c-4b's identity work.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+
+    expect(editor.adoptions).toEqual([]);
+    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(false);
+
+    control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+    flushSync();
+
+    // The second step: the warning that says what happens *here*, the copy still
+    // offered beside it, and the first step's label gone.
+    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(true);
+    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(editor.adoptions).toEqual([]);
+    expect(editor.closed()).toBe(0);
+
+    control(editor.target, conflictChoiceKey('confirmReload')).click();
+    flushSync();
+
+    expect(editor.adoptions).toHaveLength(1);
+    expect(editor.adoptions[0]?.diskRevision).toBe(AFTER);
+    expect(editor.closed()).toBe(1);
+    editor.stop();
+  }); // End of the "confirmed reload" case
+
+  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+    // **`alreadyThere` is a success**: the window already holds the bytes that
+    // were asked for, and treating it as a failure is the stuck confirmation it
+    // was added to prevent. `refused` is the only answer that means the window did
+    // not move, and it leaves the panel where it was.
+    for (const [answer, closes] of [
+      ['alreadyThere', 1],
+      ['installed', 1],
+      ['refused', 0]
+    ] as const) {
+      const editor = mountEditor([{ result: CONFLICTED }], projection(), undefined, answer);
+      type(editor.target, 'replace', 'c');
+      control(editor.target, 'browser.matchEditor.save').click();
+      await settle();
+      control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+      flushSync();
+      control(editor.target, conflictChoiceKey('confirmReload')).click();
+      flushSync();
+
+      expect(editor.adoptions, answer).toHaveLength(1);
+      expect(editor.closed(), answer).toBe(closes);
+      // A refused adoption leaves the conflict on screen rather than reporting a
+      // reload that did not happen.
+      expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
+        closes === 0
+      );
+      editor.stop();
+    } // End of the loop over the three adoption answers
+  }); // End of the "three adoption answers" case
+
+  it('stops offering the reload once the window has refused it, and says why', async () => {
+    // **The 2c-4a-3a review's finding 3, from the screen.** A spent confirmation
+    // the window refused cannot be spent again — every reason it refuses for is a
+    // reason asking again cannot change — so the control goes and the sentence
+    // takes its place. *Keep editing* and the copy stay, and pressing what is left
+    // asks the window nothing further.
+    const editor = mountEditor([{ result: CONFLICTED }], projection(), undefined, 'refused');
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    control(editor.target, conflictChoiceKey('reloadDiskVersion')).click();
+    flushSync();
+    control(editor.target, conflictChoiceKey('confirmReload')).click();
+    flushSync();
+
+    expect(says(editor.target, 'browser.saveOutcome.reloadUnavailable')).toBe(true);
+    expect(button(editor.target, conflictChoiceKey('confirmReload'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('reloadDiskVersion'))).toBeNull();
+    expect(button(editor.target, conflictChoiceKey('copyDraft'))).not.toBeNull();
+    expect(button(editor.target, conflictChoiceKey('keepEditing'))).not.toBeNull();
+    // The warning is gone with the control it belonged to.
+    expect(says(editor.target, 'browser.matchEditor.reloadClosesEditor')).toBe(false);
+    expect(editor.adoptions).toHaveLength(1);
+    expect(editor.closed()).toBe(0);
+
+    // And *Keep editing* is a real way out: the panel goes and the draft is back.
+    control(editor.target, conflictChoiceKey('keepEditing')).click();
+    flushSync();
+    expect(box(editor.target, 'replace').readOnly).toBe(false);
+    expect(box(editor.target, 'replace').value).toBe('c');
+    editor.stop();
+  }); // End of the "refused reload stops being offered" case
+
+  it('warns that the reload closes this editor, never that it replaces the text', async () => {
+    // **The 2c-4a-3a review's finding 2.** *Loading the version on disk replaces
+    // your text with it* is the raw editor's behaviour; this surface installs the
+    // disk projection and closes, loading nothing in the draft's place — and the
+    // shared sentence contradicted the confirmation sentence beside it.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+
+    expect(says(editor.target, 'browser.saveOutcome.reloadClosesSurface')).toBe(true);
+    expect(says(editor.target, 'browser.saveOutcome.reloadDiscardsDraft')).toBe(false);
+    editor.stop();
+  }); // End of the "surface-aware warning" case
+
+  it('copies a labelled reference of the draft, and never YAML', async () => {
+    // **The selection fallback, exactly as the webview takes it**: jsdom has no
+    // clipboard, so `navigator.clipboard.writeText` rejects and the carrier route
+    // runs. What it carries is `tDraftCopy` of the same list the panel drew —
+    // labels, statuses and the exact strings — and it is not YAML.
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    const copied = recordTheSelectionCopied();
+    try {
+      const editor = mountEditor([{ result: CONFLICTED }], projection({ label: 'Signature' }));
+      type(editor.target, 'replace', 'c');
+      control(editor.target, 'browser.matchEditor.save').click();
+      await settle();
+
+      control(editor.target, conflictChoiceKey('copyDraft')).click();
+      await settle();
+
+      expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(true);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopyFailed')).toBe(false);
+      // **Exactly what the model would render, and only what was selected.** The
+      // expectation is built here from the six fields this projection and this
+      // edit produce, so it pins the order, the labels, the statuses and every
+      // string byte for byte — and because the mock records the *selection* rather
+      // than the carrier's whole value, a carrier that was never selected copies
+      // an empty string and fails this (2c-4a-3a review, finding 4).
+      expect(copied.selections).toEqual([
+        tDraftCopy([
+          { label: 'trigger', text: ':a', status: 'unchanged' },
+          { label: 'replace', text: 'c', status: 'setting' },
+          { label: 'label', text: 'Signature', status: 'unchanged' },
+          { label: 'word', text: '', status: 'unchanged' },
+          { label: 'leftWord', text: '', status: 'unchanged' },
+          { label: 'rightWord', text: '', status: 'unchanged' }
+        ])
+      ]);
+      const text = copied.selections[0] ?? '';
+      // Not YAML, and nothing that could be pasted back as one: no `matches:`
+      // list, and no `key: value` line assembled out of a projection.
+      expect(text).toContain(DICTIONARIES.en['browser.saveOutcome.copyHeading']);
+      expect(text).not.toContain('matches:');
+      expect(text).not.toContain('replace: c');
+      // And the carrier is gone again.
+      expect(document.querySelectorAll('textarea')).toHaveLength(1);
+      editor.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "reference copy" case
+
+  it('refuses the selection copy of a draft holding a carriage return, and says so', async () => {
+    // **A text area normalises a carriage return**, so the carrier would put
+    // different characters on the clipboard and report success. A projected value
+    // the editor shows read-only may hold one, so this is reachable: the copy is
+    // refused and the refusal is disclosed. What stays on screen is a *readable
+    // representation* — the carriage return is named, not drawn — so it is
+    // explicitly not the original value, and no route recovers that value here.
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    let attempts = 0;
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: (): boolean => {
+        attempts += 1;
+        return true;
+      }
+    });
+    try {
+      const editor = mountEditor([{ result: CONFLICTED }], projection({ replace: 'a\rb' }));
+      type(editor.target, 'label', 'renamed');
+      control(editor.target, 'browser.matchEditor.save').click();
+      await settle();
+
+      control(editor.target, conflictChoiceKey('copyDraft')).click();
+      await settle();
+
+      expect(attempts).toBe(0);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopyFailed')).toBe(true);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(false);
+      // The panel names the carriage return rather than drawing it as a line
+      // break. That naming is what this asserts — it is the representation, not
+      // the value, and selecting it by hand would not reproduce the draft.
+      const invisible = sourceSegments('a\rb', false).filter(
+        (segment): segment is InvisibleSegment => segment.kind === 'invisible'
+      );
+      expect(editor.target.textContent).toContain(tInvisible(invisible[0]!));
+      editor.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "carriage return refuses the copy" case
 
   it('offers no control called “keep my draft”, in either language', async () => {
     // That phrase means *reapply the draft to the newly parsed document*, which is

@@ -44,12 +44,16 @@ import {
   copyOfDraft,
   describeEditSave,
   describeWholeDocumentSave,
+  draftFieldStatusKey,
   invalidationFailureMessage,
+  referenceCopyOf,
   reloadDiskVersion,
   saveOutcomeMessageKey,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictModel,
+  type DraftFieldStatus,
+  type RetainedDraftField,
   type SaveOutcomeMessage
 } from './saveOutcome';
 
@@ -202,13 +206,17 @@ function draftInHand(): Draft<string> {
  *
  * @param diskRevision - What the read after the refusal found.
  * @param draft - The draft the save was made from.
+ * @param surface - Whose declaration decides which reload sentence the model
+ *   carries. The raw editor's by default, because that is the surface
+ *   `describeWholeDocumentSave` belongs to.
  * @returns The conflict arm.
  */
 function conflictModel(
   diskRevision: ContentRevision = AFTER,
-  draft: Draft<string> = draftInHand()
+  draft: Draft<string> = draftInHand(),
+  surface: ConflictCapabilities = RAW_EDITOR
 ): ConflictModel<string> {
-  const model = describeWholeDocumentSave(conflictWith(diskRevision), draft);
+  const model = describeWholeDocumentSave(conflictWith(diskRevision), draft, surface);
   if (model.kind !== 'conflict') {
     throw new Error('the conflict arm is what this case is about');
   }
@@ -217,7 +225,7 @@ function conflictModel(
 
 describe('a save that ran to the end', () => {
   it('says the file was written, and discloses a backup without promising one', () => {
-    const model = describeWholeDocumentSave(savedWith({ backupTaken: true }), draftInHand());
+    const model = describeWholeDocumentSave(savedWith({ backupTaken: true }), draftInHand(), RAW_EDITOR);
     expect(model.kind).toBe('saved');
     expect(model).toMatchObject({ committed: true, backupTaken: true, revision: AFTER });
     expect(model.messages).toEqual([{ kind: 'fileWritten' }, { kind: 'backupTaken' }]);
@@ -228,7 +236,7 @@ describe('a save that ran to the end', () => {
     // what the file already held is not written, because replacing a file drops
     // metadata and buys nothing. A model that only said "written" or said nothing
     // would present that as a failure or as silence.
-    const model = describeWholeDocumentSave(savedWith({ committed: false }), draftInHand());
+    const model = describeWholeDocumentSave(savedWith({ committed: false }), draftInHand(), RAW_EDITOR);
     expect(model).toMatchObject({ kind: 'saved', committed: false });
     expect(model.messages).toEqual([{ kind: 'nothingToWrite' }]);
   });
@@ -241,7 +249,7 @@ describe('a save that ran to the end', () => {
       { ScalarRestyled: { edit: 0, from: 'Plain', to: 'DoubleQuoted', reason: 'MixedLineBreaks' } },
       { DoubledSequenceSeparation: { edit: 1 } }
     ];
-    const model = describeEditSave(wireSaved({ notes }), draftInHand());
+    const model = describeEditSave(wireSaved({ notes }), draftInHand(), MATCH_EDITOR);
     expect(model).toMatchObject({ kind: 'saved' });
     if (model.kind !== 'saved') {
       return;
@@ -250,8 +258,8 @@ describe('a save that ran to the end', () => {
   }); // End of the "carries every presentation note" case
 
   it('reads the same from either describer', () => {
-    expect(describeEditSave(wireSaved(), draftInHand())).toEqual(
-      describeWholeDocumentSave(savedWith(), draftInHand())
+    expect(describeEditSave(wireSaved(), draftInHand(), MATCH_EDITOR)).toEqual(
+      describeWholeDocumentSave(savedWith(), draftInHand(), RAW_EDITOR)
     );
   });
 }); // End of the "save that ran to the end" suite
@@ -262,7 +270,7 @@ describe('a save the semantic gate refused', () => {
     // an **exact multiset**, so a subset is simply a second refusal — and there
     // is no `force` flag on this wire.
     const refusal = refusedWith([REJECTION, ORDINARY]);
-    const model = describeWholeDocumentSave(refusal, draftInHand());
+    const model = describeWholeDocumentSave(refusal, draftInHand(), RAW_EDITOR);
     expect(model.kind).toBe('refused');
     if (model.kind !== 'refused') {
       return;
@@ -280,7 +288,8 @@ describe('a save the semantic gate refused', () => {
   it('withholds the offer from a verdict no acknowledgement can move', () => {
     const model = describeEditSave(
       refusedWith([ORDINARY], 'RefusedForEditorModelErrors'),
-      draftInHand()
+      draftInHand(),
+      MATCH_EDITOR
     );
     expect(model).toMatchObject({
       kind: 'refused',
@@ -293,7 +302,7 @@ describe('a save the semantic gate refused', () => {
     // `rawSave.ts` already models the owner's ruling — the sentence about espanso
     // not loading the file, the parser's position when it has one, and the choice
     // — and this arm carries that model rather than a second copy of it.
-    const model = describeWholeDocumentSave(refusedWith([REJECTION]), draftInHand());
+    const model = describeWholeDocumentSave(refusedWith([REJECTION]), draftInHand(), RAW_EDITOR);
     expect(model.kind).toBe('refused');
     if (model.kind !== 'refused') {
       return;
@@ -311,7 +320,7 @@ describe('a save the semantic gate refused', () => {
     // that is false of a field edit. The scope is not a caller's word any more:
     // this is a different function, and the other one cannot be reached without
     // an outcome that came out of a seal.
-    const model = describeEditSave(refusedWith([ORDINARY]), draftInHand());
+    const model = describeEditSave(refusedWith([ORDINARY]), draftInHand(), MATCH_EDITOR);
     expect(model).toMatchObject({ kind: 'refused', rawSave: null });
   });
 }); // End of the "save the semantic gate refused" suite
@@ -333,6 +342,29 @@ describe('a conflict, which is terminal and honest', () => {
     expect(model.draft.value).toBe('matches:\n  - trigger: x\n');
     expect(copyOfDraft(model)).toBe(draft.value);
   }); // End of the "states that nothing was written" case
+
+  it('warns about the reload the calling surface actually performs', () => {
+    // **The 2c-4a-3a review's finding 2.** *Loading the version on disk replaces
+    // your text with it* is what the raw editor does; a match surface installs the
+    // disk projection and **closes**, loading nothing in the draft's place — so the
+    // shared sentence was a false statement on five of the six panels, and it
+    // contradicted the confirmation sentence beside it. The surface's own
+    // `reloadOutcome` decides, in this module, and not in six markup files.
+    expect(conflictModel(AFTER, draftInHand(), RAW_EDITOR).messages).toContainEqual({
+      kind: 'reloadDiscardsDraft'
+    });
+    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+      const messages = describeEditSave(conflictWith(), draftInHand(), surface).messages;
+      expect(messages).toContainEqual({ kind: 'reloadClosesSurface' });
+      expect(messages).not.toContainEqual({ kind: 'reloadDiscardsDraft' });
+    } // End of the loop over the five match surfaces
+    // And the six declarations are what that rests on: one surface reseeds, five
+    // close, and a surface cannot omit the field.
+    expect(RAW_EDITOR.reloadOutcome).toBe('reseedsDraft');
+    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+      expect(surface.reloadOutcome).toBe('closesSurface');
+    } // End of the loop over the five match declarations
+  }); // End of the "surface-aware reload warning" case
 
   it('carries no choices of its own, so there is one authority and not two', () => {
     // **The consult's Q9 item 1, as the assertion that would have caught it.**
@@ -431,7 +463,13 @@ describe('the one authority that decides what a conflict offers', () => {
    * @returns The capabilities.
    */
   function capabilities(over: Partial<ConflictCapabilities> = {}): ConflictCapabilities {
-    return { draftKind: 'authoredText', offersCopyDraft: true, offersReload: true, ...over };
+    return {
+      draftKind: 'authoredText',
+      reloadOutcome: 'reseedsDraft',
+      offersCopyDraft: true,
+      offersReload: true,
+      ...over
+    };
   } // End of function capabilities()
 
   it('always offers the non-destructive way out, first', () => {
@@ -461,6 +499,27 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(first).not.toContain('confirmReload');
     expect(second).not.toContain('reloadDiskVersion');
   }); // End of the "ordering and the two steps" case
+
+  it('names no reload label once a spend has been refused, and keeps the other two', () => {
+    // **The 2c-4a-3a review's finding 3.** Every reason
+    // `BrowserState.adoptDiskVersion` refuses for is a reason asking again cannot
+    // change — the confirmation is spent, the conflict is one this window never
+    // produced, the projection has been replaced — so leaving *Confirm reload* on
+    // screen offered a control whose only possible answer was another silent
+    // refusal. The non-destructive way out and the copy stay; the surface says why
+    // the third has gone.
+    expect(conflictChoicesFor(capabilities(), 'unavailable')).toEqual([
+      'keepEditing',
+      'copyDraft'
+    ]);
+    expect(
+      conflictChoicesFor(capabilities({ offersCopyDraft: false }), 'unavailable')
+    ).toEqual(['keepEditing']);
+    // And a surface that offers no reload at all is unchanged by the step.
+    expect(conflictChoicesFor(capabilities({ offersReload: false }), 'unavailable')).toEqual(
+      conflictChoicesFor(capabilities({ offersReload: false }), 'idle')
+    );
+  }); // End of the "refused spend offers no reload" case
 
   it('refuses a copy of a draft a clipboard cannot preserve, whatever the caller says', () => {
     // **The consult's Q4 rule, enforced against the value rather than trusted of
@@ -512,27 +571,94 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(DUPLICATOR.draftKind).toBe('operationChoice');
   }); // End of the "six declarations" case
 
-  it('draws only *Keep editing* for the five surfaces whose panels do not act yet', () => {
+  it('draws all three on the authored-text surfaces and one on the other three', () => {
     // **What this establishes, and what it cannot.** It reads six capability
-    // objects and this module's one mapping, so it can say that the five match
-    // surfaces currently *offer* nothing but `keepEditing` and that the raw editor
-    // offers all three. It **cannot** say that a component acts on what it is
-    // offered: no component is imported, mounted or invoked here, and the
-    // 2c-4a-2 review was right that once 2c-4a-3 edits these expectations the case
-    // stops relating to any `conflictAction` arm at all. The wiring evidence is
-    // each surface's own model suite driving `reloadTheDiskVersion`, and — from
-    // 2c-4a-3 — each component's mounted suite pressing the control.
-    expect(conflictChoicesFor(RAW_EDITOR, 'idle')).toEqual([
-      'keepEditing',
-      'copyDraft',
-      'reloadDiskVersion'
-    ]);
-    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+    // objects and this module's one mapping, so it can say what each surface
+    // currently *offers*. It **cannot** say that a component acts on what it is
+    // offered: no component is imported, mounted or invoked here. The wiring
+    // evidence is each surface's own model suite driving `reloadTheDiskVersion`
+    // and each component's mounted suite pressing the control.
+    //
+    // 2c-4a-3a flipped both booleans on the two authored-text match surfaces, so
+    // the three surfaces whose draft a clipboard can preserve now offer the same
+    // three choices. The mover, the deleter and the duplicator wait for 2c-4a-3b's
+    // panels — and their copy stays refused for ever, because the Q4 rule is about
+    // what their draft *is*.
+    for (const surface of [RAW_EDITOR, MATCH_EDITOR, CREATOR]) {
+      expect(conflictChoicesFor(surface, 'idle')).toEqual([
+        'keepEditing',
+        'copyDraft',
+        'reloadDiskVersion'
+      ]);
+      expect(conflictChoicesFor(surface, 'confirming')).toEqual([
+        'keepEditing',
+        'copyDraft',
+        'confirmReload'
+      ]);
+    } // End of the loop over the three authored-text surfaces
+    for (const surface of [MOVER, DELETER, DUPLICATOR]) {
       expect(conflictChoicesFor(surface, 'idle')).toEqual(['keepEditing']);
       expect(conflictChoicesFor(surface, 'confirming')).toEqual(['keepEditing']);
-    } // End of the loop over the five match surfaces
-  }); // End of the "only keep editing is drawn" case
+    } // End of the loop over the three operation-choice surfaces
+  }); // End of the "what each surface draws" case
 }); // End of the "one authority" suite
+
+describe('the labelled reference copy', () => {
+  /** Wording a case can read back, so the format is what is under test. */
+  const WORDING = {
+    heading: '<heading>',
+    label: (name: string): string => `<${name}>`,
+    status: (status: DraftFieldStatus): string => `<${status}>`
+  };
+
+  /** A draft holding one field of every status, with awkward text in it. */
+  const FIELDS: readonly RetainedDraftField[] = [
+    { label: 'trigger', text: ':a', status: 'unchanged' },
+    { label: 'replace', text: 'one\r\ntwo  ', status: 'setting' },
+    { label: 'label', text: 'Signature', status: 'removing' }
+  ];
+
+  it('puts the heading first and one block per field, in the order it was given', () => {
+    expect(referenceCopyOf(FIELDS, WORDING)).toBe(
+      '<heading>\n\n<trigger> (<unchanged>)\n:a\n\n<replace> (<setting>)\none\r\ntwo  \n\n<label> (<removing>)\nSignature'
+    );
+  }); // End of the "shape of the copy" case
+
+  it('preserves every copied string byte for byte', () => {
+    // **The whole of the honesty claim.** The labels and statuses are prose around
+    // the values and nothing touches the values: a carriage return, a trailing run
+    // of spaces and an empty field all survive. What a `<textarea>` carrier would
+    // do to that carriage return is why `src/lib/components/clipboard.ts` refuses
+    // the selection route for a text holding one.
+    const copied = referenceCopyOf(FIELDS, WORDING);
+    for (const field of FIELDS) {
+      expect(copied).toContain(field.text);
+    } // End of the loop over the three fields
+    expect(referenceCopyOf([{ label: 'label', text: '', status: 'unchanged' }], WORDING)).toBe(
+      '<heading>\n\n<label> (<unchanged>)\n'
+    );
+  }); // End of the "byte for byte" case
+
+  it('is the heading alone for a draft with no fields', () => {
+    expect(referenceCopyOf([], WORDING)).toBe('<heading>');
+  });
+
+  it('gives every field status a phrase in both languages, and never YAML for one', () => {
+    for (const status of ['unchanged', 'setting', 'removing'] as const) {
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][draftFieldStatusKey(status)].length).toBeGreaterThan(0);
+      } // End of the loop over the two locales
+    } // End of the loop over the three statuses
+    // The copy says what it is, in both languages, and neither sentence is "keep
+    // my draft" — the phrase reserved for 2c-4b.
+    for (const locale of LOCALES) {
+      const heading = DICTIONARIES[locale]['browser.saveOutcome.copyHeading'].toLowerCase();
+      expect(heading).toContain('yaml');
+      expect(heading).not.toContain('keep my draft');
+      expect(heading).not.toContain('mantener mi borrador');
+    } // End of the loop over the two locales
+  }); // End of the "status sentences" case
+}); // End of the "reference copy" suite
 
 describe('the authorized disk adoption', () => {
   it('carries the projection, the revision and the text of one conflict', () => {
@@ -558,7 +684,7 @@ describe('a committed save whose invalidation failed', () => {
   it('is still a committed save, with the failure as an extra line', () => {
     // `PROGRESS.md` D2: a committed write is never afterwards reported as an
     // error. The bytes are on disk; what failed is this window's own forgetting.
-    const model = describeWholeDocumentSave(savedWith(), draftInHand());
+    const model = describeWholeDocumentSave(savedWith(), draftInHand(), RAW_EDITOR);
     expect(model).toMatchObject({ kind: 'saved', committed: true });
     expect(invalidationFailureMessage({ kind: 'failed', failure: { kind: 'unexpected' } })).toEqual({
       kind: 'windowOutOfStep'
@@ -581,6 +707,7 @@ describe('the sentences behind the model', () => {
     { kind: 'changedElsewhere' },
     { kind: 'draftKeptInMemory' },
     { kind: 'reloadDiscardsDraft' },
+    { kind: 'reloadClosesSurface' },
     { kind: 'changedAgainSinceRefusal' },
     { kind: 'windowOutOfStep' }
   ];

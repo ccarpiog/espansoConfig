@@ -47,6 +47,7 @@ import {
 } from './invalidation';
 import { startDraft, textDraftRules } from './draft';
 import { confirmReloadDiskVersion, describeEditSave } from './saveOutcome';
+import { CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES } from './matchEditor';
 import type { ConflictModel } from './saveOutcome';
 import {
   createBrowserState,
@@ -5449,7 +5450,11 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     }
     const model = describeEditSave(
       answer.value,
-      startDraft('rev-a', 'matches: []\n', textDraftRules)
+      startDraft('rev-a', 'matches: []\n', textDraftRules),
+      // Any surface's declaration would do here: this case is about the adoption
+      // door, and the capabilities only decide which reload sentence the model
+      // carries. The match editor's is the one a `save_match` conflict would use.
+      MATCH_EDITOR_CAPABILITIES
     );
     if (model.kind !== 'conflict') {
       throw new Error('this case is about a conflict');

@@ -145,6 +145,7 @@ import {
   type DraftValueRules
 } from './draft';
 import {
+  atTheReloadWarning,
   conflictArm,
   consentForRefusal,
   offeredReloadStep,
@@ -154,9 +155,11 @@ import {
   refusedArm,
   sendFailureLines,
   sendFailureOf,
+  reloadWasRefused,
   spendTheConfirmedReload,
   submissionIsStale,
   NOT_RELOADING,
+  RELOAD_REFUSED,
   type AdoptTheDiskVersion,
   type EditorPhase,
   type ReloadStep,
@@ -167,11 +170,15 @@ import type { InvalidationStatus } from './invalidation';
 import type { RawSaveChoice } from './rawSave';
 import {
   conflictChoicesFor,
+  conflictDiskText,
+  copyOfDraft,
   describeEditSave,
   invalidationFailureMessage,
   type ConflictCapabilities,
   type ConflictChoice,
+  type ConflictDiskText,
   type ConflictModel,
+  type RetainedDraftField,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -1176,7 +1183,7 @@ export function applyCreate(
   if (submission === null) {
     return session;
   }
-  const outcome = describeEditSave(result, session.draft);
+  const outcome = describeEditSave(result, session.draft, CONFLICT_CAPABILITIES);
   const failed = invalidationFailureMessage(adoption);
   const extraMessages = failed === null ? [] : [failed];
   if (result.outcome !== 'saved') {
@@ -1333,8 +1340,16 @@ export function reloadTheDiskVersion(
   session: MatchCreationSession,
   adopt: AdoptTheDiskVersion<CreationBuffers>
 ): MatchCreationSession {
-  if (!spendTheConfirmedReload(conflictOf(session), session.reload, adopt)) {
+  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  if (spend === 'notAttempted') {
     return session;
+  }
+  if (spend === 'refused') {
+    // **A terminal step rather than the session unchanged**, which is the
+    // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
+    // no for a reason that asking again cannot change, so the control stops being
+    // offered and the panel says so. *Keep editing* writes NOT_RELOADING back.
+    return { ...session, reload: RELOAD_REFUSED };
   }
   return {
     ...session,
@@ -1357,21 +1372,27 @@ export function reloadTheDiskVersion(
  * YAML — and a confirmed reload that installs the disk projection and **closes**
  * the form, because there is no disk-side `CreationBuffers` to reload.
  *
- * **The reload is built and wired; it is only unoffered.**
+ * **Both booleans were flipped at 2c-4a-3a, over machinery that already existed.**
  * {@link askToReloadDiskVersion}, {@link confirmDiskReload} and
- * {@link reloadTheDiskVersion} are the transition, and `MatchCreator.svelte`'s
- * `conflictAction` calls them. `conflictChoicesFor` names only what these booleans
- * admit, so no control that could reach either arm is drawn. **Phase 2c-4a-3 flips
- * them**: the reload over machinery that already exists, *Copy draft* over a
- * labelled field renderer still to be written.
+ * {@link reloadTheDiskVersion} are the transition — built and wired at 2c-4a-2 and
+ * driven by this module's own suite since then — and `MatchCreator.svelte`'s
+ * `conflictAction` calls them from the two controls `conflictChoicesFor` now names.
+ * The copy is {@link MatchCreationView.retainedDraft} put through `tDraftCopy`: the
+ * two typed strings under their labels, **never YAML**.
+ *
+ * **The destination and the position are not in the copy**, and that is the
+ * consult's Q4 read exactly: `Draft<CreationBuffers>` holds neither, so a copy
+ * that named them would be describing something the retained draft does not
+ * carry. They stay on screen in the form above the panel.
  *
  * **None of these is "keep my draft"** and none may become one: that phrase means
  * *reapply the draft to the newly parsed document*, which is 2c-4b.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
-  offersCopyDraft: false,
-  offersReload: false
+  reloadOutcome: 'closesSurface',
+  offersCopyDraft: true,
+  offersReload: true
 };
 
 /** Everything a screen needs about one form, derived on every read. */
@@ -1421,10 +1442,38 @@ export interface MatchCreationView {
   readonly findingsAreStale: boolean;
   /** The conflict being shown, or `null`. */
   readonly conflict: ConflictModel<CreationBuffers> | null;
+  /**
+   * The draft that conflict retained, labelled, in {@link CREATION_FIELDS} order.
+   *
+   * Empty whenever no conflict is showing. The panel draws this **and** the *Copy
+   * draft* control builds its text from the same list, so what a person is told
+   * they copied is what the panel showed them. Both entries are `setting`,
+   * because a create writes both keys and there is no key here to leave alone or
+   * to take out.
+   */
+  readonly retainedDraft: readonly RetainedDraftField[];
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
   /** Whether the warning is showing and the destructive choice is one click away. */
   readonly awaitingReloadConfirmation: boolean;
+  /**
+   * Whether a confirmed reload was spent and the window refused it.
+   *
+   * **The disclosure the panel owes for a control that has just gone.** The
+   * reload is not offered again once a spend has been refused — asking again
+   * could only be refused again — and a control that vanishes with nothing said
+   * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
+   * and nothing was discarded; *Keep editing* resets the step.
+   */
+  readonly reloadUnavailable: boolean;
+  /**
+   * The disk side of that conflict, or `null` when none is showing.
+   *
+   * A union rather than a string, so *a file of zero characters is a fact about
+   * the file rather than a failure to obtain it* is decided in this directory
+   * once instead of in each renderer’s markup (2c-4a-3a review, finding 5).
+   */
+  readonly diskText: ConflictDiskText | null;
   /**
    * Whether a confirmed reload has ended this session.
    *
@@ -1444,6 +1493,29 @@ export interface MatchCreationView {
   /** The created snippet's identity, or `null`. See the session's own field. */
   readonly created: MatchId | null;
 }
+
+/**
+ * The retained draft of one conflict, labelled, for the panel and for the copy.
+ *
+ * **Both fields, in {@link CREATION_FIELDS} order**, with the exact strings the
+ * boxes held — the consult's Q4 for this surface: *copy the exact `trigger` and
+ * `replace` strings under labels*. The status is `setting` for both because a
+ * create writes both keys, and the labels are the detail pane's own so the panel
+ * names them exactly as the form above it does.
+ *
+ * @param conflict - The conflict holding the retained draft.
+ * @returns One entry per field, in the order the form shows them.
+ */
+function retainedDraftOf(
+  conflict: ConflictModel<CreationBuffers>
+): readonly RetainedDraftField[] {
+  const buffers = copyOfDraft(conflict);
+  return CREATION_FIELDS.map((field) => ({
+    label: field,
+    text: buffers[field],
+    status: 'setting' as const
+  }));
+} // End of function retainedDraftOf()
 
 /**
  * Everything a screen needs about one form.
@@ -1482,11 +1554,14 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
+    retainedDraft: conflict === null ? [] : retainedDraftOf(conflict),
     conflictChoices:
       conflict === null
         ? []
         : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
-    awaitingReloadConfirmation: conflict !== null && session.reload.kind !== 'idle',
+    awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
+    reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    diskText: conflictDiskText(conflict),
     closed: session.closed,
     committed: session.committed,
     created: session.created

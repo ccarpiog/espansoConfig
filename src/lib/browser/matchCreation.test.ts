@@ -657,11 +657,14 @@ describe('what comes back', () => {
     expect(beginCreate(typed)!.submission.acknowledgement).toEqual({ accepted: [] });
   });
 
-  it('offers one way out of a conflict, and it is not called "keep my draft"', () => {
+  it('offers three ways out of a conflict, and none is called "keep my draft"', () => {
+    // **2c-4a-3a offers what 2c-4a-2 built**: the non-destructive way out first,
+    // then the copy that makes the destruction survivable, then the destructive
+    // one — which is `conflictChoicesFor`'s ordering and not this module's.
     const started = beginCreate(ready());
     const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED);
     const view = matchCreationView(conflicted);
-    expect(view.conflictChoices).toEqual(['keepEditing']);
+    expect(view.conflictChoices).toEqual(['keepEditing', 'copyDraft', 'reloadDiskVersion']);
     expect(conflictOf(conflicted)).not.toBeNull();
     for (const locale of LOCALES) {
       const label = DICTIONARIES[locale]['browser.rawSave.choice.keepEditing'].toLowerCase();
@@ -672,6 +675,22 @@ describe('what comes back', () => {
     expect(conflictOf(kept)).toBeNull();
     expect(isEditable(kept)).toBe(true);
   });
+
+  it('labels the retained draft, exactly as the boxes held it', () => {
+    // **The list the panel draws and the copy is built from, and it is one list.**
+    // Both fields, in `CREATION_FIELDS` order, under the detail pane's own labels,
+    // and both `setting`: a create writes both keys, and there is no key here to
+    // leave alone or to take out. The destination and the position are absent on
+    // purpose — `Draft<CreationBuffers>` does not carry them (consult Q4).
+    const started = beginCreate(ready());
+    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED);
+    expect(matchCreationView(conflicted).retainedDraft).toEqual([
+      { label: 'trigger', text: ':new', status: 'setting' },
+      { label: 'replace', text: 'a body', status: 'setting' }
+    ]);
+    // And nothing is retained when there is no conflict to retain it.
+    expect(matchCreationView(started!.session).retainedDraft).toEqual([]);
+  }); // End of the "retained draft" case
 
   it('records a send that produced no outcome, in its two arms', () => {
     const started = beginCreate(ready());
@@ -841,15 +860,15 @@ describe('the base revision a screen sends', () => {
   });
 }); // End of the "base revision" suite
 
-describe('the confirmed reload, which is built but not offered yet', () => {
-  // **2c-4a-2's High finding.** The consult's Q3 gives every one of the six
-  // surfaces a confirmed reload; withholding the *offering* until 2c-4a-3 draws
-  // this surface's control is right, and withholding the **transition** was not —
-  // an unoffered transition can be built and driven without drawing anything, and
+describe('the confirmed reload', () => {
+  // **2c-4a-2 built this and 2c-4a-3a offers it.** The consult's Q3 gives every
+  // one of the six surfaces a confirmed reload; withholding the *offering* until
+  // the panel existed was right, and withholding the **transition** was not — an
+  // unoffered transition can be built and driven without drawing anything, and
   // leaving it out would have made step 3 invent five model machines on top of
-  // five panels. So the transition below is built **and** wired: this surface's
-  // `conflictAction` calls it, and `offersReload` stays `false` so nothing on
-  // screen reaches it. Every case here calls it directly, as that arm does.
+  // five panels. `offersReload` is now `true` for this surface and
+  // `MatchCreator.svelte` draws the two controls; every case here calls the
+  // transitions directly, as that component's arms do.
 
   /**
    * A conflicted create of a ready form.
@@ -933,20 +952,35 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     const refusing = adopting('refused');
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
     const after = reloadTheDiskVersion(confirmed, refusing.adopt);
-    expect(after).toBe(confirmed);
     expect(after.closed).toBe(false);
+    // **And the reload stops being offered rather than staying pressable.** The
+    // confirmation is spent and the window said no for a reason asking again
+    // cannot change, so the step is terminal, the panel discloses it, and only
+    // *Keep editing* and the copy remain (2c-4a-3a review, finding 3).
+    expect(after.reload.kind).toBe('refused');
+    expect(matchCreationView(after).reloadUnavailable).toBe(true);
+    expect(matchCreationView(after).awaitingReloadConfirmation).toBe(false);
+    expect(matchCreationView(after).conflictChoices).not.toContain('confirmReload');
+    expect(matchCreationView(after).conflictChoices).not.toContain('reloadDiskVersion');
+    expect(matchCreationView(after).conflictChoices).toContain('keepEditing');
+    // Asking again cannot spend anything a second time.
+    expect(reloadTheDiskVersion(after, refusing.adopt)).toBe(after);
+    expect(refusing.adoptions).toHaveLength(1);
     expect(conflictOf(after)).not.toBeNull();
   }); // End of the "window refused" case
 
-  it('does not offer the reload, so no control is drawn for it', () => {
-    // The half of the review's judgement that stands: the transition exists, is
-    // driven here and is called by this surface's `conflictAction`; `offersReload`
-    // stays `false`, so nothing on screen can reach it and 2c-4a-3 has only the
-    // boolean to flip.
+  it('offers the confirmation label once the warning has been asked for', () => {
+    // **What 2c-4a-3a changed here, and it is one boolean.** The transition was
+    // built and driven by this suite from 2c-4a-2; `offersReload` was `false`, so
+    // the list said `['keepEditing']` at both steps. Now the second step names
+    // `confirmReload` and never `reloadDiskVersion` beside it.
     const asked = askToReloadDiskVersion(conflicted());
     expect(matchCreationView(asked).conflictChoices).toEqual<readonly ConflictChoice[]>([
-      'keepEditing'
+      'keepEditing',
+      'copyDraft',
+      'confirmReload'
     ]);
+    expect(matchCreationView(asked).awaitingReloadConfirmation).toBe(true);
   });
 
   it('forgets a confirmation when the panel is dismissed or a new answer arrives', () => {

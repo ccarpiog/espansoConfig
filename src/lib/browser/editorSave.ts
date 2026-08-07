@@ -254,6 +254,22 @@ export type ReloadStep =
       readonly kind: 'confirmed';
       /** What `confirmReloadDiskVersion` issued. */
       readonly confirmation: ReloadConfirmation;
+    }
+  | {
+      /**
+       * The confirmation was spent and the window refused to move.
+       *
+       * **A terminal step, and 2c-4a-3a's review finding 3 is why it exists.**
+       * `BrowserState.adoptDiskVersion` refuses for reasons that do not go away by
+       * asking again — the confirmation is already spent, the conflict is one this
+       * window never produced, the projection has been replaced since it arrived —
+       * so leaving *Confirm reload* on screen offered a control whose only possible
+       * answer was another silent refusal. From here `conflictChoicesFor` names no
+       * reload label at all, the surface says so, and *Keep editing* is the way
+       * out: every dismissal writes {@link NOT_RELOADING} back, so a fresh attempt
+       * starts from `idle`.
+       */
+      readonly kind: 'refused';
     };
 
 /**
@@ -263,6 +279,14 @@ export type ReloadStep =
  * resets the reload" is one object in one place.
  */
 export const NOT_RELOADING: ReloadStep = Object.freeze({ kind: 'idle' as const });
+
+/**
+ * The step a spent confirmation the window refused leaves behind.
+ *
+ * Shared and frozen for {@link NOT_RELOADING}'s reason: the six surfaces write it
+ * from the same constant rather than each building a literal.
+ */
+export const RELOAD_REFUSED: ReloadStep = Object.freeze({ kind: 'refused' as const });
 
 /**
  * What installs the disk observation a conflict carried, as a surface sees it.
@@ -320,34 +344,57 @@ export function reloadConfirmed<T>(
 } // End of function reloadConfirmed()
 
 /**
- * Spends a confirmed reload against the window, and says whether it happened.
+ * What became of one attempt to spend a confirmed reload.
+ *
+ * **Three values rather than a boolean, and the middle one is the 2c-4a-3a
+ * review's finding 3.** A surface has to tell *nothing happened because there was
+ * nothing to spend* from *the window was asked and said no*: the first leaves the
+ * panel exactly where it was, and the second is a terminal state that has to be
+ * disclosed and has to stop offering the control.
+ */
+export type ReloadSpend =
+  /** The window holds the disk observation, by installing it or by already having it. */
+  | 'satisfied'
+  /** The window was asked and refused. Nothing moved, and asking again cannot help. */
+  | 'refused'
+  /** There was no conflict or no confirmation, so the window was never asked. */
+  | 'notAttempted';
+
+/**
+ * Spends a confirmed reload against the window, and says what became of it.
  *
  * **The one place a surface asks the window to cross to the disk side.** It
- * refuses without a conflict and without a confirmation, and otherwise hands the
- * decision to the window, which refuses a spent confirmation, a conflict it never
- * produced, and a projection replaced since that conflict arrived.
+ * answers `notAttempted` without a conflict and without a confirmation — the
+ * window is not asked at all — and otherwise hands the decision to the window,
+ * which refuses a spent confirmation, a conflict it never produced, and a
+ * projection replaced since that conflict arrived.
  *
- * **`alreadyThere` counts as done**, and the confirmation pass is why: a window
- * that has already reached the requested disk projection has satisfied the
- * request, and reporting that as a failure left a surface stuck on a confirm
- * control that could never succeed. What a surface must not do is act on
- * `refused`, which is the only value that means the window did not move.
+ * **`alreadyThere` counts as `satisfied`**, and the 2c-4a-2 confirmation pass is
+ * why: a window that has already reached the requested disk projection has
+ * satisfied the request, and reporting that as a failure left a surface stuck on a
+ * confirm control that could never succeed.
+ *
+ * **What this forces and what it does not**: it forces that the window is asked at
+ * most once per call and only from the `confirmed` step, and that the three
+ * answers are distinguishable. It cannot force that a surface writes
+ * {@link RELOAD_REFUSED} back on `refused` — that is each surface's own transition,
+ * and each is driven by its own suite.
  *
  * @typeParam T - The drafted value.
  * @param conflict - The conflict the session is showing, or `null`.
  * @param step - Where the reload has got to.
  * @param adopt - `BrowserState.adoptDiskVersion`.
- * @returns Whether the window now holds the disk observation, by either route.
+ * @returns What became of the request.
  */
 export function spendTheConfirmedReload<T>(
   conflict: ConflictModel<T> | null,
   step: ReloadStep,
   adopt: AdoptTheDiskVersion<T>
-): boolean {
+): ReloadSpend {
   if (conflict === null || step.kind !== 'confirmed') {
-    return false;
+    return 'notAttempted';
   }
-  return adopt(conflict, step.confirmation) !== 'refused';
+  return adopt(conflict, step.confirmation) === 'refused' ? 'refused' : 'satisfied';
 } // End of function spendTheConfirmedReload()
 
 /**
@@ -355,14 +402,52 @@ export function spendTheConfirmedReload<T>(
  *
  * `confirmed` is spent in the same handler that reaches it, so it never draws a
  * list of its own; it collapses to `confirming`, which is what the panel showed
- * when the click happened.
+ * when the click happened. `refused` is the terminal step of a spend the window
+ * declined, and it collapses to `unavailable`, which names **no** reload label —
+ * so the control that could only be refused again is not drawn, while *Keep
+ * editing* and the copy stay.
  *
  * @param step - Where the reload has got to.
  * @returns The step the choices are chosen for.
  */
 export function offeredReloadStep(step: ReloadStep): ConflictReloadStep {
-  return step.kind === 'idle' ? 'idle' : 'confirming';
+  switch (step.kind) {
+    case 'idle':
+      return 'idle';
+    case 'refused':
+      return 'unavailable';
+    default:
+      return 'confirming';
+  }
 } // End of function offeredReloadStep()
+
+/**
+ * Whether the warning is showing and the destructive choice is one click away.
+ *
+ * A named rule rather than `step.kind !== 'idle'` written into six views, which is
+ * what they said until the `refused` step existed — and which would have called a
+ * refused reload "awaiting confirmation" in all six.
+ *
+ * @param step - Where the reload has got to.
+ * @returns `true` at the warning and at the confirmation that follows it.
+ */
+export function atTheReloadWarning(step: ReloadStep): boolean {
+  return offeredReloadStep(step) === 'confirming';
+} // End of function atTheReloadWarning()
+
+/**
+ * Whether the window was asked to adopt the disk version and refused.
+ *
+ * The disclosure a surface owes for {@link RELOAD_REFUSED}: the control is gone
+ * from the choice list, and a control that vanishes with nothing said in its place
+ * reads as a bug.
+ *
+ * @param step - Where the reload has got to.
+ * @returns `true` only at the terminal refused step.
+ */
+export function reloadWasRefused(step: ReloadStep): boolean {
+  return step.kind === 'refused';
+} // End of function reloadWasRefused()
 
 /**
  * Records that the person accepted the findings of the refusal on screen.

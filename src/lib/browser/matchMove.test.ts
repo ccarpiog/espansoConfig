@@ -1257,8 +1257,20 @@ describe('the confirmed reload, which is built but not offered yet', () => {
     const refusing = adopting('refused');
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
     const after = reloadTheDiskVersion(confirmed, refusing.adopt);
-    expect(after).toBe(confirmed);
     expect(after.closed).toBe(false);
+    // **And the reload stops being offered rather than staying pressable.** The
+    // confirmation is spent and the window said no for a reason asking again
+    // cannot change, so the step is terminal, the panel discloses it, and only
+    // *Keep editing* and the copy remain (2c-4a-3a review, finding 3).
+    expect(after.reload.kind).toBe('refused');
+    expect(matchMoveView(after, HELD).reloadUnavailable).toBe(true);
+    expect(matchMoveView(after, HELD).awaitingReloadConfirmation).toBe(false);
+    expect(matchMoveView(after, HELD).conflictChoices).not.toContain('confirmReload');
+    expect(matchMoveView(after, HELD).conflictChoices).not.toContain('reloadDiskVersion');
+    expect(matchMoveView(after, HELD).conflictChoices).toContain('keepEditing');
+    // Asking again cannot spend anything a second time.
+    expect(reloadTheDiskVersion(after, refusing.adopt)).toBe(after);
+    expect(refusing.adoptions).toHaveLength(1);
     expect(conflictOf(after)).not.toBeNull();
   }); // End of the "window refused" case
 

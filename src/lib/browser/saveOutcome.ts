@@ -67,6 +67,7 @@
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
+import type { DetailFieldName } from './detail';
 import type {
   Acknowledgement,
   ConflictResult,
@@ -122,8 +123,28 @@ export type SaveOutcomeMessage =
       readonly kind: 'draftKeptInMemory';
     }
   | {
-      /** Loading the version on disk discards the draft, and cannot be undone. */
+      /**
+       * Loading the version on disk **replaces the draft with it**, irreversibly.
+       *
+       * True of the raw editor and of nothing else, which is the 2c-4a-3a review's
+       * finding 2: a match surface's reload installs the disk projection and
+       * closes the panel, loading nothing in the draft's place, so this sentence
+       * described an action those five surfaces do not perform.
+       * {@link ConflictCapabilities.reloadOutcome} is what chooses between this and
+       * {@link SaveOutcomeMessage} `reloadClosesSurface`.
+       */
       readonly kind: 'reloadDiscardsDraft';
+    }
+  | {
+      /**
+       * Loading the version on disk discards the draft and **closes the panel**.
+       *
+       * The five match surfaces' half of the same fact: there is no truthful
+       * disk-side `MatchBuffers`, `CreationBuffers`, `MovePlacement` or `MatchId`
+       * to seed, and manufacturing one would be the cross-revision identification
+       * 2c-4b owns.
+       */
+      readonly kind: 'reloadClosesSurface';
     }
   | {
       /** The file changed *again* between the refusal and the read that followed it. */
@@ -171,13 +192,37 @@ export type ConflictChoice = 'keepEditing' | 'copyDraft' | 'reloadDiskVersion' |
 export type ConflictDraftKind = 'authoredText' | 'operationChoice';
 
 /**
+ * What a confirmed reload **does** on one surface.
+ *
+ * A permanent fact about the surface, exactly as {@link ConflictDraftKind} is, and
+ * the 2c-4a-3a review's finding 2 is why it is a declaration rather than a
+ * sentence: the shared conflict panel told every surface that loading the disk
+ * version *replaces your text with it*, which is what the raw editor does and is
+ * false of the five match surfaces, whose reload installs the disk projection and
+ * closes the panel with nothing in the draft's place.
+ *
+ * **Required on {@link ConflictCapabilities}**, so a surface cannot omit it and
+ * inherit somebody else's sentence; what no type can force is that the transition
+ * really does what the surface declares, and each surface's own suite is what
+ * drives that.
+ */
+export type ConflictReloadOutcome =
+  /** The draft is replaced by the disk version. The raw editor, and only it. */
+  | 'reseedsDraft'
+  /** The disk projection is installed and the panel closes. The five match surfaces. */
+  | 'closesSurface';
+
+/**
  * How far one surface's reload has got, as far as the labels are concerned.
  *
- * Two values rather than the three of a surface's own reload state: a
- * confirmation that has already been **spent** leaves the conflict behind it, so
- * there is nothing left to offer choices about.
+ * Three values rather than the four of a surface's own reload state: a
+ * confirmation that was spent **and satisfied** leaves the conflict behind it, so
+ * there is nothing left to offer choices about. A spend the window **refused** is
+ * not behind it at all — the panel is still there and the draft is still there —
+ * and `unavailable` is what stops the confirm control being offered again when
+ * asking again could only be refused again (2c-4a-3a review, finding 3).
  */
-export type ConflictReloadStep = 'idle' | 'confirming';
+export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
 
 /**
  * What one surface may offer about a conflict, declared once by that surface.
@@ -197,18 +242,27 @@ export type ConflictReloadStep = 'idle' | 'confirming';
  * **Offered is not the same as implemented, and since the 2c-4a-2 confirmation
  * pass this distinction is the whole point.** Every surface's reload transition
  * exists and every component's `conflictAction` calls it; what `offersReload: false`
- * withholds is the *control*. Phase 2c-4a-3 flips these booleans over machinery
- * that is already there and already tested.
+ * withholds is the *control*. Phase 2c-4a-3a flipped the two booleans on the two
+ * authored-text match surfaces over machinery that was already there and already
+ * tested, and 2c-4a-3b does the same for the reload on the other three.
  */
 export interface ConflictCapabilities {
   /** What the retained draft is, which decides whether a copy could ever be honest. */
   readonly draftKind: ConflictDraftKind;
   /**
+   * What a confirmed reload does here, which decides what the panel warns about.
+   *
+   * Permanent, like {@link ConflictCapabilities.draftKind}, and read by
+   * `describeEditSave`/`describeWholeDocumentSave` rather than by a component: the
+   * warning is a claim about behaviour and belongs beside the behaviour.
+   */
+  readonly reloadOutcome: ConflictReloadOutcome;
+  /**
    * Whether this surface offers *Copy draft*.
    *
-   * `false` everywhere today: this is the one arm that is genuinely **not yet
-   * implemented**, because a labelled reference copy needs field labels and those
-   * are i18n keys 2c-4a-3 adds.
+   * `true` on the three surfaces whose draft is authored text — the raw editor,
+   * the match editor and the creator — and `false` on the other three, where it
+   * would be refused anyway.
    *
    * **Honoured only for an `authoredText` draft**, and that is checked in
    * {@link conflictChoicesFor} rather than trusted here: a surface that set this
@@ -221,9 +275,10 @@ export interface ConflictCapabilities {
    *
    * Consult Q3 gives **all six** surfaces a confirmed reload, and **all six have
    * one**: the raw editor reseeds its draft from the disk text, the five match
-   * surfaces adopt the disk projection and close. Only the raw editor *offers* it;
-   * the five wait for 2c-4a-3's confirmation screen and its sentences, which is a
-   * question about what a panel says rather than about what it can do.
+   * surfaces adopt the disk projection and close. Three *offer* it as of 2c-4a-3a
+   * — the raw editor, the match editor and the creator — and the mover, the
+   * deleter and the duplicator wait for 2c-4a-3b's panels and sentences, which is
+   * a question about what a panel says rather than about what it can do.
    */
   readonly offersReload: boolean;
 }
@@ -239,10 +294,13 @@ export interface ConflictCapabilities {
  * makes the destruction survivable.
  *
  * **What this forces and what it does not, in the same sentence.** It forces that
- * a copy control cannot be offered for a draft that is not authored text, and that
- * `reloadDiskVersion` and `confirmReload` are never offered together. It cannot
- * force that the component drawing the list acts on what it names — nothing in
- * TypeScript can — which is what {@link ConflictCapabilities.offersReload} and
+ * a copy control cannot be offered for a draft that is not authored text, that
+ * `reloadDiskVersion` and `confirmReload` are never offered together, and that
+ * **neither is offered once a spend has been refused** — the `unavailable` step,
+ * which is what keeps a control that could only be refused again off the screen.
+ * It cannot force that the component drawing the list acts on what it names —
+ * nothing in TypeScript can — which is what
+ * {@link ConflictCapabilities.offersReload} and
  * {@link ConflictCapabilities.offersCopyDraft} are for, and they are hand-set.
  *
  * @param capabilities - What the surface declares about itself.
@@ -257,7 +315,7 @@ export function conflictChoicesFor(
   if (capabilities.offersCopyDraft && capabilities.draftKind === 'authoredText') {
     choices.push('copyDraft');
   }
-  if (capabilities.offersReload) {
+  if (capabilities.offersReload && step !== 'unavailable') {
     choices.push(step === 'idle' ? 'reloadDiskVersion' : 'confirmReload');
   }
   return choices;
@@ -511,13 +569,23 @@ function describeRefused(result: RefusedResult, wholeDocument: boolean): Refused
  * @param draft - The draft the save was made from, retained untouched.
  * @returns The model.
  */
-function describeConflict<T>(result: ConflictResult, draft: Draft<T>): ConflictModel<T> {
+function describeConflict<T>(
+  result: ConflictResult,
+  draft: Draft<T>,
+  capabilities: ConflictCapabilities
+): ConflictModel<T> {
   const changedAgain = result.found !== result.disk_revision;
   const messages: SaveOutcomeMessage[] = [
     { kind: 'nothingWasWritten' },
     { kind: 'changedElsewhere' },
     { kind: 'draftKeptInMemory' },
-    { kind: 'reloadDiscardsDraft' }
+    // **The surface's own declaration, not a shared guess.** The raw editor loads
+    // the disk text into its box; every match surface closes instead, and telling
+    // a person their text is about to be replaced by it would describe an action
+    // that surface does not perform (2c-4a-3a review, finding 2).
+    capabilities.reloadOutcome === 'reseedsDraft'
+      ? { kind: 'reloadDiscardsDraft' }
+      : { kind: 'reloadClosesSurface' }
   ];
   if (changedAgain) {
     messages.push({ kind: 'changedAgainSinceRefusal' });
@@ -548,18 +616,21 @@ function describeConflict<T>(result: ConflictResult, draft: Draft<T>): ConflictM
  * @typeParam T - The drafted value.
  * @param outcome - How the save ended, from an opened seal.
  * @param draft - The draft it was made from, retained for the conflict arm.
+ * @param capabilities - The calling surface's own declaration, which decides what
+ *   the conflict arm warns a reload would do.
  * @returns The model for that arm.
  */
 export function describeWholeDocumentSave<T>(
   outcome: WholeDocumentOutcome,
-  draft: Draft<T>
+  draft: Draft<T>,
+  capabilities: ConflictCapabilities
 ): SaveOutcomeModel<T> {
   if (outcome.outcome === 'saved') {
     return describeSaved(outcome);
   }
   return outcome.outcome === 'refused'
     ? describeRefused(outcome, true)
-    : describeConflict(outcome, draft);
+    : describeConflict(outcome, draft, capabilities);
 } // End of function describeWholeDocumentSave()
 
 /**
@@ -573,16 +644,64 @@ export function describeWholeDocumentSave<T>(
  * @typeParam T - The drafted value.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param draft - The draft it was made from, retained for the conflict arm.
+ * @param capabilities - The calling surface's own declaration, which decides what
+ *   the conflict arm warns a reload would do.
  * @returns The model for that arm.
  */
-export function describeEditSave<T>(result: SaveResult, draft: Draft<T>): SaveOutcomeModel<T> {
+export function describeEditSave<T>(
+  result: SaveResult,
+  draft: Draft<T>,
+  capabilities: ConflictCapabilities
+): SaveOutcomeModel<T> {
   if (result.outcome === 'saved') {
     return describeSaved(result);
   }
   return result.outcome === 'refused'
     ? describeRefused(result, false)
-    : describeConflict(result, draft);
+    : describeConflict(result, draft, capabilities);
 } // End of function describeEditSave()
+
+/**
+ * The disk side of a conflict, as the thing a panel draws.
+ *
+ * **A union rather than a `string` the renderer inspects**, which is the 2c-4a-3a
+ * review's finding 5: three components each wrote `diskText === ''` in their own
+ * markup, so *a file of zero characters is a fact about the file rather than a
+ * failure to obtain it* was a semantic decision carried by no suite at all. It is
+ * decided once, here.
+ *
+ * **There is no unavailable arm**, and that is 2c-4a-1's D1 rather than an
+ * omission: a `SaveResult::Conflict` cannot exist without the read that produced
+ * its text having succeeded.
+ */
+export type ConflictDiskText =
+  | {
+      /** The file holds characters, and these are them, exactly. */
+      readonly kind: 'text';
+      /** What to hand `SourceText`, byte for byte. */
+      readonly text: string;
+    }
+  | {
+      /** The file holds no characters at all. A fact about the file. */
+      readonly kind: 'empty';
+    };
+
+/** The one empty verdict, shared rather than rebuilt per read. */
+const NO_CHARACTERS: ConflictDiskText = Object.freeze({ kind: 'empty' as const });
+
+/**
+ * What the disk side of one conflict shows.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict carrying the text, or `null` when none is showing.
+ * @returns The arm to draw, or `null` when there is no conflict.
+ */
+export function conflictDiskText<T>(conflict: ConflictModel<T> | null): ConflictDiskText | null {
+  if (conflict === null) {
+    return null;
+  }
+  return conflict.diskText === '' ? NO_CHARACTERS : { kind: 'text', text: conflict.diskText };
+} // End of function conflictDiskText()
 
 /**
  * The draft's value, for the *Copy draft* affordance.
@@ -597,6 +716,118 @@ export function describeEditSave<T>(result: SaveResult, draft: Draft<T>): SaveOu
 export function copyOfDraft<T>(conflict: ConflictModel<T>): T {
   return conflict.draft.value;
 } // End of function copyOfDraft()
+
+/**
+ * What a save would do with one field of a retained draft.
+ *
+ * **Three arms, because those are the three things a draft says about a key**, and
+ * they are exactly the arms of the wire's own `DraftField<T>`: leave it alone,
+ * write this text, take the key out. A two-valued *present / marked for removal*
+ * status would have had to call an absent field left blank "present", which is a
+ * claim about what a save writes and is the opposite of what it writes — the one
+ * rule the whole draft-versus-projection arrangement exists for
+ * (`matchEditor.ts`'s `fieldIntent`).
+ */
+export type DraftFieldStatus =
+  /** The file keeps whatever it has here; this save says nothing about it. */
+  | 'unchanged'
+  /** This text is what the save would write. */
+  | 'setting'
+  /** The key would be taken out of the file. */
+  | 'removing';
+
+/**
+ * One labelled piece of a draft a conflict retained.
+ *
+ * **The panel draws this list and the clipboard copy is built from the same
+ * list**, so what a person is told they copied is what they were shown. It is a
+ * *reference*: labels, exact text and an explicit status, in the surface's own
+ * stable field order — never YAML, which would drop comments, key order and
+ * scalar spelling while looking like something that could be pasted back
+ * (consult Q4, and `CLAUDE.md` section 6 on projection-based emission).
+ */
+export interface RetainedDraftField {
+  /** The label, as the detail pane's own code, rendered through `tDetailField`. */
+  readonly label: DetailFieldName;
+  /**
+   * What the control holds, exactly.
+   *
+   * Copied through unchanged, including a carriage return a projected value may
+   * carry: this is the drafted value and not a rendering of it.
+   */
+  readonly text: string;
+  /** What a save would do with this key. */
+  readonly status: DraftFieldStatus;
+}
+
+/**
+ * The wording {@link referenceCopyOf} needs, supplied by the i18n layer.
+ *
+ * **The format is here and the sentences are not**, which is the split every
+ * model in this directory makes: the order of the blocks, the fact that the
+ * heading comes first and the fact that each field's text is inserted byte for
+ * byte are rules a test can fail on, and the strings they are assembled from
+ * come from `src/lib/i18n`. `tDraftCopy` there is the only caller.
+ */
+export interface DraftCopyWording {
+  /** The first line, which says the copy is a reference and not YAML. */
+  readonly heading: string;
+  /** Names one field. `tDetailField`. */
+  readonly label: (name: DetailFieldName) => string;
+  /** Says what a save would do with it. `tDraftFieldStatus`. */
+  readonly status: (status: DraftFieldStatus) => string;
+}
+
+/**
+ * The labelled reference copy of a retained draft, as plain text.
+ *
+ * **Every copied string survives byte for byte**, which is the whole of the
+ * honesty claim: the labels and statuses are prose around the values and nothing
+ * touches the values themselves. A field is one block — its label and status on
+ * one line, its text under them — and the blocks come in the order the caller
+ * gives, which is the surface's own stable field order.
+ *
+ * **What this cannot force**, in the same sentence as what it does: it forces the
+ * order, the heading's position and the exactness of each `text`, and it cannot
+ * force that the *clipboard route* a component picks preserves them — a
+ * `<textarea>` carrier normalises a carriage return, which is why
+ * `src/lib/components/clipboard.ts` refuses that route for a value holding one
+ * rather than copying something else.
+ *
+ * @param fields - The retained draft, in the order to show it.
+ * @param wording - The localized pieces to assemble it from.
+ * @returns The text to put on the clipboard.
+ */
+export function referenceCopyOf(
+  fields: readonly RetainedDraftField[],
+  wording: DraftCopyWording
+): string {
+  const blocks = fields.map(
+    (field) => `${wording.label(field.label)} (${wording.status(field.status)})\n${field.text}`
+  );
+  return [wording.heading, ...blocks].join('\n\n');
+} // End of function referenceCopyOf()
+
+/**
+ * The dictionary key holding one field status's phrase.
+ *
+ * A `switch` over literal keys rather than a template, the idiom every describer
+ * in this directory follows: a renamed key is a compile error here, and a new
+ * member of {@link DraftFieldStatus} with no phrase is one too.
+ *
+ * @param status - What a save would do with the field.
+ * @returns The key holding that status's phrase.
+ */
+export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
+  switch (status) {
+    case 'unchanged':
+      return 'browser.saveOutcome.field.unchanged';
+    case 'setting':
+      return 'browser.saveOutcome.field.setting';
+    case 'removing':
+      return 'browser.saveOutcome.field.removing';
+  }
+} // End of function draftFieldStatusKey()
 
 /**
  * The brand of a reload confirmation. Declared, never exported, never at runtime.
@@ -815,6 +1046,8 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
       return 'browser.saveOutcome.draftKeptInMemory';
     case 'reloadDiscardsDraft':
       return 'browser.saveOutcome.reloadDiscardsDraft';
+    case 'reloadClosesSurface':
+      return 'browser.saveOutcome.reloadClosesSurface';
     case 'changedAgainSinceRefusal':
       return 'browser.saveOutcome.changedAgainSinceRefusal';
     case 'windowOutOfStep':
