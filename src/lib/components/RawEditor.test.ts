@@ -41,10 +41,13 @@ import type { RawSaveAnswer } from '../browser/workspace.svelte';
 import type { RawSaveReload } from '../ipc/commands';
 import { rawSaveChoiceKey } from '../browser/rawSave';
 import {
+  conflictChoiceKey,
+  conflictChoicesFor,
   reloadUnavailableKey,
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
+import { CONFLICT_CAPABILITIES } from '../browser/rawEditor';
 import type { RoundTripText } from '../browser/rawEditor';
 import { makeDocument, makeSummary } from '../browser/fixtures';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
@@ -859,10 +862,11 @@ describe('the mounted raw editor', () => {
   }); // End of the "adoption only on a confirmed reload" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from the screen.** A spent confirmation
-    // the window refused cannot be spent again — every reason it refuses for is a
-    // reason asking again cannot change — so the control goes and the sentence
-    // takes its place, with the draft untouched behind it.
+    // **The 2c-4a-3a review's finding 3, from the screen.** A refusal comes back
+    // without a word about which of `adoptDiskVersion`'s ordered guards produced
+    // it, so the control goes and the sentence takes its place, with the draft
+    // untouched behind it. That is a decision about what to draw, **not** a claim
+    // that a later ask would be refused too: a refusal spends nothing.
     const editor = mountEditor([{ result: CONFLICTED }], ORIGINAL, 'refused');
     const candidate = `${ORIGINAL}# one more line\n`;
     type(editor.target, candidate);
@@ -1069,3 +1073,43 @@ describe('the raw editor’s outcome comes into view', () => {
     editor.stop();
   }); // End of the "arm replacing an arm" case
 }); // End of the "raw editor's outcome comes into view" suite
+
+describe('the raw editor never offers *Keep my draft*', () => {
+  it('draws neither the control nor the line that would stand beside it', async () => {
+    // **The consult's Q4 ruling, on the one screen it is about.** This candidate is
+    // a whole document, so there is no target, no field intent and no operation to
+    // re-resolve: `reapplySupport` is permanently `unavailable`, and
+    // `conflictChoicesFor` requires it to be `supported` before it names the choice.
+    // 2c-4c owns the recovery this editor is left with.
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+
+    // The conflict really is on screen, so the absence below is about the choice
+    // and not about the panel.
+    expect(button(editor.target, 'browser.rawSave.choice.keepEditing')).not.toBeNull();
+    for (const draftKind of ['authoredText', 'operationChoice'] as const) {
+      expect(button(editor.target, conflictChoiceKey('keepMyDraft', draftKind))).toBeNull();
+    } // End of the loop over the two labels the choice could wear
+    expect(says(editor.target, 'browser.reapply.ready')).toBe(false);
+    expect(says(editor.target, 'browser.reapply.readyOperation')).toBe(false);
+    editor.stop();
+  }); // End of the "no reapply control" case
+
+  it('declares both halves of the refusal, so a boolean alone cannot undo it', () => {
+    // The declaration this surface makes, read here rather than assumed from the
+    // screen above: `offersReapply` says what the surface draws today and
+    // `reapplySupport` says what it can ever do; the producer requires **both**,
+    // and the second is why flipping the raw editor's boolean alone still offers
+    // nothing.
+    expect(CONFLICT_CAPABILITIES.reapplySupport).toBe('unavailable');
+    expect(CONFLICT_CAPABILITIES.offersReapply).toBe(false);
+    for (const step of ['idle', 'confirming', 'unavailable'] as const) {
+      expect(
+        conflictChoicesFor({ ...CONFLICT_CAPABILITIES, offersReapply: true }, step),
+        step
+      ).not.toContain('keepMyDraft');
+    } // End of the loop over the three reload steps
+  }); // End of the "declaration" case
+}); // End of the "raw editor never offers a reapply" suite

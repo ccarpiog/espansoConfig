@@ -48,6 +48,8 @@ import {
   draftFieldStatusKey,
   invalidationFailureMessage,
   outcomeReveal,
+  reapplyIsOffered,
+  reapplyReadinessKey,
   referenceCopyOf,
   reloadDiskVersion,
   reloadUnavailableKey,
@@ -88,6 +90,7 @@ import { CONFLICT_CAPABILITIES as RAW_EDITOR } from './rawEditor';
 const EVERY_CONFLICT_CHOICE = Object.keys({
   keepEditing: true,
   copyDraft: true,
+  keepMyDraft: true,
   reloadDiskVersion: true,
   confirmReload: true
 } satisfies Record<ConflictChoice, true>) as readonly ConflictChoice[];
@@ -485,23 +488,36 @@ describe('a conflict, which is terminal and honest', () => {
     expect(model.messages).toContainEqual({ kind: 'changedAgainSinceRefusal' });
   });
 
-  it('names no control "keep my draft", in either language', () => {
-    // The phrase means *reapply the draft to the newly parsed document* — Phase
-    // 2c-4b, the dangerous algorithmic half — and using it early would teach the
-    // owner the wrong meaning and make 2c-4b look already-done.
-    for (const choice of EVERY_CONFLICT_CHOICE) {
-      expect(choice).not.toBe('keepMyDraft');
-    }
-    // Over both draft kinds, so the label a surface that drafts no text gets is
-    // checked too (2c-4a-3b).
+  it('says "keep my draft" on the reapply control and on no other', () => {
+    // **This case is the inverse of the one it replaces, and the inversion is the
+    // record of the phase.** Until 2c-4b-3 the phrase named nothing this
+    // application could do, so no label was allowed to use it: it means *reapply
+    // the draft to the newly parsed document*, and using it for the weaker
+    // behaviour would have made 2c-4b look already-done. The operation now exists,
+    // so exactly one choice may wear the words — and every other label must still
+    // not, for the same reason it never could.
+    const reapply = new Set<TranslationKey>(
+      EVERY_DRAFT_KIND.map((draftKind) => conflictChoiceKey('keepMyDraft', draftKind))
+    );
     for (const key of EVERY_CONFLICT_LABEL) {
+      if (reapply.has(key)) {
+        continue;
+      }
       for (const locale of LOCALES) {
         const label = DICTIONARIES[locale][key].toLowerCase();
         expect(label, `${locale}:${key}`).not.toContain('keep my draft');
         expect(label, `${locale}:${key}`).not.toContain('conservar mi borrador');
       } // End of the loop over the two locales
-    } // End of the loop over every label a conflict panel can draw
-  }); // End of the "names no control" case
+    } // End of the loop over every label that is not the reapply's
+    // And the check is only evidence if it can fire: the authored-text label is
+    // exactly what it would reject anywhere else.
+    expect(DICTIONARIES.en[conflictChoiceKey('keepMyDraft', 'authoredText')].toLowerCase()).toContain(
+      'keep my draft'
+    );
+    expect(DICTIONARIES.es[conflictChoiceKey('keepMyDraft', 'authoredText')].toLowerCase()).toContain(
+      'conservar mi borrador'
+    );
+  }); // End of the "names the reapply control" case
 }); // End of the "conflict" suite
 
 describe('the one authority that decides what a conflict offers', () => {
@@ -517,9 +533,11 @@ describe('the one authority that decides what a conflict offers', () => {
       reloadOutcome: 'reseedsDraft',
       offersCopyDraft: true,
       offersReload: true,
-      // The raw editor's own value, because that is the surface these defaults
-      // describe. `conflictChoicesFor` does not read it — 2c-4b-2 adds no choice —
-      // and the case below asserts that rather than assuming it.
+      // The raw editor's own two values, because that is the surface these
+      // defaults describe: it declares the reapply and it declares that one can
+      // never be had here. `conflictChoicesFor` reads **both**, and the cases below
+      // drive each of the four combinations rather than assuming any of them.
+      offersReapply: false,
       reapplySupport: 'unavailable',
       ...over
     };
@@ -554,13 +572,15 @@ describe('the one authority that decides what a conflict offers', () => {
   }); // End of the "ordering and the two steps" case
 
   it('names no reload label once a spend has been refused, and keeps the other two', () => {
-    // **The 2c-4a-3a review's finding 3.** Every reason
-    // `BrowserState.adoptDiskVersion` refuses for is a reason asking again cannot
-    // change — the confirmation is spent, the conflict is one this window never
-    // produced, the projection has been replaced — so leaving *Confirm reload* on
-    // screen offered a control whose only possible answer was another silent
-    // refusal. The non-destructive way out and the copy stay; the surface says why
-    // the third has gone.
+    // **The 2c-4a-3a review's finding 3.** `BrowserState.adoptDiskVersion` refuses
+    // for one of its own ordered reasons — a confirmation issued for another
+    // conflict, one already spent, a conflict this window never produced, an
+    // unprojected document, or a projection replaced since the conflict arrived
+    // when the window does not already hold the requested revision — and says which
+    // through nothing but the answer, so leaving *Confirm reload* on screen offered
+    // a control that had just been refused without a word. Withholding it claims
+    // nothing about how a later ask would be answered. The non-destructive way out
+    // and the copy stay; the surface says why the third has gone.
     expect(conflictChoicesFor(capabilities(), 'unavailable')).toEqual([
       'keepEditing',
       'copyDraft'
@@ -600,6 +620,142 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(conflictChoicesFor(unoffered, 'idle')).toEqual(['keepEditing']);
     expect(conflictChoicesFor(unoffered, 'confirming')).toEqual(['keepEditing']);
   });
+
+  it('puts the reapply after the copy and before the reload', () => {
+    // **The consult's Q6 order, read literally.** It writes nothing, discards
+    // nothing and asks no second question, so it belongs above the choice that
+    // abandons the draft — and below the copy that makes abandoning it survivable.
+    const offered = conflictChoicesFor(
+      capabilities({ offersReapply: true, reapplySupport: 'supported' }),
+      'idle'
+    );
+    expect(offered).toEqual(['keepEditing', 'copyDraft', 'keepMyDraft', 'reloadDiskVersion']);
+    expect(
+      conflictChoicesFor(
+        capabilities({ offersReapply: true, reapplySupport: 'supported' }),
+        'confirming'
+      )
+    ).toEqual(['keepEditing', 'copyDraft', 'keepMyDraft', 'confirmReload']);
+  }); // End of the "reapply ordering" case
+
+  it('names the reapply only when both the boolean and the permanent fact allow it', () => {
+    // **Two conditions and neither is decoration.** `offersReapply` is what the
+    // surface draws today; `reapplySupport` is whether an honest reapply could ever
+    // be had here. Either alone offers nothing, which is what stops a surface
+    // declaring its way past the consult's Q4 ruling on the raw editor.
+    for (const offersReapply of [true, false]) {
+      for (const reapplySupport of ['supported', 'unavailable'] as const) {
+        const offered = conflictChoicesFor(
+          capabilities({ offersReapply, reapplySupport }),
+          'idle'
+        );
+        expect(offered.includes('keepMyDraft'), `${String(offersReapply)}/${reapplySupport}`).toBe(
+          offersReapply && reapplySupport === 'supported'
+        );
+      } // End of the loop over the permanent fact
+    } // End of the loop over the boolean
+  }); // End of the "two gates" case
+
+  it('offers the reapply whatever the reload step is, including a refused spend', () => {
+    // **Deliberately not gated on the reload's step**, which records that a
+    // *reload* spend was refused. A reapply is a different question with a
+    // different authorization, and a person who presses it in that state is
+    // answered by the honest `adoptionRefused` sentence rather than by a control
+    // that vanished without a word.
+    const surface = capabilities({ offersReapply: true, reapplySupport: 'supported' });
+    for (const step of ['idle', 'confirming', 'unavailable'] as const) {
+      expect(conflictChoicesFor(surface, step).includes('keepMyDraft'), step).toBe(true);
+    } // End of the loop over the three reload steps
+    // And the reload's own rule is untouched by that.
+    expect(conflictChoicesFor(surface, 'unavailable')).toEqual(['keepEditing', 'copyDraft', 'keepMyDraft']);
+  }); // End of the "reapply is not the reload's step" case
+
+  it('never offers the reapply to the raw editor, whatever it declares', () => {
+    // **The one surface the consult's Q4 rules out for ever.** Its candidate is a
+    // whole document, so there is no target, no field intent and no operation to
+    // re-resolve — and this is the assertion that keeps a later `offersReapply:
+    // true` from putting a control over `rawEditor.reapplyToDiskVersion`, which
+    // takes no adoption function at all and answers `unavailable` before it looks
+    // at any evidence.
+    expect(RAW_EDITOR.reapplySupport).toBe('unavailable');
+    expect(RAW_EDITOR.offersReapply).toBe(false);
+    for (const step of ['idle', 'confirming', 'unavailable'] as const) {
+      expect(conflictChoicesFor(RAW_EDITOR, step), step).not.toContain('keepMyDraft');
+      expect(
+        conflictChoicesFor({ ...RAW_EDITOR, offersReapply: true }, step),
+        step
+      ).not.toContain('keepMyDraft');
+    } // End of the loop over the three reload steps
+    // And the five match surfaces declare both halves, which is what makes the
+    // sentence above about the raw editor rather than about nobody.
+    for (const surface of [MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+      expect(surface.reapplySupport).toBe('supported');
+      expect(surface.offersReapply).toBe(true);
+      expect(conflictChoicesFor(surface, 'idle')).toContain('keepMyDraft');
+    } // End of the loop over the five match declarations
+  }); // End of the "raw never offers it" case
+
+  it('answers whether a produced list names the reapply, and reads no declaration', () => {
+    // The predicate every panel's `reapplyOffered` goes through, so the readiness
+    // sentence and the control cannot disagree: it is given the list, not the
+    // surface, and there is nothing in it to consult a second authority with.
+    expect(reapplyIsOffered(conflictChoicesFor(DELETER, 'idle'))).toBe(true);
+    expect(reapplyIsOffered(conflictChoicesFor(RAW_EDITOR, 'idle'))).toBe(false);
+    expect(reapplyIsOffered([])).toBe(false);
+  });
+
+  it('gives the readiness line one sentence per draft kind, in both languages', () => {
+    // **What no test here can hold**: that either sentence *says* what the
+    // consult's Q6 requires — that this app will only try, that it works from the
+    // newly parsed document, that nothing is written when a match cannot be made
+    // safely, that a safe match promises *no* particular ending, and that a later
+    // save may still be refused or conflict. The fourth of those is the 2c-4b-3a
+    // review's High: `alreadySatisfied` is a successful arm with nothing to send,
+    // so a sentence promising a form outright is false. The i18n suites check keys
+    // and placeholders, never meaning. What is held is that the two keys are
+    // different and that each kind reaches its own.
+    const authored = reapplyReadinessKey('authoredText');
+    const operation = reapplyReadinessKey('operationChoice');
+    expect(authored).not.toBe(operation);
+    for (const key of [authored, operation]) {
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][key].length, `${locale}:${key}`).toBeGreaterThan(0);
+      } // End of the loop over the two locales
+    } // End of the loop over the two sentences
+    // And the operation-choice sentence does not call a placement or an identity
+    // *text*, which is 2c-4a-3b's finding applied to the sentence this step adds
+    // rather than rediscovered on a screen later. A word check, not a meaning
+    // check: only a person can say whether the replacement reads well.
+    for (const locale of LOCALES) {
+      const sentence = DICTIONARIES[locale][operation].toLowerCase();
+      expect(sentence, locale).not.toContain('you typed');
+      expect(sentence, locale).not.toContain('your text');
+      expect(sentence, locale).not.toContain('su texto');
+      expect(sentence, locale).not.toContain('ha escrito');
+    } // End of the loop over the two locales
+  }); // End of the "readiness line" case
+
+  it('labels the reapply by what the surface drafts too', () => {
+    // The third branch on the draft kind, and the same rule as `keepEditing`'s and
+    // `confirmReload`'s: *my draft* names text on the three authored-text
+    // surfaces, and nobody typed anything on the other three.
+    expect(conflictChoiceKey('keepMyDraft', 'authoredText')).toBe(
+      'browser.saveOutcome.choice.keepMyDraft'
+    );
+    expect(conflictChoiceKey('keepMyDraft', 'operationChoice')).toBe(
+      'browser.saveOutcome.choice.keepMyRequest'
+    );
+    expect(conflictChoiceKey('keepMyDraft', 'authoredText')).not.toBe(
+      conflictChoiceKey('keepMyDraft', 'operationChoice')
+    );
+    for (const locale of LOCALES) {
+      const label = DICTIONARIES[locale][
+        conflictChoiceKey('keepMyDraft', 'operationChoice')
+      ].toLowerCase();
+      expect(label, locale).not.toContain('draft');
+      expect(label, locale).not.toContain('borrador');
+    } // End of the loop over the two locales
+  }); // End of the "reapply label" case
 
   it('gives every choice it can name a sentence in both languages', () => {
     for (const key of EVERY_CONFLICT_LABEL) {
@@ -697,36 +853,60 @@ describe('the one authority that decides what a conflict offers', () => {
     expect(DUPLICATOR.draftKind).toBe('operationChoice');
   }); // End of the "six declarations" case
 
-  it('draws three on the authored-text surfaces and two on the other three', () => {
+  it('draws four on the two authored-text match surfaces and three on the raw editor', () => {
     // **What this establishes, and what it cannot.** It reads six capability
     // objects and this module's one mapping, so it can say what each surface
     // currently *offers*. It **cannot** say that a component acts on what it is
     // offered: no component is imported, mounted or invoked here. The wiring
-    // evidence is each surface's own model suite driving `reloadTheDiskVersion`
-    // and each component's mounted suite pressing the control.
+    // evidence is each surface's own model suite driving its transitions and each
+    // component's mounted suite pressing the control.
     //
     // 2c-4a-3a flipped both booleans on the two authored-text match surfaces and
-    // 2c-4a-3b flipped `offersReload` on the other three, so **all six now offer
-    // the reload**. The copy stays refused on three of them for ever, because the
-    // Q4 rule is about what their draft *is* and not about what they declare.
-    for (const surface of [RAW_EDITOR, MATCH_EDITOR, CREATOR]) {
+    // 2c-4a-3b flipped `offersReload` on the other three, so **all six offer the
+    // reload**; 2c-4b-3 flipped `offersReapply` on the five match surfaces, so the
+    // raw editor is now the only one of the six with three choices. The copy stays
+    // refused on three of them for ever, and the reapply on the raw editor for
+    // ever, because both rules are about what those surfaces *are* and not about
+    // what they declare.
+    expect(conflictChoicesFor(RAW_EDITOR, 'idle')).toEqual([
+      'keepEditing',
+      'copyDraft',
+      'reloadDiskVersion'
+    ]);
+    expect(conflictChoicesFor(RAW_EDITOR, 'confirming')).toEqual([
+      'keepEditing',
+      'copyDraft',
+      'confirmReload'
+    ]);
+    for (const surface of [MATCH_EDITOR, CREATOR]) {
       expect(conflictChoicesFor(surface, 'idle')).toEqual([
         'keepEditing',
         'copyDraft',
+        'keepMyDraft',
         'reloadDiskVersion'
       ]);
       expect(conflictChoicesFor(surface, 'confirming')).toEqual([
         'keepEditing',
         'copyDraft',
+        'keepMyDraft',
         'confirmReload'
       ]);
-    } // End of the loop over the three authored-text surfaces
+    } // End of the loop over the two authored-text match surfaces
     for (const surface of [MOVER, DELETER, DUPLICATOR]) {
-      expect(conflictChoicesFor(surface, 'idle')).toEqual(['keepEditing', 'reloadDiskVersion']);
-      expect(conflictChoicesFor(surface, 'confirming')).toEqual(['keepEditing', 'confirmReload']);
-      // And a spend the window refused takes both away again, on these three as on
-      // the other three.
-      expect(conflictChoicesFor(surface, 'unavailable')).toEqual(['keepEditing']);
+      expect(conflictChoicesFor(surface, 'idle')).toEqual([
+        'keepEditing',
+        'keepMyDraft',
+        'reloadDiskVersion'
+      ]);
+      expect(conflictChoicesFor(surface, 'confirming')).toEqual([
+        'keepEditing',
+        'keepMyDraft',
+        'confirmReload'
+      ]);
+      // And a spend the window refused takes **both reload labels** away again, on
+      // these three as on the other three — and leaves the reapply, which is a
+      // different question with a different authorization.
+      expect(conflictChoicesFor(surface, 'unavailable')).toEqual(['keepEditing', 'keepMyDraft']);
       expect(surface.offersCopyDraft).toBe(false);
     } // End of the loop over the three operation-choice surfaces
   }); // End of the "what each surface draws" case

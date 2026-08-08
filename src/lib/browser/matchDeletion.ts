@@ -145,7 +145,9 @@ import type { RawSaveChoice } from './rawSave';
 import {
   adoptForReapply,
   beginReapply,
+  sharedReapplyObstacleKey,
   subjectCorrespondence,
+  type ReapplyAttempt,
   type ReapplyOutcome,
   type SharedReapplyObstacle
 } from './reapply';
@@ -154,6 +156,7 @@ import {
   conflictDiskText,
   describeEditSave,
   invalidationFailureMessage,
+  reapplyIsOffered,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
@@ -765,11 +768,16 @@ export function confirmDiskReload(session: MatchDeletionSession): MatchDeletionS
  * collected for.
  *
  * **Nothing is closed for an adoption the window refused.** A `refused` from
- * `adopt` — a spent confirmation, a conflict this window did not produce, or a
- * projection replaced since it arrived — leaves the session exactly as it was,
- * because closing over a window that did not move would report a reload that did
- * not happen. **`alreadyThere` is not a refusal**: the window already holds the
- * bytes that were asked for, so the request is satisfied and this session ends.
+ * `adopt` — a confirmation issued for another conflict, one already spent, a
+ * conflict this window did not produce, an unprojected document, or a projection
+ * replaced since the conflict arrived when the window does not already hold the
+ * requested revision — leaves the session exactly as it was, because closing over
+ * a window that did not move would report a reload that did not happen. Those are
+ * `BrowserState.adoptDiskVersion`'s guards **in its order**, not a set applied
+ * alike. **`alreadyThere` is not a refusal**: a window already holding the
+ * requested revision is answered so, and its confirmation spent, *before* the
+ * projection generation is compared at all, so the request is satisfied and this
+ * session ends.
  *
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * panel reading the view's `closed` really closes.
@@ -788,9 +796,11 @@ export function reloadTheDiskVersion(
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the
-    // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
-    // no for a reason that asking again cannot change, so the control stops being
-    // offered and the panel says so. The `keepEditing` choice writes
+    // 2c-4a-3a review’s finding 3: the window said no without a word about which
+    // of `adoptDiskVersion`'s ordered guards produced it, so the control stops
+    // being offered and the panel says so. That is a decision about what to draw
+    // and **not** a claim that a later ask would be refused too — a refusal spends
+    // nothing. The `keepEditing` choice writes
     // NOT_RELOADING back; it is **labelled** *Leave this as it is* on this
     // surface, because nothing here is being edited (2c-4a-3c's finding 10.2).
     return { ...session, reload: RELOAD_REFUSED };
@@ -824,6 +834,39 @@ export type DeletionReapplyObstacle =
 
 /** What a reapply of this deletion became. */
 export type MatchDeletionReapply = ReapplyOutcome<MatchDeletionSession, DeletionReapplyObstacle>;
+
+/** One reapply attempt this panel made, tied to the session it left behind. */
+export type DeletionReapplyAttempt = ReapplyAttempt<
+  MatchDeletionSession,
+  DeletionReapplyObstacle
+>;
+
+/**
+ * The dictionary key holding one reapply obstacle's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom of every other
+ * describer in this directory: a renamed key is a compile error here, and a new
+ * member of {@link DeletionReapplyObstacle} with no sentence is one too. The two
+ * shared arms delegate to {@link sharedReapplyObstacleKey}, so *espansoConfig could
+ * not establish correspondence* is one sentence across the five surfaces rather
+ * than five that have to be kept in step.
+ *
+ * **The nested reason is a second line and not part of this key.**
+ * `notDeletable` carries a {@link DeletionRefusal}, which already has its own
+ * sentences and its own accessor; the i18n layer composes the two.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The key holding that obstacle's sentence.
+ */
+export function deletionReapplyObstacleKey(obstacle: DeletionReapplyObstacle): TranslationKey {
+  switch (obstacle.kind) {
+    case 'notDeletable':
+      return 'browser.matchDeletion.reapply.notDeletable';
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return sharedReapplyObstacleKey(obstacle);
+  }
+} // End of function deletionReapplyObstacleKey()
 
 /**
  * Reissues this deletion against the newly parsed disk version.
@@ -908,16 +951,22 @@ export function reapplyToDiskVersion(
  * driven by this module's tests at 2c-4a-2 — which is the trade that split paid
  * for.
  *
- * **`reapplySupport` is the same trade one sub-phase later.** This surface *can*
- * reapply — {@link reapplyToDiskVersion} is the transition — and nothing draws it:
- * `ConflictChoice` has no member for one and `conflictChoicesFor` names none.
- * 2c-4b-3 draws it.
+ * **`offersReapply` is the same trade one sub-phase later, and it is `true` as of
+ * 2c-4b-3.** {@link reapplyToDiskVersion} was built and driven by this module's
+ * tests at 2c-4b-2 with nothing naming it; flipping this boolean beside the
+ * permanent `reapplySupport` is what makes `conflictChoicesFor` name `keepMyDraft`,
+ * and `MatchDeleter.svelte`'s `conflictAction` is what calls the transition. **A
+ * reapply here re-asks this surface's own confirmation** — the rebuilt session has
+ * nothing pending, so the person presses *Delete* again and `confirmDelete` compares
+ * against the identity the live projection then gives that snippet. That is
+ * confirmation of the deletion and not of the label.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
   offersReload: true,
+  offersReapply: true,
   reapplySupport: 'supported'
 };
 
@@ -967,12 +1016,24 @@ export interface MatchDeletionView {
    * Whether a confirmed reload was spent and the window refused it.
    *
    * **The disclosure the panel owes for a control that has just gone.** The
-   * reload is not offered again once a spend has been refused — asking again
-   * could only be refused again — and a control that vanishes with nothing said
-   * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
+   * reload is not offered again once a spend has been refused — the refusal came
+   * back with no word about its cause, so this panel withholds the control rather
+   * than claiming a later ask could only be refused too — and a control that
+   * vanishes with nothing said in its place reads as a bug (2c-4a-3a review,
+   * finding 3). Nothing was written
    * and nothing was discarded; the `keepEditing` choice resets the step.
    */
   readonly reloadUnavailable: boolean;
+  /**
+   * Whether the reapply control is among {@link MatchDeletionView.conflictChoices}.
+   *
+   * **Read from the produced list and never from the capability record**, through
+   * `reapplyIsOffered`: the readiness sentence and the control it stands beside must
+   * come from one authority, and a view that asked the declaration instead would be
+   * expressing capability twice — the split that once let a button compile and do
+   * nothing.
+   */
+  readonly reapplyOffered: boolean;
   /**
    * The disk side of that conflict, or `null` when none is showing.
    *
@@ -1017,6 +1078,10 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
   const stale = submissionIsStale(session.draft, session.submitted);
   const conflict = conflictOf(session);
   const saved = outcome !== null && outcome.kind === 'saved' ? outcome : null;
+  const conflictChoices =
+    conflict === null
+      ? []
+      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
   return {
     match: session.match,
     canDelete: canRequestDelete(session),
@@ -1032,12 +1097,10 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
     refusalChoices: offeredRefusalChoices(refused, stale),
     findingsAreStale: refused !== null && stale,
     conflict,
-    conflictChoices:
-      conflict === null
-        ? []
-        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    conflictChoices,
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    reapplyOffered: reapplyIsOffered(conflictChoices),
     diskText: conflictDiskText(conflict),
     conflictOperation: conflict === null ? null : 'deleteSnippet',
     closed: session.closed

@@ -17,14 +17,17 @@
     keepDrafting,
     matchCreationView,
     placementOptionsOf,
+    reapplyToDiskVersion,
     redoCreation,
     reloadTheDiskVersion,
     startMatchCreation,
+    type CreationReapplyAttempt,
     type PlacementOption,
     undoCreation
   } from '../browser/matchCreation';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
+  import { attemptOfReapply, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { Clock } from '../browser/typing';
@@ -35,6 +38,7 @@
   import {
     t,
     tConflictChoice,
+    tCreationReapplyObstacle,
     tCreationRefusal,
     tDestinationRefusal,
     tDetailField,
@@ -46,6 +50,8 @@
     tIpcFailure,
     tPresentationNote,
     tRawSaveChoice,
+    tReapplyOutcome,
+    tReapplyReadiness,
     tReloadUnavailable,
     tSaveError,
     tSaveOutcomeMessage,
@@ -229,6 +235,19 @@
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startMatchCreation(documents(), projections(), held(), clock));
   const view = $derived(matchCreationView(session));
+
+  /**
+   * The last *Keep my draft* attempt, or `null` when this panel has made none.
+   *
+   * **Held with the session it produced**, which is what stops a report outliving
+   * what it describes: `reapplyToShow` answers `null` the moment `session` is
+   * replaced by anything else, and every transition in the model returns a new
+   * value. Nothing here has to remember to clear it.
+   */
+  let reapplyAttempt = $state.raw<CreationReapplyAttempt | null>(null);
+
+  /** What the last attempt left this panel to say, or `null`. */
+  const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
 
   /**
    * Every position the form can offer, named from the current projections.
@@ -429,6 +448,22 @@
   } // End of function copyTheDraft()
 
   /**
+   * Tries what this panel is holding again, against the version on disk.
+   *
+   * **Two model calls and two assignments, and no rule of its own.**
+   * `reapplyToDiskVersion` decides the whole rebase before it asks the window to
+   * move, and `attemptOfReapply` is what decides which arms replace the session —
+   * that question is answered once, in `../browser/reapply.ts`, because five panels
+   * ask it and a rule written into one renderer is carried by that renderer's
+   * mounted suite alone.
+   */
+  function keepMyDraft(): void {
+    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, adoptDiskVersion));
+    reapplyAttempt = attempt;
+    session = attempt.session;
+  } // End of function keepMyDraft()
+
+  /**
    * Does what one conflict choice says.
    *
    * **All four arms are reachable as of 2c-4a-3a.** `matchCreation.ts`'s
@@ -454,6 +489,9 @@
       case 'keepEditing':
         session = keepDrafting(session);
         copied = 'none';
+        return;
+      case 'keepMyDraft':
+        keepMyDraft();
         return;
       case 'reloadDiskVersion':
         session = askToReloadDiskVersion(session);
@@ -672,6 +710,21 @@
     </div>
   {/if}
 
+  <!-- What the last *Keep my draft* left to say. Outside the outcome panel on
+       purpose: a reapply that succeeded hands back a session with no outcome at
+       all, so a report drawn inside that block would disappear at the moment it
+       had something to report. `reapplyToShow` is what keeps it from outliving the
+       session it describes. -->
+  {#if reapplyReport !== null}
+    {@const report = reapplyReport}
+    <div class="panel" role="status">
+      <p>{tReapplyOutcome(report.kind)}</p>
+      {#if report.kind === 'manualResolution'}
+        <p class="kind">{tCreationReapplyObstacle(report.obstacle)}</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -784,6 +837,15 @@
           <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
         {:else if copied === 'failed'}
           <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
+        {/if}
+
+        <!-- The line beside *Keep my draft*: what this app will **try**, what it
+             works from, when it writes nothing, and what a later save may still
+             do. Drawn when the model names that choice and never from this
+             surface's own declaration, so the sentence and the control cannot
+             disagree (consult Q6). -->
+        {#if view.reapplyOffered}
+          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         <p class="choices" bind:this={outcomeChoices}>

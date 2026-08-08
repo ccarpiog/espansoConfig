@@ -58,7 +58,14 @@ import { conflictChoiceKey, type ConflictChoice } from '../browser/saveOutcome';
 import { sourceSegments, type InvisibleSegment } from '../browser/sourceText';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
-import { t, tDraftCopy, tDraftError, tInvisible, tIpcFailure } from '../i18n';
+import {
+  describeEditorReapplyObstacle,
+  t,
+  tDraftCopy,
+  tDraftError,
+  tInvisible,
+  tIpcFailure
+} from '../i18n';
 import { LOCALES } from '../i18n/locale';
 import { locale } from '../stores/locale.svelte';
 import type { IpcFailure } from '../ipc/errors';
@@ -1115,11 +1122,12 @@ describe('the mounted small editor', () => {
   }); // End of the "three adoption answers" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from the screen.** A spent confirmation
-    // the window refused cannot be spent again — every reason it refuses for is a
-    // reason asking again cannot change — so the control goes and the sentence
-    // takes its place. *Keep editing* and the copy stay, and pressing what is left
-    // asks the window nothing further.
+    // **The 2c-4a-3a review's finding 3, from the screen.** A refusal comes back
+    // without a word about which of `adoptDiskVersion`'s ordered guards produced
+    // it, so the control goes and the sentence takes its place. That is a decision
+    // about what to draw, **not** a claim that a later ask would be refused too: a
+    // refusal spends nothing. *Keep editing* and the copy stay, and pressing what
+    // is left asks the window nothing further.
     const editor = mountEditor([{ result: CONFLICTED }], projection(), undefined, 'refused');
     type(editor.target, 'replace', 'c');
     control(editor.target, 'browser.matchEditor.save').click();
@@ -1263,19 +1271,21 @@ describe('the mounted small editor', () => {
     }
   }); // End of the "carriage return refuses the copy" case
 
-  it('offers no control called “keep my draft”, in either language', async () => {
-    // That phrase means *reapply the draft to the newly parsed document*, which is
-    // Phase 2c-4b; using the words for this weaker behaviour would make that phase
-    // look already done.
+  it('calls only the reapply control “keep my draft”, in either language', async () => {
+    // **The inverse of the case this replaces, and the inversion is the phase.**
+    // Until 2c-4b-3 the phrase named nothing this application could do, so no
+    // control was allowed to wear it; the operation exists now, and exactly one
+    // control may. Every *other* label must still not, for the reason that has not
+    // changed: the words mean *reapply the draft to the newly parsed document*.
     const forbidden = ['keep my draft', 'mantener mi borrador'];
-    const choices: readonly ConflictChoice[] = [
+    const others: readonly ConflictChoice[] = [
       'keepEditing',
       'copyDraft',
       'reloadDiskVersion',
       'confirmReload'
     ];
     for (const one of LOCALES) {
-      for (const choice of choices) {
+      for (const choice of others) {
         // Both draft kinds, because `confirmReload` has one label per kind since
         // 2c-4a-3b and the forbidden phrase could hide in either of them.
         for (const draftKind of ['authoredText', 'operationChoice'] as const) {
@@ -1283,16 +1293,19 @@ describe('the mounted small editor', () => {
           expect(label).not.toContain(forbidden[0]);
           expect(label).not.toContain(forbidden[1]);
         } // End of the loop over the two draft kinds
-      } // End of the loop over the four conflict choices
+      } // End of the loop over the four other conflict choices
     } // End of the loop over the two locales
 
     const editor = mountEditor([{ result: CONFLICTED }]);
     type(editor.target, 'replace', 'c');
     control(editor.target, 'browser.matchEditor.save').click();
     await settle();
+    // On the screen the phrase appears, once, on a control this panel really does
+    // wire — which is the whole difference between this case and the one it
+    // replaces.
+    expect(button(editor.target, conflictChoiceKey('keepMyDraft', 'authoredText'))).not.toBeNull();
     const drawn = (editor.target.textContent ?? '').toLowerCase();
-    expect(drawn).not.toContain(forbidden[0]);
-    expect(drawn).not.toContain(forbidden[1]);
+    expect(drawn).toContain(forbidden[0]);
     editor.stop();
   }); // End of the "keep my draft" case
 
@@ -1492,3 +1505,127 @@ describe('the small editor’s outcome comes into view', () => {
     editor.stop();
   }); // End of the "arm replacing an arm" case
 }); // End of the "small editor's outcome comes into view" suite
+
+describe('the small editor’s *Keep my draft*', () => {
+  /** The reapply control's label on this surface, whose draft is authored text. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /**
+   * A conflict whose evidence identified the snippet in the fresh read.
+   *
+   * @param replace - What the disk now holds in the body, so a case can choose
+   *   between the field being untouched and the disk having moved it.
+   * @returns The conflict as it crosses the boundary.
+   */
+  function identified(replace: string): SaveResult {
+    const target = makeMatch({
+      node: 1,
+      document: FILE.id,
+      revision: AFTER,
+      trigger: ':a',
+      replace
+    });
+    // Written out rather than spread over {@link CONFLICTED}: a spread into a
+    // `SaveResult` annotation is checked against all three arms, and the two this
+    // is not lack every field below.
+    return {
+      outcome: 'conflict',
+      reapply: { subject: { Identified: { target } }, placement: { NotAnchored: {} } },
+      expected: BASE,
+      found: AFTER,
+      disk_revision: AFTER,
+      disk_text: DISK_TEXT,
+      disk: makeDocument({
+        id: FILE.id,
+        relativePath: FILE.relative_path,
+        revision: AFTER,
+        matches: [target]
+      })
+    };
+  } // End of function identified()
+
+  /**
+   * Types into the body and saves into a conflict.
+   *
+   * @param result - The conflict the scripted boundary answers with.
+   * @param adoption - What the window answers when asked to adopt.
+   * @returns The mounted editor, showing the conflict.
+   */
+  async function conflictedWith(
+    result: SaveResult,
+    adoption: DiskAdoptionOutcome = 'installed'
+  ): Promise<Mounted> {
+    const editor = mountEditor(
+      [{ result }],
+      projection(),
+      { kind: 'unavailable', reason: 'otherFile' },
+      adoption
+    );
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    return editor;
+  } // End of function conflictedWith()
+
+  it('draws the control and the authored-text line beside it', async () => {
+    const editor = await conflictedWith(CONFLICTED);
+    expect(button(editor.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(says(editor.target, 'browser.reapply.ready')).toBe(true);
+    // Never the operation-choice sentence: this surface holds text a person typed.
+    expect(says(editor.target, 'browser.reapply.readyOperation')).toBe(false);
+    editor.stop();
+  });
+
+  it('rebuilds the drafted field over the disk version and sends it afresh', async () => {
+    // The disk has not touched the body, so the retained change applies and the
+    // rebuilt session's ordinary *Save* sends it against the new base revision.
+    const editor = await conflictedWith(identified('b'));
+    control(editor.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(editor.adoptions).toHaveLength(1);
+    expect(says(editor.target, 'browser.reapply.reapplied')).toBe(true);
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    // The typed value survived, and the box holds it.
+    expect(box(editor.target, 'replace').value).toBe('c');
+    expect(editor.calls).toHaveLength(1);
+
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    expect(editor.calls).toHaveLength(2);
+    expect(editor.calls[1]?.baseRevision).toBe(AFTER);
+    expect(editor.calls[1]?.id.revision).toBe(AFTER);
+    editor.stop();
+  }); // End of the "field rebuilt and sent afresh" case
+
+  it('names the field the disk moved under the draft, and writes nothing', async () => {
+    // **Any collision refuses the whole reapply**, and the panel still says which
+    // field: saving the safe ones would strand the rest while looking successful,
+    // and per-field resolution is 2c-4c's.
+    const editor = await conflictedWith(identified('theirs'));
+    control(editor.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(editor.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(editor.target.textContent).toContain(
+      describeEditorReapplyObstacle('en', { kind: 'fieldCollisions', fields: ['replace'] })
+    );
+    // Decide first, adopt second: nothing was installed and the conflict stands.
+    expect(editor.adoptions).toEqual([]);
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(editor.calls).toHaveLength(1);
+    editor.stop();
+  }); // End of the "field collision" case
+
+  it('refuses and adopts nothing when the evidence names no snippet', async () => {
+    const editor = await conflictedWith(CONFLICTED);
+    control(editor.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(editor.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(says(editor.target, 'browser.reapply.obstacle.evidenceNotATarget')).toBe(true);
+    expect(editor.adoptions).toEqual([]);
+    expect(box(editor.target, 'replace').value).toBe('c');
+    editor.stop();
+  });
+}); // End of the "small editor’s reapply" suite

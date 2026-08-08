@@ -846,8 +846,9 @@ describe('the duplicate panel’s conflict', () => {
   }); // End of the "three adoption answers" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
-    // only be refused again is gone, and the sentence takes its place.
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control the window
+    // refused without a word is gone, and the sentence takes its place; withholding
+    // it claims nothing about how a later ask would be answered.
     const panel = await conflicted('refused');
     control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
     flushSync();
@@ -1103,3 +1104,83 @@ describe('a duplicate panel over the real workspace state', () => {
     target.remove();
   }); // End of the "duplicate over the real state" case
 }); // End of the "duplicate panel over the real state" suite
+
+/** The reapply control's label on this surface, which drafts no text. */
+const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'operationChoice');
+
+/**
+ * The same conflict, whose evidence identified the snippet in the fresh read.
+ *
+ * `disk` and the identified target come from one value; in Rust one refresh builds
+ * the text, the revision and the projection together, and a fixture cannot stand
+ * in for that (`fixtures.ts`'s own note).
+ */
+const IDENTIFIED: SaveResult = (() => {
+  const disk = reread();
+  return {
+    ...CONFLICTED,
+    disk,
+    reapply: {
+      subject: { Identified: { target: disk.matches[0]! } },
+      placement: { NotAnchored: {} }
+    }
+  };
+})();
+
+/**
+ * Reaches the conflict panel with a chosen payload.
+ *
+ * @param result - The conflict the scripted boundary answers with.
+ * @param adoption - What the window answers when asked to adopt.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflictedWith(
+  result: SaveResult,
+  adoption: DiskAdoptionOutcome = 'installed'
+): Promise<Mounted> {
+  const panel = mountDuplicator([{ result }], { adoption });
+  control(panel.target, 'browser.matchDuplication.duplicate').click();
+  await settle();
+  return panel;
+} // End of function conflictedWith()
+
+describe('the duplication panel’s *Keep my draft*', () => {
+  it('draws the control and the operation-choice line beside it', async () => {
+    const panel = await conflicted();
+    expect(button(panel.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(says(panel.target, 'browser.reapply.readyOperation')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.ready')).toBe(false);
+    panel.stop();
+  });
+
+  it('rebuilds the duplicate over the disk version and collects consent again', async () => {
+    // **The old acknowledgement does not cross**, because it is content-addressed
+    // to a candidate whose bytes are gone: the rebuilt session has no consent, so
+    // the panel is back at the ordinary first attempt rather than holding one.
+    const panel = await conflictedWith(IDENTIFIED);
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(says(panel.target, 'browser.reapply.reapplied')).toBe(true);
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    // The duplicate control is offered again, and nothing has been sent by the
+    // reapply itself: sending is the surface's ordinary submit path.
+    expect(button(panel.target, 'browser.matchDuplication.duplicate')).not.toBeNull();
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "duplicate rebuilt" case
+
+  it('refuses and adopts nothing when the evidence names no snippet', async () => {
+    const panel = await conflicted();
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.obstacle.evidenceNotATarget')).toBe(true);
+    expect(panel.adoptions).toEqual([]);
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    panel.stop();
+  });
+}); // End of the "duplication panel’s reapply" suite

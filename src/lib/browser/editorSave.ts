@@ -257,17 +257,26 @@ export type ReloadStep =
     }
   | {
       /**
-       * The confirmation was spent and the window refused to move.
+       * The confirmation was presented and the window refused to move.
        *
        * **A terminal step, and 2c-4a-3a's review finding 3 is why it exists.**
-       * `BrowserState.adoptDiskVersion` refuses for reasons that do not go away by
-       * asking again — the confirmation is already spent, the conflict is one this
-       * window never produced, the projection has been replaced since it arrived —
-       * so leaving *Confirm reload* on screen offered a control whose only possible
-       * answer was another silent refusal. From here `conflictChoicesFor` names no
-       * reload label at all, the surface says so, and *Keep editing* is the way
-       * out: every dismissal writes {@link NOT_RELOADING} back, so a fresh attempt
-       * starts from `idle`.
+       * `BrowserState.adoptDiskVersion` refuses for one of its own ordered
+       * reasons — a confirmation issued for another conflict, one already spent, a
+       * conflict this window never produced, an unprojected document, or a
+       * projection replaced since the conflict arrived when the window does not
+       * already hold the requested revision — and it says which through nothing but
+       * the answer, so leaving *Confirm reload* on screen offered a control that had
+       * just been refused without a word. **What justifies this step is that silence
+       * and not permanence**: the answer names no cause, so this step cannot tell
+       * whether a later properly authorized ask would succeed or be refused again,
+       * and it declines to offer that guess in either direction. A refusal does add
+       * nothing to the window's spent set — but that rules out only this attempt
+       * newly causing the spent-confirmation refusal; it neither identifies the
+       * cause this refusal had nor promises that the four guards ahead of the
+       * revision comparison will pass on a later call. From here
+       * `conflictChoicesFor` names no reload label at all, the surface says so, and
+       * *Keep editing* is the way out: every dismissal writes {@link NOT_RELOADING}
+       * back, so a fresh attempt starts from `idle`.
        */
       readonly kind: 'refused';
     };
@@ -355,7 +364,11 @@ export function reloadConfirmed<T>(
 export type ReloadSpend =
   /** The window holds the disk observation, by installing it or by already having it. */
   | 'satisfied'
-  /** The window was asked and refused. Nothing moved, and asking again cannot help. */
+  /**
+   * The window was asked and refused. Nothing moved, and the surface stops
+   * offering the control — which is a decision about what to draw, not a claim
+   * that a later ask would be refused too.
+   */
   | 'refused'
   /** There was no conflict or no confirmation, so the window was never asked. */
   | 'notAttempted';
@@ -366,8 +379,11 @@ export type ReloadSpend =
  * **The one place a surface asks the window to cross to the disk side.** It
  * answers `notAttempted` without a conflict and without a confirmation — the
  * window is not asked at all — and otherwise hands the decision to the window,
- * which refuses a spent confirmation, a conflict it never produced, and a
- * projection replaced since that conflict arrived.
+ * which refuses a confirmation issued for another conflict, a spent one, a
+ * conflict it never produced, an unprojected document, and a projection replaced
+ * since that conflict arrived — the last of those **only** when the window does
+ * not already hold the requested revision, which is answered `alreadyThere` before
+ * the generation is inspected at all.
  *
  * **`alreadyThere` counts as `satisfied`**, and the 2c-4a-2 confirmation pass is
  * why: a window that has already reached the requested disk projection has
@@ -404,8 +420,9 @@ export function spendTheConfirmedReload<T>(
  * list of its own; it collapses to `confirming`, which is what the panel showed
  * when the click happened. `refused` is the terminal step of a spend the window
  * declined, and it collapses to `unavailable`, which names **no** reload label —
- * so the control that could only be refused again is not drawn, while *Keep
- * editing* and the copy stay.
+ * so a control the window has just refused without a word is not drawn, while
+ * *Keep editing* and the copy stay. That is what this step withholds, and not a
+ * claim that a later ask would be refused too.
  *
  * @param step - Where the reload has got to.
  * @returns The step the choices are chosen for.

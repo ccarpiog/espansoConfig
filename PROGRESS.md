@@ -72,7 +72,10 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b design consult** | **Phase 2c-4b put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4b-design.md`. It **narrowed the phase and split its confidence rule in two**: the match editor may fall back from exact item identity to a unique unchanged trigger, while delete, move, duplicate and every positional anchor require exact correspondence and **never** use the item index as a tie-break. The raw editor is ruled **out of reapply entirely** — a whole-document text draft has no match to identify — and three steps keep the correspondence proof separate from the visible promise |
 | **2c-4b-1** | **The correspondence evidence and the conflict contract**: `crates/espansoconfig-core/src/reconcile.rs`, the anchor/fingerprint construction, the refusal enum, and `SaveResult::Conflict::reapply` / `ConflictResult.reapply` — built from the **same fresh snapshot** as `disk_text` and `disk_revision`. No control, no choice, no capability, no `.svelte` change | ✅ complete — after **three** rounds. Round 1 returned **NOT READY** on a High and five others; round 2 confirmed four closed and found **two still standing plus two new**; round 3 closed those and its own sweep found **three more**, one of which was the decision record claiming a guarantee the code did not give |
 | **2c-4b-2** | **Reapply as browser-model transitions, with nothing drawn**: `src/lib/browser/reapply.ts` — the gate, the two evidence readers, the three-armed `ReapplyOutcome` and the shared adoption — plus one pure decide-first-adopt-second transition on each of the five match surfaces and a permanent *unavailable* on the raw editor. No `ConflictChoice` member, no dictionary key, no `.svelte` change, so no mounted or window evidence is owed | ✅ complete — after **four** rounds. Round 1 returned **NOT READY** and found the step's only algorithmic defect: the authorization was keyed on the **derived `ConflictModel`**, so two descriptions of one wire conflict could each win an adoption spend. Rounds 2–4 found **no algorithmic defect at all** — every remaining finding was one claim, that `adoptDiskVersion`'s guards are a set rather than an ordered sequence, wrong in four places and taking three rounds to close |
-| 2c-4b-3 | The offered choice: `keepMyDraft` in `ConflictChoice` and `conflictChoicesFor` only, capability flipped on the five eligible surfaces, both dictionaries, the mounted suites, and the deterministic R0→R1 window matrix | ⬜️ **next** |
+| **2c-4b-3a** | **The offered choice, drawn**: `keepMyDraft` added to `ConflictChoice` and produced by `conflictChoicesFor` **only**, the `ConflictCapabilities.offersReapply` boolean 2c-4b-2 deliberately deferred, capability flipped on the five match surfaces with raw declaring `false` beside its permanent `unavailable`, six component handlers, 24 new strings in both dictionaries through typed accessors, and 36 new cases | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium and two Lows, **all four in prose**; round 2 confirmed all four closed and found the one this project's history predicts — the 32-site permanence sweep had produced the **mirror image** of the finding it was closing, an unconditional claim of *later success* where an unconditional claim of *permanent refusal* had stood |
+| 2c-4b-3b | The **instrument**: the external-writer harness rebuilt (it was deleted at 2c-4a-3c-5) with Q7's fixed R0→R1 fixture pairs, one positive and one refusal per policy, synchronized from the plan and never by wall clock | ⬜️ **next** |
+| 2c-4b-3c | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages | ⬜️ not started |
+| 2c-4b-3d | The **fixes and the re-take**, if the reading finds anything | ⬜️ not started |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3422,6 +3425,76 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 3a
+
+All rows re-run by the orchestrator after the fix round and after the confirmation pass's own fix,
+never taken from a worker's report.
+
+| Command | Result |
+|---|---|
+| `npm test` | **1623** passed, **49** files (1587 / 49 at `HEAD`) |
+| `npm run check` | **418** files, **0** errors, **0** warnings — unchanged |
+| `npm run build` | **175** modules — **unchanged**; `svelte/internal/server` **absent** from the bundle |
+| `cargo test --workspace` | **1086** passed, 0 failed — **unchanged; no Rust file was opened in any round** |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| i18n leaf keys | **769** en / **769** es, at parity — 745 plus 24 |
+| `rg "'keepMyDraft'" src/ --glob '!*.test.ts'` | **one** producer, `saveOutcome.ts:460`; every other hit is a component `case` arm consuming it |
+
+**The module count did not move, and that is the expected reading of the guard, not a miss.** 3a added
+no new source module — only union members, dictionary entries, accessors, handlers and tests — so the
+shape rule says the number must stay at 175. A jump to ~180 with `svelte/internal/server` in the
+bundle is the regression the guard exists to catch, and it is absent.
+
+**Six `.svelte` files changed, so six window readings are owed** and none is taken. That is 2c-4b-3c,
+and it is why 3a is not the end of 2c-4b-3. The confirmation pass's own fix touched two `.svelte`
+files in **comments only**, which invalidates nothing because nothing had been read yet.
+
+---
+
+## Phase 2c-4b step 3a review disposition
+
+**Round 1 — `docs/reviews/phase-2c-4b-3a-code.md` — NOT READY.** Four findings, and **all four were
+prose**: the class this repository names its worst, and the one no test in it can fail.
+
+| # | Severity | Where | What was claimed that is not true |
+|---|---|---|---|
+| 1 | **High** | `en.json` `browser.reapply.ready` | The readiness sentence promised a sendable form. `alreadySatisfied` is a permitted successful arm and returns none |
+| 2 | Medium | `en.json` `browser.reapply.reapplied` and neighbours | Claimed the attempt had moved the window, and that retrying a refusal could not change the answer |
+| 3 | Low | `matchEditor.ts` and eight sibling passages | The swept adoption contracts still named a subset of `adoptDiskVersion`'s refusal causes |
+| 4 | Low | `RawEditor.test.ts` | A test comment said the producer requires one of the two reapply gates. It requires both |
+
+All four fixed. The fix round **widened deliberately**: closing finding 2's permanence claim meant
+rewriting it in **32 further places** — across `saveOutcome.ts`, `editorSave.ts`, all six surface
+modules, two markup comments and twelve suite comments — on the argument that leaving the same claim
+standing elsewhere is precisely this project's documented "narrower instance still standing" failure.
+Two contract passages the review had not named were corrected with it, including one that said a
+confirmation "was spent" on a refusal, when a refusal spends nothing.
+
+Two of the review's suggested wordings were **not taken**, both recorded in `2c-4b-3a-notes.md` §7.6
+and both **sustained by round 2**: an "either … or" on the readiness line would have swapped one false
+promise for a smaller one, because `manualResolution` and `adoptionRefused` are also reachable after a
+safe correspondence; and quoting *"Keep editing"* in the result prose would have been wrong on three
+surfaces, which label that control *Leave this as it is*.
+
+**Round 2 — `docs/reviews/phase-2c-4b-3a-code-round2.md` — NOT READY on one new Low, with all four
+round-1 findings confirmed closed.** The new one was **introduced by the fix round**, and it is the
+recurrence this project has now recorded in five consecutive phases. The 32-site permanence rewrite
+left `editorSave.ts`'s `ReloadStep.refused` saying that because a refusal spends nothing, a later
+press over a window that had reprojected to the requested revision *would be answered `alreadyThere`*.
+Four guards run before the revision comparison, and "a refusal spends nothing" rules out only *this
+attempt newly causing* the spent-authorization guard: **an unconditional claim of permanent refusal
+had become an unconditional claim of later success**, the mirror image of the finding it closed.
+
+Fixed by the orchestrator, and the sweep written from the predicate rather than from the finding's
+words found **two narrower instances** in `reapply.ts`'s `adoptionRefused` arm — the guard walk and
+the permanence paragraph — both fixed. `saveOutcome.ts`'s `DiskAdoption` list was examined and
+**ruled not an instance**: it is an ordered numbered list whose item 5 is reached only after 1–4, and
+it says so in its own words. Neither fix moved a predicate, so no test was added; `npm test` and
+`npm run check` are identical before and after, which is the hole restated rather than a reassurance.
+
+---
+
 ## Verification — Phase 2c-4b step 2
 
 | Command | Result |
@@ -5978,6 +6051,96 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### Phase 2c-4b-3a is complete. **Step 2c-4b-3b is next.**
+
+**`keepMyDraft` is on five screens and refused on the sixth, and no window has been read.** The exact
+first commands to run:
+
+```sh
+npm install && npm test        # expect 1623 passed, 49 files
+cargo test --workspace         # expect 1086 passed, 0 failed
+```
+
+(`npm run check` expects **418 files, 0 errors, 0 warnings** — unchanged. `npm run build` expects
+**175 modules**, *unchanged*: 3a added no new source module, only members, accessors, handlers and
+strings, so the guard's shape rule says the number must not move. i18n is **769** keys per language,
+at parity — 745 plus the 24 this step added, its first user-facing strings since 2c-4a-3b.)
+
+#### Why 2c-4b-3 was cut into four steps
+
+The consult's Q8 named 2c-4b-3 as one step — "one choice authority, six panels, i18n, and window
+reading". It is cut here into **3a** (the code), **3b** (the instrument), **3c** (the reading) and
+**3d** (the fixes and the re-take), which is exactly how 2c-4a-3c ran when the same obligation came
+due. The forcing fact: **the external-writer harness does not exist.** `2c-4a-3c-5` deleted it, by
+design — "the harness is deleted, both hook files restored by hand to byte-identical, and the gates
+are back at their production numbers". So the reading 3c owes cannot be taken until 3b rebuilds it,
+and Q7 asks for **more** than 2c-4a-3c-1 built: fixed R0→R1 fixture *pairs*, seeded whole and copied
+atomically over `conflict.yml`, rather than a broad substitution.
+
+#### What 3a actually shipped
+
+`ConflictChoice` gained `keepMyDraft`, pushed from **one line** — `saveOutcome.ts:460` — after
+`copyDraft` and before the reload pair, gated on **both** the new per-surface
+`ConflictCapabilities.offersReapply` and the permanent `reapplySupport` that 2c-4b-2 built. The five
+match surfaces set the boolean `true`; `rawEditor.ts` sets it `false` beside `unavailable`, and the
+two statements are deliberately not one: the weaker says *this surface does not draw it today*, the
+stronger says *this surface can never do it*.
+
+`reapply.ts` gained the **presentation half only** — no transition changed. Each surface got an
+obstacle key function beside its union, a `reapplyOffered` view read from the produced list, and a
+component handler, readiness line and report block. The i18n layer composes each obstacle sentence
+with its nested wire/model code, so no renderer can drop the reason.
+
+**`DetailPane.svelte` needed no change** — the mover's and duplicator's extra readers were already
+props.
+
+#### Two review rounds, and what they cost
+
+**Round 1 — NOT READY**, 1 High, 1 Medium, 2 Lows, and **every one of them was prose**. The High:
+the readiness sentence promised a sendable form even when reapply returns `alreadySatisfied`, which
+returns none. The Medium: the result prose claimed the attempt had moved the window, and that
+retrying a refusal could not change the answer.
+
+**Round 2 confirmed all four closed and found one new Low — introduced by the fix round**, which is
+this repository's documented recurrence. Closing the permanence claim had meant rewriting it in **32
+further places**, and `editorSave.ts`'s `ReloadStep.refused` came out saying that because a refusal
+spends nothing, a later press over a window that had reprojected to the requested revision *would be
+answered `alreadyThere`*. **Reaching that revision is not sufficient**: four guards run before the
+revision comparison, and "a refusal spends nothing" rules out only *this attempt newly causing* the
+spent-authorization guard. An unconditional claim of permanent refusal had been replaced by an
+unconditional claim of later success — the mirror image of the finding being closed. Fixed, and the
+sweep that followed found **two narrower instances** in `reapply.ts`'s `adoptionRefused` arm, both
+fixed. The reviews are `docs/reviews/phase-2c-4b-3a-code.md` and `phase-2c-4b-3a-code-round2.md`;
+the record is `docs/decisions/2c-4b-3a-notes.md`, §7 and §8.
+
+#### What 3a inherits and hands on as stated risk
+
+1. **Nothing here has been seen on a screen.** Six components changed, so **six readings are owed**,
+   and 3a's evidence anticipates none of them. A mounted test proves a handler fires, not that a
+   window draws.
+2. **No suite in this repository can fail because a sentence became untrue.** This phase demonstrated
+   it twice: four false sentences, and then their mirror image, all past 1623 green tests,
+   `svelte-check` and a build. The 24 new strings are argued against the code, **not read**.
+3. **`adoptForReapply` is still not a route a caller is forced through**, and 2c-4b-1's two risks are
+   unchanged — see the 2c-4b-2 record below, which 3a did not alter.
+
+#### What 3b must do
+
+Rebuild the instrument to `docs/decisions/2c-4a-3c-1-instrument.md`'s mechanism — a fresh bundle path
+per launch, a synthetic config, the language set **explicitly through the picker** and never trusted
+from the launch environment, one plan per launch, an external filesystem writer that touches no
+workspace or cache, and synchronization **from the plan rather than `sleep`**. Then add what Q7 asks
+of it: two complete neutral fixture variants per case, the second writer copying the selected R1 file
+atomically over `conflict.yml` after the probe's "surface ready" point, and a byte comparison of the
+final file against the expected post-reapply bytes. Prove the instrument before the reading depends
+on it, exactly as 2c-4a-3c-1 did — that step's whole value was demonstrating a **true**
+`SaveResult::Conflict` from a running WKWebView before anything was read. **The harness is
+deliberately uncommitted**, and 3d deletes it again.
+
+---
+
+### The record that closed 2c-4b-2 (superseded by the above, kept for its rationale)
 
 ### Phase 2c-4b-2 is complete. **Step 2c-4b-3 is next.**
 
@@ -9716,6 +9879,7 @@ _Updated at each phase boundary._
 | **2c-4b design consult** | **`56d4817`** | ✅ pushed to `origin/main` (recorded by `74c7467`) | clean |
 | **2c-4b step 1** | **`3451a81`** | ✅ pushed to `origin/main` (recorded by `e7d5184`) | clean |
 | **2c-4b step 2** | **`0dec45c`** | ✅ pushed to `origin/main` | clean |
+| **2c-4b step 3a** | **`PENDING`** | pending | clean at commit |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no

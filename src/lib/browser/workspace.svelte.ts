@@ -612,7 +612,13 @@ export interface BrowserState {
    * earlier: authorization was bound to its conflict and *spending* was bound to
    * nothing, so a retained value could be replayed, handed to another
    * `BrowserState`, or spent while a later conflict was on screen. There is no
-   * such value to retain now. Five things are checked here, in order:
+   * such value to retain now. **This is an ordered sequence and not a set of checks
+   * applied alike**, and 2c-4b-3 is where that is written down: the passage here
+   * used to say *"Five things are checked here, in order"* over a flat list of five,
+   * with the `alreadyThere` arm described three paragraphs below and saying nothing
+   * about where in the order it returns — so a reader drew the conclusion that the
+   * generation guarded every successful answer, from the file that decides it. It
+   * does not. The real order is:
    *
    * 1. the confirmation was issued for **this** conflict (`authorizeDiskAdoption`);
    * 2. it has not already been spent through this state — one click, one install;
@@ -622,9 +628,17 @@ export interface BrowserState {
    *    session-local `DocumentId` may collide with one of this state's — installs
    *    nothing. That is the confirmation pass's residual half of the brand finding;
    * 4. the document is still projected here;
-   * 5. **that projection has not been replaced since the conflict arrived.**
+   * 5. **the projection already holds the requested revision** — in which case the
+   *    request is satisfied, the confirmation is spent, and the answer is
+   *    `alreadyThere`;
+   * 6. **that projection has not been replaced since the conflict arrived**, which
+   *    is asked only of what is left: the branch that is about to install.
    *
-   * **Item 5 is the confirmation pass's High, and the check is a generation rather
+   * So the first four precede **every** successful answer, and the generation
+   * comparison guards **only** the installing branch — because step 5 has already
+   * returned, and spent the token, for a window that holds those bytes.
+   *
+   * **Step 6 is the confirmation pass's High, and the check is a generation rather
    * than `conflict.expected`.** The defect was real: a `rereadDocument` landing
    * while a person read the warning left the window on a *newer* parse, and the
    * confirm then installed the conflict's older snapshot over it and reported
@@ -637,7 +651,10 @@ export interface BrowserState {
    *
    * **A window already holding the disk revision is `alreadyThere`, not a
    * refusal** — the request is satisfied, and the surface may finish. Reporting it
-   * as a failure left a confirm control that could never succeed.
+   * as a failure left a confirm control that could never succeed. That arm is step
+   * 5 above and not an aside: a window that reprojected to those exact bytes is
+   * answered before the generation is inspected at all, so it is *never* refused for
+   * having moved.
    *
    * **What none of this forces**: that a surface honours the answer. Nor can this
    * method know which conflict a surface is *currently* resolving; what closes that

@@ -14,13 +14,16 @@
     duplicationCouldNotBeSent,
     duplicationRecoveryFailed,
     matchDuplicationView,
+    reapplyToDiskVersion,
     reloadTheDiskVersion,
     startMatchDuplication,
+    type DuplicationReapplyAttempt,
     type DuplicationRecovery,
     type MatchDuplicationView
   } from '../browser/matchDuplication';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
+  import { attemptOfReapply, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { revealOutcome } from './reveal';
@@ -31,6 +34,7 @@
     tConflictOperation,
     tDetailField,
     tDraftError,
+    tDuplicationReapplyObstacle,
     tDuplicationRecovery,
     tDuplicationRefusal,
     tDuplicationSubmissionRefusal,
@@ -39,6 +43,8 @@
     tIpcFailure,
     tPresentationNote,
     tRawSaveChoice,
+    tReapplyOutcome,
+    tReapplyReadiness,
     tReloadUnavailable,
     tSaveError,
     tSaveOutcomeMessage,
@@ -269,6 +275,19 @@
   let session = $state.raw(startMatchDuplication(projection, match, unsavedDraftInDocument()));
 
   /**
+   * The last *Keep my draft* attempt, or `null` when this panel has made none.
+   *
+   * **Held with the session it produced**, which is what stops a report outliving
+   * what it describes: `reapplyToShow` answers `null` the moment `session` is
+   * replaced by anything else, and every transition in the model returns a new
+   * value. Nothing here has to remember to clear it.
+   */
+  let reapplyAttempt = $state.raw<DuplicationReapplyAttempt | null>(null);
+
+  /** What the last attempt left this panel to say, or `null`. */
+  const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
+
+  /**
    * Everything derived from **one** read of the current projections.
    *
    * The rule `matchDuplication.ts`'s header states and cannot enforce, and the
@@ -436,6 +455,22 @@
   } // End of function refusalAction()
 
   /**
+   * Tries what this panel is holding again, against the version on disk.
+   *
+   * **Two model calls and two assignments, and no rule of its own.**
+   * `reapplyToDiskVersion` decides the whole rebase before it asks the window to
+   * move, and `attemptOfReapply` is what decides which arms replace the session —
+   * that question is answered once, in `../browser/reapply.ts`, because five panels
+   * ask it and a rule written into one renderer is carried by that renderer's
+   * mounted suite alone.
+   */
+  function keepMyDraft(): void {
+    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, unsavedDraftInDocument(), adoptDiskVersion));
+    reapplyAttempt = attempt;
+    session = attempt.session;
+  } // End of function keepMyDraft()
+
+  /**
    * Does what one conflict choice says.
    *
    * **Three of the four arms are reachable as of 2c-4a-3b.**
@@ -460,6 +495,9 @@
     switch (choice) {
       case 'keepEditing':
         session = dismissDuplicationOutcome(session);
+        return;
+      case 'keepMyDraft':
+        keepMyDraft();
         return;
       case 'reloadDiskVersion':
         session = askToReloadDiskVersion(session);
@@ -603,6 +641,21 @@
     </div>
   {/if}
 
+  <!-- What the last *Keep my draft* left to say. Outside the outcome panel on
+       purpose: a reapply that succeeded hands back a session with no outcome at
+       all, so a report drawn inside that block would disappear at the moment it
+       had something to report. `reapplyToShow` is what keeps it from outliving the
+       session it describes. -->
+  {#if reapplyReport !== null}
+    {@const report = reapplyReport}
+    <div class="panel" role="status">
+      <p>{tReapplyOutcome(report.kind)}</p>
+      {#if report.kind === 'manualResolution'}
+        <p class="kind">{tDuplicationReapplyObstacle(report.obstacle)}</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if current.view.outcome !== null}
     {@const outcome = current.view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -723,6 +776,15 @@
         <!-- A control that has just gone, with the reason in its place. -->
         {#if current.view.reloadUnavailable}
           <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+        {/if}
+
+        <!-- The line beside *Keep my draft*: what this app will **try**, what it
+             works from, when it writes nothing, and what a later save may still
+             do. Drawn when the model names that choice and never from this
+             surface's own declaration, so the sentence and the control cannot
+             disagree (consult Q6). -->
+        {#if current.view.reapplyOffered}
+          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         <p class="choices" bind:this={outcomeChoices}>

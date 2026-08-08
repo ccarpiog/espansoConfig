@@ -1076,19 +1076,26 @@ describe('the conflict, which is terminal in this sub-phase', () => {
     expect(editField(stuck, 'replace', 'd')).toBe(stuck);
   });
 
-  it('offers three ways out, and none of them is called "keep my draft"', () => {
-    // **2c-4a-3a offers what 2c-4a-2 built.** Both capability booleans are `true`
-    // for this surface, so the non-destructive way out comes first, the copy that
-    // makes the destruction survivable comes next, and the destructive one is two
+  it('offers four ways out, and only the reapply is called "keep my draft"', () => {
+    // **2c-4a-3a offered what 2c-4a-2 built, and 2c-4b-3 did it again**: all three
+    // capability booleans are `true` for this surface, so the non-destructive way
+    // out comes first, the copy that makes the destruction survivable comes next,
+    // the reapply comes above the destructive one, and the destructive one is two
     // clicks away — the ordering `conflictChoicesFor` owns, not this module's.
     const choices = matchEditorView(conflicted()).conflictChoices;
     expect(choices).toEqual<readonly ConflictChoice[]>([
       'keepEditing',
       'copyDraft',
+      'keepMyDraft',
       'reloadDiskVersion'
     ]);
+    // The phrase is reserved for the one control that reapplies, and every other
+    // label must still not use it — the reason it was reserved has not changed.
     for (const locale of LOCALES) {
       for (const choice of choices) {
+        if (choice === 'keepMyDraft') {
+          continue;
+        }
         // Both draft kinds, because `confirmReload` has one label per kind since
         // 2c-4a-3b and a forbidden phrase could hide in either of them.
         for (const draftKind of ['authoredText', 'operationChoice'] as const) {
@@ -1246,8 +1253,10 @@ describe('the confirmed reload', () => {
    * A recorder for the window's own adoption.
    *
    * @param answer - What the window answers. `refused` is a real production
-   *   answer — a spent confirmation, a conflict this window did not produce, or a
-   *   projection replaced since it arrived.
+   *   answer — a confirmation issued for another conflict, one already spent, a
+   *   conflict this window did not produce, an unprojected document, or a
+   *   projection replaced since the conflict arrived when the window does not
+   *   already hold the requested revision.
    * @returns The callback to pass, and the conflicts it was handed.
    */
   function adopting(answer: DiskAdoptionOutcome = 'installed'): {
@@ -1313,9 +1322,10 @@ describe('the confirmed reload', () => {
     const after = reloadTheDiskVersion(confirmed, refusing.adopt);
     expect(after.closed).toBe(false);
     // **And the reload stops being offered rather than staying pressable.** The
-    // confirmation is spent and the window said no for a reason asking again
-    // cannot change, so the step is terminal, the panel discloses it, and only
-    // *Keep editing* and the copy remain (2c-4a-3a review, finding 3).
+    // window said no with no word about which guard produced it, so the step is
+    // terminal, the panel discloses it, and only *Keep editing* and the copy remain
+    // (2c-4a-3a review, finding 3). Terminal is what this panel draws, and not a
+    // claim that a later ask would be refused too.
     expect(after.reload.kind).toBe('refused');
     expect(matchEditorView(after).reloadUnavailable).toBe(true);
     expect(matchEditorView(after).awaitingReloadConfirmation).toBe(false);
@@ -1339,6 +1349,7 @@ describe('the confirmed reload', () => {
     expect(matchEditorView(asked).conflictChoices).toEqual<readonly ConflictChoice[]>([
       'keepEditing',
       'copyDraft',
+      'keepMyDraft',
       'confirmReload'
     ]);
     expect(matchEditorView(asked).awaitingReloadConfirmation).toBe(true);

@@ -202,11 +202,23 @@ export type SaveOutcomeMessage =
  * the other writer's work is destroyed; the save that refused is the check that
  * prevented it.
  *
- * **And none of these is "keep my draft".** In the plan that phrase means
- * *reapply the draft to the newly parsed disk document*, which is 2c-4b and is the
- * dangerous algorithmic half of Phase 2c. Using the words for the weaker
- * behaviour would teach the owner the wrong meaning and make 2c-4b look
- * already-done (`docs/decisions/2c-split-notes.md` section 6).
+ * **`keepMyDraft` is the phrase the plan reserved, and it means what the plan says
+ * it means.** Until 2c-4b-3 this union deliberately had no member for it: in the
+ * plan the words mean *reapply the draft to the newly parsed disk document*, which
+ * is 2c-4b's dangerous algorithmic half, and using them for the weaker behaviour
+ * would have taught the owner the wrong meaning and made the phase look
+ * already-done (`docs/decisions/2c-split-notes.md` section 6). The member exists
+ * now because the operation does: 2c-4b-1 built the correspondence evidence,
+ * 2c-4b-2 built one pure transition per surface, and this member is what names the
+ * control that calls one.
+ *
+ * **It is not a second reload and it asks no second question** — the consult's Q6.
+ * A reload discards the draft and resets the history; a reapply retains the intent,
+ * rebuilds it over the newly parsed document and hands back a session the surface's
+ * ordinary submit path sends, meeting the ordinary gates. What a destructive
+ * surface still re-asks is **its own** confirmation, against the snippet the live
+ * projection then names; that is confirmation of the destructive operation and not
+ * of this label.
  *
  * `confirmReload` is deliberately never offered beside `reloadDiskVersion`: it is
  * the second step, the label on the control that confirms a reload after the
@@ -214,7 +226,12 @@ export type SaveOutcomeMessage =
  * {@link confirmReloadDiskVersion}. {@link conflictChoicesFor} is what enforces
  * that, by taking the step and answering one of the two.
  */
-export type ConflictChoice = 'keepEditing' | 'copyDraft' | 'reloadDiskVersion' | 'confirmReload';
+export type ConflictChoice =
+  | 'keepEditing'
+  | 'copyDraft'
+  | 'keepMyDraft'
+  | 'reloadDiskVersion'
+  | 'confirmReload';
 
 /**
  * What one surface's retained draft **is**.
@@ -254,8 +271,9 @@ export type ConflictReloadOutcome =
  * confirmation that was spent **and satisfied** leaves the conflict behind it, so
  * there is nothing left to offer choices about. A spend the window **refused** is
  * not behind it at all — the panel is still there and the draft is still there —
- * and `unavailable` is what stops the confirm control being offered again when
- * asking again could only be refused again (2c-4a-3a review, finding 3).
+ * and `unavailable` is what stops the confirm control being offered again after a
+ * refusal that came back with no word about its cause (2c-4a-3a review, finding 3)
+ * — a control withheld, not a claim that a later ask could only be refused too.
  */
 export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
 
@@ -270,16 +288,20 @@ export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
  * disk text with a stale string or inventing a text merge — the first forbidden by
  * plan section 6.5 and the second by `IMPLEMENTATION_PLAN.md` outright.
  *
- * **What reads it is `beginReapply` in `./reapply.ts`**, which is the one gate
- * every surface's reapply transition goes through. That is deliberate: a
- * declaration nothing reads is a second answer rather than a default
- * ({@link conflictChoicesFor}'s own history), so this field decides a transition
- * rather than merely describing one.
+ * **Two things read it, and they read it for two different questions.**
+ * `beginReapply` in `./reapply.ts` is the gate every surface's reapply transition
+ * goes through, so an `unavailable` surface answers `unavailable` whether or not a
+ * conflict is showing; {@link conflictChoicesFor} reads it as the second of the two
+ * conditions for naming `keepMyDraft`, so a surface cannot draw a control over a
+ * transition that can never do anything. Neither is a description: a declaration
+ * nothing reads is a second answer rather than a default
+ * ({@link conflictChoicesFor}'s own history).
  *
- * **There is no `offersReapply` boolean beside it yet**, and that is 2c-4b-2's own
- * decision rather than an omission: {@link ConflictChoice} has no member a reapply
- * control could be named by, so a boolean saying *this surface draws it today*
- * would have nothing to produce and nothing to read it. 2c-4b-3 adds both together.
+ * **It is the permanent half of the pair, and
+ * {@link ConflictCapabilities.offersReapply} is the other.** This one says what the
+ * surface *is*; that one says what it draws today. 2c-4b-2 shipped this alone and
+ * said so, because there was then no {@link ConflictChoice} member for a boolean to
+ * produce; 2c-4b-3 added the member and the boolean together.
  */
 export type ConflictReapplySupport =
   /** This surface has a reapply transition. The five match surfaces. */
@@ -294,22 +316,28 @@ export type ConflictReapplySupport =
  * capability was expressed twice — an ignored field on the model and a local array
  * in each of the five match models — and {@link conflictChoicesFor} replaces both.
  *
- * **{@link ConflictCapabilities.draftKind} is permanent; the two booleans are
- * not.** The first is a fact about what the drafted value *is* and can only change
- * if the drafted type changes. The other two say what this surface **offers
- * today**, and they exist because of a hazard no type in this project can close: a
- * model that names a choice puts a control on screen, and the five components'
- * exhaustive `switch`es protect against a new *member* of {@link ConflictChoice}
- * and not against a newly *offered* one.
+ * **Two fields are permanent and three booleans are not.**
+ * {@link ConflictCapabilities.draftKind} and
+ * {@link ConflictCapabilities.reloadOutcome} are facts about what the drafted value
+ * *is* and what a reload *does*, and {@link ConflictCapabilities.reapplySupport} is
+ * a fact about whether a reapply could ever be honest here. The three booleans say
+ * what this surface **offers today**, and they exist because of a hazard no type in
+ * this project can close: a model that names a choice puts a control on screen, and
+ * the six components' exhaustive `switch`es protect against a new *member* of
+ * {@link ConflictChoice} and not against a newly *offered* one.
  *
  * **Offered is not the same as implemented, and since the 2c-4a-2 confirmation
  * pass this distinction is the whole point.** Every surface's reload transition
  * exists and every component's `conflictAction` calls it; what a `false` here
  * withholds is the *control*. Phase 2c-4a-3a flipped both booleans on the two
  * authored-text match surfaces over machinery that was already there and already
- * tested, and 2c-4a-3b flipped `offersReload` on the other three the same way. All
- * six now offer the reload; three of them will never offer the copy, because that
- * one is refused by {@link conflictChoicesFor} for what their draft *is*.
+ * tested, 2c-4a-3b flipped `offersReload` on the other three the same way, and
+ * 2c-4b-3 flipped {@link ConflictCapabilities.offersReapply} on the five match
+ * surfaces over the transitions 2c-4b-2 had already built and driven. All six now
+ * offer the reload; three of them will never offer the copy, because that one is
+ * refused by {@link conflictChoicesFor} for what their draft *is*; and the raw
+ * editor will never offer the reapply, because its
+ * {@link ConflictCapabilities.reapplySupport} refuses it for what its candidate is.
  */
 export interface ConflictCapabilities {
   /** What the retained draft is, which decides whether a copy could ever be honest. */
@@ -349,17 +377,34 @@ export interface ConflictCapabilities {
    */
   readonly offersReload: boolean;
   /**
+   * Whether this surface offers *Keep my draft* — the reapply path.
+   *
+   * `true` on the five match surfaces since 2c-4b-3, over the transitions
+   * `./reapply.ts` and each surface's own module built at 2c-4b-2; `false` on the
+   * raw editor, which also declares
+   * {@link ConflictCapabilities.reapplySupport} `unavailable`.
+   *
+   * **Honoured only for a surface whose {@link ConflictCapabilities.reapplySupport}
+   * is `supported`**, and that is checked in {@link conflictChoicesFor} rather than
+   * trusted here — the same shape as {@link ConflictCapabilities.offersCopyDraft}
+   * and for the same reason: the raw editor's refusal is a permanent property of a
+   * whole-document candidate and not a caller's opinion about it, so a surface that
+   * set this beside `unavailable` still gets no control.
+   *
+   * **A boolean rather than a constant**, like the other two: what it records is
+   * what a surface draws today, and a surface without a panel for it must be able
+   * to say so.
+   */
+  readonly offersReapply: boolean;
+  /**
    * Whether this surface can have a reapply transition at all.
    *
    * Permanent, like {@link ConflictCapabilities.draftKind} and
-   * {@link ConflictCapabilities.reloadOutcome}, and read by `beginReapply` in
-   * `./reapply.ts` rather than by a component: a surface that declares
-   * `unavailable` gets a `ReapplyOutcome` of `unavailable` from the shared gate,
-   * whether or not a conflict is showing.
-   *
-   * **{@link conflictChoicesFor} does not read it and must not**, because there is
-   * no {@link ConflictChoice} member for a reapply until 2c-4b-3. Nothing here
-   * draws anything.
+   * {@link ConflictCapabilities.reloadOutcome}. `beginReapply` in `./reapply.ts`
+   * reads it as the gate every reapply transition goes through — a surface that
+   * declares `unavailable` gets a `ReapplyOutcome` of `unavailable` whether or not a
+   * conflict is showing — and {@link conflictChoicesFor} reads it as the permanent
+   * half of the two conditions for naming `keepMyDraft`.
    */
   readonly reapplySupport: ConflictReapplySupport;
 }
@@ -374,15 +419,33 @@ export interface ConflictCapabilities {
  * on purpose — the destructive one is never nearest to hand, and the copy is what
  * makes the destruction survivable.
  *
+ * **`keepMyDraft` comes after the copy and before the reload**, which is the
+ * consult's Q6 read literally. It is the conservative choice — it writes nothing,
+ * discards nothing and asks no second question — so it belongs above the one that
+ * abandons the draft, and below the copy that makes abandoning it survivable.
+ *
+ * **It is gated on two conditions and not on the reload's step.**
+ * {@link ConflictCapabilities.reapplySupport} is the permanent fact — the raw
+ * editor can never have an honest reapply — and
+ * {@link ConflictCapabilities.offersReapply} is what the surface draws today. The
+ * `unavailable` step is deliberately **not** consulted: it records that a *reload*
+ * spend was refused, and a reapply is a different question with a different
+ * authorization. What a person who presses it in that state gets is whatever that
+ * attempt honestly ends as — `adoptionRefused` among the six arms, and no arm is
+ * promised here — rather than a control that vanished without a word.
+ *
  * **What this forces and what it does not, in the same sentence.** It forces that
- * a copy control cannot be offered for a draft that is not authored text, that
- * `reloadDiskVersion` and `confirmReload` are never offered together, and that
+ * a copy control cannot be offered for a draft that is not authored text, that a
+ * reapply control cannot be offered by a surface whose support is `unavailable`,
+ * that `reloadDiskVersion` and `confirmReload` are never offered together, and that
  * **neither is offered once a spend has been refused** — the `unavailable` step,
- * which is what keeps a control that could only be refused again off the screen.
+ * which keeps a control that has just been refused without a word off the screen
+ * rather than claiming a later ask could only be refused again.
  * It cannot force that the component drawing the list acts on what it names —
  * nothing in TypeScript can — which is what
- * {@link ConflictCapabilities.offersReload} and
- * {@link ConflictCapabilities.offersCopyDraft} are for, and they are hand-set.
+ * {@link ConflictCapabilities.offersReload},
+ * {@link ConflictCapabilities.offersCopyDraft} and
+ * {@link ConflictCapabilities.offersReapply} are for, and they are hand-set.
  *
  * @param capabilities - What the surface declares about itself.
  * @param step - How far its reload has got.
@@ -396,11 +459,66 @@ export function conflictChoicesFor(
   if (capabilities.offersCopyDraft && capabilities.draftKind === 'authoredText') {
     choices.push('copyDraft');
   }
+  if (capabilities.offersReapply && capabilities.reapplySupport === 'supported') {
+    choices.push('keepMyDraft');
+  }
   if (capabilities.offersReload && step !== 'unavailable') {
     choices.push(step === 'idle' ? 'reloadDiskVersion' : 'confirmReload');
   }
   return choices;
 } // End of function conflictChoicesFor()
+
+/**
+ * Whether one offered list names the reapply control.
+ *
+ * **A named read of the one authority, so a panel's readiness sentence and its
+ * control cannot disagree.** The sentence beside *Keep my draft* is the thing the
+ * consult's Q6 spends most of its words on, and a surface that drew it from its own
+ * capability record rather than from the produced list would be expressing
+ * capability twice — the split that once let a button compile and do nothing.
+ *
+ * @param choices - What {@link conflictChoicesFor} answered.
+ * @returns Whether the reapply control is among them.
+ */
+export function reapplyIsOffered(choices: readonly ConflictChoice[]): boolean {
+  return choices.includes('keepMyDraft');
+} // End of function reapplyIsOffered()
+
+/**
+ * The dictionary key holding the sentence that stands beside *Keep my draft*.
+ *
+ * **The consult's Q6 sentence, chosen by what the surface drafts and by nothing
+ * else.** Three surfaces hold text a person typed and three hold a placement or an
+ * identity nobody typed at all, so the version for the second three says *requested
+ * action* where the first says *the changes you kept* — the 2c-4a-3b finding that
+ * *typed text* describes something a mover, a deleter and a duplicator never
+ * produced, applied to the sentence this step adds rather than rediscovered later.
+ *
+ * **What no test in this repository can hold**: that either sentence *says* what
+ * Q6 requires — that this application will only **try**, that it works from the
+ * newly parsed document, that nothing is written when the target or a drafted field
+ * cannot be matched safely, that a safe match promises **no** particular ending,
+ * and that a later save may still be refused or conflict. The third of those is the
+ * 2c-4b-3a review's High: a safe correspondence does not imply something to send,
+ * because `ReapplyOutcome`'s `alreadySatisfied` is a success with nothing left
+ * to send when the newly parsed document already holds what was asked for — an arm
+ * the mounted mover suite exercises — and `adoptionRefused` and `manualResolution`
+ * are endings too, so the sentence names the two successful shapes as possibilities
+ * rather than as an exhaustive pair. The i18n suites check key parity and
+ * placeholder agreement, never meaning (`CLAUDE.md` section 6). What a test can
+ * hold, and `saveOutcome.test.ts` does, is that the two keys are different and that
+ * each draft kind reaches its own.
+ *
+ * @param draftKind - What the calling surface's retained draft is, from its own
+ *   `CONFLICT_CAPABILITIES`.
+ * @returns The key holding that surface's version of the sentence.
+ */
+export function reapplyReadinessKey(draftKind: ConflictDraftKind): TranslationKey {
+  return draftKindWording(draftKind, {
+    authoredText: 'browser.reapply.ready',
+    operationChoice: 'browser.reapply.readyOperation'
+  });
+} // End of function reapplyReadinessKey()
 
 /** A save that ran to the end. */
 export interface SavedModel {
@@ -1220,11 +1338,14 @@ declare const AUTHORIZED: unique symbol;
  * an adoption cannot be assembled from a `DocumentView` a caller happens to hold:
  * the brand is nameable only inside this module and {@link authorizeDiskAdoption}
  * is its only producer, which in turn requires the confirmation issued for that
- * exact conflict. It does not force the *window-side* answers — a spent
- * confirmation, a conflict that window did not produce, an unprojected document, a
- * projection replaced since the conflict arrived, or one already **at** the disk
- * revision, which is a {@link DiskAdoptionOutcome} `alreadyThere` and not a
- * refusal at all. Those are `BrowserState.adoptDiskVersion`'s and are stated
+ * exact conflict. It does not force the *window-side* answers — a confirmation
+ * issued for another conflict, one already spent, a conflict that window did not
+ * produce, an unprojected document, or a projection replaced since the conflict
+ * arrived when the window does not already hold the requested revision, that last
+ * clause being load-bearing because a window already **at** the disk revision is a
+ * {@link DiskAdoptionOutcome} `alreadyThere`, decided before the projection
+ * generation is compared at all, and not a refusal. Those are
+ * `BrowserState.adoptDiskVersion`'s, in that method's order, and are stated
  * there; and the brand is a cast at bottom, exactly as `ReloadConfirmation`,
  * `RoundTripText` and `SealedWholeDocumentSave` are.
  */
@@ -1416,6 +1537,16 @@ export function conflictChoiceKey(
       });
     case 'copyDraft':
       return 'browser.saveOutcome.choice.copyDraft';
+    case 'keepMyDraft':
+      // **The third branch on the draft kind, and it is the same rule as the other
+      // two.** *Keep my draft* names text on the raw editor, the match editor and
+      // the creator; on the mover, the deleter and the duplicator there is no
+      // draft in that sense — a placement and an identity are not authored text —
+      // so the label names the requested action instead (consult Q6).
+      return draftKindWording(draftKind, {
+        authoredText: 'browser.saveOutcome.choice.keepMyDraft',
+        operationChoice: 'browser.saveOutcome.choice.keepMyRequest'
+      });
     case 'reloadDiskVersion':
       return 'browser.saveOutcome.choice.reloadDiskVersion';
     case 'confirmReload':
@@ -1449,7 +1580,11 @@ export function conflictChoiceKey(
  * 3. the conflict is one that state never registered, or the origin recorded when
  *    it arrived names a different document from the one the payload carries;
  * 4. the document is no longer projected there;
- * 5. that document's projection generation has moved since the conflict arrived.
+ * 5. that document's projection generation has moved since the conflict arrived
+ *    **and** the window does not already hold the requested revision. The order is
+ *    load-bearing and this clause is 2c-4b-3's correction of it: the satisfied
+ *    request is settled first, so a window that has reprojected *to those exact
+ *    bytes* answers `alreadyThere` and never reaches this check.
  *
  * **Why the current window supplies none of the five, which is a separate claim
  * from the list.** The first two are closed by how a confirmation is minted and
@@ -1463,11 +1598,21 @@ export function conflictChoiceKey(
  * at all. The third is closed because every conflict a surface can show arrived
  * through one of the six writing wrappers, each of which calls
  * `rememberTheConflict` for that document at the moment it arrived. The last two
- * ask about the projection, and no control drawn while a conflict panel owns the
- * interaction removes or replaces one: the panel offers *Keep editing*, the copy
- * where it is honest, and the reload pair, and the one control that calls
+ * ask about the projection, and the one control that calls
  * `BrowserState.rereadDocument` — the mover's and the duplicator's `reloadFile` —
  * is offered only from a `sendFailure`, which a conflict outcome does not set.
+ *
+ * **Since 2c-4b-3 the panel draws a control that *does* replace the projection,
+ * and this is where that is accounted for.** *Keep my draft* adopts through the
+ * very same door, so a successful reapply installs a view and bumps the generation.
+ * It does not put a later reload in front of a moved projection, because the two
+ * arms that adopt — `reapplied` and `alreadySatisfied` — both hand the surface a
+ * rebuilt session whose outcome is `null`, so the conflict panel that could offer a
+ * reload is gone in the same synchronous handler; and the arms that leave the panel
+ * standing adopt nothing at all, because every transition decides its whole rebase
+ * before it asks the window to move. **That is an implementation fact about the six
+ * transitions and about six components, not something these types force**, and what
+ * drives it is each surface's own suite together with the six mounted suites.
  *
  * **What that argument is worth, in the same place as the argument.** It is about
  * the controls this window draws; it is not a proof that no reprojection begun

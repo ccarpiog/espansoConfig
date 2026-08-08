@@ -82,11 +82,15 @@
    * ordering, not this file's: `view.conflictChoices` answers one list before the
    * warning and another after it.
    *
-   * **No control here is called "keep my draft", in any language.** That phrase
-   * means *reapply the draft to the newly parsed document*, which is Phase 2c-4b;
-   * using the words for this weaker behaviour would make 2c-4b look already done.
-   * What is offered is *Keep editing*, *Copy my text* and *Load the version on
-   * disk*, which are the four `ConflictChoice` labels and no others.
+   * **No control here is called "keep my draft", and on this surface that is
+   * permanent.** Since 2c-4b-3 the phrase names a real operation and five panels
+   * draw it, and this one never will: `rawEditor.ts`'s `CONFLICT_CAPABILITIES`
+   * declares `reapplySupport: 'unavailable'` — the consult's Q4 ruling that a
+   * whole-document candidate has no target, no field intent and no operation to
+   * re-resolve — so `conflictChoicesFor` names no reapply here whatever this
+   * surface's `offersReapply` said. What is offered is *Keep editing*, *Copy my
+   * text* and *Load the version on disk*, and 2c-4c owns the recovery this editor
+   * is left with.
    *
    * **A save that failed is never drawn as "nothing was written" unless it was.**
    * A failure at or after the rename may have left the candidate on disk, and the
@@ -360,6 +364,15 @@
       case 'copyDraft':
         void copyTheDraft();
         return;
+      case 'keepMyDraft':
+        // Never offered here, and not because a boolean is `false`: this
+        // surface's `reapplySupport` is permanently `unavailable`, and
+        // `conflictChoicesFor` requires it to be `supported` before it will name
+        // this choice. `rawEditor.reapplyToDiskVersion` takes no adoption
+        // function at all, so there is nothing this arm could call. It exists so
+        // the `switch` stays exhaustive and a sixth member of `ConflictChoice`
+        // is a compile error here.
+        return;
       case 'reloadDiskVersion':
         session = askToReload(session);
         return;
@@ -576,8 +589,9 @@
         {/if}
 
         <!-- A control that has just gone, with the reason in its place: the reload
-             is not offered again once the window has refused a spend, because
-             asking again could only be refused again. -->
+             is not offered again once the window has refused a spend, because the
+             refusal came back with no word about its cause. That withholds a
+             control; it claims nothing about how a later ask would be answered. -->
         {#if view.reloadUnavailable}
           <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}

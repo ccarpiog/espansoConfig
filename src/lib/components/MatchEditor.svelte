@@ -12,6 +12,7 @@
     focusField,
     keepEditing,
     matchEditorView,
+    reapplyToDiskVersion,
     redoEdit,
     reloadTheDiskVersion,
     removeField,
@@ -20,11 +21,13 @@
     startMatchEditor,
     type Clock,
     type EditableField,
+    type EditorReapplyAttempt,
     type Reprojection,
     undoEdit
   } from '../browser/matchEditor';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { MatchBuffers } from '../browser/matchEditor';
+  import { attemptOfReapply, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
@@ -38,6 +41,7 @@
     tDraftError,
     tDraftFieldStatus,
     tEditError,
+    tEditorReapplyObstacle,
     tFieldRefusal,
     tFindingCode,
     tHazard,
@@ -45,6 +49,8 @@
     tOptionGroup,
     tPresentationNote,
     tRawSaveChoice,
+    tReapplyOutcome,
+    tReapplyReadiness,
     tReloadUnavailable,
     tReprojectionRefusal,
     tSaveError,
@@ -264,6 +270,19 @@
   let session = $state.raw(startMatchEditor(match, clock));
   const view = $derived(matchEditorView(session));
 
+  /**
+   * The last *Keep my draft* attempt, or `null` when this panel has made none.
+   *
+   * **Held with the session it produced**, which is what stops a report outliving
+   * what it describes: `reapplyToShow` answers `null` the moment `session` is
+   * replaced by anything else, and every transition in the model returns a new
+   * value. Nothing here has to remember to clear it.
+   */
+  let reapplyAttempt = $state.raw<EditorReapplyAttempt | null>(null);
+
+  /** What the last attempt left this panel to say, or `null`. */
+  const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
+
   /** Whether leaving the editor is waiting on a confirmation. */
   let leaving = $state(false);
 
@@ -473,6 +492,22 @@
   } // End of function copyTheDraft()
 
   /**
+   * Tries what this panel is holding again, against the version on disk.
+   *
+   * **Two model calls and two assignments, and no rule of its own.**
+   * `reapplyToDiskVersion` decides the whole rebase before it asks the window to
+   * move, and `attemptOfReapply` is what decides which arms replace the session —
+   * that question is answered once, in `../browser/reapply.ts`, because five panels
+   * ask it and a rule written into one renderer is carried by that renderer's
+   * mounted suite alone.
+   */
+  function keepMyDraft(): void {
+    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, adoptDiskVersion));
+    reapplyAttempt = attempt;
+    session = attempt.session;
+  } // End of function keepMyDraft()
+
+  /**
    * Does what one conflict choice says.
    *
    * **All four arms are reachable as of 2c-4a-3a.** `matchEditor.ts`'s
@@ -497,6 +532,9 @@
       case 'keepEditing':
         session = keepEditing(session);
         copied = 'none';
+        return;
+      case 'keepMyDraft':
+        keepMyDraft();
         return;
       case 'reloadDiskVersion':
         session = askToReloadDiskVersion(session);
@@ -748,6 +786,21 @@
     </div>
   {/if}
 
+  <!-- What the last *Keep my draft* left to say. Outside the outcome panel on
+       purpose: a reapply that succeeded hands back a session with no outcome at
+       all, so a report drawn inside that block would disappear at the moment it
+       had something to report. `reapplyToShow` is what keeps it from outliving the
+       session it describes. -->
+  {#if reapplyReport !== null}
+    {@const report = reapplyReport}
+    <div class="panel" role="status">
+      <p>{tReapplyOutcome(report.kind)}</p>
+      {#if report.kind === 'manualResolution'}
+        <p class="kind">{tEditorReapplyObstacle(report.obstacle)}</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -859,8 +912,9 @@
         {/if}
 
         <!-- A control that has just gone, with the reason in its place. The reload
-             is not offered again once the window has refused a spend, because
-             asking again could only be refused again. -->
+             is not offered again once the window has refused a spend, because the
+             refusal came back with no word about its cause. That withholds a
+             control; it claims nothing about how a later ask would be answered. -->
         {#if view.reloadUnavailable}
           <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
@@ -870,6 +924,15 @@
           <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
         {:else if copied === 'failed'}
           <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
+        {/if}
+
+        <!-- The line beside *Keep my draft*: what this app will **try**, what it
+             works from, when it writes nothing, and what a later save may still
+             do. Drawn when the model names that choice and never from this
+             surface's own declaration, so the sentence and the control cannot
+             disagree (consult Q6). -->
+        {#if view.reapplyOffered}
+          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         <p class="choices" bind:this={outcomeChoices}>

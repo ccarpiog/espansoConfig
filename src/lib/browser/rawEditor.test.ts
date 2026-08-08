@@ -201,9 +201,11 @@ function conflict(diskRevision: ContentRevision = AFTER, diskText: string = DISK
  * on one this module refuses.
  *
  * @param answer - What the window answers. `refused` is a real production answer —
- *   a spent confirmation, a conflict this window did not produce, or a projection
- *   replaced since it arrived — and a reload that took it for a success would
- *   reseed over a window that never moved.
+ *   a confirmation issued for another conflict, one already spent, a conflict this
+ *   window did not produce, an unprojected document, or a projection replaced since
+ *   the conflict arrived when the window does not already hold the requested
+ *   revision — and a reload that took it for a success would reseed over a window
+ *   that never moved.
  * @returns The callback to pass, and what it was handed.
  */
 function adopting(answer: DiskAdoptionOutcome = 'installed'): {
@@ -743,22 +745,25 @@ describe('the conflict state', () => {
   }); // End of the "already at the disk version" case
 
   it('reseeds nothing when the window refuses the adoption', () => {
-    // **A `refused` is a real production answer** — a spent confirmation, a
-    // conflict this window did not produce, a document it no longer projects, or a
-    // projection replaced since the conflict arrived — and taking it for a success
-    // would give the person a clean draft over a window that never moved, with the
-    // conflict panel gone and nothing to say what happened. Bytes the window
-    // already holds are **not** in that list: that is `alreadyThere`, and the case
-    // above is what it does.
+    // **A `refused` is a real production answer** — a confirmation issued for
+    // another conflict, one already spent, a conflict this window did not produce,
+    // a document it no longer projects, or a projection replaced since the conflict
+    // arrived when the window does not already hold the requested revision — and
+    // taking it for a success would give the person a clean draft over a window that
+    // never moved, with the conflict panel gone and nothing to say what happened.
+    // Bytes the window already holds are **not** in that list: that is
+    // `alreadyThere`, decided before the projection generation is compared at all,
+    // and the case above is what it does.
     const refusing = adopting('refused');
     const confirmed = confirmReload(askToReload(inConflict()));
     const after = loadDiskVersion(confirmed, refusing.adopt);
     expect(rawEditorView(after).text).toBe(EDITED);
     expect(conflictOf(after)).not.toBeNull();
     // **And the reload stops being offered rather than staying pressable**, which
-    // is the 2c-4a-3a review's finding 3: every reason the window refuses for is a
-    // reason asking again cannot change, so the step is terminal and the panel
-    // discloses it in place of the control. *Keep editing* and the copy remain.
+    // is the 2c-4a-3a review's finding 3: the window refuses with no word about
+    // which guard produced it, so the step is terminal and the panel discloses it
+    // in place of the control. Terminal is what this panel draws, and not a claim
+    // that a later ask would be refused too. *Keep editing* and the copy remain.
     expect(after.reload.kind).toBe('refused');
     expect(rawEditorView(after).reloadUnavailable).toBe(true);
     expect(rawEditorView(after).awaitingReloadConfirmation).toBe(false);

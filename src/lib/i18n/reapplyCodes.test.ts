@@ -37,7 +37,25 @@ import {
   reapplyRefusalKey,
   reapplyResolutionKey
 } from './codes';
-import { translate, type TranslationKey } from './dictionaries';
+import {
+  describeCreationReapplyObstacle,
+  describeDeletionReapplyObstacle,
+  describeDuplicationReapplyObstacle,
+  describeEditorReapplyObstacle,
+  describeMoveReapplyObstacle,
+  describeReapplyOutcome,
+  describeReapplyReadiness
+} from './index';
+import { creationReapplyObstacleKey, type CreationReapplyObstacle } from '../browser/matchCreation';
+import { deletionReapplyObstacleKey, type DeletionReapplyObstacle } from '../browser/matchDeletion';
+import {
+  duplicationReapplyObstacleKey,
+  type DuplicationReapplyObstacle
+} from '../browser/matchDuplication';
+import { editorReapplyObstacleKey, type EditorReapplyObstacle } from '../browser/matchEditor';
+import { moveReapplyObstacleKey, type MoveReapplyObstacle } from '../browser/matchMove';
+import { DICTIONARIES, translate, type TranslationKey } from './dictionaries';
+import type { Locale } from './locale';
 import type { ExpectNever, Missing } from './exhaustive';
 import { LOCALES } from './locale';
 import en from './en.json';
@@ -279,3 +297,190 @@ describe('the correspondence-evidence accessors', () => {
     expect(identified.toLowerCase()).toContain('not proof');
   }); // End of the "identification cannot establish" case
 }); // End of the "correspondence-evidence accessors" suite
+
+// ---------------------------------------------------------------------------
+// The obstacle sentences a panel draws — Phase 2c-4b-3
+// ---------------------------------------------------------------------------
+//
+// The composing describers, one per surface. What is checked here is what
+// `svelte-check` and the dictionary contract cannot see: that calling one
+// produces a sentence rather than `undefined`, that every arm of every union has
+// one of its own, and that an arm carrying a nested wire or model code renders
+// **both** — an obstacle that named a refusal and then dropped the reason would
+// leave a person with a refusal and no reason, and every other check would pass.
+//
+// **It says nothing about what the sentences mean.** No test in this repository
+// can (`CLAUDE.md` section 6).
+
+describe('the reapply obstacle sentences', () => {
+  /** Every arm of the match editor's union, exhaustively. */
+  const EDITOR_OBSTACLES: readonly EditorReapplyObstacle[] = [
+    { kind: 'fieldCollisions', fields: ['replace', 'label'] },
+    { kind: 'targetNotEditable' },
+    { kind: 'correspondence', reason: 'AmbiguousTrigger' },
+    { kind: 'evidenceNotATarget' }
+  ];
+
+  /** Every arm of the creation form's union, exhaustively. */
+  const CREATION_OBSTACLES: readonly CreationReapplyObstacle[] = [
+    { kind: 'anchorCorrespondence', reason: 'NoExactCorrespondence' },
+    { kind: 'evidenceNotAnAnchor' },
+    { kind: 'anchorNotInDestination' },
+    { kind: 'notTheDestination' },
+    { kind: 'creationRefused', reason: 'anchorUnavailable' },
+    { kind: 'correspondence', reason: 'AmbiguousTrigger' },
+    { kind: 'evidenceNotATarget' }
+  ];
+
+  /** Every arm of the deletion's union, exhaustively. */
+  const DELETION_OBSTACLES: readonly DeletionReapplyObstacle[] = [
+    { kind: 'notDeletable', reason: 'readOnly' },
+    { kind: 'correspondence', reason: 'AmbiguousExact' },
+    { kind: 'evidenceNotATarget' }
+  ];
+
+  /** Every arm of the duplication's union, exhaustively. */
+  const DUPLICATION_OBSTACLES: readonly DuplicationReapplyObstacle[] = [
+    { kind: 'notDuplicable', reason: 'readOnly' },
+    { kind: 'correspondence', reason: 'AmbiguousExact' },
+    { kind: 'evidenceNotATarget' }
+  ];
+
+  /** Every arm of the move's union, exhaustively. */
+  const MOVE_OBSTACLES: readonly MoveReapplyObstacle[] = [
+    { kind: 'anchorCorrespondence', reason: 'NoExactCorrespondence' },
+    { kind: 'evidenceNotAnAnchor' },
+    { kind: 'notTheSameSequence' },
+    { kind: 'anchorNotInSequence' },
+    { kind: 'moveRefused', reason: 'outOfDate' },
+    { kind: 'correspondence', reason: 'AmbiguousExact' },
+    { kind: 'evidenceNotATarget' }
+  ];
+
+  /**
+   * One surface's union, its key function and its describer, checked together.
+   *
+   * @param name - Which surface, so a failure says which.
+   * @param arms - Every arm of that surface's union.
+   * @param key - The key function beside the union.
+   * @param describe1 - The composing describer in `./index.ts`.
+   */
+  function surface<O extends { readonly kind: string }>(
+    name: string,
+    arms: readonly O[],
+    key: (obstacle: O) => TranslationKey,
+    describe1: (locale: Locale, obstacle: O) => string
+  ): void {
+    const keys = new Set<TranslationKey>();
+    for (const obstacle of arms) {
+      keys.add(key(obstacle));
+      for (const locale of LOCALES) {
+        const sentence = describe1(locale, obstacle);
+        expect(sentence, `${name}/${locale}/${obstacle.kind}`).not.toContain('undefined');
+        expect(sentence.length, `${name}/${locale}/${obstacle.kind}`).toBeGreaterThan(0);
+        // The arm's own sentence is always in it; a describer that reached for
+        // another arm's key would still be a sentence. Compared up to the first
+        // `{placeholder}`, because one arm has one and a substituted value is not
+        // in the raw dictionary string.
+        const own = DICTIONARIES[locale][key(obstacle)];
+        const upToThePlaceholder = own.slice(0, own.indexOf('{') === -1 ? own.length : own.indexOf('{'));
+        expect(sentence, `${name}/${locale}/${obstacle.kind}`).toContain(upToThePlaceholder);
+      } // End of the loop over the two locales
+    } // End of the loop over every arm of this surface's union
+    // One key per arm: an arm wearing another's sentence would pass everything
+    // above.
+    expect(keys.size, name).toBe(arms.length);
+  } // End of function surface()
+
+  it('gives every arm of every surface a sentence of its own, in both languages', () => {
+    surface('editor', EDITOR_OBSTACLES, editorReapplyObstacleKey, describeEditorReapplyObstacle);
+    surface(
+      'creation',
+      CREATION_OBSTACLES,
+      creationReapplyObstacleKey,
+      describeCreationReapplyObstacle
+    );
+    surface(
+      'deletion',
+      DELETION_OBSTACLES,
+      deletionReapplyObstacleKey,
+      describeDeletionReapplyObstacle
+    );
+    surface(
+      'duplication',
+      DUPLICATION_OBSTACLES,
+      duplicationReapplyObstacleKey,
+      describeDuplicationReapplyObstacle
+    );
+    surface('move', MOVE_OBSTACLES, moveReapplyObstacleKey, describeMoveReapplyObstacle);
+  }); // End of the "every arm has a sentence" case
+
+  it('renders the nested code beside the obstacle rather than instead of it', () => {
+    // **The arms that carry a reason must show it.** A refusal that named itself
+    // and dropped the reason would leave a person with nothing to act on, and the
+    // key-parity suites cannot see the difference.
+    for (const locale of LOCALES) {
+      expect(
+        describeEditorReapplyObstacle(locale, {
+          kind: 'correspondence',
+          reason: 'AmbiguousTrigger'
+        })
+      ).toContain(translate(locale, reapplyRefusalKey('AmbiguousTrigger')));
+      expect(
+        describeMoveReapplyObstacle(locale, {
+          kind: 'anchorCorrespondence',
+          reason: 'NoExactCorrespondence'
+        })
+      ).toContain(translate(locale, reapplyRefusalKey('NoExactCorrespondence')));
+      expect(
+        describeDeletionReapplyObstacle(locale, { kind: 'notDeletable', reason: 'readOnly' })
+      ).toContain(translate(locale, 'browser.matchDeletion.refused.readOnly'));
+      expect(
+        describeDuplicationReapplyObstacle(locale, { kind: 'notDuplicable', reason: 'readOnly' })
+      ).toContain(translate(locale, 'browser.matchDuplication.refused.readOnly'));
+      expect(
+        describeCreationReapplyObstacle(locale, {
+          kind: 'creationRefused',
+          reason: 'anchorUnavailable'
+        })
+      ).toContain(translate(locale, 'browser.matchCreation.cannotCreate.anchorUnavailable'));
+      expect(
+        describeMoveReapplyObstacle(locale, { kind: 'moveRefused', reason: 'outOfDate' })
+      ).toContain(translate(locale, 'browser.matchMove.cannotMove.outOfDate'));
+    } // End of the loop over the two locales
+  }); // End of the "nested code rendered" case
+
+  it('names the collided fields by the labels the editor itself uses', () => {
+    // The `{fields}` placeholder is filled from the obstacle's own list and the
+    // detail pane's own labels, so a field is called the same thing here as it is
+    // where it is edited — and the list is joined the same way in both languages,
+    // which is a compromise `./index.ts` states rather than hides.
+    for (const locale of LOCALES) {
+      const sentence = describeEditorReapplyObstacle(locale, {
+        kind: 'fieldCollisions',
+        fields: ['replace', 'label']
+      });
+      expect(sentence, locale).toContain(translate(locale, 'browser.detail.field.replace'));
+      expect(sentence, locale).toContain(translate(locale, 'browser.detail.field.label'));
+      expect(sentence, locale).not.toContain('{fields}');
+    } // End of the loop over the two locales
+  }); // End of the "collided fields named" case
+
+  it('gives the readiness line and every attempt arm a sentence, in both languages', () => {
+    for (const locale of LOCALES) {
+      for (const draftKind of ['authoredText', 'operationChoice'] as const) {
+        expect(describeReapplyReadiness(locale, draftKind).length).toBeGreaterThan(0);
+      } // End of the loop over the two draft kinds
+      for (const code of [
+        'reapplied',
+        'alreadySatisfied',
+        'manualResolution',
+        'adoptionRefused',
+        'unavailable',
+        'notAttempted'
+      ] as const) {
+        expect(describeReapplyOutcome(locale, code).length, `${locale}:${code}`).toBeGreaterThan(0);
+      } // End of the loop over the six arms
+    } // End of the loop over the two locales
+  });
+}); // End of the "reapply obstacle sentences" suite

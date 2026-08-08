@@ -228,12 +228,22 @@ const NOTHING_SAID_YET: RawSaveModel = describeRawSave(null);
  * string or inventing a text merge — the first forbidden by plan section 6.5 and
  * the second by the plan outright. {@link reapplyToDiskVersion} is what says so as
  * a value; 2c-4c owns the recovery fallback this surface is left with.
+ *
+ * **`offersReapply` is `false` here and it is the weaker of the two statements.**
+ * The five match surfaces set it `true` at 2c-4b-3 and this one did not, but a
+ * `true` here would change nothing on the screen: `conflictChoicesFor` requires the
+ * permanent `reapplySupport` as well, so no control could be drawn for a transition
+ * that answers `unavailable` before it looks at any evidence. The field is set
+ * because it is required — a surface cannot inherit somebody else's answer — and
+ * `saveOutcome.test.ts` pins both halves, including that setting this one alone
+ * offers nothing.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'reseedsDraft',
   offersCopyDraft: true,
   offersReload: true,
+  offersReapply: false,
   reapplySupport: 'unavailable'
 };
 
@@ -832,10 +842,14 @@ export function confirmReload(session: RawEditorSession): RawEditorSession {
  * computed first because it is pure, `adopt` is called only once every check here
  * has passed, and a `refused` from it leaves both the window and the draft exactly
  * as they were — a confirmation issued for another conflict, one already spent, a
- * conflict this window did not produce, or a projection replaced since it arrived.
+ * conflict this window did not produce, an unprojected document, or a projection
+ * replaced since the conflict arrived when the window does not already hold the
+ * requested revision, which are `BrowserState.adoptDiskVersion`'s guards **in its
+ * order** and not a set applied alike.
  * A carriage return in the disk text is refused one step earlier, here.
- * **`alreadyThere` reseeds**: the window already holds the bytes the draft would be
- * seeded from, so the request is satisfied and the draft follows it.
+ * **`alreadyThere` reseeds**: a window already holding the requested revision is
+ * answered so, and its confirmation spent, *before* the projection generation is
+ * compared at all, so the request is satisfied and the draft follows it.
  *
  * **What no type here forces**: that `adopt`'s body does anything.
  * `() => 'installed'` type-checks, exactly as `openWholeDocumentSave`'s `forget`
@@ -876,9 +890,11 @@ export function loadDiskVersion(
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the 2c-4a-3a
-    // review's finding 3: the confirmation is spent and the window said no for a
-    // reason asking again cannot change, so the control stops being offered and the
-    // panel says so. Nothing is reseeded, and *Keep editing* writes `NOT_RELOADING`
+    // review's finding 3: the window said no without a word about which of
+    // `adoptDiskVersion`'s ordered guards produced it, so the control stops being
+    // offered and the panel says so. That is a decision about what to draw and
+    // **not** a claim that a later ask would be refused too — a refusal spends
+    // nothing. Nothing is reseeded, and *Keep editing* writes `NOT_RELOADING`
     // back for a fresh attempt.
     return { ...session, reload: RELOAD_REFUSED };
   }
@@ -1024,9 +1040,10 @@ export interface RawEditorView {
    * Whether a confirmed reload was spent and the window refused it.
    *
    * **The disclosure this panel owes for a control that has just gone.** The reload
-   * is not offered again once a spend has been refused — asking again could only be
-   * refused again — and a control that vanishes with nothing said in its place
-   * reads as a bug (2c-4a-3a review, finding 3). Nothing was written, nothing was
+   * is not offered again once a spend has been refused — the refusal came back with
+   * no word about its cause, so this panel withholds the control rather than
+   * claiming a later ask could only be refused too — and a control that vanishes
+   * with nothing said in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written, nothing was
    * discarded and nothing was reseeded; *Keep editing* resets the step.
    */
   readonly reloadUnavailable: boolean;

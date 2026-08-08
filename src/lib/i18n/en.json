@@ -137,6 +137,19 @@
   "browser.rawSave.choice.saveAnyway": "Save anyway",
   "browser.rawSave.choice.keepEditing": "Keep editing",
 
+  "browser.reapply.ready": "espansoConfig will try to apply the changes you kept to the version of this file on disk shown above, working from that newly parsed document. Nothing is written if the snippet this change is about, or any field you changed, cannot be matched safely. If they can be matched safely, this may end with the disk version already holding the changes you asked for and nothing left to send, or with a form for you to send — and that save can still be refused, or meet another change to the file and conflict again. However it ends, you are told, and nothing is written until you send something.",
+  "browser.reapply.readyOperation": "espansoConfig will try to apply the action you requested to the version of this file on disk shown above, working from that newly parsed document. Nothing is written if the snippet this action is about, or the position it needs, cannot be matched safely. If they can be matched safely, this may end with the disk version already holding the result you asked for and nothing left to send, or with the action set up again over that version for you to send — and that save can still be refused, or meet another change to the file and conflict again. However it ends, you are told, and nothing is written until you send something.",
+  "browser.reapply.reapplied": "This window now shows the version on disk, with what you kept set up over it. Nothing has been written yet: send it when you are ready, and that save can still be refused or conflict.",
+  "browser.reapply.alreadySatisfied": "This window now shows the version on disk, and that version already holds what you asked for, so there is nothing left to send. Nothing was written.",
+  "browser.reapply.manualResolution": "espansoConfig applied nothing. Nothing was written, this window was not moved, and what you kept is still here exactly as it was. The reason follows.",
+  "browser.reapply.adoptionRefused": "This window would not move to the version on disk, so nothing was rebuilt and nothing was written. What you kept is still here. You can carry on here, or stop and open the file again to start from what it holds now.",
+  "browser.reapply.unavailable": "This panel cannot keep what you have here against the version on disk. Nothing was written and nothing was discarded.",
+  "browser.reapply.notAttempted": "There was no conflict to work from, so this window was not asked to do anything. Nothing was written.",
+  "browser.reapply.obstacle.correspondence": "espansoConfig could not identify the snippet this change is about in the version on disk.",
+  "browser.reapply.obstacle.evidenceNotATarget": "The correspondence evidence this conflict carried names no snippet to look for, and this panel needs one.",
+  "browser.reapply.obstacle.anchorCorrespondence": "espansoConfig could not identify, in the version on disk, the snippet this one was to be placed after.",
+  "browser.reapply.obstacle.evidenceNotAnAnchor": "This change names a snippet to be placed after, and the correspondence evidence this conflict carried names none.",
+
   "browser.saveOutcome.fileWritten": "The file was written. What is on disk now is exactly the text that was sent.",
   "browser.saveOutcome.nothingToWrite": "The text was already exactly what the file held, so nothing was written. Both checks still ran; this is a save with nothing to do.",
   "browser.saveOutcome.backupTaken": "A copy of this file as it was before this session's first change to it was kept. Only the last ten sessions of copies are kept, so this is not a promise that the file can be recovered later.",
@@ -156,6 +169,8 @@
   "browser.saveOutcome.choice.reloadDiskVersion": "Load the version on disk",
   "browser.saveOutcome.choice.confirmReload": "Discard my text and load it",
   "browser.saveOutcome.choice.confirmReloadClosing": "Close this and load it",
+  "browser.saveOutcome.choice.keepMyDraft": "Keep my draft",
+  "browser.saveOutcome.choice.keepMyRequest": "Keep what I asked for",
   "browser.saveOutcome.retainedDraft": "What you wrote, kept here",
   "browser.saveOutcome.retainedOperation": "What you asked for, kept here",
   "browser.saveOutcome.operationIdentityIsOld": "This panel names the snippet as this window read it before the file changed. This app does not look for a matching snippet in the version on disk, so nothing here says what that version holds.",
@@ -237,6 +252,8 @@
   "browser.matchEditor.fieldRemoved": "This key will be taken out of the file when you save.",
   "browser.matchEditor.remove": "Take this key out",
   "browser.matchEditor.restore": "Keep this key",
+  "browser.matchEditor.reapply.fieldCollisions": "The version on disk has changed fields that you had changed too, so espansoConfig will not choose between them: {fields}.",
+  "browser.matchEditor.reapply.targetNotEditable": "The snippet found in the version on disk is one this app will not edit, so there is nowhere to put your changes.",
 
   "browser.matchCreation.open": "Add a snippet",
   "browser.matchCreation.label": "A new snippet",
@@ -283,6 +300,9 @@
   "browser.matchCreation.cannotCreate.triggerEmpty": "A snippet needs the text that fires it.",
   "browser.matchCreation.cannotCreate.replaceEmpty": "A snippet needs something to expand to.",
   "browser.matchCreation.cannotCreate.carriageReturn": "One of these values contains a carriage return, which no box in this window could show you back afterwards, so it will not be written.",
+  "browser.matchCreation.reapply.anchorNotInDestination": "The snippet this one was to be placed after is not in this file's list as the version on disk holds it.",
+  "browser.matchCreation.reapply.notTheDestination": "This form writes into a different file from the one this conflict is about, so there is nothing here to re-point at it.",
+  "browser.matchCreation.reapply.creationRefused": "The form cannot be sent against the version on disk.",
 
   "browser.matchDeletion.open": "Delete this snippet…",
   "browser.matchDeletion.label": "Deleting a snippet",
@@ -309,6 +329,7 @@
   "browser.matchDeletion.refused.readOnly": "This app must not write to this file, so it cannot delete anything from it.",
   "browser.matchDeletion.refused.lastSnippet": "This is the only snippet in this file, and emptying a file’s snippet list is not something this app does. Delete the file itself instead, outside this app.",
   "browser.matchDeletion.refused.notInDocument": "This snippet and the reading of the file this window holds do not go together, so nothing can be deleted from here. Read the file again and pick the snippet from the list.",
+  "browser.matchDeletion.reapply.notDeletable": "The snippet found in the version on disk is one this app will not delete.",
 
   "browser.matchMove.open": "Move this snippet…",
   "browser.matchMove.label": "Moving a snippet",
@@ -350,6 +371,9 @@
   "browser.matchMove.cannotMove.notMovable": "This snippet cannot be moved, and the reason is shown beside it.",
   "browser.matchMove.cannotMove.outOfDate": "The places offered here come from a reading of this file that this window can no longer stand behind. This move wrote nothing. Close this and pick the snippet in the list to move it.",
   "browser.matchMove.cannotMove.alreadyThere": "This is where the file already writes this snippet. Choose another place for it.",
+  "browser.matchMove.reapply.notTheSameSequence": "The snippet found in the version on disk is not in the list this move works in, and this app does not move a snippet from one list to another.",
+  "browser.matchMove.reapply.anchorNotInSequence": "The snippet this one was to be placed after is not one this move may name in the list as the version on disk holds it.",
+  "browser.matchMove.reapply.moveRefused": "The move cannot be sent against the version on disk.",
 
   "browser.matchDuplication.open": "Duplicate this snippet…",
   "browser.matchDuplication.label": "Duplicating a snippet",
@@ -383,6 +407,7 @@
   "browser.matchDuplication.cannotDuplicate.conflict": "The file changed while this duplicate was being written, so nothing was written. Read what happened before duplicating it again.",
   "browser.matchDuplication.cannotDuplicate.outOfDate": "This panel comes from a reading of this file that this window can no longer stand behind. This duplicate wrote nothing. Close this and pick the snippet in the list to duplicate it.",
   "browser.matchDuplication.cannotDuplicate.notDuplicable": "This snippet cannot be duplicated, and the reason is shown beside it.",
+  "browser.matchDuplication.reapply.notDuplicable": "The snippet found in the version on disk is one this app will not copy.",
 
   "language.label": "Language",
   "language.followSystem": "Follow the system language",

@@ -175,7 +175,9 @@ import {
   adoptForReapply,
   anchorCorrespondence,
   beginReapply,
+  sharedReapplyObstacleKey,
   subjectIsTargetless,
+  type ReapplyAttempt,
   type ReapplyOutcome,
   type SharedReapplyObstacle
 } from './reapply';
@@ -185,6 +187,7 @@ import {
   copyOfDraft,
   describeEditSave,
   invalidationFailureMessage,
+  reapplyIsOffered,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
@@ -1334,11 +1337,16 @@ export function confirmDiskReload(session: MatchCreationSession): MatchCreationS
  * collected for.
  *
  * **Nothing is closed for an adoption the window refused.** A `refused` from
- * `adopt` — a spent confirmation, a conflict this window did not produce, or a
- * projection replaced since it arrived — leaves the session exactly as it was,
- * because closing over a window that did not move would report a reload that did
- * not happen. **`alreadyThere` is not a refusal**: the window already holds the
- * bytes that were asked for, so the request is satisfied and this session ends.
+ * `adopt` — a confirmation issued for another conflict, one already spent, a
+ * conflict this window did not produce, an unprojected document, or a projection
+ * replaced since the conflict arrived when the window does not already hold the
+ * requested revision — leaves the session exactly as it was, because closing over
+ * a window that did not move would report a reload that did not happen. Those are
+ * `BrowserState.adoptDiskVersion`'s guards **in its order**, not a set applied
+ * alike. **`alreadyThere` is not a refusal**: a window already holding the
+ * requested revision is answered so, and its confirmation spent, *before* the
+ * projection generation is compared at all, so the request is satisfied and this
+ * session ends.
  *
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * panel reading the view's `closed` really closes.
@@ -1357,9 +1365,11 @@ export function reloadTheDiskVersion(
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the
-    // 2c-4a-3a review’s finding 3: the confirmation is spent and the window said
-    // no for a reason that asking again cannot change, so the control stops being
-    // offered and the panel says so. *Keep editing* writes NOT_RELOADING back.
+    // 2c-4a-3a review’s finding 3: the window said no without a word about which
+    // of `adoptDiskVersion`'s ordered guards produced it, so the control stops
+    // being offered and the panel says so. That is a decision about what to draw
+    // and **not** a claim that a later ask would be refused too — a refusal spends
+    // nothing. *Keep editing* writes NOT_RELOADING back.
     return { ...session, reload: RELOAD_REFUSED };
   }
   return {
@@ -1432,6 +1442,48 @@ export type CreationReapplyObstacle =
 
 /** What a reapply of this form became. */
 export type MatchCreationReapply = ReapplyOutcome<MatchCreationSession, CreationReapplyObstacle>;
+
+/** One reapply attempt this panel made, tied to the session it left behind. */
+export type CreationReapplyAttempt = ReapplyAttempt<
+  MatchCreationSession,
+  CreationReapplyObstacle
+>;
+
+/**
+ * The dictionary key holding one reapply obstacle's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom of every other
+ * describer in this directory: a renamed key is a compile error here, and a new
+ * member of {@link CreationReapplyObstacle} with no sentence is one too. The two
+ * shared arms delegate to {@link sharedReapplyObstacleKey}, and the two anchor arms
+ * share the mover's keys, because there the claim really is the same claim about
+ * the same kind of thing.
+ *
+ * **The nested reasons are second lines and not part of these keys.** Both
+ * `anchorCorrespondence`'s {@link ReapplyRefusal} and `creationRefused`'s
+ * {@link CreationRefusal} already have their own sentences and accessors; the i18n
+ * layer composes them.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The key holding that obstacle's sentence.
+ */
+export function creationReapplyObstacleKey(obstacle: CreationReapplyObstacle): TranslationKey {
+  switch (obstacle.kind) {
+    case 'anchorCorrespondence':
+      return 'browser.reapply.obstacle.anchorCorrespondence';
+    case 'evidenceNotAnAnchor':
+      return 'browser.reapply.obstacle.evidenceNotAnAnchor';
+    case 'anchorNotInDestination':
+      return 'browser.matchCreation.reapply.anchorNotInDestination';
+    case 'notTheDestination':
+      return 'browser.matchCreation.reapply.notTheDestination';
+    case 'creationRefused':
+      return 'browser.matchCreation.reapply.creationRefused';
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return sharedReapplyObstacleKey(obstacle);
+  }
+} // End of function creationReapplyObstacleKey()
 
 /**
  * The destination one file's newly parsed projection is, for a rebuilt form.
@@ -1607,17 +1659,21 @@ export function reapplyToDiskVersion(
  * that named them would be describing something the retained draft does not
  * carry. They stay on screen in the form above the panel.
  *
- * **None of these is "keep my draft"** and none may become one until a control is
- * drawn: `reapplySupport` says this form *can* reapply and
- * {@link reapplyToDiskVersion} is the transition, but `ConflictChoice` has no
- * member for one and `conflictChoicesFor` names none, so nothing is offered here.
- * 2c-4b-3 draws it.
+ * **`offersReapply` is `true` as of 2c-4b-3**, over the transition 2c-4b-2 built
+ * and this module's tests already drove. `MatchCreator.svelte`'s `conflictAction`
+ * is what calls {@link reapplyToDiskVersion}, and what it hands back is a form
+ * re-pointed at the newly parsed destination with the typed values retained, the
+ * consent withdrawn and {@link creationRefusal} asked again in full. **A reapply
+ * here is not a duplicate-trigger check**: whether the file already has a snippet
+ * that fires the same way is decided by the newly derived candidate's own findings,
+ * at the command (consult Q4).
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: true,
   offersReload: true,
+  offersReapply: true,
   reapplySupport: 'supported'
 };
 
@@ -1686,12 +1742,24 @@ export interface MatchCreationView {
    * Whether a confirmed reload was spent and the window refused it.
    *
    * **The disclosure the panel owes for a control that has just gone.** The
-   * reload is not offered again once a spend has been refused — asking again
-   * could only be refused again — and a control that vanishes with nothing said
-   * in its place reads as a bug (2c-4a-3a review, finding 3). Nothing was written
+   * reload is not offered again once a spend has been refused — the refusal came
+   * back with no word about its cause, so this panel withholds the control rather
+   * than claiming a later ask could only be refused too — and a control that
+   * vanishes with nothing said in its place reads as a bug (2c-4a-3a review,
+   * finding 3). Nothing was written
    * and nothing was discarded; *Keep editing* resets the step.
    */
   readonly reloadUnavailable: boolean;
+  /**
+   * Whether the reapply control is among {@link MatchCreationView.conflictChoices}.
+   *
+   * **Read from the produced list and never from the capability record**, through
+   * `reapplyIsOffered`: the readiness sentence and the control it stands beside must
+   * come from one authority, and a view that asked the declaration instead would be
+   * expressing capability twice — the split that once let a button compile and do
+   * nothing.
+   */
+  readonly reapplyOffered: boolean;
   /**
    * The disk side of that conflict, or `null` when none is showing.
    *
@@ -1759,6 +1827,10 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
   const stale = submissionIsStale(session.draft, session.submitted);
   const conflict = conflictOf(session);
   const saved = outcome !== null && outcome.kind === 'saved' ? outcome : null;
+  const conflictChoices =
+    conflict === null
+      ? []
+      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
   return {
     destinations: session.destinations,
     chosen: chosenDestination(session),
@@ -1781,12 +1853,10 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
     findingsAreStale: refused !== null && stale,
     conflict,
     retainedDraft: conflict === null ? [] : retainedDraftOf(conflict),
-    conflictChoices:
-      conflict === null
-        ? []
-        : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload)),
+    conflictChoices,
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    reapplyOffered: reapplyIsOffered(conflictChoices),
     diskText: conflictDiskText(conflict),
     closed: session.closed,
     committed: session.committed,

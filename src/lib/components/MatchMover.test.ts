@@ -933,8 +933,9 @@ describe('the destination panel’s conflict', () => {
   }); // End of the "three adoption answers" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
-    // only be refused again is gone, and the sentence takes its place.
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control the window
+    // refused without a word is gone, and the sentence takes its place; withholding
+    // it claims nothing about how a later ask would be answered.
     const panel = await conflicted('refused');
     control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
     flushSync();
@@ -1300,3 +1301,113 @@ describe('a move panel over the real workspace state', () => {
     target.remove();
   }); // End of the "reprojection under an open conflict" case
 }); // End of the "move panel over the real state" suite
+
+/** The reapply control's label on this surface, which drafts no text. */
+const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'operationChoice');
+
+/**
+ * A conflict whose evidence identified the moved snippet in a chosen disk parse.
+ *
+ * @param disk - The projection of the fresh read, and where the target is found.
+ * @param at - Which of its snippets the evidence identified.
+ * @returns The conflict as it crosses the boundary.
+ */
+function identifiedIn(disk: DocumentView, at: number): SaveResult {
+  // Written out rather than spread over {@link CONFLICTED}: a spread into a
+  // `SaveResult` annotation is checked against all three arms, and the two this is
+  // not lack every field below.
+  return {
+    outcome: 'conflict',
+    reapply: {
+      subject: { Identified: { target: disk.matches[at]! } },
+      placement: { NotAnchored: {} }
+    },
+    expected: BASE,
+    found: AFTER,
+    disk_revision: AFTER,
+    disk_text: DISK_TEXT,
+    disk
+  };
+} // End of function identifiedIn()
+
+/**
+ * Reaches the conflict panel with a chosen payload and a positional destination.
+ *
+ * **Positional on purpose.** `top` and `end` are semantic choices the rebuilt
+ * session lowers afresh, so these cases drive the subject's correspondence without
+ * also depending on an anchor's — which is the mover's second, separate arm.
+ *
+ * @param result - The conflict the scripted boundary answers with.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflictedGoingToTheEnd(result: SaveResult): Promise<Mounted> {
+  const panel = mountMover([{ result }]);
+  destination(panel.target, DICTIONARIES.en['browser.matchMove.position.end']).click();
+  flushSync();
+  control(panel.target, 'browser.matchMove.move').click();
+  await settle();
+  return panel;
+} // End of function conflictedGoingToTheEnd()
+
+describe('the destination panel’s *Keep my draft*', () => {
+  it('draws the control and the operation-choice line beside it', async () => {
+    const panel = await conflicted();
+    expect(button(panel.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(says(panel.target, 'browser.reapply.readyOperation')).toBe(true);
+    // Never the authored-text sentence: nobody typed a placement.
+    expect(says(panel.target, 'browser.reapply.ready')).toBe(false);
+    panel.stop();
+  });
+
+  it('rebuilds the move over the disk version, sending nothing', async () => {
+    // The disk still writes this snippet first, so *at the bottom of the list* is
+    // a real request against the new parse and the rebuilt session has one to send.
+    const panel = await conflictedGoingToTheEnd(identifiedIn(reread(), 0));
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(says(panel.target, 'browser.reapply.reapplied')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.alreadySatisfied')).toBe(false);
+    // The conflict is gone and nothing was sent a second time: a reapply is not a
+    // retry, and the ordinary submit path is what sends what it hands back.
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "move rebuilt" case
+
+  it('reports the no-op arm when the disk already places the snippet there', async () => {
+    // **`alreadySatisfied` is not `reapplied` and not a refusal**, which is consult
+    // Q9's likeliest false sentence designed out: the disk snapshot was adopted and
+    // there is nothing left to send, and saying *reapplied* would invite a person
+    // to look for something to press.
+    const settled = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [item(11, 0, ':date', AFTER), item(12, 1, ':sql', AFTER), item(10, 2, ':sig', AFTER)]
+    });
+    const panel = await conflictedGoingToTheEnd(identifiedIn(settled, 2));
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(says(panel.target, 'browser.reapply.alreadySatisfied')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.reapplied')).toBe(false);
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "already satisfied" case
+
+  it('refuses and adopts nothing when the evidence names no snippet', async () => {
+    const panel = await conflicted();
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.obstacle.evidenceNotATarget')).toBe(true);
+    expect(panel.adoptions).toEqual([]);
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    panel.stop();
+  });
+}); // End of the "destination panel’s reapply" suite

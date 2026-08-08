@@ -19,6 +19,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
+import { LOCALES } from '../i18n/locale';
 import type {
   ConflictResult,
   MatchView,
@@ -30,9 +32,14 @@ import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import {
   adoptForReapply,
   anchorCorrespondence,
+  attemptOfReapply,
   beginReapply,
+  reapplyOutcomeKey,
+  reapplyToShow,
+  sharedReapplyObstacleKey,
   subjectCorrespondence,
-  subjectIsTargetless
+  subjectIsTargetless,
+  type ReapplyOutcomeCode
 } from './reapply';
 import {
   authorizeDiskAdoption,
@@ -49,11 +56,23 @@ const SUPPORTED: ConflictCapabilities = {
   reloadOutcome: 'closesSurface',
   offersCopyDraft: true,
   offersReload: true,
+  offersReapply: true,
   reapplySupport: 'supported'
 };
 
-/** A surface that never can. The raw editor's declaration. */
-const UNAVAILABLE: ConflictCapabilities = { ...SUPPORTED, reapplySupport: 'unavailable' };
+/**
+ * A surface that never can. The raw editor's declaration, both halves.
+ *
+ * `beginReapply` reads only `reapplySupport`; `offersReapply` is set to the raw
+ * editor's own `false` so this constant is that surface rather than a variant of
+ * the one above, and the case that drives the gate over `reapplySupport` alone
+ * says so where it drives it.
+ */
+const UNAVAILABLE: ConflictCapabilities = {
+  ...SUPPORTED,
+  offersReapply: false,
+  reapplySupport: 'unavailable'
+};
 
 /** The snippet a case's disk snapshot holds. */
 const TARGET: MatchView = makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':sig' });
@@ -277,3 +296,89 @@ describe('the adoption', () => {
     } // End of the loop over the three adoption outcomes
   });
 }); // End of the adoption suite
+
+describe('what one attempt leaves a panel holding', () => {
+  /** A session, as an identity a case can compare by reference. */
+  interface Held {
+    /** Which one this is, so a failure names it. */
+    readonly name: string;
+  }
+
+  /** The session a panel is showing before an attempt. */
+  const BEFORE: Held = { name: 'before' };
+
+  /** The session a successful attempt hands back. */
+  const AFTER: Held = { name: 'after' };
+
+  it('replaces the session on the two arms that adopted, and on no other', () => {
+    // **The rule five panels would otherwise each have written.** `reapplied` and
+    // `alreadySatisfied` have already installed the disk snapshot, so the session
+    // they carry is the one to hold; the other four adopted nothing and leave the
+    // window exactly where it was.
+    const carried = [
+      { kind: 'reapplied', session: AFTER },
+      { kind: 'alreadySatisfied', session: AFTER }
+    ] as const;
+    for (const outcome of carried) {
+      expect(attemptOfReapply(BEFORE, outcome).session, outcome.kind).toBe(AFTER);
+    } // End of the loop over the two arms that carry a session
+
+    const kept = [
+      { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } },
+      { kind: 'adoptionRefused' },
+      { kind: 'unavailable' },
+      { kind: 'notAttempted' }
+    ] as const;
+    for (const outcome of kept) {
+      expect(attemptOfReapply(BEFORE, outcome).session, outcome.kind).toBe(BEFORE);
+    } // End of the loop over the four arms that carry none
+  }); // End of the "which arms replace the session" case
+
+  it('reports an attempt only while the session it produced is the one on screen', () => {
+    // What makes a stale report impossible rather than unlikely: the comparison is
+    // reference equality, and every transition in this repository returns a new
+    // session value, so the next thing a person does drops the report.
+    const attempt = attemptOfReapply(BEFORE, { kind: 'adoptionRefused' });
+    expect(reapplyToShow(attempt, BEFORE)).toBe(attempt.outcome);
+    expect(reapplyToShow(attempt, { name: 'before' })).toBeNull();
+    expect(reapplyToShow(null, BEFORE)).toBeNull();
+  });
+
+  it('gives every arm a sentence, in both languages', () => {
+    // A `Record` over the union rather than an array, so a seventh arm is a
+    // compile error here as well as in `reapplyOutcomeKey`.
+    const every = Object.keys({
+      reapplied: true,
+      alreadySatisfied: true,
+      manualResolution: true,
+      adoptionRefused: true,
+      unavailable: true,
+      notAttempted: true
+    } satisfies Record<ReapplyOutcomeCode, true>) as readonly ReapplyOutcomeCode[];
+    const keys = new Set<TranslationKey>();
+    for (const code of every) {
+      const key = reapplyOutcomeKey(code);
+      keys.add(key);
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][key].length, `${locale}:${code}`).toBeGreaterThan(0);
+      } // End of the loop over the two locales
+    } // End of the loop over every arm
+    // Six arms, six keys: one arm wearing another's sentence would satisfy every
+    // assertion above.
+    expect(keys.size).toBe(every.length);
+  }); // End of the "every arm has a sentence" case
+
+  it('gives both shared obstacles a sentence of their own, in both languages', () => {
+    const first = sharedReapplyObstacleKey({
+      kind: 'correspondence',
+      reason: 'AmbiguousTrigger'
+    });
+    const second = sharedReapplyObstacleKey({ kind: 'evidenceNotATarget' });
+    expect(first).not.toBe(second);
+    for (const key of [first, second]) {
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][key].length, `${locale}:${key}`).toBeGreaterThan(0);
+      } // End of the loop over the two locales
+    } // End of the loop over the two shared obstacles
+  });
+}); // End of the "what one attempt leaves a panel holding" suite

@@ -472,11 +472,59 @@ describe('the mounted deletion panel', () => {
  * @returns The mounted panel, showing the conflict.
  */
 async function conflicted(adoption: DiskAdoptionOutcome = 'installed'): Promise<Mounted> {
-  const panel = mountDeleter([{ result: CONFLICTED }], file(), 0, adoption);
+  return conflictedWith(CONFLICTED, adoption);
+} // End of function conflicted()
+
+/**
+ * The file as the fresh read after the refusal found it.
+ *
+ * Two snippets, so a rebuilt deletion is not refused for emptying the list, and
+ * **different arena nodes**, so a case can tell an identity minted from this parse
+ * from one minted from the parse the panel opened over.
+ */
+const DISK: DocumentView = file({
+  revision: AFTER,
+  matches: [
+    makeMatch({ node: 20, document: 2, revision: AFTER, trigger: ':sig' }),
+    makeMatch({ node: 21, document: 2, revision: AFTER, trigger: ':date' })
+  ]
+});
+
+/**
+ * The same conflict, whose correspondence evidence identified the snippet.
+ *
+ * `disk` and the identified target come from one value here; in Rust one refresh
+ * builds the text, the revision and the projection together, and nothing in a
+ * fixture can stand in for that (`fixtures.ts`'s own note).
+ */
+const IDENTIFIED: SaveResult = {
+  ...CONFLICTED,
+  disk: DISK,
+  reapply: {
+    subject: { Identified: { target: DISK.matches[0]! } },
+    placement: { NotAnchored: {} }
+  }
+};
+
+/**
+ * Reaches the conflict panel with a chosen payload.
+ *
+ * @param result - The conflict the scripted boundary answers with.
+ * @param adoption - What the window answers when asked to adopt.
+ * @returns The mounted panel, showing the conflict.
+ */
+async function conflictedWith(
+  result: SaveResult,
+  adoption: DiskAdoptionOutcome = 'installed'
+): Promise<Mounted> {
+  const panel = mountDeleter([{ result }], file(), 0, adoption);
   control(panel.target, 'browser.matchDeletion.confirm').click();
   await settle();
   return panel;
-} // End of function conflicted()
+} // End of function conflictedWith()
+
+/** The reapply control's label on this surface, which drafts no text. */
+const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'operationChoice');
 
 describe('the deletion panel’s conflict', () => {
   it('shows the operation beside the disk text, and deletes nothing', async () => {
@@ -588,9 +636,10 @@ describe('the deletion panel’s conflict', () => {
   }); // End of the "three adoption answers" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from this screen.** The control that could
-    // only be refused again is gone, and the sentence takes its place; *Keep
-    // editing* stays and resets the step.
+    // **The 2c-4a-3a review's finding 3, from this screen.** The control the window
+    // refused without a word is gone, and the sentence takes its place; *Keep
+    // editing* stays and resets the step. Withholding it claims nothing about how a
+    // later ask would be answered.
     const panel = await conflicted('refused');
     control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
     flushSync();
@@ -904,3 +953,110 @@ describe('a committed deletion, over the real workspace state', () => {
     target.remove();
   }); // End of the "no pre-commit identity" case
 }); // End of the "committed deletion over the real state" suite
+
+describe('the deletion panel’s *Keep my draft*', () => {
+  it('draws the control and the line that stands beside it', () => {
+    // **A mounted test proves a handler fires, not that a window draws.** What it
+    // establishes is that the model names this choice for this surface, that the
+    // panel turns that into a control, and that the sentence beside it is the
+    // operation-choice one — nobody typed anything here, so the version that talks
+    // about changes to fields would describe something the person never produced.
+    return conflicted().then((panel) => {
+      expect(button(panel.target, KEEP_MY_DRAFT)).not.toBeNull();
+      expect(says(panel.target, 'browser.reapply.readyOperation')).toBe(true);
+      expect(says(panel.target, 'browser.reapply.ready')).toBe(false);
+      // And it sits above the destructive choice, which is the consult's Q6 order.
+      const labels = [...panel.target.querySelectorAll('.choices button')].map((one) =>
+        one.textContent?.trim()
+      );
+      expect(labels.indexOf(DICTIONARIES.en[KEEP_MY_DRAFT])).toBeLessThan(
+        labels.indexOf(DICTIONARIES.en[conflictChoiceKey('reloadDiskVersion', 'operationChoice')])
+      );
+      panel.stop();
+    });
+  }); // End of the "control and readiness line" case
+
+  it('refuses and adopts nothing when the evidence names no snippet', async () => {
+    // The conflict this suite's other cases use carries `Unsupported`, which is
+    // what a save that names nothing produces — so the transition refuses before it
+    // asks the window to move anything, and the panel says both halves: that
+    // nothing was applied, and which negative claim about the evidence stopped it.
+    const panel = await conflicted();
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.obstacle.evidenceNotATarget')).toBe(true);
+    // Decide first, adopt second: the window was never asked.
+    expect(panel.adoptions).toEqual([]);
+    // And the conflict is still on screen, with its choices, and nothing was sent.
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(button(panel.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "refusal adopts nothing" case
+
+  it('rebuilds the deletion over the disk version and asks its own question again', async () => {
+    // **Consult Q6: there is no second "are you sure?" merely because the reload
+    // has one — the deletion's own confirmation is what a reapply hands back.** The
+    // rebuilt session has nothing pending, so the request control returns and the
+    // person answers a question about the snippet the new parse names.
+    const panel = await conflictedWith(IDENTIFIED);
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(panel.adoptions).toHaveLength(1);
+    expect(says(panel.target, 'browser.reapply.reapplied')).toBe(true);
+    // The conflict panel is gone: the rebuilt session carries no outcome at all.
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(button(panel.target, KEEP_MY_DRAFT)).toBeNull();
+    // Nothing was sent by the reapply itself.
+    expect(panel.calls).toHaveLength(1);
+
+    // The window really moved, which is what the stubbed adoption stands for.
+    panel.reproject([DISK]);
+    control(panel.target, 'browser.matchDeletion.request').click();
+    flushSync();
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+
+    expect(panel.calls).toHaveLength(2);
+    // The identity and the base revision are both the newly parsed ones; nothing
+    // from the parse this panel opened over is sent a second time.
+    expect(panel.calls[1]?.id).toEqual(DISK.matches[0]?.id);
+    expect(panel.calls[1]?.baseRevision).toBe(AFTER);
+    panel.stop();
+  }); // End of the "renewed confirmation" case
+
+  it('refuses the renewed confirmation while the window still holds the old parse', async () => {
+    // The half no model test can reach: `confirmDelete`'s live-projection argument
+    // is read **here**, at the click, and a window that has not moved gives the
+    // rebuilt snippet no identity at all. Nothing is sent.
+    const panel = await conflictedWith(IDENTIFIED);
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+    control(panel.target, 'browser.matchDeletion.request').click();
+    flushSync();
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+
+    expect(says(panel.target, 'browser.matchDeletion.confirmationRefused')).toBe(true);
+    expect(panel.calls).toHaveLength(1);
+    panel.stop();
+  }); // End of the "renewed confirmation refused" case
+
+  it('says what happened when the window refuses to move, and keeps the panel', async () => {
+    const panel = await conflictedWith(IDENTIFIED, 'refused');
+    control(panel.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.reapply.adoptionRefused')).toBe(true);
+    expect(says(panel.target, 'browser.reapply.reapplied')).toBe(false);
+    // The conflict is still showing and the session was not replaced.
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "adoption refused" case
+}); // End of the "deletion panel’s reapply" suite

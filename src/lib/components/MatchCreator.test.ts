@@ -926,9 +926,10 @@ describe('the mounted new-snippet form', () => {
   }); // End of the "three adoption answers" case
 
   it('stops offering the reload once the window has refused it, and says why', async () => {
-    // **The 2c-4a-3a review's finding 3, from the screen.** The control that could
-    // only be refused again is gone, and the sentence takes its place; *Keep
-    // editing* and the copy stay.
+    // **The 2c-4a-3a review's finding 3, from the screen.** The control the window
+    // refused without a word is gone, and the sentence takes its place; *Keep
+    // editing* and the copy stay. Withholding it claims nothing about how a later
+    // ask would be answered.
     const form = mountCreator([{ result: CONFLICTED }], null, undefined, 'refused');
     fillIn(form);
     control(form.target, 'browser.matchCreation.create').click();
@@ -1176,3 +1177,89 @@ describe('the new-snippet form’s outcome comes into view', () => {
     form.stop();
   }); // End of the "arm replacing an arm" case
 }); // End of the "new-snippet form's outcome comes into view" suite
+
+describe('the creation form’s *Keep my draft*', () => {
+  /** The reapply control's label on this surface, whose draft is authored text. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /**
+   * The same conflict, carrying the arm a creation's own conflict carries.
+   *
+   * **`Targetless` and not `Unsupported`.** A creation brings its own snippet and
+   * names no existing one to find again; a whole-document replacement has no
+   * snippet *and* no honest reapply, and collapsing the two is what consult Q3
+   * forbids.
+   */
+  const TARGETLESS: SaveResult = {
+    ...CONFLICTED,
+    disk: makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' }),
+        makeMatch({ node: 31, document: 2, revision: AFTER, trigger: ':date' })
+      ]
+    }),
+    reapply: { subject: { Targetless: {} }, placement: { NotAnchored: {} } }
+  };
+
+  /**
+   * A form showing a conflict over a filled-in draft, with a chosen payload.
+   *
+   * @param result - The conflict the scripted boundary answers with.
+   * @returns The mounted form.
+   */
+  async function conflictedWith(result: SaveResult): Promise<Mounted> {
+    const form = mountCreator([{ result }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    return form;
+  } // End of function conflictedWith()
+
+  it('draws the control and the authored-text line beside it', async () => {
+    const form = await conflictedWith(CONFLICTED);
+    expect(button(form.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(says(form.target, 'browser.reapply.ready')).toBe(true);
+    expect(says(form.target, 'browser.reapply.readyOperation')).toBe(false);
+    form.stop();
+  });
+
+  it('re-points the form at the disk version and sends it afresh', async () => {
+    // The typed values are what a person wrote and mean the same against either
+    // parse; the destination, the base revision and every ordinary check are
+    // rebuilt around them, and the consent collected before the conflict is gone.
+    const form = await conflictedWith(TARGETLESS);
+    control(form.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(form.adoptions).toHaveLength(1);
+    expect(says(form.target, 'browser.reapply.reapplied')).toBe(true);
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(form.calls).toHaveLength(1);
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls).toHaveLength(2);
+    expect(form.calls[1]?.baseRevision).toBe(AFTER);
+    // The acknowledgement round trip starts again: findings accepted for one
+    // revision's candidate say nothing about another's.
+    expect(form.calls[1]?.acknowledgement).toEqual({ accepted: [] });
+    form.stop();
+  }); // End of the "form re-pointed" case
+
+  it('refuses and adopts nothing when the evidence is not a creation’s', async () => {
+    // `Unsupported` is a whole-document replacement's arm, and a form handed one
+    // treats the disagreement as a refusal: it writes nothing.
+    const form = await conflictedWith(CONFLICTED);
+    control(form.target, KEEP_MY_DRAFT).click();
+    flushSync();
+
+    expect(says(form.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(says(form.target, 'browser.reapply.obstacle.evidenceNotATarget')).toBe(true);
+    expect(form.adoptions).toEqual([]);
+    expect(says(form.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    form.stop();
+  });
+}); // End of the "creation form’s reapply" suite

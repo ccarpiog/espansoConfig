@@ -14,11 +14,14 @@
     dismissDeletionOutcome,
     identityInProjection,
     matchDeletionView,
+    reapplyToDiskVersion,
     reloadTheDiskVersion,
     requestDelete,
-    startMatchDeletion
+    startMatchDeletion,
+    type DeletionReapplyAttempt
   } from '../browser/matchDeletion';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
+  import { attemptOfReapply, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
@@ -35,7 +38,10 @@
     tFindingCode,
     tIpcFailure,
     tPresentationNote,
+    tDeletionReapplyObstacle,
     tRawSaveChoice,
+    tReapplyOutcome,
+    tReapplyReadiness,
     tReloadUnavailable,
     tSaveError,
     tSaveOutcomeMessage,
@@ -191,6 +197,19 @@
    */
   let confirmationRefused = $state(false);
 
+  /**
+   * The last *Keep my draft* attempt, or `null` when this panel has made none.
+   *
+   * **Held with the session it produced**, which is what stops a report outliving
+   * what it describes: {@link reapplyToShow} answers `null` the moment `session` is
+   * replaced by anything else, and every transition in the model returns a new
+   * value. Nothing here has to remember to clear it.
+   */
+  let reapplyAttempt = $state.raw<DeletionReapplyAttempt | null>(null);
+
+  /** What the last attempt left this panel to say, or `null`. */
+  const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
+
   /** The outcome panel's own element, so it can be brought into view. */
   let outcomePanel = $state<HTMLElement | null>(null);
   /** The conflict arm's row of controls, which is the second step's target. */
@@ -297,16 +316,41 @@
   } // End of function refusalAction()
 
   /**
+   * Tries the retained deletion again against the version on disk.
+   *
+   * **Two model calls and two assignments, and no rule of its own.**
+   * `reapplyToDiskVersion` decides the whole rebase before it asks the window to
+   * move, and `attemptOfReapply` is what decides which arms replace the session —
+   * that question is answered once, in `../browser/reapply.ts`, because five panels
+   * ask it and a rule written into one renderer is carried by that renderer's
+   * mounted suite alone.
+   *
+   * **What comes back on a success has nothing pending**, so the person is asked to
+   * confirm the deletion again, and `runDelete` then compares against the identity
+   * the live projections give that snippet. Nothing in this file re-raises the
+   * question, and nothing in it may.
+   */
+  function keepMyDraft(): void {
+    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, adoptDiskVersion));
+    reapplyAttempt = attempt;
+    session = attempt.session;
+    confirmationRefused = false;
+  } // End of function keepMyDraft()
+
+  /**
    * Does what one conflict choice says.
    *
-   * **Three of the four arms are reachable as of 2c-4a-3b.**
+   * **Four of the five arms are reachable as of 2c-4b-3.**
    * `matchDeletion.ts`'s `CONFLICT_CAPABILITIES` declares this draft an
    * `operationChoice` — a `MatchId` is a revision-scoped protocol carrier, not user
    * content — so *Copy draft* can never be offered here, whatever a later change
    * sets; `offersReload` is now `true`, so `conflictChoicesFor` names the two
    * reload labels and this panel draws them. The reload adopts the disk projection
    * and **closes** the deleter; it was built and wired at 2c-4a-2 and is driven by
-   * `matchDeletion.test.ts`.
+   * `matchDeletion.test.ts`. `keepMyDraft` joined them at 2c-4b-3, over the
+   * transition 2c-4b-2 had already built and driven, and it is **not** a second
+   * reload: it discards nothing, closes nothing and asks no second question of its
+   * own — the deletion's own confirmation is what it hands back.
    *
    * **What the exhaustive switch forces, and what it does not.** A *new member* of
    * `ConflictChoice` fails to compile here, because every existing member is named
@@ -321,6 +365,9 @@
     switch (choice) {
       case 'keepEditing':
         session = dismissDeletionOutcome(session);
+        return;
+      case 'keepMyDraft':
+        keepMyDraft();
         return;
       case 'reloadDiskVersion':
         session = askToReloadDiskVersion(session);
@@ -439,6 +486,21 @@
     </div>
   {/if}
 
+  <!-- What the last *Keep my draft* left to say. Outside the outcome panel on
+       purpose: a reapply that succeeded hands back a session with no outcome at
+       all, so a report drawn inside that block would disappear at the moment it
+       had something to report. `reapplyToShow` is what keeps it from outliving the
+       session it describes. -->
+  {#if reapplyReport !== null}
+    {@const report = reapplyReport}
+    <div class="panel" role="status">
+      <p>{tReapplyOutcome(report.kind)}</p>
+      {#if report.kind === 'manualResolution'}
+        <p class="kind">{tDeletionReapplyObstacle(report.obstacle)}</p>
+      {/if}
+    </div>
+  {/if}
+
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -537,6 +599,15 @@
         <!-- A control that has just gone, with the reason in its place. -->
         {#if view.reloadUnavailable}
           <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+        {/if}
+
+        <!-- The line beside *Keep my draft*: what this app will **try**, what it
+             works from, when it writes nothing, and what a later save may still
+             do. Drawn when the model names that choice and never from this
+             surface's own declaration, so the sentence and the control cannot
+             disagree (consult Q6). -->
+        {#if view.reapplyOffered}
+          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
         {/if}
 
         <p class="choices" bind:this={outcomeChoices}>

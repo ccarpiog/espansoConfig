@@ -137,6 +137,19 @@
   "browser.rawSave.choice.saveAnyway": "Guardar de todos modos",
   "browser.rawSave.choice.keepEditing": "Seguir editando",
 
+  "browser.reapply.ready": "espansoConfig intentará aplicar los cambios que ha conservado a la versión de este archivo en disco que se muestra arriba, partiendo de ese documento recién analizado. No se escribe nada si el fragmento al que se refiere este cambio, o alguno de los campos que ha modificado, no se puede emparejar con seguridad. Si se pueden emparejar con seguridad, esto puede terminar con que la versión en disco ya contenga los cambios que pidió y no quede nada por enviar, o con un formulario por enviar: ese guardado todavía puede rechazarse, o encontrarse con otro cambio del archivo y volver a entrar en conflicto. Termine como termine, se le dirá, y no se escribe nada hasta que usted envíe algo.",
+  "browser.reapply.readyOperation": "espansoConfig intentará aplicar la acción que ha solicitado a la versión de este archivo en disco que se muestra arriba, partiendo de ese documento recién analizado. No se escribe nada si el fragmento al que se refiere esta acción, o la posición que necesita, no se puede emparejar con seguridad. Si se pueden emparejar con seguridad, esto puede terminar con que la versión en disco ya contenga el resultado que pidió y no quede nada por enviar, o con la acción de nuevo preparada sobre esa versión para que la envíe: ese guardado todavía puede rechazarse, o encontrarse con otro cambio del archivo y volver a entrar en conflicto. Termine como termine, se le dirá, y no se escribe nada hasta que usted envíe algo.",
+  "browser.reapply.reapplied": "Esta ventana muestra ahora la versión en disco, con lo que usted conservó preparado sobre ella. Todavía no se ha escrito nada: envíelo cuando quiera, y ese guardado todavía puede rechazarse o entrar en conflicto.",
+  "browser.reapply.alreadySatisfied": "Esta ventana muestra ahora la versión en disco, y esa versión ya contiene lo que usted pidió, así que no queda nada por enviar. No se ha escrito nada.",
+  "browser.reapply.manualResolution": "espansoConfig no ha aplicado nada. No se ha escrito nada, esta ventana no se ha movido y lo que usted conservó sigue aquí exactamente igual. El motivo es el siguiente.",
+  "browser.reapply.adoptionRefused": "Esta ventana no ha pasado a la versión en disco, así que no se ha reconstruido nada y no se ha escrito nada. Lo que usted conservó sigue aquí. Puede seguir aquí, o cerrar esto y abrir el archivo de nuevo para partir de lo que contiene ahora.",
+  "browser.reapply.unavailable": "Este panel no puede conservar lo que tiene aquí frente a la versión en disco. No se ha escrito nada ni se ha descartado nada.",
+  "browser.reapply.notAttempted": "No había ningún conflicto del que partir, así que no se ha pedido nada a esta ventana. No se ha escrito nada.",
+  "browser.reapply.obstacle.correspondence": "espansoConfig no ha podido identificar en la versión en disco el fragmento al que se refiere este cambio.",
+  "browser.reapply.obstacle.evidenceNotATarget": "La evidencia de correspondencia que traía este conflicto no nombra ningún fragmento que buscar, y este panel necesita uno.",
+  "browser.reapply.obstacle.anchorCorrespondence": "espansoConfig no ha podido identificar en la versión en disco el fragmento tras el cual debía colocarse este.",
+  "browser.reapply.obstacle.evidenceNotAnAnchor": "Este cambio nombra un fragmento tras el cual colocarse, y la evidencia de correspondencia que traía este conflicto no nombra ninguno.",
+
   "browser.saveOutcome.fileWritten": "Se ha escrito el archivo. Lo que hay ahora en el disco es exactamente el texto que se envió.",
   "browser.saveOutcome.nothingToWrite": "El texto ya era exactamente el que tenía el archivo, así que no se ha escrito nada. Las dos comprobaciones se han hecho igualmente; es un guardado que no tenía nada que hacer.",
   "browser.saveOutcome.backupTaken": "Se ha guardado una copia de este archivo tal y como estaba antes del primer cambio de esta sesión. Solo se conservan las copias de las diez últimas sesiones, así que esto no garantiza que el archivo se pueda recuperar más adelante.",
@@ -156,6 +169,8 @@
   "browser.saveOutcome.choice.reloadDiskVersion": "Cargar la versión del disco",
   "browser.saveOutcome.choice.confirmReload": "Descartar mi texto y cargarla",
   "browser.saveOutcome.choice.confirmReloadClosing": "Cerrar esto y cargarla",
+  "browser.saveOutcome.choice.keepMyDraft": "Conservar mi borrador",
+  "browser.saveOutcome.choice.keepMyRequest": "Conservar lo que he pedido",
   "browser.saveOutcome.retainedDraft": "Lo que escribiste, conservado aquí",
   "browser.saveOutcome.retainedOperation": "Lo que pediste, conservado aquí",
   "browser.saveOutcome.operationIdentityIsOld": "Este panel nombra el fragmento tal y como lo leyó esta ventana antes de que cambiara el archivo. Esta aplicación no busca un fragmento equivalente en la versión del disco, así que nada de lo que hay aquí dice qué contiene esa versión.",
@@ -237,6 +252,8 @@
   "browser.matchEditor.fieldRemoved": "Esta clave se quitará del archivo cuando guardes.",
   "browser.matchEditor.remove": "Quitar esta clave",
   "browser.matchEditor.restore": "Mantener esta clave",
+  "browser.matchEditor.reapply.fieldCollisions": "La versión en disco ha cambiado campos que usted también había cambiado, así que espansoConfig no elige entre ellos: {fields}.",
+  "browser.matchEditor.reapply.targetNotEditable": "El fragmento encontrado en la versión en disco es uno que esta aplicación no edita, así que no hay dónde poner sus cambios.",
 
   "browser.matchCreation.open": "Añadir un fragmento",
   "browser.matchCreation.label": "Un fragmento nuevo",
@@ -283,6 +300,9 @@
   "browser.matchCreation.cannotCreate.triggerEmpty": "Un fragmento necesita el texto que lo activa.",
   "browser.matchCreation.cannotCreate.replaceEmpty": "Un fragmento necesita algo en lo que expandirse.",
   "browser.matchCreation.cannotCreate.carriageReturn": "Uno de estos valores contiene un retorno de carro, que ninguna caja de esta ventana podría mostrarte después, así que no se escribirá.",
+  "browser.matchCreation.reapply.anchorNotInDestination": "El fragmento tras el cual debía colocarse este no está en la lista de este archivo tal como la tiene la versión en disco.",
+  "browser.matchCreation.reapply.notTheDestination": "Este formulario escribe en un archivo distinto de aquel al que se refiere este conflicto, así que no hay nada aquí que reorientar hacia él.",
+  "browser.matchCreation.reapply.creationRefused": "El formulario no se puede enviar contra la versión en disco.",
 
   "browser.matchDeletion.open": "Eliminar este fragmento…",
   "browser.matchDeletion.label": "Eliminación de un fragmento",
@@ -309,6 +329,7 @@
   "browser.matchDeletion.refused.readOnly": "Esta aplicación no debe escribir en este archivo, así que no puede eliminar nada de él.",
   "browser.matchDeletion.refused.lastSnippet": "Este es el único fragmento de este archivo, y vaciar la lista de fragmentos de un archivo no es algo que haga esta aplicación. Elimina el archivo entero fuera de la aplicación.",
   "browser.matchDeletion.refused.notInDocument": "Este fragmento y la lectura del archivo que tiene esta ventana no se corresponden, así que no se puede eliminar nada desde aquí. Vuelve a leer el archivo y elige el fragmento en la lista.",
+  "browser.matchDeletion.reapply.notDeletable": "El fragmento encontrado en la versión en disco es uno que esta aplicación no elimina.",
 
   "browser.matchMove.open": "Mover este fragmento…",
   "browser.matchMove.label": "Traslado de un fragmento",
@@ -350,6 +371,9 @@
   "browser.matchMove.cannotMove.notMovable": "Este fragmento no se puede mover, y el motivo aparece a su lado.",
   "browser.matchMove.cannotMove.outOfDate": "Los sitios que se ofrecen aquí vienen de una lectura de este archivo por la que esta ventana ya no puede responder. Este traslado no ha escrito nada. Cierra esto y elige el fragmento en la lista para moverlo.",
   "browser.matchMove.cannotMove.alreadyThere": "Aquí es donde el archivo ya escribe este fragmento. Elige otro sitio para él.",
+  "browser.matchMove.reapply.notTheSameSequence": "El fragmento encontrado en la versión en disco no está en la lista en la que trabaja este movimiento, y esta aplicación no mueve un fragmento de una lista a otra.",
+  "browser.matchMove.reapply.anchorNotInSequence": "El fragmento tras el cual debía colocarse este no es uno que este movimiento pueda nombrar en la lista tal como la tiene la versión en disco.",
+  "browser.matchMove.reapply.moveRefused": "El movimiento no se puede enviar contra la versión en disco.",
 
   "browser.matchDuplication.open": "Duplicar este fragmento…",
   "browser.matchDuplication.label": "Duplicado de un fragmento",
@@ -383,6 +407,7 @@
   "browser.matchDuplication.cannotDuplicate.conflict": "El archivo ha cambiado mientras se escribía este duplicado, así que no se ha escrito nada. Lee lo que ha pasado antes de volver a duplicarlo.",
   "browser.matchDuplication.cannotDuplicate.outOfDate": "Este panel viene de una lectura de este archivo por la que esta ventana ya no puede responder. Este duplicado no ha escrito nada. Cierra esto y elige el fragmento en la lista para duplicarlo.",
   "browser.matchDuplication.cannotDuplicate.notDuplicable": "Este fragmento no se puede duplicar, y el motivo aparece a su lado.",
+  "browser.matchDuplication.reapply.notDuplicable": "El fragmento encontrado en la versión en disco es uno que esta aplicación no copia.",
 
   "language.label": "Idioma",
   "language.followSystem": "Seguir el idioma del sistema",

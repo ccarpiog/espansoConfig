@@ -17,35 +17,55 @@ import {
 } from '../browser/detail';
 import {
   creationRefusalKey,
+  creationReapplyObstacleKey,
   destinationRefusalKey,
+  type CreationReapplyObstacle,
   type CreationRefusal,
   type DestinationRefusal
 } from '../browser/matchCreation';
-import { deletionRefusalKey, type DeletionRefusal } from '../browser/matchDeletion';
 import {
+  deletionReapplyObstacleKey,
+  deletionRefusalKey,
+  type DeletionReapplyObstacle,
+  type DeletionRefusal
+} from '../browser/matchDeletion';
+import {
+  duplicationReapplyObstacleKey,
   duplicationRecoveryKey,
   duplicationRefusalKey,
   duplicationSubmissionRefusalKey,
+  type DuplicationReapplyObstacle,
   type DuplicationRecovery,
   type DuplicationRefusal,
   type DuplicationSubmissionRefusal
 } from '../browser/matchDuplication';
 import {
+  moveReapplyObstacleKey,
   moveRecoveryKey,
   moveRefusalKey,
   moveReloadWarningKey,
   moveSubmissionRefusalKey,
+  type MoveReapplyObstacle,
   type MoveRecovery,
   type MoveRefusal,
   type MoveReloadWarning,
   type MoveSubmissionRefusal
 } from '../browser/matchMove';
 import {
+  editorReapplyObstacleKey,
+  fieldLabelName,
   fieldRefusalKey,
   reprojectionRefusalKey,
+  type EditorReapplyObstacle,
   type FieldRefusal,
   type ReprojectionRefusal
 } from '../browser/matchEditor';
+import {
+  reapplyOutcomeKey,
+  sharedReapplyObstacleKey,
+  type ReapplyOutcomeCode,
+  type SharedReapplyObstacle
+} from '../browser/reapply';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import {
   rawEditorDiskRefusalKey,
@@ -63,6 +83,7 @@ import {
   conflictChoiceKey,
   conflictOperationKey,
   draftFieldStatusKey,
+  reapplyReadinessKey,
   referenceCopyOf,
   reloadUnavailableKey,
   saveOutcomeMessageKey,
@@ -114,6 +135,7 @@ import type {
   WriteStep
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
+import type { Locale } from './locale';
 import {
   describeBackupError,
   describeBackupStep,
@@ -1133,11 +1155,13 @@ export function tSaveResult(result: SaveResult): string {
 // The correspondence evidence a conflict carries — Phase 2c-4b-1
 // ---------------------------------------------------------------------------
 //
-// Three accessors with **no caller yet**, and deliberately so: 2c-4b-1 adds the
-// evidence and no control, and 2c-4b-3 is what draws it. They exist here because
-// a code with no string is worse than a code with no caller, and because the
-// only lawful way to reach a `code.` key is an accessor whose return type makes
-// a missing one a compile error.
+// Three accessors written one sub-phase before anything called them, because a
+// code with no string is worse than a code with no caller and the only lawful way
+// to reach a `code.` key is an accessor whose return type makes a missing one a
+// compile error. **Two of them have callers as of 2c-4b-3**: the composing
+// describers below put `tReapplyRefusal`'s sentence under the obstacle that
+// carried the code. `tReapplyResolution` and `tReapplyPlacement` still have none —
+// they describe an evidence slot whole, which no panel this step draws shows.
 
 /**
  * Renders what the search for a conflict's own snippet found, in the current
@@ -1187,6 +1211,281 @@ export function tReapplyPlacement(placement: ReapplyPlacement): string {
 export function tReapplyRefusal(reason: ReapplyRefusal): string {
   return describeReapplyRefusal(locale.current, reason);
 } // End of function tReapplyRefusal()
+
+// ---------------------------------------------------------------------------
+// *Keep my draft*, as sentences — Phase 2c-4b-3
+// ---------------------------------------------------------------------------
+//
+// The readiness line that stands beside the control, the six arms one attempt can
+// end on, and one composing describer per surface for the obstacle that refused
+// it. **The composition is here rather than in five components** for the reason
+// every model in `src/lib/browser/` states about itself: an obstacle that carries
+// a nested code needs two sentences, and a renderer that walked the union itself
+// could omit the second one while every other renderer showed it — a rule written
+// into one renderer is carried by that renderer's mounted suite alone (2c-3c-3).
+//
+// **What no test in this repository can hold about any of it**: that a sentence
+// says what the consult's Q6 requires. The i18n suites check key parity and
+// placeholder agreement, never meaning (`CLAUDE.md` section 6).
+
+/**
+ * Renders what one reapply attempt ended as, in one language.
+ *
+ * **Six arms and no operand.** `manualResolution` says only that nothing was
+ * applied, written or moved; *why* is the surface's own obstacle, drawn beside
+ * this and never folded into it.
+ *
+ * @param locale - The dictionary to read from.
+ * @param code - Which arm the attempt ended on.
+ * @returns The translated sentence.
+ */
+export function describeReapplyOutcome(locale: Locale, code: ReapplyOutcomeCode): string {
+  return translate(locale, reapplyOutcomeKey(code));
+} // End of function describeReapplyOutcome()
+
+/**
+ * Renders what one reapply attempt ended as, in the current language.
+ *
+ * @param code - Which arm the attempt ended on.
+ * @returns The translated sentence.
+ */
+export function tReapplyOutcome(code: ReapplyOutcomeCode): string {
+  return describeReapplyOutcome(locale.current, code);
+} // End of function tReapplyOutcome()
+
+/**
+ * Renders the line that stands beside *Keep my draft*, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param draftKind - What the calling surface's retained draft is.
+ * @returns The translated sentence.
+ */
+export function describeReapplyReadiness(
+  locale: Locale,
+  draftKind: ConflictDraftKind
+): string {
+  return translate(locale, reapplyReadinessKey(draftKind));
+} // End of function describeReapplyReadiness()
+
+/**
+ * Renders the line that stands beside *Keep my draft*, in the current language.
+ *
+ * @param draftKind - What the calling surface's retained draft is, from its own
+ *   `CONFLICT_CAPABILITIES`.
+ * @returns The translated sentence.
+ */
+export function tReapplyReadiness(draftKind: ConflictDraftKind): string {
+  return describeReapplyReadiness(locale.current, draftKind);
+} // End of function tReapplyReadiness()
+
+/**
+ * One obstacle's own sentence followed by the wire code's, as one string.
+ *
+ * The shape every composing describer below shares: the obstacle names *what*
+ * could not be done and the nested code names *what the search answered*, and the
+ * second is never dropped, because the first alone would leave a person with a
+ * refusal and no reason.
+ *
+ * @param locale - The dictionary to read from.
+ * @param key - The obstacle's own key.
+ * @param reason - The correspondence refusal it carried.
+ * @returns The two sentences, joined by a space.
+ */
+function obstacleWithRefusal(
+  locale: Locale,
+  key: TranslationKey,
+  reason: ReapplyRefusal
+): string {
+  return `${translate(locale, key)} ${describeReapplyRefusal(locale, reason)}`;
+} // End of function obstacleWithRefusal()
+
+/**
+ * Renders one of the two obstacles every surface shares, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - The shared obstacle.
+ * @returns The translated sentence, with the correspondence refusal's under it.
+ */
+function describeSharedReapplyObstacle(
+  locale: Locale,
+  obstacle: SharedReapplyObstacle
+): string {
+  const key = sharedReapplyObstacleKey(obstacle);
+  return obstacle.kind === 'correspondence'
+    ? obstacleWithRefusal(locale, key, obstacle.reason)
+    : translate(locale, key);
+} // End of function describeSharedReapplyObstacle()
+
+/**
+ * Renders why a match editor's reapply refused, in one language.
+ *
+ * **`fieldCollisions` names its fields, and the list is joined with a comma and a
+ * space in every language.** That is a compromise this file states rather than
+ * hides: a locale whose list separator differs would need its own rule, and none
+ * of the two shipped does. The names themselves come from the detail pane's own
+ * labels, so a field is called the same thing here as it is where it is edited.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function describeEditorReapplyObstacle(
+  locale: Locale,
+  obstacle: EditorReapplyObstacle
+): string {
+  if (obstacle.kind === 'fieldCollisions') {
+    return translate(locale, editorReapplyObstacleKey(obstacle), {
+      fields: obstacle.fields
+        .map((field) => translate(locale, detailFieldKey(fieldLabelName(field))))
+        .join(', ')
+    });
+  }
+  return obstacle.kind === 'targetNotEditable'
+    ? translate(locale, editorReapplyObstacleKey(obstacle))
+    : describeSharedReapplyObstacle(locale, obstacle);
+} // End of function describeEditorReapplyObstacle()
+
+/**
+ * Renders why a match editor's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tEditorReapplyObstacle(obstacle: EditorReapplyObstacle): string {
+  return describeEditorReapplyObstacle(locale.current, obstacle);
+} // End of function tEditorReapplyObstacle()
+
+/**
+ * Renders why a creation form's reapply refused, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence, with any nested code's under it.
+ */
+export function describeCreationReapplyObstacle(
+  locale: Locale,
+  obstacle: CreationReapplyObstacle
+): string {
+  const key = creationReapplyObstacleKey(obstacle);
+  switch (obstacle.kind) {
+    case 'anchorCorrespondence':
+      return obstacleWithRefusal(locale, key, obstacle.reason);
+    case 'creationRefused':
+      return `${translate(locale, key)} ${translate(locale, creationRefusalKey(obstacle.reason))}`;
+    case 'evidenceNotAnAnchor':
+    case 'anchorNotInDestination':
+    case 'notTheDestination':
+      return translate(locale, key);
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+  }
+} // End of function describeCreationReapplyObstacle()
+
+/**
+ * Renders why a creation form's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tCreationReapplyObstacle(obstacle: CreationReapplyObstacle): string {
+  return describeCreationReapplyObstacle(locale.current, obstacle);
+} // End of function tCreationReapplyObstacle()
+
+/**
+ * Renders why a deletion's reapply refused, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence, with any nested code's under it.
+ */
+export function describeDeletionReapplyObstacle(
+  locale: Locale,
+  obstacle: DeletionReapplyObstacle
+): string {
+  const key = deletionReapplyObstacleKey(obstacle);
+  return obstacle.kind === 'notDeletable'
+    ? `${translate(locale, key)} ${translate(locale, deletionRefusalKey(obstacle.reason))}`
+    : describeSharedReapplyObstacle(locale, obstacle);
+} // End of function describeDeletionReapplyObstacle()
+
+/**
+ * Renders why a deletion's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tDeletionReapplyObstacle(obstacle: DeletionReapplyObstacle): string {
+  return describeDeletionReapplyObstacle(locale.current, obstacle);
+} // End of function tDeletionReapplyObstacle()
+
+/**
+ * Renders why a duplication's reapply refused, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence, with any nested code's under it.
+ */
+export function describeDuplicationReapplyObstacle(
+  locale: Locale,
+  obstacle: DuplicationReapplyObstacle
+): string {
+  const key = duplicationReapplyObstacleKey(obstacle);
+  return obstacle.kind === 'notDuplicable'
+    ? `${translate(locale, key)} ${translate(locale, duplicationRefusalKey(obstacle.reason))}`
+    : describeSharedReapplyObstacle(locale, obstacle);
+} // End of function describeDuplicationReapplyObstacle()
+
+/**
+ * Renders why a duplication's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tDuplicationReapplyObstacle(obstacle: DuplicationReapplyObstacle): string {
+  return describeDuplicationReapplyObstacle(locale.current, obstacle);
+} // End of function tDuplicationReapplyObstacle()
+
+/**
+ * Renders why a move's reapply refused, in one language.
+ *
+ * **The subject's refusal and the anchor's are two sentences here too**, because
+ * they are two arms in `matchMove.ts` and two enums on the wire: *the snippet you
+ * moved* and *the snippet you moved it after* are different things to have lost.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence, with any nested code's under it.
+ */
+export function describeMoveReapplyObstacle(
+  locale: Locale,
+  obstacle: MoveReapplyObstacle
+): string {
+  const key = moveReapplyObstacleKey(obstacle);
+  switch (obstacle.kind) {
+    case 'anchorCorrespondence':
+      return obstacleWithRefusal(locale, key, obstacle.reason);
+    case 'moveRefused':
+      return `${translate(locale, key)} ${translate(locale, moveSubmissionRefusalKey(obstacle.reason))}`;
+    case 'evidenceNotAnAnchor':
+    case 'notTheSameSequence':
+    case 'anchorNotInSequence':
+      return translate(locale, key);
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+  }
+} // End of function describeMoveReapplyObstacle()
+
+/**
+ * Renders why a move's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tMoveReapplyObstacle(obstacle: MoveReapplyObstacle): string {
+  return describeMoveReapplyObstacle(locale.current, obstacle);
+} // End of function tMoveReapplyObstacle()
 
 // ---------------------------------------------------------------------------
 // The draft surface — Phase 2b-2b-3

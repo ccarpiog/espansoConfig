@@ -1,12 +1,15 @@
 /**
- * *Keep my draft*, as the part of it every surface shares — Phase 2c-4b-2.
+ * *Keep my draft*, as the part of it every surface shares — Phase 2c-4b-2, drawn
+ * at 2c-4b-3.
  *
- * **No control, no choice and no sentence.** {@link ConflictChoice} has no member
- * for a reapply, `conflictChoicesFor` is byte-for-byte as 2c-4a-3 left it, and no
- * `.svelte` file was touched. What is here are the transitions, built and driven by
- * tests before anything draws them — the trade 2c-4a-2 proved, where the reload
- * transitions existed for one sub-phase before a boolean was flipped and a panel
- * drew them (`CLAUDE.md` section 6).
+ * **The transitions came first and the control came second**, which is the trade
+ * 2c-4a-2 proved: at 2c-4b-2 every function below existed and was driven by tests
+ * while `ConflictChoice` had no member a reapply control could be named by, and
+ * 2c-4b-3 then added the member, the `offersReapply` boolean and the panels
+ * together, inventing no machinery (`CLAUDE.md` section 6). What this module gained
+ * at 2c-4b-3 is the presentation half and nothing else: {@link ReapplyOutcomeCode}
+ * with its key function, {@link sharedReapplyObstacleKey}, and the
+ * {@link ReapplyAttempt} pair a panel holds one attempt in. No transition changed.
  *
  * ## What a reapply is, stated as the narrowest thing it does
  *
@@ -79,6 +82,7 @@
  * origin map.
  */
 
+import type { TranslationKey } from '../i18n/dictionaries';
 import type { MatchView, ReapplyEvidence, ReapplyRefusal } from '../ipc/types';
 import type { AdoptTheDiskVersion } from './editorSave';
 import {
@@ -211,11 +215,14 @@ export type ReapplyOutcome<S, O> =
       /**
        * The file already holds what the retained intent asked for.
        *
-       * The disk snapshot was adopted and **nothing is left to write**. Not a
-       * refusal and not a success of a save: no save was attempted.
+       * The window holds the disk snapshot and **nothing is left to write**. Not a
+       * refusal and not a success of a save: no save was attempted. *Holds*, not
+       * *was moved to*: the adoption answered `installed` or `alreadyThere`, and
+       * the second means this attempt installed nothing because the window was
+       * already there.
        */
       readonly kind: 'alreadySatisfied';
-      /** The session to hold, over the adopted snapshot, with nothing to send. */
+      /** The session to hold, over that snapshot, with nothing to send. */
       readonly session: S;
     }
   | {
@@ -234,10 +241,23 @@ export type ReapplyOutcome<S, O> =
       /**
        * The window refused to install the disk observation.
        *
-       * A spent authorization, a conflict this window never produced, an
-       * unprojected document, or a projection replaced since the conflict arrived.
+       * An authorization issued for another conflict, one already spent, a
+       * conflict this window never produced, an unprojected document, or a
+       * projection replaced since the conflict arrived when the window does not
+       * already hold the requested revision — `BrowserState.adoptDiskVersion`'s
+       * guards **in its order**, not a set applied alike. A window that has passed
+       * the four guards ahead of it and reprojected to those exact bytes is
+       * answered `alreadyThere`, which is a success, and that arm is settled before
+       * the projection generation is compared at all.
        * Nothing was rebased and the session must be left as it was — the same rule
        * `reloadTheDiskVersion` follows for a refused reload.
+       *
+       * **It does not encode a permanent cause.** The answer names no cause, so
+       * this arm cannot say which guard refused. A refusal spends nothing, which
+       * rules out only this attempt newly causing the spent-authorization refusal;
+       * the other four guards are asked again from the top on a later attempt and
+       * nothing here says they will pass. Nothing here promises that pressing again
+       * is futile, and nothing promises it will help.
        */
       readonly kind: 'adoptionRefused';
     }
@@ -404,3 +424,141 @@ export function adoptForReapply<T>(
 ): DiskAdoptionOutcome {
   return adopt(conflict, reapplyAuthorizationFor(conflict));
 } // End of function adoptForReapply()
+
+/**
+ * Which arm one attempt ended on, with the session and the obstacle taken off.
+ *
+ * Derived from {@link ReapplyOutcome} rather than written out, for
+ * `OutcomeArm`'s reason one module along: a seventh arm is then a compile error in
+ * {@link reapplyOutcomeKey} instead of a silent gap in what a panel says.
+ */
+export type ReapplyOutcomeCode = ReapplyOutcome<unknown, unknown>['kind'];
+
+/**
+ * The dictionary key holding the sentence one attempt's arm shows.
+ *
+ * A `switch` over literal keys rather than a template, the idiom every describer
+ * in `src/lib/browser/` follows: a renamed key is a compile error here, and a new
+ * arm of {@link ReapplyOutcome} with no sentence is one too.
+ *
+ * **`manualResolution`'s sentence says what happened and never why.** The *why* is
+ * the surface's own obstacle, which has its own key function beside its own union,
+ * and a panel draws the two as two lines. Folding the reason in here would need
+ * this module to import six obstacle unions, and every one of those imports is a
+ * cycle (`2c-4b-2-notes.md` D7).
+ *
+ * @param code - Which arm the attempt ended on.
+ * @returns The key holding that arm's sentence.
+ */
+export function reapplyOutcomeKey(code: ReapplyOutcomeCode): TranslationKey {
+  switch (code) {
+    case 'reapplied':
+      return 'browser.reapply.reapplied';
+    case 'alreadySatisfied':
+      return 'browser.reapply.alreadySatisfied';
+    case 'manualResolution':
+      return 'browser.reapply.manualResolution';
+    case 'adoptionRefused':
+      return 'browser.reapply.adoptionRefused';
+    case 'unavailable':
+      return 'browser.reapply.unavailable';
+    case 'notAttempted':
+      return 'browser.reapply.notAttempted';
+  }
+} // End of function reapplyOutcomeKey()
+
+/**
+ * The dictionary key holding one **shared** obstacle's sentence.
+ *
+ * Every surface's own key function delegates to this for the two arms that are
+ * about the *evidence* rather than about that surface's value, so the sentence a
+ * person reads for *espansoConfig could not establish correspondence* is one
+ * sentence and not five that have to be kept in step.
+ *
+ * **The nested {@link ReapplyRefusal} is not folded in here**, and that is the same
+ * split {@link reapplyOutcomeKey} makes: the wire code already has its own
+ * sentences (`code.reapplyRefusal.*`, since 2c-4b-1) and its own accessor, so the
+ * i18n layer composes the two rather than this module inventing a third string.
+ *
+ * @param obstacle - The shared obstacle to name.
+ * @returns The key holding its sentence.
+ */
+export function sharedReapplyObstacleKey(obstacle: SharedReapplyObstacle): TranslationKey {
+  switch (obstacle.kind) {
+    case 'correspondence':
+      return 'browser.reapply.obstacle.correspondence';
+    case 'evidenceNotATarget':
+      return 'browser.reapply.obstacle.evidenceNotATarget';
+  }
+} // End of function sharedReapplyObstacleKey()
+
+/**
+ * One attempt, tied to the session it left behind.
+ *
+ * **The pairing is what makes a stale report impossible rather than merely
+ * unlikely.** A panel holds one of these and shows its outcome only while
+ * {@link ReapplyAttempt.session} is still the session on screen
+ * ({@link reapplyToShow}); every transition in this repository returns a *new*
+ * session value, so the next thing the person does drops the report without any
+ * component having to remember to clear it.
+ *
+ * **What that forces and what it does not, in the same sentence.** It forces that a
+ * report cannot outlive the session it describes, because the comparison is
+ * reference equality against the value the panel is drawing. It cannot force that a
+ * panel installs {@link ReapplyAttempt.session} at all, nor that it asks
+ * {@link reapplyToShow} rather than reading the field directly — both are ordinary
+ * values, and each component's mounted suite is what drives its own handler.
+ *
+ * @typeParam S - The surface's own session type.
+ * @typeParam O - The surface's own obstacle type.
+ */
+export interface ReapplyAttempt<S, O> {
+  /** The session to hold after the attempt: the rebuilt one, or the one held. */
+  readonly session: S;
+  /** What the attempt became, whole. */
+  readonly outcome: ReapplyOutcome<S, O>;
+}
+
+/**
+ * Folds one attempt into the session to hold and the report to show.
+ *
+ * **The rule that decides which arms replace the session, in one place.** Two of
+ * the six carry one — `reapplied` and `alreadySatisfied`, the two the window has
+ * answered with `installed` or `alreadyThere`, so that it holds the disk snapshot
+ * whether or not this attempt is what put it there — and the other four leave the
+ * window exactly where it was. Five panels ask this question and a rule written
+ * into one renderer
+ * is carried by that renderer's mounted suite alone, which is the defect 2c-3c-3
+ * named and this repository keeps re-finding.
+ *
+ * @typeParam S - The surface's own session type.
+ * @typeParam O - The surface's own obstacle type.
+ * @param held - The session the panel is showing now.
+ * @param outcome - What {@link ReapplyOutcome} the surface's transition answered.
+ * @returns The session to hold, paired with the outcome that produced it.
+ */
+export function attemptOfReapply<S, O>(
+  held: S,
+  outcome: ReapplyOutcome<S, O>
+): ReapplyAttempt<S, O> {
+  const session =
+    outcome.kind === 'reapplied' || outcome.kind === 'alreadySatisfied' ? outcome.session : held;
+  return { session, outcome };
+} // End of function attemptOfReapply()
+
+/**
+ * The attempt a panel may still show something about, or `null`.
+ *
+ * @typeParam S - The surface's own session type.
+ * @typeParam O - The surface's own obstacle type.
+ * @param attempt - The last attempt this panel made, or `null` when it made none.
+ * @param session - The session the panel is drawing **now**.
+ * @returns The outcome to report, or `null` when there is nothing to report about
+ *   this session.
+ */
+export function reapplyToShow<S, O>(
+  attempt: ReapplyAttempt<S, O> | null,
+  session: S
+): ReapplyOutcome<S, O> | null {
+  return attempt === null || attempt.session !== session ? null : attempt.outcome;
+} // End of function reapplyToShow()
