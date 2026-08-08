@@ -9879,7 +9879,7 @@ _Updated at each phase boundary._
 | **2c-4b design consult** | **`56d4817`** | ✅ pushed to `origin/main` (recorded by `74c7467`) | clean |
 | **2c-4b step 1** | **`3451a81`** | ✅ pushed to `origin/main` (recorded by `e7d5184`) | clean |
 | **2c-4b step 2** | **`0dec45c`** | ✅ pushed to `origin/main` | clean |
-| **2c-4b step 3a** | **`PENDING`** | pending | clean at commit |
+| **2c-4b step 3a** | **`11b8160`** | ✅ pushed to `origin/main` | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
