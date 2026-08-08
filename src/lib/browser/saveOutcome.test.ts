@@ -517,6 +517,10 @@ describe('the one authority that decides what a conflict offers', () => {
       reloadOutcome: 'reseedsDraft',
       offersCopyDraft: true,
       offersReload: true,
+      // The raw editor's own value, because that is the surface these defaults
+      // describe. `conflictChoicesFor` does not read it — 2c-4b-2 adds no choice —
+      // and the case below asserts that rather than assuming it.
+      reapplySupport: 'unavailable',
       ...over
     };
   } // End of function capabilities()

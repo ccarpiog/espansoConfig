@@ -236,6 +236,13 @@ import {
 import type { RawSaveChoice } from './rawSave';
 import type { InvalidationStatus } from './invalidation';
 import {
+  adoptForReapply,
+  beginReapply,
+  subjectCorrespondence,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle
+} from './reapply';
+import {
   conflictChoicesFor,
   conflictDiskText,
   copyOfDraft,
@@ -1707,6 +1714,335 @@ export function reloadTheDiskVersion(
 } // End of function reloadTheDiskVersion()
 
 /**
+ * What one field's retained intent can do against the newly parsed projection.
+ *
+ * **Four arms, and three of them emit something different.** `applicable` keeps the
+ * intent as it was, `satisfied` emits `'Unchanged'` because the file already says
+ * what the person asked for, `unchanged` emits `'Unchanged'` because the person
+ * asked for nothing, and `collision` emits nothing at all — it stops the whole
+ * reapply.
+ *
+ * **`satisfied` and `unchanged` are not one arm**, although both write nothing:
+ * the first is a drafted change the disk has already made and the second is no
+ * drafted change, and the consult's Q9 names *"all changes reapplied" when some
+ * were merely already satisfied* as this phase's likeliest false sentence. Keeping
+ * them apart is what lets 2c-4b-3 say which happened.
+ */
+export type FieldReapplyVerdict =
+  | {
+      /** The drafted change still applies to the new projection unchanged. */
+      readonly kind: 'applicable';
+      /**
+       * The intent to send, which is the one the retained draft derived.
+       *
+       * `'Unchanged'` is excluded by the type, not merely absent by construction:
+       * an applicable verdict is a field that **would be written**, and the two
+       * arms that write nothing are `satisfied` and `unchanged`.
+       */
+      readonly intent: Exclude<DraftField<string>, 'Unchanged'>;
+    }
+  | {
+      /** The disk already holds what the drafted change asked for. */
+      readonly kind: 'satisfied';
+    }
+  | {
+      /** The retained draft asked for nothing here. */
+      readonly kind: 'unchanged';
+    }
+  | {
+      /** The disk moved this field under a drafted change. Blocks the reapply. */
+      readonly kind: 'collision';
+    };
+
+/**
+ * Whether two eligibility verdicts say the same thing.
+ *
+ * @param one - One verdict.
+ * @param other - The other.
+ * @returns `true` when both are editable, or both refuse for the same reason.
+ */
+function sameEligibility(one: FieldEligibility, other: FieldEligibility): boolean {
+  if (one.kind === 'editable' || other.kind === 'editable') {
+    return one.kind === other.kind;
+  }
+  return one.reason === other.reason;
+} // End of function sameEligibility()
+
+/**
+ * Whether the new projection holds a field in exactly the state the old one did.
+ *
+ * **Three things, and the consult's Q4 names all three**: key presence, logical
+ * scalar text, and eligibility. Comparing the buffers instead would ask whether the
+ * person's *draft* still matches, which says nothing about what the file now holds;
+ * comparing presence and value alone would call a field that has become
+ * undecodable, zero-width or unmodelled "the same state" and then write into it.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param now - What the newly parsed projection holds.
+ * @returns `true` when the field is, for a save's purposes, untouched.
+ */
+function sameBaselineState(was: FieldBaseline, now: FieldBaseline): boolean {
+  return (
+    was.present === now.present &&
+    was.value === now.value &&
+    sameEligibility(was.eligibility, now.eligibility)
+  );
+} // End of function sameBaselineState()
+
+/**
+ * What one field's retained intent does against the newly parsed projection.
+ *
+ * The consult's Q4 table, one row per branch and in the consult's own order:
+ *
+ * | Old intent | New disk field | Result |
+ * |---|---|---|
+ * | `Unchanged` | anything | `unchanged` — the disk field is preserved exactly |
+ * | `Set(x)` | exactly the old baseline state | `applicable`, emitting `Set(x)` |
+ * | `Set(x)` | already present as editable text `x` | `satisfied` |
+ * | `Remove` | exactly the old baseline state | `applicable`, emitting `Remove` |
+ * | `Remove` | absent, and the key is editable | `satisfied` |
+ * | `Set`/`Remove` | anything else, or newly ineligible | `collision` |
+ *
+ * **The two `satisfied` rows require the new field to be editable, and that is not
+ * decoration.** A key the file *has* but whose value the projection did not model
+ * reads as `present: false` — `projectedScalar` answers `null` for it — so *absent*
+ * on its own would call a `label:` that has become a mapping "already removed" and
+ * write nothing while the key stayed. `fieldEligibility` answers `unmodelledShape`
+ * for exactly that case, which is what the editable test excludes.
+ *
+ * **The rows are disjoint and the order is presentation only.** A `Set(x)` implies
+ * the old baseline did not already hold `x` — `fieldIntent` answers `'Unchanged'`
+ * when a present field's buffer equals its value, and refuses an empty buffer over
+ * an absent key — so *the new state equals the old* and *the new state is `x`*
+ * cannot both hold. The same argument holds for `Remove`, which implies the old key
+ * was present.
+ *
+ * @param was - What the file held for this field when the session was seeded.
+ * @param buffer - What the retained draft holds for it.
+ * @param now - What the newly parsed projection holds for it.
+ * @returns The verdict, with the intent to send when there is one.
+ */
+export function fieldReapply(
+  was: FieldBaseline,
+  buffer: FieldBuffer,
+  now: FieldBaseline
+): FieldReapplyVerdict {
+  const intent = fieldIntent(was, buffer);
+  if (intent === 'Unchanged') {
+    return { kind: 'unchanged' };
+  }
+  if (sameBaselineState(was, now)) {
+    return { kind: 'applicable', intent };
+  }
+  const editable = now.eligibility.kind === 'editable';
+  if (intent === 'Remove') {
+    return !now.present && editable ? { kind: 'satisfied' } : { kind: 'collision' };
+  }
+  return now.present && editable && now.value === intent.Set
+    ? { kind: 'satisfied' }
+    : { kind: 'collision' };
+} // End of function fieldReapply()
+
+/** What a reapply would do with all six fields. */
+export interface MatchReapplyPlan {
+  /** One verdict per field, in {@link EDITABLE_FIELDS} order. */
+  readonly verdicts: Readonly<Record<EditableField, FieldReapplyVerdict>>;
+  /**
+   * The fields the disk moved under a drafted change, in field order.
+   *
+   * **Any one of them blocks the whole reapply** (consult Q4): *Keep my draft*
+   * claims one retained intention, and saving the safe fields only would strand the
+   * rest while looking successful. Per-field manual resolution is 2c-4c's.
+   */
+  readonly collisions: readonly EditableField[];
+  /**
+   * The buffers to hold over the new baseline.
+   *
+   * Built so that {@link fieldIntent} over the **new** baseline derives exactly the
+   * intent each verdict names: an `applicable` `Set` puts its text in the box, an
+   * `applicable` `Remove` marks the key removed, and everything else holds whatever
+   * the new projection holds. Empty of meaning when {@link MatchReapplyPlan.collisions}
+   * is not empty, because nothing is then built from it.
+   */
+  readonly buffers: MatchBuffers;
+  /** Whether any field would still be written. */
+  readonly writesAnything: boolean;
+}
+
+/**
+ * What a reapply would do with every field, without doing any of it.
+ *
+ * Exported because it is the whole of the consult's Q4 rule and a test drives it
+ * directly, one row at a time; {@link reapplyToDiskVersion} is what acts on it.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param buffers - What the retained draft holds.
+ * @param now - What the newly parsed projection holds.
+ * @returns The plan, including the buffers a rebuilt session would hold.
+ */
+export function planMatchReapply(
+  was: MatchBaseline,
+  buffers: MatchBuffers,
+  now: MatchBaseline
+): MatchReapplyPlan {
+  const verdicts: Record<EditableField, FieldReapplyVerdict> = {} as Record<
+    EditableField,
+    FieldReapplyVerdict
+  >;
+  const collisions: EditableField[] = [];
+  const rebuilt: Record<EditableField, FieldBuffer> = {} as Record<EditableField, FieldBuffer>;
+  let writesAnything = false;
+  for (const field of EDITABLE_FIELDS) {
+    const verdict = fieldReapply(was[field], buffers[field], now[field]);
+    verdicts[field] = verdict;
+    if (verdict.kind === 'collision') {
+      collisions.push(field);
+    }
+    if (verdict.kind === 'applicable') {
+      writesAnything = true;
+    }
+    // The buffer that derives this verdict's intent over the *new* baseline. A
+    // `Remove` keeps the projected text beside the flag, exactly as `removeField`
+    // does, so a later restore gives back what the file holds rather than a blank.
+    rebuilt[field] =
+      verdict.kind === 'applicable' && verdict.intent !== 'Remove'
+        ? { text: verdict.intent.Set, removed: false }
+        : { text: now[field].value, removed: verdict.kind === 'applicable' };
+  } // End of the loop over the six editable fields
+  return { verdicts, collisions, buffers: rebuilt, writesAnything };
+} // End of function planMatchReapply()
+
+/**
+ * Why a reapply of this editor's draft could not be carried out.
+ *
+ * **A code, never a sentence**, the rule every model in this directory follows.
+ * There is no key function for these yet and that is 2c-4b-2's boundary: nothing
+ * draws them, so 2c-4b-3 adds the accessors together with the panel that renders
+ * them.
+ */
+export type EditorReapplyObstacle =
+  | SharedReapplyObstacle
+  | {
+      /**
+       * The disk moved fields the draft had changed.
+       *
+       * Every one of them is named, so 2c-4b-3 can say **which**; the whole reapply
+       * is refused all the same.
+       */
+      readonly kind: 'fieldCollisions';
+      /** The fields, in {@link EDITABLE_FIELDS} order. */
+      readonly fields: readonly EditableField[];
+    }
+  | {
+      /**
+       * The identified snippet is one this application will not edit at all.
+       *
+       * `matchEditability` over the *new* projection: a snippet that has grown a
+       * blocking hazard since the session opened cannot be drafted against, and
+       * handing back a session whose `canSave` is permanently `false` would be an
+       * offer this editor could not keep.
+       */
+      readonly kind: 'targetNotEditable';
+    };
+
+/** What a reapply of this editor's draft became. */
+export type MatchEditorReapply = ReapplyOutcome<MatchEditorSession, EditorReapplyObstacle>;
+
+/**
+ * The session a reapply hands back: the identified snippet, with the rebuilt
+ * buffers.
+ *
+ * **A clean session over the new projection, and the draft is the only thing
+ * carried across.** The base value is what the file now holds, the current value is
+ * what the person still wants, and the one step between them is the whole history —
+ * consult Q4's *draw a new history boundary, clear old undo/redo and consent*.
+ * Replaying the old history over a different baseline would itself be a merge
+ * algorithm.
+ *
+ * @param target - The identified snippet, as the disk snapshot projects it.
+ * @param plan - What {@link planMatchReapply} decided.
+ * @param clock - The session's own clock, carried across unchanged.
+ * @returns The session to hold.
+ */
+function reapplied(
+  target: MatchView,
+  plan: MatchReapplyPlan,
+  clock: Clock
+): MatchEditorSession {
+  const fresh = startMatchEditor(target, clock);
+  // `editDraft` answers the same draft when the value did not change, which is the
+  // `alreadySatisfied` case — and that case never reaches here, because the caller
+  // has already answered it from `writesAnything`.
+  return { ...fresh, draft: editDraft(fresh.draft, plan.buffers) };
+} // End of function reapplied()
+
+/**
+ * Rebuilds this editor's retained draft over the newly parsed disk version.
+ *
+ * **The consult's Q4 for the match editor, and the one transition that is allowed
+ * to fall back from exact item identity to a unique unchanged trigger.** The tier
+ * itself is 2c-4b-1's, decided in Rust against the exact snapshot the conflict
+ * carries; what happens here is what the consult permits *because* the tier is
+ * weaker: every drafted field is checked against the new projection, and **any**
+ * collision refuses the whole thing.
+ *
+ * The order is decide-then-adopt. A refusal therefore leaves the window untouched:
+ * no projection replaced, no selection repaired, and the conflict's one
+ * authorization unspent.
+ *
+ * **What it hands back and what it does not.** `reapplied` is a session whose
+ * ordinary *Save* sends the same intents against the new base revision — it is not
+ * a save, and the gates it will meet are the ordinary ones. `alreadySatisfied` is a
+ * clean session over the adopted projection with **nothing to send**, because every
+ * drafted change is already in the file. Neither claims the identified snippet is
+ * the original one: where the trigger tier answered, an external delete followed by
+ * an indistinguishable replacement cannot be detected at all.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, that a caller
+ * stops on `adoptionRefused`, or that the session handed back is installed. What is
+ * closed is that no path here writes, calls a command, or adopts anything before
+ * the whole rebase has been decided.
+ *
+ * @param session - The session showing the conflict.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never
+ *   at all on a refusal.
+ * @returns What became of the attempt.
+ */
+export function reapplyToDiskVersion(
+  session: MatchEditorSession,
+  adopt: AdoptTheDiskVersion<MatchBuffers>
+): MatchEditorReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  if (start.kind !== 'ready') {
+    return start;
+  }
+  const subject = subjectCorrespondence(start.evidence);
+  if (subject.kind === 'refused') {
+    return { kind: 'manualResolution', obstacle: { kind: 'correspondence', reason: subject.reason } };
+  }
+  if (subject.kind === 'noSubject') {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const target = subject.target;
+  if (matchEditability(target).kind !== 'unrestricted') {
+    return { kind: 'manualResolution', obstacle: { kind: 'targetNotEditable' } };
+  }
+  const plan = planMatchReapply(session.baseline, copyOfDraft(start.conflict), baselineOf(target));
+  if (plan.collisions.length > 0) {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'fieldCollisions', fields: plan.collisions }
+    };
+  }
+  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+    return { kind: 'adoptionRefused' };
+  }
+  return plan.writesAnything
+    ? { kind: 'reapplied', session: reapplied(target, plan, session.clock) }
+    : { kind: 'alreadySatisfied', session: startMatchEditor(target, session.clock) };
+} // End of function reapplyToDiskVersion()
+
+/**
  * What this surface offers about a conflict.
  *
  * **`draftKind` is the permanent fact and the two booleans are not.**
@@ -1723,14 +2059,18 @@ export function reloadTheDiskVersion(
  * The copy is {@link MatchEditorView.retainedDraft} put through `tDraftCopy`: a
  * labelled reference copy of the six buffers, **never YAML**.
  *
- * **None of these is "keep my draft"** and none may become one: that phrase means
- * *reapply the draft to the newly parsed document*, which is 2c-4b.
+ * **None of these is "keep my draft"** and none may become one until a control is
+ * drawn for it: {@link ConflictCapabilities.reapplySupport} says this surface *can*
+ * reapply and {@link reapplyToDiskVersion} is the transition, but
+ * {@link ConflictChoice} has no member for one and `conflictChoicesFor` names none,
+ * so nothing is offered here. 2c-4b-3 draws it.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: true,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'supported'
 };
 
 /** Everything a screen needs about one field, derived on every read. */

@@ -30,10 +30,12 @@ import type {
   DocumentView,
   Finding,
   MatchId,
+  ReapplyPlacement,
+  ReapplyResolution,
   SaveResult
 } from '../ipc/types';
 import { editDraft } from './draft';
-import { makeDocument, makeMatch, makeSummary } from './fixtures';
+import { makeConflict, makeDocument, makeMatch, makeSummary } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeCreationFindings,
@@ -59,6 +61,7 @@ import {
   matchCreationView,
   newMatchOf,
   placementOptionsOf,
+  reapplyToDiskVersion,
   redoCreation,
   reloadTheDiskVersion,
   startMatchCreation,
@@ -995,3 +998,239 @@ describe('the confirmed reload', () => {
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
+
+describe('reapplying the retained form', () => {
+  // **2c-4b-2 builds this and 2c-4b-3 draws it.** `ConflictChoice` has no member
+  // for a reapply, so nothing here is reachable from a control; every case calls
+  // the transition directly.
+
+  /**
+   * The destination file, re-read: two new snippets under a new parse.
+   *
+   * @param overrides - Whatever a case needs the disk file to keep saying.
+   * @returns The projection the conflict carries.
+   */
+  function diskFile(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' }),
+        makeMatch({ node: 31, document: 2, revision: AFTER, trigger: ':date' })
+      ],
+      ...overrides
+    });
+  } // End of function diskFile()
+
+  /**
+   * A conflicted create whose payload carries chosen correspondence evidence.
+   *
+   * @param session - The form to submit.
+   * @param disk - The newly parsed projection the conflict carries.
+   * @param subject - What the search for a snippet answered. A creation's own is
+   *   `Targetless`, which is what the command really sends.
+   * @param anchor - What the search for the positional anchor answered.
+   * @returns The form showing the conflict.
+   */
+  function conflictedOver(
+    session: MatchCreationSession,
+    disk: DocumentView,
+    subject: ReapplyResolution = { Targetless: {} },
+    anchor: ReapplyPlacement = { NotAnchored: {} }
+  ): MatchCreationSession {
+    const started = beginCreate(session);
+    if (started === null) {
+      throw new Error('this case needs a form that can be submitted');
+    }
+    return applyCreate(
+      started.session,
+      makeConflict({ disk, subject, placement: anchor, expected: BASE, found: AFTER }),
+      NOT_OWED
+    );
+  } // End of function conflictedOver()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adoptingReapply(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<CreationBuffers>;
+    readonly adoptions: ConflictModel<CreationBuffers>[];
+  } {
+    const adoptions: ConflictModel<CreationBuffers>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adoptingReapply()
+
+  it('retains the typed values and re-points the base at the new revision', () => {
+    // **Targetless**: there is no snippet to find, because a creation brings its
+    // own. What is rebuilt is everything around the two typed strings.
+    const disk = diskFile();
+    const stuck = conflictedOver(ready(), disk);
+    const recorder = adoptingReapply();
+    const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+    expect(answer.kind).toBe('reapplied');
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt form');
+    }
+    expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(baseRevisionOf(answer.session)).toBe(AFTER);
+    expect(canCreate(answer.session)).toBe(true);
+    // The destination the form offers is the one the conflict carried, with the
+    // anchors of the parse the window is about to install.
+    expect(chosenDestination(answer.session)?.revision).toBe(AFTER);
+    expect(chosenDestination(answer.session)?.anchors.map((one) => one.node)).toEqual([30, 31]);
+    expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
+  });
+
+  it('withdraws consent collected before the conflict', () => {
+    // Findings accepted against one revision's candidate say nothing about
+    // another's, so the acknowledgement round trip starts again.
+    const refused = applyCreate(beginCreate(ready())!.session, REFUSED, NOT_OWED);
+    const consented = acknowledgeCreationFindings(refused);
+    expect(beginCreate(consented)!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
+    const stuck = conflictedOver(consented, diskFile());
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt form');
+    }
+    expect(answer.session.draft.consent).toBeNull();
+    expect(beginCreate(answer.session)!.submission.acknowledgement).toEqual({ accepted: [] });
+  });
+
+  it('keeps a front placement, which the command lowers against the new list', () => {
+    const disk = diskFile();
+    const stuck = conflictedOver(choosePlacement(ready(), { kind: 'front' }), disk);
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt form');
+    }
+    expect(answer.session.placement).toEqual({ kind: 'front' });
+    expect(beginCreate(answer.session)?.position).toEqual({ Front: {} });
+  });
+
+  it('ignores the evidence anchor entirely for a semantic placement', () => {
+    // `front` and `end` name no snippet, so a refused anchor says nothing about
+    // them. The command sends `NotAnchored` for both; a refusal here would be this
+    // form reading an answer to a question it never asked.
+    const stuck = conflictedOver(choosePlacement(ready(), { kind: 'end' }), diskFile(), undefined, {
+      Refused: { reason: 'NoExactCorrespondence' }
+    });
+    expect(reapplyToDiskVersion(stuck, adoptingReapply().adopt).kind).toBe('reapplied');
+  });
+
+  it('rebuilds an after from the identified anchor, never from the old one', () => {
+    const disk = diskFile();
+    const anchor = disk.matches[1]!;
+    const placed = choosePlacement(ready(), {
+      kind: 'after',
+      anchor: snippetFile().matches[1]!.id
+    });
+    const stuck = conflictedOver(placed, disk, undefined, { Identified: { target: anchor } });
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt form');
+    }
+    expect(answer.session.placement).toEqual({ kind: 'after', anchor: anchor.id });
+    expect(beginCreate(answer.session)?.position).toEqual({ After: { anchor: anchor.id } });
+  });
+
+  it('refuses an anchor the core would not establish, and adopts nothing', () => {
+    const placed = choosePlacement(ready(), {
+      kind: 'after',
+      anchor: snippetFile().matches[1]!.id
+    });
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(placed, diskFile(), undefined, {
+      Refused: { reason: 'TargetMissingOrTriggerChanged' }
+    });
+    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'anchorCorrespondence', reason: 'TargetMissingOrTriggerChanged' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that answers no anchor although the form names one', () => {
+    const placed = choosePlacement(ready(), {
+      kind: 'after',
+      anchor: snippetFile().matches[1]!.id
+    });
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(conflictedOver(placed, diskFile()), recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotAnAnchor' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses an identified anchor the new destination does not hold', () => {
+    const placed = choosePlacement(ready(), {
+      kind: 'after',
+      anchor: snippetFile().matches[1]!.id
+    });
+    const recorder = adoptingReapply();
+    const stranger = makeMatch({ node: 99, document: 2, revision: AFTER, trigger: ':gone' });
+    const stuck = conflictedOver(placed, diskFile(), undefined, {
+      Identified: { target: stranger }
+    });
+    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'anchorNotInDestination' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that names a snippet, which a creation never does', () => {
+    const recorder = adoptingReapply();
+    const disk = diskFile();
+    const stuck = conflictedOver(ready(), disk, { Identified: { target: disk.matches[0]! } });
+    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotATarget' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('runs the ordinary creation checks again over the new parse', () => {
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(ready(), diskFile({ readOnly: true }));
+    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'creationRefused', reason: 'destinationIneligible' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses a conflict about a file this form is not writing into', () => {
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(ready(), diskFile({ id: 3, relativePath: 'match/other.yml' }));
+    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'notTheDestination' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('reports the window refusal and rebuilds nothing', () => {
+    const recorder = adoptingReapply('refused');
+    expect(reapplyToDiskVersion(conflictedOver(ready(), diskFile()), recorder.adopt)).toEqual({
+      kind: 'adoptionRefused'
+    });
+    expect(recorder.adoptions).toHaveLength(1);
+  });
+
+  it('is not attempted when no conflict is showing', () => {
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(ready(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+    expect(recorder.adoptions).toEqual([]);
+  });
+}); // End of the reapply suite

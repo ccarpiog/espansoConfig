@@ -113,6 +113,7 @@ import {
   type SendFailure
 } from './editorSave';
 import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
+import { beginReapply, type ReapplyOutcome, type SharedReapplyObstacle } from './reapply';
 import { describeRawSave, type RawSaveChoice, type RawSaveModel } from './rawSave';
 import {
   conflictChoicesFor,
@@ -219,12 +220,21 @@ const NOTHING_SAID_YET: RawSaveModel = describeRawSave(null);
  *
  * **This surface is the only one that reseeds**, and `reloadOutcome` is where that
  * is said: its draft is replaced by the disk text rather than the panel closing.
+ *
+ * **And it is the only one that can never reapply.** `reapplySupport` is
+ * `unavailable` permanently, by the consult's Q4: this candidate is a whole
+ * document, so there is no target, no field intent and no operation to re-resolve,
+ * and "reapply" could only mean overwriting the newly read disk text with a stale
+ * string or inventing a text merge — the first forbidden by plan section 6.5 and
+ * the second by the plan outright. {@link reapplyToDiskVersion} is what says so as
+ * a value; 2c-4c owns the recovery fallback this surface is left with.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'reseedsDraft',
   offersCopyDraft: true,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'unavailable'
 };
 
 /**
@@ -882,6 +892,56 @@ export function loadDiskVersion(
     sendFailure: null
   };
 } // End of function loadDiskVersion()
+
+/**
+ * Why a reapply of this editor's draft could not be carried out.
+ *
+ * **The shared obstacles and nothing else**, and neither of them is reachable from
+ * this surface: {@link reapplyToDiskVersion} answers `unavailable` before it has
+ * looked at any evidence. The alias exists so that
+ * {@link RawEditorReapply}'s shape is the same one the five match surfaces answer
+ * with, rather than a special case a caller has to know about.
+ */
+export type RawEditorReapplyObstacle = SharedReapplyObstacle;
+
+/** What a reapply of this editor's draft became. Always `unavailable`. */
+export type RawEditorReapply = ReapplyOutcome<RawEditorSession, RawEditorReapplyObstacle>;
+
+/**
+ * Refuses to reapply this editor's draft, permanently and by construction.
+ *
+ * **The consult's Q4 as a value.** A whole-document candidate has no target, no
+ * field intent and no operation to re-resolve, so *reapply* could only mean
+ * overwriting the newly read disk text with a stale string — which plan section 6.5
+ * forbids — or inventing a text merge, which the plan forbids for v1 outright. This
+ * editor's honest options stay 2c-4a's: keep editing, take an exact reference copy,
+ * compare, or confirm a reload. The recovery fallback is 2c-4c's.
+ *
+ * **It takes no adoption function and cannot spend one.** {@link beginReapply}
+ * answers `unavailable` from this surface's own permanent
+ * `ConflictCapabilities.reapplySupport` **before** it looks at the conflict, so a
+ * conflict whose payload happened to carry an identified subject changes nothing
+ * here — which is what makes this a declaration rather than an accident of which
+ * arms the wire produces.
+ *
+ * **What no type forces**: that a caller does not simply build a `reapplied` outcome
+ * of its own. What is closed is that nothing in this module produces one, and that
+ * no adoption of a disk snapshot can be reached from this surface's reapply path at
+ * all.
+ *
+ * @param session - The session, showing a conflict or not. Read only to ask which
+ *   conflict it holds, which does not change the answer.
+ * @returns The `unavailable` arm, always.
+ */
+export function reapplyToDiskVersion(session: RawEditorSession): RawEditorReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  // **`start` is `unavailable` here, every time**: `beginReapply` reads this
+  // surface's permanent `reapplySupport` before it looks at the conflict, so
+  // neither `ready` nor `notAttempted` can come back. The narrowing exists because
+  // `ReapplyStart` has three arms whatever this surface declares, and answering
+  // `unavailable` for a `ready` that cannot occur is the conservative direction.
+  return start.kind === 'ready' ? { kind: 'unavailable' } : start;
+} // End of function reapplyToDiskVersion()
 
 /** Everything a screen needs about one session, derived on every read. */
 export interface RawEditorView {

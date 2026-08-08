@@ -35,7 +35,7 @@ import type {
   SaveResult
 } from '../ipc/types';
 import { isDirty, startDraft, textDraftRules } from './draft';
-import { makeDocument } from './fixtures';
+import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import {
   openWholeDocumentSave,
   sealWholeDocumentSave,
@@ -58,6 +58,7 @@ import {
   rawEditorRefusal,
   rawEditorRefusalKey,
   rawEditorView,
+  reapplyToDiskVersion,
   redoEdit,
   saveCouldNotBeSent,
   startRawEditor,
@@ -832,3 +833,49 @@ describe('the conflict state', () => {
     } // End of the loop over both languages
   }); // End of the "no keep my draft" case
 }); // End of the "conflict state" suite
+
+describe('the reapply this editor can never have', () => {
+  // **The consult's Q4 as an executable value.** A whole-document candidate has no
+  // target, no field intent and no operation to re-resolve, so *reapply* could only
+  // mean overwriting the newly read disk text with a stale string — plan section
+  // 6.5 — or inventing a text merge, which the plan forbids for v1 outright.
+
+  it('answers unavailable with a conflict on screen', () => {
+    expect(reapplyToDiskVersion(inConflict())).toEqual({ kind: 'unavailable' });
+  });
+
+  it('answers unavailable with no conflict at all', () => {
+    // **Permanent and not a state.** A surface that can never reapply says so
+    // whether or not there is something to reapply, because answering *there is
+    // nothing to do* would invite a caller to conclude the refusal was temporary.
+    expect(reapplyToDiskVersion(fresh())).toEqual({ kind: 'unavailable' });
+    expect(reapplyToDiskVersion(editText(fresh(), EDITED))).toEqual({ kind: 'unavailable' });
+  });
+
+  it('answers unavailable even for a payload that identified a snippet', () => {
+    // A `ReapplyEvidence` is a boundary value and nothing in TypeScript proves
+    // which command produced one. `beginReapply` reads this surface's permanent
+    // declaration **before** it looks at the evidence, which is what makes the
+    // answer a declaration rather than an accident of which arms the wire carries.
+    const identified: SaveResult = makeConflict({
+      disk: makeDocument({ id: DOCUMENT, revision: AFTER }),
+      expected: BASE,
+      found: AFTER,
+      diskText: DISK,
+      subject: {
+        Identified: {
+          target: makeMatch({ node: 40, document: DOCUMENT, revision: AFTER, trigger: ':a' })
+        }
+      }
+    });
+    const stuck = roundTrip(editText(fresh(), EDITED), identified).session;
+    expect(conflictOf(stuck)).not.toBeNull();
+    expect(reapplyToDiskVersion(stuck)).toEqual({ kind: 'unavailable' });
+  });
+
+  it('takes no adoption function, so no disk snapshot can be installed through it', () => {
+    // The strongest thing a test can say about a transition that does nothing:
+    // there is no parameter through which it could ask the window to move.
+    expect(reapplyToDiskVersion).toHaveLength(1);
+  });
+}); // End of the raw reapply suite

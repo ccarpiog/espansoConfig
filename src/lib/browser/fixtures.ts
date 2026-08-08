@@ -35,7 +35,9 @@
 
 import type {
   AliasView,
+  ConflictResult,
   ContentKind,
+  ContentRevision,
   ContentSpec,
   Diagnostic,
   DiagnosticCode,
@@ -50,6 +52,8 @@ import type {
   MatchBadge,
   MatchOptions,
   MatchView,
+  ReapplyPlacement,
+  ReapplyResolution,
   ScalarStyle,
   ScalarView,
   TriggerKind,
@@ -647,3 +651,77 @@ export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
     safely_editable: (overrides.hazards ?? []).length === 0
   };
 } // End of function makeDocument()
+
+/** What {@link makeConflict} needs; only the disk projection is required. */
+export interface ConflictOverrides {
+  /**
+   * The newly parsed projection the conflict carries.
+   *
+   * **Required, and `disk_revision` is copied from its `revision` field** — that
+   * one equality is the whole of what this fixture forces, and it is worth forcing
+   * because a case that set the two separately would be asserting over a payload
+   * whose revision names a projection it does not carry. Neither TypeScript nor
+   * this fixture proves anything further: `revision` is an ordinary string, so a
+   * caller can hand in a `DocumentView` whose revision is unrelated to its own
+   * projected fields, and nothing here hashes
+   * {@link ConflictOverrides.diskText} or checks that this projection is a parse
+   * of it. In Rust one refresh produces the text, the revision and the projection
+   * together; a fixture cannot stand in for that.
+   */
+  readonly disk: DocumentView;
+  /** The revision the save was based on. */
+  readonly expected?: ContentRevision;
+  /**
+   * The revision the locked read found.
+   *
+   * Defaults to the disk projection's, which is the ordinary case: the file moved
+   * once. A case about `changedAgain` sets a third value.
+   */
+  readonly found?: ContentRevision;
+  /**
+   * The disk side's whole file text.
+   *
+   * Independently settable, and its default is a fixed comment line that is not a
+   * serialisation of {@link ConflictOverrides.disk}. Nothing binds it to the
+   * revision above; a case that needs the two to agree has to say so itself.
+   */
+  readonly diskText?: string;
+  /** What the search for the operation's own snippet found. */
+  readonly subject?: ReapplyResolution;
+  /** What the search for its positional anchor found. */
+  readonly placement?: ReapplyPlacement;
+}
+
+/**
+ * Builds a `ConflictResult` of the shape the boundary delivers.
+ *
+ * **The two correspondence operands default to the arms a save that names nothing
+ * produces** — `Unsupported` and `NotAnchored` — because that is what every
+ * conflict fixture written before 2c-4b-1 carries and what a case not about
+ * reapply should go on carrying. A case about reapply sets them.
+ *
+ * **What it forces, in the same sentence as what it does not.** `disk_revision`
+ * equals the supplied projection's `revision`, and `found` defaults to it. It does
+ * not force that either names the same bytes as `disk_text`, that the projection is
+ * a parse of those bytes, or that the identified subject and placement belong to
+ * this projection at all — those are properties of the Rust boundary, and a test
+ * built on this fixture is evidence about the transition it drives and not about
+ * the payload the wire can produce.
+ *
+ * @param overrides - The disk projection, and whatever else the case cares about.
+ * @returns The conflict, as it crosses the boundary.
+ */
+export function makeConflict(overrides: ConflictOverrides): ConflictResult {
+  return {
+    outcome: 'conflict',
+    reapply: {
+      subject: overrides.subject ?? { Unsupported: {} },
+      placement: overrides.placement ?? { NotAnchored: {} }
+    },
+    expected: overrides.expected ?? 'rev-a',
+    found: overrides.found ?? overrides.disk.revision,
+    disk_revision: overrides.disk.revision,
+    disk_text: overrides.diskText ?? '# the file as it is now\n',
+    disk: overrides.disk
+  };
+} // End of function makeConflict()

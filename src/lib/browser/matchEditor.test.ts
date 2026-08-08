@@ -35,12 +35,13 @@ import type {
   MatchDraft,
   MatchId,
   MatchView,
+  ReapplyResolution,
   SaveResult,
   ScalarView,
   UnknownEntry
 } from '../ipc/types';
 import { editDraft, isDirty } from './draft';
-import { aliasValue, makeDocument, makeMatch, scalar } from './fixtures';
+import { aliasValue, makeConflict, makeDocument, makeMatch, scalar, unknownEntry } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeFindings,
@@ -56,6 +57,7 @@ import {
   editField,
   fieldEligibility,
   fieldIntent,
+  fieldReapply,
   fieldRefusalKey,
   focusField,
   isEditable,
@@ -64,6 +66,8 @@ import {
   matchDraftOf,
   matchEditorView,
   outcomeIsStale,
+  planMatchReapply,
+  reapplyToDiskVersion,
   redoEdit,
   reloadTheDiskVersion,
   removeField,
@@ -1351,3 +1355,454 @@ describe('the confirmed reload', () => {
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
+
+describe('reapplying the retained draft', () => {
+  // **2c-4b-2 builds this and 2c-4b-3 draws it**, which is the same trade
+  // 2c-4a-2 made for the reload: an unoffered transition can be built and driven
+  // without a screen, and `ConflictChoice` has no member for a reapply yet — so
+  // nothing here is reachable from a control, and every case calls the transition
+  // directly.
+
+  /**
+   * A conflicted save of an edited draft, over a chosen disk snapshot.
+   *
+   * @param edit - What the person did before saving.
+   * @param subject - What the correspondence search answered about the snippet.
+   * @param diskMatches - What the newly parsed projection holds.
+   * @param base - The snippet the session was seeded from.
+   * @returns The session showing the conflict.
+   */
+  function conflictedOver(
+    edit: (start: MatchEditorSession) => MatchEditorSession,
+    subject: ReapplyResolution,
+    diskMatches: readonly MatchView[],
+    base: MatchView = projection()
+  ): MatchEditorSession {
+    const started = beginSave(edit(session(base)));
+    if (started === null) {
+      throw new Error('this case needs a saveable draft');
+    }
+    const disk = makeDocument({ revision: AFTER, matches: diskMatches });
+    return applySave(
+      started.session,
+      makeConflict({ disk, subject, expected: BASE, found: AFTER }),
+      NOT_OWED
+    );
+  } // End of function conflictedOver()
+
+  /**
+   * The disk-side twin of {@link projection}, at the revision a conflict reports.
+   *
+   * @param overrides - Whatever the case needs beyond the trigger and the body.
+   * @returns The projection the disk snapshot holds.
+   */
+  function diskMatch(overrides: Parameters<typeof makeMatch>[0] = {}): MatchView {
+    return makeMatch({ revision: AFTER, trigger: ':a', replace: 'b', ...overrides });
+  } // End of function diskMatch()
+
+  /**
+   * One field's baseline, taken from a whole projection.
+   *
+   * Through `baselineOf` rather than by writing a `FieldBaseline` literal, so the
+   * eligibility a row is about is the one `fieldEligibility` really computes.
+   *
+   * @param match - The projection.
+   * @param field - Which field.
+   * @returns That field's baseline.
+   */
+  function baselineFor(match: MatchView, field: EditableField) {
+    return baselineOf(match)[field];
+  } // End of function baselineFor()
+
+  describe('the field table', () => {
+    it('row 1 — an unchanged intent preserves whatever the disk now holds', () => {
+      const was = baselineFor(projection({ label: 'mine' }), 'label');
+      const now = baselineFor(diskMatch({ label: 'theirs' }), 'label');
+      expect(fieldReapply(was, { text: 'mine', removed: false }, now)).toEqual({
+        kind: 'unchanged'
+      });
+    });
+
+    it('row 1 — an absent field left blank is unchanged, never Set("")', () => {
+      // **The presence-vs-blank rule, which is what the whole draft-versus-
+      // projection arrangement exists for.** The buffer alone cannot tell an absent
+      // field left blank from a present field cleared to empty, and getting it
+      // wrong here would write `label: ''` into a file that never had a label — and
+      // would then have to decide whether the disk's new label collided with it.
+      const was = baselineFor(projection(), 'label');
+      const now = baselineFor(diskMatch({ label: 'theirs' }), 'label');
+      expect(was.present).toBe(false);
+      expect(fieldReapply(was, { text: '', removed: false }, now)).toEqual({ kind: 'unchanged' });
+    });
+
+    it('row 2 — a Set survives a disk field in exactly the old state', () => {
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(diskMatch({ label: 'old' }), 'label');
+      expect(fieldReapply(was, { text: 'new', removed: false }, now)).toEqual({
+        kind: 'applicable',
+        intent: { Set: 'new' }
+      });
+    });
+
+    it('row 3 — a Set the disk already made is satisfied, not applicable', () => {
+      // Nothing is written for it, and it is **not** the same answer as row 1: the
+      // person did ask for this, and the file happens to say it already.
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(diskMatch({ label: 'new' }), 'label');
+      expect(fieldReapply(was, { text: 'new', removed: false }, now)).toEqual({
+        kind: 'satisfied'
+      });
+    });
+
+    it('row 4 — a Remove survives a disk field in exactly the old state', () => {
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(diskMatch({ label: 'old' }), 'label');
+      expect(fieldReapply(was, { text: 'old', removed: true }, now)).toEqual({
+        kind: 'applicable',
+        intent: 'Remove'
+      });
+    });
+
+    it('row 5 — a Remove the disk already made is satisfied', () => {
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(diskMatch(), 'label');
+      expect(now.present).toBe(false);
+      expect(fieldReapply(was, { text: 'old', removed: true }, now)).toEqual({ kind: 'satisfied' });
+    });
+
+    it('row 5 — a key the disk now writes as something unmodelled is not "already removed"', () => {
+      // **`present` is `false` for an unmodelled key too**, because the projection
+      // carries no scalar for it — so *absent* alone would call a `label:` that has
+      // become a mapping "already removed", write nothing, and leave the key in the
+      // file. The editable test is what excludes it.
+      const now = baselineFor(
+        diskMatch({
+          unknownEntries: [unknownEntry('label', { UnexpectedShape: { found: 'Mapping' } })]
+        }),
+        'label'
+      );
+      expect(now.present).toBe(false);
+      expect(now.eligibility).toEqual({ kind: 'readOnly', reason: 'unmodelledShape' });
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      expect(fieldReapply(was, { text: 'old', removed: true }, now)).toEqual({ kind: 'collision' });
+    });
+
+    it('row 6 — a Set over a field the disk moved to a third value collides', () => {
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(diskMatch({ label: 'theirs' }), 'label');
+      expect(fieldReapply(was, { text: 'mine', removed: false }, now)).toEqual({
+        kind: 'collision'
+      });
+    });
+
+    it('row 6 — a Set over a field that is newly ineligible collides', () => {
+      // Eligibility is load-bearing: a fresh projection can make a formerly
+      // editable scalar undecodable, zero-width, the wrong shape or
+      // carriage-return-bearing, and writing into it would be writing into
+      // something this application has just said it cannot read.
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const now = baselineFor(
+        makeMatch({ revision: AFTER, trigger: ':a', replace: 'b', label: 'old\rx' }),
+        'label'
+      );
+      expect(now.eligibility).toEqual({ kind: 'readOnly', reason: 'carriageReturn' });
+      expect(fieldReapply(was, { text: 'mine', removed: false }, now)).toEqual({
+        kind: 'collision'
+      });
+    });
+
+    it('row 6 — a Set whose value the disk matches, in a field it made read-only, collides', () => {
+      // The satisfied rows ask for editability as well as for the value: a field
+      // the new parse will not let anybody edit is not a field whose drafted change
+      // has been made, it is a field this session can no longer reason about.
+      const was = baselineFor(projection({ label: 'old' }), 'label');
+      const undecodable = makeMatch({ revision: AFTER, trigger: ':a', replace: 'b' });
+      const now = baselineFor(
+        { ...undecodable, label: undecoded('new') },
+        'label'
+      );
+      expect(now.eligibility).toEqual({ kind: 'readOnly', reason: 'notDecodable' });
+      expect(now.value).toBe('new');
+      expect(fieldReapply(was, { text: 'new', removed: false }, now)).toEqual({
+        kind: 'collision'
+      });
+    });
+  }); // End of the field table suite
+
+  describe('the plan over all six fields', () => {
+    it('rebuilds buffers that derive exactly the intents it decided', () => {
+      // The round trip that makes the rebuilt session honest: `fieldIntent` over
+      // the **new** baseline must answer what the plan said it would, or the
+      // session would send something other than what was decided.
+      const was = baselineOf(projection({ label: 'old', options: { word: 'on' } }));
+      const now = baselineOf(diskMatch({ label: 'old', options: { word: 'on' } }));
+      const buffers: MatchBuffers = {
+        ...buffersOf(was),
+        replace: { text: 'mine', removed: false },
+        label: { text: 'old', removed: true }
+      };
+      const plan = planMatchReapply(was, buffers, now);
+      expect(plan.collisions).toEqual([]);
+      expect(plan.writesAnything).toBe(true);
+      for (const field of ['trigger', 'replace', 'label', 'word'] as const) {
+        expect(fieldIntent(now[field], plan.buffers[field]), field).toEqual(
+          plan.verdicts[field].kind === 'applicable'
+            ? (plan.verdicts[field] as { readonly intent: unknown }).intent
+            : 'Unchanged'
+        );
+      } // End of the loop over the fields this case drafted or left alone
+    });
+
+    it('names every collided field and blocks the whole reapply', () => {
+      // **Any collision blocks all of it** (consult Q4): *Keep my draft* claims one
+      // retained intention, and saving the safe fields only would strand the rest
+      // while looking successful.
+      const was = baselineOf(projection({ label: 'old' }));
+      const now = baselineOf(diskMatch({ trigger: ':theirs', label: 'theirs' }));
+      const buffers: MatchBuffers = {
+        ...buffersOf(was),
+        trigger: { text: ':mine', removed: false },
+        replace: { text: 'mine', removed: false },
+        label: { text: 'mine', removed: false }
+      };
+      const plan = planMatchReapply(was, buffers, now);
+      expect(plan.collisions).toEqual(['trigger', 'label']);
+      expect(plan.verdicts.replace).toEqual({ kind: 'applicable', intent: { Set: 'mine' } });
+    });
+
+    it('writes nothing when every drafted change was already satisfied', () => {
+      const was = baselineOf(projection({ label: 'old' }));
+      const now = baselineOf(diskMatch({ label: 'mine' }));
+      const buffers: MatchBuffers = {
+        ...buffersOf(was),
+        label: { text: 'mine', removed: false }
+      };
+      const plan = planMatchReapply(was, buffers, now);
+      expect(plan.collisions).toEqual([]);
+      expect(plan.writesAnything).toBe(false);
+      expect(plan.verdicts.label).toEqual({ kind: 'satisfied' });
+    });
+  }); // End of the plan suite
+
+  describe('the transition', () => {
+    /**
+     * A recorder for the window's own adoption.
+     *
+     * @param answer - What the window answers.
+     * @returns The callback to pass, and the conflicts it was handed.
+     */
+    function adoptingReapply(answer: DiskAdoptionOutcome = 'installed'): {
+      readonly adopt: AdoptTheDiskVersion<MatchBuffers>;
+      readonly adoptions: ConflictModel<MatchBuffers>[];
+    } {
+      const adoptions: ConflictModel<MatchBuffers>[] = [];
+      return {
+        adopt: (conflict) => {
+          adoptions.push(conflict);
+          return answer;
+        },
+        adoptions
+      };
+    } // End of function adoptingReapply()
+
+    it('rebuilds the draft over the identified snippet and draws a new boundary', () => {
+      const target = diskMatch({ node: 9 });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const recorder = adoptingReapply();
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      // The identity and the base revision are the disk snapshot's, so the save
+      // that follows is measured against the bytes that refused the last one.
+      expect(answer.session.match).toEqual(target.id);
+      expect(baseRevisionOf(answer.session)).toBe(AFTER);
+      // The drafted value survived, and the disk field it did not touch survived
+      // with it.
+      expect(answer.session.draft.value.replace.text).toBe('mine');
+      expect(canSave(answer.session)).toBe(true);
+      expect(matchDraftOf(answer.session.baseline, answer.session.draft.value)).toMatchObject({
+        replace: { Set: 'mine' },
+        trigger: 'Unchanged',
+        label: 'Unchanged'
+      });
+      // A new history boundary: one step back to the version on disk, and nothing
+      // of the old session's history or consent.
+      expect(answer.session.draft.past).toHaveLength(1);
+      expect(answer.session.draft.future).toEqual([]);
+      expect(answer.session.draft.consent).toBeNull();
+      expect(answer.session.outcome).toBeNull();
+      expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
+    });
+
+    it('keeps a field the other writer changed, when the draft did not touch it', () => {
+      const target = diskMatch({ node: 9, label: 'theirs' });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      // The external label is in the baseline and goes out `'Unchanged'`, so the
+      // save preserves the other writer's bytes exactly.
+      expect(answer.session.baseline.label.value).toBe('theirs');
+      expect(matchDraftOf(answer.session.baseline, answer.session.draft.value).label).toBe(
+        'Unchanged'
+      );
+    });
+
+    it('reports alreadySatisfied and leaves nothing to send', () => {
+      const target = diskMatch({ node: 9, replace: 'mine' });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const recorder = adoptingReapply();
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      expect(answer.kind).toBe('alreadySatisfied');
+      if (answer.kind !== 'alreadySatisfied') {
+        throw new Error('this case is about the satisfied arm');
+      }
+      // **The disk was still adopted**: the window must move to the file that
+      // already holds the change, or it would go on describing bytes that are gone.
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(canSave(answer.session)).toBe(false);
+      expect(isDirty(answer.session.draft)).toBe(false);
+      expect(answer.session.draft.value.replace.text).toBe('mine');
+    });
+
+    it('refuses a field collision, names the fields, and adopts nothing', () => {
+      const target = diskMatch({ node: 9, replace: 'theirs' });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const recorder = adoptingReapply();
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      expect(answer).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'fieldCollisions', fields: ['replace'] }
+      });
+      // **Decide first, adopt second.** A refusal leaves the window exactly where
+      // it was — no projection replaced, no selection repaired, no token spent.
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses a correspondence the core would not establish, and adopts nothing', () => {
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Refused: { reason: 'AmbiguousTrigger' } },
+        [diskMatch({ node: 9 })]
+      );
+      const recorder = adoptingReapply();
+      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'correspondence', reason: 'AmbiguousTrigger' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses evidence that names no snippet, and adopts nothing', () => {
+      for (const subject of [{ Unsupported: {} }, { Targetless: {} }] as const) {
+        const stuck = conflictedOver(
+          (start) => editField(start, 'replace', 'mine'),
+          subject,
+          [diskMatch({ node: 9 })]
+        );
+        const recorder = adoptingReapply();
+        expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+          kind: 'manualResolution',
+          obstacle: { kind: 'evidenceNotATarget' }
+        });
+        expect(recorder.adoptions).toEqual([]);
+      } // End of the loop over the two empty subject arms
+    });
+
+    it('refuses a snippet the new parse will not let anybody edit, and adopts nothing', () => {
+      const target = diskMatch({ node: 9, blockingHazard: 'MergeKey', safelyEditable: false });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const recorder = adoptingReapply();
+      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'targetNotEditable' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('reports the window refusal and rebuilds nothing', () => {
+      const target = diskMatch({ node: 9 });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const recorder = adoptingReapply('refused');
+      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(recorder.adoptions).toHaveLength(1);
+    });
+
+    it('treats a window that already holds the disk version as a success', () => {
+      const target = diskMatch({ node: 9 });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      expect(reapplyToDiskVersion(stuck, adoptingReapply('alreadyThere').adopt).kind).toBe(
+        'reapplied'
+      );
+    });
+
+    it('is not attempted when no conflict is showing', () => {
+      const recorder = adoptingReapply();
+      expect(reapplyToDiskVersion(session(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('meets another conflict as an ordinary one, with no retry loop', () => {
+      // **A reapply is one new attempt** (consult Q5). The rebuilt session goes
+      // through the ordinary submit path, and a file that moved a third time
+      // produces an ordinary conflict panel — not a second automatic rebase.
+      const target = diskMatch({ node: 9 });
+      const stuck = conflictedOver(
+        (start) => editField(start, 'replace', 'mine'),
+        { Identified: { target } },
+        [target]
+      );
+      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case starts from a rebuilt session');
+      }
+      const started = beginSave(answer.session);
+      if (started === null) {
+        throw new Error('the rebuilt session is saveable');
+      }
+      // The base revision it sends is the adopted one, not the session's original.
+      expect(started.submission.baseRevision).toBe(AFTER);
+      const third = makeDocument({ revision: 'c'.repeat(64), matches: [diskMatch({ node: 11 })] });
+      const again = applySave(
+        started.session,
+        makeConflict({ disk: third, expected: AFTER, found: 'c'.repeat(64) }),
+        NOT_OWED
+      );
+      expect(again.outcome?.kind).toBe('conflict');
+      expect(conflictOf(again)?.diskRevision).toBe('c'.repeat(64));
+      // The retained draft is the one the reapply rebuilt, kept again.
+      expect(conflictOf(again)?.draft.value.replace.text).toBe('mine');
+    });
+  }); // End of the transition suite
+}); // End of the reapply suite

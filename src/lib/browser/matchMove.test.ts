@@ -36,9 +36,11 @@ import type {
   MatchId,
   MatchView,
   PresentationNote,
+  ReapplyPlacement,
+  ReapplyResolution,
   SaveResult
 } from '../ipc/types';
-import { makeDocument, makeMatch, matchListPath } from './fixtures';
+import { makeConflict, makeDocument, makeMatch, matchListPath } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import { identityInProjection } from './matchDeletion';
 import {
@@ -66,6 +68,7 @@ import {
   moveSubmissionRefusal,
   moveSubmissionRefusalKey,
   placementOf,
+  reapplyToDiskVersion,
   reloadTheDiskVersion,
   sameSequence,
   sequenceOf,
@@ -1420,3 +1423,351 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
+
+describe('reapplying the retained move', () => {
+  // **2c-4b-2 builds this and 2c-4b-3 draws it.** `ConflictChoice` has no member
+  // for a reapply, so nothing here is reachable from a control; every case calls
+  // the transition directly.
+
+  /**
+   * The same three snippets, **reordered**, at the revision a conflict reports.
+   *
+   * The arena nodes travel with the snippets and the indexes do not, which is
+   * exactly what a reapply must follow: the old final path index is never a
+   * tie-break, and the destination is rebuilt from the new sequence.
+   *
+   * @param overrides - Whatever a case needs the disk file to keep saying.
+   * @returns The projection the conflict carries.
+   */
+  function reordered(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
+    return file({
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 12, document: 2, revision: AFTER, trigger: ':sql', path: matchListPath(0) }),
+        makeMatch({ node: 10, document: 2, revision: AFTER, trigger: ':sig', path: matchListPath(1) }),
+        makeMatch({ node: 11, document: 2, revision: AFTER, trigger: ':date', path: matchListPath(2) })
+      ],
+      ...overrides
+    });
+  } // End of function reordered()
+
+  /**
+   * One snippet of a disk projection, by the trigger it is written with.
+   *
+   * By trigger rather than by index, because *which snippet* is the whole question
+   * a reapply answers and an index is what it must not use.
+   *
+   * @param document - The projection.
+   * @param trigger - The snippet's trigger.
+   * @returns Its projection.
+   */
+  function snippet(document: DocumentView, trigger: string): MatchView {
+    const found = document.matches.find((one) => one.trigger.trigger?.text === trigger);
+    if (found === undefined) {
+      throw new Error(`this fixture holds no ${trigger}`);
+    }
+    return found;
+  } // End of function snippet()
+
+  /**
+   * A conflicted move whose payload carries chosen correspondence evidence.
+   *
+   * @param position - Which snippet of {@link file} the move is about.
+   * @param placement - Where the person asked for it to go.
+   * @param subject - What the search for the moved snippet answered.
+   * @param disk - The newly parsed projection the conflict carries.
+   * @param anchor - What the search for the positional anchor answered.
+   * @returns The session showing the conflict.
+   */
+  function conflictedOver(
+    position: number,
+    placement: MovePlacement,
+    subject: ReapplyResolution,
+    disk: DocumentView,
+    anchor: ReapplyPlacement = { NotAnchored: {} }
+  ): MatchMoveSession {
+    const chosen = choosePlacement(session(position), placement);
+    const started = beginMove(chosen, live(position));
+    if (started === null) {
+      throw new Error('this case needs a move that really moves');
+    }
+    return applyMove(
+      started.session,
+      makeConflict({ disk, subject, placement: anchor, expected: BASE, found: AFTER }),
+      NOT_OWED
+    );
+  } // End of function conflictedOver()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adoptingReapply(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MovePlacement>;
+    readonly adoptions: ConflictModel<MovePlacement>[];
+  } {
+    const adoptions: ConflictModel<MovePlacement>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adoptingReapply()
+
+  it('follows the snippet and not its former index after a reorder', () => {
+    // The snippet was the second item and is now the third. Nothing carries the
+    // old index: the members and the anchors are rebuilt from the sequence the
+    // adopted projection holds.
+    const disk = reordered();
+    const target = snippet(disk, ':date');
+    const stuck = conflictedOver(1, { kind: 'top' }, { Identified: { target } }, disk);
+    const recorder = adoptingReapply();
+    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt);
+    expect(answer.kind).toBe('reapplied');
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt session');
+    }
+    expect(answer.session.match).toEqual(target.id);
+    expect(baseRevisionOf(answer.session)).toBe(AFTER);
+    expect(answer.session.members.map((one) => one.node)).toEqual([12, 10, 11]);
+    expect(placementOf(answer.session)).toEqual({ kind: 'top' });
+    expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
+    // **R25 stays visible**: what the rebuilt session produces is one move and
+    // nothing else, and the wire's `after` is the lowering of *top*.
+    const started = beginMove(
+      answer.session,
+      identityInProjection([disk], answer.session.match)
+    );
+    expect(started).not.toBeNull();
+    expect(started?.match).toEqual(target.id);
+    expect(started?.after).toBeNull();
+    expect(started?.submission.baseRevision).toBe(AFTER);
+  });
+
+  it('lowers end afresh against the new sequence', () => {
+    // *End* is a semantic choice: it means the bottom of whatever list the file
+    // now holds, so the anchor it lowers to is the new last other snippet.
+    const disk = reordered();
+    const target = snippet(disk, ':sig');
+    const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target } }, disk);
+    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt);
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt session');
+    }
+    expect(placementOf(answer.session)).toEqual({ kind: 'end' });
+    expect(
+      beginMove(answer.session, identityInProjection([disk], answer.session.match))?.after
+    ).toEqual(snippet(disk, ':date').id);
+  });
+
+  it('ignores the evidence anchor entirely for a semantic placement', () => {
+    // **An `end` was lowered to *after the last other snippet* before it was
+    // sent**, so its wire anchor is a snippet the person never named. Refusing the
+    // move because that snippet's bytes changed would refuse a request that has
+    // nothing to do with it.
+    const disk = reordered();
+    const target = snippet(disk, ':sig');
+    const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target } }, disk, {
+      Refused: { reason: 'NoExactCorrespondence' }
+    });
+    expect(reapplyToDiskVersion(stuck, null, adoptingReapply().adopt).kind).toBe('reapplied');
+  });
+
+  it('rebuilds an after from the identified anchor, never from the old one', () => {
+    const disk = reordered();
+    const target = snippet(disk, ':sig');
+    const anchor = snippet(disk, ':date');
+    const stuck = conflictedOver(
+      0,
+      { kind: 'after', anchor: live(1) },
+      { Identified: { target } },
+      disk,
+      { Identified: { target: anchor } }
+    );
+    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt);
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt session');
+    }
+    // The anchor's revision is the adopted one; the identity the session drafted
+    // belonged to a parse that is gone.
+    expect(placementOf(answer.session)).toEqual({ kind: 'after', anchor: anchor.id });
+    expect(
+      beginMove(answer.session, identityInProjection([disk], answer.session.match))?.after
+    ).toEqual(anchor.id);
+  });
+
+  it('reports alreadySatisfied when the disk already writes it there', () => {
+    // The person asked for *after `:sql`*, and the reordered file already writes
+    // `:sig` directly after `:sql`. Nothing is written — and the disk is still
+    // adopted, because the window must describe the file that already says it.
+    const disk = reordered();
+    const target = snippet(disk, ':sig');
+    const anchor = snippet(disk, ':sql');
+    const stuck = conflictedOver(
+      0,
+      { kind: 'after', anchor: live(2) },
+      { Identified: { target } },
+      disk,
+      { Identified: { target: anchor } }
+    );
+    const recorder = adoptingReapply();
+    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt);
+    expect(answer.kind).toBe('alreadySatisfied');
+    if (answer.kind !== 'alreadySatisfied') {
+      throw new Error('this case is about the satisfied arm');
+    }
+    expect(recorder.adoptions).toHaveLength(1);
+    expect(moveSubmissionRefusal(answer.session, [disk])).toBe('alreadyThere');
+    expect(
+      beginMove(answer.session, identityInProjection([disk], answer.session.match))
+    ).toBeNull();
+  });
+
+  it('refuses an anchor the core would not establish, and adopts nothing', () => {
+    const disk = reordered();
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(
+      0,
+      { kind: 'after', anchor: live(1) },
+      { Identified: { target: snippet(disk, ':sig') } },
+      disk,
+      { Refused: { reason: 'AmbiguousExact' } }
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'anchorCorrespondence', reason: 'AmbiguousExact' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that answers no anchor although the move names one', () => {
+    const disk = reordered();
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(
+      0,
+      { kind: 'after', anchor: live(1) },
+      { Identified: { target: snippet(disk, ':sig') } },
+      disk
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotAnAnchor' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses an identified anchor the new sequence does not offer, and adopts nothing', () => {
+    // The anchor identified is the moved snippet itself — the self-anchor
+    // exclusion — which `choosePlacement` would answer *unchanged* for, and that
+    // answer is indistinguishable from *the destination did not move*.
+    const disk = reordered();
+    const target = snippet(disk, ':sig');
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(
+      0,
+      { kind: 'after', anchor: live(1) },
+      { Identified: { target } },
+      disk,
+      { Identified: { target } }
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'anchorNotInSequence' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses a snippet the new parse addresses in another sequence', () => {
+    // **"Same sequence" is the invariant, and "same file" is not it** (D2r). No
+    // projection produces two snippet lists today, which is exactly why the rule
+    // is written rather than assumed: encoding the coincidence would make the
+    // model silently wrong the first time one does.
+    const elsewhere = makeMatch({
+      node: 10,
+      document: 2,
+      revision: AFTER,
+      trigger: ':sig',
+      path: { document_index: 0, segments: [{ Key: 'other' }, { Index: 0 }] }
+    });
+    const disk = reordered({
+      matches: [
+        elsewhere,
+        makeMatch({ node: 11, document: 2, revision: AFTER, trigger: ':date', path: matchListPath(0) }),
+        makeMatch({ node: 12, document: 2, revision: AFTER, trigger: ':sql', path: matchListPath(1) })
+      ]
+    });
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target: elsewhere } }, disk);
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'notTheSameSequence' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses a correspondence the core would not establish, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(
+      0,
+      { kind: 'end' },
+      { Refused: { reason: 'TargetMissingOrTriggerChanged' } },
+      reordered()
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: 'TargetMissingOrTriggerChanged' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that names no snippet, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(0, { kind: 'end' }, { Targetless: {} }, reordered());
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotATarget' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('asks the ordinary submission rule again over the new parse', () => {
+    const disk = reordered({ readOnly: true });
+    const recorder = adoptingReapply();
+    const stuck = conflictedOver(
+      0,
+      { kind: 'end' },
+      { Identified: { target: snippet(disk, ':sig') } },
+      disk
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'moveRefused', reason: 'notMovable' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('reports the window refusal and rebuilds nothing', () => {
+    const disk = reordered();
+    const recorder = adoptingReapply('refused');
+    const stuck = conflictedOver(
+      0,
+      { kind: 'end' },
+      { Identified: { target: snippet(disk, ':sig') } },
+      disk
+    );
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(recorder.adoptions).toHaveLength(1);
+  });
+
+  it('is not attempted when no conflict is showing', () => {
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(session(0), null, recorder.adopt)).toEqual({
+      kind: 'notAttempted'
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+}); // End of the reapply suite

@@ -32,9 +32,10 @@ import type {
   MatchId,
   MatchView,
   PresentationNote,
+  ReapplyResolution,
   SaveResult
 } from '../ipc/types';
-import { makeDocument, makeMatch, matchListPath } from './fixtures';
+import { makeConflict, makeDocument, makeMatch, matchListPath } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import { identityInProjection } from './matchDeletion';
 import {
@@ -57,6 +58,7 @@ import {
   duplicationSubmissionRefusal,
   duplicationSubmissionRefusalKey,
   matchDuplicationView,
+  reapplyToDiskVersion,
   reloadTheDiskVersion,
   startMatchDuplication,
   type DuplicationRefusal,
@@ -1030,3 +1032,156 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
+
+describe('reapplying the retained duplication', () => {
+  // **2c-4b-2 builds this and 2c-4b-3 draws it.** `ConflictChoice` has no member
+  // for a reapply, so nothing here is reachable from a control; every case calls
+  // the transition directly.
+
+  /**
+   * A conflicted duplicate whose payload carries chosen correspondence evidence.
+   *
+   * @param subject - What the search for this snippet answered.
+   * @param disk - The newly parsed projection the conflict carries.
+   * @returns The session showing the conflict.
+   */
+  function conflictedOver(
+    subject: ReapplyResolution,
+    disk: DocumentView = reread()
+  ): MatchDuplicationSession {
+    const started = beginDuplicate(session(0), live(0));
+    if (started === null) {
+      throw new Error('a fresh session is duplicable');
+    }
+    return applyDuplication(
+      started.session,
+      makeConflict({ disk, subject, expected: BASE, found: AFTER }),
+      NOT_OWED
+    );
+  } // End of function conflictedOver()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adoptingReapply(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MatchId>;
+    readonly adoptions: ConflictModel<MatchId>[];
+  } {
+    const adoptions: ConflictModel<MatchId>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adoptingReapply()
+
+  it('re-opens the duplicate over the identified snippet, with no consent carried', () => {
+    // **The old acknowledgement cannot cross.** `DuplicateKeepsTriggerDefinition`
+    // is content-addressed to the candidate's own revision, so consent collected
+    // before the conflict describes bytes that are gone: the rebuilt session
+    // carries none and the refuse-then-acknowledge round starts again.
+    const disk = reread();
+    const target = disk.matches[0]!;
+    const stuck = conflictedOver({ Identified: { target } }, disk);
+    const recorder = adoptingReapply();
+    const answer = reapplyToDiskVersion(stuck, false, recorder.adopt);
+    expect(answer.kind).toBe('reapplied');
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt session');
+    }
+    expect(answer.session.match).toEqual(target.id);
+    expect(baseRevisionOf(answer.session)).toBe(AFTER);
+    expect(answer.session.draft.consent).toBeNull();
+    expect(answer.session.duplicated).toBe(false);
+    expect(answer.session.invalidated).toBe(false);
+    expect(beginDuplicate(answer.session, live(0, disk))).not.toBeNull();
+    expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
+  });
+
+  it('refuses a correspondence the core would not establish, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(
+        conflictedOver({ Refused: { reason: 'AmbiguousExact' } }),
+        false,
+        recorder.adopt
+      )
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: 'AmbiguousExact' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that names no snippet, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(conflictedOver({ Targetless: {} }), false, recorder.adopt)
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotATarget' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('asks the open-editor question again, about this window now', () => {
+    // The answer is about the window at the moment of the reapply, not about the
+    // parse that was replaced — and it says *an editor is open*, never *there are
+    // unsaved edits*, because no coordinator can see a component-local `isDirty`.
+    const disk = reread();
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(
+        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+        true,
+        recorder.adopt
+      )
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'notDuplicable', reason: 'unsavedDraftInDocument' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('rechecks eligibility over the new parse', () => {
+    const disk = reread({ readOnly: true });
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(
+        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+        false,
+        recorder.adopt
+      )
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'notDuplicable', reason: 'readOnly' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('reports the window refusal and rebuilds nothing', () => {
+    const disk = reread();
+    const recorder = adoptingReapply('refused');
+    expect(
+      reapplyToDiskVersion(
+        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+        false,
+        recorder.adopt
+      )
+    ).toEqual({ kind: 'adoptionRefused' });
+    expect(recorder.adoptions).toHaveLength(1);
+  });
+
+  it('is not attempted when no conflict is showing', () => {
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(session(0), false, recorder.adopt)).toEqual({
+      kind: 'notAttempted'
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+}); // End of the reapply suite

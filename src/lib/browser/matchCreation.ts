@@ -126,6 +126,8 @@ import type {
   NewMatch,
   NewMatchPosition,
   PresentationNote,
+  ReapplyEvidence,
+  ReapplyRefusal,
   SaveResult
 } from '../ipc/types';
 import {
@@ -167,7 +169,16 @@ import {
   type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
+import { plainIdentity } from './matchDeletion';
 import type { RawSaveChoice } from './rawSave';
+import {
+  adoptForReapply,
+  anchorCorrespondence,
+  beginReapply,
+  subjectIsTargetless,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle
+} from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
@@ -1364,6 +1375,217 @@ export function reloadTheDiskVersion(
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Why a reapply of this form could not be carried out.
+ *
+ * **A code, never a sentence.** There is no key function for these yet, and that is
+ * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
+ * with the panel that renders them.
+ */
+export type CreationReapplyObstacle =
+  | SharedReapplyObstacle
+  | {
+      /** The search for the snippet this form places the new one **after** refused. */
+      readonly kind: 'anchorCorrespondence';
+      /** The wire's own code, which `tReapplyRefusal` already has sentences for. */
+      readonly reason: ReapplyRefusal;
+    }
+  | {
+      /**
+       * The evidence answers no anchor although this form names one.
+       *
+       * **Unreachable from the running application**: `create_match` builds an
+       * anchored placement whenever it sends an `After`. A `ReapplyEvidence` is a
+       * boundary value and nothing in TypeScript proves which command produced one,
+       * and treating the disagreement as a refusal writes nothing.
+       */
+      readonly kind: 'evidenceNotAnAnchor';
+    }
+  | {
+      /** The identified anchor is not one the newly parsed destination holds. */
+      readonly kind: 'anchorNotInDestination';
+    }
+  | {
+      /**
+       * The conflict is about a file this form is not writing into.
+       *
+       * **Unreachable while a conflict is showing**, because {@link isEditable} is
+       * `false` then and {@link chooseDestination} refuses — so the destination
+       * cannot move between the send and the reapply. It is checked rather than
+       * assumed because a rebase against the wrong file's projection would install
+       * another file's anchors under this form's destination.
+       */
+      readonly kind: 'notTheDestination';
+    }
+  | {
+      /**
+       * The rebuilt form cannot be submitted, for one of the ordinary reasons.
+       *
+       * {@link creationRefusal}'s own verdict over the newly parsed projection —
+       * the destination is no longer a writable snippet file, the anchor is gone,
+       * a required field is empty. One rule, asked again, rather than a second copy
+       * of it here.
+       */
+      readonly kind: 'creationRefused';
+      /** Which of that rule's codes, for the panel to render. */
+      readonly reason: CreationRefusal;
+    };
+
+/** What a reapply of this form became. */
+export type MatchCreationReapply = ReapplyOutcome<MatchCreationSession, CreationReapplyObstacle>;
+
+/**
+ * The destination one file's newly parsed projection is, for a rebuilt form.
+ *
+ * `destinationOf` takes a `DocumentSummary` and this takes the projection, because
+ * a reapply has the projection and not the summary: the conflict carries
+ * `ConflictModel.disk`, and re-deriving the destination from a summary the form
+ * captured earlier would mix an old read's facts into a new one's. Every field a
+ * summary contributes — the identity, the relative path, the kind, the read-only
+ * flag — a `DocumentView` carries itself.
+ *
+ * **The anchors are plain copies**, for `startMatchMove`'s reason: a projection a
+ * screen holds comes out of `$state` and is deeply proxied, and the draft's
+ * `structuredClone` snapshot throws on a proxy. `choosePlacement` here validates an
+ * anchor and installs the **caller's** object rather than its own copy, unlike the
+ * mover's, so the copy has to be made before it is offered.
+ *
+ * @param view - The file's newly parsed projection.
+ * @returns The destination to put in the rebuilt form.
+ */
+function destinationOfProjection(view: DocumentView): CreationDestination {
+  return {
+    document: view.id,
+    path: view.relative_path,
+    revision: view.revision,
+    eligibility: destinationEligibility(view, view),
+    anchors: view.matches.map((match) => plainIdentity(match.id))
+  };
+} // End of function destinationOfProjection()
+
+/**
+ * The placement a reapply asks for, rebuilt against the newly parsed destination.
+ *
+ * `front` and `end` are handed back untouched: they are semantic choices and the
+ * command lowers them against whatever list it finds, so a change to the file's
+ * snippets does not change what they mean. An `after` is replaced by the anchor the
+ * evidence identified — never by the old one, whose revision belongs to a parse
+ * that is gone — and the replacement is taken **from the rebuilt destination's own
+ * anchors**, so what is installed is that list's plain copy.
+ *
+ * @param placement - What the form asked for.
+ * @param evidence - The correspondence answers from the conflict's payload.
+ * @param destination - The newly parsed destination, for its anchors.
+ * @returns The placement to hold, or the obstacle that stops the reapply.
+ */
+function rebuiltPlacement(
+  placement: CreationPlacement,
+  evidence: ReapplyEvidence,
+  destination: CreationDestination
+): { readonly placement: CreationPlacement } | { readonly obstacle: CreationReapplyObstacle } {
+  if (placement.kind !== 'after') {
+    return { placement };
+  }
+  const anchor = anchorCorrespondence(evidence);
+  if (anchor.kind === 'refused') {
+    return { obstacle: { kind: 'anchorCorrespondence', reason: anchor.reason } };
+  }
+  if (anchor.kind === 'notAnchored') {
+    return { obstacle: { kind: 'evidenceNotAnAnchor' } };
+  }
+  const identity = anchor.target.id;
+  const held = destination.anchors.find((one) => sameIdentity(one, identity));
+  return held === undefined
+    ? { obstacle: { kind: 'anchorNotInDestination' } }
+    : { placement: { kind: 'after', anchor: held } };
+} // End of function rebuiltPlacement()
+
+/**
+ * Re-points this form at the newly parsed disk version and revalidates it.
+ *
+ * **The consult's Q4 for the creator, which is the targetless surface**: there is
+ * no snippet to identify, because a creation brings its own. `subjectIsTargetless`
+ * is what says so, and it is the one place `Targetless` is told apart from
+ * `Unsupported` — the two are two facts, and a whole-document save's *there is
+ * nothing here to reapply at all* must not be read as a creation's *there is
+ * nothing to find*.
+ *
+ * What is retained is the {@link CreationBuffers} the person typed. What is rebuilt
+ * is everything around them:
+ *
+ * - the destination, from `ConflictModel.disk` — the projection paired with the
+ *   revision the conflict reported;
+ * - the draft's **base revision**, through `retargetedDraft`, which withdraws the
+ *   consent in the same call: findings accepted for one revision's candidate say
+ *   nothing about another's, and the acknowledgement round trip starts again;
+ * - `front` and `end`, which keep their meaning and are lowered by the command
+ *   against the new list; an `after`, which survives **only** on exact anchor
+ *   correspondence;
+ * - every ordinary creation check, through {@link creationRefusal}: the destination
+ *   is still a parsed writable snippet file with a match list, the anchor is still
+ *   one of its own, and the two fields are still non-empty and free of carriage
+ *   returns.
+ *
+ * **There is no `alreadySatisfied` arm, and there must not be one.** *Somebody else
+ * already added this snippet* would mean comparing the drafted trigger against the
+ * file's — a duplicate-trigger precheck the consult's Q4 refuses to add, because
+ * the candidate's own findings and the content-addressed acknowledgement protocol
+ * are what decide that, at the command, for the newly derived candidate.
+ *
+ * @param session - The form showing the conflict.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
+ *   all on a refusal.
+ * @returns What became of the attempt.
+ */
+export function reapplyToDiskVersion(
+  session: MatchCreationSession,
+  adopt: AdoptTheDiskVersion<CreationBuffers>
+): MatchCreationReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  if (start.kind !== 'ready') {
+    return start;
+  }
+  if (!subjectIsTargetless(start.evidence)) {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const held = chosenDestination(session);
+  const disk = start.conflict.disk;
+  if (held === null || held.document !== disk.id) {
+    return { kind: 'manualResolution', obstacle: { kind: 'notTheDestination' } };
+  }
+  const destination = destinationOfProjection(disk);
+  const wanted = rebuiltPlacement(session.placement, start.evidence, destination);
+  if ('obstacle' in wanted) {
+    return { kind: 'manualResolution', obstacle: wanted.obstacle };
+  }
+  const rebuilt: MatchCreationSession = {
+    ...session,
+    destinations: session.destinations.map((one) =>
+      one.document === disk.id ? destination : one
+    ),
+    placement: wanted.placement,
+    // Re-pointed at the destination's new revision, with the consent withdrawn in
+    // the same call. The typed values are untouched: they are what the person
+    // wrote, and they mean the same thing against either parse.
+    draft: retargetedDraft(session.draft, disk.revision),
+    phase: 'editing',
+    submitted: null,
+    outcome: null,
+    extraMessages: [],
+    group: null,
+    sendFailure: null,
+    reload: NOT_RELOADING
+  };
+  const refusal = creationRefusal(rebuilt);
+  if (refusal !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'creationRefused', reason: refusal } };
+  }
+  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+    return { kind: 'adoptionRefused' };
+  }
+  return { kind: 'reapplied', session: rebuilt };
+} // End of function reapplyToDiskVersion()
+
+/**
  * What this surface offers about a conflict.
  *
  * **`draftKind` is the permanent fact and the two booleans are not.**
@@ -1385,14 +1607,18 @@ export function reloadTheDiskVersion(
  * that named them would be describing something the retained draft does not
  * carry. They stay on screen in the form above the panel.
  *
- * **None of these is "keep my draft"** and none may become one: that phrase means
- * *reapply the draft to the newly parsed document*, which is 2c-4b.
+ * **None of these is "keep my draft"** and none may become one until a control is
+ * drawn: `reapplySupport` says this form *can* reapply and
+ * {@link reapplyToDiskVersion} is the transition, but `ConflictChoice` has no
+ * member for one and `conflictChoicesFor` names none, so nothing is offered here.
+ * 2c-4b-3 draws it.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: true,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'supported'
 };
 
 /** Everything a screen needs about one form, derived on every read. */

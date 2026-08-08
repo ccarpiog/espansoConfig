@@ -21,8 +21,15 @@
 import { describe, expect, it } from 'vitest';
 import { DICTIONARIES } from '../i18n/dictionaries';
 import { LOCALES } from '../i18n/locale';
-import type { ContentRevision, DocumentView, Finding, MatchId, SaveResult } from '../ipc/types';
-import { makeDocument, makeMatch } from './fixtures';
+import type {
+  ContentRevision,
+  DocumentView,
+  Finding,
+  MatchId,
+  ReapplyResolution,
+  SaveResult
+} from '../ipc/types';
+import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeDeletionFindings,
@@ -40,6 +47,7 @@ import {
   dismissDeletionOutcome,
   identityInProjection,
   matchDeletionView,
+  reapplyToDiskVersion,
   reloadTheDiskVersion,
   requestDelete,
   startMatchDeletion,
@@ -55,6 +63,9 @@ const BASE: ContentRevision = 'a'.repeat(64);
 
 /** The revision the file holds after a commit. */
 const AFTER: ContentRevision = 'b'.repeat(64);
+
+/** The revision a *third* writer leaves, after a reapply has already happened. */
+const LATER: ContentRevision = 'c'.repeat(64);
 
 /**
  * A snippet file with two snippets in it.
@@ -631,3 +642,146 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
+
+describe('reapplying the retained deletion', () => {
+  // **2c-4b-2 builds this and 2c-4b-3 draws it.** `ConflictChoice` has no member
+  // for a reapply, so nothing here is reachable from a control; every case calls
+  // the transition directly.
+
+  /**
+   * A conflicted deletion whose payload carries chosen correspondence evidence.
+   *
+   * @param subject - What the search for this snippet answered.
+   * @param disk - The newly parsed projection the conflict carries.
+   * @returns The session showing the conflict.
+   */
+  function conflictedOver(
+    subject: ReapplyResolution,
+    disk: DocumentView = reprojected()
+  ): MatchDeletionSession {
+    const started = confirmDelete(requestDelete(session()), live());
+    if (started === null) {
+      throw new Error('a confirmed deletion is what this case sends');
+    }
+    return applyDeletion(
+      started.session,
+      makeConflict({ disk, subject, expected: BASE, found: AFTER }),
+      NOT_OWED
+    );
+  } // End of function conflictedOver()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adoptingReapply(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MatchId>;
+    readonly adoptions: ConflictModel<MatchId>[];
+  } {
+    const adoptions: ConflictModel<MatchId>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adoptingReapply()
+
+  it('re-opens the deletion over the identified snippet, with the question unasked', () => {
+    // **The confirmation is asked again, and against the live projection**
+    // (consult Q4). Carrying a pending confirmation across a reparse would be
+    // exactly the "two values minted together" defect `confirmDelete` exists to
+    // close.
+    const disk = reprojected();
+    const target = disk.matches[0]!;
+    const stuck = conflictedOver({ Identified: { target } }, disk);
+    const recorder = adoptingReapply();
+    const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+    expect(answer.kind).toBe('reapplied');
+    if (answer.kind !== 'reapplied') {
+      throw new Error('this case is about the rebuilt session');
+    }
+    expect(answer.session.pending).toBeNull();
+    expect(answer.session.match).toEqual(target.id);
+    expect(baseRevisionOf(answer.session)).toBe(AFTER);
+    expect(canRequestDelete(answer.session)).toBe(true);
+    expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
+    // The rebuilt session can be confirmed while the projection it was built over
+    // is still the one the window holds. **On its own this proves nothing about
+    // where the identity came from** — `answer.session.match` and `live(disk)` are
+    // both `disk.matches[0]!.id`, minted together — which is what the next
+    // assertion is for.
+    const again = confirmDelete(requestDelete(answer.session), live(disk));
+    expect(again).not.toBeNull();
+    expect(again?.match).toEqual(target.id);
+    // **And it resolves against the live projection, not against itself.** A third
+    // writer reparses the file, so the identity the window now gives that snippet
+    // differs from the rebuilt session's own; the confirmation must refuse. This is
+    // the assertion that fails if `confirmDelete` compares `session.match` with
+    // itself instead of with what it was handed.
+    const third = file({
+      revision: LATER,
+      matches: [
+        makeMatch({ node: 50, document: 2, revision: LATER, trigger: ':sig' }),
+        makeMatch({ node: 51, document: 2, revision: LATER, trigger: ':date' })
+      ]
+    });
+    expect(live(third)).not.toEqual(answer.session.match);
+    expect(confirmDelete(requestDelete(answer.session), live(third))).toBeNull();
+  });
+
+  it('refuses a correspondence the core would not establish, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(conflictedOver({ Refused: { reason: 'NoExactCorrespondence' } }), recorder.adopt)
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: 'NoExactCorrespondence' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('refuses evidence that names no snippet, and adopts nothing', () => {
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(conflictedOver({ Unsupported: {} }), recorder.adopt)).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'evidenceNotATarget' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('rechecks eligibility over the new parse, including the last snippet', () => {
+    // The refusal to empty a sequence is decided again over the file as it now is,
+    // rather than carried from the parse this session opened on.
+    const disk = file({
+      revision: AFTER,
+      matches: [makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' })]
+    });
+    const recorder = adoptingReapply();
+    expect(
+      reapplyToDiskVersion(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk), recorder.adopt)
+    ).toEqual({
+      kind: 'manualResolution',
+      obstacle: { kind: 'notDeletable', reason: 'lastSnippet' }
+    });
+    expect(recorder.adoptions).toEqual([]);
+  });
+
+  it('reports the window refusal and rebuilds nothing', () => {
+    const disk = reprojected();
+    const recorder = adoptingReapply('refused');
+    expect(
+      reapplyToDiskVersion(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk), recorder.adopt)
+    ).toEqual({ kind: 'adoptionRefused' });
+    expect(recorder.adoptions).toHaveLength(1);
+  });
+
+  it('is not attempted when no conflict is showing', () => {
+    const recorder = adoptingReapply();
+    expect(reapplyToDiskVersion(session(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+    expect(recorder.adoptions).toEqual([]);
+  });
+}); // End of the reapply suite

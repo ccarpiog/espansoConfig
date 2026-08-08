@@ -23,13 +23,31 @@ import type {
   DocumentView,
   Finding,
   MatchDraft,
+  MatchId,
   MatchView,
   NewMatch,
   NewMatchPosition,
+  ReapplyResolution,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
-import { diagnostic, makeDocument, makeMatch, makeSummary, matchListPath } from './fixtures';
+import {
+  diagnostic,
+  makeConflict,
+  makeDocument,
+  makeMatch,
+  makeSummary,
+  matchListPath
+} from './fixtures';
+import {
+  applyDeletion,
+  baseRevisionOf as deletionBaseRevisionOf,
+  confirmDelete,
+  reapplyToDiskVersion,
+  requestDelete,
+  startMatchDeletion,
+  type MatchDeletionSession
+} from './matchDeletion';
 import {
   applyMove,
   baseRevisionOf,
@@ -48,7 +66,7 @@ import {
 import { startDraft, textDraftRules } from './draft';
 import { confirmReloadDiskVersion, describeEditSave } from './saveOutcome';
 import { CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES } from './matchEditor';
-import type { ConflictModel } from './saveOutcome';
+import type { ConflictModel, ReloadConfirmation } from './saveOutcome';
 import {
   createBrowserState,
   type BrowserCommands,
@@ -5619,4 +5637,218 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.adoptDiskVersion(first, spent)).toBe('refused');
     expect(state.scopedDocument?.revision).toBe('rev-c');
   }); // End of the "retained across a later conflict" case
+
+  /**
+   * The file as another writer left it: two snippets, at `rev-c`.
+   *
+   * Two rather than one, because a deletion refuses to empty a sequence — and a
+   * reapply that refused for `lastSnippet` would be about the wrong thing.
+   *
+   * @returns The projection a conflict carries.
+   */
+  function diskAfterTheOtherWriter(): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-c',
+      matches: [
+        makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':sig' }),
+        makeMatch({ node: 41, document: 2, revision: 'rev-c', trigger: ':date' })
+      ]
+    });
+  } // End of function diskAfterTheOtherWriter()
+
+  /**
+   * A deletion conflict whose correspondence evidence identifies the snippet.
+   *
+   * @param subject - What the search answered; an identification by default.
+   * @returns The answer `delete_match` gives.
+   */
+  function deletionConflict(subject?: ReapplyResolution): CommandResult<SaveResult> {
+    const disk = diskAfterTheOtherWriter();
+    return {
+      ok: true,
+      value: makeConflict({
+        disk,
+        subject: subject ?? { Identified: { target: disk.matches[0]! } },
+        expected: 'rev-a',
+        found: 'rev-c',
+        diskText: DISK_TEXT
+      })
+    };
+  } // End of function deletionConflict()
+
+  /**
+   * Drives one deletion through the real window until it conflicts.
+   *
+   * **The whole path a person takes**, so that what the reapply is asked about is
+   * a conflict this `BrowserState` really registered — which is what the origin
+   * check in `adoptDiskVersion` is about.
+   *
+   * @param state - The window.
+   * @returns The session showing the conflict.
+   */
+  async function conflictedDeletion(state: BrowserState): Promise<MatchDeletionSession> {
+    const answered = await deletionUntilItConflicts(state);
+    return applyDeletion(answered.session, answered.result, answered.adoption);
+  } // End of function conflictedDeletion()
+
+  /**
+   * The same path, stopped one step earlier: the answer, undescribed.
+   *
+   * **The `SaveResult` is handed back rather than a session**, so a case can
+   * describe **one** wire conflict twice. `applyDeletion` calls `describeEditSave`,
+   * which builds a fresh `ConflictModel` per call, and two models over one payload
+   * is the shape the reapply authorization has to survive.
+   *
+   * @param state - The window.
+   * @returns The waiting session, the answer it got, and the invalidation.
+   */
+  async function deletionUntilItConflicts(state: BrowserState): Promise<{
+    readonly session: MatchDeletionSession;
+    readonly result: SaveResult;
+    readonly adoption: InvalidationStatus;
+  }> {
+    const held = state.views.find((view) => view.id === 2);
+    if (held === undefined) {
+      throw new Error('this case needs the file projected');
+    }
+    const opened = startMatchDeletion(held, held.matches[0]!);
+    const started = confirmDelete(requestDelete(opened), held.matches[0]!.id);
+    if (started === null) {
+      throw new Error('a confirmed deletion is what this case sends');
+    }
+    const answer = await state.deleteMatch(
+      started.match,
+      deletionBaseRevisionOf(started.session),
+      NOTHING_ACKNOWLEDGED
+    );
+    if (answer.kind !== 'answered') {
+      throw new Error('this case needs the transaction to have answered');
+    }
+    return { session: started.session, result: answer.result, adoption: answer.adoption };
+  } // End of function deletionUntilItConflicts()
+
+  it('installs the disk projection when a reapply is carried out', async () => {
+    // **The end-to-end shape of 2c-4b-2**: a surface decides, and the window is
+    // the only thing that installs. No command is sent by the reapply itself.
+    const commands = scriptedCommands({ deletes: [deletionConflict()] });
+    const state = await withTheSecondSnippetSelected(commands);
+    const stuck = await conflictedDeletion(state);
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+
+    const answer = reapplyToDiskVersion(stuck, (conflict, confirmation) =>
+      state.adoptDiskVersion(conflict, confirmation)
+    );
+    expect(answer.kind).toBe('reapplied');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    // **No second command.** The reapply rebuilds a session; sending it is the
+    // ordinary submit path, which nothing here took.
+    expect(commands.deleteMatch).toHaveBeenCalledTimes(1);
+  }); // End of the "reapply installs" case
+
+  it('sends no command and installs nothing on a manual-resolution refusal', async () => {
+    const commands = scriptedCommands({
+      deletes: [deletionConflict({ Refused: { reason: 'AmbiguousExact' } })]
+    });
+    const state = await withTheSecondSnippetSelected(commands);
+    const stuck = await conflictedDeletion(state);
+    const reads = (commands.getDocument as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    expect(
+      reapplyToDiskVersion(stuck, (conflict, confirmation) =>
+        state.adoptDiskVersion(conflict, confirmation)
+      ).kind
+    ).toBe('manualResolution');
+    // The window is exactly where it was, and the boundary was not touched again.
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+    expect(commands.deleteMatch).toHaveBeenCalledTimes(1);
+    expect(commands.getDocument).toHaveBeenCalledTimes(reads);
+  }); // End of the "no command on a refusal" case
+
+  it('refuses the adoption when the projection moved after the conflict arrived', async () => {
+    // The consult's Q9 item 2, one layer up: the disk snapshot a conflict carries
+    // may be **older** than what the window now holds, and revisions are content
+    // hashes with no order. A reapply cannot install it, and says so.
+    const later = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-d',
+      matches: [makeMatch({ node: 70, document: 2, revision: 'rev-d', trigger: ':later' })]
+    });
+    const commands = scriptedCommands({
+      deletes: [deletionConflict()],
+      reload: { ok: true, value: later }
+    });
+    const state = await withTheSecondSnippetSelected(commands);
+    const stuck = await conflictedDeletion(state);
+    expect(await state.rereadDocument(2)).toBeNull();
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+
+    expect(
+      reapplyToDiskVersion(stuck, (conflict, confirmation) =>
+        state.adoptDiskVersion(conflict, confirmation)
+      )
+    ).toEqual({ kind: 'adoptionRefused' });
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+    expect(commands.deleteMatch).toHaveBeenCalledTimes(1);
+  }); // End of the "projection moved" case
+
+  it('refuses a second reapply of one conflict, because one conflict has one token', async () => {
+    // A reapply asks no second question, so there is no step to hold a token on;
+    // the memo on the conflict's **wire value** — `ConflictModel.source`, not the
+    // model — is what hands the second attempt the token this window has already
+    // spent.
+    const commands = scriptedCommands({ deletes: [deletionConflict()] });
+    const state = await withTheSecondSnippetSelected(commands);
+    const stuck = await conflictedDeletion(state);
+    const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
+      state.adoptDiskVersion(conflict, confirmation);
+
+    expect(reapplyToDiskVersion(stuck, adopt).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(stuck, adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "one conflict, one token" case
+
+  it('refuses the second of two descriptions of one wire conflict', async () => {
+    // **The 2c-4b-2 review's first finding, driven through the real window.**
+    // `describeEditSave` builds a fresh `ConflictModel` per call, so two
+    // `applyDeletion` calls over one `SaveResult` give two model objects sharing
+    // one `source`. Keyed on the model, the second would mint an unspent token,
+    // pass `authorizeDiskAdoption`, and be answered `alreadyThere` — a second
+    // successful adoption from one wire conflict, and a second rebuilt session.
+    // Keyed on `source`, it presents the first model's token and the door refuses
+    // it.
+    const commands = scriptedCommands({ deletes: [deletionConflict()] });
+    const state = await withTheSecondSnippetSelected(commands);
+    const answered = await deletionUntilItConflicts(state);
+    const first = applyDeletion(answered.session, answered.result, answered.adoption);
+    const second = applyDeletion(answered.session, answered.result, answered.adoption);
+    const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
+      state.adoptDiskVersion(conflict, confirmation);
+
+    expect(reapplyToDiskVersion(first, adopt).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(second, adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    expect(commands.deleteMatch).toHaveBeenCalledTimes(1);
+  }); // End of the "two descriptions, one conflict" case
+
+  it('treats a window already at the disk revision as a satisfied adoption', async () => {
+    // **`alreadyThere` is a success**, and a boolean could not have carried it. The
+    // second conflict describes the very bytes the first reapply installed, so
+    // there is nothing to install and the rebuild proceeds.
+    const commands = scriptedCommands({
+      deletes: [deletionConflict(), deletionConflict()]
+    });
+    const state = await withTheSecondSnippetSelected(commands);
+    const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
+      state.adoptDiskVersion(conflict, confirmation);
+    expect(reapplyToDiskVersion(await conflictedDeletion(state), adopt).kind).toBe('reapplied');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+
+    const again = await conflictedDeletion(state);
+    expect(reapplyToDiskVersion(again, adopt).kind).toBe('reapplied');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    expect(commands.deleteMatch).toHaveBeenCalledTimes(2);
+  }); // End of the "already there" case
 }); // End of the "deferred adoption" suite

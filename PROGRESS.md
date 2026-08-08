@@ -71,7 +71,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **Phase 2c-4a** | **Conflict capture and preservation** — plan §12's "retain the draft, load the disk version separately, compare, copy, reload, overwriting neither side" | ✅ **complete.** Two Codex rounds, both **NOT READY** (three findings, then one); **six of step 3c's eight findings were sentences or records claiming something the code does not do**, and none of the eight changed a byte written to disk |
 | **2c-4b design consult** | **Phase 2c-4b put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4b-design.md`. It **narrowed the phase and split its confidence rule in two**: the match editor may fall back from exact item identity to a unique unchanged trigger, while delete, move, duplicate and every positional anchor require exact correspondence and **never** use the item index as a tie-break. The raw editor is ruled **out of reapply entirely** — a whole-document text draft has no match to identify — and three steps keep the correspondence proof separate from the visible promise |
 | **2c-4b-1** | **The correspondence evidence and the conflict contract**: `crates/espansoconfig-core/src/reconcile.rs`, the anchor/fingerprint construction, the refusal enum, and `SaveResult::Conflict::reapply` / `ConflictResult.reapply` — built from the **same fresh snapshot** as `disk_text` and `disk_revision`. No control, no choice, no capability, no `.svelte` change | ✅ complete — after **three** rounds. Round 1 returned **NOT READY** on a High and five others; round 2 confirmed four closed and found **two still standing plus two new**; round 3 closed those and its own sweep found **three more**, one of which was the decision record claiming a guarantee the code did not give |
-| 2c-4b-2 … 2c-4b-3 | Reapply as browser-model transitions, then the offered choice. See the step table under "Next action" | ⬜️ **2c-4b-2 is next** — the per-surface transitions, built and tested with `offersReapply: false` |
+| **2c-4b-2** | **Reapply as browser-model transitions, with nothing drawn**: `src/lib/browser/reapply.ts` — the gate, the two evidence readers, the three-armed `ReapplyOutcome` and the shared adoption — plus one pure decide-first-adopt-second transition on each of the five match surfaces and a permanent *unavailable* on the raw editor. No `ConflictChoice` member, no dictionary key, no `.svelte` change, so no mounted or window evidence is owed | ✅ complete — after **four** rounds. Round 1 returned **NOT READY** and found the step's only algorithmic defect: the authorization was keyed on the **derived `ConflictModel`**, so two descriptions of one wire conflict could each win an adoption spend. Rounds 2–4 found **no algorithmic defect at all** — every remaining finding was one claim, that `adoptDiskVersion`'s guards are a set rather than an ordered sequence, wrong in four places and taking three rounds to close |
+| 2c-4b-3 | The offered choice: `keepMyDraft` in `ConflictChoice` and `conflictChoicesFor` only, capability flipped on the five eligible surfaces, both dictionaries, the mounted suites, and the deterministic R0→R1 window matrix | ⬜️ **next** |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3421,6 +3422,65 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 2
+
+| Command | Result |
+|---|---|
+| `npm test` | **1587** passed, **49** files (1499 / 48 at `HEAD`) |
+| `npm run check` | **418** files, **0** errors, **0** warnings |
+| `npm run build` | **175** modules — 174 plus exactly one new source module; `svelte/internal/server` **absent** from the bundle |
+| `cargo test --workspace` | **1086** passed, 0 failed — **unchanged; no Rust file was touched in any round of this step** |
+| `git status --short` | **no `.svelte` file among the changes**, in any round |
+
+The three counts that are the point of this step are the **last two rows**. No Rust file changed
+because step 1 had already put every byte of evidence on the wire, and no `.svelte` file changed
+because nothing is drawn — which is why **no mounted-component test and no window reading are owed
+here**, and why the frontend suite grew by 88 cases while the i18n key count stayed at **745** per
+language.
+
+**The +1 module is `src/lib/browser/reapply.ts` and nothing else.** The guard is the *shape* of the
+change, not the number: a count that moves by exactly the number of new source modules is a new
+module, and a jump to ~180 with `svelte/internal/server` in the bundle is `vite.config.ts`'s
+`resolve.conditions` regression. Both were checked, the second by grepping the built bundle.
+
+### The four review rounds
+
+| Round | Verdict | Findings |
+|---|---|---|
+| 1 (`phase-2c-4b-2-code.md`) | **NOT READY** | 2 Medium, 2 Low — including the step's **only algorithmic defect** |
+| 2 (`phase-2c-4b-2-code-round2.md`) | **NOT READY** | 1 Medium (introduced), 2 Low (1 survivor, 1 introduced) — all prose |
+| 3 (no review file; `2c-4b-2-notes.md` §9) | **NOT READY** | 1 Low, a **survivor across three rounds** |
+| 4 (no review file) | **READY** | none |
+
+Round 1's Medium is the one worth remembering, because it is a defect a green suite could not see:
+the reapply authorization was a `WeakMap` keyed on the **derived `ConflictModel`**, not on the wire
+`ConflictResult` the existing origin map keys on. Two `ConflictModel`s describing one conflict are two
+object identities, so each could win a successful adoption spend — the exact *one conflict, one
+spend* guarantee 2c-4a-2 was built to give. Its falsifiability was then proved by mutation: re-keying
+back to the model broke exactly the two new tests and nothing else.
+
+**Rounds 2, 3 and 4 found no algorithmic defect at all**, and that is the honest shape of this step:
+one real bug, then three rounds spent on a single sentence. `BrowserState.adoptDiskVersion`'s guards
+were described as *five checks* applied alike when they are an **ordered sequence** — authorization,
+spend, origin and projected-document precede every successful answer, `alreadyThere` is decided and
+its token spent before the projection generation is inspected at all, and the generation comparison
+therefore guards only the installing branch. That was wrong in four places, and each sweep missed the
+next one because it had been written from the previous finding's wording rather than from what the
+method does. This repository's documented recurrence, again, and the reason the standing rule is
+*sweep for what the type now says, not for the words the old finding used*.
+
+**One instance was deliberately left standing**: `src/lib/browser/workspace.svelte.ts:615`'s *"Five
+things are checked here, in order"*, shipped and committed at 2c-4a-2 and outside this step's diff.
+It is named in `2c-4b-2-notes.md` §8.4 and §9.2 and is **debt 2c-4b-3 should pay**, not something
+this step silently accepted.
+
+Rounds 3 and 4 produced **no review file** — Codex returned a verdict without writing one — so §9 of
+`docs/decisions/2c-4b-2-notes.md` is their only record and reproduces round 3's finding in full.
+Round 3's fix was applied by the orchestrator rather than a worker, which is why round 4 exists: a fix
+is a change, and the round that reviews it is not optional.
+
+---
+
 ## Verification — Phase 2c-4a step 3c
 
 **Step 3c is the window reading 2c-4a-3 owed, and it ran in five steps.** The cut was forced by the
@@ -5919,6 +5979,118 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### Phase 2c-4b-2 is complete. **Step 2c-4b-3 is next.**
+
+**Reapply exists as a value on five surfaces and nothing draws it.** The exact first commands to run:
+
+```sh
+npm install && npm test        # expect 1587 passed, 49 files
+cargo test --workspace         # expect 1086 passed, 0 failed
+```
+
+(`npm run check` expects **418 files, 0 errors, 0 warnings**. `npm run build` expects **175
+modules** — 174 at step 1 plus exactly one new source module, `src/lib/browser/reapply.ts`; the
+guard is the *shape* of the change, and a jump to ~180 with `svelte/internal/server` in the bundle is
+the regression it exists to catch. i18n is **745** keys per language, at parity and **unchanged** —
+this step added no user-facing string, because it draws nothing.)
+
+#### What step 2 actually shipped
+
+`src/lib/browser/reapply.ts` is the shared part of *Keep my draft*: **the gate** (`beginReapply`, the
+only reader of the new permanent `ConflictCapabilities.reapplySupport`), **the two evidence readers**
+(`subjectCorrespondence` and `anchorCorrespondence`, which turn step 1's two wire enums into the
+three answers a surface can act on), the three-armed `ReapplyOutcome<S, O>`, and **the adoption**
+(`adoptForReapply`, which spends the conflict's one authorization through the existing
+`BrowserState.adoptDiskVersion` door — no parallel weaker door was built).
+
+One pure transition per surface, all **decide-first-adopt-second**, so a refusal spends nothing and
+leaves the window exactly where it was: the editor's Q4 six-row field table with **whole-operation**
+collision refusal; the creator's targetless rebase with consent withdrawn and `after` retained only
+on exact anchor correspondence; strict exact correspondence for delete (confirmation re-asked against
+the live projection) and duplicate (consent cleared); move with a `SequenceAddress` equality
+requirement, the destination rebuilt from the new sequence, `top`/`end` lowered afresh and
+`alreadySatisfied` reported without writing; and the raw editor **permanently `unavailable`**, its
+transition taking no adoption function at all.
+
+**Nothing is drawn, and that is the proven trade taken again.** `ConflictChoice` has no member a
+reapply control could be named by, `conflictChoicesFor` is byte-for-byte as 2c-4a-3 left it, no
+dictionary key was added, and **no `.svelte` file was touched** — so no mounted-component and no
+window evidence is owed by this step. 2c-4b-3 flips capability over machinery that already exists and
+is already driven by tests, exactly as 2c-4a-3a did for the reload.
+
+#### The planned `offersReapply: false` boolean was not built, deliberately
+
+The consult's step-2 paragraph asked for it. What shipped instead is
+`ConflictCapabilities.reapplySupport: 'supported' | 'unavailable'` — a **permanent** fact about the
+surface, like `draftKind` and `reloadOutcome`, read by `beginReapply`. The argument, recorded in
+`2c-4b-2-notes.md` §2.1 and in the field's own doc comment: a boolean saying *this surface draws it
+today* would have nothing to produce and nothing to read it while `ConflictChoice` has no reapply
+member, and `saveOutcome.ts` already names a declaration nothing reads as "a second answer" — the
+defect that once let a button compile and do nothing. **2c-4b-3 adds the boolean and the
+`ConflictChoice` member together.**
+
+#### Four review rounds, and what converged
+
+**Round 1 — NOT READY**, 2 Mediums + 2 Lows, and it found this step's only algorithmic defect: the
+reapply authorization was keyed on the **derived `ConflictModel`**, so two descriptions of one wire
+conflict could each win a successful adoption spend. It is now a
+`WeakMap<ConflictResult, ReloadConfirmation>` keyed on `conflict.source` — the same wire value
+`rememberTheConflict` keys on — so the second description receives the first's token and
+`authorizeDiskAdoption` refuses it.
+
+**Rounds 2, 3 and 4 found no algorithmic defect at all.** Every remaining finding was this
+repository's named worst class — *a sentence claiming a guarantee the code does not give* — and the
+same one kept reappearing: **`BrowserState.adoptDiskVersion`'s guards described as a set of five
+checks applied alike, when they are an ordered sequence.** Authorization, spend, origin and
+projected-document precede **every** successful answer; `alreadyThere` is then decided **and its
+token spent** before the projection generation is inspected at all, so the generation comparison
+guards only the branch that installs. That claim was wrong in four places and took **three rounds**
+to close, each sweep having been written from the previous finding's wording rather than from what
+the method does. Round 4 is **READY**.
+
+The reviews are `docs/reviews/phase-2c-4b-2-code.md` and `phase-2c-4b-2-code-round2.md`. **Rounds 3
+and 4 have no review file** — Codex returned its verdict without writing one — so
+`docs/decisions/2c-4b-2-notes.md` §9 is their only record, and it reproduces round 3's finding in
+full. The record is `2c-4b-2-notes.md`, §§7–9 covering the three fix rounds.
+
+#### Three things 2c-4b-3 inherits as stated risk
+
+1. **`adoptForReapply` is not a route a caller is forced through.** `reapplyAuthorizationFor`,
+   `confirmReloadDiskVersion` and `BrowserState.adoptDiskVersion` are all exported and compose
+   directly, and `AdoptTheDiskVersion` is an ordinary function type, so an arbitrary callback can
+   ignore both token and spend. What holds is an **implementation fact** — every transition that
+   adopts takes this route, and each surface's suite keeps it that way — plus one run-time check
+   inside the door: no adoption for a conflict the window never registered.
+2. **One prose defect was deliberately left standing.** `src/lib/browser/workspace.svelte.ts:615`
+   still reads *"Five things are checked here, in order"* — the oldest instance of the ordering
+   defect above, shipped and committed at 2c-4a-2 and therefore outside this step's diff. Recorded in
+   `2c-4b-2-notes.md` §8.4 and §9.2. **2c-4b-3 touches that area and should close it.**
+3. **Step 1's two risks are unchanged**: `ReapplyEvidence` ties two fields nothing in Rust or
+   TypeScript can bind together, held only by its single production construction site; and the
+   command-level tests observe *answers*, not requests, so a seventh writing command with a wrong
+   request needs a fifth test (`2c-4b-1-notes.md` §7.4).
+
+#### What 2c-4b-3 must do
+
+Per the consult's Q6 and Q8: add `keepMyDraft` to `ConflictChoice` and to **`conflictChoicesFor`
+only** — never appended locally by a surface — produce it after *Keep editing* and the copy and
+before the reload, flip capability on the five eligible surfaces with raw declaring it unavailable,
+wire the component handlers and `DetailPane` props, render typed readiness/refusal/collision
+sentences through accessors in both dictionaries (components never compose a key), give every changed
+component a mounted interaction test proving the offered choice invokes its model transition and that
+raw never offers it, and then run and record **the deterministic R0→R1 window matrix of Q7's eight
+readings**, re-taking any surface whose component changes during a fix round.
+
+**The sentence beside the control is the thing most likely to be wrong.** Q6 lists what it must not
+claim: that the same snippet has been found before the resolution says so, that every draft can be
+kept, that all fields will merge, that nothing else changed, that the next save will succeed, that the
+file cannot change again, that the result is a byte-for-byte copy of the old item, or that espanso
+will accept it. The i18n suites check keys and placeholders, **not meaning**.
+
+---
+
+### The record that closed 2c-4b-1 (superseded by the above, kept for its rationale)
+
 ### Phase 2c-4b-1 is complete. **Step 2c-4b-2 is next.**
 
 **`3451a81` is `HEAD`** — step 1 with **all three review rounds folded in**, so, as with every
@@ -6033,7 +6205,7 @@ honest options remain 2c-4a's plus 2c-4c's fallback.
 | Step | Scope | State |
 |---|---|---|
 | **2c-4b-1** | The core `reconcile` primitive, the anchor/fingerprint construction, the refusal enum, and `ConflictResult.reapply` on the wire — **built from the same fresh snapshot as `disk_revision`**. No control is added, so 2c-4a's behaviour is unchanged and the new payload is only evidence | ✅ complete — three review rounds |
-| **2c-4b-2** | Reapply as browser-model transitions, one per surface, with **`offersReapply: false`** — the proven trade of building and testing an unoffered transition before drawing it. No component changes, so no mounted or window evidence is owed | ⬜️ **next** |
+| **2c-4b-2** | Reapply as browser-model transitions, one per surface, with **`offersReapply: false`** — the proven trade of building and testing an unoffered transition before drawing it. No component changes, so no mounted or window evidence is owed | ✅ complete — four review rounds. The planned boolean was **not** built; `ConflictCapabilities.reapplySupport` is what shipped, and §2.1 of the record argues why |
 | **2c-4b-3** | `keepMyDraft` added to `ConflictChoice` and to **`conflictChoicesFor` only**, the capability flipped on the five eligible surfaces, both dictionaries, the mounted suites, and the deterministic R0→R1 window matrix | ⬜️ |
 
 **Why not two steps, in the consult's own words:** if core and UI land together, one review must
@@ -9541,6 +9713,9 @@ _Updated at each phase boundary._
 | **2c-4a step 1** | **`fa5bb93`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a step 2** | **`53874d7`** | ✅ pushed to `origin/main` | clean |
 | **2c-4a step 3a** | **`96d7e06`** | ✅ pushed to `origin/main` | clean |
+| **2c-4b design consult** | **`56d4817`** | ✅ pushed to `origin/main` (recorded by `74c7467`) | clean |
+| **2c-4b step 1** | **`3451a81`** | ✅ pushed to `origin/main` (recorded by `e7d5184`) | clean |
+| **2c-4b step 2** | **see below** | — | clean |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no

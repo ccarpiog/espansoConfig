@@ -181,6 +181,13 @@ import { identityInProjection, plainIdentity } from './matchDeletion';
 import { sequenceOf, type SequenceAddress } from './matchMove';
 import type { RawSaveChoice } from './rawSave';
 import {
+  adoptForReapply,
+  beginReapply,
+  subjectCorrespondence,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle
+} from './reapply';
+import {
   conflictChoicesFor,
   conflictDiskText,
   describeEditSave,
@@ -1073,6 +1080,98 @@ export function reloadTheDiskVersion(
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Why a reapply of this duplication could not be carried out.
+ *
+ * **A code, never a sentence.** There is no key function for these yet, and that is
+ * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
+ * with the panel that renders them.
+ */
+export type DuplicationReapplyObstacle =
+  | SharedReapplyObstacle
+  | {
+      /** The identified snippet is one this application will not duplicate. */
+      readonly kind: 'notDuplicable';
+      /** Which refusal the newly parsed projection gives, as a code. */
+      readonly reason: DuplicationRefusal;
+    };
+
+/** What a reapply of this duplication became. */
+export type MatchDuplicationReapply = ReapplyOutcome<
+  MatchDuplicationSession,
+  DuplicationReapplyObstacle
+>;
+
+/**
+ * Reissues this duplication against the newly parsed disk version.
+ *
+ * **Strict exact correspondence and nothing weaker**, which is the consult's Q4:
+ * the clone must be of *the newly adopted item's own bytes*, so a snippet that
+ * merely still spells its trigger the same way is not enough. The tier is
+ * 2c-4b-1's and is chosen by `duplicate_match`, which asks for `ExactItem`.
+ *
+ * **What is duplicated is the identified snippet as the file now writes it**, not a
+ * stale copy and never a projection rendering: the session handed back names the
+ * new identity at the new revision, and the core's `DuplicateItem` clones that
+ * item's own runs when the save runs. That is what keeps *true duplicate* true
+ * across a reapply.
+ *
+ * **The old acknowledgement does not cross, and this is where that is enforced.**
+ * `DuplicateKeepsTriggerDefinition` is content-addressed to the candidate's own
+ * `ContentRevision`, so consent collected before the conflict describes bytes that
+ * are gone; {@link startMatchDuplication} builds a draft with no consent at all, so
+ * the new candidate is refused and acknowledged again in the ordinary way.
+ *
+ * **There is no `alreadySatisfied` arm.** *A copy of this snippet already exists*
+ * is not something correspondence can answer — an identical twin is precisely what
+ * makes the evidence `AmbiguousExact` — so the honest answers are a rebuilt session
+ * or a refusal.
+ *
+ * @param session - The session showing the conflict.
+ * @param unsavedDraftInDocument - Whether this window has a match editor open over
+ *   **any** snippet of that file, dirty or not. Required for
+ *   {@link duplicationEligibility}'s reason, and asked again here because the
+ *   answer is about this window now rather than about the parse that was replaced.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
+ *   all on a refusal.
+ * @returns What became of the attempt.
+ */
+export function reapplyToDiskVersion(
+  session: MatchDuplicationSession,
+  unsavedDraftInDocument: boolean,
+  adopt: AdoptTheDiskVersion<MatchId>
+): MatchDuplicationReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  if (start.kind !== 'ready') {
+    return start;
+  }
+  const subject = subjectCorrespondence(start.evidence);
+  if (subject.kind === 'refused') {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: subject.reason }
+    };
+  }
+  if (subject.kind === 'noSubject') {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const rebuilt = startMatchDuplication(
+    start.conflict.disk,
+    subject.target,
+    unsavedDraftInDocument
+  );
+  if (rebuilt.eligibility.kind !== 'duplicable') {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'notDuplicable', reason: rebuilt.eligibility.reason }
+    };
+  }
+  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+    return { kind: 'adoptionRefused' };
+  }
+  return { kind: 'reapplied', session: rebuilt };
+} // End of function reapplyToDiskVersion()
+
+/**
  * What the person may do about a command that produced no outcome.
  *
  * One arm today, `./matchMove.ts`'s. It is an **offer**, never a diagnosis:
@@ -1171,12 +1270,18 @@ export function duplicationRecoveryFailed(
  * the two labels `conflictChoicesFor` names. Flipping the boolean was the whole of
  * that step's model change here, because the machinery it turns on was built and
  * driven by this module's tests at 2c-4a-2.
+ *
+ * **`reapplySupport` is the same trade one sub-phase later.** This surface *can*
+ * reapply — {@link reapplyToDiskVersion} is the transition — and nothing draws it:
+ * `ConflictChoice` has no member for one and `conflictChoicesFor` names none.
+ * 2c-4b-3 draws it.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'supported'
 };
 
 /** Everything a screen needs about one duplication, derived on every read. */

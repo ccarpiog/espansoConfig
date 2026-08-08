@@ -238,6 +238,8 @@ import type {
   MatchView,
   PathSegment,
   PresentationNote,
+  ReapplyEvidence,
+  ReapplyRefusal,
   SaveResult
 } from '../ipc/types';
 import {
@@ -275,6 +277,14 @@ import {
 import type { InvalidationStatus } from './invalidation';
 import { identityInProjection, plainIdentity } from './matchDeletion';
 import type { RawSaveChoice } from './rawSave';
+import {
+  adoptForReapply,
+  anchorCorrespondence,
+  beginReapply,
+  subjectCorrespondence,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle
+} from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
@@ -1614,6 +1624,201 @@ export function reloadTheDiskVersion(
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Why a reapply of this move could not be carried out.
+ *
+ * **A code, never a sentence.** There is no key function for these yet, and that is
+ * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
+ * with the panel that renders them.
+ *
+ * **The subject's refusal and the anchor's are two arms, not one**, because the
+ * wire answers them with two enums and `tReapplyResolution` and
+ * `tReapplyPlacement` have two sets of sentences: *the snippet you moved* and *the
+ * snippet you moved it after* are different things to have lost.
+ */
+export type MoveReapplyObstacle =
+  | SharedReapplyObstacle
+  | {
+      /** The search for the snippet this move was placed **after** refused. */
+      readonly kind: 'anchorCorrespondence';
+      /** The wire's own code, which `tReapplyRefusal` already has sentences for. */
+      readonly reason: ReapplyRefusal;
+    }
+  | {
+      /**
+       * The evidence answers no anchor although this move names one.
+       *
+       * **Unreachable from the running application**: `move_match` builds an
+       * anchored placement whenever it sends an `after`, so a session holding an
+       * `after` meets `Identified` or `Refused`. A `ReapplyEvidence` is a boundary
+       * value and nothing in TypeScript proves which command produced one, and
+       * treating the disagreement as a refusal writes nothing.
+       */
+      readonly kind: 'evidenceNotAnAnchor';
+    }
+  | {
+      /**
+       * The identified snippet is not in the sequence this move was about.
+       *
+       * **"Same sequence" is the invariant a move keeps, and "same file" is not
+       * it** (D2r). Today's projection gives a snippet file exactly one snippet
+       * list, so this cannot be reached by a real file — and encoding that
+       * coincidence is what would make the model silently wrong the first time a
+       * projection exposes a second list. A session that never had a sequence
+       * address at all lands here too; it could never have sent a move.
+       */
+      readonly kind: 'notTheSameSequence';
+    }
+  | {
+      /**
+       * The identified anchor is not one this rebuilt move may name.
+       *
+       * The new sequence does not hold it, or it is the moved snippet itself — the
+       * self-anchor exclusion. Checked rather than left to
+       * {@link choosePlacement}, which answers *the session unchanged* for an
+       * anchor it will not install: that answer is indistinguishable from *the
+       * destination did not move*, and acting on it would silently reapply the
+       * snippet's **current** position as though it were the person's choice.
+       */
+      readonly kind: 'anchorNotInSequence';
+    }
+  | {
+      /**
+       * The rebuilt move cannot be sent, for one of the ordinary reasons.
+       *
+       * {@link moveSubmissionRefusal}'s own verdict over the newly parsed
+       * projection — `notMovable` for a snippet the new parse will not move,
+       * `outOfDate` for a destination it can no longer express. One rule, asked
+       * again, rather than a second copy of it here.
+       */
+      readonly kind: 'moveRefused';
+      /** Which of that rule's codes, for the panel to render. */
+      readonly reason: MoveSubmissionRefusal;
+    };
+
+/** What a reapply of this move became. */
+export type MatchMoveReapply = ReapplyOutcome<MatchMoveSession, MoveReapplyObstacle>;
+
+/**
+ * Reissues this move against the newly parsed disk version.
+ *
+ * **The consult's Q4 for a move, and every clause of it is a decision.**
+ *
+ * - **The moved snippet is resolved strictly.** `move_match` asks for `ExactItem`,
+ *   so an identified subject is a snippet whose own owned lines are byte-for-byte
+ *   what this session was about. A unique trigger is not enough to move somebody
+ *   else's snippet.
+ * - **Its `SequenceAddress` must equal the original one** — the same *sequence*,
+ *   not merely the same file.
+ * - **The destination is rebuilt from the new sequence, and the old numeric index
+ *   is never carried.** `startMatchMove` derives the members and the anchors from
+ *   the adopted projection; nothing here reads a position from the old one.
+ * - **`top` and `end` survive because they are semantic and are lowered afresh.**
+ *   The evidence's anchor is read **only** for an `after`: an `end` was lowered to
+ *   *after the last other snippet* before it was sent, so its wire anchor is a
+ *   snippet the person never named, and refusing the move because that snippet's
+ *   bytes changed would refuse a request that has nothing to do with it.
+ * - **An `after` survives only on exact anchor correspondence**, which is the one
+ *   thing `ReapplyEvidence`'s second operand exists to answer.
+ * - **A disk that already places the snippet where it was asked to go is
+ *   `alreadySatisfied`**, and nothing is written. That verdict is
+ *   {@link moveSubmissionRefusal}'s own `alreadyThere`, asked of the rebuilt
+ *   session, so *already there* means the same thing here as it does beside the
+ *   control.
+ *
+ * **R25 stays visible in what this hands back**: a rebuilt session whose ordinary
+ * {@link beginMove} produces one move and nothing else. Nothing here batches, and
+ * nothing here writes.
+ *
+ * @param session - The session showing the conflict.
+ * @param unsavedDraftFor - The snippet this window is holding unsaved edits for,
+ *   **by the identity the newly parsed projection gives it**, or `null`. Required
+ *   for {@link moveEligibility}'s reason. An editor opened over the *replaced*
+ *   parse carries an older revision and will not match — the limitation
+ *   {@link moveEligibility} already states, unchanged by a reapply.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
+ *   all on a refusal.
+ * @returns What became of the attempt.
+ */
+export function reapplyToDiskVersion(
+  session: MatchMoveSession,
+  unsavedDraftFor: MatchId | null,
+  adopt: AdoptTheDiskVersion<MovePlacement>
+): MatchMoveReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  if (start.kind !== 'ready') {
+    return start;
+  }
+  const subject = subjectCorrespondence(start.evidence);
+  if (subject.kind === 'refused') {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: subject.reason }
+    };
+  }
+  if (subject.kind === 'noSubject') {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const held = session.sequence;
+  const found = sequenceOf(subject.target);
+  if (held === null || found === null || !sameSequence(held, found)) {
+    return { kind: 'manualResolution', obstacle: { kind: 'notTheSameSequence' } };
+  }
+  const rebuilt = startMatchMove(start.conflict.disk, subject.target, unsavedDraftFor);
+  const wanted = rebuiltPlacement(session.draft.value, start.evidence, rebuilt);
+  if ('obstacle' in wanted) {
+    return { kind: 'manualResolution', obstacle: wanted.obstacle };
+  }
+  const chosen = choosePlacement(rebuilt, wanted.placement);
+  const refusal = moveSubmissionRefusal(chosen, [start.conflict.disk]);
+  if (refusal !== null && refusal !== 'alreadyThere') {
+    return { kind: 'manualResolution', obstacle: { kind: 'moveRefused', reason: refusal } };
+  }
+  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+    return { kind: 'adoptionRefused' };
+  }
+  return refusal === 'alreadyThere'
+    ? { kind: 'alreadySatisfied', session: chosen }
+    : { kind: 'reapplied', session: chosen };
+} // End of function reapplyToDiskVersion()
+
+/**
+ * The destination a reapply asks for, rebuilt against the new sequence.
+ *
+ * `top` and `end` are handed back untouched, because they are semantic choices the
+ * rebuilt session lowers against its own members. An `after` is replaced by the
+ * anchor the evidence identified — never by the old one, whose revision belongs to
+ * a parse that is gone — and the replacement is checked against the rebuilt
+ * session's own anchors, because {@link choosePlacement} answers *unchanged* for an
+ * anchor it will not install and that answer would otherwise be read as *the
+ * destination did not move*.
+ *
+ * @param placement - What the retained draft asked for.
+ * @param evidence - The correspondence answers from the conflict's payload.
+ * @param rebuilt - The session over the newly parsed projection, for its anchors.
+ * @returns The placement to choose, or the obstacle that stops the reapply.
+ */
+function rebuiltPlacement(
+  placement: MovePlacement,
+  evidence: ReapplyEvidence,
+  rebuilt: MatchMoveSession
+): { readonly placement: MovePlacement } | { readonly obstacle: MoveReapplyObstacle } {
+  if (placement.kind !== 'after') {
+    return { placement };
+  }
+  const anchor = anchorCorrespondence(evidence);
+  if (anchor.kind === 'refused') {
+    return { obstacle: { kind: 'anchorCorrespondence', reason: anchor.reason } };
+  }
+  if (anchor.kind === 'notAnchored') {
+    return { obstacle: { kind: 'evidenceNotAnAnchor' } };
+  }
+  const identity = anchor.target.id;
+  return rebuilt.anchors.some((one) => sameIdentity(one, identity))
+    ? { placement: { kind: 'after', anchor: identity } }
+    : { obstacle: { kind: 'anchorNotInSequence' } };
+} // End of function rebuiltPlacement()
+
+/**
  * What the person may do about a command that produced no outcome.
  *
  * One arm today. It is an **offer**, never a diagnosis: nothing here knows
@@ -1735,12 +1940,18 @@ export function moveRecoveryFailed(session: MatchMoveSession): MatchMoveSession 
  * two labels `conflictChoicesFor` names. Flipping the boolean was the whole of
  * that step's capability change here, because the machinery it turns on was built
  * and driven by this module's tests at 2c-4a-2.
+ *
+ * **`reapplySupport` is the same trade one sub-phase later.** This surface *can*
+ * reapply — {@link reapplyToDiskVersion} is the transition — and nothing draws it:
+ * `ConflictChoice` has no member for one and `conflictChoicesFor` names none.
+ * 2c-4b-3 draws it.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'supported'
 };
 
 /**

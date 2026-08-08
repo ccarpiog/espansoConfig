@@ -260,6 +260,34 @@ export type ConflictReloadOutcome =
 export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
 
 /**
+ * Whether one surface can have a reapply transition **at all**.
+ *
+ * **A permanent fact about the surface**, exactly as {@link ConflictDraftKind} and
+ * {@link ConflictReloadOutcome} are, and not a statement about what it draws. The
+ * consult's Q4 rules the raw editor out for ever: its candidate is a whole
+ * document, so there is no target, no field intent and no operation to re-resolve,
+ * and the only things "reapply" could mean there are overwriting the newly read
+ * disk text with a stale string or inventing a text merge — the first forbidden by
+ * plan section 6.5 and the second by `IMPLEMENTATION_PLAN.md` outright.
+ *
+ * **What reads it is `beginReapply` in `./reapply.ts`**, which is the one gate
+ * every surface's reapply transition goes through. That is deliberate: a
+ * declaration nothing reads is a second answer rather than a default
+ * ({@link conflictChoicesFor}'s own history), so this field decides a transition
+ * rather than merely describing one.
+ *
+ * **There is no `offersReapply` boolean beside it yet**, and that is 2c-4b-2's own
+ * decision rather than an omission: {@link ConflictChoice} has no member a reapply
+ * control could be named by, so a boolean saying *this surface draws it today*
+ * would have nothing to produce and nothing to read it. 2c-4b-3 adds both together.
+ */
+export type ConflictReapplySupport =
+  /** This surface has a reapply transition. The five match surfaces. */
+  | 'supported'
+  /** It can never have one. The raw editor, and only it. */
+  | 'unavailable';
+
+/**
  * What one surface may offer about a conflict, declared once by that surface.
  *
  * **The single authority the consult's Q9 asked for.** Before 2c-4a-2 the
@@ -320,6 +348,20 @@ export interface ConflictCapabilities {
    * must be able to say so.
    */
   readonly offersReload: boolean;
+  /**
+   * Whether this surface can have a reapply transition at all.
+   *
+   * Permanent, like {@link ConflictCapabilities.draftKind} and
+   * {@link ConflictCapabilities.reloadOutcome}, and read by `beginReapply` in
+   * `./reapply.ts` rather than by a component: a surface that declares
+   * `unavailable` gets a `ReapplyOutcome` of `unavailable` from the shared gate,
+   * whether or not a conflict is showing.
+   *
+   * **{@link conflictChoicesFor} does not read it and must not**, because there is
+   * no {@link ConflictChoice} member for a reapply until 2c-4b-3. Nothing here
+   * draws anything.
+   */
+  readonly reapplySupport: ConflictReapplySupport;
 }
 
 /**
@@ -1007,12 +1049,22 @@ export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
 declare const CONFIRMED: unique symbol;
 
 /**
- * Proof that a person was asked before their draft was discarded.
+ * Authorization to act on **one** conflict's disk observation, once.
  *
- * Issued by {@link confirmReloadDiskVersion} for **one** conflict state, and
- * checked against it by {@link reloadDiskVersion}. It exists because the previous
- * shape said `reloadNeedsConfirmation: true` and nothing enforced it: a boolean
- * describing a requirement is not the requirement.
+ * Issued by {@link confirmReloadDiskVersion} for one conflict state, and checked
+ * against it by {@link reloadDiskVersion} and by {@link authorizeDiskAdoption}. It
+ * exists because the previous shape said `reloadNeedsConfirmation: true` and
+ * nothing enforced it: a boolean describing a requirement is not the requirement.
+ *
+ * **The name records the transition that first needed one, not the only one that
+ * does.** Since 2c-4b-2 a *reapply* mints one too, through
+ * {@link reapplyAuthorizationFor}, and a reapply does **not** discard the draft and
+ * asks the person no second question — the consult's Q6 rules that a reapply needs
+ * no reload-style confirmation. What the two share, and all this value carries, is
+ * the binding: one conflict, one spend, checked by
+ * `BrowserState.adoptDiskVersion`. The type is not renamed here because six
+ * components name it and 2c-4b-2 may not touch a `.svelte` file; the debt is
+ * recorded rather than hidden.
  */
 export interface ReloadConfirmation {
   /** The brand. Never present at runtime, never nameable outside this module. */
@@ -1065,6 +1117,79 @@ export function reloadDiskVersion<T>(
   }
   return reloadedDraft(conflict.draft, revision, value);
 } // End of function reloadDiskVersion()
+
+/**
+ * The one authorization each conflict's reapply may ever spend.
+ *
+ * **Keyed by the wire value, not by the model.** `describeEditSave` builds a fresh
+ * {@link ConflictModel} on every call, so a memo keyed on the model would hand a
+ * second description of *the same* conflict a second unspent token. The wire value
+ * is the key `rememberTheConflict` already uses in `./workspace.svelte.ts`, for the
+ * same reason; the review round of 2c-4b-2 found this map disagreeing with it.
+ */
+const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictResult, ReloadConfirmation>();
+
+/**
+ * The authorization a reapply of one conflict spends.
+ *
+ * **One conflict, one token, and that is what makes "one spend" true rather than
+ * intended.** A reapply asks the person no second question — the consult's Q6 —
+ * so there is no `confirming` step to hold the token on, as the reload's
+ * `ReloadStep` does. Minting a fresh one per attempt would therefore hand every
+ * attempt a token `BrowserState.adoptDiskVersion`'s spent-confirmation guard had
+ * never seen, which is precisely the guard a conflict's reapply must not be able
+ * to walk past. So the token is **memoized on the conflict's origin**: the first
+ * attempt mints it, every later attempt for the same wire conflict gets that same
+ * token back, and the window refuses it.
+ *
+ * **The key is {@link ConflictModel.source}, the wire value the payload carried
+ * whole** — the same key `rememberTheConflict` uses in `./workspace.svelte.ts`, and
+ * for the same reason. `describeEditSave` builds a fresh model per call, so a memo
+ * keyed on the model object would give a second description of one conflict a
+ * second unspent token; the window would then authorize it, find the projection
+ * already at the disk revision, and answer `alreadyThere` — a successful adoption
+ * from a conflict that had already spent its one. That is what the 2c-4b-2 review
+ * found and what this key closes.
+ *
+ * **It is the existing door and not a parallel one**: the token is
+ * {@link confirmReloadDiskVersion}'s own, the origin and projection-generation
+ * checks are `BrowserState.adoptDiskVersion`'s own — applied where that method
+ * applies them, which for the generation is only on the branch that installs — and
+ * nothing here weakens either. What is added is the memo.
+ *
+ * **What this forces and what it does not, in the same sentence.** All this
+ * function forces is that every {@link ConflictModel} over one wire conflict is
+ * handed the *same* token; what a caller then does with it is the caller's, and
+ * `AdoptTheDiskVersion` in `./editorSave.ts` is an ordinary function type, so an
+ * arbitrary one can ignore both the token and the spend. **At most one adoption
+ * can succeed per wire conflict** is an implementation fact about the one callback
+ * the five match transitions pass, `BrowserState.adoptDiskVersion`: with that
+ * method a success spends the token in its own `WeakSet`, and a later attempt is
+ * refused — as spent when it presents the model the token was minted for, and by
+ * {@link authorizeDiskAdoption} when it presents any other model of that same
+ * conflict. Nor does this function force that a caller takes its token
+ * from here: {@link confirmReloadDiskVersion} is exported, and a caller that mints
+ * its own for an already-adopted conflict is answered `alreadyThere` — a success
+ * that installs nothing but is reported as one, because
+ * `BrowserState.adoptDiskVersion` settles that question before it reaches the
+ * projection-generation check. What holds today is an implementation fact and not a
+ * type: every reapply transition that adopts anything — the five match surfaces —
+ * takes its token from this function, through `adoptForReapply` in `./reapply.ts`,
+ * and the raw editor's takes no adoption function at all.
+ *
+ * @typeParam T - The drafted value.
+ * @param conflict - The conflict state a reapply is being attempted from.
+ * @returns The authorization for that conflict's origin, minted once.
+ */
+export function reapplyAuthorizationFor<T>(conflict: ConflictModel<T>): ReloadConfirmation {
+  const held = REAPPLY_AUTHORIZATIONS.get(conflict.source);
+  if (held !== undefined) {
+    return held;
+  }
+  const minted = confirmReloadDiskVersion(conflict);
+  REAPPLY_AUTHORIZATIONS.set(conflict.source, minted);
+  return minted;
+} // End of function reapplyAuthorizationFor()
 
 /**
  * The brand of an authorized adoption. Declared, never exported, never at runtime.

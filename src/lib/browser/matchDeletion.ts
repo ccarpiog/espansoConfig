@@ -143,6 +143,13 @@ import {
 import type { InvalidationStatus } from './invalidation';
 import type { RawSaveChoice } from './rawSave';
 import {
+  adoptForReapply,
+  beginReapply,
+  subjectCorrespondence,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle
+} from './reapply';
+import {
   conflictChoicesFor,
   conflictDiskText,
   describeEditSave,
@@ -800,6 +807,89 @@ export function reloadTheDiskVersion(
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Why a reapply of this deletion could not be carried out.
+ *
+ * **A code, never a sentence.** There is no key function for these yet, and that is
+ * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
+ * with the panel that renders them.
+ */
+export type DeletionReapplyObstacle =
+  | SharedReapplyObstacle
+  | {
+      /** The identified snippet is one this application will not delete. */
+      readonly kind: 'notDeletable';
+      /** Which refusal the newly parsed projection gives, as a code. */
+      readonly reason: DeletionRefusal;
+    };
+
+/** What a reapply of this deletion became. */
+export type MatchDeletionReapply = ReapplyOutcome<MatchDeletionSession, DeletionReapplyObstacle>;
+
+/**
+ * Reissues this deletion against the newly parsed disk version.
+ *
+ * **Strict exact correspondence and nothing weaker**, which is the consult's Q4:
+ * *a unique trigger is not enough to delete a snippet whose contents changed after
+ * the person reviewed it*. The tier is 2c-4b-1's and is chosen by the command that
+ * built the question — `delete_match` asks for `ExactItem` — so an identified
+ * subject here is a snippet whose own owned lines are byte-for-byte what this
+ * session was about.
+ *
+ * **The confirmation is asked again, and against the live projection.** The session
+ * handed back has **nothing pending**: the person presses *Delete* again, and
+ * {@link confirmDelete} then compares its own pending identity, the session's, the
+ * draft's candidate and — the only one that comes from outside — the identity
+ * {@link identityInProjection} reads from the projection this window now holds.
+ * Comparing two values minted together proves nothing (`CLAUDE.md` section 6), and
+ * carrying a pending confirmation across a reparse would be exactly that.
+ *
+ * **Eligibility is rechecked over the new projection**, including the refusal to
+ * empty the sequence: a file that has lost its other snippets since this session
+ * opened refuses `lastSnippet` here rather than at the command.
+ *
+ * **There is no `alreadySatisfied` arm and there cannot be one.** *The snippet is
+ * already deleted* is not something this transition can observe: a snippet that is
+ * gone has no exact correspondence, so it arrives as a refusal about evidence and
+ * never as a satisfied request. Saying otherwise would claim the file was examined
+ * and the snippet found absent, which is a stronger claim than the evidence carries.
+ *
+ * @param session - The session showing the conflict.
+ * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
+ *   all on a refusal.
+ * @returns What became of the attempt.
+ */
+export function reapplyToDiskVersion(
+  session: MatchDeletionSession,
+  adopt: AdoptTheDiskVersion<MatchId>
+): MatchDeletionReapply {
+  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
+  if (start.kind !== 'ready') {
+    return start;
+  }
+  const subject = subjectCorrespondence(start.evidence);
+  if (subject.kind === 'refused') {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'correspondence', reason: subject.reason }
+    };
+  }
+  if (subject.kind === 'noSubject') {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const rebuilt = startMatchDeletion(start.conflict.disk, subject.target);
+  if (rebuilt.eligibility.kind !== 'deletable') {
+    return {
+      kind: 'manualResolution',
+      obstacle: { kind: 'notDeletable', reason: rebuilt.eligibility.reason }
+    };
+  }
+  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+    return { kind: 'adoptionRefused' };
+  }
+  return { kind: 'reapplied', session: rebuilt };
+} // End of function reapplyToDiskVersion()
+
+/**
  * What this surface offers about a conflict.
  *
  * **`operationChoice` is permanent here, and it is the consult's Q4 ruling rather
@@ -817,12 +907,18 @@ export function reloadTheDiskVersion(
  * that step's model change here, because the machinery it turns on was built and
  * driven by this module's tests at 2c-4a-2 — which is the trade that split paid
  * for.
+ *
+ * **`reapplySupport` is the same trade one sub-phase later.** This surface *can*
+ * reapply — {@link reapplyToDiskVersion} is the transition — and nothing draws it:
+ * `ConflictChoice` has no member for one and `conflictChoicesFor` names none.
+ * 2c-4b-3 draws it.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: true
+  offersReload: true,
+  reapplySupport: 'supported'
 };
 
 /** Everything a screen needs about one deletion, derived on every read. */
