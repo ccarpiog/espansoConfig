@@ -10145,6 +10145,15 @@ _Updated at each phase boundary._
 | **2c-4b step 2** | **`0dec45c`** | ✅ pushed to `origin/main` | clean |
 | **2c-4b step 3a** | **`11b8160`** | ✅ pushed to `origin/main` | clean |
 | **2c-4b step 3b** | **`f6316cc`** | ✅ pushed to `origin/main` | **deliberately not clean** — `src/probe.ts`, `src-tauri/src/probe.rs` and the four hook lines stay in the working tree for 3c |
+| **2c-4b step 3c-1** | **`a9d7a28`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for 3c-2, and `src/probe.ts` now also carries this step's `moverPlan` parameter and `BLOCK_TEXT_LIMIT` of 1500. **Never `git commit -am` while they are there** |
+
+`a9d7a28` is Phase 2c-4b step 3c-1 **including all four of its review rounds** — the step was held
+open until the last round returned READY, so, as with every phase since `8989c16`, no commit holds a
+demonstrated defect: neither the two missing Q7 cases, nor the sentence endings quoted from
+transcripts that had truncated them, nor the exhaustive-coverage claim that survived in the body
+after the title was narrowed. It contains `docs/decisions/2c-4b-3c-1-notes.md`, the four review
+files and this checkpoint — **and nothing else, because the harness it describes is deliberately
+uncommitted**. A fresh session starting 2c-4b-3c-2 should start from `a9d7a28` or later.
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
