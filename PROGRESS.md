@@ -73,8 +73,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-1** | **The correspondence evidence and the conflict contract**: `crates/espansoconfig-core/src/reconcile.rs`, the anchor/fingerprint construction, the refusal enum, and `SaveResult::Conflict::reapply` / `ConflictResult.reapply` — built from the **same fresh snapshot** as `disk_text` and `disk_revision`. No control, no choice, no capability, no `.svelte` change | ✅ complete — after **three** rounds. Round 1 returned **NOT READY** on a High and five others; round 2 confirmed four closed and found **two still standing plus two new**; round 3 closed those and its own sweep found **three more**, one of which was the decision record claiming a guarantee the code did not give |
 | **2c-4b-2** | **Reapply as browser-model transitions, with nothing drawn**: `src/lib/browser/reapply.ts` — the gate, the two evidence readers, the three-armed `ReapplyOutcome` and the shared adoption — plus one pure decide-first-adopt-second transition on each of the five match surfaces and a permanent *unavailable* on the raw editor. No `ConflictChoice` member, no dictionary key, no `.svelte` change, so no mounted or window evidence is owed | ✅ complete — after **four** rounds. Round 1 returned **NOT READY** and found the step's only algorithmic defect: the authorization was keyed on the **derived `ConflictModel`**, so two descriptions of one wire conflict could each win an adoption spend. Rounds 2–4 found **no algorithmic defect at all** — every remaining finding was one claim, that `adoptDiskVersion`'s guards are a set rather than an ordered sequence, wrong in four places and taking three rounds to close |
 | **2c-4b-3a** | **The offered choice, drawn**: `keepMyDraft` added to `ConflictChoice` and produced by `conflictChoicesFor` **only**, the `ConflictCapabilities.offersReapply` boolean 2c-4b-2 deliberately deferred, capability flipped on the five match surfaces with raw declaring `false` beside its permanent `unavailable`, six component handlers, 24 new strings in both dictionaries through typed accessors, and 36 new cases | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium and two Lows, **all four in prose**; round 2 confirmed all four closed and found the one this project's history predicts — the 32-site permanence sweep had produced the **mirror image** of the finding it was closing, an unconditional claim of *later success* where an unconditional claim of *permanent refusal* had stood |
-| 2c-4b-3b | The **instrument**: the external-writer harness rebuilt (it was deleted at 2c-4a-3c-5) with Q7's fixed R0→R1 fixture pairs, one positive and one refusal per policy, synchronized from the plan and never by wall clock | ⬜️ **next** |
-| 2c-4b-3c | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages | ⬜️ not started |
+| **2c-4b-3b** | The **instrument**: the external-writer harness rebuilt (it was deleted at 2c-4a-3c-5) with Q7's fixed R0→R1 fixture pairs, one positive and one refusal per policy, synchronized from the plan and never by wall clock | ✅ complete — `docs/decisions/2c-4b-3b-instrument.md`, after **four** review rounds, the last returning READY with no findings. 23 launches, all 23 with a zero-byte `probe.err`; a true `SaveResult::Conflict` on all six surfaces, *Keep my draft* drawn and pressable on all five match surfaces and **absent on the raw editor in both languages**, five positive cases byte-identical to hand-authored expected bytes and six refusals byte-identical to R1 with no backup directory. **The harness is deliberately uncommitted.** Every one of the review's ten findings was a sentence in the record claiming more than the artifacts give — **no defect in the harness, and none in the application** |
+| 2c-4b-3c | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages | ⬜️ **next** |
 | 2c-4b-3d | The **fixes and the re-take**, if the reading finds anything | ⬜️ not started |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
@@ -3425,6 +3425,65 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 3b
+
+All rows re-run by the orchestrator with the harness in the working tree, never taken from a worker's
+report. The step adds no production code, so every moved number is the harness's own presence.
+
+| Command | Result | Expected |
+|---|---|---|
+| `npm test` | **1624** passed, 49 files | 1623 + 1 — `scripts/lint/ipc-detail.test.ts` sweeps every `.ts` under `src/`, so `src/probe.ts` is a case there |
+| `npm run check` | **419** files, 0 errors, 0 warnings | 418 + that same file |
+| `npm run build` | **176** modules | 175 + `src/probe.ts`. `rg 'svelte/internal/server|async_hooks' dist/assets/*.js` finds nothing, so this is the +1 shape and not the `resolve.conditions` regression |
+| `cargo test -p espansoconfig` | **155** passed, 0 failed | unchanged — `probe.rs` declares no test |
+| `cargo test --workspace` | **1086** passed, 0 failed, 26 binaries | unchanged |
+| `cargo fmt --check` | clean | |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | |
+| `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing | the architecture rule, D2x form |
+| `git diff --stat -- src/main.ts src-tauri/src/main.rs` | 5 insertions, 1 deletion | the four documented hook lines and nothing else |
+
+**The launch evidence was checked directly rather than accepted from the report.** 23 launch
+directories exist; `find … -name probe.err -size +0c` returns **zero** files, so all 23 are empty; `rg
+-l -- '--- end'` matches **21**. Each `bytes.txt` carries a real `cmp` verdict, a backup search and a
+whole-tree diff against a pristine copy taken before the launch. Two findings were spot-checked
+against the transcripts by hand before being accepted: `L07/probe.log` really does read `--- failed
+timed out waiting for the deletion request control` immediately followed by `--- end`, and L20's
+report really is at `y = -104`.
+
+### The three review rounds, and what they cost
+
+**Every one of the ten findings across three rounds was prose in the record. Not one was a defect in
+the harness, and not one was a defect in the application.** The subject is
+`docs/decisions/2c-4b-3b-instrument.md`, which is the only thing this step commits — so auditing it
+*is* auditing the step.
+
+| Round | Verdict | Findings |
+|---|---|---|
+| 1 (`phase-2c-4b-3b-instrument-record.md`) | **NOT READY** | 2 High, 2 Medium, 2 Low |
+| 2 (same file, appended) | **NOT READY** | 4 closed cleanly, **2 closed by shipping their mirror image**; 2 Medium, 2 Low |
+| 3 (same file, appended) | **NOT READY** | 4 of 5 passages correct; **1 finding, and it was the orchestrator's own round-2 fix** |
+| 4 (same file, appended) | **READY** | none — the chain converged |
+
+Round 1's two Highs are the ones worth carrying forward. **§4's "What it proves" column claimed
+mechanisms its own fixtures cannot distinguish** — `elsewhere-r1.yml` leaves the target's bytes
+identical to R0 and does not reorder the sequence, so the delete and duplicate rows cannot tell an
+adopted target from the old one and the move row cannot tell `top` lowered afresh from a stale index.
+The column is now *Observed result* and the mechanisms are named as hypotheses that **2c-4b-1's
+Rust-side tests carry, not this instrument**. And **`--- end` is not a success signal**: `startProbe()`
+prints it unconditionally after the failure report, so `launch.sh`'s `reached-end=yes` says only that
+the wrapper reached its last line — L07, L08, L09 and L15 all printed `--- failed` first.
+
+Round 2 is the documented recurrence, twice in one round. Narrowing `--- end` produced **"no part of it
+is mechanised"**, which is false — `launch.sh` runs the `cmp` itself, measures `probe.err`, searches
+for backups and diffs the tree, and the driver throws when a control never arrives. And narrowing
+L01/L04's causes produced **"a byte match without an `--- end` is not evidence"**, when L04's bytes are
+real evidence of the byte predicate and merely insufficient to count the launch. Round 3 then found the
+same class in the orchestrator's own round-2 fix: the replacement headline was **still a false
+universal**, because §6.6's L15 cause is an inference and §6.4 is read from the application's source.
+The paragraph beneath it is now explicitly **non-exhaustive**.
+
+---
+
 ## Verification — Phase 2c-4b step 3a
 
 All rows re-run by the orchestrator after the fix round and after the confirmation pass's own fix,
@@ -6051,6 +6110,81 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### Phase 2c-4b-3b is complete. **Step 2c-4b-3c — the reading — is next.**
+
+**The instrument exists and is proven, and it is in the working tree uncommitted.** The exact first
+commands to run:
+
+```sh
+npm install && npm test        # expect 1623 passed, 49 files — WITHOUT the harness
+cargo test --workspace         # expect 1086 passed, 0 failed
+```
+
+**Read `docs/decisions/2c-4b-3b-instrument.md` before anything else.** It is the whole instrument: the
+launch recipe verbatim, the eleven fixture-pair cases, the 23 launches with their results, nine things
+the next worker must not re-derive, and — the section that matters most — **§8, what the instrument
+does not prove**.
+
+#### The critical fact about resuming here
+
+**The harness is NOT committed, and a fresh clone does not have it.** `src/probe.ts`,
+`src-tauri/src/probe.rs`, the four hook lines in `src/main.ts` and `src-tauri/src/main.rs`, and the
+whole scratch tree (`launch.sh`, `fixtures/`, `launches/L01…L23/`) live only in the working tree of
+the session that built them, under
+`/private/tmp/claude-501/-Users-ccarpio-Developer-espansoConfig/a95eea9d-1e3d-4344-9470-91a69a4e6e99/scratchpad`.
+**If that working tree is gone, 3c's first job is to rebuild the harness from the record** — which is
+exactly what 3b did from `2c-4a-3c-1-instrument.md`, and the record was written to make that possible
+a second time. Check `git status --short --untracked-files=all` first: if it lists `src/probe.ts` and
+`src-tauri/src/probe.rs`, the harness survived and the gate numbers are the shifted ones
+(1624 / 419 / 176); if it does not, they are the production ones (1623 / 418 / 175) and the harness
+must be rebuilt before a single reading can be taken.
+
+#### What 3c must do
+
+Run and record Q7's eight-reading R0→R1 matrix over six write surfaces in both languages
+(`docs/reviews/phase-2c-4b-design.md` lines 131–151), reading **choice ordering, focus and scroll
+reachability, every new refusal sentence, and the ordinary refusal/acknowledgement round after a
+successful reapply attempt** — none of which 3b touched. Its own §8 is 3c's work list:
+
+1. **§8.5 — five Q7 sub-cases have no fixture pair yet**, and each is one row in `launch.sh`'s case
+   table plus two files: the editor's **unique-trigger fallback** positive (Q7 point 2), the
+   `alreadySatisfied` arm (point 3), the **ambiguous trigger** refusal (point 5), a move over a
+   **reordered** sequence and a **resolvable `after` anchor** (points 1 and 6), and a creation whose
+   anchor was **deleted** rather than changed (point 7). Nothing in the driver has to change.
+2. **§8.10 — Spanish covers 4 of the 11 cases.** The creator and the duplicator have **no** Spanish
+   launch at all, and the mover has no Spanish positive. Q7 says *read both languages*.
+3. **§8.4 — one fixture shape was exercised and it is the easy one**: three snippets, one file, plain
+   `replace:` scalars, LF, no BOM, no block scalars, no item-owned comments, no second sequence.
+4. **§8.3 — `HTMLElement.click()` is not a mouse click.** No plan used the keyboard, moved focus by
+   tabbing or scrolled anything, so focus order and keyboard operability are entirely unread.
+5. **A standing reading finding, already measured**: the `manualResolution` report block was drawn at a
+   **negative `y` in nine launches** — above the fold, in a pane whose outcome panel had been scrolled
+   into view. 3b recorded it and deliberately did **not** judge it. That judgement is 3c's.
+
+#### What 3b proved, stated at its real strength
+
+23 launches, all 23 with a zero-byte `probe.err`, 21 printing `--- end` — **of which four printed
+`--- failed` first**, so `--- end` is a wrapper signal and never a success signal. A true
+`SaveResult::Conflict` reached all six surfaces with `expected ≠ found` and `diskRevision` at R1.
+*Keep my draft* is drawn and pressable on all five match surfaces and **absent on the raw editor**, in
+English and in Spanish. Five positive cases produced a file byte-identical to hand-authored expected
+bytes; six refusals left the file byte-identical to R1 with **no `.espansoconfig-backups` directory**.
+Every case ran in a synthetic two-file tree; the owner's real configuration was never opened.
+
+#### What 3b cost, and the lesson it repeats
+
+**Four review rounds, ten findings, and every single one was a sentence in the record.** No defect in
+the harness; no defect in the application. Round 2 found that **two of round 1's fixes had shipped the
+mirror image of the claim they closed**, round 3 found that the orchestrator's own round-2 fix was
+**still a false universal**, and round 4 returned READY with no findings. The record now separates,
+explicitly and non-exhaustively, launch-case
+outcome claims from harness-source claims, application-source facts, contemporaneous diagnoses whose
+evidence was not retained, launch-derived inferences, and gate results with no transcript.
+
+---
+
+### The record that closed 2c-4b-3a (superseded by the above, kept for its rationale)
 
 ### Phase 2c-4b-3a is complete. **Step 2c-4b-3b is next.**
 
@@ -9665,6 +9799,7 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 | Path | Why it matters next |
 |---|---|
+| [`docs/decisions/2c-4b-3b-instrument.md`](docs/decisions/2c-4b-3b-instrument.md) | **The whole reapply instrument, and the only committed artifact of 2c-4b-3b — 2c-4b-3c cannot start without it.** The harness it describes is **deliberately uncommitted**, so a fresh clone has the record and nothing else; §2 is the launch recipe verbatim and §6 is nine things not to re-derive, including that `cargo build` must follow every `npm run build` after a `touch src-tauri/build.rs`, that a WKWebView driven by a launch script runs no animation frames and clamps short `setTimeout`s, and that `MatchDeleter` opens **already asking**. Read **§8 before quoting anything from §§3–5**: it names, at the record's own insistence, what the instrument does not prove — one easy fixture shape, four of eleven cases in Spanish, no keyboard or focus evidence, no way to show a refusal issued no save command, and no visibility into which `DiskAdoptionOutcome` arm a launch took. **`--- end` is a wrapper signal, not a success signal**: `startProbe()` prints it unconditionally after a failure report, and four launches printed `--- failed` first |
 | [`src/lib/browser/saveOutcome.ts`](src/lib/browser/saveOutcome.ts) | **The one authority for what a conflict offers, as of 2c-4a-2.** `conflictChoicesFor(capabilities, step)` is the only producer of a `ConflictChoice` list in the repository; before it, capability was expressed twice — an ignored `choices` field on every `ConflictModel` and a local `['keepEditing']` in each of the five match models — **and that split is exactly why a newly offered button could compile and do nothing**. `ConflictCapabilities.draftKind` is a permanent fact about the drafted value; `offersCopyDraft` and `offersReload` say what the panel *acts on today* and are hand-set, because **nothing in TypeScript can force a component to act on a choice its model names**, and the doc says so in the same sentence as what it does force. A copy is refused for an `operationChoice` draft regardless of the boolean |
 | [`src/lib/browser/editorSave.ts`](src/lib/browser/editorSave.ts) | **The shared reload machine — `ReloadStep`, `NOT_RELOADING`, `AdoptTheDiskVersion<T>`, `reloadAsked`, `reloadConfirmed`, `spendTheConfirmedReload`, `offeredReloadStep`.** Built in 2c-4a-2 *without* being offered, which is the shape worth copying: an unoffered transition can be implemented and tested without drawing its choice, and the first review round rejected the opposite trade. `spendTheConfirmedReload` treats **both** `installed` and `alreadyThere` as success and stops only on `refused` — collapsing those two back into one is the defect round 2 shipped and round 3 removed |
 | [`docs/reviews/phase-2c-4a-2-code.md`](docs/reviews/phase-2c-4a-2-code.md) | **Four review passes in one file, and the clearest record in this project of a fix becoming the next defect three times running.** Round 2's fix of round 1's High introduced a window that installed an **older** snapshot over a **newer** projection and reported success; rounds 4 and 5 each found a narrower instance of the prose finding the round before had just closed. The reason is one sentence and it generalizes: **each sweep was written from the previous wording rather than from the new contract** |
@@ -9880,6 +10015,7 @@ _Updated at each phase boundary._
 | **2c-4b step 1** | **`3451a81`** | ✅ pushed to `origin/main` (recorded by `e7d5184`) | clean |
 | **2c-4b step 2** | **`0dec45c`** | ✅ pushed to `origin/main` | clean |
 | **2c-4b step 3a** | **`11b8160`** | ✅ pushed to `origin/main` | clean |
+| **2c-4b step 3b** | see below | | **deliberately not clean** — the harness stays |
 
 `21b3573` is Phase 2c-3c step 3 **including both of its review rounds and the window reading** — the
 phase was held open until all four findings were closed, so, as with every phase since `8989c16`, no
