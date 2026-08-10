@@ -75,8 +75,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3a** | **The offered choice, drawn**: `keepMyDraft` added to `ConflictChoice` and produced by `conflictChoicesFor` **only**, the `ConflictCapabilities.offersReapply` boolean 2c-4b-2 deliberately deferred, capability flipped on the five match surfaces with raw declaring `false` beside its permanent `unavailable`, six component handlers, 24 new strings in both dictionaries through typed accessors, and 36 new cases | ✅ complete — after a review fix round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium and two Lows, **all four in prose**; round 2 confirmed all four closed and found the one this project's history predicts — the 32-site permanence sweep had produced the **mirror image** of the finding it was closing, an unconditional claim of *later success* where an unconditional claim of *permanent refusal* had stood |
 | **2c-4b-3b** | The **instrument**: the external-writer harness rebuilt (it was deleted at 2c-4a-3c-5) with Q7's fixed R0→R1 fixture pairs, one positive and one refusal per policy, synchronized from the plan and never by wall clock | ✅ complete — `docs/decisions/2c-4b-3b-instrument.md`, after **four** review rounds, the last returning READY with no findings. 23 launches, all 23 with a zero-byte `probe.err`; a true `SaveResult::Conflict` on all six surfaces, *Keep my draft* drawn and pressable on all five match surfaces and **absent on the raw editor in both languages**, five positive cases byte-identical to hand-authored expected bytes and six refusals byte-identical to R1 with no backup directory. **The harness is deliberately uncommitted.** Every one of the review's ten findings was a sentence in the record claiming more than the artifacts give — **no defect in the harness, and none in the application** |
 | **2c-4b-3c-1** | **The instrument, extended with the Q7 cases 3b left unbuilt**: eight new fixture-pair cases — `editor-fallback`, `editor-satisfied`, `editor-ambiguous`, `editor-missing`, `mover-reordered`, `mover-after`, `mover-after-changed`, `creator-anchor-gone` — plus the driver's `moverPlan` placement parameter and `BLOCK_TEXT_LIMIT` at 1500. **2c-4b-3c was cut in two here**, construction from reading, the way 2c-4a-3c was numbered | ✅ complete — `docs/decisions/2c-4b-3c-1-notes.md`, after **four** review rounds, the last returning READY. 16 launches (L24–L39), all 16 with a zero-byte `probe.err` and none printing `--- failed`; every positive byte-identical to hand-authored expected bytes differing from R1, every refusal byte-identical to R1 with no backup directory. **Round 1's two Highs were real instrument gaps** — Q7 point 6's changed-`after`-anchor refusal and point 4's removed target had no case in either step — and the other eight findings were prose. It **corrects 3b's §8.5**: `mover-after` did force a driver change. `end`-after-reorder remains unbuilt |
-| 2c-4b-3c-2 | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages, plus the standing negative-`y` judgement | ⬜️ **next** |
-| 2c-4b-3d | The **fixes and the re-take**, if the reading finds anything | ⬜️ not started |
+| **2c-4b-3c-2** | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages, plus the standing negative-`y` judgement | ✅ complete — `docs/decisions/2c-4b-3c-2-window-reading.md`, after **three** review rounds. **71 launches (L40–L110)**, all with a zero-byte `probe.err`, none printing `--- failed`, and `bytes=MATCH` on **all 71**; **21 ended at hand-authored bytes with a backup present and 50 ended at R1 with no backup directory** — a perfect partition, re-derived independently by the orchestrator from every launch's `expect=` and `backups=` fields. All 20 cases ran in **both languages** and `end`-after-a-reorder was built, so 3c-1's §7.6 and §7.7 are **closed as recorded deviations**. **1 High, 2 Mediums, 1 Low, 5 observations**, and **no defect in what is written to disk** |
+| 2c-4b-3d | The **fixes and the re-take**: §11.3, §11.1, §11.5, §11.2, then re-read every component changed, then delete the harness | ⬜️ **next** |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -2244,6 +2244,8 @@ write is what is on disk would be wrong for the same reason.
 | R33 | **TypeScript is pinned to 6.0.3, one major behind 7.0.2**, because `svelte-check@4.7.4` declares `typescript: ^5 \|\| ^6` | Accepted and dated. The whole i18n guarantee is a *compile-time* one, so the version that compiles it is load-bearing: an upgrade that changes how `Record<Exclude<keyof T, TranslationKey>, never>` behaves would weaken `ExactDictionary` silently. The four disabling experiments of `1b-1-notes.md` §2 are the tripwire — **re-run them after any TypeScript or `svelte-check` upgrade**, because they are the only thing that would notice. |
 | R30 | **Nothing in the projection is proven against espanso itself.** The field list is plan §3's, verified against espanso 2.3.0 and its JSON schemas — but by the plan's author, not by any test in this repository | Accepted, and the failure mode is the right one rather than a silent one: a field espanso has and plan §3 lacks lands in `unknown_entries`, where D2w's accounting proves it survived and R29 records that it is not rendered. That is not the same as being correct. Closing this means a differential check against espanso's own schema, which is a Phase 3 concern at the earliest (plan §12 puts unknown-field preservation *verified end to end* there). |
 | R36 | **There is no relation that can follow an open draft to the snippet it edits across a reparse**, and 2c-3b-1 deliberately did not invent one. `moveEligibility`'s `unsavedDraft` rule compares **whole identities**, so the moment the draft's identity is older than the projection the eligibility is computed over, the rule **stops matching and the move is allowed** — and a commit strands those edits | Open, recorded as hole 18 of `docs/decisions/2c-3b-1-notes.md` and in `moveEligibility`'s own doc comment. **`identityInProjection` is not the producer that closes it, and the record claimed it was for one round**: it resolves by **arena node alone**, so with draft A at R0/node 10 and an unrelated snippet B at R1/node 10 it answers B's identity and the rule refuses **B** — the defect the round before had just closed, reached through the producer prescribed to close it. It is safe as a **check** (`confirmDelete` and `sessionIsLive` require equality including the revision) and unsafe as a **producer**. Two shapes would settle it, and step 2 must choose one: a coordinator that owns the editor-to-snippet relation and re-points it in the same synchronous block that installs a new projection — the shape `repairAfter` already has for the *selection* — **or** a rule that a snippet with a stale draft is not offered a move at all until the draft is saved or discarded. **Not** a lookup that infers cross-revision identity from an arena node, whatever it is named |
+| R38 | **Every window reading this project has taken ran on one easy fixture shape, and none of the fifteen corpus fixtures `CLAUDE.md` §4 lists has ever been through the harness.** 3c-2's 71 launches used plain `replace:` scalars, double-quoted triggers, one leading comment, LF, no BOM — no block scalars, no item-owned comments, no blank-line runs, no second sequence, no read-only file, no package. The fifteen fixtures exist *precisely because those shapes behave differently* | Open, and stated as 3c-2 §12's own bound rather than discovered later. It is **not** a defect claim: the byte-exactness of every edit over both corpora is what the Phase 0 gate discharged, at the core, with a property test. What is unevidenced is the **window's** behaviour over those shapes — a reapply refusal drawn against a block scalar, a conflict panel over a file with item-owned comments. The harness dies at 3d, so closing this means rebuilding it; the cheaper mitigation is to add one hard fixture shape to whichever instrument the next reading-bearing phase builds, rather than to reopen 2c-4b for it |
+| R39 | **A shared user-facing string is not a shared predicate, and a sweep that assumes otherwise manufactures findings in both directions.** 2c-4b-3c-2's review found `browser.notice.differentMatch` claiming an identity its producer cannot give — and then found the fix round alleging the same defect in `displacedByMove` and `displacedByDuplicate`, where the revision guard on each attributed adoption path *earns* the claim | Open as a standing method rule, not as a defect. Four notices carried one clause; two are false and two are true, and **only reading each notice's own producer separates them**. The cost of getting it wrong is symmetric: a missed instance ships a false sentence, and a manufactured one hands a later step work that does not exist and invites a "fix" that breaks a correct sentence. **`browser.notice.gone` is the untested half** — it is length-based, source-derived and was **never drawn in any of the 110 launches**, so its half of the finding has no screen behind it |
 | R37 | **A model rule that reads the live projection agrees with itself only over consistent inputs, and nothing forces a caller to supply them.** `matchMoveView(session, R0Views)` answering `canMove: true` beside `beginMove(session, identityInProjection(R1Views, …))` answering `null` type-checks, and no signature refuses it. The same shape is `beginMove`'s `projected` argument and `confirmDelete`'s, where nothing in TypeScript can say where an argument came from | Accepted and **stated in the same sentence as what the code does force** — in `refusalGiven`, in `beginMove` and in the two module headers — after a review round found the record claiming the two "cannot disagree by construction". What would close the remaining half is a requirement on the caller: **a component must derive the view, the destination options and the submission identity from one read of the current projections, in one synchronous block.** A screen holding a stale copy of `BrowserState.views` gets the stale answer from every one of them, consistently and wrongly |
 
 ---
@@ -3423,6 +3425,93 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-4b step 3c-2
+
+All rows re-run by the orchestrator with the harness in the working tree, never taken from a worker's
+report. This step **adds no production code at all** — its only committed artifacts are two
+documents — so every gate number is 3c-1's, unmoved, and an unmoved number is evidence of an unmoved
+number and nothing broader.
+
+| Command | Result | Exit |
+|---|---|---|
+| `npm test` | **1624** passed, 49 files | 0 |
+| `npm run check` | 419 files, **0 errors, 0 warnings** | 0 |
+| `npm run build` | **176** modules — the harness-inflated count (172 production + the probe's four) | 0 |
+| `cargo test --workspace` | **1086** passed, **0** failed | 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | 0 |
+| `cargo fmt --check` | clean | 0 |
+| `git status --short --untracked-files=all` | the four harness paths + the two new documents; **no production source modified** | — |
+
+### The launch evidence, re-derived by the orchestrator rather than accepted
+
+The single most consequential thing this step got wrong on its first pass was its arithmetic, so the
+counts were re-derived here from the retained artifacts and not from the worker's or Codex's prose.
+Over `launches/L40…L110` in the scratch tree, reading each `bytes.txt`:
+
+| Measure | Value |
+|---|---|
+| launches | **71** (L40–L110), continuing 3c-1's L01–L39 |
+| `bytes=MATCH` | **71 / 71** |
+| non-empty `probe.err`, across all 110 launches | **0** |
+| `expect=R1` (a refusal) | **50**, and **every one** of them `backups=none` |
+| `expect=…-expected.yml` (an authored write) | **21**, and **every one** of them `backups=PRESENT` |
+
+The partition is perfect and it is what falsified the record's original **28 / 43**. Codex reached
+21/50 independently from the ledger; this table reached it from the artifacts. **Two independent
+derivations of a number the record had wrong is why the number is now trustworthy** — and it is also
+why the fix round was told to re-derive *every* count rather than patch the two named, which surfaced
+five more (`manualResolution` 18→42, §10's notices 16→21, editor adoptions 6→9, shorter-surface
+adoptions 10→12, *usted* lines 9→7) and two the review never raised ("ten refusal cases" → nine,
+"ten of eleven" obstacle sentences → nine of ten).
+
+**A `bytes=MATCH` is a claim about the final filesystem state and nothing more.** There is no invoke
+spy and no command counter, so no row above says which command ran or when.
+
+### Phase 2c-4b step 3c-2 review disposition — three rounds, `docs/reviews/phase-2c-4b-3c-2-reading.md`
+
+The step changed no production code, so **every one of the thirteen findings was a claim in the
+record** — this project's named worst defect class, in the one document whose whole purpose is to be
+believed later.
+
+**Round 1 — NOT READY: five High, one Medium, three Lows.** Two of the Highs were **defects in the
+application the record had graded as sound**: `browser.notice.differentMatch` is *false* rather than
+merely misleading (`reresolve` proves only that the bytes at the retained index differ, so it fires
+when the *same* snippet was edited in place), which raised §11.3 from Low to **High**; and §5.2's
+"true" verdict on `fieldCollisions` was wrong, because `fieldReapply` returns `collision` when a
+drafted field becomes *ineligible* even with an unchanged value — a **new finding, §11.5**. The other
+three Highs were the record's own integrity: a dropped inherited limitation in §12 (3b §8.9, that
+`--- end` is printed unconditionally and is only a wrapper signal), the 28/43 miscount, and temporal
+claims — *"every conflicted save wrote nothing"*, *"the write happens only on the next press"* —
+beyond an instrument with no invoke spy. Re-deriving §12 item by item against 3c-1 §7 then recovered
+**three further dropped limitations** the review had not named.
+
+**Round 2 — NOT READY: one High, two Lows, and the High was a finding that did not exist.** Round 1's
+sweep had alleged the `differentMatch` clause also stood in `displacedByMove` and
+`displacedByDuplicate`. It does not: each is reachable only when the re-read is the committed
+operation's own parse, and within that parse a move changes no item's bytes and a duplicate inserts a
+byte-exact clone, so the identity claim is *earned*. Both were **retracted**. This is the pattern the
+project already knew — each round's fix produces the next round's finding — pointed the other way:
+**a sweep can manufacture this project's worst defect class aimed at the application**, handing a
+later step work that is not there. Round 2 also confirmed, independently of the orchestrator's own
+derivation, that the recount is right, that §12 now drops nothing, and that the fix round's rebuttal
+grading §11.5 **Medium rather than High** holds — the refusal and the no-write outcome are correct,
+and only the reason is false.
+
+**Round 3 — NOT READY on one Low, everything else clean.** The retraction had grounded *both*
+attributed notices in `adoptTheDocumentOnDisk:2750-2752`; a committed duplicate goes through
+`adoptAfterTheDuplicate`, whose equivalent guard is `workspace.svelte.ts:2891-2893` and whose
+clone-follow early return is `:2882-2887`. **Closed by the orchestrator rather than dispatched**,
+after reading both sites: it is a citation correction with no judgement in it, and the retraction's
+conclusion never depended on the citation — it rested on there being a revision guard on each
+attributed path, and there are two, one per path. All three sites in the record now name both and
+reserve `:2741-2746` for the move.
+
+**A shared string is not a shared predicate**, and that is the transferable lesson. Four notices
+carried the same clause; two earn it and two do not, and only reading each notice's *producer* tells
+them apart.
 
 ---
 
@@ -6178,7 +6267,106 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Phase 2c-4b-3c-1 is complete. **Step 2c-4b-3c-2 — the reading itself — is next.**
+### Phase 2c-4b-3c-2 is complete. **Step 2c-4b-3d — the fixes, the re-take, and the harness's removal — is next.**
+
+**Read `docs/decisions/2c-4b-3c-2-window-reading.md` first**; it is the whole work list. Read
+`docs/reviews/phase-2c-4b-3c-2-reading.md` second — three review rounds, and round 2's High is the
+one a fixer most needs, because it is a finding that turned out **not to exist**. Read
+`docs/decisions/2c-4b-3b-instrument.md` only when a launch has to be run: it holds the launch recipe
+verbatim and the nine things a worker must not re-derive.
+
+The exact first commands to run:
+
+```sh
+npm install && npm test        # expect 1624 passed, 49 files — WITH the harness
+cargo test --workspace         # expect 1086 passed, 0 failed
+```
+
+#### The critical fact about resuming here
+
+**The harness is NOT committed, and a fresh clone does not have it.** `src/probe.ts`,
+`src-tauri/src/probe.rs`, the four hook lines in `src/main.ts` and `src-tauri/src/main.rs`, and the
+whole scratch tree (`launch.sh`, `run-3c-2.sh`, `fixtures/` — 19 files, `launches/L01…L110/`,
+`manifest-3c-1-post.sha256`, `manifest-3c-2-post.sha256`) live only in the working tree of the
+sessions that built them, under
+`/private/tmp/claude-501/-Users-ccarpio-Developer-espansoConfig/a95eea9d-1e3d-4344-9470-91a69a4e6e99/scratchpad`.
+**Check `git status --short --untracked-files=all` first**: if it lists `src/probe.ts` and
+`src-tauri/src/probe.rs`, the harness survived and the gate numbers are the shifted ones
+(**1624 / 419 / 176**); if it does not, they are the production ones (**1623 / 418 / 175**) and the
+harness must be rebuilt from the two instrument records before a single reading can be taken.
+
+Note the scratch tree is now **4.4 GB** — every launch retains a whole `.app` bundle. 3d deletes the
+harness at its end, and that includes this tree.
+
+#### What 3d owes
+
+**Four findings, then a re-take of every component it changes, then the harness's removal.** The
+severity order is the fix order, and the re-take is not optional — a green suite is not a screen, and
+a window reading is re-taken after any change to a component.
+
+1. **§11.3 — High. `browser.notice.differentMatch` is false, and `browser.notice.gone` with it.**
+   `reresolve` (`src/lib/browser/selection.ts:176`, with `matchFingerprint` at `:109`) compares a
+   positional index and an **exact `source_text`**, so *"what is now in that position is a different
+   snippet"* is drawn when the **same** snippet was edited in place — which is exactly what happened
+   in L43–L46. The two strings have **different predicates and need different wording**: `differentMatch`
+   is a bytes predicate and was drawn on screen; `gone` is a length predicate, was derived from source
+   and **never drawn in any launch**, so half of this finding has no screen behind it and 3d owes it
+   one. **Do not touch `browser.notice.displacedByMove` or `displacedByDuplicate`** — round 1's sweep
+   alleged the same defect there and round 2 retracted it; their attribution is reachable only when
+   the re-read is the committed operation's own parse (`adoptTheDocumentOnDisk`
+   `workspace.svelte.ts:2750-2752` for the move, `adoptAfterTheDuplicate` `:2891-2893` for the
+   duplicate), where the identity claim is earned.
+2. **§11.1 — Medium. A refused reapply reports where nobody can see it.** In **all 18**
+   `manualResolution` launches — five surfaces, both languages — the report block is drawn entirely
+   above the visible band (`y` between −53 and −104, `clip=above`), the outcome panel and its four
+   controls keep pixel-identical coordinates, and **a second press reproduces the identical invisible
+   refusal** (L107–L110). The mechanism: the report is a second `role="status"` panel drawn
+   immediately before the outcome panel in all five components, and the reveal machinery knows only
+   about the outcome panel — `outcomeReveal` (`src/lib/browser/saveOutcome.ts:1711`) has no arm for a
+   reapply report and `revealOutcome` (`src/lib/components/reveal.ts:87`) is only ever handed
+   `outcomePanel` and `outcomeChoices`. **Neither a model test nor a mounted test can fail for this,
+   because neither has a viewport.** §11.4 is the constraint on the fix: on five of six surfaces the
+   conflict panel's controls already start below the fold.
+3. **§11.5 — Medium. `browser.matchEditor.reapply.fieldCollisions` gives a false reason for a correct
+   refusal.** `fieldReapply` returns `collision` when a drafted field becomes **ineligible**, even
+   when its value did not change, so *"The version on disk has changed fields…"* claims more than the
+   predicate gives. Graded Medium rather than High deliberately, and the argument is in the finding:
+   this project's precedents put a false claim about *whether the file was written* at High and a
+   right-substance/wrong-door defect at Low, and this is a wrong **reason** for a refusal that
+   correctly writes nothing. **3d may re-grade it with that argument in view.**
+4. **§11.2 — Low. The Spanish reapply family uses *usted* where every other Spanish string on the
+   same panel uses *tú*** — seven strings, `src/lib/i18n/es.json:140-145` and `:255`.
+
+Five observations (§11.4 and §11.6–§11.9) are recorded and are **not** work: nothing moves focus into
+the conflict panel; a refusal correctly draws no selection notice; the mover's destinations and the
+deleter's confirmation are visibly rebuilt; and `alreadySatisfied` leaves nothing to press.
+
+#### What 3c-2 proved, stated at its real strength
+
+**71 launches (L40–L110)**, all with a zero-byte `probe.err`, none printing `--- failed`, and
+`bytes=MATCH` on **all 71**. **21 ended at hand-authored bytes with a backup present; 50 ended at R1
+with no backup directory** — a perfect partition, and the orchestrator re-derived it from every
+launch's own `expect=` and `backups=` fields rather than accepting it. **No defect was found in what
+is written to disk**, on any of the six surfaces, in either language.
+
+**PASS** on choice ordering, on the readiness sentence and its draft-kind branch, on the reachability
+and focusability of every drawn control, on the truth of the other four refusal sentences and both
+shared obstacle lines, and on the duplicator's refusal/acknowledgement round after a successful
+reapply.
+
+**And the honest bounds, which §12 of the record states as 21 items.** There is no invoke spy and no
+command counter, so **every refusal claim is a claim about the final filesystem state and nothing
+more**; `--- end` is printed **unconditionally** and is only a wrapper signal, saying nothing about
+activity after the driver's last line; `HTMLElement.click()` is not a mouse click and **no `Tab` key
+was ever sent**, so DOM order and `tabIndex` values are *consistent with* the expected tab order and
+real traversal is untested; and **the fixture shape is still the easy one** — plain `replace:`
+scalars, double-quoted triggers, one leading comment, LF, no BOM, no block scalars, no item-owned
+comments, no second sequence, no read-only file. **None of the fifteen corpus fixtures `CLAUDE.md` §4
+lists has ever been through this harness**, and the owner's real configuration was never opened.
+
+---
+
+### The record that closed 2c-4b-3c-1 (superseded by the above, kept for its rationale)
 
 **2c-4b-3c was cut in two, and this is the deviation a cold session most needs to know.** The
 checkpoint before this one named 3c as one step: "the reading". Its own work list was five missing
@@ -9929,6 +10117,8 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 |---|---|
 | [`docs/decisions/2c-4b-3b-instrument.md`](docs/decisions/2c-4b-3b-instrument.md) | **The whole reapply instrument, and the only committed artifact of 2c-4b-3b — 2c-4b-3c cannot start without it.** The harness it describes is **deliberately uncommitted**, so a fresh clone has the record and nothing else; §2 is the launch recipe verbatim and §6 is nine things not to re-derive, including that `cargo build` must follow every `npm run build` after a `touch src-tauri/build.rs`, that a WKWebView driven by a launch script runs no animation frames and clamps short `setTimeout`s, and that `MatchDeleter` opens **already asking**. Read **§8 before quoting anything from §§3–5**: it names, at the record's own insistence, what the instrument does not prove — one easy fixture shape, four of eleven cases in Spanish, no keyboard or focus evidence, no way to show a refusal issued no save command, and no visibility into which `DiskAdoptionOutcome` arm a launch took. **`--- end` is a wrapper signal, not a success signal**: `startProbe()` prints it unconditionally after a failure report, and four launches printed `--- failed` first |
 | [`docs/decisions/2c-4b-3c-1-notes.md`](docs/decisions/2c-4b-3c-1-notes.md) | **What the instrument became, and the only committed artifact of 2c-4b-3c-1 — read it before 3b's record, then read 3b's for the recipe.** Nineteen cases now, of which this step built eight; 39 launches, of which this step took 16. §3 records that **3b's §8.5 is false**: `mover-after` forced a driver change because it had to select a placement the mover plan never selected, and it separates that *forced* change from the *chosen* one beside it. §5 is the claim-class table, and §5.6 carries the rule that produced this step's sharpest finding — **a quotation is bounded by the artifact, never by what the reader knows the application would have drawn**: `reportReapply` kept 300 characters, and the first draft wrote sentence endings its own transcripts did not hold. The limit is 1500 now and L37–L39 are the re-runs. §7 is the bound — **one case per numbered Q7 point is not exhaustion of any point**, `end`-after-reorder is unbuilt, bilingual coverage is 8 of 19, the fixture shape is still the easy one, and there is still no invoke spy |
+| [`docs/decisions/2c-4b-3c-2-window-reading.md`](docs/decisions/2c-4b-3c-2-window-reading.md) | **The reading itself, and 2c-4b-3d's entire work list — read it before either instrument record.** 71 launches (L40–L110), 20 cases in both languages, `bytes=MATCH` on all 71, and a **perfect partition of 21 authored-bytes-with-a-backup against 50 R1-with-no-backup-directory**. Four findings: §11.3 **High** (`differentMatch` is *false* of `reresolve`'s index+`source_text` predicate, and `gone` with it — but **not** `displacedByMove`/`displacedByDuplicate`, whose attribution is guarded by the committed operation's own revision), §11.1 **Medium** (a refused reapply draws its report entirely above the visible band on all five match surfaces in both languages, and a second press reproduces the identical invisible refusal), §11.5 **Medium** (`fieldCollisions` gives a false *reason* for a correct refusal), §11.2 **Low** (*usted* among *tú*). **§12 is 21 numbered bounds** and the honest starting point for anything built on this: no invoke spy, no command counter, `--- end` printed unconditionally, no `Tab` key ever sent, one easy fixture shape, and **not one of the fifteen corpus fixtures** ever run through the harness |
+| [`docs/reviews/phase-2c-4b-3c-2-reading.md`](docs/reviews/phase-2c-4b-3c-2-reading.md) | **Three rounds over a record that changed no code, and the round-2 High is the one to read.** Round 1's sweep, closing a true finding, **manufactured a false one** — it alleged the `differentMatch` clause also stood in `displacedByMove` and `displacedByDuplicate`, and it does not. That is this project's worst defect class **pointed at the application**, and it would have handed a later step work that was not there. The transferable rule: **a shared string is not a shared predicate**; four notices carried the same clause, two earn it and two do not, and only reading each notice's *producer* separates them. Round 1 also shows why a miscount is never local — 28/43 was wrong, and re-deriving *every* count rather than the two named surfaced five more errors plus two the review never raised |
 | [`src/lib/browser/saveOutcome.ts`](src/lib/browser/saveOutcome.ts) | **The one authority for what a conflict offers, as of 2c-4a-2.** `conflictChoicesFor(capabilities, step)` is the only producer of a `ConflictChoice` list in the repository; before it, capability was expressed twice — an ignored `choices` field on every `ConflictModel` and a local `['keepEditing']` in each of the five match models — **and that split is exactly why a newly offered button could compile and do nothing**. `ConflictCapabilities.draftKind` is a permanent fact about the drafted value; `offersCopyDraft` and `offersReload` say what the panel *acts on today* and are hand-set, because **nothing in TypeScript can force a component to act on a choice its model names**, and the doc says so in the same sentence as what it does force. A copy is refused for an `operationChoice` draft regardless of the boolean |
 | [`src/lib/browser/editorSave.ts`](src/lib/browser/editorSave.ts) | **The shared reload machine — `ReloadStep`, `NOT_RELOADING`, `AdoptTheDiskVersion<T>`, `reloadAsked`, `reloadConfirmed`, `spendTheConfirmedReload`, `offeredReloadStep`.** Built in 2c-4a-2 *without* being offered, which is the shape worth copying: an unoffered transition can be implemented and tested without drawing its choice, and the first review round rejected the opposite trade. `spendTheConfirmedReload` treats **both** `installed` and `alreadyThere` as success and stops only on `refused` — collapsing those two back into one is the defect round 2 shipped and round 3 removed |
 | [`docs/reviews/phase-2c-4a-2-code.md`](docs/reviews/phase-2c-4a-2-code.md) | **Four review passes in one file, and the clearest record in this project of a fix becoming the next defect three times running.** Round 2's fix of round 1's High introduced a window that installed an **older** snapshot over a **newer** projection and reported success; rounds 4 and 5 each found a narrower instance of the prose finding the round before had just closed. The reason is one sentence and it generalizes: **each sweep was written from the previous wording rather than from the new contract** |
@@ -10146,6 +10336,7 @@ _Updated at each phase boundary._
 | **2c-4b step 3a** | **`11b8160`** | ✅ pushed to `origin/main` | clean |
 | **2c-4b step 3b** | **`f6316cc`** | ✅ pushed to `origin/main` | **deliberately not clean** — `src/probe.ts`, `src-tauri/src/probe.rs` and the four hook lines stay in the working tree for 3c |
 | **2c-4b step 3c-1** | **`a9d7a28`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for 3c-2, and `src/probe.ts` now also carries this step's `moverPlan` parameter and `BLOCK_TEXT_LIMIT` of 1500. **Never `git commit -am` while they are there** |
+| **2c-4b step 3c-2** | **`PENDING`** | pending | **deliberately not clean** — the same four harness paths stay in the working tree for **3d**, which is the step that removes them; `src/probe.ts` carries six further additions across this step's four driver revisions and `src-tauri/src/probe.rs` is untouched since 3b. The commit holds **two documents and nothing else** — `docs/decisions/2c-4b-3c-2-window-reading.md` and `docs/reviews/phase-2c-4b-3c-2-reading.md` — because a reading changes no code. **Never `git commit -am` while the harness is there** |
 
 `a9d7a28` is Phase 2c-4b step 3c-1 **including all four of its review rounds** — the step was held
 open until the last round returned READY, so, as with every phase since `8989c16`, no commit holds a
