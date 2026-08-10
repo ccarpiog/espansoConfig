@@ -120,8 +120,8 @@
   "browser.source.invisible.other": "invisible character {code}",
 
   "browser.notice.kept": "This file changed on disk, and the snippet you had selected was found again.",
-  "browser.notice.differentMatch": "This file changed on disk, and what is now in that position is a different snippet, so the selection was cleared.",
-  "browser.notice.gone": "This file changed on disk and no longer holds the snippet that was selected, so the selection was cleared.",
+  "browser.notice.differentMatch": "This file changed on disk, and what is now in that position is no longer written the way the snippet you had selected was, so the selection was cleared. That may be the same snippet with changes in it, or a different one: espansoConfig compares the text and cannot tell which.",
+  "browser.notice.gone": "The selection was cleared, because espansoConfig can no longer point at the snippet that was selected. That is not a statement that it was removed: nothing here searched this file for it.",
   "browser.notice.unresolved": "This file changed on disk and could not be read again, so the selection was cleared.",
   "browser.notice.deleted": "That snippet was deleted. This window has read the file again and selected whatever now sits where it was; if the file holds no snippets any more, nothing is selected.",
   "browser.notice.keptAfterMove": "The move you asked for reordered this file, and the snippet you had selected was found again.",
@@ -252,7 +252,7 @@
   "browser.matchEditor.fieldRemoved": "This key will be taken out of the file when you save.",
   "browser.matchEditor.remove": "Take this key out",
   "browser.matchEditor.restore": "Keep this key",
-  "browser.matchEditor.reapply.fieldCollisions": "The version on disk has changed fields that you had changed too, so espansoConfig will not choose between them: {fields}.",
+  "browser.matchEditor.reapply.fieldCollisions": "The version on disk does not hold these fields the way the version your draft was built on did — a different value, the key added or removed, or a change in whether this app will edit it — so espansoConfig will not decide what to do with them: {fields}.",
   "browser.matchEditor.reapply.targetNotEditable": "The snippet found in the version on disk is one this app will not edit, so there is nowhere to put your changes.",
 
   "browser.matchCreation.open": "Add a snippet",

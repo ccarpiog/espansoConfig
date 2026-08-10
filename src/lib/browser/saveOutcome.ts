@@ -1647,7 +1647,8 @@ export function reloadUnavailableKey(draftKind: ConflictDraftKind): TranslationK
 export type OutcomeArm = SaveOutcomeModel<unknown>['kind'];
 
 /**
- * What, if anything, to bring into view when an outcome panel changes.
+ * What, if anything, to ask to have brought into view when an outcome panel
+ * changes.
  *
  * **Five values and not three, which is the 2c-4a-3c review's second finding.**
  * The first version answered one `'panel'` for all three arms, so a component's
@@ -1660,8 +1661,8 @@ export type OutcomeArm = SaveOutcomeModel<unknown>['kind'];
  * bottom of the panel that has just gone, with the new panel's first line — *The
  * file was written* — above the viewport.
  *
- * **The three panel values scroll identically**; what they are for is the
- * *identity* of the arm, so a replacement is a change. `revealOutcome` in
+ * **The three panel values ask for identical scrolling**; what they are for is
+ * the *identity* of the arm, so a replacement is a change. `revealOutcome` in
  * `src/lib/components/reveal.ts` maps all three to `block: 'start'`, which is
  * where the sentence that says what happened is.
  *
@@ -1674,25 +1675,25 @@ export type OutcomeArm = SaveOutcomeModel<unknown>['kind'];
  * which the reading says in as many words.
  */
 export type OutcomeReveal =
-  /** Nothing is showing, so nothing is scrolled. */
+  /** Nothing is showing, so nothing is asked for. */
   | 'none'
-  /** A save that ran to the end has just appeared: put its **first** line in view. */
+  /** A save that ran to the end has just appeared: ask for its **first** line. */
   | 'savedPanel'
-  /** A refusal has just appeared: put its **first** line in view. */
+  /** A refusal has just appeared: ask for its **first** line. */
   | 'refusedPanel'
-  /** A conflict has just appeared: put its **first** line in view. */
+  /** A conflict has just appeared: ask for its **first** line. */
   | 'conflictPanel'
-  /** The reload's second step has just appeared: put the **controls** in view. */
+  /** The reload's second step has just appeared: ask for the **controls**. */
   | 'conflictChoices';
 
 /**
- * What to bring into view for one state of one outcome panel.
+ * What to ask to have brought into view for one state of one outcome panel.
  *
  * **The panel's top, not its bottom, when it appears.** The first line of a
  * conflict panel is *Nothing was written*, and that is the sentence the window
  * reading found nobody could see; a reveal that framed the controls instead would
- * put the destructive choice on screen and the statement that nothing had
- * happened off it.
+ * ask for the destructive choice and ask for nothing on behalf of the statement
+ * that nothing had happened.
  *
  * **This is a rule and it lives here for that reason.** Pointing a viewport is a
  * question only a document can answer, and the `scrollIntoView` machinery is

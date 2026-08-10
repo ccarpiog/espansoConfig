@@ -28,10 +28,23 @@ import type { TranslationKey } from '../i18n/dictionaries';
  * What happened to the selection when its document moved on.
  *
  * - `kept` — re-resolution found the same snippet, under a fresh identity.
- * - `differentMatch` — that position now holds a **different** snippet. The
- *   selection was dropped rather than moved, because moving it silently is what
- *   R27's correction is about.
- * - `gone` — nothing is there any more.
+ * - `differentMatch` — the bytes at that position are **not** the bytes that
+ *   were selected. The selection was dropped rather than moved, because moving
+ *   it silently is what R27's correction is about. **It is not an identity
+ *   claim**, and 2c-4b-3c-2's §11.3 is what happens when the sentence makes one:
+ *   `reresolve` compares `MatchView.source_text` at one index, so the same
+ *   snippet edited in place by another program produces this arm, and the
+ *   sentence saying *a different snippet is there* was false in four launches of
+ *   that reading. What the code knows is byte inequality; what it cannot know is
+ *   whether the thing at that index is the same snippet changed or another one.
+ * - `gone` — the selection cannot be pointed at any more, from either of the two
+ *   producers this arm has: `reresolve` finding **no entry at all** at the held
+ *   index (a statement about the *length* of the list), or `repairSelection`'s
+ *   `clearSelection` action, where the boundary refused the identity and **no
+ *   read happened**. Neither establishes that the snippet left the file: an
+ *   external deletion of an *earlier* snippet shortens the list, so a selection
+ *   held at the last index falls off the end while what it named is still there
+ *   one index lower.
  * - `unresolved` — the document could not be read again, so which of the three
  *   it is cannot be known.
  * - `deleted` — the selected snippet was deleted **because the person asked for
@@ -47,6 +60,13 @@ import type { TranslationKey } from '../i18n/dictionaries';
  *   asked for. The selection is still dropped rather than silently re-pointed
  *   (R27 stands), but the sentence names their own move as the cause, says the
  *   snippet is still in the file, and tells them to pick it in the list again.
+ *   **Those two extra claims are earned here and are not `differentMatch`'s to
+ *   make**, which is the retraction 2c-4b-3c-2 §16.1 records: this arm is
+ *   reachable only through `adoptTheDocumentOnDisk`'s revision guard in
+ *   `./workspace.svelte.ts`, so the parse being read *is* the committed move's
+ *   own, a move reorders the same items and changes no item's bytes, and the
+ *   moved snippet itself never reaches the repair. Do not "fix" this sentence to
+ *   match `differentMatch`'s: a shared wording is not a shared predicate.
  * - `keptAfterDuplicate` and `displacedByDuplicate` — the same two answers, when
  *   what grew the file was a duplicate the person asked for. Their own arms
  *   rather than a reuse of the move's, because one arm renders one sentence and
@@ -54,7 +74,10 @@ import type { TranslationKey } from '../i18n/dictionaries';
  *   and a decision record or a screen claiming it is this project's named worst
  *   defect class. A duplicate displaces every position below its source by one,
  *   so `displacedByDuplicate` is the routine answer for a selection parked
- *   there.
+ *   there. Its identity claim is earned the same way the move's is, through
+ *   `adoptAfterTheDuplicate`'s **own** revision guard — a separate pair of lines
+ *   from the move's, not a shared one — and a byte-exact clone changes nothing
+ *   else, so it too stays as written.
  */
 export type SelectionNotice =
   | 'kept'

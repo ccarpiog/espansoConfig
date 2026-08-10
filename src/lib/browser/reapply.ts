@@ -562,3 +562,98 @@ export function reapplyToShow<S, O>(
 ): ReapplyOutcome<S, O> | null {
   return attempt === null || attempt.session !== session ? null : attempt.outcome;
 } // End of function reapplyToShow()
+
+/**
+ * What, if anything, to ask to have brought into view when a reapply report
+ * changes.
+ *
+ * Two values, which is all this panel has: it is one block, it is either drawn
+ * or it is not, and there is no second target inside it the way a conflict's
+ * choices row is a second target inside an outcome panel.
+ */
+export type ReapplyReveal =
+  /** No report is drawn, so nothing is scrolled. */
+  | 'none'
+  /** A report is drawn: ask for the block itself to be brought into view. */
+  | 'reportPanel';
+
+/**
+ * What to ask to have brought into view for one state of one reapply report.
+ *
+ * **2c-4b-3c-2 §11.1, whose repair this completes and then widens.** In all 42
+ * `manualResolution` launches of that reading — five surfaces, both languages —
+ * the report block was drawn **entirely above the visible band** (`y` between −53
+ * and −104 in a 728 px window whose scrollport starts at 44), the outcome panel
+ * below it kept pixel-identical coordinates, and a second press reproduced the
+ * identical invisible refusal. The report is a second `role="status"` panel drawn
+ * immediately before the outcome panel in all five components, and the reveal
+ * machinery knew only about the outcome panel: `outcomeReveal` in `./saveOutcome`
+ * has no arm for a report and `revealOutcome` in `../components/reveal` is handed
+ * only the outcome panel and its choices row. Nothing pointed a viewport at this
+ * block, so pressing the control and being refused changed nothing a person could
+ * see.
+ *
+ * **Every arm asks for its report to be brought into view, including the two that
+ * succeed — and that goes past
+ * §11.1's own evidence, deliberately.** The reading measured refusals only, so the
+ * success arms are an **argued scope addition** and not part of what was asked
+ * for; `docs/decisions/2c-4b-3d-1-notes.md` §3.6 is where it is argued and priced,
+ * and 3d-2 reads its effect. The argument: a report is only ever drawn in answer to
+ * a press, and the arm that is easiest to miss is the one that changes least on
+ * screen, so restricting the cue to the refusal arms would leave the identical
+ * unseen-report defect standing on `reapplied` and `alreadySatisfied` — the defect
+ * class reintroduced in a different arm. Withholding it from `reapplied` would also
+ * make the cue a second, quieter copy of the rule about which arms replace the
+ * session, which {@link attemptOfReapply} already owns.
+ *
+ * **What the addition costs, and the cost is unknown rather than predicted.** The
+ * controls a person is meant to use next after a *successful* reapply are drawn
+ * **before** the report and not after it — the deleter's renewed confirmation at
+ * `../components/MatchDeleter.svelte:464` against its report at `:516`, the mover's
+ * rebuilt destination list at `../components/MatchMover.svelte:663` against its report
+ * at `:779` — so the report's own height is not the quantity involved at all, and
+ * nothing here pushes them down by it. Which way the page moves depends only on where
+ * the rebuilt report is relative to the scrollport when the reveal fires, and
+ * `'nearest'` has three answers: a report **below** it is aligned bottom-to-bottom,
+ * which carries these controls **up** and can take them off the top; a report
+ * **above** it is aligned top-to-top, which carries them **down**; a report already
+ * fully inside is not scrolled to at all. **Which of the three happens on this path is
+ * unmeasured** — 2c-4b-3c-2's geometry is 42 *refusal* launches, and a refusal leaves
+ * the outcome panel standing while a success removes it, so that geometry establishes
+ * nothing about this one in either direction. 3d-2 is what measures it, on **every**
+ * match surface the widening changed and in both languages, because the argument above
+ * is that no success report may go unseen and three of the five have no success
+ * reading at all.
+ *
+ * **This lives in the model for 2c-3c-3's reason**, and the reason is narrower than
+ * "markup cannot be tested": a rule written into one renderer is carried by that
+ * renderer's mounted suite alone, and five renderers draw this block.
+ *
+ * **What no test in this repository can falsify.** Neither a model test nor a
+ * mounted test has a **viewport** — jsdom lays nothing out and does not implement
+ * `scrollIntoView` at all — so nothing here can fail because the block is off
+ * screen, and nothing here can fail because a reveal put it somewhere useless. A
+ * model test can pin this function's answers, a mounted test can pin that a
+ * component binds the block and runs the effect, and only a window reading can say
+ * that a person sees it. 3d-2 is that reading.
+ *
+ * @param code - Which arm the report on screen is showing, or `null` when no
+ *   report is drawn.
+ * @returns What to reveal.
+ */
+export function reapplyReveal(code: ReapplyOutcomeCode | null): ReapplyReveal {
+  switch (code) {
+    case null:
+      return 'none';
+    case 'reapplied':
+    case 'alreadySatisfied':
+    case 'manualResolution':
+    case 'adoptionRefused':
+    case 'unavailable':
+    case 'notAttempted':
+      // Written out rather than defaulted: a seventh arm of `ReapplyOutcome` is
+      // then a compile error here, and whoever adds it decides whether their
+      // report is asked for instead of inheriting an answer.
+      return 'reportPanel';
+  }
+} // End of function reapplyReveal()

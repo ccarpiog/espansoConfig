@@ -155,7 +155,14 @@ export function selectMatch(view: DocumentView, position: number): SelectedMatch
   };
 } // End of function selectMatch()
 
-/** What looking for the selection again in a fresh projection turned up. */
+/**
+ * What looking for the selection again in a fresh projection turned up.
+ *
+ * The three arms carry exactly three predicates and no more:
+ * `sameMatch` — the held index holds those exact bytes; `differentMatch` — the
+ * held index holds *some* entry whose bytes differ; `gone` — the held index
+ * holds no entry, which is a fact about the list's length.
+ */
 export type Reresolution =
   | { readonly outcome: 'sameMatch'; readonly selected: SelectedMatch }
   | { readonly outcome: 'differentMatch' }
@@ -165,9 +172,18 @@ export type Reresolution =
  * Looks for a held selection in a fresh projection of the same document.
  *
  * Positional by necessity and never by assumption: it reads the same index and
- * then *checks* what is there. A different snippet at that index answers
- * `differentMatch`, which the caller must not treat as a hit — that is the
- * whole content of the correction R27 records.
+ * then *checks* what is there. Bytes at that index that are not the bytes that
+ * were selected answer `differentMatch`, which the caller must not treat as a
+ * hit — that is the whole content of the correction R27 records.
+ *
+ * **`differentMatch` is byte inequality and never an identity verdict**, and
+ * saying otherwise is what 2c-4b-3c-2 §11.3 found on a screen. The same snippet
+ * edited in place by another program answers `differentMatch`; so does a wholly
+ * different snippet moved into that index; and nothing here can tell the two
+ * apart. `gone` is narrower still: it is `matches[position] === undefined`, a
+ * statement about the **length** of the list, and an external deletion of an
+ * *earlier* snippet produces it while the selected snippet is still in the file
+ * one index lower. Any sentence rendered for either arm must claim only that.
  *
  * @param previous - The selection held before the document changed.
  * @param view - The projection of the bytes now on disk.
@@ -264,7 +280,12 @@ export async function repairSelection(
     case 'clearSelection':
       // The identity names something this projection does not have, and no
       // re-resolution could find it. That is `gone` in the same sense the
-      // outcome union means it. Nothing was read, so there is nothing to
+      // outcome union means it — *this selection cannot be pointed at any
+      // more*, never *the snippet left the file*. **`gone` therefore has two
+      // producers with two predicates**, this one and `reresolve`'s
+      // out-of-range index, and `browser.notice.gone` is worded to be true of
+      // both: here nothing was read at all, so a sentence about the list's
+      // length would be false. Nothing was read, so there is nothing to
       // install: the cached projection is of the revision the boundary is still
       // answering from, and replacing it with itself would be a lie about a
       // read that did not happen.

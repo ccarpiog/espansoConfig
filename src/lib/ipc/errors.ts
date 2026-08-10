@@ -677,10 +677,14 @@ export function classifyFailure(raw: unknown): IpcFailure {
  * is the bug this union exists to make hard to write:
  *
  * - `sameMatch` — the match the selection meant is still there.
- * - `differentMatch` — something is at that position, and it is **not** what was
- *   selected. An external edit that deleted an earlier match produces exactly
- *   this, because a `DocumentPath` addresses a sequence *position*.
- * - `gone` — nothing is there any more.
+ * - `differentMatch` — something is at that position and its bytes are **not**
+ *   the bytes that were selected. An external edit that deleted an earlier match
+ *   produces exactly this, because a `DocumentPath` addresses a sequence
+ *   *position* — and so does an external edit of the selected match **in
+ *   place**, which is why this arm is byte inequality and never a verdict on
+ *   which snippet is there (2c-4b-3c-2 §11.3).
+ * - `gone` — the position holds no entry, so the selection cannot be pointed at.
+ *   Not *the match was removed*: the list merely does not reach that far.
  */
 export type ReselectionOutcome = 'sameMatch' | 'differentMatch' | 'gone';
 

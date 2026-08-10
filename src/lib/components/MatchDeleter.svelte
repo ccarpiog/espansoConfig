@@ -21,11 +21,11 @@
     type DeletionReapplyAttempt
   } from '../browser/matchDeletion';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
-  import { attemptOfReapply, reapplyToShow } from '../browser/reapply';
+  import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
-  import { revealOutcome } from './reveal';
+  import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -210,13 +210,13 @@
   /** What the last attempt left this panel to say, or `null`. */
   const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
 
-  /** The outcome panel's own element, so it can be brought into view. */
+  /** The outcome panel's own element, so a reveal has something to point at. */
   let outcomePanel = $state<HTMLElement | null>(null);
   /** The conflict arm's row of controls, which is the second step's target. */
   let outcomeChoices = $state<HTMLElement | null>(null);
 
   /*
-   * **The outcome panel is scrolled into view when it appears** — 2c-4a-3c's
+   * **The outcome panel’s appearance asks for a scroll into view** — 2c-4a-3c's
    * findings 10.3 and 10.4. This panel opened highest of the six (y = 209) and its
    * controls were still below the fold at y = 863 in a 728 px viewport, with
    * `section.detail`'s `scrollTop` at `0` and nothing moving it. The decision is
@@ -227,6 +227,28 @@
   );
   $effect(() => {
     revealOutcome(reveal, outcomePanel, outcomeChoices);
+  });
+
+  /** The reapply report's own block, so an answer to a press can be seen. */
+  let reapplyPanel = $state<HTMLElement | null>(null);
+
+  /*
+   * **2c-4b-3c-2's §11.1.** The report is drawn *above* the outcome panel, and
+   * until this effect existed nothing pointed a viewport at it: that reading
+   * measured it entirely above the scrollport in all 42 of its refusal launches,
+   * with the outcome panel below it at pixel-identical coordinates, so pressing
+   * the reapply control and being refused changed nothing visible, and a second
+   * press reproduced the identical invisible answer.
+   *
+   * **`reapplyReport` is read inside the effect on purpose.** The cue is a string
+   * and a second refusal produces the same string, so an effect depending on the
+   * cue alone would not re-run; the report *object* is rebuilt by every press,
+   * because each transition returns a fresh outcome. Nothing in Svelte or in
+   * TypeScript enforces that reasoning — it is why the call is written this way
+   * rather than lifted into a `$derived` beside `reveal`.
+   */
+  $effect(() => {
+    revealReapplyReport(reapplyReveal(reapplyReport?.kind ?? null), reapplyPanel);
   });
 
   /** What the snippet fires from, for the person to recognise it by. */
@@ -493,7 +515,10 @@
        session it describes. -->
   {#if reapplyReport !== null}
     {@const report = reapplyReport}
-    <div class="panel" role="status">
+    <!-- `reapply` distinguishes this block from the outcome panel below it, which
+         carries the same class and the same role; `bind:this` is what lets
+         `revealReapplyReport` point at it (2c-4b-3c-2 §11.1). -->
+    <div class="panel reapply" role="status" bind:this={reapplyPanel}>
       <p>{tReapplyOutcome(report.kind)}</p>
       {#if report.kind === 'manualResolution'}
         <p class="kind">{tDeletionReapplyObstacle(report.obstacle)}</p>

@@ -1011,7 +1011,7 @@ describe('the destination panel’s refused arm names what this surface drafts',
   }); // End of the "refused arm names what this surface drafts" case
 }); // End of the "destination panel's refused arm" suite
 
-describe('the destination panel’s outcome comes into view', () => {
+describe('the destination panel asks for its outcome to be brought into view', () => {
   /*
    * **2c-4a-3c's findings 10.3 and 10.4, from this component's own markup.** The
    * decision is `./reveal.ts`'s and has its own suite; what only a mounted case can
@@ -1041,7 +1041,7 @@ describe('the destination panel’s outcome comes into view', () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
-  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+  it('asks for the panel’s first line when a conflict appears', async () => {
     const panel = await conflicted();
     const outcome = panel.target.querySelector('[role="status"]');
     expect(outcome).not.toBeNull();
@@ -1051,7 +1051,7 @@ describe('the destination panel’s outcome comes into view', () => {
     panel.stop();
   });
 
-  it('scrolls the controls into view at the reload’s second step', async () => {
+  it('asks for the controls at the reload’s second step', async () => {
     const panel = await conflicted();
     scrolled.length = 0;
     control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
@@ -1065,12 +1065,12 @@ describe('the destination panel’s outcome comes into view', () => {
     panel.stop();
   });
 
-  it('brings the replacing panel into view when one arm succeeds another', async () => {
+  it('asks for the replacing panel when one arm succeeds another', async () => {
     // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
     // `beginSave` retains the refusal while the retry is in flight, so `saved`
     // replaces `refused` over the **same** bound element. While all three arms
     // answered one `'panel'` cue the effect's dependency did not change, so it need
-    // not run and the new panel's first line was never brought into view. The spy
+    // not run and nothing ever asked for the new panel's first line. The spy
     // is cleared before the second result, so what is asserted is a *new* reveal.
     const panel = mountMover([{ result: REFUSED }, { result: COMMITTED }]);
     destination(panel.target, afterLabel(':date')).click();
@@ -1092,7 +1092,46 @@ describe('the destination panel’s outcome comes into view', () => {
     expect(scrolled[0]?.block).toBe('start');
     panel.stop();
   }); // End of the "arm replacing an arm" case
-}); // End of the "destination panel's outcome comes into view" suite
+
+  it('asks for a refused reapply’s report, and again on a second press', async () => {
+    // **2c-4b-3c-2 §11.1.** The report is drawn *above* the outcome panel, and
+    // that reading measured it entirely above the scrollport in all 42 of its
+    // refusal launches while the outcome panel below it kept pixel-identical
+    // coordinates — so pressing the control and being refused changed nothing a
+    // person could see. The **second** press is what settled the severity: the
+    // identical sentence at the identical rectangle, with nothing to tell the two
+    // presses apart. It is asserted here because the cue is a string and a second
+    // refusal produces the same string, so an effect depending on the cue alone
+    // would not re-run.
+    //
+    // **jsdom has no viewport and does not lay anything out**, so this case
+    // cannot fail because the block ends up off screen. What it pins is that this
+    // component binds the block and runs the effect. 3d-2's window reading is the
+    // only thing that can say a person sees the sentence. **And the spy installed
+    // above is a platform that always accepts**: a real one may have no
+    // `scrollIntoView` or may refuse the call, and `scrollQuietly` is silent for
+    // both — so the reveal is asked for here, never achieved.
+    const panel = await conflicted();
+    scrolled.length = 0;
+    control(panel.target, conflictChoiceKey('keepMyDraft', 'operationChoice')).click();
+    flushSync();
+
+    const report = panel.target.querySelector('[role="status"].reapply');
+    expect(report).not.toBeNull();
+    expect(says(panel.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(report);
+    expect(scrolled[0]?.block).toBe('nearest');
+
+    scrolled.length = 0;
+    control(panel.target, conflictChoiceKey('keepMyDraft', 'operationChoice')).click();
+    flushSync();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(report);
+    expect(scrolled[0]?.block).toBe('nearest');
+    panel.stop();
+  }); // End of the "asks for a refused reapply's report" case
+}); // End of the "destination panel asks for its outcome" suite
 
 /** The workspace summary the state below is opened over; nothing reads it. */
 const SUMMARY: WorkspaceSummary = {

@@ -957,7 +957,7 @@ describe('the raw editor’s refused arm names what this surface drafts', () => 
   }); // End of the "refused arm names what this surface drafts" case
 }); // End of the "raw editor's refused arm" suite
 
-describe('the raw editor’s outcome comes into view', () => {
+describe('the raw editor asks for its outcome to be brought into view', () => {
   /*
    * **2c-4a-3c's findings 10.3 and 10.4, from this component's own markup.** This
    * surface's panel opened highest of the three authored-text ones (y = 369) and
@@ -1003,7 +1003,7 @@ describe('the raw editor’s outcome comes into view', () => {
     return editor;
   } // End of function conflicted()
 
-  it('scrolls the panel’s first line into view when a conflict appears', async () => {
+  it('asks for the panel’s first line when a conflict appears', async () => {
     const editor = await conflicted();
     const outcome = editor.target.querySelector('[role="status"]');
     expect(outcome).not.toBeNull();
@@ -1013,7 +1013,7 @@ describe('the raw editor’s outcome comes into view', () => {
     editor.stop();
   });
 
-  it('scrolls the controls into view at the reload’s second step', async () => {
+  it('asks for the controls at the reload’s second step', async () => {
     const editor = await conflicted();
     scrolled.length = 0;
     control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
@@ -1027,7 +1027,7 @@ describe('the raw editor’s outcome comes into view', () => {
     editor.stop();
   });
 
-  it('brings a committed save’s panel into view too', async () => {
+  it('asks for a committed save’s panel too', async () => {
     // **Not a conflict, and deliberately included.** `2c-3c-3-window-reading.md`
     // section 10.2 recorded the same class as a Low for the *committed* panel, and
     // `outcomeReveal` answers `panel` for every arm rather than for the conflict
@@ -1046,12 +1046,12 @@ describe('the raw editor’s outcome comes into view', () => {
     editor.stop();
   });
 
-  it('brings the replacing panel into view when one arm succeeds another', async () => {
+  it('asks for the replacing panel when one arm succeeds another', async () => {
     // **The 2c-4a-3c review's second finding, and only a mounted case can see it.**
     // `beginSave` retains the refusal while the retry is in flight, so `saved`
     // replaces `refused` over the **same** bound element. While all three arms
     // answered one `'panel'` cue the effect's dependency did not change, so it need
-    // not run and the new panel's first line was never brought into view. The spy
+    // not run and nothing ever asked for the new panel's first line. The spy
     // is cleared before the second result, so what is asserted is a *new* reveal.
     const editor = mountEditor([{ result: REFUSED }, { result: COMMITTED }]);
     type(editor.target, `${ORIGINAL}# one more line\n`);
@@ -1072,7 +1072,7 @@ describe('the raw editor’s outcome comes into view', () => {
     expect(scrolled[0]?.block).toBe('start');
     editor.stop();
   }); // End of the "arm replacing an arm" case
-}); // End of the "raw editor's outcome comes into view" suite
+}); // End of the "raw editor asks for its outcome" suite
 
 describe('the raw editor never offers *Keep my draft*', () => {
   it('draws neither the control nor the line that would stand beside it', async () => {

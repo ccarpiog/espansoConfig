@@ -84,8 +84,16 @@ describe('selection notices', () => {
       // the one the old body never made.
       expect(DICTIONARIES.es[key], notice).not.toBe(DICTIONARIES.en[key]);
     }
-    // `differentMatch` and `gone` are the pair a user must not confuse: one
-    // means the selection moved to something else, the other that it vanished.
+    // `differentMatch` and `gone` are the pair a user must not confuse, and
+    // **neither of them means what this comment used to say they meant**
+    // (2c-4b-3c-2 §11.3): `differentMatch` is *the bytes at the held position
+    // are not the bytes that were selected*, which the same snippet edited in
+    // place by another program satisfies, and `gone` is *the selection cannot be
+    // pointed at any more*, which an external deletion of an **earlier** snippet
+    // satisfies while the snippet itself is still in the file. What is checked
+    // below is that the two sentences are not the same string. **No test in this
+    // repository can fail because one of them claims more than that** — the i18n
+    // suites check parity and placeholders, never meaning.
     for (const locale of LOCALES) {
       expect(DICTIONARIES[locale][selectionNoticeKey('differentMatch')]).not.toBe(
         DICTIONARIES[locale][selectionNoticeKey('gone')]

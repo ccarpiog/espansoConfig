@@ -1760,7 +1760,20 @@ export type FieldReapplyVerdict =
       readonly kind: 'unchanged';
     }
   | {
-      /** The disk moved this field under a drafted change. Blocks the reapply. */
+      /**
+       * The new projection does not hold this field in the state the draft was
+       * built against, and does not already satisfy it. Blocks the reapply.
+       *
+       * **The name is narrower than the predicate, and the sentence is written
+       * against the predicate** (2c-4b-3c-2 §11.5). `collision` reads as *two
+       * values fighting*, and {@link sameBaselineState} compares presence,
+       * value **and eligibility** — so a field whose value on disk did not
+       * change at all lands here when the projection made it ineligible, and in
+       * the sharpest sub-case the disk holds exactly the drafted value while
+       * being ineligible. `browser.matchEditor.reapply.fieldCollisions` was
+       * reworded because it said the disk *had changed* those fields' values;
+       * it now names the disjunction this predicate actually is.
+       */
       readonly kind: 'collision';
     };
 
@@ -1858,11 +1871,17 @@ export interface MatchReapplyPlan {
   /** One verdict per field, in {@link EDITABLE_FIELDS} order. */
   readonly verdicts: Readonly<Record<EditableField, FieldReapplyVerdict>>;
   /**
-   * The fields the disk moved under a drafted change, in field order.
+   * The drafted fields the new projection does not hold in the state the draft
+   * was built against, in field order.
    *
    * **Any one of them blocks the whole reapply** (consult Q4): *Keep my draft*
    * claims one retained intention, and saving the safe fields only would strand the
    * rest while looking successful. Per-field manual resolution is 2c-4c's.
+   *
+   * **"Moved under a drafted change" is what this used to say and it was too
+   * strong**: presence, value and eligibility are three ways to differ, and only
+   * two of them are a change to what the file *says*. The rendered sentence names
+   * all three; see {@link FieldReapplyVerdict}'s `collision` arm.
    */
   readonly collisions: readonly EditableField[];
   /**
@@ -1934,10 +1953,16 @@ export type EditorReapplyObstacle =
   | SharedReapplyObstacle
   | {
       /**
-       * The disk moved fields the draft had changed.
+       * The new projection does not hold drafted fields in the state the draft
+       * was built against.
        *
        * Every one of them is named, so 2c-4b-3 can say **which**; the whole reapply
        * is refused all the same.
+       *
+       * **Presence, value or eligibility**, and the rendered sentence names all
+       * three since 2c-4b-3d-1 — a field whose value did not change is here when
+       * the projection made it ineligible, so *the disk changed these fields* was
+       * a false reason for a correct refusal (2c-4b-3c-2 §11.5).
        */
       readonly kind: 'fieldCollisions';
       /** The fields, in {@link EDITABLE_FIELDS} order. */
@@ -1971,8 +1996,10 @@ export type EditorReapplyAttempt = ReapplyAttempt<MatchEditorSession, EditorReap
  *
  * **`fieldCollisions` names its fields through a `{fields}` placeholder**, filled
  * by the i18n layer from {@link EditorReapplyObstacle}'s own list and the detail
- * pane's existing field labels. The sentence is about *which* fields the disk moved
- * under the draft; that the whole reapply is refused is what
+ * pane's existing field labels. The sentence names *which* fields the new
+ * projection does not hold in the state the draft was built against — presence,
+ * value **or** eligibility, never "the disk changed their values" (2c-4b-3c-2
+ * §11.5); that the whole reapply is refused is what
  * `browser.reapply.manualResolution` says above it, once.
  *
  * @param obstacle - What stopped the reapply.

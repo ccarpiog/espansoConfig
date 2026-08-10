@@ -739,8 +739,8 @@ export interface BrowserState {
    * replaced through the same `installView` every adoption uses, so the snippet
    * list, the counts and every `MatchId` minted from the old parse move together,
    * and the selection is put back the ordinary way — positionally and then checked,
-   * so a different snippet at the held position drops it with a notice (R27) rather
-   * than being silently adopted. The raw viewer's snapshot goes too, because it
+   * so bytes at the held position that are not the bytes that were selected drop it
+   * with a notice (R27) rather than being silently adopted. The raw viewer's snapshot goes too, because it
    * describes bytes this state has just stopped vouching for.
    *
    * A re-read that fails is reported on the one channel every other failure of this
@@ -998,7 +998,7 @@ export interface BrowserState {
    *   re-resolves the stale identity: the projection is replaced whole, the
    *   window looks at the fresh one, and the snippet it selects is adopted under
    *   its **own new identity**. What distinguishes it from R27's `differentMatch`
-   *   case — where a different snippet at the held position drops the selection —
+   *   case — where changed bytes at the held position drop the selection —
    *   is that there the file changed underneath the person, and here they asked
    *   for the change themselves. Selecting a neighbour may still read as
    *   continuity with something that no longer exists, which is the design
@@ -2908,7 +2908,7 @@ export function createBrowserState(
    * here preserves or re-resolves the stale identity: the projection is replaced
    * whole and the snippet selected is adopted under its **own new identity**,
    * minted by the read that has just happened. What separates it from R27's
-   * `differentMatch` — where a different snippet at the held position drops the
+   * `differentMatch` — where changed bytes at the held position drop the
    * selection with a notice — is that R27 is about a file that moved **under**
    * somebody, and this is the change they asked for. The notice is shown anyway,
    * because selecting a neighbour can still read as continuity with a snippet that
@@ -3087,9 +3087,13 @@ export function createBrowserState(
    * Puts the selection back in a projection that has just replaced the one it
    * was made against.
    *
-   * `reresolve` is positional **and then checks**: a different snippet at the
-   * held position is `differentMatch` and drops the selection with a notice,
-   * never a silent re-point (`PROGRESS.md` R27). After a move that is the
+   * `reresolve` is positional **and then checks**: bytes at the held position
+   * that are not the bytes that were selected are `differentMatch` and drop the
+   * selection with a notice, never a silent re-point (`PROGRESS.md` R27). **The
+   * arm names byte inequality and not an identity** — the same snippet edited in
+   * place by another program lands here too, which is 2c-4b-3c-2 §11.3, and the
+   * two attributed arms below are the exception because their revision guard
+   * makes the parse the committed operation's own. After a move that is the
    * expected answer for every selection except the moved one, which
    * {@link adoptTheDocumentOnDisk} has already re-pointed by identity — and
    * after a duplicate it is the routine answer for every selection below the

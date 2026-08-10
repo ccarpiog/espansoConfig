@@ -35,6 +35,7 @@ import {
   attemptOfReapply,
   beginReapply,
   reapplyOutcomeKey,
+  reapplyReveal,
   reapplyToShow,
   sharedReapplyObstacleKey,
   subjectCorrespondence,
@@ -382,3 +383,40 @@ describe('what one attempt leaves a panel holding', () => {
     } // End of the loop over the two shared obstacles
   });
 }); // End of the "what one attempt leaves a panel holding" suite
+
+describe('what a panel must ask to have brought into view', () => {
+  /*
+   * **2c-4b-3c-2 §11.1's repair, at the only end a test can reach.** The finding
+   * is that a refused reapply reported itself entirely above the scrollport on
+   * five surfaces in both languages, because nothing in the application pointed a
+   * viewport at the report block.
+   *
+   * **Nothing in this file, and nothing in any mounted suite, can fail because of
+   * that.** Neither has a viewport: vitest's default environment lays nothing out
+   * at all, and jsdom does not implement `scrollIntoView`. What is checked here is
+   * the *decision* — which cue each arm gets — and what a mounted suite adds is
+   * that a component binds the block and runs the effect. That a person sees the
+   * sentence is 3d-2's window reading and nothing else.
+   */
+
+  it('asks for nothing when no report is drawn', () => {
+    expect(reapplyReveal(null)).toBe('none');
+  });
+
+  it('asks for the report block on every arm, success included', () => {
+    // A `Record` over the union for the same reason the sentence case above uses
+    // one: a seventh arm is a compile error here, so whoever adds it decides
+    // whether their report is asked for rather than inheriting an answer.
+    const every = Object.keys({
+      reapplied: true,
+      alreadySatisfied: true,
+      manualResolution: true,
+      adoptionRefused: true,
+      unavailable: true,
+      notAttempted: true
+    } satisfies Record<ReapplyOutcomeCode, true>) as readonly ReapplyOutcomeCode[];
+    for (const code of every) {
+      expect(reapplyReveal(code), code).toBe('reportPanel');
+    } // End of the loop over every arm
+  }); // End of the "asks for the report block on every arm" case
+}); // End of the "what a panel must ask to have brought into view" suite

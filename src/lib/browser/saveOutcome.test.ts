@@ -1209,11 +1209,11 @@ describe('the one rule every authored-text/operation pair shares', () => {
   }); // End of the "same guarantee" case
 }); // End of the "one rule three sentences share" suite
 
-describe('what a changing outcome brings into view', () => {
+describe('what a changing outcome asks to have brought into view', () => {
   /** Every arm a save outcome can be, from the model's own union. */
   const ARMS: readonly OutcomeArm[] = ['saved', 'refused', 'conflict'];
 
-  it('reveals nothing when no outcome panel is drawn', () => {
+  it('asks for nothing when no outcome panel is drawn', () => {
     expect(outcomeReveal(null, false)).toBe('none');
     // Even a stale confirmation flag cannot conjure a target out of no panel.
     expect(outcomeReveal(null, true)).toBe('none');
@@ -1232,18 +1232,18 @@ describe('what a changing outcome brings into view', () => {
     expect(outcomeReveal('conflict', false)).toBe('conflictPanel');
   });
 
-  it('reveals the controls at the reload’s second step', () => {
+  it('asks for the controls at the reload’s second step', () => {
     // **Finding 10.4 as a decision.** The confirmation line grows the panel
     // downwards past a `scrollTop` already at its end, so the second step needs its
     // own target and not a second scroll to the same one.
     expect(outcomeReveal('conflict', true)).toBe('conflictChoices');
   });
 
-  it('never reveals the controls for an arm that has no second step', () => {
+  it('never asks for the controls for an arm that has no second step', () => {
     // A `saved` or `refused` arm's row of controls means something else entirely —
     // *Dismiss*, *Save anyway* — and framing it would scroll the outcome off the
     // screen to show them. Only a conflict has a confirmation step at all.
     expect(outcomeReveal('saved', true)).toBe('savedPanel');
     expect(outcomeReveal('refused', true)).toBe('refusedPanel');
   });
-}); // End of the "what a changing outcome brings into view" suite
+}); // End of the "what a changing outcome asks to have brought into view" suite

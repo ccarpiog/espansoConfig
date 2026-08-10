@@ -201,13 +201,13 @@
   /** Whether leaving the editor is waiting on a confirmation. */
   let leaving = $state(false);
 
-  /** The outcome panel's own element, so it can be brought into view. */
+  /** The outcome panel's own element, so a reveal has something to point at. */
   let outcomePanel = $state<HTMLElement | null>(null);
   /** The conflict arm's row of controls, which is the second step's target. */
   let outcomeChoices = $state<HTMLElement | null>(null);
 
   /*
-   * **The outcome panel is scrolled into view when it appears** — 2c-4a-3c's
+   * **The outcome panel’s appearance asks for a scroll into view** — 2c-4a-3c's
    * findings 10.3 and 10.4. The window reading measured every one of the six write
    * surfaces putting its controls below a 728 px fold with `section.detail`'s
    * `scrollTop` at `0` and nothing moving it; on the match editor the whole panel

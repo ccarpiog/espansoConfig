@@ -23,7 +23,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OutcomeReveal } from '../browser/saveOutcome';
-import { revealOutcome } from './reveal';
+import { revealOutcome, revealReapplyReport } from './reveal';
 
 /** Puts `Element.prototype.scrollIntoView` back exactly as jsdom left it. */
 const originalScrollIntoView = Object.getOwnPropertyDescriptor(
@@ -31,7 +31,7 @@ const originalScrollIntoView = Object.getOwnPropertyDescriptor(
   'scrollIntoView'
 );
 
-/** The three cues that all mean *put the panel's first line at the top*. */
+/** The three cues that all ask for the panel's first line at the top. */
 const PANEL_CUES = ['savedPanel', 'refusedPanel', 'conflictPanel'] as const satisfies
   readonly OutcomeReveal[];
 
@@ -85,8 +85,9 @@ describe('doing it to a document', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('puts the panel’s first line in view for every arm that appears', () => {
-    // **All three panel cues scroll identically, and they are still three cues.**
+  it('asks for the panel’s first line for every arm that appears', () => {
+    // **All three panel cues ask for identical scrolling, and they are still three
+    // cues.**
     // What their being distinct buys is upstream of this function: a Svelte
     // `$effect` re-runs when one arm replaces another over the same bound element,
     // which one shared `'panel'` value did not (the 2c-4a-3c review's finding 2).
@@ -103,7 +104,7 @@ describe('doing it to a document', () => {
     } // End of the loop over the three panel cues
   });
 
-  it('puts the controls in view at the second step, and not the panel', () => {
+  it('asks for the controls at the second step, and not the panel', () => {
     const spy = spyOnScrolling();
     const panel = element('div');
     const choices = element('p');
@@ -141,3 +142,59 @@ describe('doing it to a document', () => {
     expect(() => revealOutcome('conflictPanel', element('div'), null)).not.toThrow();
   });
 }); // End of the "doing it to a document" suite
+
+describe('doing it to a reapply report', () => {
+  /*
+   * **2c-4b-3c-2 §11.1.** The report is a second `role="status"` block, drawn
+   * immediately before the outcome panel on the five match surfaces, and that
+   * reading measured it entirely above the scrollport in all 42 of its refusal
+   * launches because nothing pointed at it.
+   *
+   * **What this file cannot see, stated where the cases are.** jsdom has no
+   * layout: `getBoundingClientRect` answers zeroes for everything and
+   * `scrollIntoView` does not exist until a case installs a spy. So nothing below
+   * fails if the block ends up somewhere useless, and `'nearest'` cannot be
+   * *observed* here to scroll less than `'start'` — only asserted to be what is
+   * asked for. 3d-2's window reading is what says where it landed.
+   *
+   * **And a spy is a platform that always accepts.** The real one need not:
+   * `scrollQuietly` returns without scrolling when `scrollIntoView` is absent and
+   * swallows the call's refusal when it throws — the last case below asserts both
+   * silences. So no case here, and no contract in `./reveal.ts`, may claim that
+   * the report moved; the claim is only ever that the movement was asked for.
+   */
+
+  it('does nothing at all for "none"', () => {
+    const spy = spyOnScrolling();
+    revealReapplyReport('none', element('div'));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('asks for the minimum scroll that would show the report', () => {
+    const spy = spyOnScrolling();
+    const report = element('div');
+    revealReapplyReport('reportPanel', report);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.instances[0]).toBe(report);
+    // `nearest`, not `start`: an element already fully in the scrollport is not
+    // scrolled to at all, and one above it is aligned top-to-top. On five of the
+    // six surfaces the conflict panel's controls already begin below the fold
+    // (§11.4), so a reveal that moved more than it had to would trade one
+    // invisible sentence for another.
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ block: 'nearest' });
+  }); // End of the "minimum scroll" case
+
+  it('is silent rather than throwing when the block is not bound, or the platform refuses', () => {
+    const spy = spyOnScrolling();
+    expect(() => revealReapplyReport('reportPanel', null)).not.toThrow();
+    expect(spy).not.toHaveBeenCalled();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: () => {
+        throw new Error('refused');
+      }
+    });
+    expect(() => revealReapplyReport('reportPanel', element('div'))).not.toThrow();
+  }); // End of the "unbound or refused" case
+}); // End of the "doing it to a reapply report" suite

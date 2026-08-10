@@ -76,7 +76,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3b** | The **instrument**: the external-writer harness rebuilt (it was deleted at 2c-4a-3c-5) with Q7's fixed R0→R1 fixture pairs, one positive and one refusal per policy, synchronized from the plan and never by wall clock | ✅ complete — `docs/decisions/2c-4b-3b-instrument.md`, after **four** review rounds, the last returning READY with no findings. 23 launches, all 23 with a zero-byte `probe.err`; a true `SaveResult::Conflict` on all six surfaces, *Keep my draft* drawn and pressable on all five match surfaces and **absent on the raw editor in both languages**, five positive cases byte-identical to hand-authored expected bytes and six refusals byte-identical to R1 with no backup directory. **The harness is deliberately uncommitted.** Every one of the review's ten findings was a sentence in the record claiming more than the artifacts give — **no defect in the harness, and none in the application** |
 | **2c-4b-3c-1** | **The instrument, extended with the Q7 cases 3b left unbuilt**: eight new fixture-pair cases — `editor-fallback`, `editor-satisfied`, `editor-ambiguous`, `editor-missing`, `mover-reordered`, `mover-after`, `mover-after-changed`, `creator-anchor-gone` — plus the driver's `moverPlan` placement parameter and `BLOCK_TEXT_LIMIT` at 1500. **2c-4b-3c was cut in two here**, construction from reading, the way 2c-4a-3c was numbered | ✅ complete — `docs/decisions/2c-4b-3c-1-notes.md`, after **four** review rounds, the last returning READY. 16 launches (L24–L39), all 16 with a zero-byte `probe.err` and none printing `--- failed`; every positive byte-identical to hand-authored expected bytes differing from R1, every refusal byte-identical to R1 with no backup directory. **Round 1's two Highs were real instrument gaps** — Q7 point 6's changed-`after`-anchor refusal and point 4's removed target had no case in either step — and the other eight findings were prose. It **corrects 3b's §8.5**: `mover-after` did force a driver change. `end`-after-reorder remains unbuilt |
 | **2c-4b-3c-2** | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages, plus the standing negative-`y` judgement | ✅ complete — `docs/decisions/2c-4b-3c-2-window-reading.md`, after **three** review rounds. **71 launches (L40–L110)**, all with a zero-byte `probe.err`, none printing `--- failed`, and `bytes=MATCH` on **all 71**; **21 ended at hand-authored bytes with a backup present and 50 ended at R1 with no backup directory** — a perfect partition, re-derived independently by the orchestrator from every launch's `expect=` and `backups=` fields. All 20 cases ran in **both languages** and `end`-after-a-reorder was built, so 3c-1's §7.6 and §7.7 are **closed as recorded deviations**. **1 High, 2 Mediums, 1 Low, 5 observations**, and **no defect in what is written to disk** |
-| 2c-4b-3d | The **fixes and the re-take**: §11.3, §11.1, §11.5, §11.2, then re-read every component changed, then delete the harness | ⬜️ **next** |
+| **2c-4b-3d-1** | **The four fixes**, with no reading and no removal: §11.3's two false selection notices given wording true of their **predicates**, §11.1's invisible reapply report given a reveal cue of its own, §11.5's false collision reason widened to the real disjunction, and §11.2's Spanish register. **3d was cut in three here** — the fixes, the re-take, the removal — the way 3c was cut | ✅ complete — after **three** review rounds and an orchestrator fix round. Round 1 returned **NOT READY** on a High (`revealReapplyReport` claiming a movement its own `scrollQuietly` does not force) and two Lows; round 2 returned **NOT READY** on two more; round 3 returned **NOT READY** on one, and it was again a **narrower instance** — the fifth consecutive round to find one. **No finding in any round was a defect in behaviour**: every one was a sentence, a contract or a count claiming more than the code gives |
+| 2c-4b-3d-2 | The **re-take**: every component 3d-1 changed, read again in a window, in both languages — **six** surfaces, because `RawEditor.svelte` was drawn into the sweep | ⬜️ **next** |
+| 2c-4b-3d-3 | The **harness's removal** and the return to the production gate numbers (1623 / 418 / 175) | ⬜️ not started |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3428,6 +3430,92 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 3d-1
+
+All rows re-run by the orchestrator **with the harness in the working tree**, never taken from a
+worker's report. The harness inflates three of them; 3d-3 returns them to the production numbers.
+
+| Command | Result | Exit |
+|---|---|---|
+| `npm test` | **1634** passed, 49 files — 1624 + **10** new cases | 0 |
+| `npm run check` | 419 files, **0 errors, 0 warnings** | 0 |
+| `npm run build` | **176** modules — unmoved; the step adds **no** source module, and `rg 'svelte/internal/server\|async_hooks' dist/assets/*.js` finds nothing, so this is not the `resolve.conditions` regression | 0 |
+| `cargo test --workspace` | **1086** passed, **0** failed | 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | 0 |
+| `cargo fmt --check` | clean | 0 |
+| `git status --short --untracked-files=all` | the four harness paths + 22 changed frontend files + four new documents; **no Rust source modified** but `src-tauri/src/main.rs`, which is a harness hook | — |
+
+**The Rust rows are unmoved and that is what they claim.** The only Rust file the tree modifies is
+`src-tauri/src/main.rs`, and its modification is the probe hook. No Rust source changed in any of this
+step's four rounds, so the three cargo rows above were measured once and re-argued rather than re-run
+after every prose round.
+
+### What the four findings actually were, and what they became
+
+| Finding | Predicate | What the sentence says now |
+|---|---|---|
+| **§11.3 High** — `browser.notice.differentMatch` | `reresolve` compares a **positional index** and an **exact `source_text`** | byte inequality, plus *"that may be the same snippet with changes in it, or a different one: espansoConfig compares the text and cannot tell which"* |
+| **§11.3 High** — `browser.notice.gone` | a **length** predicate, and it has a **second producer** in `repairSelection`'s `clearSelection` arm where nothing is read at all | *"can no longer point at"*, with *"that is not a statement that it was removed"* said explicitly |
+| **§11.1 Medium** — the invisible reapply report | the report is a second `role="status"` panel and the reveal machinery knew only the outcome panel | `reapplyReveal` + `revealReapplyReport`, `block: 'nearest'` |
+| **§11.5 Medium** — `fieldCollisions` | `fieldReapply` returns `collision` when a drafted field becomes **ineligible**, value unchanged | the real disjunction: a different value, the key added or removed, **or** a change in whether this app edits it |
+| **§11.2 Low** — the Spanish register | — | *tú* throughout, and the fix is **nine** strings, not the seven the finding named |
+
+The `differentMatch` correction was also made **at the type level**: `ReselectionOutcome`'s JSDoc in
+`src/lib/ipc/errors.ts` carried the same identity claim, and an editor of that union would have read it
+before any string.
+
+**§11.5 was kept at Medium and not re-graded**, with the argument in view: the refusal and the
+no-write outcome are correct and only the reason was false. It was fixed at the **sentence** end
+rather than by splitting the predicate, because a field can differ in value *and* in eligibility at
+once, so a split needs a precedence rule nothing supports.
+
+### Phase 2c-4b step 3d-1 review disposition — three Codex rounds plus an orchestrator round
+
+`docs/reviews/phase-2c-4b-3d-1.md`, `-confirmation.md`, `-final.md`.
+
+**Round 1 — NOT READY: one High, two Lows.** The High is this project's named worst defect class,
+aimed at the fix itself: `revealReapplyReport`'s JSDoc promised *"the page moves by exactly the amount
+needed to show it"* while its own `scrollQuietly` **returns without scrolling when `scrollIntoView` is
+absent** and **swallows a throw**. Fixed at the honesty end — the guarantee is now conditional in the
+same sentence that states it — and the early return and the `catch` were deliberately left alone.
+
+**Round 2 — NOT READY: two Lows, and one of them was the orchestrator's.** Round 1's Low, and the
+brief that dispatched its fix, both said a success-path reveal pushes *"the deleter's renewed
+confirmation and the mover's rebuilt destinations"* **down**. **It is backwards, verified by reading
+the components**: `MatchDeleter.svelte` draws its confirmation at `:464` and its report at `:516`;
+`MatchMover.svelte` draws its destinations at `:663` and its report at `:784`. Both controls are drawn
+**before** the report. The fix round then rejected the orchestrator's proposed replacement as *also*
+too strong and wrote a three-way rule instead — `'nearest'` aligns top-to-top for a report above the
+scrollport, so the earlier controls may move up, down, or not at all, and the success geometry has
+never been measured.
+
+**Round 3 — NOT READY on one Low, the fifth consecutive round to find a narrower instance.** The
+82-sentence shape sweep of round 2 had rewritten *puts / brings / scrolls into view* everywhere and
+walked past the synonym **revealed** in three places. Closed by the orchestrator rather than
+dispatched — three comments and a record correction, no judgement in any of them — and running the
+synonym as its own search then found a **fourth** the review had not named, in the test file's copy of
+the same switch comment. **Two further instances are judged and deliberately left**, recorded in the
+notes so their survival is not later read as an oversight: both use the word for *which panel the cue
+designates*, never for a movement achieved.
+
+**The transferable lesson, and it is the same one five times.** A sweep written from the previous
+finding's **wording** finds the previous finding. Round 2's sweep searched for a *shape* rather than
+words and found 82 sites across 18 files — including nine in `src/lib/browser/saveOutcome.ts`, a file
+no round had ever searched, about the **outcome** reveal rather than the reapply report — and it still
+missed a synonym it had not enumerated.
+
+### The one deliberate scope addition, argued rather than smuggled
+
+`reapplyReveal` cues the reveal on **`reapplied` and `alreadySatisfied` too**, where §11.1's evidence
+is refusal-only. **Kept, on the orchestrator's decision**: restricting it to the refusal arms would
+leave the identical defect — a report block nobody can see — standing on the success arms. The
+precedent is 2c-4a-3b, where a step went beyond its brief and round 1 ruled the widening justified
+because it was argued and priced. Its price is disclosed and its geometry is **unknown**: 3d-2 must
+read the success-arm report and the next usable controls on **all five** match components, in both
+languages, not only on the two the first draft named.
+
+---
+
 ## Verification — Phase 2c-4b step 3c-2
 
 All rows re-run by the orchestrator with the harness in the working tree, never taken from a worker's
@@ -6266,6 +6354,89 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### Phase 2c-4b-3d-1 is complete. **Step 2c-4b-3d-2 — the re-take window reading — is next.**
+
+**3d was cut in three**, the way 3c was cut and for the same reason: the fixes, the re-take and the
+harness's removal are three different kinds of work, and 3d-1 alone took three Codex rounds plus an
+orchestrator round. **3d-1 (the four fixes) is complete. 3d-2 is the reading. 3d-3 deletes the
+harness.**
+
+The exact first commands to run:
+
+```sh
+npm install && npm test        # expect 1634 passed, 49 files — WITH the harness
+cargo test --workspace         # expect 1086 passed, 0 failed
+```
+
+#### The critical fact about resuming here
+
+**The harness is NOT committed, and a fresh clone does not have it.** `src/probe.ts`,
+`src-tauri/src/probe.rs`, the four hook lines in `src/main.ts` (`:20`, `:37`) and
+`src-tauri/src/main.rs` (`:47`, `:124`), and the whole scratch tree (`launch.sh`, `run-3c-2.sh`,
+`fixtures/`, `launches/L01…L110/`, `manifest-3c-1-post.sha256`, `manifest-3c-2-post.sha256`) live only
+in the working tree of the sessions that built them, under
+`/private/tmp/claude-501/-Users-ccarpio-Developer-espansoConfig/a95eea9d-1e3d-4344-9470-91a69a4e6e99/scratchpad`.
+**That tree was confirmed present at the start of the 3d-1 session** and it is where the launch
+recipe's fixtures already are.
+
+**Check `git status --short --untracked-files=all` first**: if it lists `src/probe.ts` and
+`src-tauri/src/probe.rs`, the harness survived and the gate numbers are the shifted ones
+(**1634 / 419 / 176**); if it does not, they are the production ones (**1623 / 418 / 175**) and the
+harness must be rebuilt from `docs/decisions/2c-4b-3b-instrument.md` and
+`docs/decisions/2c-4b-3c-1-notes.md` before a single reading can be taken.
+
+Note the scratch tree was **4.4 GB** at 3c-2 and every launch retains a whole `.app` bundle. **3d-3
+deletes the harness, and that includes this tree.**
+
+#### What 3d-2 owes
+
+**A window reading of every component 3d-1 changed, in both languages.** A green suite is not a
+screen, and this project's standing rule is that a window reading is re-taken after **any** change to
+a component. 3d-1 changed **six**: `MatchEditor.svelte`, `MatchCreator.svelte`, `MatchDeleter.svelte`,
+`MatchMover.svelte`, `MatchDuplicator.svelte` — and `RawEditor.svelte`, which was drawn in late by
+round 2's shape sweep for two comments. **`docs/decisions/2c-4b-3d-1-notes.md` §7 is the work list**,
+and it is per-component.
+
+The four things the reading must settle, none of which any test in this repository can:
+
+1. **Is the reapply report visible now?** §11.1 measured it at `y` between −53 and −104 with
+   `clip=above` in **all 18** `manualResolution` launches, on five surfaces in both languages, and a
+   second press reproduced the identical invisible refusal. `revealReapplyReport` is the fix.
+   **Neither a model test nor a mounted test can fail for this, because neither has a viewport** —
+   that sentence is in the code, and it is why this step exists.
+2. **The success-path geometry, which has never been measured at all.** §7 item (f): read the
+   **success-arm** report (`reapplied` and `alreadySatisfied`) and the next usable controls on **all
+   five** match components, in both languages. The deleter's renewed confirmation (`:464`, above its
+   report at `:516`) and the mover's rebuilt destination list (`:663`, above its report at `:784`) get
+   their component-specific checks — but they are **not** the whole surface, and the direction the
+   reveal scrolls them is **unknown**: `'nearest'` may move them up, down, or not at all.
+3. **`browser.notice.gone` has never been drawn in any launch.** It is a length predicate with a
+   second producer in `repairSelection`'s `clearSelection` arm. Half of §11.3's High still has no
+   screen behind it, and 3d-2 owes it one.
+4. **`browser.matchEditor.reapply.fieldCollisions`'s ineligibility arm has no screen behind it
+   either** — the arm that made the old sentence false is the one no launch has drawn.
+
+And the standing constraint from `docs/decisions/1c-2b-2b-2-notes.md` §6.1, which has cost two
+launches before: **one plan per launch, into a fresh bundle path.** A WKWebView whose window is
+occluded stops running `setTimeout` about six seconds after launch. The webview's `localStorage` is
+**not** keyed by `HOME` — it follows the bundle identifier, which every probe bundle shares — so a
+plan must set the language **explicitly through the picker** and never trust the launch environment.
+
+#### What 3d-1 proved, stated at its real strength
+
+Four findings closed, over three Codex rounds and an orchestrator round, and **not one finding in any
+round was a defect in behaviour** — every one was a sentence, a contract or a count claiming more than
+the code gives. The gates are 1634 / 419 / 176 / 1086, all green, with the harness in the tree.
+
+**And the honest bound.** Every claim 3d-1 makes about what a person *sees* is unproven. The reveal
+fix is the one thing in this step that no test in this repository can falsify, its own JSDoc says so,
+and the success-path geometry it introduced was never measured on any surface. **3d-1 is the fix; the
+evidence is 3d-2's.**
+
+---
+
+### The record that closed 2c-4b-3c-2 (superseded by the above, kept for its work list and its bounds)
 
 ### Phase 2c-4b-3c-2 is complete. **Step 2c-4b-3d — the fixes, the re-take, and the harness's removal — is next.**
 
