@@ -10509,6 +10509,16 @@ _Updated at each phase boundary._
 | **2c-4b step 3c-1** | **`a9d7a28`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for 3c-2, and `src/probe.ts` now also carries this step's `moverPlan` parameter and `BLOCK_TEXT_LIMIT` of 1500. **Never `git commit -am` while they are there** |
 | **2c-4b step 3c-2** | **`8399b95`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d**, which is the step that removes them; `src/probe.ts` carries six further additions across this step's four driver revisions and `src-tauri/src/probe.rs` is untouched since 3b. The commit holds **two documents and nothing else** — `docs/decisions/2c-4b-3c-2-window-reading.md` and `docs/reviews/phase-2c-4b-3c-2-reading.md` — because a reading changes no code. **Never `git commit -am` while the harness is there** |
 
+| **2c-4b step 3d-1** | **`a2069db`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d-2**, the reading, and **3d-3** is the step that removes them. Staged **by path**, never `-a`: the commit holds 22 frontend sources and tests, four documents and this checkpoint, and **excludes `src/main.ts`, `src-tauri/src/main.rs`, `src/probe.ts` and `src-tauri/src/probe.rs`**. **Never `git commit -am` while the harness is there** |
+
+`a2069db` is Phase 2c-4b step 3d-1 **including all three of its Codex rounds and the orchestrator
+round that closed the last one** — the step was held open until the fifth consecutive
+narrower-instance finding was closed, so, as with every phase since `8989c16`, no commit holds a
+demonstrated defect. **No round found a defect in behaviour**: every finding was a sentence, a
+contract or a count claiming more than the code gives, and no byte written to a user's file changed.
+A fresh session starting 2c-4b-3d-2 should start from `a2069db` or later — and **it needs the
+harness, which this commit does not contain.**
+
 `a9d7a28` is Phase 2c-4b step 3c-1 **including all four of its review rounds** — the step was held
 open until the last round returned READY, so, as with every phase since `8989c16`, no commit holds a
 demonstrated defect: neither the two missing Q7 cases, nor the sentence endings quoted from
