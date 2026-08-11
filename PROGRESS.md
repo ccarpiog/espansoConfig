@@ -78,8 +78,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3c-2** | The **reading**: Q7's eight-reading R0→R1 matrix over six write surfaces, both languages, plus the standing negative-`y` judgement | ✅ complete — `docs/decisions/2c-4b-3c-2-window-reading.md`, after **three** review rounds. **71 launches (L40–L110)**, all with a zero-byte `probe.err`, none printing `--- failed`, and `bytes=MATCH` on **all 71**; **21 ended at hand-authored bytes with a backup present and 50 ended at R1 with no backup directory** — a perfect partition, re-derived independently by the orchestrator from every launch's `expect=` and `backups=` fields. All 20 cases ran in **both languages** and `end`-after-a-reorder was built, so 3c-1's §7.6 and §7.7 are **closed as recorded deviations**. **1 High, 2 Mediums, 1 Low, 5 observations**, and **no defect in what is written to disk** |
 | **2c-4b-3d-1** | **The four fixes**, with no reading and no removal: §11.3's two false selection notices given wording true of their **predicates**, §11.1's invisible reapply report given a reveal cue of its own, §11.5's false collision reason widened to the real disjunction, and §11.2's Spanish register. **3d was cut in three here** — the fixes, the re-take, the removal — the way 3c was cut | ✅ complete — after **three** review rounds and an orchestrator fix round. Round 1 returned **NOT READY** on a High (`revealReapplyReport` claiming a movement its own `scrollQuietly` does not force) and two Lows; round 2 returned **NOT READY** on two more; round 3 returned **NOT READY** on one, and it was again a **narrower instance** — the fifth consecutive round to find one. **No finding in any round was a defect in behaviour**: every one was a sentence, a contract or a count claiming more than the code gives |
 | **2c-4b-3d-2a** | **The instrument, rebuilt** — because the scratch half of the harness was gone. `launch.sh`, the fixtures and the driver's case table reconstructed from the three construction records, plus the two cases the reading needed and no step had ever built: one that draws `browser.notice.gone` and one that draws `fieldCollisions`' **ineligibility** arm. **3d-2 was cut in two here**, construction from reading, the way 3c and 2c-4a-3c were both numbered | ✅ complete — `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`, after **three** review rounds. 11 launches (P01–P11), all reaching `--- end` with a zero-byte `probe.err`, none printing `--- failed`, all `bytes=MATCH`. Round 1 returned **NOT READY** on three Highs, **two of which were real instrument gaps** of exactly the kind that stranded an earlier reading; round 2 confirmed both closed by source trace and returned **NOT READY** on prose alone, saying so in its own verdict: *no new launch or fixture is required by this review*; round 3 returned **NOT READY** on two Mediums and a Low, one of them **the orchestrator's own fix**, which is the seventh consecutive round to find a narrower instance of what the round before closed. **Fourteen findings across three rounds and not one was a defect in the instrument or in the application** |
-| 2c-4b-3d-2b | The **re-take reading**: every component 3d-1 changed, read again in a window, in both languages — **six** surfaces, because `RawEditor.svelte` was drawn into the sweep | ⬜️ **next** |
-| 2c-4b-3d-3 | The **harness's removal** and the return to the production gate numbers (1623 / 418 / 175) | ⬜️ not started |
+| **2c-4b-3d-2b** | The **re-take reading**: every component 3d-1 changed, read again in a window, in both languages — **six** surfaces, because `RawEditor.svelte` was drawn into the sweep | ✅ complete — `docs/decisions/2c-4b-3d-2b-window-reading.md`, after a review round and a confirmation pass. **64 launches (P12–P75)**: P12–P53 are the reading as first taken, **P54–P75 its fix round**; all 64 reached `--- end` with a zero-byte `probe.err`, none printed `--- failed`, all 64 report `bytes=MATCH` — including the five expected-bytes files 3d-2a §6.3 had flagged as never compared against anything. Round 1 returned **NOT READY** on six findings (3 Medium, 2 Low, 1 Observation); the confirmation pass returned **NOT READY** on three Lows, all three wording defects in the record and all three closed. **None of the nine is a defect in what is written to a user's file**, and neither are the reading's own six (F1–F3 **Low**, F4–F6 **Observation**). **The step's real result: two obligations no launch of this project could previously observe were closed by instrumenting the harness rather than by rewording** — a `scrollIntoView` spy with pane samples taken synchronously either side of each call measured obligation (f)'s *which of the three the reveal did* (the request is issued and moves nothing, on all five match surfaces in both languages; the editor's final offset is the browser's clamp) and obligation (c)'s *a second press still scrolls* (one `origin=app` request in each of ten `:twice` launches, producing no movement against a pane with room). The bound it keeps: the fixture shape is still the easy one, **none of the fifteen corpus fixtures `CLAUDE.md` §4 lists has been through this harness**, and the owner's real configuration has never been opened by it |
+| 2c-4b-3d-3 | The **harness's removal** and the return to the production gate numbers (1623 / 418 / 175) | ⬜️ **next** |
 | 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3431,6 +3431,118 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 3d-2b
+
+**Record:** `docs/decisions/2c-4b-3d-2b-window-reading.md`.
+**Reviews:** `docs/reviews/phase-2c-4b-3d-2b-reading.md` (round 1) and
+`docs/reviews/phase-2c-4b-3d-2b-confirmation.md` (the confirmation pass).
+
+**The gates, with the harness in the tree**, each re-run by the orchestrator on the exact tree that
+closes this step and not accepted from a worker's report:
+
+| Gate | Command | Result |
+|---|---|---|
+| Frontend tests | `npm test` | **1634 passed, 49 files** |
+| Rust tests | `cargo test --workspace` | **1086 passed, 0 failed** |
+| Types | `npm run check` | **419 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` | **176 modules** |
+
+The production numbers remain **1623 / 418 / 175**; 3d-3 returns to them when it deletes the harness.
+**The review round changed `src/probe.ts`** — uncommitted harness code, but a file `svelte-check`,
+`vitest` and `vite` all read — so the four gates were re-run after the instrumentation and **before**
+P54, and again at the close of the step. The first round changed no file at all and did not run them,
+and the record says so rather than implying a run.
+
+**The working tree.** `git status --short --untracked-files=all` lists the two modified hook files,
+the two untracked probe sources and this step's untracked documents under `docs/`; `git diff --stat`
+over `src/main.ts` and `src-tauri/src/main.rs` is **5 insertions and 1 deletion** — the four hook
+lines and nothing else. **No tracked source file was changed by this step**, and the harness stays
+uncommitted.
+
+**The launches.** **64 (P12–P75)** — P12–P53 the reading as first taken on binary `84148bbf…`,
+P54–P75 the fix round on `7fe2a6da…`. All 64 reached `--- end`, none printed `--- failed`, every
+`probe.err` is zero bytes, and every `bytes=` verdict is **MATCH**, including all five of the
+expected-bytes files 3d-2a §6.3 had flagged as never compared against anything. **All 23 cases of the
+driver's table have now been launched at least once on this tree**, so 3d-2a §6.2's fourteen-case list
+is empty.
+
+**What the reading settled, and it is what the step was for:**
+
+- **3c-2 §11.1's Medium is closed.** Sixteen refusal readings over five surfaces and both languages
+  put the reapply report at `y = 44`, the top of the visible band [44, 689].
+- **The cause is measured.** P66 records one application-issued `block:nearest` request on the report,
+  paired synchronously with `delta=-114` and `rect=-70->44`; `revealReapplyReport`
+  (`src/lib/components/reveal.ts:168`) is the only production path calling `scrollQuietly` with
+  `'nearest'`.
+- **The success-path reveal moves nothing**, on all five match surfaces in both languages; on the
+  editor 160–295 px of room went unspent, and the editor's final offset is the browser's clamp,
+  separated from the reveal for the first time.
+- **A second press re-issues the request** — one `origin=app` call in each of ten `:twice` launches,
+  returning without throwing and producing no movement while the report was already in view.
+- **§11.3's High, §11.5's Medium and §11.2's Low are closed for the strings this reading drew**, and
+  `browser.notice.gone` and `fieldCollisions`' ineligibility arm were judged on a screen in both
+  languages.
+
+**The reading's own findings are three Lows (F1–F3) and three Observations (F4–F6), and none is a
+defect in what is written to a user's file** — 64 launches, 64 `bytes=MATCH`.
+
+**The bounds it keeps** (record §15): no invoke spy and no command counter, so every refusal claim is
+about the **final filesystem state**; the reveal is observed as a *request* and a pane offset, **never
+as a platform decision**, and `threw=false` says only that the native call returned without throwing;
+the instrumented launches force a layout flush the uninstrumented ones do not; on the four operation
+surfaces the success-arm `delta=0` says nothing about the request, because the pane's range was
+already `0`; whether a second press ran a second reapply **transition** is still unobservable; §12's
+17 px panel-height instability is reproduced and **confounded**, excluding neither candidate cause;
+and **the fixture shape is still the easy one — none of the fifteen corpus fixtures `CLAUDE.md` §4
+lists has been through this harness, and the owner's real configuration has never been opened by it.**
+
+---
+
+## Phase 2c-4b-3d-2b review disposition
+
+**Round 1 — NOT READY. Three Medium, two Low, one Observation** (`phase-2c-4b-3d-2b-reading.md`).
+**Two of the six could not be closed by rewording**, and that is the step's result: they were closed
+by **instrumenting the harness** — a `scrollIntoView` spy with pane samples taken synchronously either
+side of every call — and by 22 new launches.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Medium** — the reveal's direction was not measured. Every sample was taken *after* the transition, so nothing distinguished a reveal that scrolled from a clamp that produced the same final number | **Closed by measurement**, not by rewording: the instrument (record §1.4) plus twelve new launches (P54–P65). §5.3 replaces "down or nothing, never up" with *the reveal moves nothing on the success path*, and separates the browser's clamp from the request. Checkable against `launches/P54…P65/probe.log` |
+| 2 | **Medium** — obligation (c)'s *still scrolls* half was answered with "the report remained in the band", which is consistent with a second press that issued no request at all | **Closed by measurement**: ten new `:twice` launches (P66–P75). §9.1 records exactly one `origin=app` `block:nearest` request per launch, `delta=0` against a pane with room in both directions. Checkable against the `secondReapply` segment of those logs |
+| 3 | **Medium** — §12's causal exclusion outran its evidence | **Closed** — rewritten to the confounding conclusion: the between-launch instability is established, and the exclusion of either of 3d-2a's candidate causes is withdrawn. No other verdict depends on conflict-panel height |
+| 4 | **Low** — F5 contradicted `2c-4b-3d-1-notes.md` §4.2 | **Closed** — "those call for different actions" removed; F5 kept as a neutral observation that the model intentionally does not attribute a collision to one disjunct, and 3d-1's truthfulness fix stated as delivered |
+| 5 | **Low** — §15 was not a complete bounds list | **Closed** — six items added (10–15): the five holes by cross-reference to §14, the three instrument bounds, the operation surfaces' uninformative zero, and the two questions that were the reading's central limits |
+| 6 | **Observation** — F1's Low grade rested on the wrong precedent (an earlier reading's decision not to file) | **Closed** — regrounded in current impact and reachability: informational block, one surface, reachable at `y = 44`. 3c-2 §9 is now cited for provenance and non-regression only |
+
+**The confirmation pass — NOT READY on three Lows, all three wording defects in one record and none
+of them a defect in what is written to a user's file.** It also confirmed the two measurement fixes
+landed at the right layer, ruled the observer-effect bound stated at the right strength, found the
+other four round-one corrections sound, verified the fourth binary's digest against the retained
+build, and **found no narrower recurrence of round one's findings**.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Low** — §4 called P12's 114 px panel displacement and P66's 114 px pane movement "the same event seen from the two ends", when they are separate launches on separate binaries | **Closed** — restated as *the same 114 px transition shape reproduced across the first launch and its instrumented re-take*, with an explicit "they are not two observations of one event", and the causal statement rested on P66's own paired `delta`/`rect` plus the source search that leaves `revealReapplyReport` the only `'nearest'` caller |
+| 2 | **Low** — "decision", "the transcript proves" and "the platform runs it without refusing it" exceeded what the spy observes; `threw=false` does not separate an honoured specified no-op from a silent ignore | **Closed** in §1.4, §5.3, §9.1 and §17: the zero is now **the specified no-movement outcome and not a range clamp**, the request *returned without throwing and produced no movement while the report was already in view*, and no passage claims an internal platform state. §15 item 11, which already stated the tension correctly, is unchanged and the other passages were made consistent with it. The sound conclusions are kept: the application re-issued the request, and the request caused no movement despite available range |
+| 3 | **Low** — §17 restored the stale "eighteen" refusal count that §4 had already corrected to 42 | **Closed** — §17 now says **42** and names §4's evidence (3c-2 §9 and §11.1 both say 42; 18 is the stale `PROGRESS.md` value). Nothing in the fix round changes the historical count |
+
+**The whole-file sweep the ninth round owed, and what it found.** After finding 2 was closed, the
+record was swept for **any** passage claiming an observed platform choice, refusal, acceptance or
+intent — searching for what the corrected text now says rather than for the words the finding used.
+**Six further passages** carried the same class and were corrected: §1.4's account of what the first
+round could not tell apart ("a pane that chose not to move"), §5.3's closing bound ("no evidence about
+the request's *intent*"), §5's three-way answer and §9.1's own heading (both calling the request "a
+no-op"), F3's justification ("a request that correctly declines"), and §15 item 13 ("*declined to
+scroll*"). **`threw=false`'s limit is now stated in §1.4 bound 1 itself**, where the claims that
+relied on it point. Nothing else in the file claims an internal platform state.
+
+**That is the ninth consecutive review round in phase 2c-4b, and the first in eight to be told to
+sweep from the corrected text rather than from the finding's wording.** The confirmation pass found no
+narrower recurrence of round one's findings; this fix round's sweep is recorded above so the next one
+can check it rather than repeat it.
+
+---
+
 ## Verification — Phase 2c-4b step 3d-2a
 
 **Record:** `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`.
@@ -6457,6 +6569,136 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### Phase 2c-4b-3d-2b is complete. **Step 2c-4b-3d-3 — the harness's removal — is next, and it is the last step of 2c-4b-3d.**
+
+**3d was cut in three: the fixes (3d-1), the re-take (3d-2, itself cut into 2a and 2b), and the
+removal.** The reading is taken and its record is `docs/decisions/2c-4b-3d-2b-window-reading.md`.
+**Nothing is left to read and nothing is left to fix — 3d-3 deletes the instrument and returns the
+gates to their production numbers.**
+
+The exact first commands to run, with the values this tree produces **with the harness still in it**:
+
+```sh
+npm test                       # expect 1634 passed, 49 files   — WITH the harness
+cargo test --workspace         # expect 1086 passed, 0 failed
+npm run check                  # expect 419 files, 0 errors, 0 warnings — WITH the harness
+npm run build                  # expect 176 modules             — WITH the harness
+```
+
+**Those four are the shifted numbers. 3d-3's own success criterion is that they become
+`1623` / `418` / `175`** (frontend tests / `svelte-check` files / bundle modules) once the harness is
+gone. `cargo test --workspace` is **1086 with the harness**, and `src-tauri/src/probe.rs` declares no
+test (`rg 'mod tests|#\[test\]' src-tauri/src/probe.rs` finds nothing), so the removal is not expected
+to move it — **check the number rather than assume it**.
+
+#### What 3d-3 must remove, and how 2c-4a-3c-5 did it
+
+- **`src/probe.ts`** and **`src-tauri/src/probe.rs`** — deleted outright. Both are untracked, so
+  deleting them changes no tracked file.
+- **Two hook lines each in `src/main.ts` (`:20`, `:37`) and `src-tauri/src/main.rs` (`:47`, `:124`)** —
+  **restored by hand to byte-identical**, which is how 2c-4a-3c-5 removed the previous harness. Do not
+  `git checkout` blindly if anything else is pending in those files; there is nothing else pending
+  today — `git diff --stat` over those two paths is **5 insertions and 1 deletion**, the four hook
+  lines and nothing else.
+- **The scratch tree `/private/tmp/espansoconfig-harness-2c-4b-3d/`** — `launch.sh`, `run-batch.sh`,
+  the two manifest scripts, `fixtures/`, `launches/P01…P75/` and the three manifests.
+- **After the removal, `git diff` must be empty** and
+  `git status --short --untracked-files=all` must list no `probe` path.
+
+**The scratch tree's measured size is `3.0G`** (`du -sh /private/tmp/espansoconfig-harness-2c-4b-3d/`,
+measured at the close of 3d-2b) across **75 launch directories**, because `launch.sh` assembles a
+fresh `.app` bundle per launch and every launch retains its whole bundle. That figure is the reason
+the removal is a step and not a footnote.
+
+**Never `git commit -a` or `git commit -am` while `src/probe.ts` and `src-tauri/src/probe.rs` are in
+the tree.** Stage by path, as 3d-1 and 3d-2a both did.
+
+#### The five holes that survive this step, and that are **not** 3d-3's to close
+
+They are 3d-2a §6.7's holes, carried into the reading's §14 and restated as bounds in its §15 item 10.
+A **hole** has **no case row in `launch.sh` and no arm in `runPlan`**, so nothing could be launched
+for it; it costs a fixture or a plan function **before** there is anything to launch. None is an
+obligation of `2c-4b-3d-1-notes.md` §7.
+
+- **Hole 1 — `browser.notice.gone`'s second producer**: `repairSelection`'s `clearSelection` arm,
+  `src/lib/browser/selection.ts:292`. The reading drew that sentence from `reresolve`'s **length** arm
+  only (P43 en, P44 es).
+- **Holes 2–5 — the confirmed-reload transition on the creator, the deleter, the mover and the
+  duplicator.** The transition exists on all five match surfaces and has a case on **one** (the
+  editor).
+
+**Removing the harness makes each of them cost a rebuild too** — the repo-side hooks, the two probe
+sources and the whole scratch tree would have to be reconstructed from
+`docs/decisions/2c-4b-3d-2a-instrument-rebuild.md` before the missing fixture or plan function could
+even be written. **That is the accepted trade**, and it is the same one 2c-4a-3c-5 took: the harness
+costs 3.0 GB of scratch, four lines of hook in two production files and a shifted gate baseline for as
+long as it stays, and the five holes are not §7 obligations.
+
+#### What 3d-2b proved, at its real strength
+
+**64 launches, P12–P75**, all reaching `--- end` with a zero-byte `probe.err`, none printing
+`--- failed`, and `bytes=MATCH` on all 64 — including the five expected-bytes files 3d-2a §6.3 had
+flagged as never compared against anything. **All 23 cases of the driver's table have now been
+launched at least once on this tree.**
+
+- **Question 1 — the refused reapply's report is visible.** Sixteen refusal readings over five
+  surfaces and both languages put it at `y = 44`, the visible band's own top ([44, 689]), up to at
+  most a sub-pixel of its top edge. 3c-2's §11.1 Medium is closed.
+- **The cause is measured, not inferred.** P66 records **one** application-issued `block:nearest`
+  request on the report, synchronously paired with `delta=-114` and `rect=-70->44`, and
+  `revealReapplyReport` (`src/lib/components/reveal.ts:168`) is the only production path that calls
+  `scrollQuietly` with `'nearest'`.
+- **Question 2 — the success path.** The `'nearest'` request is issued on all five match surfaces in
+  both languages and **moves nothing**. On the editor the pane had 160–295 px of unspent room and the
+  request spent none of it; the editor's final offset is the **browser's clamp** on a `scrollHeight`
+  that shrank when the panel was rebuilt, separated from the reveal for the first time.
+- **Obligation (c) — a second press.** Ten `:twice` launches, five surfaces, both languages: exactly
+  one `origin=app` request each, returning without throwing and producing **no movement while the
+  report was already in view**, against a pane with room in both directions.
+- **The reading's own findings are three Lows and three Observations** — F1 a status block with a
+  *Dismiss* control lying above the band on the editor's success path (informational, reachable by
+  scrolling, one surface), F2 the report's bottom flush with the band's bottom there, F3 a second
+  press changing nothing on screen; F4 the 6–7 px gap between two same-width panels, F5
+  `fieldCollisions`' two arms drawing one sentence by design, F6 a cleared-selection notice beside an
+  editor still open on that snippet. **None is a defect in what is written to a user's file.**
+
+#### And the bounds, drawn from the reading's §15 — state them as bounds, never soften them
+
+- **No invoke spy and no command counter.** Every refusal claim is a claim about the **final
+  filesystem state** and nothing more; `--- end` prints unconditionally; `HTMLElement.click()` is not a
+  mouse click and no plan pressed a key. Whether a second press ran a second reapply **transition** is
+  therefore still unobservable — what is measured is that the component's reveal effect re-ran.
+- **The reveal is observed as a *request* and a pane offset, never as a platform decision.**
+  `threw=false` says the native call returned without throwing, not that the platform honoured it.
+- **The instrumented launches (P54–P75) force a layout flush the uninstrumented ones do not.** Stated
+  as a bound, not as a proof of no effect; the twelve success rectangles reproducing P24–P45's exactly
+  is *consistent with* no effect and is not a demonstration of none.
+- **On the four operation surfaces the success-arm `delta=0` says nothing about the request** — the
+  pane's range was already `0`. Only the editor's launches, where room existed, carry that weight.
+- **Two binaries ran the two rounds** (`84148bbf…` for P12–P53, `7fe2a6da…` for P54–P75), so a
+  cross-round geometric comparison is a comparison across binaries. §12's 17 px panel-height
+  instability is **reproduced and confounded**: it excludes neither of 3d-2a's two candidate causes.
+- **Every launch ran `hasFocus=false visibility=hidden`**, so every focus statement is about that
+  condition and not the one a person at the machine would have.
+- **The fixture shape is still the easy one** — plain `replace:` scalars, double-quoted triggers, LF,
+  no BOM, no block scalars, no item-owned comments, no read-only file. **None of the fifteen corpus
+  fixtures `CLAUDE.md` §4 lists has ever been through this harness, and the owner's real configuration
+  has never been opened by it.**
+
+#### The manifests, and the one thing about them that must not be "repaired"
+
+`/private/tmp/espansoconfig-harness-2c-4b-3d/` holds three manifests. `manifest-3d-2b-fix-post.sha256`
+(**177 entries**) covers the current probe and the P54–P75 artifacts and **verifies in full**.
+`manifest-3d-2b-post.sha256` (131 entries) verifies **130** and `manifest-3d-2a-post.sha256`
+(46 entries) verifies **45**; the single failing entry in each is **`src/probe.ts` and nothing else**,
+because the review round instrumented it. **That is recorded rather than regenerated on purpose** — a
+manifest is a statement about a moment, and 3d-2a §8.5 is this project's record of what regenerating
+one destroyed. 3d-3 deletes all three with the tree; it must not rewrite them first.
+
+---
+
+### The record that closed 2c-4b-3d-2a (superseded by the above, kept for its work list and its bounds)
 
 ### Phase 2c-4b-3d-2a is complete. **Step 2c-4b-3d-2b — the re-take window reading — is next.**
 
@@ -10522,6 +10764,7 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 | [`docs/decisions/2c-4b-3c-2-window-reading.md`](docs/decisions/2c-4b-3c-2-window-reading.md) | **The reading itself, and 2c-4b-3d's entire work list — read it before either instrument record.** 71 launches (L40–L110), 20 cases in both languages, `bytes=MATCH` on all 71, and a **perfect partition of 21 authored-bytes-with-a-backup against 50 R1-with-no-backup-directory**. Four findings: §11.3 **High** (`differentMatch` is *false* of `reresolve`'s index+`source_text` predicate, and `gone` with it — but **not** `displacedByMove`/`displacedByDuplicate`, whose attribution is guarded by the committed operation's own revision), §11.1 **Medium** (a refused reapply draws its report entirely above the visible band on all five match surfaces in both languages, and a second press reproduces the identical invisible refusal), §11.5 **Medium** (`fieldCollisions` gives a false *reason* for a correct refusal), §11.2 **Low** (*usted* among *tú*). **§12 is 21 numbered bounds** and the honest starting point for anything built on this: no invoke spy, no command counter, `--- end` printed unconditionally, no `Tab` key ever sent, one easy fixture shape, and **not one of the fifteen corpus fixtures** ever run through the harness |
 | [`docs/reviews/phase-2c-4b-3c-2-reading.md`](docs/reviews/phase-2c-4b-3c-2-reading.md) | **Three rounds over a record that changed no code, and the round-2 High is the one to read.** Round 1's sweep, closing a true finding, **manufactured a false one** — it alleged the `differentMatch` clause also stood in `displacedByMove` and `displacedByDuplicate`, and it does not. That is this project's worst defect class **pointed at the application**, and it would have handed a later step work that was not there. The transferable rule: **a shared string is not a shared predicate**; four notices carried the same clause, two earn it and two do not, and only reading each notice's *producer* separates them. Round 1 also shows why a miscount is never local — 28/43 was wrong, and re-deriving *every* count rather than the two named surfaced five more errors plus two the review never raised |
 | [`docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`](docs/decisions/2c-4b-3d-2a-instrument-rebuild.md) | **Where the instrument actually is, and the record 3d-2b and 3d-3 both need — read it before either older instrument record, which describe a tree that no longer exists.** The scratch half now lives at **`/private/tmp/espansoconfig-harness-2c-4b-3d/`**, outside any session directory, because the old one was a *session scratchpad* and vanished with the session that made it. 23 cases, 21 fixtures, 11 launches (P01–P11), a 46-entry manifest that verifies. **§6.7 is the per-obligation scheduling table** against `2c-4b-3d-1-notes.md` §7 — for each thing the reading owes, which case serves it and whether that case has been launched — and §6.2 and §6.3 name the 14 unlaunched cases and the 5 uncompared expected files, so **a `bytes=DIFFER` on an unlaunched positive means suspect the fixture first.** It corrects two earlier records: `BLOCK_TEXT_LIMIT` is **4000**, and the case count is not the fixture-file count. Its bounds are the ones that matter most — **the fixtures were re-authored from prose, not recovered**, so digest continuity with L01–L110 is gone, and the two 17-px panel differences from 3c-2's geometry have **two candidate causes this step does not separate** |
+| [`docs/decisions/2c-4b-3d-2b-window-reading.md`](docs/decisions/2c-4b-3d-2b-window-reading.md) | **The reading 3d-1's fixes owed, and the last document 3d-3 needs before it deletes the harness.** 64 launches (P12–P75), two rounds on two binaries (`84148bbf…`, `7fe2a6da…`), `bytes=MATCH` on all 64 and all 23 driver cases now launched. **§1.4 is the `scrollIntoView` spy the review round added, and it is the step's lesson** — the two facts the first 42 launches could not observe were closed by **instrumenting**, not by rewording: §5.3 (the success-path reveal issues its request and moves nothing; the editor's final offset is the browser's clamp, separated from the reveal at last) and §9.1 (a second press re-issues the request and it produces no movement while the report is already in view). §4 closes 3c-2 §11.1 — the refused report sits at `y = 44` on five surfaces in both languages, and P66 pairs one `block:nearest` request with `delta=-114` and `rect=-70->44`. **§15 is fifteen bounds**: no invoke spy, no command counter, the reveal observed as a *request* and a pane offset and **never as a platform decision** (`threw=false` says only that the call returned), the layout-flush observer effect, and the five **holes** §14 names — each costs a fixture or a plan function **before** it costs a launch. Findings F1–F3 **Low**, F4–F6 **Observation**, **none a defect in what is written to disk** |
 | [`src/lib/browser/saveOutcome.ts`](src/lib/browser/saveOutcome.ts) | **The one authority for what a conflict offers, as of 2c-4a-2.** `conflictChoicesFor(capabilities, step)` is the only producer of a `ConflictChoice` list in the repository; before it, capability was expressed twice — an ignored `choices` field on every `ConflictModel` and a local `['keepEditing']` in each of the five match models — **and that split is exactly why a newly offered button could compile and do nothing**. `ConflictCapabilities.draftKind` is a permanent fact about the drafted value; `offersCopyDraft` and `offersReload` say what the panel *acts on today* and are hand-set, because **nothing in TypeScript can force a component to act on a choice its model names**, and the doc says so in the same sentence as what it does force. A copy is refused for an `operationChoice` draft regardless of the boolean |
 | [`src/lib/browser/editorSave.ts`](src/lib/browser/editorSave.ts) | **The shared reload machine — `ReloadStep`, `NOT_RELOADING`, `AdoptTheDiskVersion<T>`, `reloadAsked`, `reloadConfirmed`, `spendTheConfirmedReload`, `offeredReloadStep`.** Built in 2c-4a-2 *without* being offered, which is the shape worth copying: an unoffered transition can be implemented and tested without drawing its choice, and the first review round rejected the opposite trade. `spendTheConfirmedReload` treats **both** `installed` and `alreadyThere` as success and stops only on `refused` — collapsing those two back into one is the defect round 2 shipped and round 3 removed |
 | [`docs/reviews/phase-2c-4a-2-code.md`](docs/reviews/phase-2c-4a-2-code.md) | **Four review passes in one file, and the clearest record in this project of a fix becoming the next defect three times running.** Round 2's fix of round 1's High introduced a window that installed an **older** snapshot over a **newer** projection and reported success; rounds 4 and 5 each found a narrower instance of the prose finding the round before had just closed. The reason is one sentence and it generalizes: **each sweep was written from the previous wording rather than from the new contract** |
