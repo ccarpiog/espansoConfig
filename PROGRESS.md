@@ -81,7 +81,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3d-2b** | The **re-take reading**: every component 3d-1 changed, read again in a window, in both languages — **six** surfaces, because `RawEditor.svelte` was drawn into the sweep | ✅ complete — `docs/decisions/2c-4b-3d-2b-window-reading.md`, after a review round and a confirmation pass. **64 launches (P12–P75)**: P12–P53 are the reading as first taken, **P54–P75 its fix round**; all 64 reached `--- end` with a zero-byte `probe.err`, none printed `--- failed`, all 64 report `bytes=MATCH` — including the five expected-bytes files 3d-2a §6.3 had flagged as never compared against anything. Round 1 returned **NOT READY** on six findings (3 Medium, 2 Low, 1 Observation); the confirmation pass returned **NOT READY** on three Lows, all three wording defects in the record and all three closed. **None of the nine is a defect in what is written to a user's file**, and neither are the reading's own six (F1–F3 **Low**, F4–F6 **Observation**). **The step's real result: two obligations no launch of this project could previously observe were closed by instrumenting the harness rather than by rewording** — a `scrollIntoView` spy with pane samples taken synchronously either side of each call measured obligation (f)'s *which of the three the reveal did* (the request is issued and moves nothing, on all five match surfaces in both languages; the editor's final offset is the browser's clamp) and obligation (c)'s *a second press still scrolls* (one `origin=app` request in each of ten `:twice` launches, producing no movement against a pane with room). The bound it keeps: the fixture shape is still the easy one, **none of the fifteen corpus fixtures `CLAUDE.md` §4 lists has been through this harness**, and the owner's real configuration has never been opened by it |
 | **2c-4b-3d-3** | The **harness's removal** and the return to the production gate numbers — **which are `1633 / 418 / 175`, not the `1623 / 418 / 175` this row said until 3d-3 measured them** | ✅ complete — `docs/decisions/2c-4b-3d-3-notes.md`. Both halves gone: the two untracked probe sources, the four hook lines reverted, and the 3.0 GB scratch tree with its 75 launch directories, 21 fixtures and 3 manifests. `git status --short --untracked-files=all` returns **nothing**. The step changed **no tracked source file**, so no reading and no mounted test is owed. Its one finding is in a record, not in the application: the production test count `1623` was **stale**, carried forward through three step records after 3d-1 committed 10 cases while the harness was in the tree. Codex returned **NOT READY** on eight findings, **every one of them prose**; the High was this record claiming a `PROGRESS.md` correction it had not yet made, and one Medium was closed **by measuring** (34 case lines added, 24 removed, net **+10**) rather than by softening the claim. **This closes 2c-4b-3d** |
 | **Phase 2c-4b** | **Reapply** — "keep my draft" in plan §12's strong sense: identify the intended match in the newly parsed document and apply only when confidence suffices | ✅ **complete.** Ten steps (1, 2, 3a, 3b, 3c-1, 3c-2, 3d-1, 3d-2a, 3d-2b, 3d-3), all three kinds of evidence, and the instrument built, rebuilt and removed twice over. The correspondence proof is in the core (`reconcile.rs`), the transitions are in `src/lib/browser/reapply.ts`, *Keep my draft* is drawn on the five match surfaces and **absent on the raw editor**, and the 71-launch Q7 matrix plus the 64-launch re-take were read in both languages. **No finding in any round of 3d changed a byte written to a user's file** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake | ⬜️ **next** |
+| **2c-4c design consult** | **Phase 2c-4c put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4c-design.md`, and it **returned no open question for the owner**. It rules save-as-new an **ordinary `create_match`** on the editor and creator only, labelled *Create a new snippet from supported fields* and never *Duplicate*; the trigger stays an **editable literal**, never auto-suffixed, with a **new** `FindingCode::NewMatchRepeatsLiteralTrigger` claiming risk only; placement is a fixed `End` with **no chooser**, because recovery has no trustworthy anchor by definition; **all six** surfaces are in the recovery contract but the three operation-choice ones recover by reload-then-fresh-operation and the raw editor recovers as whole-document text; and the Rust is **narrow** — widen `NewMatch`, add the finding, **no new command and no new writer**. Six steps |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — the consult is taken and adopted; step 2c-4c-1 is next** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -2255,6 +2256,50 @@ write is what is on disk would be wrong for the same reason.
 
 ---
 
+## Phase 2c-4c — consult disposition
+
+Phase 2c-4c, the recovery fallback, was put to a design consult before any line of it was written,
+by the rule every phase since 2b-2c has followed. The consult is
+`docs/reviews/phase-2c-4c-design.md`. **Unlike the 2c split's consult, this one was given the
+repository to read** — every ruling cites `path:line`, as 2c-4b's and 2c-3c's did — and was
+forbidden the web. Five questions were asked; five were answered, and the consult **returned no
+open question for the owner**, on the ground that the repository already fixes the preservation
+boundary, the conflict entry condition, the naming, the write path, the evidence rule and the
+localization contract tightly enough that what is left is engineering rather than product policy.
+
+**The verdict in one sentence:** 2c-4c adds a **recovery creator**, reached only from an intact
+conflict, that keeps the original conflict and draft alive while it prepares **one ordinary
+`create_match`** against a person-chosen eligible destination, at that destination's **end**.
+
+| # | Question | Ruling | What it changes |
+|---|---|---|---|
+| 1 | Is *save my draft as a new snippet* a `create_match`, and what is its trigger? | **Yes**, on the match editor and the creator only. It is the projection-based product 2c-3c refused to call *Duplicate* — so it is labelled **_Create a new snippet from supported fields_** with an explicit disclosure of what was not copied. The trigger is carried as an **editable literal** and is **never auto-suffixed, normalized or guessed**; an exact repeat is reported as risk by a new transaction finding | 2c-3c's precedent transfers **at the level of the pattern, not the code**: `DuplicateKeepsTriggerDefinition` fires only for `DuplicateItem` batches, so a **new** `FindingCode::NewMatchRepeatsLiteralTrigger { revision }` is needed, `SuspiciousButPermitted`, content-addressed to the candidate, and emitted for `InsertItem` candidates — which means it reaches **ordinary `create_match` too**, because exact repetition is a property of the candidate and not of the route that reached it |
+| 2 | Where does the recovered snippet go? | **Fixed `NewMatchPosition::End`, with no placement chooser.** The conflict's own document is preferred **only when the disk projection still says it is eligible**; otherwise an explicit destination choice is required, using the creator's existing destination vocabulary. If the `matches` sequence is gone, recovery **must not synthesize one** — it offers the other eligible destinations, and if none exists it writes nothing and keeps the draft | Recovery has **no trustworthy anchor by definition** — the anchor is what went missing — so `After` is refused outright. A person who wants another position performs a later same-sequence move as its own operation, which D2r and R25 already require |
+| 3 | What is *manual resolution* on a screen? | The **existing** stacked comparison plus the truthful actions the draft kind supports. **No diff viewer is added**, and nothing a diff produces may be writable. 2c-4c's addition is the recovery creator for **authored-text match drafts**; an `operationChoice` draft gets neither a copy nor a save-as-new | This answers the plan's *Compare* and *Copy draft* offers by saying they already exist rather than by building them. It also names what an `operationChoice` recovery **is**: confirmed reload, fresh selection, fresh operation |
+| 4 | Which surfaces get it? | **All six are in the recovery contract; only two gain save-as-new** — the match editor and the creator. The deleter, the mover and the duplicator recover by confirmed reload then a fresh operation. **The raw editor is in**, but recovers only as whole-document authored text: keep editing, exact copy, comparison, confirmed reload | The raw editor being out of *reapply* does **not** put it out of *recovery* — the consult was asked to rule that explicitly and did |
+| 5 | Does it need Rust? | **Yes, but narrowly.** Widen `NewMatch` from its two mandatory fields to those two plus optional `label`, `word`, `left_word`, `right_word`; add the new finding. **No new `DocumentEdit` variant, no thirteenth command, no second writer** — everything still composes `create_match` → `InsertItem` → `run_one_save` → `save_document` | This is smaller than 2c-3c's Rust (which needed a new primitive **and** a command) and larger than 2c-4a's and 2c-4b's (which needed none) |
+
+**The six-step cut the consult prescribed**, adopted as written:
+
+| Step | Scope | Evidence it owes |
+|---|---|---|
+| **2c-4c-1** | The creation and risk contract in Rust: widen `NewMatch`, add `NewMatchRepeatsLiteralTrigger`, keep `create_match` lowering to one `InsertItem` | Rust model and persistence tests only. **No frontend control changes** — this isolates the one authoritative protocol change |
+| **2c-4c-2** | Recovery as browser values: the shared outcome/choice model, the six field transfer decisions, destination selection, fixed-end placement, and the rule that the source conflict survives until a recovery create **commits**. Compose `BrowserState.createMatch`; **draw nothing** | Model and workspace tests over every `manualResolution` obstacle from the five surfaces, no eligible destination, another conflict, refusal/acknowledgement/retry, uncertain send, failed adoption after a known commit, selection races — and proof that **no command is called** by operation-choice or raw recovery |
+| **2c-4c-3** | One recovery UI, i18n in both languages through typed accessors, and mounted evidence | A mounted interaction test per changed component, proving the editor and creator invoke recovery creation, the three operation surfaces offer neither copy nor save-as-new, raw offers no save-as-new, and the original conflict survives every non-committed ending |
+| **2c-4c-4** | **Rebuild the window instrument** from `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`, add recovery plans and expected-byte fixtures, and prove it reaches all six surfaces | This step **judges the instrument, not the screen** |
+| **2c-4c-5** | The bilingual window reading: every surface's manual path, recovery creation at end, changed destination, missing sequence, exact repeated-trigger acknowledgement, another conflict, copy success/failure, committed-result adoption — byte-comparing the whole configuration tree after every case | The phase's manual evidence. **At least one committed awkward corpus fixture** (CRLF or BOM) and one item-owned-comment/block-scalar case, verifying pre-existing bytes survive and that the disclosure does not call the synthesized item a duplicate |
+| **2c-4c-6** | Remove the instrument, sweep the residue, and **re-derive** the harness-free gate counts rather than copying figures observed with the harness | No product evidence; it exists so an instrument does not become production code |
+
+**Step 4 is the instrument and step 5 is the reading, and that separation is not new** — 2c-4a-3c,
+2c-4b-3c and 2c-4b-3d-2 were each numbered in two for the same reason: **building an instrument and
+taking a reading are two different kinds of work in one worker's context.**
+
+**On R38, the standing bound, the consult ruled narrowly and deliberately:** step 5 closes *the
+fixture shapes directly relevant to recovery* and no more. The full fifteen-fixture sweep and the
+owner's real configuration **stay open**, recorded rather than quietly absorbed into this phase.
+
+---
+
 ## Phase 2c-3c-3 review disposition
 
 **Two rounds, four findings, `NOT READY` both times** (`docs/reviews/phase-2c-3c-3-code.md`; round 2
@@ -3430,6 +3475,37 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-4c design consult
+
+**Consult:** `docs/reviews/phase-2c-4c-design.md` (25 260 bytes, written by the job itself).
+**Codex job:** `task-mspsc1gw-ji2qnu`, effort `high`, no web search, repository reading permitted.
+
+**This step changed no source file.** Its whole effect is one new document under `docs/reviews/` and
+the checkpoint entries recording what it ruled. **No mounted test and no window reading is owed** —
+nothing was built.
+
+**The gates were nonetheless run in full on the pristine tree at `81bc193`, before any edit**, to
+confirm that the production baseline 2c-4b-3d-3 rebaselined is the one this phase starts from, and
+because the corrected `1633` had not yet been re-observed by a second session:
+
+| Gate | Expected | Observed |
+|---|---|---|
+| Frontend tests | `npm test` — 1633, 49 files | **1633 passed, 49 files** |
+| Types | `npm run check` — 418 files | **418 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` — 175 modules | **175 modules transformed** |
+| Rust tests | `cargo test --workspace` — 1086 | **1086 passed, 0 failed** — re-summed from all 25 `test result:` lines |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| Format | `cargo fmt --check` | clean, exit 0 |
+| Architecture (D2x) | `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+
+**`1633` is confirmed, not inherited.** It was re-derived on a harness-free tree by a session that
+did not produce it, which is exactly the re-derivation `2c-4b-3d-3-notes.md` §3 asked for.
+
+**The working tree** was empty before the consult: `git status --short --untracked-files=all`
+returned nothing. The consult's only write is the review document.
 
 ---
 
@@ -6681,7 +6757,122 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### Phase 2c-4c's design consult is taken and adopted. **Step 2c-4c-1 — the creation and risk contract in Rust — is next, and it touches no frontend file.**
+
+The consult is `docs/reviews/phase-2c-4c-design.md`; its disposition, with the full five-question
+table and the six-step cut, is "Phase 2c-4c — consult disposition" above. **Read the disposition
+first and the consult only for the step you are on** — the consult is 25 KB and a step needs one
+section of it.
+
+**The tree is clean and the production gates are confirmed on it** (see "Verification — Phase 2c-4c
+design consult" above):
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+npm test                       # expect 1633 passed, 49 files
+cargo test --workspace         # expect 1086 passed, 0 failed
+npm run check                  # expect 418 files, 0 errors, 0 warnings
+npm run build                  # expect 175 modules
+```
+
+**`1633` is right and `1623` is the stale figure 2c-4b-3d-3 corrected. Do not "restore" 1623.**
+
+#### What 2c-4c-1 must do, and the four things it must not
+
+Two core changes, and **no command, no `DocumentEdit` variant and no second writer**:
+
+1. **Widen `NewMatch`** in `crates/espansoconfig-core/src/draft/new_match.rs` from its two mandatory
+   fields to those two plus **optional `label`, `word`, `left_word`, `right_word`** — the same six
+   fields `src/lib/browser/matchEditor.ts` actually drafts. `fields()` emits **only present
+   schema-known fields, in one documented order**. No projection, comment, arbitrary key/value list
+   or YAML source may enter this type.
+2. **Add `FindingCode::NewMatchRepeatsLiteralTrigger { revision }`** in
+   `crates/espansoconfig-core/src/validate/mod.rs`, produced by a **pure candidate inspection**
+   beside `findings_of` in `crates/espansoconfig-core/src/persist/save.rs`. It is
+   `SuspiciousButPermitted`, carries the exact candidate `ContentRevision`, and fires **only** for an
+   `InsertItem` candidate whose new match exposes a modeled literal trigger text **exactly equal** to
+   another modeled literal trigger text **in that same destination sequence**.
+
+The four prohibitions, each with the reason it exists:
+
+- **The finding's sentence may say only that the new snippet repeats literal trigger text already
+  present, and that this application cannot determine how espanso will handle overlapping
+  definitions.** It must not say *invalid*, *collision*, which snippet wins, or that a non-match is
+  safe. That is **D2u** — a claim about risk is permitted, a claim about espanso semantics is not.
+- **It must not become a generic validator rule.** A rule that runs over every candidate would
+  interrupt unrelated match edits; a UI-only check would be bypassable. It is produced **inside**
+  `save_document`, for `InsertItem` candidates only, and it participates in the ordinary
+  exact-multiset acknowledgement round trip.
+- **It will affect ordinary `create_match`, and that is correct, not a side effect.** Exact
+  repetition is a property of the candidate creation, not of which frontend route reached it —
+  so 2c-4c-1's tests must cover the plain-creation path as well as the recovery one.
+- **Do not reuse `DuplicateKeepsTriggerDefinition`.** It is produced only for `DuplicateItem`
+  batches; borrowing it would be the 2c-3c precedent reused **under a false name** rather than
+  transferred at the right level.
+
+**The evidence 2c-4c-1 owes** is Rust tests only — optional-field order and omission; exact repeated
+and non-repeated literal triggers; **no semantic claim for regex or unmodelled trigger forms**; a
+changed candidate revision invalidating an old acknowledgement; exact-multiset coverage; and byte
+identity outside the insertion span. **No mounted test and no window reading**, because no component
+changes. Those are steps 3 and 5.
+
+#### The remaining five steps, so the cut is visible from here
+
+**2c-4c-2** recovery as browser values, drawing nothing · **2c-4c-3** one recovery UI, i18n and
+mounted evidence · **2c-4c-4** rebuild the window instrument · **2c-4c-5** the bilingual window
+reading · **2c-4c-6** remove the instrument and re-derive the gate counts. Their scopes and the
+evidence each owes are the table in the consult disposition above.
+
+#### The rules that bind every step of 2c-4c
+
+- **Three kinds of evidence per sub-phase** — model tests, a **mounted-component test**, and a
+  **window reading**. A green suite is not a screen. 2c-4c-1 owes only the first because it changes
+  no component; the phase as a whole owes all three.
+- **The harness is gone, so any reading costs a rebuild first** — that is why steps 4 and 5 are two
+  steps. `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md` carries the fixtures' content, not just
+  their descriptions.
+- **Never `git commit -a` or `git commit -am` while probe files are in the tree.** Stage by path.
+- **`save_document` is the only entry point that may write a user's file**, there is no `force` flag,
+  and a committed write is never afterwards reported as an error.
+- **The recovery product is never called *Duplicate*, *exact copy* or *Keep my draft*.** It
+  reconstructs schema-supported fields and cannot promise source-byte preservation; *Keep my draft*
+  is already reapply's control. Its name is **_Create a new snippet from supported fields_**.
+- **Opening recovery must not adopt the disk snapshot or close the source surface.** The
+  `manualResolution` arm (`src/lib/browser/reapply.ts:236`) guarantees the projection, the selection
+  and the one-shot authorization are all untouched — that is the phase's strongest asset, and
+  spending it early throws it away.
+
+#### The five holes 2c-4b left behind, still open and still not defects
+
+They have no case row in the (now removed) `launch.sh` and no arm in `runPlan`, so nothing could be
+launched for them; each costs a fixture or a plan function **plus an instrument rebuild** before
+there is anything to launch. **2c-4c-4 is the natural place to add them**, since it rebuilds the
+instrument anyway — but they are not obligations of any 2c-4b record.
+
+- **Hole 1 — `browser.notice.gone`'s second producer**: `repairSelection`'s `clearSelection` arm,
+  `src/lib/browser/selection.ts:292`. Every reading of that sentence so far came from `reresolve`'s
+  **length** arm (P43 en, P44 es).
+- **Holes 2–5 — the confirmed-reload transition on the creator, the deleter, the mover and the
+  duplicator.** It exists on all five match surfaces and has been launched on **one**, the editor.
+
+#### The standing bound on every window reading this project has taken (R38)
+
+**The fixture shape has always been the easy one** — plain `replace:` scalars, double-quoted
+triggers, LF, no BOM, no block scalars, no item-owned comments, no read-only file. **None of the
+fifteen corpus fixtures `CLAUDE.md` §4 lists has ever been through the harness, and the owner's real
+configuration has never been opened by it.** The consult ruled that **2c-4c-5 closes only the shapes
+directly relevant to recovery** — at least one CRLF-or-BOM fixture and one item-owned-comment or
+block-scalar case — and that the full sweep stays open for a later gate. It is recorded, not absorbed.
+
+---
+
+### The record that opened 2c-4c (superseded by the above, kept for its five questions)
+
 ### Phase 2c-4b is complete, and the harness is gone. **Phase 2c-4c — the recovery fallback — is next, and its first act is a design consult.**
+
+> **Done.** The consult was taken; `docs/reviews/phase-2c-4c-design.md` answers all five questions
+> below and returned **no open question for the owner**. This block is kept because the five
+> questions are what the consult was asked, and the answers only make sense beside them.
 
 **Nothing is left over from 2c-4b.** 3d was cut in three — the fixes (3d-1), the re-take (3d-2,
 itself cut into 2a and 2b) and the removal (3d-3) — and all three are closed. The working tree is
