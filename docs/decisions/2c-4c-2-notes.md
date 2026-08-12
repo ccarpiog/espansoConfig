@@ -227,9 +227,11 @@ A recovery create can itself be refused or conflict, so the form carries an ordi
   it was. There is no `alreadySatisfied` arm and there must not be one — that would be the
   repeated-trigger precheck the consult refuses;
 - **`askToReloadRecoveryDiskVersion` → `confirmRecoveryDiskReload` → `reloadRecoveryDiskVersion`** —
-  the ordinary two-step confirmation, spent through `spendTheConfirmedReload`. It adopts the disk
-  projection and **closes the form**, because there is no disk-side recovered draft to seed one from,
-  which is what `reloadOutcome: 'closesSurface'` says and what the appended warning describes.
+  the ordinary two-step confirmation, spent through `spendTheConfirmedReload`. It spends an adoption
+  of the disk version and **closes the form on that spend** — not on anything the spend is found to
+  have done, since a satisfied one answers `alreadyThere` as readily as `installed` — because there is
+  no disk-side recovered draft to seed one from, which is what `reloadOutcome: 'closesSurface'` says
+  and what the appended warning describes.
 
 **Why this had to exist at this step rather than the one that draws it.** Without the rebase,
 dismissing a conflict left the form holding the base revision the transaction had just refused, so
@@ -472,7 +474,7 @@ Model and workspace tests, as the step's brief requires. No mounted test and no 
 | **An uncertain send** says so, keeps the draft, and stops calling the source conflict intact | `recovery.test.ts::says a send may have written…`, `::raises the two failure arms from outside the composition too` |
 | A failure that wrote nothing reconciles nothing | `recovery.test.ts::leaves the source conflict alone for a failure that wrote nothing` |
 | A non-committed arm the wrapper reconciled answers `windowMoved`, both adoption endings | `recovery.test.ts::does not call the source conflict intact when a non-committed arm reconciled the window` |
-| Nothing puts the window back: dismissing, typing, retargeting and a later refusal all keep it | `recovery.test.ts::keeps saying the window moved once it has…` |
+| Nothing withdraws the record: dismissing, typing, retargeting and a later refusal all keep it | `recovery.test.ts::keeps saying the window may have moved once a re-read was ordered…` |
 | **A failed adoption after a known commit** is a save, never an error | `recovery.test.ts::reports a committed create whose adoption failed…` |
 | A commit spends the form and nothing dismisses past it | `recovery.test.ts::spends the form on a commit…` |
 | A saved arm that committed **and reconciled** nothing retains the conflict | `recovery.test.ts::retains the source conflict for a saved arm that committed nothing and moved nothing` |
@@ -480,17 +482,17 @@ Model and workspace tests, as the step's brief requires. No mounted test and no 
 | A field the transfer could not carry opens blank and is required | `recovery.test.ts::opens a field the transfer could not carry blank…` |
 | The carriage return is refused at the control **and** at the wire | `recovery.test.ts::refuses a carriage return at the control and again at the wire` |
 | The view: six rows in order, two editable, the labels, the transfers | `recovery.test.ts::lays the six fields out in the editor’s order…` |
-| The view carries the three-valued source-conflict answer | `recovery.test.ts::says the source conflict is still the person’s until a create commits` |
+| The view carries the three-valued source-conflict answer, all three arms | `recovery.test.ts::draws the source conflict as retained before any send…` (two arms), `::says a send may have written…` and `::takes the disk version in two steps…` (the middle one) |
 | A recovery conflict draws one control today, and the disk text beside it | `recovery.test.ts::offers only the way out for a conflict of its own…` |
 | Opening adopts nothing and carries the wire conflict unchanged | `recovery.test.ts::adopts nothing, spends nothing and closes nothing when it opens` |
 | **The rebase breaks the stale base**, goes out against the new revision, and records that the window may have moved | `recovery.test.ts::rebases the form onto the newly parsed file…` |
 | The rebase withdraws consent | `recovery.test.ts::withdraws consent when it rebases…` |
 | The rebase refuses wrong evidence, an ineligible file, and a refused adoption | `recovery.test.ts::refuses to rebase onto evidence a creation’s conflict never answers`, `::refuses to rebase onto a file that may no longer be written into`, `::leaves the form exactly as it was when the window refuses the adoption` |
 | The two-step reload closes the form, spends **this form's** conflict, and records that the window may have moved | `recovery.test.ts::takes the disk version in two steps…` |
-| Both adoption paths record it for `alreadyThere` as well as `installed` | `recovery.test.ts::records the window as moved for a spend that found it already there`, `::records the window as moved for a rebase whose adoption found it already there` |
+| Both adoption paths record it for `alreadyThere` as well as `installed` | `recovery.test.ts::records the spend of a confirmed reload that found the window already there`, `::records the spend for a rebase whose adoption found the window already there` |
 | A refused reload closes nothing, records nothing, and says the control is gone | `recovery.test.ts::does not close over a window that refused to move…` |
 | A refused rebase adopts nothing and records nothing | `recovery.test.ts::leaves the form exactly as it was when the window refuses the adoption` |
-| **A closed form answers itself from every export that takes one**, probed from a table over the produced form **and four hostile ones the type permits** | `recovery.test.ts::answers itself for every transition once it is closed, hostile fixture included` |
+| **A closed form answers itself from every export that takes one**, probed from a table over the produced form **and four hostile ones the type permits** | `recovery.test.ts::answers itself for every transition once it is closed, four hostile fixtures included` |
 | No probe reaches the window from a closed form, hostile fixtures included | the same case's per-fixture adoption recorder |
 | **The partition is checked against the module's own exports**, so a new one must be classified | `recovery.test.ts::classifies every value this module exports…` |
 | Neither reload step asks the window anything it should not | `recovery.test.ts::asks the window nothing without a conflict and without a confirmation` |
@@ -623,8 +625,33 @@ friendly fixture.
 
 | # | Finding | Where it is now |
 |---|---|---|
-| 1 | Medium — the outcome-language sweep was incomplete: the header, the `windowMoved` arm, `applyRecoveryCreate` twice, `recoveryCreateCouldNotBeSent`, `sendRecoveryCreate` and this record's §2.7 still said the projection **was** installed | All seven now name the observable act — an adoption spent, a re-read ordered — and say the projection **may** have changed. `installed` survives only where it is contrasted with `alreadyThere`, and every such place hedges in the same sentence |
+| 1 | Medium — the outcome-language sweep was incomplete: the header, the `windowMoved` arm, `applyRecoveryCreate` twice, `recoveryCreateCouldNotBeSent`, `sendRecoveryCreate` and this record's §2.7 still said the projection **was** installed | All seven now name the observable act — an adoption spent, a re-read ordered — and say the projection **may** have changed. What that sweep did **not** reach is the correction below |
 | 2 | Low, with a code half — five transitions read outcome, reload or acknowledgement state before checking `closed`, and a type-valid closed form retaining those fields could be changed or **could reach an adoption** | All five guard first (§4.7 lists the nine). The invariant case now probes four hostile forms as well as the produced one, and each of the seven guards was removed on its own to prove the fixtures catch it — three of the seven passed against the produced fixture alone |
+
+> **Corrected by the next review round, and this is the correction.** That round is
+> `## Round 5 — scoped pass over the third fix round` in `docs/reviews/phase-2c-4c-2-code.md`; this
+> record's §6.2 and §6.3 are that file's rounds **3** and **4**, and the ordinals here are left as
+> they were written rather than renumbered. The row above used to end *"`installed` survives only
+> where it is contrasted with `alreadyThere`, and every such place hedges in the same sentence"*,
+> which reads as **the sweep is complete**. It was not. Thirteen narrower carriers were still
+> standing: **two in the module** — the `windowWasReconciled` field summary, which said something
+> "made the window move", and `applyRecoveryCreate`'s implementation comment, which said the wrapper
+> ordered "a repair of the selection"; **eight in `recovery.test.ts`** — the uncertain-send comment,
+> the monotonicity case's name and comment, both `alreadyThere` case names, the two adoption cases'
+> comments and the view case's name, which claimed the source conflict stays the person's until a
+> commit and so omitted the middle answer entirely; and **three rows of §5 above**, which repeated
+> them. Two of the eight were beyond the sites that round listed. Every one now names the act — an
+> adoption spent, a re-read ordered — and, where that is the point, the uncertainty; the §5 rows cite
+> the renamed cases. **The pattern is the finding, not the thirteen sites**: this is the third
+> consecutive round whose sweep, written from the previous round's wording, closed what it was given
+> and left a narrower instance of it standing.
+>
+> **That round's second finding is corrected in the code and not here**, because §4.7 above was
+> already right: it is the `closed` contract on `RecoverySession` that still said **four** doors carry
+> an explicit guard and named the confirmed reload as protected only through a gate it already had,
+> and the invariant case's own commentary that still described **one combined** hostile fixture and
+> **three** non-identity probes where there are four and two. All three now describe what is there.
+> The guards, the fixtures and every assertion were ruled complete and were left untouched.
 
 **Did the five guards change observable behaviour?** No production path reaches any of them with
 anything to read, because the one producer of `closed` clears the outcome, the submission and the

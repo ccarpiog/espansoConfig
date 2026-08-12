@@ -903,9 +903,10 @@ describe('sending the recovery create', () => {
     expect(recoveryView(after).failureLines).toHaveLength(1);
     // **And the source conflict is not called intact**, which is the review's
     // High: `mayHaveWritten` is the exact answer on which `BrowserState.createMatch`
-    // re-reads the file, installs the projection and repairs the selection. The
-    // real wrapper doing so is `workspace.test.ts`'s to drive; what this pins is
-    // that the model stops claiming the window is where it was.
+    // orders a re-read of the file, and what that re-read installed — or where it
+    // left the selection — is reported back to neither this model nor its caller.
+    // The real wrapper ordering one is `workspace.test.ts`'s to drive; what this
+    // pins is that the model stops claiming the window is where it was.
     expect(sourceConflictState(after)).toBe('windowMoved');
     expect(recoveryView(after).sourceConflict).toBe('windowMoved');
   }); // End of the "uncertain send" case
@@ -1005,7 +1006,7 @@ describe('sending the recovery create', () => {
     } // End of the loop over the two ways a reconciliation can end
   }); // End of the "saved, committed: false, reconciled" case
 
-  it('keeps saying the window moved once it has, through every later transition', async () => {
+  it('keeps saying the window may have moved once a re-read was ordered, through every later transition', async () => {
     const moved = await sendRecoveryCreate(
       openedOverEditor(),
       recordingCreate([
@@ -1016,8 +1017,9 @@ describe('sending the recovery create', () => {
         }
       ]).create
     );
-    // Dismissing a panel, typing and choosing another destination are not
-    // observations of the window: none of them can put back what the re-read moved.
+    // Dismissing a panel, typing and choosing another destination observe nothing
+    // about the window: none of them can withdraw a re-read that was already
+    // ordered, and none of them can learn what came of it.
     expect(sourceConflictState(keepRecovering(moved))).toBe('windowMoved');
     expect(sourceConflictState(editRecoveryField(moved, 'trigger', ':again'))).toBe('windowMoved');
     expect(sourceConflictState(chooseRecoveryDestination(moved, 3))).toBe('windowMoved');
@@ -1026,7 +1028,7 @@ describe('sending the recovery create', () => {
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
     );
     expect(sourceConflictState(refusedLater)).toBe('windowMoved');
-  }); // End of the "the window does not move back" case
+  }); // End of the "the record is never withdrawn" case
 
   it('ignores an answer for a form that sent nothing', () => {
     const session = openedOverEditor();
@@ -1038,8 +1040,9 @@ describe('sending the recovery create', () => {
  * One export that takes a form and answers something, and what a closed form owes.
  *
  * `answersItself` is the property under test — the same session, by reference —
- * and `otherwise` is for the three doors that answer something else entirely: a
- * reapply answers a `ReapplyOutcome`, and `beginRecoveryCreate` answers `null`.
+ * and `otherwise` is for the two doors that answer something else entirely: a
+ * reapply answers a `ReapplyOutcome`'s `notAttempted`, and `beginRecoveryCreate`
+ * answers `null`.
  */
 interface ClosedFormProbe {
   /**
@@ -1224,9 +1227,11 @@ describe('the two ways out of a conflict of this form’s own', () => {
     expect(recoveryConflictOf(attempt.session)).toBeNull();
     expect(adoptions).toHaveLength(1);
     expect(adoptions[0]!.source).not.toBe(conflicted.origin.conflict);
-    // **The adoption it spent installed a projection**, so the source conflict's
-    // window is not the window it was registered against — the confirmation pass's
-    // first finding, in the second of the two paths that carried it.
+    // **The adoption it spent was not refused**, which is all this transition
+    // tests for — the double answers `installed`, and the case below drives
+    // `alreadyThere` through the same arm — so this form can no longer vouch for
+    // the window the source conflict was registered against: the confirmation
+    // pass's first finding, in the second of the two paths that carried it.
     expect(attempt.session.windowWasReconciled).toBe(true);
     expect(sourceConflictState(attempt.session)).toBe('windowMoved');
     // And the next send really goes out against the newly parsed revision.
@@ -1297,7 +1302,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
     expect(sourceConflictState(conflicted)).toBe('retained');
   });
 
-  it('records the window as moved for a rebase whose adoption found it already there', async () => {
+  it('records the spend for a rebase whose adoption found the window already there', async () => {
     const attempt = reapplyRecoveryToDiskVersion(await conflictedForm(), adopting('alreadyThere').adopt);
     expect(attempt.kind).toBe('reapplied');
     if (attempt.kind !== 'reapplied') {
@@ -1336,15 +1341,15 @@ describe('the two ways out of a conflict of this form’s own', () => {
     // The conflict recovery was opened from is another conflict on another
     // surface, and this transition neither answers nor spends it — **and that is
     // not the same as leaving the window it was registered against alone**, which
-    // is the confirmation pass's first finding. The adoption just spent installed
-    // a projection here.
+    // is the confirmation pass's first finding. An adoption was spent here, and a
+    // satisfied spend does not say whether a projection was installed.
     expect(closed.origin.conflict).toBe(conflicted.origin.conflict);
     expect(closed.windowWasReconciled).toBe(true);
     expect(sourceConflictState(closed)).toBe('windowMoved');
     expect(recoveryView(closed).sourceConflict).toBe('windowMoved');
   }); // End of the "confirmed reload" case
 
-  it('records the window as moved for a spend that found it already there', async () => {
+  it('records the spend of a confirmed reload that found the window already there', async () => {
     // `spendTheConfirmedReload` collapses `installed` and `alreadyThere` into
     // `satisfied`, so this transition cannot tell them apart — and `windowMoved`
     // claims uncertainty, so recording it over-claims nothing while staying
@@ -1390,7 +1395,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
     );
   }); // End of the "the export partition is exhaustive" case
 
-  it('answers itself for every transition once it is closed, hostile fixture included', async () => {
+  it('answers itself for every transition once it is closed, four hostile fixtures included', async () => {
     // **The confirmation pass's second finding, and then round 4's.** The first
     // named `focusRecoveryField`; the property is that a form the person has left
     // behind produces no new value from **any** door. Round 4's addition is that
@@ -1399,12 +1404,14 @@ describe('the two ways out of a conflict of this form’s own', () => {
     // cleared *by that transition* — so an explicit guard and identity caused by an
     // empty fixture were indistinguishable.
     //
-    // The second fixture is the adversarial one `RecoverySession`'s own type
-    // permits: **closed while still carrying a refusal, a conflict, a submission
-    // and a confirmed reload step.** Nothing in this module produces it today, and
-    // nothing in TypeScript forbids it — `closed implies cleared` is not encoded —
+    // Beside it stand **four** adversarial forms `RecoverySession`'s own type
+    // permits, one state each rather than one form carrying them all: a conflict at
+    // each of the three reload steps, and a refusal with the submission consent is
+    // collected against. Nothing in this module produces any of them today, and
+    // nothing in TypeScript forbids one — `closed implies cleared` is not encoded —
     // so a transition that reads any of those before checking `closed` shows up
-    // here, an adoption reached from a closed form included.
+    // here, an adoption reached from a closed form included. They are probed one at
+    // a time, each with an adoption recorder of its own.
     const confirmed = confirmRecoveryDiskReload(
       askToReloadRecoveryDiskVersion(await conflictedForm())
     );
@@ -1568,7 +1575,10 @@ describe('what a screen would draw', () => {
     });
   });
 
-  it('says the source conflict is still the person’s until a create commits', async () => {
+  it('draws the source conflict as retained before any send, and as spent once a create commits', async () => {
+    // Two of the three answers, and deliberately not the middle one: `windowMoved`
+    // is drawn from this same view where it is produced — by the uncertain send and
+    // by the confirmed reload, both above.
     const session = openedOverEditor();
     expect(recoveryView(session).sourceConflict).toBe('retained');
     const committed = await sendRecoveryCreate(

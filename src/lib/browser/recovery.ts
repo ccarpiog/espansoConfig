@@ -839,20 +839,30 @@ export interface RecoverySession {
   /**
    * Whether a confirmed reload has ended this form.
    *
-   * A reload here adopts the disk projection and **closes the recovery form**;
+   * A reload here spends an adoption of the disk version and **closes the recovery
+   * form**;
    * there is no disk-side recovered draft to seed one from. The source conflict is
    * behind it and is **not answered by this** — but the adoption that closed the
    * form is one the window may have installed a projection for, which
    * {@link RecoverySession.windowWasReconciled} is what records.
    *
    * **Terminal**: every export that takes a form and answers one answers the
-   * **same** form when it is closed — four by a guard written for that
-   * ({@link focusRecoveryField}, {@link keepRecovering},
-   * {@link applyRecoveryCreate}, {@link recoveryCreateCouldNotBeSent}) and the
-   * rest through the gates they already had. `recovery.test.ts` probes them
-   * against this module's own export list, so a new one has to be classified
-   * before that suite passes; what no test there can force is that a new export is
-   * classified **correctly**.
+   * **same** form when it is closed, and the one that answers something else
+   * attempts nothing — {@link reapplyRecoveryToDiskVersion}'s `notAttempted`.
+   * **Nine carry a guard written for that**, each deciding on `closed` before the
+   * transition acts on anything else: {@link focusRecoveryField},
+   * {@link applyRecoveryCreate}, {@link recoveryCreateCouldNotBeSent},
+   * {@link acknowledgeRecoveryFindings}, {@link keepRecovering},
+   * {@link askToReloadRecoveryDiskVersion}, {@link confirmRecoveryDiskReload},
+   * {@link reloadRecoveryDiskVersion} and {@link reapplyRecoveryToDiskVersion} —
+   * the last two before an adoption can be reached at all. The rest answer through
+   * the gates they already had: {@link isRecoveryEditable} is `false` for a closed
+   * form, and {@link recoveryRefusal} answers `formClosed`, which is what
+   * {@link beginRecoveryCreate} and {@link sendRecoveryCreate} stop on.
+   * `recovery.test.ts` probes them against this module's own export list, so a new
+   * one has to be classified before that suite passes; what no test there can
+   * force is that a new export is classified **correctly**, nor that the forms the
+   * probes are handed are hostile enough to expose a guard that is missing.
    */
   readonly closed: boolean;
   /**
@@ -864,7 +874,8 @@ export interface RecoverySession {
    */
   readonly committed: boolean;
   /**
-   * Whether anything short of a committed create made the window move.
+   * Whether anything short of a committed create spent an adoption or ordered a
+   * re-read.
    *
    * **The 2c-4c-2 review's High, and the reason `!committed` was not the whole
    * story.** Four things set it, and none of them commits anything:
@@ -1563,8 +1574,10 @@ export function applyRecoveryCreate(
   // **The window's own reconciliation, read off the answer rather than assumed.**
   // `adoption` is `notOwed` exactly when `BrowserState.createMatch` decided the
   // result left this window in step, and anything else means it ordered a re-read
-  // and a repair of the selection — after which this form cannot go on calling the
-  // window `retained`, whatever that re-read found.
+  // of the file. What that re-read installed, and where it left the selection, is
+  // reported back by neither the answer nor this module — so what is recorded is
+  // the order and never its outcome, after which this form cannot go on calling
+  // the window `retained`.
   const windowWasReconciled = session.windowWasReconciled || adoption.kind !== 'notOwed';
   if (result.outcome !== 'saved') {
     return {
@@ -1873,11 +1886,13 @@ export function confirmRecoveryDiskReload(session: RecoverySession): RecoverySes
 } // End of function confirmRecoveryDiskReload()
 
 /**
- * Adopts the disk version into the window and ends this recovery form.
+ * Spends an adoption of the disk version and ends this recovery form.
  *
  * **The match-level reload result, for a form whose draft nothing on disk
- * describes**: there is no disk-side recovered snippet to seed, so the window
- * crosses to the disk observation and this form **closes**.
+ * describes**: there is no disk-side recovered snippet to seed, so this form
+ * **closes** on the spend rather than on anything the spend is found to have
+ * done. What the adoption installed, if anything, is not reported here — a
+ * satisfied one answers `alreadyThere` as readily as `installed`.
  *
  * **A satisfied spend records that the window may have moved**, which is the confirmation
  * pass's first finding: this transition does not spend the source conflict's
@@ -2116,10 +2131,16 @@ function rebuiltDestinations(
  *
  * **Every offer is withheld and every declaration is true of a transition that
  * exists.** The drafted value is two strings a person typed, so `draftKind` is
- * `authoredText`. A reload here adopts the disk projection and **ends this form** —
- * {@link reloadRecoveryDiskVersion} — so `reloadOutcome` is `closesSurface` and the
- * warning `describeConflict` appends to every conflict arm describes something this
- * value really does. `reapplySupport` is `supported` because
+ * `authoredText`. A reload here spends an adoption and **ends this form** —
+ * {@link reloadRecoveryDiskVersion} — so `reloadOutcome` is `closesSurface`, which is
+ * the part of the appended warning this value can vouch for: **the closing**, and
+ * that nothing is seeded in the draft's place. It does **not** vouch for the
+ * warning's *"moves this window to it"*, which is a claim about where the projection
+ * ends up and this module never learns that — a satisfied adoption answers
+ * `alreadyThere` as readily as `installed`. That sentence is shared with the surfaces
+ * that already draw it, so it is not this module's to change; it is carried on
+ * `PROGRESS.md`'s standing debt ledger with the reading that disputes it.
+ * `reapplySupport` is `supported` because
  * {@link reapplyRecoveryToDiskVersion} **is** that transition, built and driven by
  * this module's own suite.
  *
