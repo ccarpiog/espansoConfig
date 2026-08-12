@@ -3651,6 +3651,10 @@ point; the bundle hash; that `git status` showed exactly the five paths above an
 that `browser.saveOutcome.reloadClosesSurface` is drawn on two shipped surfaces, which is the
 correction that moved round 7's finding out of this step and onto the ledger.
 
+**Git state:** committed as **`b1bc7b0`** — *"Phase 2c-4c-2 rounds 5-7: the claim that changed its
+clothes twice"* — five paths staged by name, pushed to `origin/main` (`7ea06c1..b1bc7b0`). The tree is
+clean and `b1bc7b0` is where a fresh session resumes.
+
 ---
 
 ## Phase 2c-4c step 2 — the rounds 5–7 disposition
