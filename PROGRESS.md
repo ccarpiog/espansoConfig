@@ -12371,7 +12371,19 @@ _Updated at each phase boundary._
 | **2c-4c step 1** | **`dc664ce`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path** even so, out of the habit 2c-4b's harness steps forced: the commit holds **23 files** — nine core sources and tests, four `src-tauri/` files, seven frontend files, the two new documents and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
 | **2c-4c step 3a** | **`ac4a4b8`** | ✅ pushed to `origin/main` (`d9df5bd..ac4a4b8`) | **clean** — eighteen files staged **by path**, no harness in the tree |
+| **2c-4c step 3b (closes 2c-4c-3)** | **`c0f2e2f`** | ✅ pushed to `origin/main` (`a93323e..c0f2e2f`) | **clean** — fifteen files staged **by path**, no harness in the tree: eleven frontend sources and tests (one of them new), the step's record, its two-round review, `CLAUDE.md` (the module ladder, its spent shorthand, and the deciding-is-not-drawing rule) and this checkpoint. **It holds both review rounds' fixes**, as every phase since `8989c16` does, so no commit carries a demonstrated defect. **The next path that must never be swept in by `-a` appears at 2c-4c-4**, which rebuilds the window instrument |
 | 2c-4c step 2 | `4e29589` | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path**: the commit holds **six files** — `src/lib/browser/recovery.ts`, `src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts`, `docs/decisions/2c-4c-2-notes.md`, `docs/reviews/phase-2c-4c-2-code.md` and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
+
+`c0f2e2f` is Phase 2c-4c **step 3b**, and it **closes 2c-4c-3 in both its halves**. It is committed
+**on a round-2 verdict of no High**, with that round's one Medium — an over-claim the round-1 fix's
+own record had introduced — closed before the commit by doing the work *and* narrowing the sentence.
+It holds **fifteen files** staged by name: `RecoveryWithoutCreation.svelte` (new),
+`recovery.{ts,test.ts}`, the four surfaces and their four mounted suites,
+`docs/decisions/2c-4c-3b-notes.md`, `docs/reviews/phase-2c-4c-3b-code.md`, `CLAUDE.md` and this
+checkpoint. **No dictionary file is among them** — 3b added no string. **No harness exists to
+exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the
+instrument. **A fresh session starting 2c-4c-4 resumes at `c0f2e2f` or later.** As at 1b-1,
+`npm install` is required before any frontend command will run.
 
 `ac4a4b8` is Phase 2c-4c **step 3a**, committed **on a round-2 verdict of no High and no Medium**,
 with its one Low — a false sentence the round-1 fix had introduced — closed before the commit. It
