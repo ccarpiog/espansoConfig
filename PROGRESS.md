@@ -86,7 +86,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-2** | **Recovery as browser values, with nothing drawn**: `src/lib/browser/recovery.ts` — the six-surface route matrix, `recoveryAvailability` as the single producer of both the choice list and the destination list, the six field transfers through `fieldIntent`, destination selection judged by the **disk** projection, `RECOVERY_POSITION` as the only position anywhere, and `sendRecoveryCreate` composing `BrowserState.createMatch` through a callback. No `.svelte`, no `ConflictChoice` member, no dictionary key, no Rust | ✅ complete — after **five** review rounds. Round 1 returned **NOT READY** on five findings; rounds 2–5 each closed what was named and **each found a narrower instance of it**, four of the five times in a path the previous fix had introduced. Only two findings in five rounds were defects in behaviour — round 1's High (`sourceConflictRetained` claiming an intactness the composed wrapper can falsify) and round 5's five missing `closed` guards — and **neither was reachable from a window**, because nothing draws this module yet |
 | **2c-4c-3a** | **The recovery panel, and the first screen in this phase that draws anything**: one shared `src/lib/components/RecoveryPanel.svelte` driven by `recoveryView()`, wired into `MatchEditor.svelte` and `MatchCreator.svelte` only, 58 `browser.recovery.*` keys per language behind seven reactive accessors, and the mounted evidence step 1's live behaviour change never got. **Step 3 was split by the orchestrator**; the four non-creating surfaces are 3b | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on two Highs: `runCreate` never installed the `saving` session before awaiting, so **a double-click sent two writes on one base revision and a late conflict could replace a committed answer** — this project's one absolute prohibition, reachable from a button — and `sourceConflict.retained` claimed an intactness its predicate cannot establish. Round 2 confirmed the fix sound, found **no High and no Medium**, and left one Low: a false sentence **the fix round itself introduced** |
 | **2c-4c-3b** | **The four surfaces that recover without creating**: `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and `RawEditor.svelte` draw a **reason and not a form**, through one new shared `src/lib/components/RecoveryWithoutCreation.svelte` mounted unconditionally by all four. `recoveryWithoutCreation()` and one **ordering change** in `recoveryAvailability` — the conflict is asked about first — and no new string, no dictionary key, no transition, no Rust. **With 3b the consult's step-3 matrix is complete on all six surfaces** | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on one High: the four hosts each carried their own `{#if}` and accessor call, so `recoveryWithoutCreation` centralized *which* reason but not *whether it is drawn*, and **one host could omit the sentence while consuming the model faithfully** — the 2c-3c-3 failure mode exactly. The fix built the shared renderer. Round 2 found **no High**, and its one Medium was an over-claim **the fix round's own record introduced** while fixing an over-claim |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3 are complete, 3 in both its halves. Step 4, rebuilding the window instrument, is next** |
+| **2c-4c-4a** | **The instrument, rebuilt from prose — both halves this time.** 2c-4b-3d-3 deleted `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the whole scratch tree, so unlike 3d-2a (which still had both probe sources) this step had **nothing** to start from. `src-tauri/src/probe.rs` is **authored from the code** for the first time in this project's history: no record carries its source. `launch.sh`, 21 fixtures and a 23-row case table re-authored from four construction records. **Step 4 was split by the orchestrator**; the recovery cases are 4b | ✅ complete — after a review fix round. **Twelve launches (P01–P12), all twelve with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all twelve**; P07–P12 are the proof set, one per write surface. Codex returned **NOT READY** on a High, two Mediums, a Low and an Observation — **the instrument itself was not faulted**: the audit found the six plans credible, the hooks inert without `ECFG_PROBE_PLAN`, and the conflicts genuine. **No executable line changed in the fix round**; all five findings were prose in the record |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3 are complete, 3 in both its halves, and step 4 is complete in its first half. Step 4b — the recovery cases, whose scope the 4a review sharpened — is next** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -7284,7 +7285,129 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Steps 2c-4c-1, 2c-4c-2 and **2c-4c-3 in both its halves** are complete. **Step 2c-4c-4 — rebuild the window instrument — is next.**
+### Steps 2c-4c-1, 2c-4c-2, **2c-4c-3 in both its halves** and **2c-4c-4a** are complete. **Step 2c-4c-4b — the recovery cases — is next.**
+
+**Step 4 was split in two by the orchestrator**, the way step 3 was, and for the same reason: 4a had
+to rebuild **both** halves of the harness from prose, which 3d-2a never had to do. The consult's
+six-step cut is unchanged.
+
+#### ⚠️ The harness is in the working tree and MUST NOT be committed
+
+`git status --short --untracked-files=all` right now lists **four harness paths**, and the checkpoint
+commit for 4a stages `PROGRESS.md` and the two `docs/` files **by path** and nothing else:
+
+```
+ M src-tauri/src/main.rs      ← two hook lines
+ M src/main.ts                ← two hook lines
+?? src-tauri/src/probe.rs     ← untracked, authored from the code
+?? src/probe.ts               ← untracked, 981 lines
+```
+
+**Never `git commit -a` while these are in the tree.** Step 4b uses them, step 5 reads with them, and
+**step 6 deletes them and re-derives the production gate counts**.
+
+**The scratch tree is `/private/tmp/espansoconfig-harness-2c-4c/`** — `launch.sh`, `fixtures/` (21),
+`launches/P01…P12/`, `manifest-2c-4c-4a-post.sha256` (48 entries, all verify), ~493 MB. Steps 4b, 5
+and 6 all need that path.
+
+#### What 4a established, and the one thing it got wrong
+
+**Twelve launches, all twelve with a zero-byte `probe.err`, one `--- end` each, no `--- failed`,
+`bytes=MATCH` on all twelve.** P07–P12 are the proof set — `editor-exact`, `creator-front`,
+`deleter-exact`, `mover-exact`, `duplicator-exact`, `raw-negative`, one per write surface. P01–P06 are
+the same six pairings on the pre-`cargo fmt` binary, retained. The two binaries are pinned by a
+`binary=` digest in each launch's `bytes.txt`.
+
+**Source-to-binary provenance is unknown and the record now says so.** No build transcript was
+retained and `launch.sh` copies whatever `ECFG_BINARY` names without checking a timestamp, so the
+strongest true statement is that P07–P12 ran an executable whose digest matches the one now at
+`target/debug/espansoconfig`. *A tree rebuilt from the records reaches all six surfaces* is *not*
+available — it conjoins source inspection with a byte measurement. Codex's High was exactly this, in
+three passages.
+
+**The language coverage is aggregate, not per-surface.** English for the editor, deleter and
+duplicator; Spanish for the creator, mover and raw editor; **no surface was launched in both**. Step 5
+is what owes both languages on every surface.
+
+#### ⚠️ What the 4a review changed about step 4b's scope — read this before writing a plan function
+
+4a's record originally said *nothing about recovery is in this instrument*. **That was false**, and the
+review found it by tracing the mounts rather than reading the case table. Verified directly in the
+components: `MatchDeleter.svelte:548`, `MatchMover.svelte:815`, `MatchDuplicator.svelte:708` and
+`RawEditor.svelte:541` mount `RecoveryWithoutCreation` **unconditionally**, handing it the live
+`view.conflict` — so **P09–P12 already drew a recovery sentence**. `MatchEditor.svelte:908` and
+`MatchCreator.svelte:791` mount `RecoveryPanel` from their reapply outcome and retained conflict.
+
+So 4b does **not** add recovery reach. It adds **reporting and activation**, and its scope is these
+three things:
+
+1. **Targeted reporting of `[data-recovery-without-creation]`** on the four non-creating surfaces. The
+   driver today reads only the non-reapply status panel and then `[role="status"]` blocks
+   (`src/probe.ts:367`, `:379`, `:486`, `:506`), so that element never enters a transcript. Look for
+   the **element**, never a string — `RECOVERY_WITHOUT_CREATION_ATTRIBUTE` carries the reason the
+   component itself derived, which is how a host that re-inlined the paragraph is caught.
+2. **Targeted reporting and activation of the editor's and creator's recovery offer** — assert it,
+   then press it. No launch has ever done either.
+3. **A `.recovery`-scoped driver for the opened form**, through its own create / refusal / conflict /
+   reload outcomes. **The scope is load-bearing**: that form has status panels of its own, and an
+   unscoped `[role="status"]` sweep would conflate them with the host surface's.
+
+Plus the expected-byte fixtures a recovery create needs — placement is a fixed `RECOVERY_POSITION` of
+`End`, with no chooser, and the trigger is an **editable literal**, never auto-suffixed.
+
+#### Also owed, and 4b is the natural place — the five holes 2c-4b left
+
+`2c-4b-3d-3-notes.md` §4.1's list, unclosed by 4a: `browser.notice.gone`'s second producer
+(`repairSelection`'s `clearSelection` arm, `src/lib/browser/selection.ts:292`), and the
+**confirmed-reload** transition on the creator, the deleter, the mover and the duplicator. This tree
+has a reload case on **one** surface — `editor-reload-gone`, rebuilt from 3d-2a §8.3 — and it was not
+launched. Adding the other four costs a plan function each, not a launch.
+
+#### Four un-launched expected-bytes fixtures are predictions, not measurements
+
+`editor-fallback-expected.yml`, `mover-reordered-expected.yml`, `mover-after-expected.yml` and
+`mover-end-expected.yml` were authored from the records' *Expected afterwards* columns and have never
+been compared against anything. **Read a `bytes=DIFFER` on an un-launched positive as a suspect
+fixture first**, not as an application defect. The five that did match are the reason to expect these
+to — including `creator-front-expected.yml`, the one derived from `choose_scalar`/`render_item` rather
+than from byte preservation, which matched byte-for-byte.
+
+#### The gates, re-derived by the orchestrator **with the harness in the tree**
+
+```sh
+npm test           # 1768 passed, 51 files    ← with-harness; production is 1767
+npm run check      # 424 files, 0 errors      ← with-harness; production is 423
+npm run build      # 181 modules              ← with-harness; production is 180
+cargo test --workspace   # 1112 passed, 0 failed    ← unchanged by the harness
+```
+
+**These are with-harness figures and must never be carried forward as production numbers** — that is
+the defect 2c-4b-3d-3 found and fixed. Step 6 re-derives `1767 / 423 / 180 / 1112` on a harness-free
+tree. The `+1` on each frontend gate is `src/probe.ts`: one new `.ts` module, no styles, and the
+per-source-file `it.each` scanners add its row.
+
+**The bundle was searched as well as counted**, per `CLAUDE.md`'s ladder warning: `internal/server`,
+`svelte/server` and `async_hooks` are all absent from `dist/assets/index-*.js`, and the search is live
+(495 `svelte` hits in the same file). Do both, never the number alone.
+
+#### Privacy, verified rather than assumed
+
+No launch log contains any path under `/Users/ccarpio/`; the real espanso config directory is
+untouched; no `.espansoconfig-backups` exists outside the launch trees. Every fixture is neutral —
+`:alpha`, `:beta`, `:gamma`, `:probe` and nothing else.
+
+#### What 4a's review cost, and the lesson
+
+One round, five findings, **none of them a defect in the instrument**. All five were prose in the
+record, and the fix round changed no executable line. **The orchestrator's own fix then wrote a count
+larger than the work it described** — "four places" where three passages had been narrowed — caught by
+the standing post-fix sweep and corrected before the commit. That is the **eighth consecutive round in
+this phase where a fix produced a finding**, and the first where the fix and the finding were the same
+person's. The disposition is at the foot of `docs/reviews/phase-2c-4c-4a-instrument.md`.
+
+---
+
+### ⚠️ HISTORICAL — the step-3b handoff, kept because its items 2 and 3 still bind
 
 **Step 3 was split in two by the orchestrator and both halves are done.** The consult's six-step cut
 is unchanged. 3a built the shared panel, its strings and the two surfaces that can create; 3b drew
