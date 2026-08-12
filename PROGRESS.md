@@ -11410,6 +11410,14 @@ _Updated at each phase boundary._
 | **2c-4b step 3d-2b** | **`692b0e0`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d-3**, which is the step that removes them. Staged **by path**, never `-a`: the commit holds **four documents and nothing else** — this checkpoint, `docs/decisions/2c-4b-3d-2b-window-reading.md`, `docs/reviews/phase-2c-4b-3d-2b-reading.md` and `docs/reviews/phase-2c-4b-3d-2b-confirmation.md` — because a reading changes no tracked code. **`src/probe.ts` carries this step's `scrollIntoView` spy**, which is why the two older manifests each fail on exactly that one entry (45/46 and 130/131) and were **recorded rather than regenerated**; `manifest-3d-2b-fix-post.sha256` (177 entries) is the current post-image. **Never `git commit -am` while the harness is there** |
 | **2c-4b step 3d-3** | **`e3e2530`** | ✅ pushed to `origin/main` | **clean** — the first clean tree since 3d-1, because this is the step that removed the harness. `git status --short --untracked-files=all` returns **nothing** and `git diff` is empty. Staged **by path** even so: the commit holds **three files** — this checkpoint, `docs/decisions/2c-4b-3d-3-notes.md` and `docs/reviews/phase-2c-4b-3d-3.md`. **The removal is in no diff**: the two probe sources were untracked and the four hook lines returned to what `HEAD` already held, so the evidence is the gate numbers and the empty status, not the patch |
 
+| **2c-4c design consult** | **`5027de1`** | ✅ pushed to `origin/main` | **clean** — the consult changed no source file. Staged **by path**: the commit holds **two files**, `docs/reviews/phase-2c-4c-design.md` and this checkpoint. `81bc193` is its parent, and the four production gates were re-run on that pristine tree **before** any edit, which is where the confirmation of `1633` comes from |
+
+`5027de1` is Phase 2c-4c's design consult, and it is the phase's **first act rather than its first
+step** — no source file changed, so it owes no mounted test and no window reading. A fresh session
+should start from it and go to **2c-4c-1**, the Rust contract, which is the top of "Next action".
+
+---
+
 `e3e2530` is Phase 2c-4b step 3d-3, and it is the **first commit since `a2069db` that leaves a clean
 working tree** — the harness is gone, so `git status --short --untracked-files=all` returns nothing
 and the "deliberately not clean" note that qualified the three rows above it does not apply. It holds
