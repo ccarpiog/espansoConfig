@@ -79,8 +79,10 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3d-1** | **The four fixes**, with no reading and no removal: §11.3's two false selection notices given wording true of their **predicates**, §11.1's invisible reapply report given a reveal cue of its own, §11.5's false collision reason widened to the real disjunction, and §11.2's Spanish register. **3d was cut in three here** — the fixes, the re-take, the removal — the way 3c was cut | ✅ complete — after **three** review rounds and an orchestrator fix round. Round 1 returned **NOT READY** on a High (`revealReapplyReport` claiming a movement its own `scrollQuietly` does not force) and two Lows; round 2 returned **NOT READY** on two more; round 3 returned **NOT READY** on one, and it was again a **narrower instance** — the fifth consecutive round to find one. **No finding in any round was a defect in behaviour**: every one was a sentence, a contract or a count claiming more than the code gives |
 | **2c-4b-3d-2a** | **The instrument, rebuilt** — because the scratch half of the harness was gone. `launch.sh`, the fixtures and the driver's case table reconstructed from the three construction records, plus the two cases the reading needed and no step had ever built: one that draws `browser.notice.gone` and one that draws `fieldCollisions`' **ineligibility** arm. **3d-2 was cut in two here**, construction from reading, the way 3c and 2c-4a-3c were both numbered | ✅ complete — `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`, after **three** review rounds. 11 launches (P01–P11), all reaching `--- end` with a zero-byte `probe.err`, none printing `--- failed`, all `bytes=MATCH`. Round 1 returned **NOT READY** on three Highs, **two of which were real instrument gaps** of exactly the kind that stranded an earlier reading; round 2 confirmed both closed by source trace and returned **NOT READY** on prose alone, saying so in its own verdict: *no new launch or fixture is required by this review*; round 3 returned **NOT READY** on two Mediums and a Low, one of them **the orchestrator's own fix**, which is the seventh consecutive round to find a narrower instance of what the round before closed. **Fourteen findings across three rounds and not one was a defect in the instrument or in the application** |
 | **2c-4b-3d-2b** | The **re-take reading**: every component 3d-1 changed, read again in a window, in both languages — **six** surfaces, because `RawEditor.svelte` was drawn into the sweep | ✅ complete — `docs/decisions/2c-4b-3d-2b-window-reading.md`, after a review round and a confirmation pass. **64 launches (P12–P75)**: P12–P53 are the reading as first taken, **P54–P75 its fix round**; all 64 reached `--- end` with a zero-byte `probe.err`, none printed `--- failed`, all 64 report `bytes=MATCH` — including the five expected-bytes files 3d-2a §6.3 had flagged as never compared against anything. Round 1 returned **NOT READY** on six findings (3 Medium, 2 Low, 1 Observation); the confirmation pass returned **NOT READY** on three Lows, all three wording defects in the record and all three closed. **None of the nine is a defect in what is written to a user's file**, and neither are the reading's own six (F1–F3 **Low**, F4–F6 **Observation**). **The step's real result: two obligations no launch of this project could previously observe were closed by instrumenting the harness rather than by rewording** — a `scrollIntoView` spy with pane samples taken synchronously either side of each call measured obligation (f)'s *which of the three the reveal did* (the request is issued and moves nothing, on all five match surfaces in both languages; the editor's final offset is the browser's clamp) and obligation (c)'s *a second press still scrolls* (one `origin=app` request in each of ten `:twice` launches, producing no movement against a pane with room). The bound it keeps: the fixture shape is still the easy one, **none of the fifteen corpus fixtures `CLAUDE.md` §4 lists has been through this harness**, and the owner's real configuration has never been opened by it |
-| 2c-4b-3d-3 | The **harness's removal** and the return to the production gate numbers (1623 / 418 / 175) | ⬜️ **next** |
-| 2c-4c … 2c-5 | The rest of the editing UI. See the 2c split table below | ⬜️ not started |
+| **2c-4b-3d-3** | The **harness's removal** and the return to the production gate numbers — **which are `1633 / 418 / 175`, not the `1623 / 418 / 175` this row said until 3d-3 measured them** | ✅ complete — `docs/decisions/2c-4b-3d-3-notes.md`. Both halves gone: the two untracked probe sources, the four hook lines reverted, and the 3.0 GB scratch tree with its 75 launch directories, 21 fixtures and 3 manifests. `git status --short --untracked-files=all` returns **nothing**. The step changed **no tracked source file**, so no reading and no mounted test is owed. Its one finding is in a record, not in the application: the production test count `1623` was **stale**, carried forward through three step records after 3d-1 committed 10 cases while the harness was in the tree. Codex returned **NOT READY** on eight findings, **every one of them prose**; the High was this record claiming a `PROGRESS.md` correction it had not yet made, and one Medium was closed **by measuring** (34 case lines added, 24 removed, net **+10**) rather than by softening the claim. **This closes 2c-4b-3d** |
+| **Phase 2c-4b** | **Reapply** — "keep my draft" in plan §12's strong sense: identify the intended match in the newly parsed document and apply only when confidence suffices | ✅ **complete.** Ten steps (1, 2, 3a, 3b, 3c-1, 3c-2, 3d-1, 3d-2a, 3d-2b, 3d-3), all three kinds of evidence, and the instrument built, rebuilt and removed twice over. The correspondence proof is in the core (`reconcile.rs`), the transitions are in `src/lib/browser/reapply.ts`, *Keep my draft* is drawn on the five match surfaces and **absent on the raw editor**, and the 71-launch Q7 matrix plus the 64-launch re-take were read in both languages. **No finding in any round of 3d changed a byte written to a user's file** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake | ⬜️ **next** |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3431,6 +3433,100 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4b step 3d-3
+
+**Record:** `docs/decisions/2c-4b-3d-3-notes.md`. **Review:** `docs/reviews/phase-2c-4b-3d-3.md`.
+
+**This step changed no tracked source file.** Its whole effect is the absence of two untracked files,
+the reversion of four hook lines to what `HEAD` already held, and the deletion of a 3.0 GB scratch
+tree. **No window reading and no mounted test is owed**, because no component changed and the two
+files that did change went back to the versions every existing reading was taken against.
+
+**The gates, each run by the orchestrator on the exact tree, before and after the removal**, and none
+taken from a worker's report:
+
+| Gate | With the harness | After the removal |
+|---|---|---|
+| Frontend tests | `npm test` — 1634 passed, 49 files | **1633 passed, 49 files** |
+| Types | `npm run check` — 419 files, 0/0 | **418 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` — 176 modules | **175 modules** |
+| Rust tests | `cargo test --workspace` — 1086 | **1086 passed, 0 failed** — re-summed from all 25 `test result:` lines |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| Format | `cargo fmt --check` | clean |
+| Architecture (D2x) | `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+| Bundle shape | `rg -l 'svelte/internal/server\|async_hooks' dist/assets/` | no hits — the −1 shape, not the `resolve.conditions` regression |
+
+**The working tree.** `git status --short --untracked-files=all` returns **nothing at all** and
+`git diff` is empty. No real-config path appears anywhere in it.
+
+### The one finding, and it is a record's, not the application's
+
+**The production frontend test count was `1623` in this file and is `1633`.** Two of the three
+production figures were right; the test count had been stale since 3d-1 and was copied forward through
+three consecutive step records. The arithmetic, re-runnable rather than assertable:
+
+```
+1623  production at 3a
++ 1   src/probe.ts as a case in scripts/lint/ipc-detail.test.ts (one case per .ts/.svelte under src/)
+= 1624 with the harness at 3b
++ 10  net cases committed by a2069db (3d-1): 34 added `it(`/`test(` lines, 24 removed,
+      and `rg -c '^[-+].*\.each'` over that diff finds nothing, so no line hides more than one case
+= 1634 with the harness at 3d-1, 3d-2a and 3d-2b
+- 1   the probe case, removed here
+= 1633 production at 3d-3
+```
+
+**Why nothing could fail for it:** a production number is only observable on a tree with no harness in
+it, and there was no such tree between 3d-2a and this step. `418` and `175` survived because 3d-1
+added no file under `src/` and no source module — it added cases inside test files that already
+existed. The two stale sentences are **annotated in place** in the 3d-2a and 3d-2b sections above,
+beside the originals rather than replacing them, the way 3d-2a annotated `BLOCK_TEXT_LIMIT`.
+
+### What the removal does not close, and never was going to
+
+3d-2a §6.7's **five holes** survive, unchanged: `browser.notice.gone`'s second producer
+(`repairSelection`'s `clearSelection` arm, `src/lib/browser/selection.ts:292` — the reading drew that
+sentence from `reresolve`'s **length** arm only), and the confirmed-reload transition on the creator,
+the deleter, the mover and the duplicator, which exists on all five match surfaces and had a case on
+one. **None is an obligation of `2c-4b-3d-1-notes.md` §7**, and each now costs an instrument rebuild
+as well as its missing fixture or plan arm. A rebuild needs the *inputs* — the two probe sources, the
+four hook lines, `launch.sh`, the case table and the fixtures — **not** `launches/P01…P75/`, which is
+retained output; and **3.0 GB is what 75 launches grew to, not a reconstruction footprint.**
+
+**The bound the reading kept is restated so it is not lost with the instrument that carried it:** the
+fixture shape was the easy one — plain `replace:` scalars, double-quoted triggers, LF, no BOM, no block
+scalars, no item-owned comments, no read-only file. **None of the fifteen corpus fixtures `CLAUDE.md`
+§4 lists has ever been through this harness, and the owner's real configuration has never been opened
+by it.**
+
+---
+
+## Phase 2c-4b-3d-3 review disposition
+
+**Round 1 — NOT READY. One High, four Medium, three Low** (`docs/reviews/phase-2c-4b-3d-3.md`).
+**Every one of the eight is prose**; not one is a defect in the removal, and none changes a byte
+written to a user's file. The reviewer was asked specifically to **refute** the 1633 conclusion and
+did not: *"The current production count is unambiguously 1633 passed / 49 files, because it was
+measured after removal on a clean tree."* It also ruled the manifest bound (§1.3) *"honest and
+adequate […] It does not imply that a check occurred at deletion."*
+
+| # | Finding | Disposition |
+|---|---|---|
+| H1 | The record said the stale `PROGRESS.md` figures **"are corrected in place"** while all four sites still read `1623` — a claim of work not yet done | **Fixed by doing the work**, not by rewording: the status row, the 3d-2a and 3d-2b verification sections and "Next action" are annotated. **The orchestrator's own sweep then found two more** in superseded "Next action" blocks, both stale on the day they were written — **six sites, not four**, the narrowing pattern appearing inside the fix for the round's own High. Every other `1623` is accurate history and was deliberately left |
+| M1 | `git checkout -- <paths>` restores from the **index**, not `HEAD`, and plain `git diff` does not show staged difference — so the record's "byte-identity by construction from `HEAD`" was not established by what it cited | Fixed. §1.1 now rests on two observations instead of on the command's name: the pre-command `git status --short` showed a **space in the index column** for both files, so the index equalled `HEAD`; the post-command empty `git status`/`git diff` shows worktree, index and `HEAD` equal |
+| M2 | §5 claimed the tracked tree was byte-identical at the step's **start** and end — false, it held four hook lines at the start | Fixed: byte-identical **to `HEAD`**, and explicitly *not* to what the files held at the start. That distinction is what discharges the reading rule |
+| M3 | §3 treated a ten-**file** stat plus a commit message as proof of ten added **cases**; additions and removals could net to anything | **Fixed by measuring, which strengthened the claim rather than softening it**: 34 added case lines, 24 removed, net **+10**, matching the gate delta exactly, with the `.each` condition checked rather than assumed |
+| M4 | §4.2 called an unmeasured future rebuild cost **"measured"**, and said "the whole scratch tree" would have to be reconstructed | Fixed. Feasibility is demonstrated (2c-4a-3c-5 deleted a harness, 3d-2a rebuilt one); **effort is unmeasured and no longer claimed**. The 75 launch directories are retained output, not inputs |
+| L1 | §2.1 stated as a general rule what is a rule of thumb about this bundle | Fixed: the rule is attributed to `CLAUDE.md` §6, and the attribution for *this* tree is argued from three observations on it |
+| L2 | "the numbers a fresh clone produces" — no clone was made | Fixed: "the measured harness-free working-tree values", with the `npm install` precondition named |
+| L3 | "the ten R1 files" enumerated **eleven** | Fixed, with the 1 + 11 + 9 = 21 arithmetic shown |
+
+**What the review could not do, recorded so no reader infers otherwise:** it read the record, the
+relevant `PROGRESS.md` sections and the repository, but **ran no gate**. Every number above is the
+orchestrator's own measurement on the exact tree; the review checked the arithmetic and the claims.
+
+---
+
 ## Verification — Phase 2c-4b step 3d-2b
 
 **Record:** `docs/decisions/2c-4b-3d-2b-window-reading.md`.
@@ -3448,6 +3544,13 @@ closes this step and not accepted from a worker's report:
 | Bundle | `npm run build` | **176 modules** |
 
 The production numbers remain **1623 / 418 / 175**; 3d-3 returns to them when it deletes the harness.
+
+> **Correction, made at 3d-3 and left here beside the original rather than replacing it.** The `1623`
+> above is **stale** — the same stale figure this file's 3d-2a section carries, copied forward from
+> before 3d-1 committed its 10 new test cases. The measured harness-free figures are
+> **`1633 / 418 / 175`**; the two that were right stayed right. See
+> `docs/decisions/2c-4b-3d-3-notes.md` §3.
+
 **The review round changed `src/probe.ts`** — uncommitted harness code, but a file `svelte-check`,
 `vitest` and `vite` all read — so the four gates were re-run after the instrumentation and **before**
 P54, and again at the close of the step. The first round changed no file at all and did not run them,
@@ -3560,6 +3663,14 @@ worker's report:
 | Bundle | `npm run build` | **176 modules** |
 
 The production numbers remain **1623 / 418 / 175**; 3d-3 returns to them when it deletes the harness.
+
+> **Correction, made at 3d-3 and left here beside the original rather than replacing it.** The
+> `1623` in the sentence above is **stale, and was stale when it was written**. 3d-1 committed **10**
+> new test cases while the harness was in the tree, so the production count had already moved to
+> **1633**; only the *with-harness* figure (1634) was re-derived after 3d-1, and the production figure
+> was copied forward. 3d-3 measured `1633 / 418 / 175` on the harness-free tree. **`418` and `175`
+> were correct** — 3d-1 added no file under `src/` and no source module. The arithmetic and its
+> artifacts are `docs/decisions/2c-4b-3d-3-notes.md` §3.
 
 **The working tree.** `git status --short --untracked-files=all` lists the two modified hook files,
 the two untracked probe sources and the untracked documents under `docs/`; `git diff --stat` is
@@ -6570,7 +6681,122 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### Phase 2c-4b is complete, and the harness is gone. **Phase 2c-4c — the recovery fallback — is next, and its first act is a design consult.**
+
+**Nothing is left over from 2c-4b.** 3d was cut in three — the fixes (3d-1), the re-take (3d-2,
+itself cut into 2a and 2b) and the removal (3d-3) — and all three are closed. The working tree is
+**clean**: `git status --short --untracked-files=all` returns nothing, `git diff` is empty, and no
+probe file, hook line or scratch tree survives anywhere.
+
+**The gate numbers are the production ones again, and one of them is not what this file used to say:**
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+npm test                       # expect 1633 passed, 49 files    ← NOT 1623; see below
+cargo test --workspace         # expect 1086 passed, 0 failed
+npm run check                  # expect 418 files, 0 errors, 0 warnings
+npm run build                  # expect 175 modules
+```
+
+**`1633` is the corrected figure and `1623` was stale** — it predated the 10 test cases 3d-1
+committed while the harness was in the tree, and it was copied forward through three step records
+because a production count is unobservable on a tree that has a harness in it. The arithmetic, the
+artifacts and the two in-place annotations are in "Verification — Phase 2c-4b step 3d-3" above and
+`docs/decisions/2c-4b-3d-3-notes.md` §3. **Do not "restore" 1623.**
+
+#### What 2c-4c is, and why the code already names it
+
+**Recovery fallback**: *save-draft-as-a-new-snippet, and manual resolution when the target is
+ambiguous or gone* (`2c-split-notes.md` §2). **It fails as a dead-end mistake** — that is the failure
+mode the split assigned it, and it is the right one to design against: every other conflict path now
+ends somewhere, and this one is what stands between a person and a draft they cannot land anywhere.
+
+**2c-4b built the doorway and deliberately did not walk through it.** `src/lib/browser/reapply.ts:236`
+is `ReapplyOutcome`'s `manualResolution` arm, and its own doc comment says where recovery belongs:
+
+> *Nothing could be done automatically, and **nothing was adopted**. The window is exactly where it
+> was: the projection was not replaced, the selection was not repaired and the conflict's
+> authorization was not spent. **Recovery from here is 2c-4c's, whole.***
+
+That is the precise entry condition 2c-4c inherits, and it is a **strong** one: the arm guarantees
+nothing was spent, so 2c-4c starts from an unspent conflict with the draft intact — it does not have
+to unwind a partial adoption. The `obstacle` code it carries is what the recovery must be able to act
+on. The reading that drew this arm on five surfaces in both languages is
+`docs/decisions/2c-4b-3c-2-window-reading.md`, and `revealReapplyReport` is why it is visible.
+
+#### The first act is a design consult, and that is a standing rule, not a preference
+
+**Every phase since 2b-2c has been put to a design consult before any line of it was written**, and
+the consults have changed the phase rather than confirmed it often enough that the rule is load-bearing:
+2c-4a's ruled the frontend's eager adoption a *defect* rather than something to disclose; 2c-4b's
+**narrowed the phase and split its confidence rule in two**, and ruled the raw editor out of reapply
+entirely; the 2c split's own changed four of the seven things it was asked about.
+`docs/reviews/phase-2c-4c-design.md` is where 2c-4c's belongs.
+
+Questions the consult must settle before any step is cut, none of which should be answered by
+assumption:
+
+1. **Is "save my draft as a new snippet" a `create_match`, and if so what is its trigger?** A trigger
+   collision is the obvious hazard — the draft's trigger is very likely the one already on disk. D2u
+   forbids claiming espanso semantics, and 2c-3c settled the neighbouring question for *Duplicate* by
+   making `DuplicateKeepsTriggerDefinition` an acknowledgeable finding **claiming risk, never
+   semantics**, content-addressed to the candidate. Whether that precedent transfers is a consult
+   question, not a foregone conclusion.
+2. **Where does the new snippet go?** `create_match` has `NewMatchPosition`, identity-addressed; a
+   recovery has no natural anchor, because the anchor is what went missing.
+3. **What is "manual resolution" on a screen?** 2c-4b draws a *report* saying it happened. Whether
+   2c-4c adds a side-by-side, a copy-out, or only the save-as-new escape is the phase's shape.
+4. **Which surfaces get it.** Five match surfaces plus the raw editor, and the raw editor is the one
+   ruled out of *reapply* — a whole-document text draft has no match to identify. It does not follow
+   that it is out of *recovery*; that is a distinct question and the consult should say so explicitly.
+5. **Does it need Rust at all**, or is it entirely a composition of existing commands? 2c-3c needed a
+   new core primitive and a twelfth command; 2c-4a and 2c-4b needed none.
+
+#### The rules that bind 2c-4c before it starts
+
+- **Three kinds of evidence.** Model tests, a **mounted-component test**, and a **window reading** —
+  every sub-phase of 2c owes all three, and a green suite is not a screen.
+- **The harness is gone, so any reading costs a rebuild first.** `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`
+  is written to make that possible and carries the fixtures' content, not just their descriptions.
+  Budget it as its own step — 3c, 3d-2 and 2c-4a-3c were each numbered in two for exactly this reason:
+  **building an instrument and taking a reading are two different kinds of work in one worker's
+  context.**
+- **Never `git commit -a` or `git commit -am` while probe files are in the tree.** Stage by path.
+- **`save_document` is the only entry point that may write a user's file**, there is no `force` flag,
+  and a committed write is never afterwards reported as an error.
+- **No control may be named or coded "keep my draft" for anything other than reapply** — that name is
+  now spent, and 2c-4c's escape is a different promise.
+
+#### The five holes 2c-4b leaves behind, recorded so they are not rediscovered as bugs
+
+They have no case row in `launch.sh` and no arm in `runPlan`, so nothing could be launched for them;
+each costs a fixture or a plan function **before** there is anything to launch, and now an instrument
+rebuild too. **None is an obligation of `2c-4b-3d-1-notes.md` §7**, and none is a known defect — they
+are unobserved paths.
+
+- **Hole 1 — `browser.notice.gone`'s second producer**: `repairSelection`'s `clearSelection` arm,
+  `src/lib/browser/selection.ts:292`. Every reading of that sentence so far came from `reresolve`'s
+  **length** arm (P43 en, P44 es).
+- **Holes 2–5 — the confirmed-reload transition on the creator, the deleter, the mover and the
+  duplicator.** It exists on all five match surfaces and has been launched on **one**, the editor.
+
+#### The standing bound on every window reading this project has taken
+
+**The fixture shape has always been the easy one** — plain `replace:` scalars, double-quoted triggers,
+LF, no BOM, no block scalars, no item-owned comments, no read-only file. **None of the fifteen corpus
+fixtures `CLAUDE.md` §4 lists has ever been through the harness, and the owner's real configuration
+has never been opened by it.** That is the largest single gap in this project's window evidence, it
+survived 2c-4b untouched, and it is worth naming in 2c-4c's consult as a candidate for its own step.
+
+---
+
+### The record that closed 2c-4b-3d-3 (superseded by the above, kept for its work list)
+
 ### Phase 2c-4b-3d-2b is complete. **Step 2c-4b-3d-3 — the harness's removal — is next, and it is the last step of 2c-4b-3d.**
+
+> **Done at 3d-3.** Everything below is the checkpoint as it stood before the removal, kept because it
+> is the work list the removal followed. Its `1623` is the stale figure §3 of
+> `docs/decisions/2c-4b-3d-3-notes.md` corrects to **1633**; the `418` and `175` were right.
 
 **3d was cut in three: the fixes (3d-1), the re-take (3d-2, itself cut into 2a and 2b), and the
 removal.** The reading is taken and its record is `docs/decisions/2c-4b-3d-2b-window-reading.md`.
@@ -6735,7 +6961,9 @@ they lived in different places for the first time.
 **Check `git status --short --untracked-files=all` first.** If it lists `src/probe.ts` and
 `src-tauri/src/probe.rs`, the repo-side half survived and the gate numbers are the shifted ones
 (**1634 / 419 / 176**); if it does not, they are the production ones (**1623 / 418 / 175**) and that
-half must be rebuilt. If `/private/tmp/espansoconfig-harness-2c-4b-3d/` is missing, the scratch half
+half must be rebuilt. [**3d-3: the production test count in that sentence is stale — it is `1633`.**
+This block is superseded, and the correction is in "Verification — Phase 2c-4b step 3d-3".]
+If `/private/tmp/espansoconfig-harness-2c-4b-3d/` is missing, the scratch half
 must be rebuilt from `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`, which was written to make
 exactly that possible and now records the fixtures' content rather than only their descriptions.
 
@@ -6858,6 +7086,8 @@ recipe's fixtures already are.
 (**1634 / 419 / 176**); if it does not, they are the production ones (**1623 / 418 / 175**) and the
 harness must be rebuilt from `docs/decisions/2c-4b-3b-instrument.md` and
 `docs/decisions/2c-4b-3c-1-notes.md` before a single reading can be taken.
+[**3d-3: the production test count in that sentence is stale — it is `1633`.** This block is
+superseded, and the correction is in "Verification — Phase 2c-4b step 3d-3".]
 
 Note the scratch tree was **4.4 GB** at 3c-2 and every launch retains a whole `.app` bundle. **3d-3
 deletes the harness, and that includes this tree.**
