@@ -83,7 +83,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **Phase 2c-4b** | **Reapply** — "keep my draft" in plan §12's strong sense: identify the intended match in the newly parsed document and apply only when confidence suffices | ✅ **complete.** Ten steps (1, 2, 3a, 3b, 3c-1, 3c-2, 3d-1, 3d-2a, 3d-2b, 3d-3), all three kinds of evidence, and the instrument built, rebuilt and removed twice over. The correspondence proof is in the core (`reconcile.rs`), the transitions are in `src/lib/browser/reapply.ts`, *Keep my draft* is drawn on the five match surfaces and **absent on the raw editor**, and the 71-launch Q7 matrix plus the 64-launch re-take were read in both languages. **No finding in any round of 3d changed a byte written to a user's file** |
 | **2c-4c design consult** | **Phase 2c-4c put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4c-design.md`, and it **returned no open question for the owner**. It rules save-as-new an **ordinary `create_match`** on the editor and creator only, labelled *Create a new snippet from supported fields* and never *Duplicate*; the trigger stays an **editable literal**, never auto-suffixed, with a **new** `FindingCode::NewMatchRepeatsLiteralTrigger` claiming risk only; placement is a fixed `End` with **no chooser**, because recovery has no trustworthy anchor by definition; **all six** surfaces are in the recovery contract but the three operation-choice ones recover by reload-then-fresh-operation and the raw editor recovers as whole-document text; and the Rust is **narrow** — widen `NewMatch`, add the finding, **no new command and no new writer**. Six steps |
 | **2c-4c-1** | **The creation and risk contract in Rust**, with no command, no `DocumentEdit` variant and no second writer: `NewMatch` widened from two mandatory fields to those plus four optional ones with `fields()` emitting only present keys in one documented order, and `FindingCode::NewMatchRepeatsLiteralTrigger` — `SuspiciousButPermitted`, content-addressed to the candidate — produced beside `findings_of` **inside** `save_document` for insertion candidates only | ✅ complete — after a review fix round, a confirmation pass and a **third scoped pass**. Round 1 returned **NOT READY** on three Mediums and two Lows, and **one of them was a defect in behaviour**: the locator derived the inserted item's address from candidate-sequence *length*, so a legal mixed batch shifted the anchor and the finding could fire **against an existing item the new snippet does not repeat**. Round 2 confirmed all five closed and found **one new Low the fix had introduced**; round 3 returned **READY with no findings** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — step 1 of six is complete; step 2c-4c-2, recovery as browser values, is next** |
+| **2c-4c-2** | **Recovery as browser values, with nothing drawn**: `src/lib/browser/recovery.ts` — the six-surface route matrix, `recoveryAvailability` as the single producer of both the choice list and the destination list, the six field transfers through `fieldIntent`, destination selection judged by the **disk** projection, `RECOVERY_POSITION` as the only position anywhere, and `sendRecoveryCreate` composing `BrowserState.createMatch` through a callback. No `.svelte`, no `ConflictChoice` member, no dictionary key, no Rust | ✅ complete — after **five** review rounds. Round 1 returned **NOT READY** on five findings; rounds 2–5 each closed what was named and **each found a narrower instance of it**, four of the five times in a path the previous fix had introduced. Only two findings in five rounds were defects in behaviour — round 1's High (`sourceConflictRetained` claiming an intactness the composed wrapper can falsify) and round 5's five missing `closed` guards — and **neither was reachable from a window**, because nothing draws this module yet |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1 and 2 of six are complete; step 2c-4c-3, the recovery UI, is next, and it is the first of this phase to draw anything** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3479,6 +3480,138 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4c step 2
+
+**Record:** `docs/decisions/2c-4c-2-notes.md`. **Review:** `docs/reviews/phase-2c-4c-2-code.md`
+(five rounds in one file: `## Findings`, `## Confirmation pass — round 2`, `## Round 3 — scoped pass
+over the fix round`, `## Round 4 — scoped pass over the second fix round`).
+
+**Codex jobs:** `task-mspyy3x1-ivt7du` (round 1), `task-mspzx6kg-alwkwk` (round 2),
+`task-msq0gtws-nwfsyp` (round 3), `task-msq0xsg9-uavnvb` (round 4). All four: no web search,
+repository reading permitted.
+
+**Two of the five rounds could not write their own section, and the record says which.** Rounds 3
+and 4 ran with the workspace mounted read-only, so their `apply_patch` was refused; a second job
+commissioned solely to append round 3's section failed the same way. **Round 3's section is the
+orchestrator's transcription of the job's terse final message and its fuller reasoning is not
+recoverable** — the thread is `019ff5bf-e4cb-7e50-bd13-51fc97ab1d02` and the rollout jsonl under
+`~/.codex/sessions/` is the only place it survives. Round 4 was therefore dispatched asking for the
+**full section in the final message**, which worked, and its text is complete. **The provenance note
+at the head of each transcribed section is not decoration**: rounds 1 and 2 are Codex's own bytes and
+rounds 3 and 4 are not, and a later reader must be able to tell them apart. If a future round meets a
+read-only workspace, ask for the section in the reply rather than spending the job discovering it.
+
+| Gate | Expected | Observed |
+|---|---|---|
+| Frontend tests | `npm test` — was 1633, 49 files | **1711 passed, 50 files** |
+| Types | `npm run check` — was 418 files | **420 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` — 175 modules | **175 modules transformed**, `index-C1846SS8.js` 400.85 kB |
+| Rust tests | `cargo test --workspace` — 1112 | **1112 passed, 0 failed** — re-summed by the orchestrator from all 25 `test result:` lines |
+
+Every figure above was re-derived by the orchestrator on the tree, not accepted from a worker.
+
+**The bundle staying at 175 is correct here, and it is a different fact from every earlier step that
+held it.** 2c-4a-2 and 2c-4b-2 also changed no `.svelte` file, yet each moved the count by one,
+because something already in the reachable graph imported the new module. **`recovery.ts` is imported
+by nothing** — it sits *above* `matchEditor.ts` and `matchCreation.ts` (it consumes `fieldIntent` and
+the destination eligibility, and the reverse direction is an import cycle), so the emitted bundle is
+**byte-identical** to the pre-step one, same content hash. **2c-4c-3 is what moves it to 176**, when
+the two components that draw recovery import it exactly as they already import `./reapply`. A count
+that does *not* move for a new module is therefore evidence about reachability, and the next step
+must see it move.
+
+**The test count moved 1633 → 1711 (+78), and +2 of that is not a case anyone wrote.**
+`scripts/lint/ipc-detail.test.ts` runs a per-source-file `it.each`, so **adding a source file to
+`src/lib/browser/` adds cases to a suite that has nothing to do with the step.** The rest is +64
+recovery cases, +8 workspace cases and the +4 later rounds added. Anyone re-deriving this figure
+after adding a module should expect the same off-by-two and not hunt for it.
+
+**What changed:** two new source files and one modified — `src/lib/browser/recovery.ts`,
+`src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts` — plus two new documents,
+`docs/decisions/2c-4c-2-notes.md` and `docs/reviews/phase-2c-4c-2-code.md`. **No `.svelte` file, no
+`src/lib/i18n/*`, no Rust, no `ConflictChoice` member and no new command**, which is the step's whole
+shape: it draws nothing, so **no mounted test and no window reading is owed**. Those are steps 3
+and 5, and step 3 also owes the evidence for step 1's live creator-surface behaviour change.
+
+**Confirmed by the orchestrator rather than accepted from a worker:** the four gate figures above;
+that the working tree holds exactly the five paths named; and that the `git status` after each of the
+five rounds still showed no `.svelte`, i18n or Rust path.
+
+---
+
+## Phase 2c-4c step 2 review disposition
+
+**Five rounds, seventeen findings, and exactly two of them were defects in behaviour.** The pattern
+this project has recorded since 2c-2 held again and got sharper: **each round closed what it was
+given and left a narrower instance of it standing**, and four of the five times the narrower instance
+lived in code the *previous round's own fix* had introduced. That is now five consecutive rounds on
+this step, and eight consecutive across the phase.
+
+**Round 1 — NOT READY.** Five findings: one High, three Medium, one Low.
+
+- **High — `sourceConflictRetained` claimed an intactness the composed wrapper can falsify.** It was
+  `!session.committed`, but `BrowserState.createMatch` calls `adoptTheDocumentOnDisk` on a
+  `mayHaveWritten` failure **and** on the legal `saved, committed: false` out-of-date arm; that
+  re-read can replace the projection, move the selection, and advance the projection generation the
+  source conflict's one-shot authorization is registered against. The record explicitly claimed that
+  arm retains the conflict. **The uncertain-send test could not have caught it**: its callback
+  returned the failure shape directly and never executed the wrapper's adoption path, so it observed
+  an intact model after omitting the very side effect that makes it non-intact.
+- **Two Mediums the implementer had already flagged as tensions rather than fixed** — a
+  `reapplySupport: 'supported'` with no transition behind it, and a conflict advertising reload
+  consequences with no reload path. Codex ruled both defects. **A tension recorded is not a tension
+  closed**, and naming one in a report does not discharge it.
+- **Medium — both "no command is called" tests inspected mocks the exercised code cannot reach**, so
+  neither could fail. This is the step's own acceptance criterion asserted by a test that could not
+  falsify it.
+- **Low — the three reserved product names** appeared in the module header and the record, and the
+  record made an **absolute sweep claim** that nothing calls it those names while itself repeating
+  all three. One citation was ruled **out of scope by the orchestrator**: `PROGRESS.md`'s prohibition
+  sentence must name the three terms in order to forbid them.
+
+**Round 2 — NOT READY.** F2, F3, F4 and F5 closed; **F1 not closed**, in the two transitions built to
+close F2 and F3. Both spent an adoption and then returned a session that spread the *old*
+`windowWasReconciled`, so `sourceConflictState` still answered `retained` after the projection was
+installed and its generation advanced — and the reload test **pinned that false answer**. Plus a new
+Low: `focusRecoveryField` had no closed-form guard. **The widening was ruled justified**, not an
+over-reach: building the two transitions was warranted by the existing capability contract, and both
+read only this form's own conflict, never `origin.conflict`.
+
+**Round 3 — NOT READY.** The derivation was ruled sound *for the callback* — `mayHaveWritten` is
+exactly the failed arm that re-reads, every answered-arm reconciliation moves `adoption` off
+`notOwed`, and `windowMoved` claims uncertainty rather than movement or refusal. Two findings: the
+contracts claimed a **definite** install where recording on `alreadyThere` means the code cannot know
+one, and the invariant test omitted a **sixteenth** transition, `recoveryCreateCouldNotBeSent`, which
+mutates a closed form. **The hole sat exactly where the finding it generalized lived.**
+
+**Round 4 — NOT READY.** The outcome-language sweep was incomplete — seven more carriers asserting
+the outcome the corrected contract disclaims — and **five transitions still had no `closed` guard**
+(`acknowledgeRecoveryFindings`, both confirmation builders, the reload spend, reapply). The reason
+the invariant case missed them is the finding worth keeping: **every probe received the one closed
+session the reload transition produces, whose outcome, submission and reload state were cleared
+during closure**, so the test could not tell an explicit guard from identity caused by that fixture.
+The fix added four hostile type-valid fixtures nothing produces, each with its own adoption recorder,
+and **three of the seven guards passed against the friendly fixture alone** — the hole was real and
+is now measured rather than argued. Round 4 also affirmed two things not to disturb: removing the
+transition counts was right (the runtime-export partition is the authority, the ordinal was
+ambiguous), and the F2/F3 mechanics are intact.
+
+**What the five rounds cost and bought.** Seventeen findings; **two defects in behaviour**, both
+unreachable from a window because nothing draws this module yet; **fifteen sentences, contracts or
+tests claiming more than the code gives.** The step ends with ten reverted mutations proving its
+rules can fail, and with the honest limit stated in one sentence beside what it forces: the partition
+forces every runtime export name to be classified and none twice, and forces **neither** correct
+classification **nor** sufficient probe inputs.
+
+**The obligation this step leaves open, and it is not optional.** Round 4's fixes have had **no
+review round of their own** — the session that ran them stopped at its context boundary instead of
+starting a sixth. By this project's standing rule, *a fix is a change and the round that reviews it
+is not optional*, and five consecutive rounds here have found a narrower instance. **Step 3 must open
+with that round**, scoped to round 4's two fixes: the seven reworded carriers, the five new `closed`
+guards and the four hostile fixtures. It is written into "Next action" as step 3's first task.
+
+---
+
 ## Verification — Phase 2c-4c step 1
 
 **Record:** `docs/decisions/2c-4c-1-notes.md`. **Review:** `docs/reviews/phase-2c-4c-1-code.md`
@@ -6868,6 +7001,139 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### Steps 2c-4c-1 and 2c-4c-2 are complete. **Step 2c-4c-3 — the recovery UI — is next, and it is the first step of this phase that draws anything.**
+
+**Open with the review round step 2 owes, before writing any component.** Round 4's fixes — the seven
+reworded outcome-language carriers, the five new `closed` guards on `acknowledgeRecoveryFindings`,
+both confirmation builders, the reload spend and reapply, and the four hostile type-valid fixtures —
+**have had no review round of their own.** A fix is a change and the round that reviews it is not
+optional; five consecutive rounds on this step each found a narrower instance of what the round
+before closed, four of them in the previous fix's own code. Scope that round to those three fixes and
+nothing else, and read "Phase 2c-4c step 2 review disposition" above first, because it says what each
+earlier round already ruled and what must not be re-litigated.
+
+**Dispatch it read-only-aware:** two of the five rounds ran with the workspace mounted read-only and
+could not append their own section. **Ask for the full section text in the final message** and
+transcribe it, marking provenance — do not spend a job discovering the mount, and do not let a
+transcription pass as Codex's own bytes.
+
+The phase's cut, with the full five-question table and the six-step scope table, is "Phase 2c-4c —
+consult disposition" above. The consult itself is `docs/reviews/phase-2c-4c-design.md`. **Read the
+disposition first and the consult only for the step you are on** — the consult is 25 KB and a step
+needs one section of it. Step 2's record is `docs/decisions/2c-4c-2-notes.md`; its five review rounds
+are `docs/reviews/phase-2c-4c-2-code.md`.
+
+**The tree is clean and the gates are at these numbers** (see "Verification — Phase 2c-4c step 2"
+above, where each was re-derived by the orchestrator rather than accepted from a worker):
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+cargo test --workspace         # expect 1112 passed, 0 failed
+npm test                       # expect 1711 passed, 50 files
+npm run check                  # expect 420 files, 0 errors, 0 warnings
+npm run build                  # expect 175 modules
+```
+
+**`1711 / 420 / 175 / 1112` are the step-2 numbers.** Two of them carry a fact worth knowing before
+you re-derive them:
+
+- **175 must move to 176 in step 3, and if it does not, the components are not importing
+  `recovery.ts`.** It stayed at 175 through step 2 because nothing reachable from the entry imports
+  that module — it sits above `matchEditor.ts`/`matchCreation.ts` and the reverse edge would be a
+  cycle — so the bundle is byte-identical to step 1's. This is the one step in this project where an
+  unmoved module count is the *expected* reading of a new module.
+- **The test count is off by two from anything you can attribute to your own cases**, because
+  `scripts/lint/ipc-detail.test.ts` runs a per-source-file `it.each` and a new file in
+  `src/lib/browser/` adds cases there. Expect it; do not hunt it.
+
+#### What step 2 hands step 3, in the sentences step 3 needs
+
+1. **`src/lib/browser/recovery.ts` is recovery as a value and nothing draws it.** `recoveryAvailability`
+   is the **single producer** of both the choice list and the destination list, gated on
+   `reapply.ts`'s `manualResolution` arm. The six field transfers go through `fieldIntent`, so
+   **`None` is not `Some("")`** — an absent optional writes no key, an empty string writes an empty
+   value. `RECOVERY_POSITION` is the only position value anywhere and it is a fixed `End`.
+   `sendRecoveryCreate` composes `BrowserState.createMatch` through a callback: **no new command, no
+   second writer.**
+2. **`sourceConflictState` answers `retained | windowMoved | spent`, and it is deliberately coarse.**
+   `windowWasReconciled` means *an adoption was spent or a re-read was ordered* — **not** that the
+   projection changed, which this module cannot observe. It is recorded on `alreadyThere` as well as
+   `installed`, on purpose. **Every sentence step 3 writes about it must name the act, never the
+   outcome**; seven carriers had to be reworded in round 4 for exactly this, and any UI copy that
+   says the window *moved* re-opens the finding.
+3. **Nine transitions guard `closed` explicitly**, and the invariant case probes the produced closed
+   form **plus four hostile ones the type permits and nothing produces**, each with its own adoption
+   recorder. A tenth transition added in step 3 must be classified in the runtime-export partition or
+   the case fails — which is the point — and if it reads outcome, reload or acknowledgement state it
+   needs the guard too.
+4. **Three capability booleans are still `false`** — the two reload/reapply offers and save-as-new —
+   so the transitions exist and no control is drawn. **Step 3 flips them and draws, without inventing
+   machinery.** That is the 2c-4a-2 → 2c-4a-3a trade this phase has now used twice.
+
+#### What 2c-4c-3 must do
+
+One recovery UI, i18n in **both languages through typed accessors** (`src/lib/i18n/codes.ts` — a
+component renders a code by calling an accessor, never by building a key), and **mounted evidence per
+changed component**: that the editor and the creator invoke recovery creation, that the deleter, the
+mover and the duplicator offer **neither copy nor save-as-new**, that the raw editor offers no
+save-as-new, and that **the original conflict survives every non-committed ending**.
+
+It also owes the evidence **step 1's live behaviour change** never got: `NewMatchRepeatsLiteralTrigger`
+already fires for ordinary `create_match` on the creator surface, with no mounted test and no window
+reading behind it.
+
+The prohibitions are unchanged and they bind the drawn controls now, not just the model: the name is
+**_Create a new snippet from supported fields_**, never *Duplicate*, *exact copy* or *Keep my draft*;
+the repeated-trigger sentence claims **risk only**, never espanso semantics (D2u); no `After`, no
+numeric position, no reused old `MatchId`; no synthesized sequence; every write through
+`save_document`; and a committed write is never afterwards reported as an error.
+
+#### The remaining three steps, so the cut is visible from here
+
+**2c-4c-4** rebuild the window instrument · **2c-4c-5** the bilingual window reading ·
+**2c-4c-6** remove the instrument and re-derive the gate counts. Their scopes and the evidence each
+owes are the table in the consult disposition above.
+
+#### The rules that bind every step of 2c-4c
+
+- **Three kinds of evidence per sub-phase** — model tests, a **mounted-component test**, and a
+  **window reading**. A green suite is not a screen. Steps 1 and 2 owed only the first because
+  neither changed a component; **step 3 is the first that owes the second**.
+- **The harness is gone, so any reading costs a rebuild first** — that is why steps 4 and 5 are two
+  steps. `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md` carries the fixtures' content, not just
+  their descriptions.
+- **Never `git commit -a` or `git commit -am` while probe files are in the tree.** Stage by path.
+- **A fix is a change, and the round that reviews it is not optional.**
+
+#### The five holes 2c-4b left behind, still open and still not defects
+
+They have no case row in the (now removed) `launch.sh` and no arm in `runPlan`, so nothing could be
+launched for them; each costs a fixture or a plan function **plus an instrument rebuild** before
+there is anything to launch. **2c-4c-4 is the natural place to add them**, since it rebuilds the
+instrument anyway — but they are not obligations of any 2c-4b record.
+
+- **Hole 1 — `browser.notice.gone`'s second producer**: `repairSelection`'s `clearSelection` arm,
+  `src/lib/browser/selection.ts:292`. Every reading of that sentence so far came from `reresolve`'s
+  **length** arm (P43 en, P44 es).
+- **Holes 2–5 — the confirmed-reload transition on the creator, the deleter, the mover and the
+  duplicator.** It exists on all five match surfaces and has been launched on **one**, the editor.
+
+#### The standing bound on every window reading this project has taken (R38)
+
+**The fixture shape has always been the easy one** — plain `replace:` scalars, double-quoted
+triggers, LF, no BOM, no block scalars, no item-owned comments, no read-only file. **None of the
+fifteen corpus fixtures `CLAUDE.md` §4 lists has ever been through the harness, and the owner's real
+configuration has never been opened by it.** The consult ruled that **2c-4c-5 closes only the shapes
+directly relevant to recovery** — at least one CRLF-or-BOM fixture and one item-owned-comment or
+block-scalar case — and that the full sweep stays open for a later gate. It is recorded, not absorbed.
+
+---
+
+### The record that opened step 2c-4c-2 (superseded by the above)
+
+**Superseded.** Step 2c-4c-2 is complete; what it built and what binds the steps after it is the
+section above. This is kept for the prohibitions it states, which still bind step 3's drawn controls.
 
 ### Step 2c-4c-1 is complete. **Step 2c-4c-2 — recovery as browser values — is next, and it draws nothing.**
 

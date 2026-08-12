@@ -63,9 +63,25 @@ import {
   type InvalidationStatus,
   type WholeDocumentOutcome
 } from './invalidation';
-import { startDraft, textDraftRules } from './draft';
+import { startDraft, structuredDraftRules, textDraftRules } from './draft';
 import { confirmReloadDiskVersion, describeEditSave } from './saveOutcome';
-import { CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES } from './matchEditor';
+import {
+  CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES,
+  baselineOf,
+  buffersOf,
+  type MatchBuffers
+} from './matchEditor';
+import {
+  editRecoveryField,
+  recoveryAvailability,
+  recoveryRefusal,
+  recoveryView,
+  sendRecoveryCreate,
+  sourceConflictState,
+  startMatchFieldRecovery,
+  type CreateARecoveredSnippet,
+  type RecoverySession
+} from './recovery';
 import type { ConflictModel, ReloadConfirmation } from './saveOutcome';
 import {
   createBrowserState,
@@ -4790,6 +4806,409 @@ describe('creating a snippet', () => {
     expect(disk.matches.map((match) => match.id.node)).toEqual([40, 41, 42]);
   }); // End of the "conflicted create" case
 }); // End of the "creating a snippet" suite
+
+describe('recovering a draft no reapply could resolve', () => {
+  /**
+   * The conflict a match editor is showing over this state's own `base.yml`.
+   *
+   * The disk side is {@link grownDocument}, at `rev-b`, while the window goes on
+   * projecting `rev-a` — which is the whole point of the `manualResolution` arm:
+   * nothing was adopted, so the two observations are both live.
+   *
+   * @param buffers - The draft the conflict retained.
+   * @returns The conflict model, built through the ordinary describer.
+   */
+  function editorConflict(buffers: MatchBuffers): ConflictModel<MatchBuffers> {
+    const outcome = describeEditSave(
+      makeConflict({ disk: grownDocument(), expected: 'rev-a' }),
+      startDraft('rev-a', buffers, structuredDraftRules<MatchBuffers>()),
+      MATCH_EDITOR_CAPABILITIES
+    );
+    if (outcome.kind !== 'conflict') {
+      throw new Error('this helper needs the conflict arm');
+    }
+    return outcome;
+  } // End of function editorConflict()
+
+  /**
+   * A recovery form opened over that conflict, against this state's own files.
+   *
+   * @param state - The window, opened.
+   * @returns The form.
+   */
+  function recoveryOver(
+    state: BrowserState,
+    match: MatchView = makeMatch({
+      // The snippet the editor was open on, with a body: `baseDocument`'s fixtures
+      // carry no `replace`, and a draft that transfers none opens its body box
+      // blank and refuses until a person fills it in.
+      node: 10,
+      document: 2,
+      trigger: ':sig',
+      replace: 'a body',
+      label: 'Signature'
+    }),
+    conflict: ConflictModel<MatchBuffers> | null = null
+  ): RecoverySession {
+    const baseline = baselineOf(match);
+    const start = startMatchFieldRecovery(
+      { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } },
+      conflict ?? editorConflict(buffersOf(baseline)),
+      baseline,
+      state.documents,
+      state.views,
+      () => 0
+    );
+    if (start.kind !== 'ready') {
+      throw new Error(`this helper needs an opened form, not ${start.reason}`);
+    }
+    return start.session;
+  } // End of function recoveryOver()
+
+  /**
+   * A conflict this state really produced, so its adoption is authorizable.
+   *
+   * **Built by driving a save rather than by hand**, which is the whole point:
+   * `BrowserState.adoptDiskVersion` looks a conflict up in the origin map this
+   * state fills when one arrives, so a `makeConflict` literal would be refused for
+   * the wrong reason and prove nothing about the authorization.
+   *
+   * @param state - The window, opened.
+   * @returns The conflict model, over a draft of the snippet that was edited.
+   */
+  async function conflictFromASave(state: BrowserState): Promise<ConflictModel<MatchBuffers>> {
+    const answer = await state.saveMatch(
+      baseDocument().matches[0]!.id,
+      editedDraft(),
+      'rev-a',
+      NOTHING_ACKNOWLEDGED
+    );
+    if (answer.kind !== 'answered' || answer.result.outcome !== 'conflict') {
+      throw new Error('this helper needs the conflict arm');
+    }
+    const buffers = buffersOf(
+      baselineOf(
+        makeMatch({ node: 10, document: 2, trigger: ':sig', replace: 'a body', label: 'Signature' })
+      )
+    );
+    const outcome = describeEditSave(
+      answer.result,
+      startDraft('rev-a', buffers, structuredDraftRules<MatchBuffers>()),
+      MATCH_EDITOR_CAPABILITIES
+    );
+    if (outcome.kind !== 'conflict') {
+      throw new Error('this helper needs the conflict arm');
+    }
+    return outcome;
+  } // End of function conflictFromASave()
+
+  /** The conflict `saveMatch` is scripted to answer in the cases below. */
+  const SAVE_CONFLICTED: CommandResult<SaveResult> = {
+    ok: true,
+    value: {
+      outcome: 'conflict',
+      reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
+      expected: 'rev-a',
+      found: 'rev-b',
+      disk_revision: 'rev-b',
+      disk_text: DISK_TEXT,
+      disk: grownDocument()
+    }
+  };
+
+  it('writes through this state’s own create, at the end, with the disk revision', async () => {
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const grown = grownDocument();
+    const created: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: grown.matches[2]!.id
+      }
+    };
+    const commands = scriptedCommands({ documents, creates: [created] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+
+    // **The composition really is this state's method**, which is what the
+    // callback type exists to say: `MatchSaveAnswer` satisfies it structurally, so
+    // there is no second writer and no new command anywhere on this path.
+    const create: CreateARecoveredSnippet = state.createMatch;
+    documents.set(2, { ok: true, value: grown });
+    const after = await sendRecoveryCreate(recoveryOver(state), create);
+
+    const call = vi.mocked(commands.createMatch).mock.calls[0]!;
+    expect(call[0]).toBe(2);
+    expect(call[1]).toEqual({ trigger: ':sig', replace: 'a body', label: 'Signature' });
+    expect(call[2]).toEqual({ End: {} });
+    // The **disk** revision the conflict carried, not the `rev-a` this window is
+    // still projecting: recovery drafts against the observation that refused the
+    // save, and the wrapper forwards what it is handed.
+    expect(call[3]).toBe('rev-b');
+    expect(call[4]).toEqual(NOTHING_ACKNOWLEDGED);
+    expect(JSON.stringify(call.slice(0, 5))).not.toContain('force');
+    expect(after.committed).toBe(true);
+    expect(sourceConflictState(after)).toBe('spent');
+  }); // End of the "one ordinary create" case
+
+  it('does not drag the selection away from a snippet clicked while it was in flight', async () => {
+    const grown = grownDocument();
+    const created: SaveResult = {
+      outcome: 'saved',
+      revision: 'rev-b',
+      committed: true,
+      notes: [],
+      backup_taken: false,
+      moved: grown.matches[2]!.id
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const gate = deferred<CommandResult<SaveResult>>();
+    const commands: BrowserCommands = {
+      ...scriptedCommands({ documents }),
+      createMatch: vi.fn(async () => gate.promise)
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const pending = sendRecoveryCreate(recoveryOver(state), state.createMatch);
+    // The person picks something else while the recovered snippet is being
+    // written. The guard is the wrapper's own and holds at the write; recovery
+    // neither observes the selection nor writes to it.
+    await state.select(otherDocument().matches[0]!);
+    documents.set(2, { ok: true, value: grown });
+    gate.resolve({ ok: true, value: created });
+    await pending;
+
+    expect(state.selected?.id.node).toBe(20);
+    expect(state.selected?.document).toBe(3);
+  }); // End of the "selection moved during the recovery create" case
+
+  it('gives an operation choice and the raw editor no create offer', async () => {
+    // **Narrowed after the review's fourth finding**, which is right that the
+    // previous version proved nothing about commands: it called one pure function
+    // that receives neither this state nor its command surface, then asserted six
+    // unrelated mocks were untouched. What can fail is below — the mock that the
+    // exercised path really does call — and in `recovery.test.ts`, whose dependency
+    // check fails if the module gains a route to the command layer at all.
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const identity = describeEditSave(
+      makeConflict({ disk: grownDocument(), expected: 'rev-a' }),
+      startDraft('rev-a', baseDocument().matches[0]!.id, structuredDraftRules<MatchId>()),
+      MATCH_EDITOR_CAPABILITIES
+    );
+    const text = describeEditSave(
+      makeConflict({ disk: grownDocument(), expected: 'rev-a' }),
+      startDraft('rev-a', DISK_TEXT, textDraftRules),
+      MATCH_EDITOR_CAPABILITIES
+    );
+    expect(identity.kind).toBe('conflict');
+    expect(text.kind).toBe('conflict');
+
+    expect(
+      recoveryAvailability(
+        'operationChoice',
+        { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } },
+        identity.kind === 'conflict' ? identity : null,
+        state.documents,
+        state.views
+      )
+    ).toEqual({ kind: 'unavailable', reason: 'operationDraft' });
+    expect(
+      recoveryAvailability(
+        'wholeDocumentText',
+        { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } },
+        text.kind === 'conflict' ? text : null,
+        state.documents,
+        state.views
+      )
+    ).toEqual({ kind: 'unavailable', reason: 'wholeDocumentDraft' });
+
+  }); // End of the "no create offer" case
+
+  it('sends nothing through this state for a form that may not be submitted', async () => {
+    const commands = scriptedCommands({ creates: [{ ok: true, value: CREATED_NOTHING }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    // `baseDocument`'s snippets carry no `replace`, so the transfer carries no
+    // body and the form refuses until a person supplies one.
+    const blank = recoveryOver(state, baseDocument().matches[0]!);
+    expect(recoveryRefusal(blank)).toBe('replaceEmpty');
+    expect(await sendRecoveryCreate(blank, state.createMatch)).toBe(blank);
+    expect(commands.createMatch).not.toHaveBeenCalled();
+
+    // **And the same mock is reached the moment the refusal is gone**, which is
+    // what stops the assertion above from being one that cannot fail.
+    await sendRecoveryCreate(
+      editRecoveryField(blank, 'replace', 'a body'),
+      state.createMatch
+    );
+    expect(commands.createMatch).toHaveBeenCalledTimes(1);
+  }); // End of the "nothing sent while a refusal stands" case
+
+  it('stops calling the source conflict intact once an uncertain send reconciled the window', async () => {
+    // **The review's High, against the real wrapper.** A failure whose
+    // `mayHaveWritten` is true makes `BrowserState.createMatch` re-read the file,
+    // install the projection and repair the selection — so the window the conflict
+    // came from is gone, and `!committed` was never a claim the model could make
+    // about it.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({
+      documents,
+      saves: [SAVE_CONFLICTED],
+      creates: [WRITE_MAY_HAVE_HAPPENED]
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    const conflict = await conflictFromASave(state);
+    const reads = vi.mocked(commands.getDocument).mock.calls.length;
+
+    // The re-read finds a third revision, which is neither what the window held
+    // nor what the conflict carried.
+    documents.set(2, { ok: true, value: thinnedDocument() });
+    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+
+    expect(after.sendFailure?.kind).toBe('mayHaveWritten');
+    expect(after.committed).toBe(false);
+    expect(vi.mocked(commands.getDocument).mock.calls.length).toBe(reads + 1);
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe('rev-c');
+    // The selection no longer names the parse the conflict was about.
+    expect(state.selected).toBeNull();
+    // The window moved, so the model says so — and the conflict's one-shot
+    // authorization is refused by the projection-generation guard it is keyed to.
+    expect(sourceConflictState(after)).toBe('windowMoved');
+    expect(recoveryView(after).sourceConflict).toBe('windowMoved');
+    expect(state.adoptDiskVersion(conflict, confirmReloadDiskVersion(conflict))).toBe('refused');
+  }); // End of the "uncertain send reconciled the window" case
+
+  it('leaves the window and the authorization alone when the send wrote nothing', async () => {
+    // The other side of the same pair, and what makes it falsifiable: an ordinary
+    // rejection reconciles nothing, so the projection, the selection and the
+    // conflict's authorization are all exactly where they were.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, saves: [SAVE_CONFLICTED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    const conflict = await conflictFromASave(state);
+    const reads = vi.mocked(commands.getDocument).mock.calls.length;
+
+    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+
+    expect(after.sendFailure).toEqual({
+      kind: 'notSent',
+      reason: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    });
+    expect(vi.mocked(commands.getDocument).mock.calls.length).toBe(reads);
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe('rev-a');
+    expect(state.selected?.id.node).toBe(10);
+    expect(sourceConflictState(after)).toBe('retained');
+    // The authorization is still the person's to spend, which is what `retained`
+    // claims and what the case above shows it cannot claim.
+    expect(state.adoptDiskVersion(conflict, confirmReloadDiskVersion(conflict))).toBe('installed');
+  }); // End of the "nothing was written" case
+
+  it('stops calling it intact when a saved arm that committed nothing reconciled the window', async () => {
+    // The second half of the review's High: a recovery create is based on the
+    // conflict's disk revision while the window projects the older one, so even a
+    // `committed: false` result is out of date to the wrapper, which adopts.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const wroteNothing: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: false,
+        notes: [],
+        backup_taken: false,
+        moved: null
+      }
+    };
+    const commands = scriptedCommands({
+      documents,
+      saves: [SAVE_CONFLICTED],
+      creates: [wroteNothing]
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    const conflict = await conflictFromASave(state);
+
+    documents.set(2, { ok: true, value: thinnedDocument() });
+    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+
+    expect(after.committed).toBe(false);
+    expect(after.outcome?.kind).toBe('saved');
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe('rev-c');
+    expect(sourceConflictState(after)).toBe('windowMoved');
+    expect(state.adoptDiskVersion(conflict, confirmReloadDiskVersion(conflict))).toBe('refused');
+  }); // End of the "committed nothing, reconciled anyway" case
+
+  it('offers the other file when the conflict’s own has lost its snippet list', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const listless = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      topLevelKeys: ['global_vars']
+    });
+    const outcome = describeEditSave(
+      makeConflict({ disk: listless, expected: 'rev-a' }),
+      startDraft('rev-a', buffersOf(baselineOf(baseDocument().matches[0]!)), structuredDraftRules<MatchBuffers>()),
+      MATCH_EDITOR_CAPABILITIES
+    );
+    const offer = recoveryAvailability(
+      'matchFields',
+      { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } },
+      outcome.kind === 'conflict' ? outcome : null,
+      state.documents,
+      state.views
+    );
+    // A missing `matches:` list is not permission to create one: the file is not
+    // offered, the other snippet file is, and nothing has been written.
+    expect(offer).toEqual({
+      kind: 'offered',
+      choices: ['createFromSupportedFields'],
+      destinations: [{ document: 3, path: 'match/other.yml', revision: 'rev-a' }]
+    });
+    expect(commands.createMatch).not.toHaveBeenCalled();
+  }); // End of the "missing sequence" case
+}); // End of the "recovering a draft" suite
 
 describe('deleting a snippet', () => {
   it('sends the identity, the revision this state is projecting, and no flag', async () => {
