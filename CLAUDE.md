@@ -368,9 +368,15 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**172** as of 2c-4a-3a (171 through 2c-4a-2, plus exactly one new source module,
-`src/lib/components/clipboard.ts`), and the guard is not the number but the *shape of
-a change to it*. A count
+**175** as of 2c-4b-3d-3, and the guard is not the number but the *shape of
+a change to it*. The ladder, so it can be checked rather than accepted: **171** through 2c-4a-2,
+**172** at 2c-4a-3a (`src/lib/components/clipboard.ts`), **173** and **174** at 2c-4a-3c
+(`src/lib/components/reveal.ts`, then `src/lib/browser/draftKind.ts`), **175** at 2c-4b-2
+(`src/lib/browser/reapply.ts`) — one new source module each time. The other two frontend gates move
+with it: **418** `svelte-check` files and **1633** tests as of 2c-4b-3d-3. (The test count is the one
+this project has already got wrong: `1623` stood in `PROGRESS.md` for three step records after 3d-1
+committed ten cases behind a harness that made the production figure unobservable. A count only a
+harness-free tree can produce must be **re-derived** on such a tree, never copied forward.) A count
 that moves by exactly the number of new source modules is a new module; a jump to ~180 with
 `svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine
 `git archive HEAD` copy and subtracting; never by editing the condition.

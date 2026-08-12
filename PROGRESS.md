@@ -11217,6 +11217,25 @@ _Updated at each phase boundary._
 | **2c-4b step 3d-1** | **`a2069db`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d-2**, the reading, and **3d-3** is the step that removes them. Staged **by path**, never `-a`: the commit holds 22 frontend sources and tests, four documents and this checkpoint, and **excludes `src/main.ts`, `src-tauri/src/main.rs`, `src/probe.ts` and `src-tauri/src/probe.rs`**. **Never `git commit -am` while the harness is there** |
 | **2c-4b step 3d-2a** | **`531d81a`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d-2b**, the reading, and **3d-3** removes them. Staged **by path**, never `-a`: the commit holds **five files** — this checkpoint, `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md` and its **three** reviews — and **excludes `src/main.ts`, `src-tauri/src/main.rs`, `src/probe.ts` and `src-tauri/src/probe.rs`**. The rebuild record's §1 **predicted this staging and this residue**, so a reader can check the prediction against what happened. **Never `git commit -am` while the harness is there** |
 | **2c-4b step 3d-2b** | **`692b0e0`** | ✅ pushed to `origin/main` | **deliberately not clean** — the same four harness paths stay in the working tree for **3d-3**, which is the step that removes them. Staged **by path**, never `-a`: the commit holds **four documents and nothing else** — this checkpoint, `docs/decisions/2c-4b-3d-2b-window-reading.md`, `docs/reviews/phase-2c-4b-3d-2b-reading.md` and `docs/reviews/phase-2c-4b-3d-2b-confirmation.md` — because a reading changes no tracked code. **`src/probe.ts` carries this step's `scrollIntoView` spy**, which is why the two older manifests each fail on exactly that one entry (45/46 and 130/131) and were **recorded rather than regenerated**; `manifest-3d-2b-fix-post.sha256` (177 entries) is the current post-image. **Never `git commit -am` while the harness is there** |
+| **2c-4b step 3d-3** | **`e3e2530`** | ✅ pushed to `origin/main` | **clean** — the first clean tree since 3d-1, because this is the step that removed the harness. `git status --short --untracked-files=all` returns **nothing** and `git diff` is empty. Staged **by path** even so: the commit holds **three files** — this checkpoint, `docs/decisions/2c-4b-3d-3-notes.md` and `docs/reviews/phase-2c-4b-3d-3.md`. **The removal is in no diff**: the two probe sources were untracked and the four hook lines returned to what `HEAD` already held, so the evidence is the gate numbers and the empty status, not the patch |
+
+`e3e2530` is Phase 2c-4b step 3d-3, and it is the **first commit since `a2069db` that leaves a clean
+working tree** — the harness is gone, so `git status --short --untracked-files=all` returns nothing
+and the "deliberately not clean" note that qualified the three rows above it does not apply. It holds
+**three files**: `docs/decisions/2c-4b-3d-3-notes.md`, `docs/reviews/phase-2c-4b-3d-3.md` and this
+checkpoint. It was still staged **by path**, because the rule is about the habit and not about the
+tree of the day. **The removal itself appears in no diff**: the two deleted files were untracked and
+the four hook lines went back to what `HEAD` already held, so a reader looking for the removal in the
+patch will not find it — the evidence is the gates and the empty `git status`, both recorded in
+"Verification — Phase 2c-4b step 3d-3".
+
+**This commit closes 2c-4b-3d and with it Phase 2c-4b.** A fresh session starting **2c-4c** should
+start from `e3e2530` or later, and it does **not** need the harness — but the first window reading of
+2c-4c will, and rebuilding it is its own step
+(`docs/decisions/2c-4b-3d-2a-instrument-rebuild.md`). As at 1b-1, `npm install` (or `npm ci`) is
+required before any frontend command will run. **The production gate numbers from here are
+`1633 / 418 / 175` and `1086`** — the `1623` this file repeated until now was stale, and §3 of the
+step's record is the arithmetic.
 
 `a2069db` is Phase 2c-4b step 3d-1 **including all three of its Codex rounds and the orchestrator
 round that closed the last one** — the step was held open until the fifth consecutive
