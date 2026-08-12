@@ -110,6 +110,7 @@ import {
   transferOfMatchDraft,
   undoRecoveryEdit,
   type CreateARecoveredSnippet,
+  type InstallTheWaitingForm,
   type RecoveryCreateAnswer,
   type RecoveryDraftKind,
   type RecoverySession
@@ -141,6 +142,26 @@ const NOT_ADOPTED: InvalidationStatus = {
 
 /** A clock nothing advances, so every keystroke joins one run. */
 const CLOCK = (): number => 0;
+
+/**
+ * An installation that puts the waiting form nowhere.
+ *
+ * `sendRecoveryCreate`'s third argument has no default — the 2c-4c-3a review's
+ * first High — so a case that is not about the moment a form goes in flight still
+ * has to say what it does with it. The cases that **are** about that moment record
+ * instead, and `RecoveryPanel.test.ts` presses the controls a real installation
+ * makes inert.
+ */
+const INSTALLS_NOTHING: InstallTheWaitingForm = () => {};
+
+/**
+ * An installation that fails the case that reaches it.
+ *
+ * For the probes where *nothing goes in flight at all* is the property under test.
+ */
+const REFUSES_TO_INSTALL: InstallTheWaitingForm = () => {
+  throw new Error('this form must never be put in flight');
+};
 
 /**
  * The snippet the match editor's cases are seeded from.
@@ -780,7 +801,8 @@ describe('where a recovered snippet may go', () => {
   it('withdraws consent and the panel when the destination moves', async () => {
     const refusedFirst = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     const consented = acknowledgeRecoveryFindings(refusedFirst);
     expect(consented.draft.consent).not.toBeNull();
@@ -792,7 +814,7 @@ describe('where a recovered snippet may go', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(moved, create);
+    await sendRecoveryCreate(moved, create, INSTALLS_NOTHING);
     expect(calls[0]![3]).toBe(OTHER);
     expect(calls[0]![4]).toEqual({ accepted: [] });
   }); // End of the "consent does not cross a destination" case
@@ -809,19 +831,62 @@ describe('where in the file a recovered snippet goes', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(openedOverEditor(), create);
+    await sendRecoveryCreate(openedOverEditor(), create, INSTALLS_NOTHING);
     expect(calls[0]![2]).toEqual({ End: {} });
     expect(recoveryView(openedOverEditor()).position).toEqual({ End: {} });
   });
 }); // End of the "placement" suite
 
 describe('sending the recovery create', () => {
+  it('hands the waiting form back before it authorizes anything, and only when it sends', async () => {
+    // **The 2c-4c-3a review's first High, held in the model rather than in the one
+    // renderer that composes it.** A caller awaiting this function holds the
+    // pre-send form for the whole flight, so the moment the form goes in flight has
+    // to be offered synchronously or it does not exist at all. What is pinned here
+    // is the ordering and the gating; that a caller *installs* what it is handed is
+    // `RecoveryPanel.test.ts`'s, and no type forces it.
+    const order: string[] = [];
+    const installed: RecoverySession[] = [];
+    const create: CreateARecoveredSnippet = async (...args) => {
+      order.push('create');
+      expect(installed).toHaveLength(1);
+      // The revision on the wire is the waiting form's own, so the two values
+      // cannot describe two different sends.
+      expect(args[3]).toBe(recoveryBaseRevisionOf(installed[0]!));
+      return { kind: 'answered', result: COMMITTED, adoption: ADOPTED };
+    };
+    const after = await sendRecoveryCreate(openedOverEditor(), create, (waiting) => {
+      order.push('install');
+      installed.push(waiting);
+    });
+    expect(order).toEqual(['install', 'create']);
+    // What was handed over is the form gated as saving, which is what makes every
+    // control the view gates on `saving` inert for the flight.
+    expect(installed[0]!.phase).toBe('saving');
+    expect(recoveryView(installed[0]!).saving).toBe(true);
+    expect(recoveryView(installed[0]!).canCreate).toBe(false);
+    expect(recoveryView(installed[0]!).refusal).toBe('saveInFlight');
+    expect(recoveryView(installed[0]!).editable).toBe(false);
+    expect(after.committed).toBe(true);
+  }); // End of the "the waiting form is offered before the send" case
+
+  it('offers no waiting form for a form it will not send', async () => {
+    // The mirror of the case above: a refusal calls neither callback, so nothing
+    // installs a `saving` state a person could never leave.
+    const installed: RecoverySession[] = [];
+    const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body' }), 'trigger', '');
+    const { create, calls } = recordingCreate([]);
+    expect(await sendRecoveryCreate(blank, create, (waiting) => installed.push(waiting))).toBe(blank);
+    expect(installed).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   it('composes the one create the caller supplies, with the drafted values', async () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
     const session = openedOverEditor(snippet({ label: 'A name' }));
-    const after = await sendRecoveryCreate(session, create);
+    const after = await sendRecoveryCreate(session, create, INSTALLS_NOTHING);
     expect(calls).toHaveLength(1);
     expect(calls[0]![0]).toBe(2);
     expect(calls[0]![1]).toEqual({
@@ -839,13 +904,13 @@ describe('sending the recovery create', () => {
       { kind: 'answered', result: REFUSED, adoption: NOT_OWED },
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    const refused = await sendRecoveryCreate(openedOverEditor(), create);
+    const refused = await sendRecoveryCreate(openedOverEditor(), create, INSTALLS_NOTHING);
     expect(refused.outcome?.kind).toBe('refused');
     expect(recoveryView(refused).refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
     expect(refused.committed).toBe(false);
     expect(sourceConflictState(refused)).toBe('retained');
     const consented = acknowledgeRecoveryFindings(refused);
-    const committed = await sendRecoveryCreate(consented, create);
+    const committed = await sendRecoveryCreate(consented, create, INSTALLS_NOTHING);
     expect(calls[1]![4]).toEqual({ accepted: [REPEATS_TRIGGER] });
     expect(committed.committed).toBe(true);
   }); // End of the "acknowledgement round trip" case
@@ -853,7 +918,8 @@ describe('sending the recovery create', () => {
   it('withdraws the offer to save anyway once the findings are about another draft', async () => {
     const refused = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     const typed = editRecoveryField(refused, 'trigger', ':other');
     expect(recoveryView(typed).findingsAreStale).toBe(true);
@@ -870,7 +936,8 @@ describe('sending the recovery create', () => {
           result: makeConflict({ disk: diskFile({ revision: AFTER }), expected: DISK }),
           adoption: NOT_OWED
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
     expect(recoveryConflictOf(conflicted)).not.toBeNull();
     expect(conflicted.committed).toBe(false);
@@ -894,7 +961,7 @@ describe('sending the recovery create', () => {
       }
     ]);
     const session = openedOverEditor();
-    const after = await sendRecoveryCreate(session, create);
+    const after = await sendRecoveryCreate(session, create, INSTALLS_NOTHING);
     expect(after.sendFailure?.kind).toBe('mayHaveWritten');
     expect(after.outcome).toBeNull();
     expect(after.committed).toBe(false);
@@ -920,7 +987,8 @@ describe('sending the recovery create', () => {
           mayHaveWritten: false,
           failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
     expect(after.sendFailure?.kind).toBe('notSent');
     expect(sourceConflictState(after)).toBe('retained');
@@ -929,7 +997,8 @@ describe('sending the recovery create', () => {
   it('says nothing was written for a state that refused before any command ran', async () => {
     const after = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'notAttempted' }]).create
+      recordingCreate([{ kind: 'notAttempted' }]).create,
+      INSTALLS_NOTHING
     );
     expect(after.sendFailure).toEqual({ kind: 'notSent', reason: null });
   });
@@ -955,7 +1024,8 @@ describe('sending the recovery create', () => {
   it('reports a committed create whose adoption failed as a save, never as an error', async () => {
     const after = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: NOT_ADOPTED }]).create
+      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: NOT_ADOPTED }]).create,
+      INSTALLS_NOTHING
     );
     expect(after.outcome?.kind).toBe('saved');
     expect(after.committed).toBe(true);
@@ -968,14 +1038,15 @@ describe('sending the recovery create', () => {
   it('spends the form on a commit and lets nothing dismiss its way past that', async () => {
     const after = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create
+      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create,
+      INSTALLS_NOTHING
     );
     expect(recoveryRefusal(after)).toBe('alreadyCreated');
     expect(recoveryRefusal(keepRecovering(after))).toBe('alreadyCreated');
     expect(beginRecoveryCreate(after)).toBeNull();
     expect(isRecoveryEditable(after)).toBe(false);
     const { create, calls } = recordingCreate([]);
-    expect(await sendRecoveryCreate(after, create)).toBe(after);
+    expect(await sendRecoveryCreate(after, create, INSTALLS_NOTHING)).toBe(after);
     expect(calls).toEqual([]);
   });
 
@@ -983,7 +1054,8 @@ describe('sending the recovery create', () => {
     const wroteNothing: SaveResult = { ...COMMITTED, committed: false, moved: null };
     const after = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: wroteNothing, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: wroteNothing, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     expect(after.committed).toBe(false);
     expect(sourceConflictState(after)).toBe('retained');
@@ -998,7 +1070,8 @@ describe('sending the recovery create', () => {
     for (const adoption of [ADOPTED, NOT_ADOPTED]) {
       const after = await sendRecoveryCreate(
         openedOverEditor(),
-        recordingCreate([{ kind: 'answered', result: wroteNothing, adoption }]).create
+        recordingCreate([{ kind: 'answered', result: wroteNothing, adoption }]).create,
+        INSTALLS_NOTHING
       );
       expect(after.committed).toBe(false);
       expect(after.windowWasReconciled).toBe(true);
@@ -1015,7 +1088,8 @@ describe('sending the recovery create', () => {
           mayHaveWritten: true,
           failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
     // Dismissing a panel, typing and choosing another destination observe nothing
     // about the window: none of them can withdraw a re-read that was already
@@ -1025,7 +1099,8 @@ describe('sending the recovery create', () => {
     expect(sourceConflictState(chooseRecoveryDestination(moved, 3))).toBe('windowMoved');
     const refusedLater = await sendRecoveryCreate(
       moved,
-      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     expect(sourceConflictState(refusedLater)).toBe('windowMoved');
   }); // End of the "the record is never withdrawn" case
@@ -1112,7 +1187,11 @@ const CLOSED_FORM_PROBES: Readonly<Record<string, ClosedFormProbe>> = {
     answersItself: true
   },
   sendRecoveryCreate: {
-    answers: (closed) => sendRecoveryCreate(closed, recordingCreate([]).create),
+    // The installer **throws** rather than records: a closed form must reach
+    // neither the boundary nor the moment a form goes in flight, and a probe that
+    // silently accepted an installation would let a terminal form be drawn as
+    // saving with nothing ever coming back to clear it.
+    answers: (closed) => sendRecoveryCreate(closed, recordingCreate([]).create, REFUSES_TO_INSTALL),
     answersItself: true
   },
   reapplyRecoveryToDiskVersion: {
@@ -1130,9 +1209,11 @@ const CLOSED_FORM_PROBES: Readonly<Record<string, ClosedFormProbe>> = {
 /**
  * Every other value this module exports, and why it is not probed above.
  *
- * Three kinds, and each is a claim a reader can check: a **producer** builds a
+ * Four kinds, and each is a claim a reader can check: a **producer** builds a
  * form or a value out of things that are not a form; a **query** takes one and
- * answers a fact about it rather than a new form; a **constant** is data.
+ * answers a fact about it rather than a new form; a **constant** is data; and a
+ * **key function** turns a code into a dictionary key, which 2c-4c-3a added and
+ * which takes no form at all.
  */
 const NOT_A_FORM_TRANSITION: readonly string[] = [
   // Producers: they build values, and none of them takes a form.
@@ -1156,6 +1237,17 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'canCreateRecovery',
   'recoveryView',
   'recoveryBaseRevisionOf',
+  'recoveryIsAnswerable',
+  'transferStatusOf',
+  // Key functions, added at 2c-4c-3a: each takes a code and answers a dictionary
+  // key, and not one of them takes a form.
+  'recoveryChoiceKey',
+  'recoveryUnavailableKey',
+  'transferStatusKey',
+  'transferRefusalKey',
+  'recoveryRefusalKey',
+  'recoveryReapplyObstacleKey',
+  'sourceConflictStateKey',
   // Constants.
   'RECOVERY_POSITION',
   'RECOVERY_CONFLICT_CAPABILITIES'
@@ -1186,7 +1278,8 @@ describe('the two ways out of a conflict of this form’s own', () => {
           }),
           adoption: NOT_OWED
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
   } // End of function conflictedForm()
 
@@ -1238,14 +1331,15 @@ describe('the two ways out of a conflict of this form’s own', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(attempt.session, create);
+    await sendRecoveryCreate(attempt.session, create, INSTALLS_NOTHING);
     expect(calls[0]![3]).toBe(AFTER);
   }); // End of the "stale base broken" case
 
   it('withdraws consent when it rebases, because findings do not cross a revision', async () => {
     const refused = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     const consented = acknowledgeRecoveryFindings(refused);
     expect(consented.draft.consent).not.toBeNull();
@@ -1261,7 +1355,8 @@ describe('the two ways out of a conflict of this form’s own', () => {
           }),
           adoption: NOT_OWED
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
     const attempt = reapplyRecoveryToDiskVersion(conflicted, adopting().adopt);
     expect(attempt.kind === 'reapplied' ? attempt.session.draft.consent : 'no session').toBeNull();
@@ -1320,9 +1415,14 @@ describe('the two ways out of a conflict of this form’s own', () => {
     const conflicted = await conflictedForm();
     const asked = askToReloadRecoveryDiskVersion(conflicted);
     expect(recoveryView(asked).awaitingReloadConfirmation).toBe(true);
-    // **Built and not offered**: the transition exists and the control is withheld,
-    // which is what `offersReload: false` is for.
-    expect(recoveryView(asked).conflictChoices).toEqual(['keepEditing']);
+    // **Offered as of 2c-4c-3a**: the same transition, with the boolean flipped, so
+    // the second step's label replaces the first's in the produced list — which is
+    // `conflictChoicesFor`'s decision and not this module's.
+    expect(recoveryView(asked).conflictChoices).toEqual([
+      'keepEditing',
+      'keepMyDraft',
+      'confirmReload'
+    ]);
     const confirmed = confirmRecoveryDiskReload(asked);
     const { adopt, adoptions } = adopting();
     const closed = reloadRecoveryDiskVersion(confirmed, adopt);
@@ -1424,7 +1524,8 @@ describe('the two ways out of a conflict of this form’s own', () => {
     const asked = askToReloadRecoveryDiskVersion(conflicted);
     const refused = await sendRecoveryCreate(
       openedOverEditor(),
-      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
     );
     // **One hostile form per state a guard could read**, because a guard is only
     // shown to be a guard by a form that would otherwise get past it: a conflict at
@@ -1485,7 +1586,7 @@ describe('what the form refuses to send', () => {
     const noBody = openedOverCreator({ trigger: ':new', replace: '' });
     expect(recoveryRefusal(noBody)).toBe('replaceEmpty');
     const { create, calls } = recordingCreate([]);
-    expect(await sendRecoveryCreate(noBody, create)).toBe(noBody);
+    expect(await sendRecoveryCreate(noBody, create, INSTALLS_NOTHING)).toBe(noBody);
     expect(calls).toEqual([]);
     expect(canCreateRecovery(noBody)).toBe(false);
     expect(beginRecoveryCreate(noBody)).toBeNull();
@@ -1583,14 +1684,15 @@ describe('what a screen would draw', () => {
     expect(recoveryView(session).sourceConflict).toBe('retained');
     const committed = await sendRecoveryCreate(
       session,
-      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create
+      recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create,
+      INSTALLS_NOTHING
     );
     expect(recoveryView(committed).sourceConflict).toBe('spent');
     expect(recoveryView(committed).created).toEqual(CREATED);
     expect(recoveryView(committed).committed).toBe(true);
   });
 
-  it('offers only the way out for a conflict of its own, and draws the disk text', async () => {
+  it('offers the two ways out for a conflict of its own, and draws the disk text', async () => {
     const conflicted = await sendRecoveryCreate(
       openedOverEditor(),
       recordingCreate([
@@ -1599,16 +1701,19 @@ describe('what a screen would draw', () => {
           result: makeConflict({ disk: diskFile({ revision: AFTER }), expected: DISK }),
           adoption: NOT_OWED
         }
-      ]).create
+      ]).create,
+      INSTALLS_NOTHING
     );
     const view = recoveryView(conflicted);
-    // Nothing is offered but the way out: this step draws no control, so the
-    // reload and the copy are withheld by the capability record.
-    expect(view.conflictChoices).toEqual(['keepEditing']);
+    // Both transitions this module owns are offered as of 2c-4c-3a. The copy is
+    // not, and that is a property of the view rather than an opinion: it copies the
+    // **retained draft list**, which `recoveryView` does not produce — the two
+    // values are in this form's own boxes.
+    expect(view.conflictChoices).toEqual(['keepEditing', 'keepMyDraft', 'reloadDiskVersion']);
     expect(view.diskText).toEqual({ kind: 'text', text: '# the file as it is now\n' });
-    expect(RECOVERY_CONFLICT_CAPABILITIES.offersReload).toBe(false);
+    expect(RECOVERY_CONFLICT_CAPABILITIES.offersReload).toBe(true);
+    expect(RECOVERY_CONFLICT_CAPABILITIES.offersReapply).toBe(true);
     expect(RECOVERY_CONFLICT_CAPABILITIES.offersCopyDraft).toBe(false);
-    expect(RECOVERY_CONFLICT_CAPABILITIES.offersReapply).toBe(false);
   });
 
   it('draws nothing about a conflict when there is none of its own', () => {
@@ -1647,10 +1752,10 @@ describe('what recovery never does', () => {
     // `beginRecoveryCreate` makes this fail rather than pass vacuously.
     const create = vi.fn<CreateARecoveredSnippet>(async () => ({ kind: 'notAttempted' }));
     const blank = openedOverCreator({ trigger: ':new', replace: '' });
-    expect(await sendRecoveryCreate(blank, create)).toBe(blank);
+    expect(await sendRecoveryCreate(blank, create, INSTALLS_NOTHING)).toBe(blank);
     expect(create).not.toHaveBeenCalled();
     // And it is called exactly once for a form that may be.
-    await sendRecoveryCreate(openedOverCreator(), create);
+    await sendRecoveryCreate(openedOverCreator(), create, INSTALLS_NOTHING);
     expect(create).toHaveBeenCalledTimes(1);
   });
 

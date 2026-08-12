@@ -677,13 +677,23 @@
     />
   {:else if editingMatch !== null}
     {@const open = editingMatch}
+    <!-- **The three readers the recovery panel needs are functions**, for
+         `MatchCreator`'s reason: a recovery form opened after this window has
+         re-read anything must offer the files as they are now, not as they were
+         when the editor opened. `adoptRecoveryDiskVersion` is the same generic
+         method as `adoptDiskVersion`, at the other drafted value. -->
     <MatchEditor
       match={open.match}
       file={open.file}
+      documents={() => browser.documents}
+      projections={() => browser.views}
       save={(id, draft, baseRevision, acknowledgement) =>
         browser.saveMatch(id, draft, baseRevision, acknowledgement)}
+      create={(document, newMatch, position, baseRevision, acknowledgement) =>
+        browser.createMatch(document, newMatch, position, baseRevision, acknowledgement)}
       reproject={reprojectMatch}
       {adoptDiskVersion}
+      adoptRecoveryDiskVersion={adoptDiskVersion}
       close={() => (editingMatch = null)}
     />
   {:else if deletingMatch !== null}

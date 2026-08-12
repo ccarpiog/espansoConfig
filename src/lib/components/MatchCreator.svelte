@@ -28,11 +28,13 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
+  import { recoveryAvailability, startCreationFieldRecovery } from '../browser/recovery';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { Clock } from '../browser/typing';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { copyReferenceText } from './clipboard';
+  import RecoveryPanel from './RecoveryPanel.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
@@ -248,6 +250,24 @@
 
   /** What the last attempt left this panel to say, or `null`. */
   const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
+
+  /**
+   * Whether recovery has anything to offer, and what it would work from.
+   *
+   * **Read from the report rather than from the attempt**, so the offer lives
+   * exactly as long as the answer that justifies it: recovery's entry condition is
+   * a reapply that resolved **nothing** and adopted nothing, and `reapplyToShow`
+   * is `null` the moment the session is replaced.
+   */
+  const recovery = $derived(
+    recoveryAvailability(
+      'creationFields',
+      reapplyReport,
+      view.conflict,
+      documents(),
+      projections()
+    )
+  );
 
   /**
    * Every position the form can offer, named from the current projections.
@@ -749,6 +769,26 @@
       {/if}
     </div>
   {/if}
+
+  <!-- The way out of a conflict nothing could resolve automatically. **Outside the
+       outcome panel on purpose**, for the reason the reapply report is: a form the
+       person has begun to fill in must not be taken away by *Keep editing* on the
+       conflict above it. The panel is handed this form's **own** adoption door:
+       both conflicts retain the same two authored strings, so one instantiation
+       serves both — which is not true of the match editor. -->
+  <RecoveryPanel
+    availability={recovery}
+    open={() =>
+      startCreationFieldRecovery(
+        reapplyReport,
+        view.conflict,
+        documents(),
+        projections(),
+        clock
+      )}
+    {create}
+    {adoptDiskVersion}
+  />
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}

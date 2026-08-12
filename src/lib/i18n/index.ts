@@ -66,6 +66,22 @@ import {
   type ReapplyOutcomeCode,
   type SharedReapplyObstacle
 } from '../browser/reapply';
+import {
+  recoveryChoiceKey,
+  recoveryReapplyObstacleKey,
+  recoveryRefusalKey,
+  recoveryUnavailableKey,
+  sourceConflictStateKey,
+  transferRefusalKey,
+  transferStatusKey,
+  type RecoveryChoice,
+  type RecoveryReapplyObstacle,
+  type RecoveryRefusal,
+  type RecoveryUnavailable,
+  type SourceConflictState,
+  type TransferRefusal,
+  type TransferStatus
+} from '../browser/recovery';
 import { selectionNoticeKey, type SelectionNotice } from '../browser/notices';
 import {
   rawEditorDiskRefusalKey,
@@ -1486,6 +1502,147 @@ export function describeMoveReapplyObstacle(
 export function tMoveReapplyObstacle(obstacle: MoveReapplyObstacle): string {
   return describeMoveReapplyObstacle(locale.current, obstacle);
 } // End of function tMoveReapplyObstacle()
+
+// ---------------------------------------------------------------------------
+// Recovery from a conflict nothing could resolve — Phase 2c-4c-3a
+// ---------------------------------------------------------------------------
+//
+// Seven accessors over the six code unions `../browser/recovery` owns, written
+// together with the one panel that renders them. Two of them **compose**, for the
+// reason the reapply describers above compose: an arm that carries a nested code
+// needs two sentences, and a renderer that walked the union itself could omit the
+// second one while every other renderer showed it (2c-3c-3).
+//
+// **The product is named once, in `browser.recovery.open`**, and it is *create a new
+// snippet from supported fields*. It is not a duplicate, not an exact copy and not
+// *keep my draft* — that phrase is the reapply control's alone
+// (`docs/reviews/phase-2c-4c-design.md`, "What this phase must not do").
+//
+// **Every sentence about {@link SourceConflictState} names an act and never an
+// outcome.** `windowMoved` means *an adoption was spent or a re-read was ordered*,
+// and nothing in this application learns what came of either — so no string here may
+// say the window moved, the list re-ordered or the projection changed. Nothing
+// mechanical holds that: these suites check key parity and placeholder agreement,
+// never meaning.
+
+/**
+ * Renders the label of one thing recovery offers, in the current language.
+ *
+ * @param choice - What `recoveryAvailability` offered.
+ * @returns The translated label.
+ */
+export function tRecoveryChoice(choice: RecoveryChoice): string {
+  return translate(locale.current, recoveryChoiceKey(choice));
+} // End of function tRecoveryChoice()
+
+/**
+ * Renders why recovery offers nothing on one surface, in the current language.
+ *
+ * @param reason - What `recoveryAvailability` answered.
+ * @returns The translated sentence.
+ */
+export function tRecoveryUnavailable(reason: RecoveryUnavailable): string {
+  return translate(locale.current, recoveryUnavailableKey(reason));
+} // End of function tRecoveryUnavailable()
+
+/**
+ * Renders what one row of the transfer table says, in the current language.
+ *
+ * @param status - What `transferStatusOf` answered.
+ * @returns The translated phrase.
+ */
+export function tTransferStatus(status: TransferStatus): string {
+  return translate(locale.current, transferStatusKey(status));
+} // End of function tTransferStatus()
+
+/**
+ * Renders why one field is not carried into a recovered snippet, in one language.
+ *
+ * **The `fieldNotEditable` arm is two sentences**, and the second is the match
+ * editor's own `FieldRefusal` — which already has strings and a key function — so
+ * this composes the two rather than a fifth string set being invented for the four
+ * eligibility refusals that reach here.
+ *
+ * @param locale - The dictionary to read from.
+ * @param refusal - Why the field is not carried.
+ * @returns The translated sentence, with the nested code's under it.
+ */
+export function describeTransferRefusal(locale: Locale, refusal: TransferRefusal): string {
+  const key = transferRefusalKey(refusal);
+  return refusal.kind === 'fieldNotEditable'
+    ? `${translate(locale, key)} ${translate(locale, fieldRefusalKey(refusal.reason))}`
+    : translate(locale, key);
+} // End of function describeTransferRefusal()
+
+/**
+ * Renders why one field is not carried into a recovered snippet, in the current
+ * language.
+ *
+ * @param refusal - Why the field is not carried.
+ * @returns The translated sentence.
+ */
+export function tTransferRefusal(refusal: TransferRefusal): string {
+  return describeTransferRefusal(locale.current, refusal);
+} // End of function tTransferRefusal()
+
+/**
+ * Renders why a recovery form cannot be submitted, in the current language.
+ *
+ * @param reason - What `recoveryRefusal` answered.
+ * @returns The translated sentence.
+ */
+export function tRecoveryRefusal(reason: RecoveryRefusal): string {
+  return translate(locale.current, recoveryRefusalKey(reason));
+} // End of function tRecoveryRefusal()
+
+/**
+ * Renders why a recovery form's reapply refused, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence, with any nested code's under it.
+ */
+export function describeRecoveryReapplyObstacle(
+  locale: Locale,
+  obstacle: RecoveryReapplyObstacle
+): string {
+  const key = recoveryReapplyObstacleKey(obstacle);
+  switch (obstacle.kind) {
+    case 'recoveryRefused':
+      return `${translate(locale, key)} ${translate(locale, recoveryRefusalKey(obstacle.reason))}`;
+    case 'notTheDestination':
+      return translate(locale, key);
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+  }
+} // End of function describeRecoveryReapplyObstacle()
+
+/**
+ * Renders why a recovery form's reapply refused, in the current language.
+ *
+ * @param obstacle - What stopped the reapply.
+ * @returns The translated sentence.
+ */
+export function tRecoveryReapplyObstacle(obstacle: RecoveryReapplyObstacle): string {
+  return describeRecoveryReapplyObstacle(locale.current, obstacle);
+} // End of function tRecoveryReapplyObstacle()
+
+/**
+ * Renders what became of the conflict a recovery was opened from, in the current
+ * language.
+ *
+ * **The middle answer names the act and not its outcome.** `windowMoved` says an
+ * adoption was spent or a re-read was ordered; it may not say what that did, because
+ * `recovery.ts` cannot observe it and a satisfied adoption answers `alreadyThere` as
+ * readily as `installed`.
+ *
+ * @param state - What `sourceConflictState` answered.
+ * @returns The translated sentence.
+ */
+export function tSourceConflictState(state: SourceConflictState): string {
+  return translate(locale.current, sourceConflictStateKey(state));
+} // End of function tSourceConflictState()
 
 // ---------------------------------------------------------------------------
 // The draft surface — Phase 2b-2b-3

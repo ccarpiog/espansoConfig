@@ -88,13 +88,14 @@ describe('the untranslated-value heuristic (identity only, never "is it Spanish"
 }); // End of the untranslated-value heuristic suite
 
 /**
- * The six keys that name the revision a conflicted save was drafted from.
+ * The seven keys that name the revision a conflicted save was drafted from.
  *
- * One per write surface, drawn as the first of three revision lines on that
- * surface's conflict panel — a few lines under
- * `browser.saveOutcome.nothingWasWritten`, which is the panel's whole reason for
- * existing. The list is asserted below to be **exactly** the family, so a seventh
- * surface's line cannot join the dictionary without joining the check.
+ * One per panel that draws a conflict of its own — the six write surfaces and, since
+ * 2c-4c-3a, the recovery panel — drawn as the first of three revision lines on that
+ * panel, a few lines under `browser.saveOutcome.nothingWasWritten`, which is the
+ * panel's whole reason for existing. The list is asserted below to be **exactly**
+ * the family, so an eighth line cannot join the dictionary without joining the
+ * check.
  */
 const REVISION_EXPECTED_KEYS = [
   'browser.rawEditor.revisionExpected',
@@ -102,7 +103,12 @@ const REVISION_EXPECTED_KEYS = [
   'browser.matchCreation.revisionExpected',
   'browser.matchDeletion.revisionExpected',
   'browser.matchMove.revisionExpected',
-  'browser.matchDuplication.revisionExpected'
+  'browser.matchDuplication.revisionExpected',
+  // The seventh, added at 2c-4c-3a: the recovery panel's own create is a save
+  // like any other, so its conflict draws the same three revision lines under the
+  // same *nothing was written* sentence — and the check below is exactly what that
+  // comment above predicted would have to grow with it.
+  'browser.recovery.revisionExpected'
 ] as const satisfies readonly TranslationKey[];
 
 /**

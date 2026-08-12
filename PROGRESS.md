@@ -84,7 +84,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c design consult** | **Phase 2c-4c put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4c-design.md`, and it **returned no open question for the owner**. It rules save-as-new an **ordinary `create_match`** on the editor and creator only, labelled *Create a new snippet from supported fields* and never *Duplicate*; the trigger stays an **editable literal**, never auto-suffixed, with a **new** `FindingCode::NewMatchRepeatsLiteralTrigger` claiming risk only; placement is a fixed `End` with **no chooser**, because recovery has no trustworthy anchor by definition; **all six** surfaces are in the recovery contract but the three operation-choice ones recover by reload-then-fresh-operation and the raw editor recovers as whole-document text; and the Rust is **narrow** — widen `NewMatch`, add the finding, **no new command and no new writer**. Six steps |
 | **2c-4c-1** | **The creation and risk contract in Rust**, with no command, no `DocumentEdit` variant and no second writer: `NewMatch` widened from two mandatory fields to those plus four optional ones with `fields()` emitting only present keys in one documented order, and `FindingCode::NewMatchRepeatsLiteralTrigger` — `SuspiciousButPermitted`, content-addressed to the candidate — produced beside `findings_of` **inside** `save_document` for insertion candidates only | ✅ complete — after a review fix round, a confirmation pass and a **third scoped pass**. Round 1 returned **NOT READY** on three Mediums and two Lows, and **one of them was a defect in behaviour**: the locator derived the inserted item's address from candidate-sequence *length*, so a legal mixed batch shifted the anchor and the finding could fire **against an existing item the new snippet does not repeat**. Round 2 confirmed all five closed and found **one new Low the fix had introduced**; round 3 returned **READY with no findings** |
 | **2c-4c-2** | **Recovery as browser values, with nothing drawn**: `src/lib/browser/recovery.ts` — the six-surface route matrix, `recoveryAvailability` as the single producer of both the choice list and the destination list, the six field transfers through `fieldIntent`, destination selection judged by the **disk** projection, `RECOVERY_POSITION` as the only position anywhere, and `sendRecoveryCreate` composing `BrowserState.createMatch` through a callback. No `.svelte`, no `ConflictChoice` member, no dictionary key, no Rust | ✅ complete — after **five** review rounds. Round 1 returned **NOT READY** on five findings; rounds 2–5 each closed what was named and **each found a narrower instance of it**, four of the five times in a path the previous fix had introduced. Only two findings in five rounds were defects in behaviour — round 1's High (`sourceConflictRetained` claiming an intactness the composed wrapper can falsify) and round 5's five missing `closed` guards — and **neither was reachable from a window**, because nothing draws this module yet |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1 and 2 of six are complete, and step 2's seven-round review debt is discharged (rounds 5–7 ran, prose-only, bundle byte-identical); step 2c-4c-3, the recovery UI, is next, and it is the first of this phase to draw anything** |
+| **2c-4c-3a** | **The recovery panel, and the first screen in this phase that draws anything**: one shared `src/lib/components/RecoveryPanel.svelte` driven by `recoveryView()`, wired into `MatchEditor.svelte` and `MatchCreator.svelte` only, 58 `browser.recovery.*` keys per language behind seven reactive accessors, and the mounted evidence step 1's live behaviour change never got. **Step 3 was split by the orchestrator**; the four non-creating surfaces are 3b | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on two Highs: `runCreate` never installed the `saving` session before awaiting, so **a double-click sent two writes on one base revision and a late conflict could replace a committed answer** — this project's one absolute prohibition, reachable from a button — and `sourceConflict.retained` claimed an intactness its predicate cannot establish. Round 2 confirmed the fix sound, found **no High and no Medium**, and left one Low: a false sentence **the fix round itself introduced** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3a are complete. Step 3 is split: 3b, the four surfaces that recover without creating, is next** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3479,6 +3480,97 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-4c step 3a
+
+**Record:** `docs/decisions/2c-4c-3a-notes.md`. **Review:** `docs/reviews/phase-2c-4c-3a-code.md`
+(two rounds in one file).
+
+**Every number below was re-derived by the orchestrator on the working tree, each command run on its
+own, never accepted from a worker's report.**
+
+| Gate | Command | Result |
+|---|---|---|
+| Rust | `cargo test --workspace` | **1112 passed, 0 failed** — unchanged; no Rust file was touched |
+| Frontend tests | `npm test` | **1744 passed, 51 files** (1711 → 1740 at 3a, → 1744 after the fix round) |
+| Types | `npm run check` | **422 files, 0 errors, 0 warnings** (`--fail-on-warnings`) |
+| Bundle | `npm run build` | **178 modules**; `rg -c "svelte/internal/server" dist/assets/index-*.js` finds nothing |
+| Architecture (D2x) | `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+
+**The module count moved by three for two source files, and that is correct.** `recovery.ts` became
+reachable from the entry for the first time (+1) — step 2 built it and nothing imported it, which is
+why 175 held then — `RecoveryPanel.svelte` is new (+1), and **that component's `<style>` block is a
+module in its own right** (+1). Established by deleting the block, rebuilding to 177, and restoring
+it. `CLAUDE.md`'s ladder now carries this, **including that the old regression shorthand "a jump to
+~180" is within one of a legitimate count and must not be read alone.**
+
+**Two things were verified by inspection rather than by a gate, because no gate covers them:**
+
+- **No pre-existing dictionary key was altered.** `git diff src/lib/i18n/en.json src/lib/i18n/es.json`
+  has **zero deleted lines** in either file — every change is an addition. That is the proof that
+  `browser.saveOutcome.reloadClosesSurface`, the standing debt-ledger item, is untouched, and it is
+  stronger than grepping for the key.
+- **The four 3b surfaces are byte-identical.** `MatchDeleter`, `MatchMover`, `MatchDuplicator` and
+  `RawEditor` do not appear in `git status` at all.
+
+### The review, and what it cost
+
+Two Codex rounds, both read-only-mounted and both therefore **transcribed by the orchestrator with
+provenance marked** rather than written by Codex.
+
+**Round 1 — NOT READY, two Highs, one Medium, one Low.**
+
+1. **High, and a defect in behaviour.** `RecoveryPanel.svelte`'s `runCreate` awaited
+   `sendRecoveryCreate` without ever installing the `saving` session, so `view.saving` was false for
+   the entire flight and every control stayed live. **Two clicks on *Create* sent two writes against
+   one base revision; one commits, one conflicts, and the late answer could replace the committed
+   state with the conflict** — a committed write afterwards reported as an error, which this project
+   forbids absolutely. *Close* could also abandon a form mid-write. Confirmed independently by the
+   orchestrator against `MatchEditor.svelte:499`, which assigns `session = started.session;`
+   synchronously, before commissioning the fix.
+2. **High, prose.** `browser.recovery.sourceConflict.retained` claimed the source change was "still
+   here, exactly as it was". The predicate establishes only that recovery has written nothing and
+   ordered no reconciliation; because the panel is drawn **beside** the host outcome panel, a person
+   can dismiss the host conflict with *Keep editing*, edit the host draft, and still be told it is
+   exactly as it was.
+3. Medium: a JSDoc claiming recovery has no anchor "by definition", when `manualResolution` is also
+   reached by a field collision or an unusable destination. 4. Low: a miscounted test inventory.
+
+**The fix chose the model over the renderer.** `sendRecoveryCreate` gained a **required** third
+argument, `InstallTheWaitingForm`, invoked before the request is authorized and never for a refused
+form; all 36 call sites were updated rather than the argument made optional. Splitting the
+composition into the component would have moved the base revision, the `NewMatch` and the fixed
+placement into a renderer — the duplication the one shared panel exists to prevent. The sweep for
+finding 2 was extended unprompted to `windowMoved` and `spent`.
+
+**Round 2 — no High, no Medium, one Low**, and the implementation fix confirmed sound on every point,
+including that **no test installer had been weakened to a no-op** by the 36-call-site change. Its one
+finding was a false sentence **the round-1 fix had itself introduced**: §5 of the record called *Save
+anyway* "the one control" left live, while the whole refusal choice row stays enabled and §6.1 said
+so. Fixed directly by the orchestrator (one sentence, one file); no executable line changed.
+
+### The lesson this step is worth remembering for
+
+**All five gates were green when round 1 found both Highs, and neither was visible to any of them.**
+1744 tests, a mounted suite on every changed component, `svelte-check` clean, and a double-click on
+*Create* would still have sent two writes. The first High was a synchronous-ordering bug **no model
+test drives**; the second was prose, and **the i18n suites check parity and placeholder agreement,
+never meaning** — reverting a prose fix while keeping its key leaves every suite green.
+
+**Round 3 was judged not worth spending**, and the reasoning is in the review file's last section so
+it can be overruled on evidence: round 2 found no High and no Medium, and its one Low was a prose
+contradiction whose fix adds no claim the round had not already stated in its own words.
+
+### What this step did NOT establish
+
+- **No window reading.** None of 3a's evidence is a reading of a screen; a mounted test proves a
+  handler fires, not that a window draws. The reading is owed at 2c-4c-5, for six surfaces.
+- **The four 3b surfaces are unproven, not proven absent.** That the deleter, mover and duplicator
+  offer neither copy nor save-as-new is 3b's mounted obligation; 3a proved only the positive half.
+- **`NewMatchRepeatsLiteralTrigger` now has mounted evidence on the ordinary `create_match` path**
+  (two cases, `MatchCreator.test.ts`), closing the debt step 1 left. It still has no window reading.
 
 ---
 
@@ -7121,7 +7213,91 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Steps 2c-4c-1 and 2c-4c-2 are complete. **Step 2c-4c-3 — the recovery UI — is next, and it is the first step of this phase that draws anything.**
+### Steps 2c-4c-1, 2c-4c-2 and **2c-4c-3a** are complete. **Step 2c-4c-3b — the four surfaces that recover without creating — is next.**
+
+**Step 3 was split in two by the orchestrator, and the split is now part of the plan.** The consult's
+six-step cut is unchanged; step 3 is subdivided, exactly as 2c-4a-3 was, and for the same reason: one
+worker cannot coherently carry six components, a new i18n namespace and a mounted suite per component
+in one context.
+
+- **3a — DONE.** The shared panel, its strings, and the two surfaces that can create.
+- **3b — NEXT.** `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and
+  `RawEditor.svelte`. All four are **byte-identical today** — 3a did not touch them, and
+  `git status` at the 3a commit proves it.
+
+#### What 3a hands 3b, in the sentences 3b needs
+
+1. **`src/lib/components/RecoveryPanel.svelte` is the one recovery renderer**, driven by
+   `recoveryView()`, and it is already used by two hosts. 3b's four surfaces are the ones
+   `recoveryAvailability` answers **`unavailable`** for — `operationDraft` for the deleter, mover and
+   duplicator, `wholeDocumentDraft` for the raw editor. **3b draws a reason, not a form.** The
+   sentences already exist: `browser.recovery.unavailable.operationDraft` and
+   `.wholeDocumentDraft`, both languages, both written to name the truthful next step.
+2. **`sendRecoveryCreate` takes a required third argument, `InstallTheWaitingForm`**, invoked with
+   the waiting session **before** the request is authorized and never for a refused form. Any new
+   call site must supply one; the type forces that, and forces this module to call it before
+   sending. **It does not force the callback body to install the form anywhere a screen reads** —
+   `() => {}` type-checks — and that limit is stated on the type itself. 3b should need no new call
+   site at all, since none of its four surfaces creates.
+3. **Every sentence about `sourceConflictState` names the act, never the outcome**, and all three
+   arms now also disclaim knowledge of what the host draft holds now. Round 1's second High was
+   exactly this claim; do not reintroduce it in a 3b sentence.
+4. **The mounted matrix 3b owes** is the negative half of the consult's step-3 requirement: that the
+   deleter, the mover and the duplicator offer **neither copy nor save-as-new**, that the raw editor
+   offers **no save-as-new**, and that **the original conflict survives every non-committed ending**
+   on each. 3a proved the positive half on the editor and the creator.
+
+#### The gates, re-derived by the orchestrator on a clean tree at the 3a commit
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+cargo test --workspace         # expect 1112 passed, 0 failed
+npm test                       # expect 1744 passed, 51 files
+npm run check                  # expect 422 files, 0 errors, 0 warnings
+npm run build                  # expect 178 modules
+```
+
+**178 moved by three for two source files, and that is the expected reading, not a regression.**
+`recovery.ts` became reachable from the entry for the first time (+1), `RecoveryPanel.svelte` is new
+(+1), and **that component's `<style>` block is a module of its own** (+1). Measured, not inferred:
+the block was deleted, the build came back 177, and it was restored. `CLAUDE.md`'s ladder is updated
+with this. **The old shorthand for the regression — "a jump to ~180" — is now within one of a
+legitimate count**, so check the bundle for `svelte/internal/server` rather than reading the number
+(it is absent at 178). A new styled component now costs **two**.
+
+The test count is off by more than your own cases whenever a file is added under `src/lib/browser/`
+or `src/lib/components/`: three per-source-file `it.each` scanners add rows. Expect it; do not hunt it.
+
+#### What 2c-4c-3a's review cost, and the one lesson worth carrying
+
+Two rounds. Round 1 returned **NOT READY** on two Highs; round 2 confirmed the fix and found no High
+and no Medium. Both records are `docs/reviews/phase-2c-4c-3a-code.md`; the step's own record is
+`docs/decisions/2c-4c-3a-notes.md`.
+
+**The lesson: all five gates were green when round 1 found both Highs, and neither was visible to
+any of them.** 1744 tests, a mounted suite on every changed component, `svelte-check` clean. The
+first High was a synchronous-ordering bug no model test drives — a double-click on *Create* sent two
+writes against one base revision, and the late conflict could replace a committed answer, which is
+the one thing this project forbids absolutely. The second was prose, and **the i18n suites check
+parity and placeholders, never meaning**. A green suite is not a screen, and it is not a claim either.
+
+**Round 2's only finding was a false sentence the round-1 fix had itself introduced** — the fifth
+time this phase that a fix produced the next round's finding. Do not treat a fix round as the end of
+a step.
+
+#### Still owed by the phase after 3b
+
+**2c-4c-4** rebuild the window instrument · **2c-4c-5** the bilingual window reading ·
+**2c-4c-6** remove the instrument and re-derive the gate counts. Their scopes and the evidence each
+owes are the table in the consult disposition above. **The window reading is owed for six surfaces**
+and none of the three kinds of evidence 3a produced is a reading of a screen.
+
+---
+
+### The step-2 handoff, kept because its prohibitions bind every remaining step
+
+**The review round step 2 owed is DISCHARGED — do not run it again.** Rounds 5, 6 and 7 ran and are
+recorded in **"Phase 2c-4c step 2 — the rounds 5–7 disposition"** above and in
 
 **The review round step 2 owed is DISCHARGED — do not run it again.** Rounds 5, 6 and 7 ran and are
 recorded in **"Phase 2c-4c step 2 — the rounds 5–7 disposition"** above and in
@@ -7154,8 +7330,11 @@ disposition first and the consult only for the step you are on** — the consult
 needs one section of it. Step 2's record is `docs/decisions/2c-4c-2-notes.md`; its **seven** review
 rounds are `docs/reviews/phase-2c-4c-2-code.md`.
 
-**The tree is clean and the gates are at these numbers** (see "Verification — Phase 2c-4c step 2"
-above, where each was re-derived by the orchestrator rather than accepted from a worker):
+**⚠️ HISTORICAL — these were the numbers at step 2 and they are superseded.** The current gates are
+`1112 / 1744 / 422 / 178`, at the top of this section. What follows is kept only because the
+paragraph under it explains *why* 175 did not move at step 2, which is the fact that makes 178
+readable now. (See "Verification — Phase 2c-4c step 2" above, where each was re-derived by the
+orchestrator rather than accepted from a worker.)
 
 ```sh
 npm install                    # required first in a fresh clone; node_modules/ is gitignored

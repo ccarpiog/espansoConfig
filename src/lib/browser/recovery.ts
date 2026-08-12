@@ -3,14 +3,21 @@
  *
  * **No component and no screen.** This is the whole of recovery as a value,
  * exactly as `./reapply.ts` is for the reapply path and `./matchCreation.ts` is for
- * the new-snippet form, and for the same standing reason: only the seven files
- * that opt into jsdom render a Svelte component in an automated test, so a
- * decision written in markup is a decision one renderer's suite carries alone
- * (`CLAUDE.md` section 6). 2c-4c-3 draws what this module decides, and until then
- * **nothing here is offered**: no `ConflictChoice` member names it, no dictionary
- * key exists for its codes, and no control is drawn. That is the trade 2c-4a-2
- * proved and 2c-4b-2 repeated — build the transition, then flip capability and
- * draw it without inventing machinery.
+ * the new-snippet form, and for the same standing reason: only the files that opt
+ * into jsdom render a Svelte component in an automated test, so a decision written
+ * in markup is a decision one renderer's suite carries alone (`CLAUDE.md`
+ * section 6).
+ *
+ * **2c-4c-3a draws it, and drawing it took no new machinery** — which is the trade
+ * 2c-4a-2 proved and 2c-4b-2 repeated. What that step added here is the
+ * presentation half and nothing else: a key function per code union, the
+ * {@link TransferStatus} one rule two renderers would otherwise each write, and
+ * {@link recoveryIsAnswerable}; and it flipped two booleans of
+ * {@link RECOVERY_CONFLICT_CAPABILITIES}, over transitions that already existed and
+ * were already driven by `recovery.test.ts`. **No transition changed.**
+ * `src/lib/components/RecoveryPanel.svelte` is the one renderer, shared by the
+ * match editor and the creator; the three operation surfaces and the raw editor
+ * are 2c-4c-3b's.
  *
  * ## What recovery is, stated as the narrowest thing it does
  *
@@ -96,8 +103,17 @@
  * component importing `createMatch` from `../ipc/commands` directly. What is
  * closed is that **this module never calls a command itself**: the only way a
  * recovery writes anything is a callback its caller supplied.
+ *
+ * **One of those was narrowed by the 2c-4c-3a review and is worth stating
+ * exactly.** A caller of {@link sendRecoveryCreate} can no longer be unaware that
+ * a form goes in flight before its answer arrives: {@link InstallTheWaitingForm}
+ * is a required argument, and it is invoked with the waiting form before the
+ * request is authorized. What is still not forced is that the body of it installs
+ * anything — a function that does nothing type-checks — so a surface's own mounted
+ * suite is what shows that its controls really do go inert for the flight.
  */
 
+import type { TranslationKey } from '../i18n/dictionaries';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
@@ -171,6 +187,7 @@ import type { RawSaveChoice } from './rawSave';
 import {
   adoptForReapply,
   beginReapply,
+  sharedReapplyObstacleKey,
   subjectIsTargetless,
   type ReapplyOutcome,
   type SharedReapplyObstacle
@@ -305,9 +322,9 @@ const CREATE_FROM_SUPPORTED_FIELDS: readonly RecoveryChoice[] = Object.freeze([
 /**
  * Why recovery offers nothing to press on one surface.
  *
- * **A code, never a sentence** (`CLAUDE.md` section 2). There is no key function
- * for these yet and that is this step's boundary: nothing draws them, so 2c-4c-3
- * adds the accessors together with the panel that renders them.
+ * **A code, never a sentence** (`CLAUDE.md` section 2).
+ * {@link recoveryUnavailableKey} is where each one becomes a key, and `tRecoveryUnavailable`
+ * in `../i18n` is what a component calls.
  *
  * The first three are permanent facts about a surface or about how it was reached;
  * the fourth is a fact about the configuration on disk and may stop being true
@@ -1108,10 +1125,19 @@ export function sourceConflictState(session: RecoverySession): SourceConflictSta
 /** What became of the conflict a recovery was opened from. */
 export type SourceConflictState =
   /**
-   * Nothing has moved: it and its draft are still the person's to resolve.
+   * **Recovery has neither written anything nor ordered any reconciliation.**
    *
    * The state after a refusal, after another conflict, after a send that was never
    * made, and while the form is being filled in.
+   *
+   * **It is not a claim that the source conflict's draft is as it was**, and saying
+   * so was the 2c-4c-3a review's second finding. This module holds nothing of the
+   * host surface (see this file's header), so it cannot observe what that draft
+   * holds: a person may dismiss the host conflict with *Keep editing* and type into
+   * it while this form is open, and nothing here would change. What the predicate
+   * establishes is a fact about **this panel** — it has written nothing and asked
+   * the window for nothing — which is why the sentence it renders says that and
+   * points at the host surface for the rest.
    */
   | 'retained'
   /**
@@ -1377,8 +1403,8 @@ export function redoRecoveryEdit(session: RecoverySession): RecoverySession {
 /**
  * Why this form cannot be submitted as it stands.
  *
- * **A code, never a sentence.** 2c-4c-3 adds the key function and the two
- * dictionaries; nothing draws these yet.
+ * **A code, never a sentence.** {@link recoveryRefusalKey} is where one becomes a
+ * key, and `tRecoveryRefusal` in `../i18n` is what a component calls.
  */
 export type RecoveryRefusal =
   /** A confirmed reload has ended this form; the person left it behind. */
@@ -1791,12 +1817,47 @@ export type RecoveryCreateAnswer =
     };
 
 /**
+ * What a caller does with the form the moment it goes in flight.
+ *
+ * **The argument exists because a composition that returns only on resolution
+ * cannot be made to show a waiting form**, which is the 2c-4c-3a review's first
+ * High: {@link sendRecoveryCreate} builds the waiting session inside itself, so a
+ * caller awaiting it holds the *pre-send* form for the whole flight — every
+ * control live, a second create one press away, and a late answer free to replace
+ * whatever the person reached in the meantime. `MatchEditor.svelte` and
+ * `MatchCreator.svelte` avoid that by calling `beginSave` and `beginCreate`
+ * themselves and assigning `started.session` before their own await; this callback
+ * is how a one-call composition offers the same synchronous moment.
+ *
+ * **What the type forces, and what it does not, in the same sentence.** It forces
+ * that every caller of {@link sendRecoveryCreate} supplies one — a caller cannot
+ * be unaware the moment exists — and {@link sendRecoveryCreate} forces that it is
+ * invoked with the waiting form **before** the request is authorized. It cannot
+ * force that the body of it installs that form anywhere a screen reads, and no
+ * type in TypeScript could: a function that does nothing type-checks. Only the
+ * caller's own mounted suite, with a create held in flight, can show that its
+ * controls really do go inert.
+ *
+ * @param waiting - The form as {@link beginRecoveryCreate} left it: `phase` is
+ *   `saving`, the submission is recorded, and every control the view gates on
+ *   `saving` is inert.
+ */
+export type InstallTheWaitingForm = (waiting: RecoverySession) => void;
+
+/**
  * Sends the recovery create and folds its answer back into the form.
  *
  * **The composition, in one place**, so that *every recovery write goes through
  * `BrowserState.createMatch`* is a property of one function rather than of six
  * call sites — and so that a test can prove the callback is **not** called for a
  * form that cannot be submitted.
+ *
+ * **The waiting form is handed back synchronously, before anything is sent.**
+ * `install` is called with {@link StartedRecoveryCreate.session} on the same tick
+ * as the call and before the request is authorized, so a caller that installs it
+ * has a screen showing `saving` for the whole flight rather than only after it.
+ * Nothing here can install anything itself — this module holds no screen — which
+ * is why the moment is offered rather than performed.
  *
  * **Nothing in this module touches the selection, the projections or the conflict
  * the form was opened from — and the function it awaits does.** That distinction
@@ -1814,17 +1875,24 @@ export type RecoveryCreateAnswer =
  * @param session - The form to submit.
  * @param create - `BrowserState.createMatch`. Called at most once, and not at all
  *   when the form cannot be submitted.
+ * @param install - What to do with the waiting form. Called exactly when `create`
+ *   is, immediately before it, and never for a form that cannot be submitted.
  * @returns The form after the attempt, which is the same form when there was
  *   nothing to send.
  */
 export async function sendRecoveryCreate(
   session: RecoverySession,
-  create: CreateARecoveredSnippet
+  create: CreateARecoveredSnippet,
+  install: InstallTheWaitingForm
 ): Promise<RecoverySession> {
   const started = beginRecoveryCreate(session);
   if (started === null) {
     return session;
   }
+  // **Before the await, and that ordering is the whole point of the argument.**
+  // A caller that installs this has a form gated on `saving` for the flight; a
+  // caller handed it only on resolution has one for none of it.
+  install(started.session);
   const answer = await create(
     started.document,
     started.newMatch,
@@ -1916,11 +1984,11 @@ export function confirmRecoveryDiskReload(session: RecoverySession): RecoverySes
  * **Nothing is closed and nothing is recorded for an adoption the window
  * refused**, which would report a reload that did not happen.
  *
- * **Built and not offered.** `RECOVERY_CONFLICT_CAPABILITIES.offersReload` is
- * `false`, so `conflictChoicesFor` names no reload control and 2c-4c-3 flips the
- * boolean over machinery that already exists — the trade 2c-4a-2 proved. It exists
- * now because the alternative was a form whose conflict messages described a
- * reload the value could not perform (the 2c-4c-2 review's third finding).
+ * **Offered as of 2c-4c-3a**, by flipping `RECOVERY_CONFLICT_CAPABILITIES.offersReload`
+ * over machinery that already existed — the trade 2c-4a-2 proved. It was built one
+ * step before it was drawn because the alternative was a form whose conflict
+ * messages described a reload the value could not perform (the 2c-4c-2 review's
+ * third finding).
  *
  * @param session - The form holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
@@ -1966,9 +2034,9 @@ export function reloadRecoveryDiskVersion(
 /**
  * Why a reapply of this recovery form could not be carried out.
  *
- * **A code, never a sentence.** There is no key function for these yet, and that is
- * this step's boundary: nothing draws them, so 2c-4c-3 adds the accessors together
- * with the panel that renders them.
+ * **A code, never a sentence.** {@link recoveryReapplyObstacleKey} is where one
+ * becomes a key, and `tRecoveryReapplyObstacle` in `../i18n` is what composes it
+ * with the nested code an arm carries.
  */
 export type RecoveryReapplyObstacle =
   | SharedReapplyObstacle
@@ -2038,7 +2106,8 @@ export type RecoveryReapply = ReapplyOutcome<RecoverySession, RecoveryReapplyObs
  * {@link reloadRecoveryDiskVersion} carries the same rule with the same reasoning
  * about `alreadyThere`.
  *
- * **Built and not offered**, like the reload above.
+ * **Offered as of 2c-4c-3a**, like the reload above, by flipping
+ * `RECOVERY_CONFLICT_CAPABILITIES.offersReapply`.
  *
  * @param session - The form showing a conflict of its own.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never
@@ -2129,9 +2198,9 @@ function rebuiltDestinations(
 /**
  * What this form offers about a conflict of its **own**.
  *
- * **Every offer is withheld and every declaration is true of a transition that
- * exists.** The drafted value is two strings a person typed, so `draftKind` is
- * `authoredText`. A reload here spends an adoption and **ends this form** —
+ * **Every declaration is true of a transition that exists, and two of the three
+ * offers are now made.** The drafted value is two strings a person typed, so
+ * `draftKind` is `authoredText`. A reload here spends an adoption and **ends this form** —
  * {@link reloadRecoveryDiskVersion} — so `reloadOutcome` is `closesSurface`, which is
  * the part of the appended warning this value can vouch for: **the closing**, and
  * that nothing is seeded in the draft's place. It does **not** vouch for the
@@ -2144,10 +2213,20 @@ function rebuiltDestinations(
  * {@link reapplyRecoveryToDiskVersion} **is** that transition, built and driven by
  * this module's own suite.
  *
- * **The three booleans are `false` because nothing is drawn in this step**, which
- * is the 2c-4a-2 trade rather than a gap: the transitions exist and are tested, and
- * 2c-4c-3 flips a boolean per control without inventing machinery. What that leaves
- * on screen until then is *keep editing* alone.
+ * **Two booleans moved at 2c-4c-3a and one did not, and the one that did not is the
+ * decision worth reading.** `offersReload` and `offersReapply` are `true` because
+ * {@link reloadRecoveryDiskVersion} and {@link reapplyRecoveryToDiskVersion} are the
+ * transitions behind them and `RecoveryPanel.svelte` presses both; without the
+ * second, a recovery form that met a conflict of its own would hold the base
+ * revision the transaction had just refused and every later send would meet the same
+ * refusal — a dead end inside the escape from a dead end.
+ *
+ * **`offersCopyDraft` stays `false`, and it is a property of the view rather than an
+ * opinion.** *Copy my text* copies the **retained draft list**, which
+ * {@link RecoveryView} does not produce and this module does not build: the two
+ * values a recovery form holds are in its own two boxes, on screen and selectable,
+ * for as long as the form is open. Offering the control would need a list to copy
+ * before it needed a button, so the boolean is what says the list does not exist.
  *
  * **This is the 2c-4c-2 review's findings 2 and 3, closed together.** The first
  * version declared `supported` while no reapply transition existed and reinterpreted
@@ -2160,8 +2239,8 @@ export const RECOVERY_CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'authoredText',
   reloadOutcome: 'closesSurface',
   offersCopyDraft: false,
-  offersReload: false,
-  offersReapply: false,
+  offersReload: true,
+  offersReapply: true,
   reapplySupport: 'supported'
 };
 
@@ -2310,8 +2389,8 @@ export function recoveryView(session: RecoverySession): RecoveryView {
     conflict,
     // **`conflictChoicesFor` stays the only producer**, and it is asked about this
     // form's own reload step exactly as the other six surfaces ask about theirs.
-    // What that list holds *today* is `keepEditing` alone, because all three offer
-    // booleans are `false` — not because the step is a constant.
+    // What that list holds is decided there, from the capability record and the
+    // reload step — never here, and never by a renderer reading the record itself.
     conflictChoices:
       conflict === null
         ? []
@@ -2355,3 +2434,262 @@ export function recoveryBaseRevisionOf(session: RecoverySession): ContentRevisio
 export function fieldsNotCarried(transfer: RecoveryTransfer): readonly EditableField[] {
   return EDITABLE_FIELDS.filter((field) => transfer[field].kind !== 'carried');
 } // End of function fieldsNotCarried()
+
+// ---------------------------------------------------------------------------
+// Recovery as sentences — Phase 2c-4c-3a
+// ---------------------------------------------------------------------------
+//
+// One key function per code union this module owns, plus the one rule about the
+// transfer table two renderers would otherwise each have written. **No transition
+// changed to add any of it**: every function below takes a value this module
+// already produced and answers a key or a code.
+//
+// The idiom is `./matchCreation.ts`'s and `./reapply.ts`'s — a `switch` over
+// literal keys rather than a template, so a renamed key is a compile error here and
+// a new arm with no sentence is one too — and the composition of an arm that
+// carries a **nested** code is the i18n layer's, never this module's: `../i18n`
+// already has sentences and accessors for `FieldRefusal` and for
+// {@link RecoveryRefusal}, so a composing describer there puts the two together
+// rather than this file inventing a third string set.
+//
+// **What no test in this repository can hold about any of it**: that a sentence
+// says what the consult requires. The i18n suites check key parity and placeholder
+// agreement, never meaning (`CLAUDE.md` section 6).
+
+/**
+ * The dictionary key holding the label of one thing recovery offers.
+ *
+ * @param choice - What {@link recoveryAvailability} offered.
+ * @returns The key holding that choice's label.
+ */
+export function recoveryChoiceKey(choice: RecoveryChoice): TranslationKey {
+  switch (choice) {
+    case 'createFromSupportedFields':
+      return 'browser.recovery.open';
+  }
+} // End of function recoveryChoiceKey()
+
+/**
+ * The dictionary key holding the sentence one unavailable reason shows.
+ *
+ * @param reason - Why recovery offers nothing here.
+ * @returns The key holding that reason's sentence.
+ */
+export function recoveryUnavailableKey(reason: RecoveryUnavailable): TranslationKey {
+  switch (reason) {
+    case 'notFromManualResolution':
+      return 'browser.recovery.unavailable.notFromManualResolution';
+    case 'noConflict':
+      return 'browser.recovery.unavailable.noConflict';
+    case 'operationDraft':
+      return 'browser.recovery.unavailable.operationDraft';
+    case 'wholeDocumentDraft':
+      return 'browser.recovery.unavailable.wholeDocumentDraft';
+    case 'noEligibleDestination':
+      return 'browser.recovery.unavailable.noEligibleDestination';
+  }
+} // End of function recoveryUnavailableKey()
+
+/**
+ * Whether a surface has anything to say about recovery at all.
+ *
+ * **The rule that decides whether a panel is drawn, and it is here rather than in a
+ * renderer for 2c-3c-3's reason**: two components ask it today and four more ask it
+ * at 2c-4c-3b, and a rule written into one renderer is carried by that renderer's
+ * mounted suite alone.
+ *
+ * Two of the five refusals mean *recovery has not been reached* rather than
+ * *recovery cannot help here*: `notFromManualResolution` is the ordinary state of a
+ * conflict nobody has pressed *Keep my draft* on — and of every surface with no
+ * conflict at all — and `noConflict` is the same fact from the other side. Drawing
+ * either as a permanent sentence would put an explanation of an unoffered control on
+ * a screen that is not about it. The other three are the consult's exit criterion:
+ * a surface that cannot create says so and names what to do instead.
+ *
+ * **It says nothing about an open form.** A recovery form that has been opened
+ * outlives the conflict it was opened from — the person may dismiss that panel, and
+ * their typed values must not go with it — so a caller draws an open form
+ * unconditionally and asks this only about what to offer when there is none.
+ *
+ * @param availability - What {@link recoveryAvailability} answered.
+ * @returns `true` when there is an offer to make or a reason worth showing.
+ */
+export function recoveryIsAnswerable(availability: RecoveryAvailability): boolean {
+  if (availability.kind === 'offered') {
+    return true;
+  }
+  return (
+    availability.reason !== 'notFromManualResolution' && availability.reason !== 'noConflict'
+  );
+} // End of function recoveryIsAnswerable()
+
+/**
+ * What one row of the transfer table says about the field it stands for.
+ *
+ * **Four values where {@link FieldTransfer} has two arms**, and both refinements are
+ * things a person has to be told apart:
+ *
+ * - **`carried` against `carriedEmptyValue`** is step 1's `None`-is-not-`Some("")`
+ *   contract seen from a screen. A key carried with an empty value is written as
+ *   `label:` with nothing after it; an omitted key is not written at all. The two
+ *   look identical in a table that only says *carried*;
+ * - **`omitted` against `needsAValue`** is which of the two a person can do
+ *   something about. The four optional fields have no control at all, so *not
+ *   carried* is the end of the story for them; the trigger and the body have a box
+ *   each, and a transfer that could carry neither leaves that box blank on purpose
+ *   rather than inventing content.
+ *
+ * **It describes the transfer and never the control.** A trigger that *was* carried
+ * and has since been cleared by hand still says `carried` here — what a box holds
+ * now is {@link recoveryRefusal}'s question, and its answer is drawn beside the
+ * create control.
+ *
+ * @param field - One row of {@link RecoveryView.fields}.
+ * @returns What that row says.
+ */
+export function transferStatusOf(field: RecoveryFieldModel): TransferStatus {
+  if (field.transfer.kind === 'carried') {
+    return field.transfer.text === '' ? 'carriedEmptyValue' : 'carried';
+  }
+  return field.editable ? 'needsAValue' : 'omitted';
+} // End of function transferStatusOf()
+
+/** What one row of the transfer table says about the field it stands for. */
+export type TransferStatus =
+  /** The new snippet is born holding this key, with this text. */
+  | 'carried'
+  /** It is born holding this key with an empty value, which is not the same as omitting it. */
+  | 'carriedEmptyValue'
+  /** It is born without this key, and there is no control that could supply one. */
+  | 'omitted'
+  /** It is born without this key, the field is required, and the box below is blank. */
+  | 'needsAValue';
+
+/**
+ * The dictionary key holding the phrase one transfer-table row shows.
+ *
+ * @param status - What {@link transferStatusOf} answered.
+ * @returns The key holding that row's phrase.
+ */
+export function transferStatusKey(status: TransferStatus): TranslationKey {
+  switch (status) {
+    case 'carried':
+      return 'browser.recovery.transfer.carried';
+    case 'carriedEmptyValue':
+      return 'browser.recovery.transfer.carriedEmptyValue';
+    case 'omitted':
+      return 'browser.recovery.transfer.omitted';
+    case 'needsAValue':
+      return 'browser.recovery.transfer.needsAValue';
+  }
+} // End of function transferStatusKey()
+
+/**
+ * The dictionary key holding the sentence one transfer refusal shows.
+ *
+ * **The `fieldNotEditable` arm's key is only half of that arm's sentence**, and
+ * that is the split `sharedReapplyObstacleKey` already makes: the refusal it
+ * carries is the match editor's own {@link FieldRefusal}, which has sentences and an
+ * accessor of its own, so `tTransferRefusal` in `../i18n` renders this key and that
+ * one together rather than this module inventing a fifth string set.
+ *
+ * @param refusal - Why one field is not carried into the new snippet.
+ * @returns The key holding its own sentence.
+ */
+export function transferRefusalKey(refusal: TransferRefusal): TranslationKey {
+  switch (refusal.kind) {
+    case 'notInTheFile':
+      return 'browser.recovery.transfer.notInTheFile';
+    case 'removedByTheDraft':
+      return 'browser.recovery.transfer.removedByTheDraft';
+    case 'fieldNotEditable':
+      return 'browser.recovery.transfer.fieldNotEditable';
+    case 'carriageReturn':
+      return 'browser.recovery.transfer.carriageReturn';
+  }
+} // End of function transferRefusalKey()
+
+/**
+ * The dictionary key holding the sentence one submission refusal shows.
+ *
+ * @param reason - What {@link recoveryRefusal} answered.
+ * @returns The key holding that reason's sentence.
+ */
+export function recoveryRefusalKey(reason: RecoveryRefusal): TranslationKey {
+  switch (reason) {
+    case 'formClosed':
+      return 'browser.recovery.cannotCreate.formClosed';
+    case 'alreadyCreated':
+      return 'browser.recovery.cannotCreate.alreadyCreated';
+    case 'saveInFlight':
+      return 'browser.recovery.cannotCreate.saveInFlight';
+    case 'conflict':
+      return 'browser.recovery.cannotCreate.conflict';
+    case 'noDestination':
+      return 'browser.recovery.cannotCreate.noDestination';
+    case 'destinationUnavailable':
+      return 'browser.recovery.cannotCreate.destinationUnavailable';
+    case 'triggerEmpty':
+      return 'browser.recovery.cannotCreate.triggerEmpty';
+    case 'replaceEmpty':
+      return 'browser.recovery.cannotCreate.replaceEmpty';
+    case 'carriageReturn':
+      return 'browser.recovery.cannotCreate.carriageReturn';
+  }
+} // End of function recoveryRefusalKey()
+
+/**
+ * The dictionary key holding the sentence one reapply obstacle shows.
+ *
+ * The two arms this module adds get their own keys; the two it shares with every
+ * other surface delegate to `sharedReapplyObstacleKey`, so *espansoConfig could not
+ * establish correspondence* is one sentence in this application and not seven.
+ *
+ * @param obstacle - What stopped a reapply of this form.
+ * @returns The key holding its own sentence.
+ */
+export function recoveryReapplyObstacleKey(obstacle: RecoveryReapplyObstacle): TranslationKey {
+  switch (obstacle.kind) {
+    case 'notTheDestination':
+      return 'browser.recovery.reapply.notTheDestination';
+    case 'recoveryRefused':
+      return 'browser.recovery.reapply.recoveryRefused';
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return sharedReapplyObstacleKey(obstacle);
+  }
+} // End of function recoveryReapplyObstacleKey()
+
+/**
+ * The dictionary key holding the sentence one source-conflict state shows.
+ *
+ * **Each of the three names an act and never an outcome**, which is round 4's
+ * finding 1 carried into the medium where it is easiest to break:
+ * {@link RecoverySession.windowWasReconciled} records that *an adoption was spent or
+ * a re-read was ordered*, and this module never learns what came of either — so the
+ * `windowMoved` sentence may not say that the window moved, that the list
+ * re-ordered, or that the projection changed. What it claims is that this panel can
+ * no longer vouch for the window behind it.
+ *
+ * **And none of the three may speak for the host's draft**, which is the 2c-4c-3a
+ * review's second finding. All three predicates are facts about *this* panel; the
+ * change recovery was opened from lives on a surface this module cannot observe,
+ * and an open form outlives the conflict it was opened from, so the person may have
+ * dismissed that conflict and typed into the draft since. The sentence
+ * `retained` renders therefore says *nothing here has touched it* and *what it
+ * holds now is shown where you were making it* — never *it is exactly as it was*,
+ * which is what it said for one review round.
+ *
+ * @param state - What {@link sourceConflictState} answered.
+ * @returns The key holding that state's sentence.
+ */
+export function sourceConflictStateKey(state: SourceConflictState): TranslationKey {
+  switch (state) {
+    case 'retained':
+      return 'browser.recovery.sourceConflict.retained';
+    case 'windowMoved':
+      return 'browser.recovery.sourceConflict.windowMoved';
+    case 'spent':
+      return 'browser.recovery.sourceConflict.spent';
+  }
+} // End of function sourceConflictStateKey()

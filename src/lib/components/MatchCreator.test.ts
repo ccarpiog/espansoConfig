@@ -48,6 +48,7 @@ import {
   type CreationBuffers,
   type DestinationRefusal
 } from '../browser/matchCreation';
+import { recoveryChoiceKey, sourceConflictStateKey } from '../browser/recovery';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { t, tDraftCopy } from '../i18n';
@@ -1302,3 +1303,153 @@ describe('the creation form’s *Keep my draft*', () => {
     form.stop();
   });
 }); // End of the "creation form’s reapply" suite
+
+describe('an ordinary creation that repeats a literal trigger', () => {
+  /*
+   * **The evidence 2c-4c-1's live behaviour change never got.**
+   * `FindingCode::NewMatchRepeatsLiteralTrigger` is emitted for every `InsertItem`
+   * candidate, so it reaches an **ordinary** `create_match` on this form and not
+   * only a recovery create — exact repetition is a property of the candidate and
+   * not of the route that reached it. It shipped at step 1 with no mounted test and
+   * no window reading behind it, which is what these two cases close.
+   *
+   * The claim the sentence makes is **risk and nothing else**: the localized string
+   * says the new snippet repeats trigger text another snippet already writes and
+   * that this application cannot determine how espanso will handle overlapping
+   * definitions. No test in this repository pins that meaning — the i18n suites
+   * check key parity and placeholder agreement — so what these cases hold is that
+   * the finding is *drawn*, that it is *acknowledgeable*, and that the consent it
+   * collects is bound to the exact candidate.
+   */
+
+  /** The finding step 1 added, as a refusal carries it. */
+  const REPEATS_TRIGGER: Finding = {
+    code: { NewMatchRepeatsLiteralTrigger: { revision: AFTER } },
+    path: null,
+    span: null,
+    node: null
+  };
+
+  /** What the transaction answers for a create refused for that one suspicion. */
+  const REPEATED: SaveResult = {
+    outcome: 'refused',
+    verdict: 'RefusedForUnacknowledgedSuspicions',
+    findings: [REPEATS_TRIGGER]
+  };
+
+  it('draws it as an acknowledgeable risk, and saving anyway carries it back whole', async () => {
+    const form = mountCreator([{ result: REPEATED }, { result: COMMITTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(says(form.target, 'code.findingCode.newMatchRepeatsLiteralTrigger')).toBe(true);
+    expect(form.calls[0]?.acknowledgement).toEqual({ accepted: [] });
+
+    control(form.target, rawSaveChoiceKey('saveAnyway', 'authoredText')).click();
+    await settle();
+    // The **complete** accepted finding, its `revision` operand included: the gate
+    // matches an exact multiset, so a consent that dropped the operand would be
+    // consent for a different candidate.
+    expect(form.calls).toHaveLength(2);
+    expect(form.calls[1]?.acknowledgement).toEqual({ accepted: [REPEATS_TRIGGER] });
+    expect(says(form.target, 'browser.matchCreation.committed')).toBe(true);
+    form.stop();
+  }); // End of the "acknowledgeable risk" case
+
+  it('withdraws the acceptance the moment the candidate changes', async () => {
+    // Content-addressed consent, on a screen: the finding names the candidate's own
+    // revision, so a keystroke afterwards makes the offer to save past it an offer
+    // this application would not keep.
+    const form = mountCreator([{ result: REPEATED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(button(form.target, rawSaveChoiceKey('saveAnyway', 'authoredText'))).not.toBeNull();
+
+    type(form.target, 'trigger', ':different');
+    expect(says(form.target, 'browser.matchCreation.findingsAreStale')).toBe(true);
+    expect(button(form.target, rawSaveChoiceKey('saveAnyway', 'authoredText'))).toBeNull();
+    expect(form.calls).toHaveLength(1);
+    form.stop();
+  });
+}); // End of the "ordinary repeated trigger" suite
+
+describe('the creation form’s recovery', () => {
+  /** The reapply control's label on this surface. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /** The label of the control that offers recovery. */
+  const CREATE_FROM_FIELDS = recoveryChoiceKey('createFromSupportedFields');
+
+  /**
+   * A form at a conflict a reapply could resolve nothing about.
+   *
+   * `CONFLICTED` carries a whole-document replacement's evidence, which a creation
+   * cannot rebase onto — so *Keep my draft* refuses and adopts nothing, which is
+   * exactly recovery's entry condition.
+   *
+   * @param answers - What each successive create answers, in order. **The recovery
+   *   panel is handed the same `create` this form uses**, which is the production
+   *   arrangement: both go through `BrowserState.createMatch`.
+   * @returns The mounted form, at the manual-resolution report.
+   */
+  async function stuck(answers: readonly ScriptedAnswer[]): Promise<Mounted> {
+    const form = mountCreator(answers);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    control(form.target, KEEP_MY_DRAFT).click();
+    flushSync();
+    return form;
+  } // End of function stuck()
+
+  it('offers nothing until a reapply has resolved nothing', async () => {
+    const form = mountCreator([{ result: CONFLICTED }]);
+    fillIn(form);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(button(form.target, CREATE_FROM_FIELDS)).toBeNull();
+    form.stop();
+  });
+
+  it('offers recovery once it has, and reaches a committed create', async () => {
+    const form = await stuck([{ result: CONFLICTED }, { result: COMMITTED }]);
+    expect(says(form.target, 'browser.reapply.manualResolution')).toBe(true);
+    control(form.target, CREATE_FROM_FIELDS).click();
+    flushSync();
+
+    expect(says(form.target, 'browser.recovery.transferHeading')).toBe(true);
+    expect(says(form.target, sourceConflictStateKey('retained'))).toBe(true);
+    control(form.target, 'browser.recovery.create').click();
+    await settle();
+
+    expect(form.calls).toHaveLength(2);
+    expect(form.calls[1]?.document).toBe(2);
+    expect(form.calls[1]?.position).toEqual({ End: {} });
+    // The **disk** revision the conflict carried, which is the newest observation
+    // this window has of that file.
+    expect(form.calls[1]?.baseRevision).toBe(AFTER);
+    // The two authored fields and no key nobody authored: an absent optional writes
+    // no key, which is a different request from sending it empty.
+    expect(form.calls[1]?.newMatch).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(form.adoptions).toEqual([]);
+    expect(says(form.target, sourceConflictStateKey('spent'))).toBe(true);
+    form.stop();
+  }); // End of the "reaches a committed create" case
+
+  it('keeps the form’s own conflict and draft through an abandoned recovery', async () => {
+    const form = await stuck([{ result: CONFLICTED }]);
+    control(form.target, CREATE_FROM_FIELDS).click();
+    flushSync();
+    control(form.target, 'browser.recovery.close').click();
+    flushSync();
+
+    expect(form.calls).toHaveLength(1);
+    expect(form.adoptions).toEqual([]);
+    expect(says(form.target, 'browser.saveOutcome.draftKeptInMemory')).toBe(true);
+    expect(button(form.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(button(form.target, CREATE_FROM_FIELDS)).not.toBeNull();
+    form.stop();
+  });
+}); // End of the "creation form’s recovery" suite

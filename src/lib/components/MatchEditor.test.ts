@@ -37,6 +37,7 @@
  */
 
 import { rawSaveChoiceKey } from '../browser/rawSave';
+import { recoveryChoiceKey, sourceConflictStateKey } from '../browser/recovery';
 import {
   reloadUnavailableKey,
   type ConflictModel,
@@ -47,6 +48,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detailFieldKey } from '../browser/detail';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
+import type { CreationBuffers } from '../browser/matchCreation';
 import {
   fieldLabelName,
   reprojectionRefusalKey,
@@ -72,11 +74,16 @@ import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
   ContentRevision,
+  DocumentId,
+  DocumentSummary,
+  DocumentView,
   DraftError,
   Finding,
   MatchDraft,
   MatchId,
   MatchView,
+  NewMatch,
+  NewMatchPosition,
   SaveResult
 } from '../ipc/types';
 import MatchEditor from './MatchEditor.svelte';
@@ -257,12 +264,38 @@ interface ScriptedAnswer {
   readonly pending?: boolean;
 }
 
+/** One call the recovery panel made to the boundary. */
+interface RecordedCreate {
+  /** Which file it aimed at. */
+  readonly document: DocumentId;
+  /** What the new snippet says. */
+  readonly newMatch: NewMatch;
+  /** Where in the list it goes, which is always the end. */
+  readonly position: NewMatchPosition;
+  /** The revision it said the form was drafted against. */
+  readonly baseRevision: ContentRevision;
+  /** The suspicions it said had already been shown to a person. */
+  readonly acknowledgement: Acknowledgement;
+}
+
 /** A mounted editor and everything a case needs to drive it. */
 interface Mounted {
   /** The element the component was mounted into. */
   readonly target: HTMLElement;
   /** Every call the component made, in order. */
   readonly calls: RecordedSave[];
+  /** Every recovery create the panel below the editor made, in order. */
+  readonly creates: RecordedCreate[];
+  /**
+   * Every conflict a **recovery** create ran into that this window was asked to
+   * adopt.
+   *
+   * Kept apart from {@link Mounted.adoptions} because the two are different
+   * conflicts over different drafted values: that one is the editor's own, and
+   * this one belongs to a create the recovery panel sent. A case that finds an
+   * entry in the wrong list has found the panel spending the wrong authorization.
+   */
+  readonly recoveryAdoptions: ConflictModel<CreationBuffers>[];
   /**
    * Every conflict the component asked the window to adopt, in order.
    *
@@ -291,6 +324,76 @@ function projection(overrides: Parameters<typeof makeMatch>[0] = {}): MatchView 
 } // End of function projection()
 
 /**
+ * The file the snippet lives in, as a projection.
+ *
+ * The recovery panel's destination list is derived from the window's projections
+ * and from the **disk** projection the conflict carries, so a case about recovery
+ * needs both. This is the first, at the revision the editor was seeded from.
+ *
+ * @returns The projection.
+ */
+function writableFile(): DocumentView {
+  return makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision: BASE });
+} // End of function writableFile()
+
+/**
+ * A second snippet file, so a change of recovery destination is observable.
+ *
+ * @returns The projection.
+ */
+function secondFile(): DocumentView {
+  return makeDocument({ id: 2, relativePath: 'match/other.yml', revision: BASE });
+} // End of function secondFile()
+
+/**
+ * The summary the window would list one projection under.
+ *
+ * Derived from the projection rather than written twice, so a fixture cannot
+ * disagree with itself about a file's kind or its read-only flag.
+ *
+ * @param view - The projection to describe.
+ * @returns The summary.
+ */
+function summaryOf(view: DocumentView): DocumentSummary {
+  return makeSummary({
+    id: view.id,
+    relativePath: view.relative_path,
+    kind: view.kind,
+    readOnly: view.read_only
+  });
+} // End of function summaryOf()
+
+/**
+ * One scripted answer turned into the arm the boundary would return.
+ *
+ * Shared by the recovery creates below, which have no `pending` case: the three
+ * arms are decided by which field the script carries, exactly as the editor's own
+ * saves decide them.
+ *
+ * @param next - The scripted answer, or `undefined` when the script ran out.
+ * @returns The answer to resolve with.
+ */
+function answerOf(next: ScriptedAnswer | undefined): MatchSaveAnswer {
+  if (next?.failure !== undefined) {
+    return {
+      kind: 'failed',
+      mayHaveWritten: next.mayHaveWritten ?? false,
+      failure: next.failure
+    };
+  }
+  if (next === undefined || next.result === undefined) {
+    return { kind: 'notAttempted' };
+  }
+  return {
+    kind: 'answered',
+    result: next.result,
+    adoption:
+      next.adoption ??
+      (next.result.outcome === 'saved' && next.result.committed ? ADOPTED : NOT_OWED)
+  };
+} // End of function answerOf()
+
+/**
  * Mounts the editor over a scripted boundary.
  *
  * @param answers - What each successive save answers, in order. A save with no
@@ -300,17 +403,25 @@ function projection(overrides: Parameters<typeof makeMatch>[0] = {}): MatchView 
  *   the refusal a window that has moved elsewhere gives.
  * @param adoption - What the window answers when the editor asks it to adopt the
  *   disk observation. All three values are real production answers.
+ * @param creates - What each successive **recovery** create answers, in order.
+ * @param views - The projections this window holds, which is where the recovery
+ *   panel's destinations come from.
  * @returns The mounted editor.
  */
 function mountEditor(
   answers: readonly ScriptedAnswer[] = [],
   match: MatchView = projection(),
   fresh: Reprojection = { kind: 'unavailable', reason: 'otherFile' },
-  adoption: DiskAdoptionOutcome = 'installed'
+  adoption: DiskAdoptionOutcome = 'installed',
+  creates: readonly ScriptedAnswer[] = [],
+  views: readonly DocumentView[] = [writableFile(), secondFile()]
 ): Mounted {
   const remaining = [...answers];
+  const remainingCreates = [...creates];
   const calls: RecordedSave[] = [];
+  const created: RecordedCreate[] = [];
   const adoptions: ConflictModel<MatchBuffers>[] = [];
+  const recoveryAdoptions: ConflictModel<CreationBuffers>[] = [];
   let closes = 0;
   let now = 0;
   const target = document.createElement('div');
@@ -320,6 +431,24 @@ function mountEditor(
     props: {
       match,
       file: FILE,
+      documents: (): readonly DocumentSummary[] => views.map((view) => summaryOf(view)),
+      projections: (): readonly DocumentView[] => views,
+      create: (
+        into: DocumentId,
+        newMatch: NewMatch,
+        position: NewMatchPosition,
+        baseRevision: ContentRevision,
+        acknowledgement: Acknowledgement
+      ): Promise<MatchSaveAnswer> => {
+        created.push({ document: into, newMatch, position, baseRevision, acknowledgement });
+        return Promise.resolve(answerOf(remainingCreates.shift()));
+      },
+      adoptRecoveryDiskVersion: (
+        conflict: ConflictModel<CreationBuffers>
+      ): DiskAdoptionOutcome => {
+        recoveryAdoptions.push(conflict);
+        return adoption;
+      },
       clock: (): number => now,
       save: (
         id: MatchId,
@@ -369,7 +498,9 @@ function mountEditor(
   return {
     target,
     calls,
+    creates: created,
     adoptions,
+    recoveryAdoptions,
     closed: () => closes,
     advance: (by: number) => {
       now += by;
@@ -1668,3 +1799,104 @@ describe('the small editor’s *Keep my draft*', () => {
     editor.stop();
   });
 }); // End of the "small editor’s reapply" suite
+
+describe('the small editor’s recovery', () => {
+  /** The label of the control that offers a reapply. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /** The label of the control that offers recovery. */
+  const CREATE_FROM_FIELDS = recoveryChoiceKey('createFromSupportedFields');
+
+  /** A recovery create that ran to the end and wrote the destination. */
+  const CREATED: SaveResult = {
+    outcome: 'saved',
+    revision: AFTER,
+    committed: true,
+    notes: [],
+    backup_taken: false,
+    moved: { document: FILE.id, revision: AFTER, node: 44 }
+  };
+
+  /**
+   * An editor showing a conflict a reapply could resolve nothing about.
+   *
+   * `CONFLICTED`'s evidence names no snippet, so *Keep my draft* refuses and
+   * adopts nothing — which is exactly recovery's entry condition.
+   *
+   * @param creates - What each successive recovery create answers, in order.
+   * @returns The mounted editor, at the manual-resolution report.
+   */
+  async function stuck(creates: readonly ScriptedAnswer[] = []): Promise<Mounted> {
+    const editor = mountEditor(
+      [{ result: CONFLICTED }],
+      projection(),
+      { kind: 'unavailable', reason: 'otherFile' },
+      'installed',
+      creates
+    );
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    control(editor.target, KEEP_MY_DRAFT).click();
+    flushSync();
+    return editor;
+  } // End of function stuck()
+
+  it('offers nothing until a reapply has resolved nothing', async () => {
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, 'replace', 'c');
+    control(editor.target, 'browser.matchEditor.save').click();
+    await settle();
+    // The conflict is on screen and the reapply has not been tried, so recovery is
+    // not reached — and `recoveryIsAnswerable` is what keeps it silent rather than
+    // explaining an unoffered control.
+    expect(button(editor.target, CREATE_FROM_FIELDS)).toBeNull();
+    editor.stop();
+  });
+
+  it('offers recovery once it has, and reaches a committed create', async () => {
+    const editor = await stuck([{ result: CREATED }]);
+    expect(says(editor.target, 'browser.reapply.manualResolution')).toBe(true);
+    control(editor.target, CREATE_FROM_FIELDS).click();
+    flushSync();
+
+    // The transfer table is drawn beside the two boxes, and the destination the
+    // conflict's own disk projection still allows is preferred.
+    expect(says(editor.target, 'browser.recovery.transferHeading')).toBe(true);
+    expect(says(editor.target, sourceConflictStateKey('retained'))).toBe(true);
+    control(editor.target, 'browser.recovery.create').click();
+    await settle();
+
+    expect(editor.creates).toHaveLength(1);
+    expect(editor.creates[0]!.document).toBe(FILE.id);
+    expect(editor.creates[0]!.position).toEqual({ End: {} });
+    // The **disk** revision the conflict carried, which is the newest observation
+    // this window has of that file.
+    expect(editor.creates[0]!.baseRevision).toBe(AFTER);
+    // The editor's own draft — the trigger it holds and the body that was typed.
+    expect(editor.creates[0]!.newMatch).toEqual({ trigger: ':a', replace: 'c' });
+    // No second `save_match`, and the editor's own conflict was never adopted.
+    expect(editor.calls).toHaveLength(1);
+    expect(editor.adoptions).toEqual([]);
+    expect(editor.recoveryAdoptions).toEqual([]);
+    expect(says(editor.target, sourceConflictStateKey('spent'))).toBe(true);
+    editor.stop();
+  }); // End of the "reaches a committed create" case
+
+  it('keeps the editor’s own conflict and draft through an abandoned recovery', async () => {
+    const editor = await stuck();
+    control(editor.target, CREATE_FROM_FIELDS).click();
+    flushSync();
+    control(editor.target, 'browser.recovery.close').click();
+    flushSync();
+
+    expect(editor.creates).toEqual([]);
+    expect(editor.adoptions).toEqual([]);
+    // The conflict above it is untouched: its own draft is still retained and its
+    // own choices are still offered.
+    expect(says(editor.target, 'browser.saveOutcome.draftKeptInMemory')).toBe(true);
+    expect(button(editor.target, KEEP_MY_DRAFT)).not.toBeNull();
+    expect(button(editor.target, CREATE_FROM_FIELDS)).not.toBeNull();
+    editor.stop();
+  });
+}); // End of the "small editor’s recovery" suite

@@ -368,17 +368,27 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**175** as of 2c-4b-3d-3, and the guard is not the number but the *shape of
+**178** as of 2c-4c-3a, and the guard is not the number but the *shape of
 a change to it*. The ladder, so it can be checked rather than accepted: **171** through 2c-4a-2,
 **172** at 2c-4a-3a (`src/lib/components/clipboard.ts`), **173** and **174** at 2c-4a-3c
 (`src/lib/components/reveal.ts`, then `src/lib/browser/draftKind.ts`), **175** at 2c-4b-2
-(`src/lib/browser/reapply.ts`) — one new source module each time. The other two frontend gates move
-with it: **418** `svelte-check` files and **1633** tests as of 2c-4b-3d-3. (The test count is the one
-this project has already got wrong: `1623` stood in `PROGRESS.md` for three step records after 3d-1
-committed ten cases behind a harness that made the production figure unobservable. A count only a
-harness-free tree can produce must be **re-derived** on such a tree, never copied forward.) A count
-that moves by exactly the number of new source modules is a new module; a jump to ~180 with
-`svelte/internal/server` in the bundle is the regression. Rebaseline it by building a pristine
+(`src/lib/browser/reapply.ts`) — one new source module each time — and then **178** at 2c-4c-3a,
+which moved by three for two source files.
+
+**That last rung is the first `.svelte` file on the ladder, and it is why "one module per new source
+module" is no longer the whole rule.** 2c-4c-3a made `src/lib/browser/recovery.ts` reachable from the
+entry for the first time (+1), added `src/lib/components/RecoveryPanel.svelte` (+1), and that
+component's `<style>` block is a module of its own (+1). This was **measured, not inferred** — the
+block was deleted, the build came back 177, and it was restored. So a new component costs **two**,
+a new `.ts` module costs one, and a component with no styles costs one. The other two frontend gates
+move with it: **422** `svelte-check` files and **1744** tests as of 2c-4c-3a. (The test count is the
+one this project has already got wrong: `1623` stood in `PROGRESS.md` for three step records after
+3d-1 committed ten cases behind a harness that made the production figure unobservable. A count only
+a harness-free tree can produce must be **re-derived** on such a tree, never copied forward.) A count
+that moves by exactly the number of new source modules **plus one per new styled component** is new
+source; a jump with `svelte/internal/server` in the bundle is the regression — and note that the old
+shorthand for it, "a jump to ~180", is now **within one of a legitimate count**, so check the bundle
+for that import rather than reading the number alone. Rebaseline by building a pristine
 `git archive HEAD` copy and subtracting; never by editing the condition.
 
 **A whole-document save outcome arrives sealed, and the seal is one-shot.**

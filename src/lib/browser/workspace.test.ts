@@ -80,6 +80,7 @@ import {
   sourceConflictState,
   startMatchFieldRecovery,
   type CreateARecoveredSnippet,
+  type InstallTheWaitingForm,
   type RecoverySession
 } from './recovery';
 import type { ConflictModel, ReloadConfirmation } from './saveOutcome';
@@ -4809,6 +4810,15 @@ describe('creating a snippet', () => {
 
 describe('recovering a draft no reapply could resolve', () => {
   /**
+   * An installation that puts the waiting form nowhere.
+   *
+   * These cases are about what reaches the boundary and what the wrapper does with
+   * the answer, never about the screen the form is drawn on; `sendRecoveryCreate`
+   * requires the argument all the same, so they say so rather than omit it.
+   */
+  const INSTALLS_NOTHING: InstallTheWaitingForm = () => {};
+
+  /**
    * The conflict a match editor is showing over this state's own `base.yml`.
    *
    * The disk side is {@link grownDocument}, at `rev-b`, while the window goes on
@@ -4944,7 +4954,7 @@ describe('recovering a draft no reapply could resolve', () => {
     // there is no second writer and no new command anywhere on this path.
     const create: CreateARecoveredSnippet = state.createMatch;
     documents.set(2, { ok: true, value: grown });
-    const after = await sendRecoveryCreate(recoveryOver(state), create);
+    const after = await sendRecoveryCreate(recoveryOver(state), create, INSTALLS_NOTHING);
 
     const call = vi.mocked(commands.createMatch).mock.calls[0]!;
     expect(call[0]).toBe(2);
@@ -4983,7 +4993,7 @@ describe('recovering a draft no reapply could resolve', () => {
     const state = createBrowserState(commands, () => undefined);
     await state.open(null);
 
-    const pending = sendRecoveryCreate(recoveryOver(state), state.createMatch);
+    const pending = sendRecoveryCreate(recoveryOver(state), state.createMatch, INSTALLS_NOTHING);
     // The person picks something else while the recovered snippet is being
     // written. The guard is the wrapper's own and holds at the write; recovery
     // neither observes the selection nor writes to it.
@@ -5050,14 +5060,15 @@ describe('recovering a draft no reapply could resolve', () => {
     // body and the form refuses until a person supplies one.
     const blank = recoveryOver(state, baseDocument().matches[0]!);
     expect(recoveryRefusal(blank)).toBe('replaceEmpty');
-    expect(await sendRecoveryCreate(blank, state.createMatch)).toBe(blank);
+    expect(await sendRecoveryCreate(blank, state.createMatch, INSTALLS_NOTHING)).toBe(blank);
     expect(commands.createMatch).not.toHaveBeenCalled();
 
     // **And the same mock is reached the moment the refusal is gone**, which is
     // what stops the assertion above from being one that cannot fail.
     await sendRecoveryCreate(
       editRecoveryField(blank, 'replace', 'a body'),
-      state.createMatch
+      state.createMatch,
+      INSTALLS_NOTHING
     );
     expect(commands.createMatch).toHaveBeenCalledTimes(1);
   }); // End of the "nothing sent while a refusal stands" case
@@ -5088,7 +5099,11 @@ describe('recovering a draft no reapply could resolve', () => {
     // The re-read finds a third revision, which is neither what the window held
     // nor what the conflict carried.
     documents.set(2, { ok: true, value: thinnedDocument() });
-    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+    const after = await sendRecoveryCreate(
+      recoveryOver(state, undefined, conflict),
+      state.createMatch,
+      INSTALLS_NOTHING
+    );
 
     expect(after.sendFailure?.kind).toBe('mayHaveWritten');
     expect(after.committed).toBe(false);
@@ -5120,7 +5135,11 @@ describe('recovering a draft no reapply could resolve', () => {
     const conflict = await conflictFromASave(state);
     const reads = vi.mocked(commands.getDocument).mock.calls.length;
 
-    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+    const after = await sendRecoveryCreate(
+      recoveryOver(state, undefined, conflict),
+      state.createMatch,
+      INSTALLS_NOTHING
+    );
 
     expect(after.sendFailure).toEqual({
       kind: 'notSent',
@@ -5167,7 +5186,11 @@ describe('recovering a draft no reapply could resolve', () => {
     const conflict = await conflictFromASave(state);
 
     documents.set(2, { ok: true, value: thinnedDocument() });
-    const after = await sendRecoveryCreate(recoveryOver(state, undefined, conflict), state.createMatch);
+    const after = await sendRecoveryCreate(
+      recoveryOver(state, undefined, conflict),
+      state.createMatch,
+      INSTALLS_NOTHING
+    );
 
     expect(after.committed).toBe(false);
     expect(after.outcome?.kind).toBe('saved');

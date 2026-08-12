@@ -26,12 +26,19 @@
     undoEdit
   } from '../browser/matchEditor';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
+  import type { CreationBuffers } from '../browser/matchCreation';
   import type { MatchBuffers } from '../browser/matchEditor';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
+  import {
+    recoveryAvailability,
+    startMatchFieldRecovery,
+    type CreateARecoveredSnippet
+  } from '../browser/recovery';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { copyReferenceText } from './clipboard';
+  import RecoveryPanel from './RecoveryPanel.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import {
     t,
@@ -62,6 +69,7 @@
     Acknowledgement,
     ContentRevision,
     DocumentSummary,
+    DocumentView,
     MatchDraft,
     MatchId,
     MatchView
@@ -169,9 +177,13 @@
   const {
     match,
     file,
+    documents,
+    projections,
     save,
+    create,
     reproject,
     adoptDiskVersion,
+    adoptRecoveryDiskVersion,
     close,
     clock = () => Date.now()
   }: {
@@ -179,6 +191,18 @@
     match: MatchView;
     /** The file it lives in, for the person to see which one it is. */
     file: DocumentSummary | null;
+    /**
+     * Every file the window lists, in window order.
+     *
+     * **A function rather than an array, and read only by recovery**: the
+     * destination list a recovery form opens with is derived at the moment it is
+     * opened, and a captured array would offer files as the window held them when
+     * this editor opened — which, after any re-read, is a list of revisions the
+     * transaction would refuse.
+     */
+    documents: () => readonly DocumentSummary[];
+    /** Every projection this window holds, read the same way and for the same reason. */
+    projections: () => readonly DocumentView[];
     /**
      * Sends one save.
      *
@@ -210,6 +234,18 @@
       baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ) => Promise<MatchSaveAnswer>;
+    /**
+     * Sends one recovery create.
+     *
+     * **`BrowserState.createMatch` and nothing else**, for the reason `save` above
+     * is `BrowserState.saveMatch` and nothing else: that method performs the
+     * adoption a committed create owes before the answer is handed back, and
+     * `createMatch` in `../ipc/commands` is the same call without it. This editor
+     * never calls it — it is handed to `RecoveryPanel`, which is
+     * the only thing here that can create a snippet, and every recovery write ends
+     * in the same `run_one_save` the other six writers do.
+     */
+    create: CreateARecoveredSnippet;
     /**
      * The freshly projected snippet of one identity, or why there is none.
      *
@@ -243,6 +279,17 @@
      * transition finishes on.
      */
     adoptDiskVersion: AdoptTheDiskVersion<MatchBuffers>;
+    /**
+     * The same door, for a conflict a **recovery create** of its own ran into.
+     *
+     * `BrowserState.adoptDiskVersion` again — the method is generic and this is a
+     * second instantiation of it, not a second transition. Two props rather than
+     * one because `AdoptTheDiskVersion<T>` is contravariant in the drafted value:
+     * this editor's conflicts retain `MatchBuffers` and a recovery form's retain
+     * the two authored strings, and one prop could not be typed for both. The
+     * panel is the only thing here that is handed this one.
+     */
+    adoptRecoveryDiskVersion: AdoptTheDiskVersion<CreationBuffers>;
     close: () => void;
     /**
      * Where the typing group's boundary readings come from.
@@ -282,6 +329,20 @@
 
   /** What the last attempt left this panel to say, or `null`. */
   const reapplyReport = $derived(reapplyToShow(reapplyAttempt, session));
+
+  /**
+   * Whether recovery has anything to offer, and what it would work from.
+   *
+   * **Read from the report rather than from the attempt**, so the offer lives
+   * exactly as long as the answer that justifies it: `reapplyToShow` is `null` the
+   * moment the session is replaced, and recovery's entry condition is a reapply
+   * that resolved **nothing** and adopted nothing. The files and the projections
+   * are read here rather than captured, so a destination that has stopped being
+   * writable stops being offered.
+   */
+  const recovery = $derived(
+    recoveryAvailability('matchFields', reapplyReport, view.conflict, documents(), projections())
+  );
 
   /** Whether leaving the editor is waiting on a confirmation. */
   let leaving = $state(false);
@@ -825,6 +886,26 @@
       {/if}
     </div>
   {/if}
+
+  <!-- The way out of a conflict nothing could resolve automatically. **Outside the
+       outcome panel on purpose**, for the reason the reapply report is: a form the
+       person has begun to fill in must not be taken away by *Keep editing* on the
+       conflict above it. What it draws when there is nothing to offer is
+       `recoveryIsAnswerable`'s decision and not this markup's. -->
+  <RecoveryPanel
+    availability={recovery}
+    open={() =>
+      startMatchFieldRecovery(
+        reapplyReport,
+        view.conflict,
+        session.baseline,
+        documents(),
+        projections(),
+        clock
+      )}
+    {create}
+    adoptDiskVersion={adoptRecoveryDiskVersion}
+  />
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
