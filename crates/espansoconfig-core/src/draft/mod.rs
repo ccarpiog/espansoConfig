@@ -78,10 +78,13 @@
 //! [`NewMatch`] is what a match is **born** holding, and it is a second type
 //! rather than a mode of [`MatchDraft`] because the two answer different
 //! questions: a draft's `Unchanged` means *leave these bytes alone*, which a
-//! match with no bytes cannot mean. It is closed at two mandatory keys, spelled
-//! from [`MatchField`] so the schema fixes them, and it derives no batch of its
-//! own — [`crate::patch::InsertItem`] is the primitive, and this only says what
-//! goes in it.
+//! match with no bytes cannot mean. It is closed at **two required and four
+//! optional schema-known scalar fields** — Phase 2c-4c-1 widened it from the two
+//! it was born with — every key spelled from [`MatchField`] so the schema fixes
+//! them, and it derives no batch of its own: [`crate::patch::InsertItem`] is the
+//! primitive, and this only says what goes in it. An optional field that is
+//! absent is a key the new item is not born holding at all, which is not the
+//! same request as one written with an empty value.
 //!
 //! # What this module never does
 //!

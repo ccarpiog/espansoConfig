@@ -84,9 +84,10 @@ pub mod path;
 
 pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
-    move_item, remove_field, remove_item, DocumentEdit, DuplicateItem, DuplicateSeam, EditError,
-    FieldInsert, FieldRemoval, InsertItem, ItemMove, ItemPlacement, MoveSeam, PatchedDocument,
-    PresentationNote, RemoveItem, Replacement, ScalarEdit, VerificationFailure,
+    insertion_landings, move_item, remove_field, remove_item, DocumentEdit, DuplicateItem,
+    DuplicateSeam, EditError, FieldInsert, FieldRemoval, InsertItem, ItemMove, ItemPlacement,
+    MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement, ScalarEdit,
+    VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

@@ -20,9 +20,13 @@
  *   which is a projection of a snippet that does not exist — a value nothing read
  *   from a file, sitting in the one field whose whole purpose is to record what a
  *   file held;
- * - there is **no absent key**. Both values are required, because `NewMatch` says
- *   so on the wire and because a trigger with no body is not a usable espanso
- *   snippet;
+ * - there is **no absent key in this form**. Its two values are the two `NewMatch`
+ *   requires on the wire, and both are required here because a trigger with no
+ *   body is not a usable espanso snippet. The four *optional* schema-known fields
+ *   `NewMatch` has carried since 2c-4c-1 are simply not authored here — omitting
+ *   one asks Rust to write no key for it, which is a different request from
+ *   sending it empty — and the absent-key question arrives with the caller that
+ *   does author them;
  * - there is **no reprojection debt** of the small editor's kind. A committed
  *   create does invalidate this form — see below — but the reason is that the
  *   *destinations* it holds are stale, not that a scalar's spelling has changed.
@@ -1023,6 +1027,11 @@ export type CreationRefusal =
  * Both values are **logical text**, never YAML: how each is spelled in the file —
  * plain, quoted, or a `|` block — is Rust's decision, made by the same encoder
  * every other value this application writes goes through.
+ *
+ * **This form authors two of {@link NewMatch}'s six fields, and that is a fact
+ * about the form rather than about the type**: the four optional schema-known
+ * fields are omitted here, which asks Rust to write no key for any of them. It is
+ * not the same request as sending them empty.
  *
  * @param buffers - What the controls hold.
  * @returns The value `create_match` takes.

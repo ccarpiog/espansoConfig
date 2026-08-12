@@ -683,7 +683,8 @@ pub enum ItemPlacement {
 }
 
 impl ItemPlacement {
-    /// How many of the original items sit **above** the new one.
+    /// How many of the original items sit **above** the new one, when that count
+    /// is a `usize` at all.
     ///
     /// The number `fold_item_expectations` needs, and the one place the three
     /// cases are turned into it: `Front` is 0, `After(k)` is `k + 1`, and `End`
@@ -698,15 +699,27 @@ impl ItemPlacement {
     /// function answers both questions and a caller cannot hold a second copy of
     /// the arithmetic that disagrees with the engine's.
     ///
-    /// It is pure arithmetic and validates nothing. `items` is the sequence's own
-    /// item count; an `After(k)` naming an index the sequence does not have is
-    /// [`EditError::NoSuchDestinationItem`], raised by `plan_item_insertion`
-    /// against a document this function has never seen.
-    pub fn items_above(self, items: usize) -> usize {
+    /// # It answers `None` for exactly one input, and validates nothing else
+    ///
+    /// `After(usize::MAX)` names an index whose successor is not a `usize`, so
+    /// there is no count of items above it to give and the answer is [`None`].
+    /// That is the whole of what this function checks: `items` is the sequence's
+    /// own item count and is never compared with anything, so an `After(k)`
+    /// naming an index the sequence does not have still answers `Some(k + 1)`
+    /// here. Such a `k` is [`EditError::NoSuchDestinationItem`], raised by
+    /// `plan_item_insertion` against a document this function has never seen.
+    ///
+    /// **The check is at this site rather than at each caller**, because the
+    /// three cases are spelled here and nowhere else — a caller that tested
+    /// `After(usize::MAX)` before calling would be a second copy of the case
+    /// analysis this function exists to be the only one of, and a caller that did
+    /// not would inherit an overflow: a panic in an overflow-checking build, and
+    /// a wrap to a plausible but false `0` in one that does not check.
+    pub fn items_above(self, items: usize) -> Option<usize> {
         match self {
-            ItemPlacement::Front => 0,
-            ItemPlacement::After(index) => index + 1,
-            ItemPlacement::End => items,
+            ItemPlacement::Front => Some(0),
+            ItemPlacement::After(index) => index.checked_add(1),
+            ItemPlacement::End => Some(items),
         }
     } // End of function items_above()
 } // End of impl ItemPlacement
@@ -4037,6 +4050,192 @@ struct PendingItem {
     inserted: Option<(usize, Vec<(String, String)>)>,
 }
 
+/// Where one position of a changed sequence came from.
+///
+/// The output of [`replay_item_positions`], and deliberately an *origin* rather
+/// than a value: the fold needs the digest of a kept item and the fields of an
+/// inserted one, while [`insertion_landings`] needs neither and only wants to
+/// know which position an insertion took. Both questions are the same one pass
+/// over the original positions, so they are answered by one function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotOrigin {
+    /// An original item, named by its index in the **original** sequence.
+    Kept(usize),
+    /// An insertion, named by its position in the list of insertions the caller
+    /// handed in — not by its position in the batch, which only the caller can
+    /// map back.
+    Inserted(usize),
+}
+
+/// The order a batch's slots come out in, as one pass over the original
+/// positions.
+///
+/// **The one spelling of the fold's arithmetic**, and the reason it is a
+/// function: [`fold_item_expectations`] turns the answer into what `verify` must
+/// find, and [`insertion_landings`] turns the same answer into the index an
+/// inserted item took. A second spelling in either place would be a second
+/// opinion about where the splice puts things.
+///
+/// `items` is the sequence's original item count; `insertions[n]` is how many
+/// original items sit above the *n*-th insertion ([`ItemPlacement::items_above`]
+/// of that count); `removals` holds the original indices being deleted. Order
+/// among insertions anchored above the same position is the order they arrive
+/// in, which is the order they were requested in.
+///
+/// It is pure arithmetic and validates nothing: an anchor above `items` or a
+/// removal of an index the sequence does not have simply contributes nothing.
+/// Every number it is handed has already been derived by its caller — the
+/// anchors by [`ItemPlacement::items_above`], which is checked at its own site —
+/// so there is no arithmetic here that can overflow. What it does cost is one
+/// pass over `items + 1` positions, so an item count no document can hold costs
+/// time proportional to that count; the only thing bounding it is that an item
+/// needs at least one byte, and no type says so.
+fn replay_item_positions(
+    items: usize,
+    insertions: &[usize],
+    removals: &[usize],
+) -> Vec<SlotOrigin> {
+    let mut slots = Vec::new();
+    for at in 0..=items {
+        for (which, above) in insertions.iter().enumerate() {
+            if *above == at {
+                slots.push(SlotOrigin::Inserted(which));
+            }
+        } // End of the loop over the insertions anchored above this position
+        if at < items && !removals.contains(&at) {
+            slots.push(SlotOrigin::Kept(at));
+        }
+    } // End of the loop that replays the batch over the original positions
+    slots
+} // End of function replay_item_positions()
+
+/// The index each of `edits`' insertions into `sequence` takes in the candidate.
+///
+/// One pair per [`DocumentEdit::InsertItem`] whose destination is `sequence`, in
+/// batch order: the edit's position in `edits`, and the index the item it writes
+/// occupies **after** the whole batch has been applied.
+///
+/// # Why the whole batch, and not the insertion alone
+///
+/// [`ItemPlacement::items_above`] answers where an insertion lands in a sequence
+/// *nothing else in the batch changes*. `apply_edits` accepts mixed batches and
+/// folds every claim about one sequence into a single ordered expectation, so a
+/// [`RemoveItem`] above the anchor shifts the arrival left and a second insertion
+/// above it shifts the arrival right. Deriving an address from the placement and
+/// the candidate's length alone is therefore correct only for a batch whose one
+/// cardinality-changing edit is that insertion — and that is a property of
+/// today's callers rather than of any type. This function reads the batch, so it
+/// is correct for every batch `apply_edits` accepts.
+///
+/// [`ItemMove`] and [`DuplicateItem`] cannot appear beside an insertion at all —
+/// each is refused unless it is the only edit in its batch — so the only edits
+/// that can move an insertion's landing are the other insertions and the
+/// removals this function reads. A [`ScalarEdit`], a [`FieldInsert`] and a
+/// [`FieldRemoval`] change a mapping and never a sequence's cardinality.
+///
+/// # `items_in_candidate` is the count *after* the batch
+///
+/// The caller has the candidate, not the original, so the original count is
+/// re-derived from it: it is the candidate's count, plus the removals this batch
+/// takes out of `sequence`, minus the insertions it puts in. An empty answer is
+/// returned rather than a guess when that arithmetic underflows, which is the
+/// same "say nothing" this crate prefers everywhere an address cannot be
+/// derived.
+///
+/// # Every derivation is checked, and the empty answer is the one failure
+///
+/// **Three arithmetic steps can fail to name a `usize`, and all three answer the
+/// empty vector**, which is the underflow rule above applied to the other two
+/// rather than a second convention: the candidate's count plus the removals can
+/// overflow, that sum minus the insertions can underflow, and an anchor of
+/// `After(usize::MAX)` sits above no position [`ItemPlacement::items_above`] can
+/// name. **One anchor with no landing empties the whole answer**, insertions this
+/// batch could have located included — the alternative is a list a caller reads
+/// as complete while a position is silently missing from it, and this function's
+/// one consumer looks each insertion up by its own batch position and produces
+/// nothing when it is absent, which is the same "say nothing" either way.
+///
+/// So for any `usize` a caller can put in an [`InsertItem`], a [`RemoveItem`] or
+/// `items_in_candidate`, **none of those three derivations** panics in an
+/// overflow-checking build or answers a wrapped index in one that does not check
+/// — and that is a claim about the arithmetic and about nothing else, because a
+/// count that survives all three is then handed to the replay, which allocates
+/// one slot per position it walks.
+///
+/// # What it still does not validate
+///
+/// It is pure arithmetic over the request. It never reads a document, so it
+/// cannot tell whether `sequence` exists, and a caller that hands in a count for
+/// the wrong sequence gets an answer for the wrong sequence. And an
+/// `items_in_candidate` near `usize::MAX` that survives the checks above — one
+/// insertion and no removal, say — is answered by replaying that many positions
+/// and allocating a slot for each: time and memory, not a wrong index. No type
+/// forbids it; only the fact that an item needs at least one byte on disk keeps
+/// a real caller away from it.
+pub fn insertion_landings(
+    edits: &[DocumentEdit],
+    sequence: &DocumentPath,
+    items_in_candidate: usize,
+) -> Vec<(usize, usize)> {
+    let insertions: Vec<(usize, ItemPlacement)> = edits
+        .iter()
+        .enumerate()
+        .filter_map(|(position, edit)| match edit {
+            DocumentEdit::InsertItem(insert) if insert.sequence() == sequence => {
+                Some((position, insert.placement()))
+            }
+            _ => None,
+        })
+        .collect();
+    if insertions.is_empty() {
+        return Vec::new();
+    }
+    let removals: Vec<usize> = edits
+        .iter()
+        .filter_map(|edit| match edit {
+            DocumentEdit::RemoveItem(removal) => index_within(removal.item(), sequence),
+            _ => None,
+        })
+        .collect();
+    let before = items_in_candidate
+        .checked_add(removals.len())
+        .and_then(|with_removals| with_removals.checked_sub(insertions.len()));
+    let Some(before) = before else {
+        return Vec::new();
+    };
+    let anchors: Option<Vec<usize>> = insertions
+        .iter()
+        .map(|(_, placement)| placement.items_above(before))
+        .collect();
+    let Some(anchors) = anchors else {
+        return Vec::new();
+    };
+    replay_item_positions(before, &anchors, &removals)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(landed, origin)| match origin {
+            SlotOrigin::Inserted(which) => Some((insertions[which].0, landed)),
+            SlotOrigin::Kept(_) => None,
+        })
+        .collect()
+} // End of function insertion_landings()
+
+/// The index `item` holds in `sequence`, when it is a direct item of it.
+///
+/// Both halves of "direct" are checked, for [`crate::persist`]'s reason: a
+/// [`DocumentPath`] names no file, so the document index must agree as well as
+/// the segments above the final one.
+fn index_within(item: &DocumentPath, sequence: &DocumentPath) -> Option<usize> {
+    if item.document_index() != sequence.document_index() {
+        return None;
+    }
+    let (last, parent) = item.segments().split_last()?;
+    let PathSegment::Index(index) = last else {
+        return None;
+    };
+    (parent == sequence.segments()).then_some(*index)
+} // End of function index_within()
+
 /// One position of a sequence, as the batch intends it.
 enum ItemSlot {
     /// An item the batch did not name, with the digest it had in the original
@@ -4082,6 +4281,12 @@ struct ItemExpectation {
 /// after an item that is **itself** removed lands exactly where that item was, and
 /// the loop gives that answer without a special case.
 ///
+/// **The pass is [`replay_item_positions`], and this function only dresses its
+/// answer.** The same replay tells [`insertion_landings`] which index an inserted
+/// item took, so the expectation `verify` enforces and the address the save
+/// transaction reports come from one arithmetic rather than from two that agree
+/// until they do not.
+///
 /// Two of the batches this arithmetic could describe never reach it, because
 /// [`apply_edits`] rejects two spans that **share a start**
 /// ([`EditError::OverlappingEdits`]): two insertions with the same `before` count,
@@ -4116,26 +4321,39 @@ fn fold_item_expectations(
     for (sequence_id, first, rest) in folded {
         let claims: Vec<&PendingItem> = std::iter::once(&first).chain(rest.iter()).collect();
         let items = first.items.clone();
+        // The replay itself is `replay_item_positions`, shared with
+        // `insertion_landings` so that the expectation `verify` checks and the
+        // address the save transaction reports cannot disagree about where the
+        // splice puts things.
+        let inserting: Vec<&PendingItem> = claims
+            .iter()
+            .copied()
+            .filter(|claim| claim.inserted.is_some())
+            .collect();
+        let anchors: Vec<usize> = inserting
+            .iter()
+            .filter_map(|claim| claim.inserted.as_ref().map(|(before, _)| *before))
+            .collect();
+        let removals: Vec<usize> = claims.iter().filter_map(|claim| claim.removed).collect();
         let mut slots = Vec::new();
-        for at in 0..=items.len() {
-            for claim in &claims {
-                if let Some((before, fields)) = &claim.inserted {
-                    if *before == at {
-                        slots.push(ItemSlot::Inserted(fields.clone()));
-                    }
+        for origin in replay_item_positions(items.len(), &anchors, &removals) {
+            match origin {
+                SlotOrigin::Inserted(which) => {
+                    let (_, fields) = inserting[which]
+                        .inserted
+                        .as_ref()
+                        .expect("`inserting` holds only claims that insert");
+                    slots.push(ItemSlot::Inserted(fields.clone()));
                 }
-            } // End of the loop over the insertions anchored above this position
-            let Some(item) = items.get(at) else {
-                continue;
-            };
-            if claims.iter().any(|claim| claim.removed == Some(at)) {
-                continue;
+                SlotOrigin::Kept(at) => {
+                    let item = items[at];
+                    let inside = touched
+                        .iter()
+                        .any(|node| in_subtree(index, item, *node) || *node == item);
+                    slots.push(ItemSlot::Kept((!inside).then(|| digest(index, item))));
+                }
             }
-            let inside = touched
-                .iter()
-                .any(|node| in_subtree(index, *item, *node) || *node == *item);
-            slots.push(ItemSlot::Kept((!inside).then(|| digest(index, *item))));
-        } // End of the loop that replays the batch over the original positions
+        } // End of the loop that turns the replayed positions into slots
 
         if slots.is_empty() {
             return Err(EditError::RemovalWouldEmptyTheSequence {
@@ -5128,7 +5346,21 @@ fn plan_item_insertion(
                     insertion_point(source, extent, position)?
                 }
             };
-            let before = edit.placement().items_above(target.children.len());
+            // Unreachable, and written as a refusal rather than an `expect`
+            // anyway: the anchor resolution above required `at < children.len()`
+            // for every `After`, so the successor is a `usize` by the time this
+            // line runs. `After(usize::MAX)` is nevertheless
+            // `NoSuchDestinationItem` and not a new variant — it names a
+            // destination item the sequence does not have, which is the sentence
+            // that variant already carries, so no refusal and no dictionary
+            // string is invented for a batch no caller can build.
+            let before = edit.placement().items_above(target.children.len()).ok_or(
+                EditError::NoSuchDestinationItem {
+                    edit: position,
+                    sequence: target.id,
+                    items: target.children.len(),
+                },
+            )?;
             (
                 marker,
                 point,

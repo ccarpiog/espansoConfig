@@ -82,7 +82,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4b-3d-3** | The **harness's removal** and the return to the production gate numbers — **which are `1633 / 418 / 175`, not the `1623 / 418 / 175` this row said until 3d-3 measured them** | ✅ complete — `docs/decisions/2c-4b-3d-3-notes.md`. Both halves gone: the two untracked probe sources, the four hook lines reverted, and the 3.0 GB scratch tree with its 75 launch directories, 21 fixtures and 3 manifests. `git status --short --untracked-files=all` returns **nothing**. The step changed **no tracked source file**, so no reading and no mounted test is owed. Its one finding is in a record, not in the application: the production test count `1623` was **stale**, carried forward through three step records after 3d-1 committed 10 cases while the harness was in the tree. Codex returned **NOT READY** on eight findings, **every one of them prose**; the High was this record claiming a `PROGRESS.md` correction it had not yet made, and one Medium was closed **by measuring** (34 case lines added, 24 removed, net **+10**) rather than by softening the claim. **This closes 2c-4b-3d** |
 | **Phase 2c-4b** | **Reapply** — "keep my draft" in plan §12's strong sense: identify the intended match in the newly parsed document and apply only when confidence suffices | ✅ **complete.** Ten steps (1, 2, 3a, 3b, 3c-1, 3c-2, 3d-1, 3d-2a, 3d-2b, 3d-3), all three kinds of evidence, and the instrument built, rebuilt and removed twice over. The correspondence proof is in the core (`reconcile.rs`), the transitions are in `src/lib/browser/reapply.ts`, *Keep my draft* is drawn on the five match surfaces and **absent on the raw editor**, and the 71-launch Q7 matrix plus the 64-launch re-take were read in both languages. **No finding in any round of 3d changed a byte written to a user's file** |
 | **2c-4c design consult** | **Phase 2c-4c put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-4c-design.md`, and it **returned no open question for the owner**. It rules save-as-new an **ordinary `create_match`** on the editor and creator only, labelled *Create a new snippet from supported fields* and never *Duplicate*; the trigger stays an **editable literal**, never auto-suffixed, with a **new** `FindingCode::NewMatchRepeatsLiteralTrigger` claiming risk only; placement is a fixed `End` with **no chooser**, because recovery has no trustworthy anchor by definition; **all six** surfaces are in the recovery contract but the three operation-choice ones recover by reload-then-fresh-operation and the raw editor recovers as whole-document text; and the Rust is **narrow** — widen `NewMatch`, add the finding, **no new command and no new writer**. Six steps |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — the consult is taken and adopted; step 2c-4c-1 is next** |
+| **2c-4c-1** | **The creation and risk contract in Rust**, with no command, no `DocumentEdit` variant and no second writer: `NewMatch` widened from two mandatory fields to those plus four optional ones with `fields()` emitting only present keys in one documented order, and `FindingCode::NewMatchRepeatsLiteralTrigger` — `SuspiciousButPermitted`, content-addressed to the candidate — produced beside `findings_of` **inside** `save_document` for insertion candidates only | ✅ complete — after a review fix round, a confirmation pass and a **third scoped pass**. Round 1 returned **NOT READY** on three Mediums and two Lows, and **one of them was a defect in behaviour**: the locator derived the inserted item's address from candidate-sequence *length*, so a legal mixed batch shifted the anchor and the finding could fire **against an existing item the new snippet does not repeat**. Round 2 confirmed all five closed and found **one new Low the fix had introduced**; round 3 returned **READY with no findings** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — step 1 of six is complete; step 2c-4c-2, recovery as browser values, is next** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3478,6 +3479,117 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-4c step 1
+
+**Record:** `docs/decisions/2c-4c-1-notes.md`. **Review:** `docs/reviews/phase-2c-4c-1-code.md`
+(three rounds in one file: round 1, `## Confirmation pass`, `## Third pass — the overflow fix`).
+
+**Codex jobs:** `task-mspu3ppu-46us6h` (round 1), `task-mspvw7q0-59af4v` (confirmation),
+`task-mspwsgjl-sw2vr5` (third pass). All three: no web search, repository reading permitted.
+
+| Gate | Expected | Observed |
+|---|---|---|
+| Rust tests | `cargo test --workspace` — was 1086 | **1112 passed, 0 failed** — re-summed by the orchestrator from all 25 `test result:` lines |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| Format | `cargo fmt --check` | clean, exit 0 |
+| Architecture (D2x) | `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+| Frontend tests | `npm test` — 1633, 49 files | **1633 passed, 49 files** — unchanged, as a Rust-only step requires |
+| Types | `npm run check` — 418 files | **418 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` — 175 modules | **175 modules transformed** |
+
+**The three frontend gates are unchanged on purpose, and that is the step's shape showing through.**
+No source module was added, so 175 stands; the eleven TypeScript-side edits are the wire mirror, the
+two dictionary sentences and doc-comment corrections, none of which is a new module or a new case.
+The Rust count moved **+26** across the three rounds — 1086 → 1101 (the step) → 1110 (the fix round)
+→ 1112 (the overflow fix).
+
+**What changed:** twenty tracked files and two new documents. Core —
+`draft/{mod,new_match}.rs`, `patch/{edit,mod}.rs`, `persist/save.rs`, `validate/mod.rs`, and the
+tests `patch_item.rs`, `persist_save.rs`, `validate_semantics.rs`. Shell —
+`src-tauri/src/{commands,dictionary_contract,dispatch_check,wire_contract}.rs`. Frontend —
+`src/lib/browser/{matchCreation.ts,workspace.svelte.ts}`, `src/lib/i18n/{en,es}.json`,
+`src/lib/ipc/{commands.ts,commands.test.ts,types.ts}`.
+
+**No `.svelte` file changed, and `rg -c "#\[tauri::command\]" src-tauri/src/commands.rs` is still
+`12`** — the step registered no command, exactly as its brief required. **No mounted test and no
+window reading is owed**, because no component changed; those are steps 3 and 5.
+
+**Independently confirmed by the orchestrator rather than accepted from a worker:** the new code is
+`SuspiciousButPermitted` in `validate/mod.rs`'s `class()`, which is an **exhaustive match with no
+wildcard**, so a future variant that forgets its class is a compile error there; and both dictionary
+sentences claim only that the new snippet repeats trigger text another snippet in the list already
+writes and that this application cannot determine how espanso will handle overlapping definitions —
+**D2u-conformant in both languages, with no placeholder in either**.
+
+---
+
+## Phase 2c-4c step 1 review disposition
+
+**Round 1 — NOT READY.** Three Mediums and two Lows.
+
+**One of the five was a defect in behaviour, and it is the one worth carrying forward.**
+`findings_of` ran the new inspection whenever a batch held exactly one `InsertItem`, and the locator
+treated `candidate_items.len() - 1` as the source sequence's old length. But `apply_edits`
+**deliberately accepts mixed batches** and folds several changes to one sequence, so an insertion
+combined with a `RemoveItem` shifted the arrival while the locator still looked one place too high.
+The concrete failure: remove the first item and insert a *unique* new trigger after original item 1,
+where original items 1 and 2 already share a literal trigger — the code inspects the wrong item, sees
+*their* repetition, and emits `NewMatchRepeatsLiteralTrigger` **against an existing item, for a new
+snippet that repeats nothing**. Two insertions, conversely, skipped the inspection entirely.
+
+The other four were this project's ordinary classes: tests that assert a property without crossing
+the path that can break it (the "ordinary creation" evidence reconstructed `create_one_match`'s
+lowering locally instead of entering it, so dropping the optional fields there would have left it
+green); stale two-field prose on a now-six-field public boundary; an undecodable-scalar exclusion no
+test could falsify; and no Rust↔TypeScript property parity check on `NewMatch`.
+
+**The fix round took the review's second option** — derive the address from the verified aggregate
+batch — rather than forbidding a mixed batch. Its reason, and the reason it is recorded here: option
+one would have **deleted a capability `apply_edits` deliberately has** (there is a standing test that
+an insert and a removal in one batch land where the bytes say), would have needed a new `EditError`
+and therefore a bilingual refusal sentence **no caller can reach and no window can show**, and would
+have converted the multiple-insertion under-report into a refusal instead of closing it.
+`replay_item_positions` was extracted out of `fold_item_expectations` so the fold and a new public
+`insertion_landings` share **one** arithmetic.
+
+**Round 2 — NOT READY, all five closed, one new Low introduced by the fix.** The confirmation pass
+verified the extraction preserves the fold exactly — claims grouped in first-seen order, insertions
+retaining claim order, same-anchor insertions preceding the original item, a claimed removal
+suppressing that item, the same touched-subtree digest for every kept slot — and then found that the
+**newly public** `insertion_landings` documented itself as pure arithmetic that validates nothing
+while adding without `checked_add`. One `InsertItem::after(sequence, usize::MAX, …)` panics in an
+overflow-checking build before the promised no-contribution behaviour, and wraps to a **plausible but
+false front landing** in a build without checks.
+
+**Round 3 — READY, no findings.** The overflow fix made `ItemPlacement::items_above` checked **at its
+own site** (`After(index) => index.checked_add(1)`, signature now `Option<usize>`) rather than
+guarding at each call, because that function is the only place all three placement variants become a
+count and the false sentence lived there. The pass found **four call sites and no omitted production
+caller**, ruled `plan_item_insertion`'s reuse of the existing `EditError::NoSuchDestinationItem`
+honest for an overflowing anchor (such an index cannot name an element, so absence of the destination
+is the operative error *and* the check that occurs first), and confirmed `create_one_match`'s
+degradation to `at: None` is safe: `run_one_save` does not treat a missing address as an error, so a
+committed write still returns `SaveResult::Saved` with `moved: None` and **no consumer reads the
+missing address as permission to retry the write**. Both new tests were confirmed falsifiable in the
+reported ways, neither passing vacuously through the early no-insertions return.
+
+**What this step teaches, beyond its own code:** the first round's behavioural defect existed because
+the inspection derived an address from a *shape it assumed the batch had* rather than from the engine
+that actually places the item. The engine already knew. Both the fix and the third pass's argument
+rest on the same move — ask the arithmetic that does the work, once, instead of re-deriving it beside
+it.
+
+**What no test pins, stated because nothing else will.** `insertion_landings` is arithmetic over a
+*request*, and it trusts that only `InsertItem` and `RemoveItem` change a sequence's cardinality —
+true today only because move and duplicate are batch-of-one, and **the match arms are wildcards, so
+the compiler will not force a future cardinality-changing variant into this arithmetic**. Nothing
+bounds the replay's time or allocation for a near-`usize::MAX` count that survives the three checks;
+that is a cost, not a wrong index, and the doc comments were narrowed to say so. And no executable
+test pins what the finding's *sentence* claims — the i18n suites check parity and placeholder
+agreement, never meaning.
+
+---
+
 ## Verification — Phase 2c-4c design consult
 
 **Consult:** `docs/reviews/phase-2c-4c-design.md` (25 260 bytes, written by the job itself).
@@ -6757,7 +6869,141 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Phase 2c-4c's design consult is taken and adopted. **Step 2c-4c-1 — the creation and risk contract in Rust — is next, and it touches no frontend file.**
+### Step 2c-4c-1 is complete. **Step 2c-4c-2 — recovery as browser values — is next, and it draws nothing.**
+
+The phase's cut, with the full five-question table and the six-step scope table, is "Phase 2c-4c —
+consult disposition" above. The consult itself is `docs/reviews/phase-2c-4c-design.md`. **Read the
+disposition first and the consult only for the step you are on** — the consult is 25 KB and a step
+needs one section of it. Step 1's own record is `docs/decisions/2c-4c-1-notes.md` and its three
+review rounds are `docs/reviews/phase-2c-4c-1-code.md`.
+
+**The tree is clean and the gates are at these numbers** (see "Verification — Phase 2c-4c step 1"
+above, where each was re-derived by the orchestrator rather than accepted from a worker):
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+cargo test --workspace         # expect 1112 passed, 0 failed
+npm test                       # expect 1633 passed, 49 files
+npm run check                  # expect 418 files, 0 errors, 0 warnings
+npm run build                  # expect 175 modules
+```
+
+**`1633` is right and `1623` is the stale figure 2c-4b-3d-3 corrected. Do not "restore" 1623.**
+The Rust figure moved 1086 → **1112** at step 1; `175` and `418` did not move and must not, because
+step 1 added no frontend module and no frontend case.
+
+#### What step 1 hands step 2, in the four sentences step 2 needs
+
+1. **`NewMatch` now carries six fields**, not two: mandatory `trigger` and `replace` plus optional
+   `label`, `word`, `left_word` and `right_word` — the same six `src/lib/browser/matchEditor.ts`
+   drafts. `fields()` emits **only present** keys in one documented order, and **`None` is not
+   `Some("")`**: an absent optional writes no key at all, while an empty string writes an empty
+   value. The TypeScript mirror in `src/lib/ipc/types.ts` has all six, and a wire-contract test now
+   compares the two property sets, so a typo in one optional key is a test failure rather than a
+   silently dropped field.
+2. **A repeated literal trigger is now refused once and committed on *Save anyway*, for ordinary
+   `create_match` as well as for recovery.** That is correct and was required by the brief — exact
+   repetition is a property of the candidate, not of the route that reached it — but it means **a
+   behaviour change is already live on the creator surface with no mounted test and no window
+   reading behind it.** It needed no component change because `refusalAcknowledgement` and
+   `refusalChoices` (`src/lib/browser/rawSave.ts`) are verdict-driven and `MatchCreator.svelte`
+   already renders the code through `tFindingCode`. **Steps 3 and 5 owe that evidence**; step 2 does
+   not, because it still draws nothing.
+3. **The finding claims risk and never semantics.** Its two sentences say the new snippet repeats
+   trigger text another snippet in this list already writes, and that this application cannot
+   determine how espanso will handle overlapping definitions. Never *invalid*, never *collision*,
+   never which snippet wins, and never that a non-match is safe. Any sentence step 2 or 3 writes
+   about it inherits that bound (D2u).
+4. **`insertion_landings` in `crates/espansoconfig-core/src/patch/edit.rs` is the address authority**,
+   and the reason it exists is worth carrying: the first version of this step derived the inserted
+   item's position from candidate-sequence *length*, which is a guess about the batch's shape, and a
+   legal insert-plus-remove batch made the finding fire against an existing item. **Ask the
+   arithmetic that does the placement; do not re-derive it beside the engine.**
+
+#### What 2c-4c-2 must do, and what it must not
+
+Add, in `src/lib/browser/`, with **no `.svelte` change, no `ConflictChoice` member, no dictionary key
+and no control drawn**: the shared recovery outcome/choice model, the six field transfer decisions,
+destination selection, **fixed `End` placement with no chooser**, and the rule that **the source
+conflict survives until a recovery create commits**. Compose the existing `BrowserState.createMatch`.
+
+The precedent to follow is the one 2c-4a-2 → 2c-4a-3a established and this checkpoint has recorded
+twice since: **an unoffered transition can be built and tested without drawing its choice, and that
+is the right trade.** Step 3 then flips capability and draws, without inventing machinery.
+
+Its evidence is model and workspace tests over **every** `manualResolution` obstacle from the five
+surfaces, no eligible destination, another conflict, refusal/acknowledgement/retry, an uncertain
+send, a failed adoption after a *known* commit, selection races — and **proof that no command is
+called** by an operation-choice or a raw recovery.
+
+The prohibitions that bite hardest here:
+
+- **Opening recovery must not adopt the disk snapshot or close the source surface.** The
+  `manualResolution` arm (`src/lib/browser/reapply.ts:236`) guarantees the projection, the selection
+  and the one-shot authorization are all untouched. **That is the phase's strongest asset and
+  spending it early throws it away.**
+- **Never *Duplicate*, *exact copy* or *Keep my draft*.** The product reconstructs schema-supported
+  fields and cannot promise source-byte preservation; *Keep my draft* is already reapply's control.
+  Its name is **_Create a new snippet from supported fields_**.
+- **No `MovePlacement` or `MatchId` draft is copied or saved.** They preserve no authored content,
+  and `src/lib/browser/draftKind.ts` already refuses that false promise as a property of the value.
+- **No `After`, no numeric position, no reused old `MatchId`, no guessed anchor.** Recovery has no
+  trustworthy anchor by definition; placement is a fixed `End`.
+- **No new sequence created, no other file chosen silently, no widening into file creation.**
+- **Every write still goes through `save_document`**, there is no `force` flag, and a committed write
+  is never afterwards reported as an error.
+
+#### The remaining four steps, so the cut is visible from here
+
+**2c-4c-3** one recovery UI, i18n in both languages through typed accessors, and mounted evidence ·
+**2c-4c-4** rebuild the window instrument · **2c-4c-5** the bilingual window reading ·
+**2c-4c-6** remove the instrument and re-derive the gate counts. Their scopes and the evidence each
+owes are the table in the consult disposition above.
+
+#### The rules that bind every step of 2c-4c
+
+- **Three kinds of evidence per sub-phase** — model tests, a **mounted-component test**, and a
+  **window reading**. A green suite is not a screen. Step 1 owed only the first because it changed no
+  component, and **step 2 is the same**; the phase as a whole owes all three, and step 1's live
+  creator-surface behaviour change is now part of what steps 3 and 5 must cover.
+- **The harness is gone, so any reading costs a rebuild first** — that is why steps 4 and 5 are two
+  steps. `docs/decisions/2c-4b-3d-2a-instrument-rebuild.md` carries the fixtures' content, not just
+  their descriptions.
+- **Never `git commit -a` or `git commit -am` while probe files are in the tree.** Stage by path.
+- **A fix is a change, and the round that reviews it is not optional.** Step 1 took three rounds and
+  each one was earned: round 2 existed because round 1's fix went wider than its brief, and round 3
+  because round 2's fix did the same. Both times the widening was **justified** and both times it
+  introduced or nearly introduced something.
+
+#### The five holes 2c-4b left behind, still open and still not defects
+
+They have no case row in the (now removed) `launch.sh` and no arm in `runPlan`, so nothing could be
+launched for them; each costs a fixture or a plan function **plus an instrument rebuild** before
+there is anything to launch. **2c-4c-4 is the natural place to add them**, since it rebuilds the
+instrument anyway — but they are not obligations of any 2c-4b record.
+
+- **Hole 1 — `browser.notice.gone`'s second producer**: `repairSelection`'s `clearSelection` arm,
+  `src/lib/browser/selection.ts:292`. Every reading of that sentence so far came from `reresolve`'s
+  **length** arm (P43 en, P44 es).
+- **Holes 2–5 — the confirmed-reload transition on the creator, the deleter, the mover and the
+  duplicator.** It exists on all five match surfaces and has been launched on **one**, the editor.
+
+#### The standing bound on every window reading this project has taken (R38)
+
+**The fixture shape has always been the easy one** — plain `replace:` scalars, double-quoted
+triggers, LF, no BOM, no block scalars, no item-owned comments, no read-only file. **None of the
+fifteen corpus fixtures `CLAUDE.md` §4 lists has ever been through the harness, and the owner's real
+configuration has never been opened by it.** The consult ruled that **2c-4c-5 closes only the shapes
+directly relevant to recovery** — at least one CRLF-or-BOM fixture and one item-owned-comment or
+block-scalar case — and that the full sweep stays open for a later gate. It is recorded, not absorbed.
+
+---
+
+### The record that opened step 2c-4c-1 (superseded by the above, kept for its four prohibitions)
+
+**Superseded.** Step 2c-4c-1 is complete; what it built, and what binds the steps after it, is the
+section above. This is kept because its four prohibitions are the reasoning behind the shipped
+finding, and a later step that touches `NewMatchRepeatsLiteralTrigger` should read them.
 
 The consult is `docs/reviews/phase-2c-4c-design.md`; its disposition, with the full five-question
 table and the six-step cut, is "Phase 2c-4c — consult disposition" above. **Read the disposition

@@ -396,7 +396,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("backupError", 8),
     ("backupStep", 12),
     ("rotationOutcome", 4),
-    ("findingCode", 12),
+    ("findingCode", 13),
     ("findingClass", 2),
     ("editError", 40),
     ("moveSeam", 4),

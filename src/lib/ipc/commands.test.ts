@@ -87,8 +87,10 @@ const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
 /**
  * The content of a snippet to create — hand-authored and neutral.
  *
- * Both fields are required, so this is written out whole rather than spread from
- * a partial: a trigger with no body is not a snippet this application creates.
+ * The two **required** fields and none of the four optional ones, which is the
+ * shape today's creator form authors: a trigger with no body is not a snippet
+ * this application creates, and an omitted optional field is a key the new
+ * snippet is not born holding rather than one written empty.
  */
 const NEW_MATCH: NewMatch = { trigger: ':new', replace: 'a new snippet' };
 
@@ -238,10 +240,12 @@ describe('the command wrappers', () => {
   it('sends a creation as a document, a closed snippet, a position and a base revision', async () => {
     // The third command that writes, and the three decisions in its arguments.
     // The file is named by the identity this window holds, never by a path. The
-    // snippet is closed at two required values, so a caller cannot smuggle a key
-    // espanso's schema does not fix. The position is an **object** for every one
-    // of its three arms, including the two that carry nothing, because one wire
-    // shape per enum is what lets Rust and this side agree without a special case.
+    // snippet is closed at two required and four optional schema-known scalar
+    // fields, so a caller cannot smuggle a key espanso's schema does not fix; the
+    // sample here carries only the two required ones, which is what today's
+    // creator form authors. The position is an **object** for every one of its
+    // three arms, including the two that carry nothing, because one wire shape per
+    // enum is what lets Rust and this side agree without a special case.
     const anchor = { document: 3, revision: 'a'.repeat(64), node: 17 };
     await createMatch(3, NEW_MATCH, { After: { anchor } }, 'c'.repeat(64), { accepted: [] });
     expect(calls[0]?.command).toBe('create_match');

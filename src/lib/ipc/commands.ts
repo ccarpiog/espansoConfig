@@ -464,12 +464,16 @@ export async function saveMatch(
  *
  * ## The snippet's content is closed, and its keys are not the caller's
  *
- * A {@link NewMatch} carries two values and nothing else, and both are required:
- * a trigger with no body is not a usable espanso snippet and this application
- * does not create one. Their **spelling** in the file — plain, quoted, or a text
- * block — is Rust's decision, made by the same encoder every other value goes
- * through, so a value holding a `#`, a line break or a leading `*` is written
- * correctly rather than injected. Nothing here composes a YAML key.
+ * A {@link NewMatch} carries **two required and four optional schema-known
+ * scalar fields** and nothing else. `trigger` and `replace` are required — a
+ * trigger with no body is not a usable espanso snippet and this application does
+ * not create one — while `label`, `word`, `left_word` and `right_word` are
+ * written only when they are given, and an omitted one is a key the new snippet
+ * is not born holding rather than a key written empty. Every value's **spelling**
+ * in the file — plain, quoted, or a text block — is Rust's decision, made by the
+ * same encoder every other value goes through, so a value holding a `#`, a line
+ * break or a leading `*` is written correctly rather than injected. Nothing here
+ * composes a YAML key.
  *
  * ## It targets the file's own snippet list
  *
@@ -490,7 +494,8 @@ export async function saveMatch(
  * flag**.
  *
  * @param document - The file to write into, by the identity this window holds.
- * @param newMatch - What the new snippet says: a trigger and a body.
+ * @param newMatch - What the new snippet says: a trigger and a body, plus any of
+ *   the four optional schema-known fields it is born holding.
  * @param position - Where it goes in the list — `{ Front: {} }`, `{ End: {} }` or
  *   `{ After: { anchor } }` naming the snippet it follows **by identity**.
  * @param baseRevision - The revision the caller believes the file holds, and the

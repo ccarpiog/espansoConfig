@@ -1351,21 +1351,28 @@ fn every_fixture_is_listed_in_every_fixture() {
 /// crate, so adding a variant without a fixture fails here rather than becoming
 /// a code nothing can reach.
 ///
-/// **`DocumentDoesNotParse` and `DuplicateKeepsTriggerDefinition` are the two
-/// exemptions**, and each is one because the code is not a rule about espanso at
-/// all: both are `save_document`'s — the first from its whole-text replacement
-/// mode when the submitted text is not YAML this crate can index, the second
-/// from a `DuplicateItem` batch whose clone keeps its source's trigger
-/// definition — and `validate`, which takes a projection of a document that
-/// already parsed and knows nothing about the edit that produced it, has no way
-/// to reach either. They live in this enum because they must be acknowledgeable,
-/// and an acknowledgement is a multiset of `Finding`s. Each exemption is
-/// asserted from both sides: no fixture reaches it, **and** it is really
-/// declared, so a renamed variant fails here. `tests/persist_raw_save.rs` proves
-/// the first reachable and `tests/persist_save.rs` the second.
+/// **`DocumentDoesNotParse`, `DuplicateKeepsTriggerDefinition` and
+/// `NewMatchRepeatsLiteralTrigger` are the three exemptions**, and each is one
+/// because the code is not a rule about espanso at all: all three are
+/// `save_document`'s — the first from its whole-text replacement mode when the
+/// submitted text is not YAML this crate can index, the second from a
+/// `DuplicateItem` batch whose clone keeps its source's trigger definition, the
+/// third from an `InsertItem` batch whose new item repeats literal trigger text
+/// its destination sequence already holds — and `validate`, which takes a
+/// projection of a document that already parsed and knows nothing about the edit
+/// that produced it, has no way to reach any of them. They live in this enum
+/// because they must be acknowledgeable, and an acknowledgement is a multiset of
+/// `Finding`s. Each exemption is asserted from both sides: no fixture reaches
+/// it, **and** it is really declared, so a renamed variant fails here.
+/// `tests/persist_raw_save.rs` proves the first reachable and
+/// `tests/persist_save.rs` the second and the third.
 #[test]
 fn every_finding_code_is_reachable() {
-    const NOT_VALIDATES: [&str; 2] = ["DocumentDoesNotParse", "DuplicateKeepsTriggerDefinition"];
+    const NOT_VALIDATES: [&str; 3] = [
+        "DocumentDoesNotParse",
+        "DuplicateKeepsTriggerDefinition",
+        "NewMatchRepeatsLiteralTrigger",
+    ];
 
     let mut seen: Vec<&str> = Vec::new();
     for source in every_fixture() {
@@ -1378,7 +1385,7 @@ fn every_finding_code_is_reachable() {
             !seen.contains(&exempt),
             "{exempt} is the save transaction's code; validate must not produce it"
         );
-    } // End of the loop over the two save-transaction codes
+    } // End of the loop over the three save-transaction codes
 
     let mut expected: Vec<&str> = FindingCode::ALL_NAMES
         .into_iter()

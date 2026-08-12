@@ -894,6 +894,170 @@ fn inserting_at_the_start_of_a_removed_item_is_an_overlap() {
     );
 } // End of function inserting_at_the_start_of_a_removed_item_is_an_overlap()
 
+/// One `insertion_landings` case: what it is, the batch, and the pairs expected.
+type LandingCase = (&'static str, Vec<DocumentEdit>, Vec<(usize, usize)>);
+
+/// `insertion_landings` answers the index each insertion actually took, for
+/// every batch shape `apply_edits` accepts.
+///
+/// **The engine's own arithmetic, asserted against the engine's own bytes.**
+/// Each case applies the batch, reads the candidate's items back out of the text
+/// and checks that the trigger sitting at every answered index is the one that
+/// batch position inserted. A landing derived from the placement and the
+/// candidate's length alone passes the first case and fails the rest, which is
+/// the 2c-4c-1 review's finding 1 as a patch-level test.
+#[test]
+fn insertion_landings_names_the_index_each_new_item_took() {
+    let cases: Vec<LandingCase> = vec![
+        (
+            "one insertion, nothing else",
+            vec![DocumentEdit::InsertItem(InsertItem::after(
+                sequence(),
+                1,
+                vec![field("trigger", "xx")],
+            ))],
+            vec![(0, 2)],
+        ),
+        (
+            "a removal above the anchor shifts the arrival left",
+            vec![
+                DocumentEdit::InsertItem(InsertItem::after(
+                    sequence(),
+                    1,
+                    vec![field("trigger", "xx")],
+                )),
+                DocumentEdit::RemoveItem(RemoveItem::new(item(0))),
+            ],
+            vec![(0, 1)],
+        ),
+        (
+            "a removal below the anchor moves nothing",
+            vec![
+                DocumentEdit::InsertItem(InsertItem::at(
+                    sequence(),
+                    ItemPlacement::Front,
+                    vec![field("trigger", "xx")],
+                )),
+                DocumentEdit::RemoveItem(RemoveItem::new(item(2))),
+            ],
+            vec![(0, 0)],
+        ),
+        (
+            "two insertions, each located",
+            vec![
+                DocumentEdit::InsertItem(InsertItem::at(
+                    sequence(),
+                    ItemPlacement::Front,
+                    vec![field("trigger", "xx")],
+                )),
+                DocumentEdit::InsertItem(InsertItem::at(
+                    sequence(),
+                    ItemPlacement::End,
+                    vec![field("trigger", "yy")],
+                )),
+            ],
+            vec![(0, 0), (1, 4)],
+        ),
+    ];
+    for (what, batch, expected) in cases {
+        let patched = apply_edits(TIGHT, &batch).unwrap_or_else(|error| {
+            panic!("{what}: the batch must apply, got {error:?}");
+        });
+        let items: Vec<&str> = patched
+            .text()
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("- trigger: "))
+            .collect();
+        let landings =
+            espansoconfig_core::patch::insertion_landings(&batch, &sequence(), items.len());
+        assert_eq!(landings, expected, "{what}: the answered landings");
+        for (position, landed) in landings {
+            let DocumentEdit::InsertItem(insertion) = &batch[position] else {
+                panic!("{what}: batch position {position} is not an insertion");
+            };
+            assert_eq!(
+                items.get(landed).copied(),
+                Some(insertion.fields()[0].1.as_str()),
+                "{what}: the item at index {landed} must be the one edit {position} wrote"
+            );
+        } // End of the loop that checks each answered landing against the bytes
+    } // End of the loop over the batch shapes
+} // End of function insertion_landings_names_the_index_each_new_item_took()
+
+/// `ItemPlacement::items_above` is checked at its own site, and checks nothing
+/// else.
+///
+/// The three cases are spelled in that one function, so the overflow is guarded
+/// there rather than at each caller — a caller testing `After(usize::MAX)` before
+/// calling would be a second copy of the case analysis. The last two rows are the
+/// two halves of that: an index the sequence does not have still answers a count,
+/// because `items` is never compared with anything; only the index with no
+/// successor answers nothing.
+#[test]
+fn items_above_answers_nothing_for_an_anchor_with_no_successor() {
+    assert_eq!(ItemPlacement::Front.items_above(3), Some(0));
+    assert_eq!(ItemPlacement::After(1).items_above(3), Some(2));
+    assert_eq!(ItemPlacement::End.items_above(3), Some(3));
+    assert_eq!(
+        ItemPlacement::After(usize::MAX - 1).items_above(3),
+        Some(usize::MAX),
+        "an index the sequence does not have is still a count, and not this function's business"
+    );
+    assert_eq!(
+        ItemPlacement::After(usize::MAX).items_above(3),
+        None,
+        "`usize::MAX + 1` is not a `usize`, so there is no count of items above it"
+    );
+} // End of function items_above_answers_nothing_for_an_anchor_with_no_successor()
+
+/// `insertion_landings` answers the empty vector at both ends of its arithmetic,
+/// rather than panicking or wrapping.
+///
+/// **The 2c-4c-1 confirmation pass's Low, as a public-API test.** The function
+/// documents itself as pure arithmetic that validates nothing, and two of its
+/// derivations were unchecked. A test build checks overflow, so before the fix
+/// both cases below panicked before the promised no-contribution answer; a build
+/// that does not check would have answered a plausible but false front landing
+/// for the first. Reverting either `checked_*` fails this.
+///
+/// **Two inputs, not a claim about all of them.** A count that *survives* the
+/// checks is replayed position by position, so a `usize::MAX` that reaches the
+/// replay costs time and memory rather than a wrong index; that is stated in the
+/// function's own doc comment and is not what this test measures.
+#[test]
+fn insertion_landings_answers_nothing_when_the_arithmetic_names_no_index() {
+    // An anchor whose successor is not a `usize`. One insertion and no removal,
+    // so the count arithmetic itself succeeds — `1 + 0 - 1` is 0 — and the only
+    // thing that cannot be named is the landing.
+    let no_successor = vec![DocumentEdit::InsertItem(InsertItem::after(
+        sequence(),
+        usize::MAX,
+        vec![field("trigger", "xx")],
+    ))];
+    assert_eq!(
+        espansoconfig_core::patch::insertion_landings(&no_successor, &sequence(), 1),
+        Vec::new(),
+        "an anchor with no successor must land nowhere, and never at the front"
+    );
+    // A candidate count that cannot take this batch's removals. The insertion is
+    // needed for the arithmetic to be reached at all — an empty insertion list
+    // returns before it — and the removal is a direct item of the same sequence,
+    // so it counts.
+    let count_overflows = vec![
+        DocumentEdit::InsertItem(InsertItem::at(
+            sequence(),
+            ItemPlacement::Front,
+            vec![field("trigger", "xx")],
+        )),
+        DocumentEdit::RemoveItem(RemoveItem::new(item(0))),
+    ];
+    assert_eq!(
+        espansoconfig_core::patch::insertion_landings(&count_overflows, &sequence(), usize::MAX),
+        Vec::new(),
+        "a candidate count that cannot take this batch's removals must answer nothing"
+    );
+} // End of function insertion_landings_answers_nothing_when_the_arithmetic_names_no_index()
+
 #[test]
 fn a_move_may_not_share_its_batch_with_a_sequence_item_edit() {
     let batch = vec![

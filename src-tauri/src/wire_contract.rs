@@ -57,7 +57,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use espansoconfig_core::discovery::FileKind;
-use espansoconfig_core::draft::DraftError;
+use espansoconfig_core::draft::{DraftError, NewMatch};
 use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
@@ -266,6 +266,28 @@ fn interface_fields(source: &str, name: &str) -> BTreeSet<String> {
 /// review of Phase 1b-2a found.
 fn block_fields(body: &str, what: &str) -> BTreeSet<String> {
     let mut fields = BTreeSet::new();
+    for declaration in member_declarations(body) {
+        let Some((field, optional)) = property_declaration(declaration.trim()) else {
+            continue;
+        };
+        assert!(
+            !optional,
+            "{what} declares `{field}?:`, but serde always writes the key: \
+             a nullable property is `{field}: T | null`, never `{field}?: T`"
+        );
+        fields.insert(field);
+    } // End of the loop over the block's member declarations
+    fields
+} // End of function block_fields()
+
+/// The member declarations an object-type body holds, at depth zero.
+///
+/// A member ends at a `;` or a newline outside any nested object type, so a
+/// one-line `{ readonly key: string; readonly found: X }` declares two members
+/// and not one. Split out of [`block_fields`] so that
+/// [`interface_properties`] reads the same segments rather than a second
+/// approximation of them.
+fn member_declarations(body: &str) -> Vec<String> {
     let mut depth = 0usize;
     let mut segment = String::new();
     let mut segments: Vec<String> = Vec::new();
@@ -279,28 +301,35 @@ fn block_fields(body: &str, what: &str) -> BTreeSet<String> {
                 depth = depth.saturating_sub(1);
                 segment.push(character);
             }
-            // A member ends at a `;` or a newline outside any nested object
-            // type, so a one-line `{ readonly key: string; readonly found: X }`
-            // declares two members and not one.
             ';' | '\n' if depth == 0 => segments.push(std::mem::take(&mut segment)),
             _ => segment.push(character),
         }
     } // End of the loop over the block's characters
     segments.push(segment);
+    segments
+} // End of function member_declarations()
 
-    for declaration in segments {
-        let Some((field, optional)) = property_declaration(declaration.trim()) else {
+/// Every property an interface declares, with its optionality and its type text.
+///
+/// [`interface_fields`]'s sibling for a **deserialize-side** type, where `x?: T`
+/// is a legal and meaningful declaration rather than the mistake
+/// [`block_fields`] refuses: `serde` reads an omitted key as the field's
+/// default, so an optional property is exactly what a `#[serde(default)]
+/// Option<T>` field is. The type text is returned unresolved — this harness
+/// resolves no TypeScript types — so a caller can only ask coarse questions of
+/// it, such as whether `null` is among the things it admits.
+fn interface_properties(source: &str, name: &str) -> BTreeMap<String, (bool, String)> {
+    let mut properties = BTreeMap::new();
+    for declaration in member_declarations(interface_body(source, name)) {
+        let line = declaration.trim();
+        let Some((field, optional)) = property_declaration(line) else {
             continue;
         };
-        assert!(
-            !optional,
-            "{what} declares `{field}?:`, but serde always writes the key: \
-             a nullable property is `{field}: T | null`, never `{field}?: T`"
-        );
-        fields.insert(field);
-    } // End of the loop over the block's member declarations
-    fields
-} // End of function block_fields()
+        let colon = line.find(':').expect("a property declaration has a colon");
+        properties.insert(field, (optional, line[colon + 1..].trim().to_owned()));
+    } // End of the loop over the interface's member declarations
+    properties
+} // End of function interface_properties()
 
 /// The property a line declares — its name, and whether it was written `name?:`.
 fn property_declaration(line: &str) -> Option<(String, bool)> {
@@ -2190,6 +2219,9 @@ fn finding_code_samples() -> Vec<FindingCode> {
         FindingCode::DuplicateKeepsTriggerDefinition {
             revision: a_revision(),
         },
+        FindingCode::NewMatchRepeatsLiteralTrigger {
+            revision: a_revision(),
+        },
     ]
 } // End of function finding_code_samples()
 
@@ -2508,7 +2540,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 205,
+        variants, 206,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2516,10 +2548,11 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          added SaveError::ReplacementRequiresBackups, Phase 2c-3c-1 added the \
          duplicate's twelve — four EditError refusals, DuplicateSeam's three, \
          VerificationFailure's four and FindingCode::DuplicateKeepsTriggerDefinition \
-         — and Phase 2c-4b-1 added the correspondence evidence's sixteen: \
+         — Phase 2c-4b-1 added the correspondence evidence's sixteen: \
          ReapplyRefusal's nine, ReapplyResolution's four and — at the review \
          round, where a move's placement anchor became an operand of its own — \
-         ReapplyPlacement's three; \
+         ReapplyPlacement's three, and Phase 2c-4c-1 added the creation's own \
+         FindingCode::NewMatchRepeatsLiteralTrigger; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -2546,6 +2579,116 @@ fn every_save_transaction_struct_declares_exactly_the_properties_serde_writes() 
         assert_same_names(&format!("interface {name}"), &written, &declared);
     }
 } // End of function every_save_transaction_struct_declares_exactly_the_properties_serde_writes()
+
+/// The six-field creation payload, with every optional key present.
+fn a_new_match() -> NewMatch {
+    NewMatch {
+        trigger: ":new".to_owned(),
+        replace: "a new snippet".to_owned(),
+        label: Some("a label".to_owned()),
+        word: Some("true".to_owned()),
+        left_word: Some("false".to_owned()),
+        right_word: Some("on".to_owned()),
+    }
+} // End of function a_new_match()
+
+/// `NewMatch`'s TypeScript interface declares exactly the properties `serde`
+/// reads, with the same required-versus-optional behaviour.
+///
+/// **The one wire value that travels *into* a writing command with a shape of
+/// its own**, and the reason it needs its own check: every other test in this
+/// module compares what `serde` **writes**, and `serde` reading is not that
+/// question's mirror. An unknown JSON property is *ignored* on the way in, so a
+/// typo in one TypeScript key — `rightWord` where the field is `right_word` —
+/// compiles, type-checks, sends a property no field claims, defaults the Rust
+/// field to `None`, and drops that key from the snippet the save writes. Nothing
+/// in `svelte-check` and nothing in `cargo test` could see it before this.
+///
+/// Four claims, and **all six properties contribute to the count**, so a check
+/// that stopped exercising one is a failure rather than a smaller pass:
+///
+/// 1. the names match — the serialize side writes every field, so its keys are
+///    the Rust property list;
+/// 2. a property TypeScript declares **required** is one `serde` refuses to
+///    default, both when the key is omitted and when it is `null`;
+/// 3. a property TypeScript declares `?:` is one `serde` accepts omitted **and**
+///    accepts as `null`, reading both as absent;
+/// 4. an optional property's declared type admits `null`, which is the second
+///    spelling of absent this wire really sends.
+///
+/// What it does **not** check is the type text of a required property beyond its
+/// being `string`: this harness resolves no TypeScript types, and that limit is
+/// the module's own (see its header).
+#[test]
+fn the_creation_payload_declares_exactly_the_properties_serde_reads() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let declared = interface_properties(&source, "NewMatch");
+    let whole = json_of(&a_new_match());
+    let written = json_keys(&whole);
+    assert_same_names(
+        "interface NewMatch",
+        &written,
+        &declared.keys().cloned().collect(),
+    );
+    assert_eq!(
+        serde_json::from_value::<NewMatch>(whole.clone()).expect("the whole payload deserializes"),
+        a_new_match(),
+        "every declared property must be read back, or one of them is being ignored"
+    );
+
+    let Value::Object(object) = &whole else {
+        panic!("a struct crosses as an object");
+    };
+    let mut checked = 0usize;
+    for (name, (optional, declared_type)) in &declared {
+        let mut without = object.clone();
+        without.remove(name);
+        let mut nulled = object.clone();
+        nulled.insert(name.clone(), Value::Null);
+        let omitted = serde_json::from_value::<NewMatch>(Value::Object(without));
+        let nulled = serde_json::from_value::<NewMatch>(Value::Object(nulled));
+        if *optional {
+            let omitted = omitted
+                .unwrap_or_else(|error| panic!("`{name}?:` must default when omitted: {error}"));
+            let nulled =
+                nulled.unwrap_or_else(|error| panic!("`{name}?:` must accept null: {error}"));
+            assert_eq!(
+                json_of(&omitted)[name],
+                Value::Null,
+                "an omitted `{name}` must read as absent"
+            );
+            assert_eq!(
+                json_of(&nulled)[name],
+                Value::Null,
+                "a null `{name}` must read as absent, never as an empty string"
+            );
+            assert!(
+                declared_type.contains("null"),
+                "`{name}?: {declared_type}` must admit null, because that is what this \
+                 wire sends for an absent optional"
+            );
+        } else {
+            assert!(
+                omitted.is_err(),
+                "`{name}` is declared required, so omitting it must be refused"
+            );
+            assert!(
+                nulled.is_err(),
+                "`{name}` is declared required, so a null must be refused"
+            );
+            assert_eq!(
+                declared_type, "string",
+                "a required creation property carries logical text and nothing else"
+            );
+        }
+        checked += 1;
+    } // End of the loop over the creation payload's declared properties
+    assert_eq!(
+        checked, 6,
+        "Phase 2b-2c-2 put two properties on this payload and Phase 2c-4c-1 added \
+         four optional ones; a property that stopped being exercised is a hole"
+    );
+} // End of function the_creation_payload_declares_exactly_the_properties_serde_reads()
 
 /// Every tagged save-transaction variant's operands are the keys `serde` writes.
 ///
@@ -2601,7 +2744,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (122, 12, 71),
+        (123, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -2614,7 +2757,9 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          `tagged_variant_fields` to read `Record<string, never>` as a checked \
          zero-field payload rather than skip it — and, since the same round made \
          a move's placement anchor an operand of its own, ReapplyPlacement's \
-         three, of which one is empty and two carry payloads; \
+         three, of which one is empty and two carry payloads, and Phase 2c-4c-1 \
+         added the creation's own NewMatchRepeatsLiteralTrigger as one more \
+         struct variant; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -2893,7 +3038,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 205,
+        checked, 206,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

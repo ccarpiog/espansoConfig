@@ -51,15 +51,17 @@ mod common;
 
 use common::corpus_root;
 use espansoconfig_core::discovery::FileKind;
+use espansoconfig_core::draft::NewMatch;
 use espansoconfig_core::model::DocumentContext;
 use espansoconfig_core::patch::{
-    apply_scalar_edit, path_to, DocumentEdit, DocumentPath, DuplicateItem, EditError, ScalarEdit,
+    apply_scalar_edit, path_to, DocumentEdit, DocumentPath, DuplicateItem, EditError, InsertItem,
+    ItemPlacement, RemoveItem, ScalarEdit,
 };
 use espansoconfig_core::persist::{
     lock_path, save_document, Acknowledgement, SaveContent, SaveError, SaveRequest, SaveVerdict,
     WriteError,
 };
-use espansoconfig_core::validate::{FindingClass, FindingCode};
+use espansoconfig_core::validate::{Finding, FindingClass, FindingCode};
 use espansoconfig_core::workspace::project_source;
 use espansoconfig_core::{ContentRevision, DocumentId, SyntaxIndex};
 use std::path::{Path, PathBuf};
@@ -1065,6 +1067,764 @@ fn a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone() {
     );
     assert_refused_without_writing(&target, before, &error, "a triggerless duplicate");
 } // End of function a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone()
+
+// ---------------------------------------------------------------------------
+// 5b. The creation's own suspicion — Phase 2c-4c-1
+// ---------------------------------------------------------------------------
+
+/// One insertion of `new_match`'s fields into `matches` at `placement`.
+///
+/// It **reconstructs** the lowering `create_one_match` performs in
+/// `src-tauri/src/commands.rs` — exactly one `InsertItem` carrying
+/// `NewMatch::fields()` and nothing else — and reconstructing is not crossing.
+/// What every test below measures is what the save transaction does with such a
+/// batch, which is this file's subject; **it is not evidence about
+/// `create_match`**, because a change to that command's own lowering could not
+/// fail any of them. That claim needs a test that starts at the command, and it
+/// is `an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger` in
+/// `src-tauri/src/commands.rs` (the 2c-4c-1 review's finding 2).
+fn creation(new_match: &NewMatch, placement: ItemPlacement) -> DocumentEdit {
+    DocumentEdit::InsertItem(InsertItem::at(
+        DocumentPath::parse("matches").expect("the test's own path parses"),
+        placement,
+        new_match.fields(),
+    ))
+} // End of function creation()
+
+/// A `NewMatch` holding only the two mandatory fields.
+fn new_match(trigger: &str, replace: &str) -> NewMatch {
+    NewMatch {
+        trigger: trigger.to_owned(),
+        replace: replace.to_owned(),
+        label: None,
+        word: None,
+        left_word: None,
+        right_word: None,
+    }
+} // End of function new_match()
+
+/// An ordinary creation whose trigger repeats one already in the list is
+/// refused with the creation's own suspicion, and the acknowledged retry
+/// commits — Phase 2c-4c-1's finding, proved reachable here because `validate`
+/// cannot reach it.
+///
+/// **The batch is the shape an ordinary `create_match` lowers to** — one
+/// `InsertItem`, two fields — rather than a recovery-shaped one. Exact repetition
+/// is a property of the candidate rather than of the caller that built it, so the
+/// finding reaching ordinary creation is the design and not a side effect. That
+/// the *command* really lowers to this shape is not asserted here and cannot be
+/// (see `creation`'s own note); it is asserted in `src-tauri/src/commands.rs`.
+#[test]
+fn a_creation_that_repeats_a_literal_trigger_refuses_until_it_is_acknowledged() {
+    let (directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [creation(
+        &new_match(":one", "another body"),
+        ItemPlacement::End,
+    )];
+
+    let refused =
+        save(&target, before, &edits, &Acknowledgement::none()).expect_err("the first attempt");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(
+        refusal.verdict,
+        SaveVerdict::RefusedForUnacknowledgedSuspicions
+    );
+    assert_eq!(
+        refusal.findings.len(),
+        1,
+        "one finding, the creation's own: {:?}",
+        refusal.findings
+    );
+    let finding = &refusal.findings[0];
+    assert!(
+        matches!(
+            finding.code,
+            FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+        ),
+        "{:?}",
+        finding.code
+    );
+    assert_eq!(
+        finding.path,
+        Some(DocumentPath::parse("matches[2]").expect("the new item's path parses")),
+        "the finding is attached to the item the insertion landed"
+    );
+    assert!(finding.span.is_some(), "the new item's bytes are named");
+    assert!(finding.node.is_some(), "the new item's node is named");
+    assert_refused_without_writing(&target, before, &refused, "an unacknowledged creation");
+
+    // The round trip: the findings go back exactly as they arrived, and the
+    // same creation proceeds. No force flag exists, and none is needed.
+    let acknowledgement = Acknowledgement::of(&refusal.findings);
+    assert_eq!(acknowledgement.len(), 1);
+    let saved = save(&target, before, &edits, &acknowledgement).expect("the retry commits");
+    assert!(saved.committed);
+    assert_eq!(
+        saved.findings, refusal.findings,
+        "the save reports what it proceeded past"
+    );
+
+    // Byte identity outside the insertion span, re-derived from the replacement
+    // list rather than from the candidate.
+    let on_disk = std::fs::read_to_string(&target).expect("the file is readable");
+    assert_eq!(on_disk, saved.text, "the file holds exactly the candidate");
+    assert_eq!(saved.replacements.len(), 1);
+    let span = saved.replacements[0].span;
+    assert_eq!(
+        &on_disk[..span.start],
+        &CLEAN[..span.start],
+        "every byte before the insertion is the source's own"
+    );
+    assert_eq!(
+        &on_disk[span.start + saved.replacements[0].text.len()..],
+        &CLEAN[span.end..],
+        "every byte after the insertion is the source's own"
+    );
+    assert!(
+        on_disk.starts_with(CLEAN),
+        "an insertion at the end leaves the whole original in front of it"
+    );
+    assert_eq!(
+        std::fs::read_dir(directory.path())
+            .expect("the directory is readable")
+            .count(),
+        1,
+        "no temp file survives a success"
+    );
+} // End of function a_creation_that_repeats_a_literal_trigger_refuses_until_it_is_acknowledged()
+
+/// A creation whose trigger is not already in the list commits on the first
+/// attempt, with no finding at all.
+///
+/// The other half of the pair: without it, a suspicion produced for *every*
+/// creation would pass the test above.
+#[test]
+fn a_creation_with_a_trigger_nobody_else_uses_commits_without_a_finding() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [creation(
+        &new_match(":three", "a third body"),
+        ItemPlacement::End,
+    )];
+
+    let saved = save(&target, before, &edits, &Acknowledgement::none())
+        .expect("a fresh trigger is not a suspicion");
+    assert!(saved.committed);
+    assert!(
+        saved.findings.is_empty(),
+        "no finding: {:?}",
+        saved.findings
+    );
+    assert!(saved.text.starts_with(CLEAN));
+} // End of function a_creation_with_a_trigger_nobody_else_uses_commits_without_a_finding()
+
+/// A trigger that merely *overlaps* another is not a repetition, and this
+/// application makes no claim about it.
+///
+/// The comparison is exact string equality of decoded text and nothing else.
+/// Reporting `:one` and `:oneself` would be a claim about how espanso matches
+/// overlapping abbreviations, which D2u forbids — and staying silent is **not**
+/// a claim that the pair is safe, which is why the dictionary sentence never
+/// says so.
+#[test]
+fn a_trigger_that_only_overlaps_another_produces_no_finding() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [creation(
+        &new_match(":oneself", "a longer trigger"),
+        ItemPlacement::End,
+    )];
+
+    let saved = save(&target, before, &edits, &Acknowledgement::none())
+        .expect("an overlap is not an exact repetition");
+    assert!(saved.committed);
+    assert!(saved.findings.is_empty(), "{:?}", saved.findings);
+} // End of function a_trigger_that_only_overlaps_another_produces_no_finding()
+
+/// The finding names the slot the insertion actually landed, for each of the
+/// three placements.
+///
+/// This is what pins the index derivation for the batch every caller in
+/// `src-tauri/` actually builds: one insertion and nothing else. The new item is
+/// found through `espansoconfig_core::patch::insertion_landings`, so a
+/// derivation that answered *end* for a *front* insertion would inspect a
+/// pre-existing item and attach the finding to the wrong address — which is
+/// exactly what this asserts cannot happen. The **mixed** batches, where the
+/// placement alone stops being enough, are the four cases above.
+#[test]
+fn the_finding_names_the_slot_the_insertion_landed_for_every_placement() {
+    let cases = [
+        (ItemPlacement::Front, ":two", "matches[0]"),
+        (ItemPlacement::After(0), ":one", "matches[1]"),
+        (ItemPlacement::End, ":one", "matches[2]"),
+    ];
+    for (placement, trigger, expected) in cases {
+        let (_directory, target) = fixture(CLEAN);
+        let before = revision_on_disk(&target);
+        let edits = [creation(&new_match(trigger, "a body"), placement)];
+
+        let refused = save(&target, before, &edits, &Acknowledgement::none())
+            .expect_err("a repeated trigger is refused wherever it lands");
+        let refusal = match &refused {
+            SaveError::Refused(refusal) => refusal,
+            other => panic!("expected the semantic gate, got {other}"),
+        };
+        assert_eq!(refusal.findings.len(), 1, "{:?}", refusal.findings);
+        assert!(matches!(
+            refusal.findings[0].code,
+            FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+        ));
+        assert_eq!(
+            refusal.findings[0].path,
+            Some(DocumentPath::parse(expected).expect("the test's own path parses")),
+            "a {placement:?} insertion lands at {expected}"
+        );
+    } // End of the loop over the three placements
+} // End of function the_finding_names_the_slot_the_insertion_landed_for_every_placement()
+
+/// Four matches, the last of which repeats no trigger — the fixture the mixed
+/// insert/remove batches below shift around.
+///
+/// Hand-authored and neutral (`CLAUDE.md` section 1).
+const FOUR_ITEMS: &str = concat!(
+    "matches:\n",
+    "  - trigger: ':a'\n",
+    "    replace: 'first'\n",
+    "  - trigger: ':b'\n",
+    "    replace: 'second'\n",
+    "  - trigger: ':c'\n",
+    "    replace: 'third'\n",
+    "  - trigger: ':d'\n",
+    "    replace: 'fourth'\n",
+);
+
+/// One removal of `matches[index]`.
+fn removal(index: usize) -> DocumentEdit {
+    DocumentEdit::RemoveItem(RemoveItem::new(
+        DocumentPath::parse(&format!("matches[{index}]")).expect("the test's own path parses"),
+    ))
+} // End of function removal()
+
+/// Every `NewMatchRepeatsLiteralTrigger` in a list of findings, in order.
+fn repetitions(findings: &[Finding]) -> Vec<&Finding> {
+    findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                finding.code,
+                FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+            )
+        })
+        .collect()
+} // End of function repetitions()
+
+/// The path a finding names, as this file spells one.
+fn at(path: &str) -> Option<DocumentPath> {
+    Some(DocumentPath::parse(path).expect("the test's own path parses"))
+} // End of function at()
+
+/// A removal **above** the anchor must not make the finding fire against an
+/// existing item — the 2c-4c-1 review's finding 1, as its own scenario.
+///
+/// `apply_edits` accepts mixed batches and folds every claim about one sequence
+/// into one ordered expectation, so a removal above the insertion shifts the
+/// arrival left. The address derived from the placement and the candidate's
+/// length alone would look one slot too high — at an item that was there all
+/// along — and here that item repeats *another* pre-existing item's trigger
+/// while the new one repeats nothing. The old derivation reported the repetition
+/// of two items the caller never touched, against a new snippet whose trigger is
+/// unique.
+///
+/// The premise is asserted rather than assumed: the committed text really is
+/// `[:same, :fresh, :same]`, so the new item really did land at index 1 while
+/// the sequence holds three.
+#[test]
+fn a_removal_above_the_insertion_does_not_report_an_existing_item() {
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: ':gone'\n",
+        "    replace: 'first'\n",
+        "  - trigger: ':same'\n",
+        "    replace: 'second'\n",
+        "  - trigger: ':same'\n",
+        "    replace: 'third'\n",
+    );
+    let (_directory, target) = fixture(source);
+    let before = revision_on_disk(&target);
+    let edits = [
+        creation(&new_match(":fresh", "a body"), ItemPlacement::After(1)),
+        removal(0),
+    ];
+
+    let saved = save(&target, before, &edits, &Acknowledgement::none())
+        .expect("a unique new trigger is not a repetition, whatever else the batch does");
+    assert!(saved.committed);
+    assert!(
+        repetitions(&saved.findings).is_empty(),
+        "the finding may fire only when the **new** item repeats: {:?}",
+        saved.findings
+    );
+    assert_eq!(
+        saved.text,
+        concat!(
+            "matches:\n",
+            "  - trigger: ':same'\n",
+            "    replace: 'second'\n",
+            "  - trigger: ':fresh'\n",
+            "    replace: a body\n",
+            "  - trigger: ':same'\n",
+            "    replace: 'third'\n",
+        ),
+        "the premise: the new item lands at index 1 of a three-item list, and the two \
+         items that repeat each other are the ones that were there already"
+    );
+} // End of function a_removal_above_the_insertion_does_not_report_an_existing_item()
+
+/// A removal above the anchor shifts the address the finding reports, and the
+/// finding follows it.
+///
+/// The other direction of the case above: here the new trigger really does
+/// repeat one already present, so the finding must be produced — at the slot the
+/// item took **after** the removal, not at the one the placement names.
+#[test]
+fn a_removal_above_the_anchor_shifts_the_address_the_finding_names() {
+    let (_directory, target) = fixture(FOUR_ITEMS);
+    let before = revision_on_disk(&target);
+    let edits = [
+        creation(&new_match(":d", "a body"), ItemPlacement::After(2)),
+        removal(0),
+    ];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the new trigger repeats `:d`, which survives the removal");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let reported = repetitions(&refusal.findings);
+    assert_eq!(reported.len(), 1, "{:?}", refusal.findings);
+    assert_eq!(
+        reported[0].path,
+        at("matches[2]"),
+        "one item was removed above the anchor, so the arrival is at 2 rather than 3"
+    );
+    assert_refused_without_writing(&target, before, &refused, "a mixed insert/remove batch");
+} // End of function a_removal_above_the_anchor_shifts_the_address_the_finding_names()
+
+/// A removal **below** the anchor leaves the address alone.
+///
+/// The second side the review asked for. Nothing above the arrival changes, so
+/// the index is the one the placement's own arithmetic gives — and the candidate
+/// is one item shorter than the original, which is exactly the length the old
+/// derivation would have read as "one fewer item above me".
+#[test]
+fn a_removal_below_the_anchor_leaves_the_address_alone() {
+    let (_directory, target) = fixture(FOUR_ITEMS);
+    let before = revision_on_disk(&target);
+    let edits = [
+        creation(&new_match(":c", "a body"), ItemPlacement::After(0)),
+        removal(3),
+    ];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the new trigger repeats `:c`, which is below the arrival and survives");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let reported = repetitions(&refusal.findings);
+    assert_eq!(reported.len(), 1, "{:?}", refusal.findings);
+    assert_eq!(
+        reported[0].path,
+        at("matches[1]"),
+        "the removal is below the arrival, so it moves nothing above it"
+    );
+    assert_refused_without_writing(&target, before, &refused, "a mixed insert/remove batch");
+} // End of function a_removal_below_the_anchor_leaves_the_address_alone()
+
+/// Two insertions in one batch are each located and each reported.
+///
+/// **This was an under-report by construction until the 2c-4c-1 review**: the
+/// inspection ran only for a batch holding exactly one insertion, because the
+/// address was derived from the candidate's own length. It is now derived from
+/// the whole batch, so every insertion is located — the front one at 0, the end
+/// one at 3 — and each is judged against the list the person would be left with.
+#[test]
+fn two_insertions_in_one_batch_are_each_located_and_each_reported() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [
+        creation(&new_match(":one", "a body"), ItemPlacement::Front),
+        creation(&new_match(":two", "another body"), ItemPlacement::End),
+    ];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("both new triggers repeat one already in the list");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let reported = repetitions(&refusal.findings);
+    assert_eq!(reported.len(), 2, "{:?}", refusal.findings);
+    assert_eq!(
+        reported
+            .iter()
+            .map(|finding| &finding.path)
+            .collect::<Vec<_>>(),
+        vec![&at("matches[0]"), &at("matches[3]")],
+        "in batch order: the front insertion landed at 0 and the end one at 3"
+    );
+    assert_refused_without_writing(&target, before, &refused, "a two-insertion batch");
+
+    // The exact-multiset round trip holds for two findings as it does for one.
+    let saved = save(
+        &target,
+        before,
+        &edits,
+        &Acknowledgement::of(&refusal.findings),
+    )
+    .expect("the acknowledged retry commits");
+    assert!(saved.committed);
+    assert_eq!(saved.findings, refusal.findings);
+} // End of function two_insertions_in_one_batch_are_each_located_and_each_reported()
+
+/// An edit that changes no sequence's cardinality moves no address.
+///
+/// The complement of the two mixed cases above, and the reason the landing is
+/// derived from the batch rather than refused for it: a scalar edit beside an
+/// insertion is a batch `apply_edits` accepts and one this finding must still be
+/// correct for. Only [`espansoconfig_core::patch::InsertItem`] and
+/// `RemoveItem` change how many items a sequence holds — a move and a duplicate
+/// are each refused unless they are alone in their batch.
+#[test]
+fn a_scalar_edit_beside_the_insertion_moves_no_address() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [
+        scalar_edit("matches[0].replace", NEW_VALUE),
+        creation(&new_match(":one", "a body"), ItemPlacement::End),
+    ];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the new trigger repeats `:one`");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let reported = repetitions(&refusal.findings);
+    assert_eq!(reported.len(), 1, "{:?}", refusal.findings);
+    assert_eq!(reported[0].path, at("matches[2]"));
+} // End of function a_scalar_edit_beside_the_insertion_moves_no_address()
+
+/// A `matches` entry that is not a mapping still occupies its slot, so the
+/// index derivation is unaffected by it.
+///
+/// This is the precedent `create_one_match` records, asserted here rather than
+/// inherited: the projection gives such an entry one `MatchView`, recorded by
+/// span and not descended into, so counting the projection's matches for a
+/// sequence is counting the sequence's own items. If it did not, the count
+/// before this insertion would be one too low, the new item would be looked for
+/// one slot too high, and this creation would report nothing.
+#[test]
+fn a_matches_entry_that_is_not_a_mapping_still_occupies_its_slot() {
+    let source = "matches:\n  - trigger: ':one'\n    replace: 'first'\n  - 'not a mapping'\n";
+    let (_directory, target) = fixture(source);
+    let before = revision_on_disk(&target);
+    let edits = [creation(&new_match(":one", "a body"), ItemPlacement::End)];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the repeated trigger is found at the slot the insertion landed");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let repetition: Vec<&_> = refusal
+        .findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                finding.code,
+                FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+            )
+        })
+        .collect();
+    assert_eq!(repetition.len(), 1, "{:?}", refusal.findings);
+    assert_eq!(
+        repetition[0].path,
+        Some(DocumentPath::parse("matches[2]").expect("the test's own path parses")),
+        "the non-mapping entry occupies slot 1, so the new item lands at 2"
+    );
+} // End of function a_matches_entry_that_is_not_a_mapping_still_occupies_its_slot()
+
+/// A `regex` trigger makes no semantic claim, in either direction.
+///
+/// Two halves, because the silence has to hold on both sides of the comparison:
+/// a new item written as a `regex` exposes no literal trigger text, and an
+/// existing `regex` whose pattern happens to read like a new item's literal
+/// trigger is not literal trigger text either. Deciding that a pattern and an
+/// abbreviation are "the same trigger" would be a claim about espanso's matcher.
+#[test]
+fn a_regex_trigger_produces_no_finding_on_either_side() {
+    // The new item is the regex, and its pattern is spelled exactly like the
+    // existing literal trigger.
+    let existing_literal = "matches:\n  - trigger: 'hello'\n    replace: 'first'\n";
+    let (_directory, target) = fixture(existing_literal);
+    let before = revision_on_disk(&target);
+    let regex_item = DocumentEdit::InsertItem(InsertItem::at(
+        DocumentPath::parse("matches").expect("the path parses"),
+        ItemPlacement::End,
+        vec![
+            ("regex".to_owned(), "hello".to_owned()),
+            ("replace".to_owned(), "second".to_owned()),
+        ],
+    ));
+    let saved = save(&target, before, &[regex_item], &Acknowledgement::none())
+        .expect("a regex trigger is not modelled literal text");
+    assert!(saved.committed);
+    assert!(saved.findings.is_empty(), "{:?}", saved.findings);
+
+    // The existing item is the regex, and the new literal trigger is spelled
+    // exactly like its pattern.
+    let existing_regex = "matches:\n  - regex: 'hello'\n    replace: 'first'\n";
+    let (_second_directory, second) = fixture(existing_regex);
+    let second_before = revision_on_disk(&second);
+    let literal_item = [creation(&new_match("hello", "second"), ItemPlacement::End)];
+    let saved = save(
+        &second,
+        second_before,
+        &literal_item,
+        &Acknowledgement::none(),
+    )
+    .expect("an existing regex exposes no literal trigger text either");
+    assert!(saved.committed);
+    assert!(saved.findings.is_empty(), "{:?}", saved.findings);
+} // End of function a_regex_trigger_produces_no_finding_on_either_side()
+
+/// A `triggers:` list **is** modelled literal text, so an entry of one is
+/// compared like a `trigger:`.
+///
+/// Excluding it would under-report: a file writing `triggers: [':one', ':alt']`
+/// really does already use `:one` as literal trigger text, and a creation
+/// repeating it carries exactly the risk this finding is about.
+#[test]
+fn an_entry_of_a_triggers_list_counts_as_literal_trigger_text() {
+    let source = "matches:\n  - triggers:\n      - ':one'\n      - ':alt'\n    replace: 'first'\n";
+    let (_directory, target) = fixture(source);
+    let before = revision_on_disk(&target);
+    let edits = [creation(&new_match(":alt", "a body"), ItemPlacement::End)];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("an entry of a triggers list is trigger text already present");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(refusal.findings.len(), 1, "{:?}", refusal.findings);
+    assert!(matches!(
+        refusal.findings[0].code,
+        FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+    ));
+    assert_refused_without_writing(&target, before, &refused, "a repeated triggers entry");
+} // End of function an_entry_of_a_triggers_list_counts_as_literal_trigger_text()
+
+/// When the new item has no trigger form at all, the editor-model finding wins
+/// and the creation suspicion deliberately stays silent.
+///
+/// The duplicate's own precedence rule, restated for an insertion: a
+/// `MatchHasNoTriggerField` is an `EditorModelError`, no acknowledgement gets
+/// past it, and producing a suspicion beside it would claim nothing and weaken
+/// that precedence.
+#[test]
+fn a_created_item_with_no_trigger_is_refused_for_the_model_error_alone() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let bodyless = DocumentEdit::InsertItem(InsertItem::at(
+        DocumentPath::parse("matches").expect("the path parses"),
+        ItemPlacement::End,
+        vec![("replace".to_owned(), "a body with no trigger".to_owned())],
+    ));
+
+    let error =
+        save(&target, before, &[bodyless], &Acknowledgement::none()).expect_err("the model error");
+    let refusal = match &error {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(refusal.verdict, SaveVerdict::RefusedForEditorModelErrors);
+    assert!(
+        refusal
+            .findings
+            .iter()
+            .any(|finding| matches!(finding.code, FindingCode::MatchHasNoTriggerField)),
+        "the missing trigger is what refuses this"
+    );
+    assert!(
+        !refusal.findings.iter().any(|finding| matches!(
+            finding.code,
+            FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+        )),
+        "the suspicion must not appear beside the error it defers to"
+    );
+    assert_refused_without_writing(&target, before, &error, "a triggerless creation");
+} // End of function a_created_item_with_no_trigger_is_refused_for_the_model_error_alone()
+
+/// When the new item carries **several** trigger forms, the same precedence
+/// holds: the model error refuses and the suspicion stays silent.
+///
+/// The `trigger` here repeats one already in the list, so the only thing keeping
+/// the suspicion away is the `Several` arm — which is the point of the case.
+#[test]
+fn a_created_item_with_several_trigger_forms_is_refused_for_the_model_error_alone() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let ambiguous = DocumentEdit::InsertItem(InsertItem::at(
+        DocumentPath::parse("matches").expect("the path parses"),
+        ItemPlacement::End,
+        vec![
+            ("trigger".to_owned(), ":one".to_owned()),
+            ("regex".to_owned(), "one".to_owned()),
+            ("replace".to_owned(), "a body".to_owned()),
+        ],
+    ));
+
+    let error =
+        save(&target, before, &[ambiguous], &Acknowledgement::none()).expect_err("the model error");
+    let refusal = match &error {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(refusal.verdict, SaveVerdict::RefusedForEditorModelErrors);
+    assert!(
+        refusal
+            .findings
+            .iter()
+            .any(|finding| matches!(finding.code, FindingCode::MatchHasSeveralTriggerForms)),
+        "the several forms are what refuses this"
+    );
+    assert!(
+        !refusal.findings.iter().any(|finding| matches!(
+            finding.code,
+            FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+        )),
+        "an unmodelled trigger shape produces no semantic claim"
+    );
+    assert_refused_without_writing(&target, before, &error, "an ambiguous creation");
+} // End of function a_created_item_with_several_trigger_forms_is_refused_for_the_model_error_alone()
+
+/// Consent for one candidate must not commit a byte-different one — the
+/// duplicate's `revision` operand, transferred at the level of the pattern.
+///
+/// The construction is the 2c-3c-1 review's own: the file moves on by a rewrite
+/// of the **same byte length** above the insertion point, so the new item's
+/// path, span and node are all unchanged and only the candidate's own
+/// `ContentRevision` tells the two texts apart.
+#[test]
+fn a_creation_acknowledgement_does_not_transfer_across_a_same_length_rewrite() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let edits = [creation(&new_match(":one", "a body"), ItemPlacement::End)];
+
+    let shown =
+        save(&target, before, &edits, &Acknowledgement::none()).expect_err("the first attempt");
+    let acknowledgement = Acknowledgement::of(shown.findings());
+    assert_eq!(acknowledgement.len(), 1);
+
+    // The file moves on: same length, same offsets, different bytes — and the
+    // repeated trigger is still there, so the same suspicion is recomputed.
+    let rewritten = CLEAN.replace("'first'", "'firsx'");
+    assert_eq!(
+        rewritten.len(),
+        CLEAN.len(),
+        "the rewrite must preserve every offset, or the span would differ anyway"
+    );
+    assert_ne!(rewritten, CLEAN);
+    std::fs::write(&target, rewritten.as_bytes()).expect("the rewrite lands");
+    let moved_on = revision_on_disk(&target);
+    assert_ne!(moved_on, before);
+
+    let error = save(&target, moved_on, &edits, &acknowledgement)
+        .expect_err("consent collected for one candidate must not commit another");
+    let refusal = match &error {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(
+        refusal.verdict,
+        SaveVerdict::RefusedForUnacknowledgedSuspicions
+    );
+    assert_refused_without_writing(&target, moved_on, &error, "a transferred acknowledgement");
+
+    // The premise, asserted rather than assumed: the two findings agree in
+    // path, span and node, and differ — so the operand is what binds consent.
+    let first = &shown.findings()[0];
+    let second = &refusal.findings[0];
+    assert_eq!(first.path, second.path);
+    assert_eq!(first.span, second.span);
+    assert_eq!(first.node, second.node);
+    assert_ne!(
+        first, second,
+        "the candidate revision operand is what tells the two candidates apart"
+    );
+} // End of function a_creation_acknowledgement_does_not_transfer_across_a_same_length_rewrite()
+
+/// The four optional fields reach the file, in the documented order, and the
+/// suspicion is unaffected by their presence.
+///
+/// **The recovery-shaped creation**, in the only form the core can see one: a
+/// six-field `NewMatch` lowered through the same single `InsertItem` an ordinary
+/// creation uses. Nothing in the transaction knows which caller built it, which
+/// is exactly why the finding reaches both.
+#[test]
+fn a_six_field_creation_writes_all_six_keys_and_still_reports_the_repetition() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let recovered = NewMatch {
+        trigger: ":one".to_owned(),
+        replace: "a recovered body".to_owned(),
+        label: Some("a recovered label".to_owned()),
+        word: Some("true".to_owned()),
+        left_word: Some("false".to_owned()),
+        right_word: None,
+    };
+    let edits = [creation(&recovered, ItemPlacement::End)];
+
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the repetition is reported whatever else the item holds");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    assert_eq!(refusal.findings.len(), 1, "{:?}", refusal.findings);
+    assert!(matches!(
+        refusal.findings[0].code,
+        FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+    ));
+
+    let saved = save(
+        &target,
+        before,
+        &edits,
+        &Acknowledgement::of(&refusal.findings),
+    )
+    .expect("the retry commits");
+    assert!(saved.committed);
+    let written = saved
+        .text
+        .strip_prefix(CLEAN)
+        .expect("the whole original is in front of the new item");
+    assert_eq!(
+        written,
+        "  - trigger: ':one'\n    replace: a recovered body\n    label: a recovered label\n    \
+         word: 'true'\n    left_word: 'false'\n",
+        "the four optional keys are written in order, and the absent one is not written at all; \
+         each value's spelling is `choose_scalar`'s decision, which is why `true` is quoted and \
+         a sentence is not"
+    );
+} // End of function a_six_field_creation_writes_all_six_keys_and_still_reports_the_repetition()
 
 /// The semantic gate is run over the **candidate**, not over the original.
 ///

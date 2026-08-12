@@ -1240,9 +1240,24 @@ fn create_one_match(
     // and not descended into (`DiagnosticCode::MatchIsNotAMapping`), so positions
     // never shift. A bare `matches:` projects zero of them and the promoted item
     // lands at 0, which is the same answer.
-    let landed = sequence
-        .clone()
-        .with_index(placement.items_above(view.matches.len()));
+    //
+    // **`items_above` alone is enough here only because the batch below holds one
+    // insertion and nothing else**, which the next two lines are the whole of the
+    // evidence for. A batch that also removed an item would shift this arrival,
+    // and the answer would then be `espansoconfig_core::patch::insertion_landings`
+    // over the whole batch — which is what the save transaction's own creation
+    // finding uses, because it is handed a batch it did not build.
+    //
+    // **No address rather than a wrong one** when the arithmetic names no index:
+    // `at: None` is already how this layer says a save has no match afterwards,
+    // so the save still runs and reports `moved: None`. Unreachable from here —
+    // `placement_of` builds an `After` only from the index `anchor_item` reads out
+    // of a match this very projection holds, so it is bounded by the file's own
+    // item count — and it is written out because an unreachable arm that says
+    // nothing costs one selection, while an unwrap would cost the window.
+    let landed = placement
+        .items_above(view.matches.len())
+        .map(|index| sequence.clone().with_index(index));
     let edits = [DocumentEdit::InsertItem(InsertItem::at(
         sequence,
         placement,
@@ -1256,7 +1271,7 @@ fn create_one_match(
             base_revision,
             content: SaveContent::Edits(&edits),
             acknowledgement,
-            at: Some(&landed),
+            at: landed.as_ref(),
             reapply,
         },
     )
@@ -1797,7 +1812,11 @@ pub fn save_match(
 ///   target could write to the wrong file. This is the one mutating command whose
 ///   target is a document rather than a match, because the match it acts on does
 ///   not exist yet.
-/// - `new_match` — a closed [`NewMatch`], **both fields mandatory**. Not a
+/// - `new_match` — a closed [`NewMatch`]: **two required and four optional
+///   schema-known scalar fields**, `trigger` and `replace` mandatory and `label`,
+///   `word`, `left_word` and `right_word` written only when they are present. An
+///   absent optional field is a key the new snippet is not born holding, which is
+///   a different request from one written with an empty value. Not a
 ///   [`MatchDraft`]: a draft can express twenty-two fields and four collections,
 ///   and creation synthesizes exactly one flat mapping of scalars, so taking one
 ///   would advertise a structure this command cannot spell. Not a list of
@@ -1995,10 +2014,11 @@ mod tests {
     use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft, NewMatch};
     use espansoconfig_core::model::{DocumentView, MatchId};
     use espansoconfig_core::patch::PresentationNote;
-    use espansoconfig_core::persist::Acknowledgement;
+    use espansoconfig_core::persist::{Acknowledgement, SaveVerdict};
     use espansoconfig_core::reconcile::{
         ReapplyEvidence, ReapplyPlacement, ReapplyRefusal, ReapplyResolution,
     };
+    use espansoconfig_core::validate::FindingCode;
     use espansoconfig_core::{ContentRevision, DocumentId, NodeId, SyntaxIndex};
     use tempfile::TempDir;
 
@@ -2192,6 +2212,10 @@ mod tests {
                     &NewMatch {
                         trigger: ":one".to_owned(),
                         replace: "first".to_owned(),
+                        label: None,
+                        word: None,
+                        left_word: None,
+                        right_word: None,
                     },
                     &NewMatchPosition::End {},
                     ContentRevision::of_bytes(b""),
@@ -4378,6 +4402,10 @@ mod tests {
         NewMatch {
             trigger: ":new".to_owned(),
             replace: "a new snippet".to_owned(),
+            label: None,
+            word: None,
+            left_word: None,
+            right_word: None,
         }
     }
 
@@ -4999,6 +5027,121 @@ mod tests {
         );
     } // End of function delete_match_never_deletes_the_item_at_a_stale_ids_old_path()
 
+    /// Ordinary creation, crossed end to end: all six fields go in, a repeated
+    /// literal trigger refuses, the exact findings come back, and the committed
+    /// bytes hold every optional key.
+    ///
+    /// **The evidence `create_match` itself owes.** `tests/persist_save.rs`
+    /// establishes what the save transaction does with a hand-built
+    /// `InsertItem`, but it builds that insertion from `NewMatch::fields()`
+    /// itself, so it cannot see `create_one_match`'s lowering at all: a mutation
+    /// that dropped the four optional fields on the way in, or that reached the
+    /// transaction by some route the new risk producer does not run on, would
+    /// leave every one of those tests green. This one starts at
+    /// `WorkspaceSession::create_match` and ends at the bytes on disk.
+    ///
+    /// Four claims, in order:
+    ///
+    /// 1. the plain-creation path really does reach
+    ///    `FindingCode::NewMatchRepeatsLiteralTrigger` — `:one` is already in the
+    ///    file — and the refusal is the suspicion arm rather than a model error;
+    /// 2. **a refused save writes nothing**, asserted as the whole file;
+    /// 3. the exact findings, handed back unchanged, are what lets it proceed —
+    ///    there is no force flag in either call;
+    /// 4. the committed file holds all six keys in the documented order, and
+    ///    every byte of the two snippets that were already there survives.
+    #[test]
+    fn an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        // The six-field shape a recovery will send, and the shape today's creator
+        // form cannot: `:one` is the trigger the file's first snippet already
+        // writes.
+        let recovered = NewMatch {
+            trigger: ":one".to_owned(),
+            replace: "a recovered body".to_owned(),
+            label: Some("a recovered label".to_owned()),
+            word: Some("true".to_owned()),
+            left_word: Some("false".to_owned()),
+            right_word: Some("on".to_owned()),
+        };
+
+        let refusal = session
+            .create_match(
+                id,
+                &recovered,
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome, not an error");
+        let findings = match refusal {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(
+                    verdict,
+                    SaveVerdict::RefusedForUnacknowledgedSuspicions,
+                    "a repeated trigger is a suspicion, never an editor-model error"
+                );
+                findings
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(
+            findings.len(),
+            1,
+            "one finding, the creation's own: {findings:?}"
+        );
+        assert!(
+            matches!(
+                findings[0].code,
+                FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+            ),
+            "{:?}",
+            findings[0].code
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            TWO_SNIPPETS,
+            "a refused creation writes nothing at all"
+        );
+
+        expect_saved(
+            session
+                .create_match(
+                    id,
+                    &recovered,
+                    &NewMatchPosition::End {},
+                    before.revision,
+                    &Acknowledgement::of(&findings),
+                )
+                .expect("the acknowledged creation proceeds"),
+            "creation",
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':two'\n",
+                "    replace: second\n",
+                "  - trigger: ':one'\n",
+                "    replace: a recovered body\n",
+                "    label: a recovered label\n",
+                "    word: 'true'\n",
+                "    left_word: 'false'\n",
+                "    right_word: 'on'\n",
+            ),
+            "all six keys, in the documented order, and every byte of the two snippets \
+             that were already there unchanged; each value's spelling is the encoder's \
+             decision, which is why `true` is quoted and a sentence is not"
+        );
+    } // End of function an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger()
+
     /// A creation refused by the semantic gate proceeds once its findings come
     /// back.
     ///
@@ -5017,6 +5160,10 @@ mod tests {
         let suspicious = NewMatch {
             trigger: ":greet".to_owned(),
             replace: "hello {{nobody}}".to_owned(),
+            label: None,
+            word: None,
+            left_word: None,
+            right_word: None,
         };
 
         let refusal = session

@@ -183,7 +183,8 @@ export interface BrowserCommands {
    *
    * @param document - The file to write into, by the identity this window holds.
    * @param newMatch - What the new snippet says: a trigger and a body, both
-   *   required.
+   *   required, plus any of the four optional schema-known fields it is born
+   *   holding.
    * @param position - Where it goes in the list; the `After` arm names the
    *   snippet it follows **by identity**.
    * @param baseRevision - The revision the caller believes the file holds, and
@@ -963,7 +964,8 @@ export interface BrowserState {
    * revision on the caller's behalf.
    *
    * @param document - The file to write into, by the identity this window holds.
-   * @param newMatch - What the new snippet says: a trigger and a body.
+   * @param newMatch - What the new snippet says: a trigger and a body, plus any
+   *   of the four optional schema-known fields it is born holding.
    * @param position - Where it goes in the file's list.
    * @param baseRevision - The revision the **submission** was drafted from, and
    *   the revision its anchor identity was minted in. Sent unchanged.

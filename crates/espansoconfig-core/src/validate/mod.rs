@@ -84,9 +84,22 @@
 //! equal across a same-length rewrite of the source trigger, so they bind
 //! consent to a *shape*, not to a text (the 2c-3c-1 review's finding 1).
 //!
-//! `tests/validate_semantics.rs`'s reachability check names both as its
+//! Phase 2c-4c-1 added [`FindingCode::NewMatchRepeatsLiteralTrigger`] on the
+//! same terms again, and deliberately **not** by widening the duplicate's code:
+//! that one is produced only for a [`crate::patch::DocumentEdit::DuplicateItem`]
+//! batch, and reusing its name for an insertion would be the 2c-3c precedent
+//! borrowed under a false name rather than transferred at the right level. What
+//! transfers is the *pattern* — a save-transaction code, `SuspiciousButPermitted`,
+//! content-addressed by the candidate's own [`ContentRevision`], acknowledged by
+//! the ordinary exact-multiset round trip. The rule that it is **not** a generic
+//! validator rule holds here for the 2c-3c reason and one more: a rule over every
+//! candidate would interrupt saves of files this application never created,
+//! while a check that lived only in the window would be bypassable by any other
+//! caller of the command.
+//!
+//! `tests/validate_semantics.rs`'s reachability check names all three as its
 //! exemptions rather than losing the check, and asserts that no fixture reaches
-//! either through [`validate`].
+//! any of them through [`validate`].
 //!
 //! # What this module is not
 //!
@@ -206,13 +219,15 @@ impl fmt::Display for FindingClass {
 /// What a save transaction noticed about a candidate, as a code plus its
 /// operands.
 ///
-/// **Ten of the twelve are [`validate`]'s.** The other two —
+/// **Ten of the thirteen are [`validate`]'s.** The other three —
 /// [`FindingCode::DocumentDoesNotParse`], produced only by
-/// [`crate::persist::save_document`]'s whole-text replacement mode, and
+/// [`crate::persist::save_document`]'s whole-text replacement mode,
 /// [`FindingCode::DuplicateKeepsTriggerDefinition`], produced only by the same
-/// transaction's duplicate batches — live here because they must be
-/// acknowledgeable, and an acknowledgement is a multiset of [`Finding`]s; the
-/// module documentation says the rest.
+/// transaction's duplicate batches, and
+/// [`FindingCode::NewMatchRepeatsLiteralTrigger`], produced only by its
+/// insertion batches — live here because they must be acknowledgeable, and an
+/// acknowledgement is a multiset of [`Finding`]s; the module documentation says
+/// the rest.
 ///
 /// Plan section 9: *"Rust returns error codes and structured data, never
 /// user-facing prose."* Nothing here is a sentence. Every operand is either a
@@ -393,6 +408,68 @@ pub enum FindingCode {
         /// [`FindingCode::DocumentDoesNotParse`]'s `revision` follows.
         revision: ContentRevision,
     },
+    /// The newly created match repeats literal trigger text another match in the
+    /// same destination sequence already writes.
+    ///
+    /// Produced only by [`crate::persist::save_document`], for a batch holding
+    /// exactly one [`crate::patch::DocumentEdit::InsertItem`], when the item that
+    /// insertion landed projects as a match exposing a **modelled literal**
+    /// trigger text equal to one another match of that same sequence exposes.
+    /// "Modelled literal" is `trigger:`, or a scalar entry of `triggers:`, whose
+    /// text this crate decoded; a `regex:`, an entry it could not decode, and any
+    /// trigger shape it does not model at all contribute nothing on either side,
+    /// so no comparison is made and no finding is produced. When the new item has
+    /// no trigger form or several, the editor-model findings
+    /// [`FindingCode::MatchHasNoTriggerField`] and
+    /// [`FindingCode::MatchHasSeveralTriggerForms`] already refuse the save
+    /// outright, and this code stays silent rather than weakening that
+    /// precedence.
+    ///
+    /// # It is a claim about text, and about risk — never about espanso (D2u)
+    ///
+    /// [`FindingClass::SuspiciousButPermitted`]. Espanso's schema, as this crate
+    /// models it, has **no trigger-uniqueness rule**, so the finding may say only
+    /// that the new snippet repeats literal trigger text already present and that
+    /// this application cannot determine how espanso will handle overlapping
+    /// definitions. It must never say *invalid*, *collision*, which snippet
+    /// wins — or, in the other direction, that a *non*-repeating trigger is safe:
+    /// two triggers that merely overlap, or that differ only in a plain scalar's
+    /// YAML 1.1 reading, are outside what this comparison can see. The user is
+    /// told, and confirms by content like any other suspicion.
+    ///
+    /// # It is not a validator rule, and it is not the duplicate's code
+    ///
+    /// Not a rule over every candidate: that would newly interrupt saves of
+    /// unrelated edits to files this application never wrote, for a repetition
+    /// the person did not just create. Not a check in the window either: a check
+    /// only the UI performs is bypassed by every other caller of the command.
+    /// It is produced inside the one entry point that writes, for insertions
+    /// only, and it therefore reaches **ordinary creation** as well as the
+    /// recovery route that motivated it — which is correct, because exact
+    /// repetition is a property of the candidate rather than of the caller that
+    /// built it.
+    ///
+    /// And it is a **new** code rather than a reuse of
+    /// [`FindingCode::DuplicateKeepsTriggerDefinition`], which is produced only
+    /// for a duplicate batch. The two sentences differ in what they claim was
+    /// done, and one name covering both would make an acknowledgement of a
+    /// duplicate readable as an acknowledgement of a creation.
+    NewMatchRepeatsLiteralTrigger {
+        /// The [`ContentRevision`] of the **exact candidate** this finding is
+        /// about — the whole document the new item sits in, not the item alone.
+        ///
+        /// The same operand, for the same reason, as
+        /// [`FindingCode::DuplicateKeepsTriggerDefinition`]'s: the new item's
+        /// path, span and node are equal across a same-length rewrite of
+        /// anything above it, so all three bind consent to a *shape* rather than
+        /// to a text. With the revision, a different candidate is a different
+        /// finding and [`crate::persist::Acknowledgement`]'s exact-multiset match
+        /// does the rest with no new concept.
+        ///
+        /// **Never rendered.** It is an opaque digest, and no dictionary sentence
+        /// names it.
+        revision: ContentRevision,
+    },
 } // End of enum FindingCode
 
 impl FindingCode {
@@ -402,12 +479,13 @@ impl FindingCode {
     /// variant is a compile error there and a length error here, so a code no
     /// fixture reaches cannot hide.
     ///
-    /// **Ten of the twelve are [`validate`]'s**, and the other two —
-    /// [`FindingCode::DocumentDoesNotParse`] and
-    /// [`FindingCode::DuplicateKeepsTriggerDefinition`] — are the save
-    /// transaction's. The reachability test that reads this table names both
-    /// explicitly rather than skipping any code it cannot produce.
-    pub const ALL_NAMES: [&'static str; 12] = [
+    /// **Ten of the thirteen are [`validate`]'s**, and the other three —
+    /// [`FindingCode::DocumentDoesNotParse`],
+    /// [`FindingCode::DuplicateKeepsTriggerDefinition`] and
+    /// [`FindingCode::NewMatchRepeatsLiteralTrigger`] — are the save
+    /// transaction's. The reachability test that reads this table names all
+    /// three explicitly rather than skipping any code it cannot produce.
+    pub const ALL_NAMES: [&'static str; 13] = [
         "MatchHasNoContentField",
         "MatchHasSeveralContentFields",
         "MatchHasNoTriggerField",
@@ -420,6 +498,7 @@ impl FindingCode {
         "RegexDoesNotCompile",
         "DocumentDoesNotParse",
         "DuplicateKeepsTriggerDefinition",
+        "NewMatchRepeatsLiteralTrigger",
     ];
 
     /// A stable identifier for this code, without its operands.
@@ -441,6 +520,7 @@ impl FindingCode {
             FindingCode::DuplicateKeepsTriggerDefinition { .. } => {
                 "DuplicateKeepsTriggerDefinition"
             }
+            FindingCode::NewMatchRepeatsLiteralTrigger { .. } => "NewMatchRepeatsLiteralTrigger",
         }
     } // End of function name() for FindingCode
 
@@ -480,7 +560,13 @@ impl FindingCode {
     ///   read, and how it chooses between overlapping definitions is not
     ///   something this application can determine. The finding is a claim about
     ///   risk, never about espanso semantics (D2u), and the user confirms it by
-    ///   content like any other suspicion.
+    ///   content like any other suspicion;
+    /// - a newly created match that **repeats literal trigger text** already in
+    ///   its destination sequence is **suspicious** for the same reason and by
+    ///   the same rule: espanso has no trigger-uniqueness rule this crate can
+    ///   read, so the finding claims repetition of text and the inability to
+    ///   determine what espanso will do with overlapping definitions, and
+    ///   nothing more.
     pub fn class(&self) -> FindingClass {
         match self {
             FindingCode::MatchHasNoContentField
@@ -494,7 +580,8 @@ impl FindingCode {
             FindingCode::VariableTypeNotRecognised { .. }
             | FindingCode::ReferenceHasNoDeclaration { .. }
             | FindingCode::DocumentDoesNotParse { .. }
-            | FindingCode::DuplicateKeepsTriggerDefinition { .. } => {
+            | FindingCode::DuplicateKeepsTriggerDefinition { .. }
+            | FindingCode::NewMatchRepeatsLiteralTrigger { .. } => {
                 FindingClass::SuspiciousButPermitted
             }
         }
@@ -1260,6 +1347,9 @@ mod tests {
                 detail: String::new(),
             },
             FindingCode::DuplicateKeepsTriggerDefinition {
+                revision: crate::ContentRevision::of_bytes(b""),
+            },
+            FindingCode::NewMatchRepeatsLiteralTrigger {
                 revision: crate::ContentRevision::of_bytes(b""),
             },
         ];

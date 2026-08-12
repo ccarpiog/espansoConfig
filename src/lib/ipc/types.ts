@@ -1187,7 +1187,8 @@ export type FindingCodeName =
   | 'ReferenceHasNoDeclaration'
   | 'RegexDoesNotCompile'
   | 'DocumentDoesNotParse'
-  | 'DuplicateKeepsTriggerDefinition';
+  | 'DuplicateKeepsTriggerDefinition'
+  | 'NewMatchRepeatsLiteralTrigger';
 
 /** What the semantic gate noticed about a candidate, as a code plus operands. */
 export type FindingCode =
@@ -1269,6 +1270,38 @@ export type FindingCode =
          * What binds an acknowledgement to one candidate. The clone's path,
          * span and node also travel on the finding, but all three are equal
          * across a same-length rewrite of the source trigger; hand a finding
+         * back unchanged and it acknowledges that text and no other.
+         *
+         * Opaque, and never rendered.
+         */
+        readonly revision: ContentRevision;
+      };
+    }
+  | {
+      /**
+       * The snippet this save creates repeats literal trigger text another
+       * snippet of the same list already writes.
+       *
+       * Produced only by an insertion batch, never by the semantic rules, and it
+       * is **acknowledgeable**: a claim about risk, never about espanso
+       * semantics — this app cannot determine how espanso handles overlapping
+       * definitions, and its silence about a *non*-repeating trigger is not a
+       * claim that the trigger is safe.
+       *
+       * It reaches **ordinary creation** as well as recovery, because exact
+       * repetition is a property of the candidate rather than of the route that
+       * built it. It is a separate code from
+       * `DuplicateKeepsTriggerDefinition`, which is produced only for a
+       * duplicate: one name over both would make consent for a duplicate
+       * readable as consent for a creation.
+       */
+      readonly NewMatchRepeatsLiteralTrigger: {
+        /**
+         * The content revision of the exact candidate this finding is about.
+         *
+         * What binds an acknowledgement to one candidate. The new item's path,
+         * span and node also travel on the finding, but all three are equal
+         * across a same-length rewrite above the insertion point; hand a finding
          * back unchanged and it acknowledges that text and no other.
          *
          * Opaque, and never rendered.
@@ -2099,19 +2132,34 @@ export interface MatchDraft {
 /**
  * What a snippet that does not exist yet is born holding.
  *
- * **Closed at two keys, and both are required.** It is not a {@link MatchDraft}:
- * a draft can express twenty-two fields and four lists, and creation writes
- * exactly one flat mapping of two scalars, so accepting a draft would advertise a
- * structure `createMatch` cannot produce and the caller would learn that from a
- * refusal rather than from the type. It is not a list of key/value pairs either —
- * the keys a save writes are fixed by espanso's schema, never composed by a
- * caller.
+ * **Closed at six keys: two required and four optional.** It is not a
+ * {@link MatchDraft}: a draft can express twenty-two fields and four lists, and
+ * creation writes exactly one flat mapping of scalars, so accepting a draft
+ * would advertise a structure `createMatch` cannot produce and the caller would
+ * learn that from a refusal rather than from the type. It is not a list of
+ * key/value pairs either — the keys a save writes are fixed by espanso's schema,
+ * never composed by a caller.
+ *
+ * **Phase 2c-4c-1 widened it from two keys to six.** The four it added are
+ * exactly the four `matchEditor.ts` drafts beside `trigger` and `replace`, so
+ * that a creation can carry what an editing session was holding rather than
+ * silently dropping four of its six fields.
  *
  * **`replace` is required**, on the ground that a trigger with no body is not a
  * usable espanso snippet and this application should not create one. A later
  * save can still change it, and can add another schema-known field beside it.
  *
- * Both values are **logical text**, not YAML. How each is spelled — plain,
+ * **An omitted optional field is a key the new snippet is not born holding at
+ * all; an empty string is that key written with an empty value.** The two are
+ * different requests, and this type carries the caller's decision rather than
+ * inferring it from a blank control — the distinction `MatchBaseline` and
+ * `MatchBuffers` exist to keep apart when *editing* a snippet.
+ *
+ * The three word-boundary keys are **text, not booleans**, for the reason their
+ * controls are: deciding that `word: on` means boolean true is a claim about how
+ * espanso reads a plain scalar, and D2u forbids this application making one.
+ *
+ * Every value is **logical text**, not YAML. How each is spelled — plain,
  * quoted, or a `|` block — is Rust's decision, made by the same encoder every
  * other value this application writes goes through, so a value holding a `#`, a
  * line break or a leading `*` is written correctly rather than injected.
@@ -2121,6 +2169,14 @@ export interface NewMatch {
   readonly trigger: string;
   /** What the snippet expands to — espanso's `replace`. */
   readonly replace: string;
+  /** `label`, when the new snippet is born holding one. */
+  readonly label?: string | null;
+  /** `word`, as source text, when the new snippet is born holding it. */
+  readonly word?: string | null;
+  /** `left_word`, as source text, when the new snippet is born holding it. */
+  readonly left_word?: string | null;
+  /** `right_word`, as source text, when the new snippet is born holding it. */
+  readonly right_word?: string | null;
 }
 
 /**

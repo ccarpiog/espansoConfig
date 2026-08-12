@@ -657,6 +657,7 @@
   "code.findingCode.regexDoesNotCompile": "Esta expresión regular no compiló con la versión que usa espansoConfig. espanso fija una anterior, de modo que ambas pueden discrepar.",
   "code.findingCode.documentDoesNotParse": "El analizador de YAML de espansoConfig no puede leer este texto. Analiza con una biblioteca distinta de la que usa espanso, así que esto es un aviso y no un veredicto, pero un archivo que espanso no pueda leer no se carga.",
   "code.findingCode.duplicateKeepsTriggerDefinition": "El duplicado mantiene la misma definición de disparador que su origen, y espansoConfig no puede determinar cómo elige espanso entre definiciones superpuestas.",
+  "code.findingCode.newMatchRepeatsLiteralTrigger": "El fragmento nuevo repite un texto de disparador que ya escribe otro fragmento de esta lista, y espansoConfig no puede determinar cómo tratará espanso las definiciones superpuestas.",
 
   "code.editError.sourceDoesNotParse": "El analizador de YAML de espansoConfig no pudo leer este archivo, así que no se puede localizar nada dentro de él.",
   "code.editError.unresolvable": "El lugar que nombra este cambio no existe en el archivo.",

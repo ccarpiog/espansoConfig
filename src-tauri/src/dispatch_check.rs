@@ -539,9 +539,15 @@ fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
 /// [`crate::commands::WorkspaceSession::create_match`] cannot make.
 ///
 /// 1. **Both are registered and the empty capability set does not block them.**
-/// 2. **`NewMatch` deserializes off the wire**, from an object naming exactly two
-///    keys — and an object missing one of them is refused *inside Tauri's command
-///    macro*, which is why a caller sends both or sends nothing.
+/// 2. **`NewMatch` deserializes off the wire.** The payload here names the two
+///    **required** keys and none of the four optional ones — the type carries two
+///    required and four optional schema-known scalar fields since Phase 2c-4c-1 —
+///    so this also pins that the four omitted keys default to absent rather than
+///    to empty, which the written bytes below assert. An object missing one of the
+///    two required keys is refused *inside Tauri's command macro*, which is why a
+///    caller sends both or sends nothing. The six-field payload is measured at
+///    `commands.rs`'s
+///    `an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger`.
 /// 3. **`NewMatchPosition` crosses as a one-key object for every arm**, including
 ///    the two that carry nothing. `{"End":{}}` is the shape a Rust struct variant
 ///    with empty braces produces; a unit variant would have wanted the bare string
@@ -591,7 +597,8 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
         Some(
             "matches:\n  - trigger: ':one'\n    replace: first\n  - trigger: ':new'\n    \
              replace: a new snippet\n"
-        )
+        ),
+        "the two keys the payload named, and no line for any of the four it omitted"
     );
 
     // And the identity the creation minted resolves, across the dispatcher, to

@@ -140,10 +140,10 @@ use serde::de::Deserializer;
 use serde::ser::{SerializeStructVariant, Serializer};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{DocumentContext, DocumentView, TriggerKind};
+use crate::model::{DocumentContext, DocumentView, MatchView, TriggerKind, ValueView};
 use crate::patch::{
-    apply_edits, DocumentEdit, DuplicateItem, EditError, PatchedDocument, PresentationNote,
-    Replacement, VerificationFailure,
+    apply_edits, insertion_landings, DocumentEdit, DocumentPath, DuplicateItem, EditError,
+    PatchedDocument, PathSegment, PresentationNote, Replacement, VerificationFailure,
 };
 use crate::persist::backup::{BackupError, BackupRecord, BackupSession};
 use crate::persist::write::{
@@ -1474,7 +1474,7 @@ fn findings_of(
     let revision = ContentRevision::of_bytes(candidate.as_bytes());
     let view = DocumentView::project(context, candidate, revision, &index, &trivia);
     let mut findings = validate(&view);
-    // The one operation-specific finding, appended after the projection pass so
+    // The two operation-specific findings, appended after the projection pass so
     // that the editor-model findings keep their precedence in `verdict`: an
     // `EditorModelError` anywhere refuses the save whatever else is present.
     for edit in edits {
@@ -1484,6 +1484,25 @@ fn findings_of(
             ));
         }
     } // End of the loop over the batch's edits, of which at most one duplicates
+      // The insertion's own suspicion, for **every** insertion in the batch and
+      // in batch order. The address each new item took is
+      // `crate::patch::insertion_landings`, which reads the whole batch: a
+      // removal above the anchor shifts the arrival left and a second insertion
+      // above it shifts it right, so the placement and the candidate's own length
+      // are not enough to name the item that landed.
+    for (position, edit) in edits.iter().enumerate() {
+        let DocumentEdit::InsertItem(insertion) = edit else {
+            continue;
+        };
+        let items = matches_directly_in(&view, insertion.sequence());
+        let landed = insertion_landings(edits, insertion.sequence(), items.len())
+            .into_iter()
+            .find_map(|(at, landed)| (at == position).then_some(landed));
+        let Some(landed) = landed else {
+            continue;
+        };
+        findings.extend(new_match_repeats_literal_trigger(&items, landed, revision));
+    } // End of the loop over the batch's insertions
     Ok(findings)
 } // End of function findings_of()
 
@@ -1536,6 +1555,147 @@ fn duplicate_keeps_trigger_definition(
         path: Some(clone_path),
     })
 } // End of function duplicate_keeps_trigger_definition()
+
+/// The suspicion a creation owes when the item it inserts repeats literal
+/// trigger text its destination sequence already holds — the 2c-4c design
+/// consult's Q1 and Q5.
+///
+/// # A pure inspection of the candidate, and nothing else
+///
+/// It reads the candidate's own projection and the insertion request. It
+/// consults no disk, no earlier revision and no caller's opinion, so the same
+/// candidate always produces the same finding — which is what makes
+/// [`Acknowledgement::covers_all`]'s exact-multiset match a round trip rather
+/// than a race.
+///
+/// # The item that landed is named by the caller, and the caller asks the engine
+///
+/// `items` is every match the candidate projects as a **direct** item of the
+/// destination sequence, paired with the index its own path ends in
+/// ([`matches_directly_in`]), and `landed` is the index the new item took —
+/// [`crate::patch::insertion_landings`], the patch engine's own arithmetic over
+/// the **whole batch**, called rather than re-spelled. Deriving it here from the
+/// placement and the candidate's length would be right only while the insertion
+/// is the batch's one cardinality-changing edit, which no type enforces: with a
+/// removal above the anchor the address shifts left, and the finding would be
+/// attached to a pre-existing item whose trigger the new one never repeated.
+/// When no landing can be derived the caller produces nothing, which is also the
+/// answer for a destination this projection does not model as a match list.
+///
+/// **The count handed to the engine is the projection's matches for that
+/// sequence, and that is the sequence's own item count rather than an
+/// approximation of it**, on the precedent `create_one_match` records: a
+/// `matches` entry the schema does not recognise still produces one
+/// `MatchView`, recorded by span and not descended into, so positions never
+/// shift.
+///
+/// # What counts as "literal", on both sides
+///
+/// [`literal_trigger_texts`] — `trigger:`, or the scalar entries of `triggers:`,
+/// and only where this crate decoded the scalar. A `regex:` contributes nothing,
+/// an undecodable scalar contributes nothing, and a match with no trigger form
+/// or several contributes nothing (those two are already
+/// [`FindingCode::MatchHasNoTriggerField`] and
+/// [`FindingCode::MatchHasSeveralTriggerForms`], which are `EditorModelError`s
+/// and win in [`verdict`]). So an unmodelled or non-literal trigger produces
+/// **no semantic claim at all**, in either direction.
+///
+/// The comparison is exact string equality of decoded text. It is deliberately
+/// not a similarity, an overlap or a prefix test: this crate can say that two
+/// texts are the same text, and it cannot say what espanso does with two
+/// definitions that merely interact.
+///
+/// # Every other item of the destination counts, newly inserted ones included
+///
+/// The comparison is against the **candidate's** list, so a batch inserting two
+/// items that repeat each other reports both. Nothing in `DocumentEdit` forbids
+/// such a batch and no caller in `src-tauri/` builds one — `create_one_match`
+/// issues exactly one insertion — but reporting it is the answer that claims
+/// least: the repetition really is in the list the person would be left with.
+fn new_match_repeats_literal_trigger(
+    items: &[(usize, &MatchView)],
+    landed: usize,
+    revision: ContentRevision,
+) -> Option<Finding> {
+    let new_match = items
+        .iter()
+        .find_map(|(index, item)| (*index == landed).then_some(*item))?;
+    let repeated = literal_trigger_texts(new_match);
+    if repeated.is_empty() {
+        return None;
+    }
+    let repeats = items.iter().any(|(index, other)| {
+        *index != landed
+            && literal_trigger_texts(other)
+                .into_iter()
+                .any(|text| repeated.contains(&text))
+    });
+    if !repeats {
+        return None;
+    }
+    Some(Finding {
+        code: FindingCode::NewMatchRepeatsLiteralTrigger { revision },
+        span: Some(new_match.span),
+        node: Some(new_match.source_node),
+        path: new_match.path.clone(),
+    })
+} // End of function new_match_repeats_literal_trigger()
+
+/// Every match `view` projects as a **direct** item of `sequence`, paired with
+/// the index its own path ends in.
+///
+/// Direct, and both halves of that are checked: the path's document index must
+/// be the sequence's, and everything before its final index segment must be the
+/// sequence's segments. A [`DocumentPath`] names no file, so two documents can
+/// carry the same path and mean two sequences; the document index is what keeps
+/// them apart here.
+fn matches_directly_in<'a>(
+    view: &'a DocumentView,
+    sequence: &DocumentPath,
+) -> Vec<(usize, &'a MatchView)> {
+    view.matches
+        .iter()
+        .filter_map(|item| {
+            let path = item.path.as_ref()?;
+            if path.document_index() != sequence.document_index() {
+                return None;
+            }
+            let (last, parent) = path.segments().split_last()?;
+            let PathSegment::Index(index) = last else {
+                return None;
+            };
+            if parent != sequence.segments() {
+                return None;
+            }
+            Some((*index, item))
+        })
+        .collect()
+} // End of function matches_directly_in()
+
+/// The literal trigger texts a match exposes, in source order.
+///
+/// Empty for every shape this crate does not model as literal text: a `regex:`,
+/// a match with no trigger form, a match with several, and any entry whose
+/// scalar this crate could not decode — an undecodable [`crate::model::ScalarView`]
+/// holds the raw source slice rather than the logical text, so comparing one
+/// would be comparing bytes against text and calling the result equality.
+fn literal_trigger_texts(item: &MatchView) -> Vec<&str> {
+    let scalars: Vec<&crate::model::ScalarView> = match item.trigger.kind {
+        TriggerKind::Single => item.trigger.trigger.iter().collect(),
+        TriggerKind::Multiple => item
+            .trigger
+            .triggers
+            .iter()
+            .filter_map(ValueView::as_scalar)
+            .collect(),
+        TriggerKind::Regex | TriggerKind::Several | TriggerKind::Absent => Vec::new(),
+    };
+    scalars
+        .into_iter()
+        .filter(|scalar| scalar.decoded)
+        .map(|scalar| scalar.text.as_str())
+        .collect()
+} // End of function literal_trigger_texts()
 
 /// Step 5 for a [`SaveContent::ReplaceText`] candidate, where a failed parse is
 /// **the answer** rather than a contradiction.
@@ -1635,11 +1795,13 @@ fn does_not_parse(candidate: &str, error: &SyntaxError) -> Finding {
 #[cfg(test)]
 mod tests {
     use super::{
-        read_target_under_the_lock, verdict, Acknowledgement, SaveError, SaveVerdict, SyntaxIndex,
+        matches_directly_in, new_match_repeats_literal_trigger, read_target_under_the_lock,
+        verdict, Acknowledgement, DocumentContext, DocumentPath, DocumentView, MatchView,
+        SaveError, SaveVerdict, SyntaxIndex, TriviaIndex,
     };
     use crate::persist::write::lock_path;
     use crate::validate::{Finding, FindingClass, FindingCode};
-    use crate::ContentRevision;
+    use crate::{ContentRevision, DocumentId};
 
     /// A finding with no span, node or path, of the code given.
     fn finding(code: FindingCode) -> Finding {
@@ -1707,6 +1869,87 @@ mod tests {
         assert_eq!(acknowledgement.len(), 1);
         assert!(!acknowledgement.covers(&an_error()));
         assert!(acknowledgement.covers(&a_suspicion("who")));
+    }
+
+    /// An **undecodable** trigger scalar contributes no literal trigger text, on
+    /// either side of the comparison.
+    ///
+    /// # Why the flag is set by hand here
+    ///
+    /// An undecodable [`crate::model::ScalarView`] holds the raw source slice
+    /// rather than the logical text, so comparing one would be comparing bytes
+    /// against text and calling the result equality — that is the rule
+    /// `literal_trigger_texts` enforces with one `filter`. Reaching it through a
+    /// real document would need a double-quoted scalar the **substrate** accepts
+    /// and `crate::emit::decode` rejects, and no such text has been found:
+    /// measured against `SyntaxIndex::parse`, an unknown escape, a malformed
+    /// numeric escape, a lone surrogate and an out-of-range code point are all
+    /// rejected by the parser first, so the projection never gets the chance.
+    /// The exclusion is therefore pinned on a projection whose flag this test
+    /// clears, and the premise — that the same pair **does** produce the finding
+    /// while both scalars are decoded — is asserted first, so removing the
+    /// `filter` fails this rather than leaving it green.
+    #[test]
+    fn an_undecodable_trigger_scalar_contributes_no_literal_text() {
+        let source = "matches:\n  - trigger: ':one'\n    replace: 'first'\n  \
+                      - trigger: ':one'\n    replace: 'second'\n";
+        let context = DocumentContext::detached(DocumentId(1), "base.yml");
+        let index = SyntaxIndex::parse(source).expect("the fixture parses");
+        let trivia = TriviaIndex::scan(source, &index);
+        let revision = ContentRevision::of_bytes(source.as_bytes());
+        let view = DocumentView::project(&context, source, revision, &index, &trivia);
+        let sequence = DocumentPath::parse("matches").expect("the test's own path parses");
+
+        let mut items: Vec<(usize, MatchView)> = matches_directly_in(&view, &sequence)
+            .into_iter()
+            .map(|(at, item)| (at, item.clone()))
+            .collect();
+        assert_eq!(items.len(), 2, "the fixture projects two matches");
+        for (at, item) in &items {
+            assert!(
+                item.trigger
+                    .trigger
+                    .as_ref()
+                    .expect("each item has a single trigger")
+                    .decoded,
+                "the premise: item {at}'s trigger really is decoded logical text"
+            );
+        } // End of the loop that asserts both premises
+
+        // The positive control: while both are decoded, the repetition is found.
+        assert!(
+            new_match_repeats_literal_trigger(&borrowed(&items), 1, revision).is_some(),
+            "the premise: this pair really is an exact repetition"
+        );
+
+        // The **existing** item's scalar holds raw bytes rather than text.
+        set_decoded(&mut items[0].1, false);
+        assert!(
+            new_match_repeats_literal_trigger(&borrowed(&items), 1, revision).is_none(),
+            "an undecodable existing scalar is not literal trigger text"
+        );
+
+        // And the **new** item's own, which is the other side of the comparison.
+        set_decoded(&mut items[0].1, true);
+        set_decoded(&mut items[1].1, false);
+        assert!(
+            new_match_repeats_literal_trigger(&borrowed(&items), 1, revision).is_none(),
+            "an undecodable new scalar exposes no literal trigger text either"
+        );
+    } // End of function an_undecodable_trigger_scalar_contributes_no_literal_text()
+
+    /// Sets the `decoded` flag of a match's single `trigger` scalar.
+    fn set_decoded(item: &mut MatchView, decoded: bool) {
+        item.trigger
+            .trigger
+            .as_mut()
+            .expect("the fixture's items each have a single trigger")
+            .decoded = decoded;
+    } // End of function set_decoded()
+
+    /// The borrowed pair list `new_match_repeats_literal_trigger` takes.
+    fn borrowed(items: &[(usize, MatchView)]) -> Vec<(usize, &MatchView)> {
+        items.iter().map(|(at, item)| (*at, item)).collect()
     }
 
     /// A suspicion refuses until it is acknowledged, and then it proceeds.
