@@ -11925,6 +11925,17 @@ _Updated at each phase boundary._
 | **2c-4c design consult** | **`5027de1`** | ✅ pushed to `origin/main` | **clean** — the consult changed no source file. Staged **by path**: the commit holds **two files**, `docs/reviews/phase-2c-4c-design.md` and this checkpoint. `81bc193` is its parent, and the four production gates were re-run on that pristine tree **before** any edit, which is where the confirmation of `1633` comes from |
 | **2c-4c step 1** | **`dc664ce`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path** even so, out of the habit 2c-4b's harness steps forced: the commit holds **23 files** — nine core sources and tests, four `src-tauri/` files, seven frontend files, the two new documents and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
+| **2c-4c step 2** | **`4e29589`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path**: the commit holds **six files** — `src/lib/browser/recovery.ts`, `src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts`, `docs/decisions/2c-4c-2-notes.md`, `docs/reviews/phase-2c-4c-2-code.md` and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
+
+`4e29589` is Phase 2c-4c **step 2**, committed **including all five of its review rounds** — but
+unlike step 1 it is **not committed on a READY verdict**, and that is the one thing a fresh session
+must not miss. Round 4 returned NOT READY, its two findings were fixed and the four gates re-derived
+on this tree, and the session stopped at its context boundary rather than opening a sixth round. **The
+review of round 4's fixes is owed and is step 3's first task**, written at the top of "Next action".
+What is committed is verified by gates and by four rounds of review; what is not is a review of the
+last fix round. The two defects in behaviour the five rounds found are both fixed here, and **neither
+was ever reachable from a window**, because nothing draws `recovery.ts` yet.
+
 `dc664ce` is Phase 2c-4c **step 1**, and it is committed **including all three of its review rounds**
 — the step was held open until round 3 returned READY, so no commit holds the demonstrated
 false-finding defect or the overflow in the newly public API. It contains the widened `NewMatch`, the
