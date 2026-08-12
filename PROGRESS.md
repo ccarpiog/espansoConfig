@@ -11657,10 +11657,18 @@ _Updated at each phase boundary._
 | **2c-4b step 3d-3** | **`e3e2530`** | ✅ pushed to `origin/main` | **clean** — the first clean tree since 3d-1, because this is the step that removed the harness. `git status --short --untracked-files=all` returns **nothing** and `git diff` is empty. Staged **by path** even so: the commit holds **three files** — this checkpoint, `docs/decisions/2c-4b-3d-3-notes.md` and `docs/reviews/phase-2c-4b-3d-3.md`. **The removal is in no diff**: the two probe sources were untracked and the four hook lines returned to what `HEAD` already held, so the evidence is the gate numbers and the empty status, not the patch |
 
 | **2c-4c design consult** | **`5027de1`** | ✅ pushed to `origin/main` | **clean** — the consult changed no source file. Staged **by path**: the commit holds **two files**, `docs/reviews/phase-2c-4c-design.md` and this checkpoint. `81bc193` is its parent, and the four production gates were re-run on that pristine tree **before** any edit, which is where the confirmation of `1633` comes from |
+| **2c-4c step 1** | **`dc664ce`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path** even so, out of the habit 2c-4b's harness steps forced: the commit holds **23 files** — nine core sources and tests, four `src-tauri/` files, seven frontend files, the two new documents and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
+
+`dc664ce` is Phase 2c-4c **step 1**, and it is committed **including all three of its review rounds**
+— the step was held open until round 3 returned READY, so no commit holds the demonstrated
+false-finding defect or the overflow in the newly public API. It contains the widened `NewMatch`, the
+new `FindingCode`, `insertion_landings` and the checked `items_above`, both dictionaries, the wire
+mirror, `docs/decisions/2c-4c-1-notes.md`, `docs/reviews/phase-2c-4c-1-code.md` and this checkpoint.
+A fresh session should start from it and go to **2c-4c-2**, recovery as browser values, which is the
+top of "Next action".
 
 `5027de1` is Phase 2c-4c's design consult, and it is the phase's **first act rather than its first
-step** — no source file changed, so it owes no mounted test and no window reading. A fresh session
-should start from it and go to **2c-4c-1**, the Rust contract, which is the top of "Next action".
+step** — no source file changed, so it owes no mounted test and no window reading.
 
 ---
 
