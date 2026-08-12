@@ -33,6 +33,12 @@
 
 import { rawSaveChoiceKey } from '../browser/rawSave';
 import {
+  recoveryChoiceKey,
+  recoveryUnavailableKey,
+  type RecoveryUnavailable
+} from '../browser/recovery';
+import { RECOVERY_WITHOUT_CREATION_ATTRIBUTE } from './RecoveryWithoutCreation.svelte';
+import {
   conflictChoiceKey,
   reloadUnavailableKey,
   type ConflictModel,
@@ -308,6 +314,25 @@ function control(target: HTMLElement, key: TranslationKey): HTMLButtonElement {
 function says(target: HTMLElement, key: TranslationKey): boolean {
   return (target.textContent ?? '').includes(DICTIONARIES.en[key]);
 } // End of function says()
+
+/**
+ * The reason the shared recovery renderer drew, or `null` when it drew nothing.
+ *
+ * **The proof that this surface mounts `RecoveryWithoutCreation.svelte`** rather
+ * than repeating its paragraph. The attribute belongs to that component and its
+ * value is the reason **it** derived, so a surface that stopped mounting it — or
+ * that drew the same sentence itself — fails here even though the words on screen
+ * would be identical. `says()` cannot tell those apart, and that a host can omit
+ * the sentence while consuming the model faithfully is the failure mode
+ * 2c-4c-3b's review found in four copied `{#if}` blocks.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The reason drawn, or `null` when nothing was.
+ */
+function recoveryNote(target: HTMLElement): string | null {
+  const note = target.querySelector(`[${RECOVERY_WITHOUT_CREATION_ATTRIBUTE}]`);
+  return note?.getAttribute(RECOVERY_WITHOUT_CREATION_ATTRIBUTE) ?? null;
+} // End of function recoveryNote()
 
 /**
  * Waits for the component's asynchronous handler to finish.
@@ -1082,6 +1107,10 @@ describe('the deletion panel’s *Keep my draft*', () => {
 
     expect(says(panel.target, 'browser.matchDeletion.confirmationRefused')).toBe(true);
     expect(panel.calls).toHaveLength(1);
+    // Nothing was written, so nothing may have closed this panel either. The
+    // `close` callback is a spy rather than a real unmount, so continued local
+    // rendering does not prove the surface was not told to go away.
+    expect(panel.closed()).toBe(0);
     panel.stop();
   }); // End of the "renewed confirmation refused" case
 
@@ -1099,3 +1128,126 @@ describe('the deletion panel’s *Keep my draft*', () => {
     panel.stop();
   }); // End of the "adoption refused" case
 }); // End of the "deletion panel’s reapply" suite
+
+describe('what the deletion panel says about recovery', () => {
+  /*
+   * **2c-4c-3b's negative half, on the first of its four surfaces.** Step 3a proved
+   * the positive half — that the match editor and the creator reach a recovery
+   * create — and this is the other side of the consult's step-3 matrix: that a
+   * surface whose draft is an operation offers **neither copy nor save-as-new**, and
+   * that nothing recovery draws here spends the conflict it is drawn beside.
+   *
+   * `recovery.test.ts` holds the same claims at the value level. What only a mounted
+   * panel can hold is that this surface **mounts the shared renderer**, that it draws
+   * no control, and that no recovery form is mounted here at all.
+   */
+
+  /** The reason a deletion's draft kind produces, so a rename is a compile error. */
+  const REASON: RecoveryUnavailable = 'operationDraft';
+
+  it('says nothing at all until something has gone wrong', () => {
+    // The permanent-paragraph defect 2c-4c-3b's model change closes. Before it,
+    // `recoveryAvailability` answered `operationDraft` for this surface whatever was
+    // happening, so an explanation of a version on disk would have stood on a screen
+    // where no version on disk was in dispute.
+    const panel = mountDeleter();
+    // The shared renderer is mounted and drew nothing, which is its own decision
+    // and not a condition this surface carries.
+    expect(recoveryNote(panel.target)).toBeNull();
+    expect(says(panel.target, recoveryUnavailableKey('operationDraft'))).toBe(false);
+    panel.stop();
+  });
+
+  it('offers neither a copy nor a save-as-new, and says why instead', async () => {
+    const panel = await conflicted();
+
+    // The reason, and the surface's own: the raw editor's sentence is about a whole
+    // file and would be false here. `recoveryNote` is what says the shared renderer
+    // drew it; `says` alone could not tell that from a paragraph of this file's own.
+    expect(recoveryNote(panel.target)).toBe(REASON);
+    expect(says(panel.target, recoveryUnavailableKey('operationDraft'))).toBe(true);
+    expect(says(panel.target, recoveryUnavailableKey('wholeDocumentDraft'))).toBe(false);
+    // No save-as-new. The control 3a drew on the two creating surfaces is the one
+    // named by `recoveryChoiceKey`, and it is not here — nor is the form it opens.
+    expect(button(panel.target, recoveryChoiceKey('createFromSupportedFields'))).toBeNull();
+    expect(says(panel.target, 'browser.recovery.label')).toBe(false);
+    expect(says(panel.target, 'browser.recovery.transferHeading')).toBe(false);
+    expect(says(panel.target, 'browser.recovery.destination')).toBe(false);
+    // And no copy, which is `conflictChoicesFor`'s decision from what this surface
+    // drafts rather than anything recovery added.
+    expect(button(panel.target, conflictChoiceKey('copyDraft', 'operationChoice'))).toBeNull();
+    // Nothing was written and nothing moved.
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "neither copy nor save-as-new" case
+
+  it('keeps the conflict through every ending that wrote nothing', async () => {
+    /*
+     * **All three of this surface's non-committed endings are reachable**, which
+     * the raw editor's three cannot claim: its `reapplySupport` is `unavailable`,
+     * so only the two reload endings exist there.
+     *
+     * **Every one of them asserts `closed()`.** The `close` callback here is a spy
+     * and not a parent unmount, so a surface that had been told to close would go
+     * on rendering and every sentence below would still be found — the reason
+     * continued rendering is not evidence, and the count is.
+     */
+
+    // **A reapply that resolved nothing.** The sentence and the conflict are both
+    // still there, and the window was never asked to move.
+    const refusedReapply = await conflicted();
+    control(refusedReapply.target, KEEP_MY_DRAFT).click();
+    flushSync();
+    expect(says(refusedReapply.target, 'browser.reapply.manualResolution')).toBe(true);
+    expect(recoveryNote(refusedReapply.target)).toBe(REASON);
+    expect(says(refusedReapply.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(refusedReapply.adoptions).toEqual([]);
+    expect(refusedReapply.calls).toHaveLength(1);
+    expect(refusedReapply.closed()).toBe(0);
+    refusedReapply.stop();
+
+    // **A reload asked for and not confirmed.** The destructive choice is a second
+    // step away, and until it is taken nothing has been spent.
+    const atTheWarning = await conflicted();
+    control(atTheWarning.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(recoveryNote(atTheWarning.target)).toBe(REASON);
+    expect(atTheWarning.adoptions).toEqual([]);
+    expect(atTheWarning.calls).toHaveLength(1);
+    expect(atTheWarning.closed()).toBe(0);
+    atTheWarning.stop();
+
+    // **A reload the window refused.** The adoption was spent and answered `refused`,
+    // so the conflict stayed, and the sentence stayed with it.
+    const refusedReload = await conflicted('refused');
+    control(refusedReload.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    control(refusedReload.target, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+    expect(says(refusedReload.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(recoveryNote(refusedReload.target)).toBe(REASON);
+    expect(refusedReload.calls).toHaveLength(1);
+    expect(refusedReload.closed()).toBe(0);
+    refusedReload.stop();
+  }); // End of the "conflict survives every non-committed ending" case
+
+  it('stops saying it when the person puts the conflict away', async () => {
+    // The one thing that ends the sentence without a commit is the person's own
+    // dismissal — and it ends the conflict too, which is the point: recovery is
+    // about a conflict, and there is no longer one.
+    const panel = await conflicted();
+    control(panel.target, conflictChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+
+    expect(says(panel.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(recoveryNote(panel.target)).toBeNull();
+    expect(says(panel.target, recoveryUnavailableKey('operationDraft'))).toBe(false);
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.calls).toHaveLength(1);
+    // A dismissal is an ending that wrote nothing too, and it does not close either.
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "dismissal ends the sentence" case
+}); // End of the "what the deletion panel says about recovery" suite

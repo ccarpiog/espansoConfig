@@ -41,6 +41,12 @@ import type { RawSaveAnswer } from '../browser/workspace.svelte';
 import type { RawSaveReload } from '../ipc/commands';
 import { rawSaveChoiceKey } from '../browser/rawSave';
 import {
+  recoveryChoiceKey,
+  recoveryUnavailableKey,
+  type RecoveryUnavailable
+} from '../browser/recovery';
+import { RECOVERY_WITHOUT_CREATION_ATTRIBUTE } from './RecoveryWithoutCreation.svelte';
+import {
   conflictChoiceKey,
   conflictChoicesFor,
   reloadUnavailableKey,
@@ -364,6 +370,25 @@ async function settle(): Promise<void> {
 function says(target: HTMLElement, key: TranslationKey): boolean {
   return (target.textContent ?? '').includes(DICTIONARIES.en[key]);
 } // End of function says()
+
+/**
+ * The reason the shared recovery renderer drew, or `null` when it drew nothing.
+ *
+ * **The proof that this surface mounts `RecoveryWithoutCreation.svelte`** rather
+ * than repeating its paragraph. The attribute belongs to that component and its
+ * value is the reason **it** derived, so a surface that stopped mounting it — or
+ * that drew the same sentence itself — fails here even though the words on screen
+ * would be identical. `says()` cannot tell those apart, and that a host can omit
+ * the sentence while consuming the model faithfully is the failure mode
+ * 2c-4c-3b's review found in four copied `{#if}` blocks.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The reason drawn, or `null` when nothing was.
+ */
+function recoveryNote(target: HTMLElement): string | null {
+  const note = target.querySelector(`[${RECOVERY_WITHOUT_CREATION_ATTRIBUTE}]`);
+  return note?.getAttribute(RECOVERY_WITHOUT_CREATION_ATTRIBUTE) ?? null;
+} // End of function recoveryNote()
 
 beforeEach(() => {
   // The dictionary this file matches against is the English one, so the
@@ -1113,3 +1138,130 @@ describe('the raw editor never offers *Keep my draft*', () => {
     } // End of the loop over the three reload steps
   }); // End of the "declaration" case
 }); // End of the "raw editor never offers a reapply" suite
+
+describe('what the raw editor says about recovery', () => {
+  /*
+   * **2c-4c-3b's negative half on the fourth of its surfaces, and the one the
+   * consult was asked to rule on explicitly.** This editor is **in** the recovery
+   * contract and **out** of save-as-new: what it drafts is a whole document, so
+   * there is no match-shaped value to send to `create_match` and no
+   * document-creation command to send anything else to. What recovery is here is the
+   * four things this screen already offers — keep editing, copy, compare, reload —
+   * and the sentence names them.
+   *
+   * **This surface is why the gate asks about the conflict before the reapply.**
+   * `reapplySupport` is `unavailable` here, so a `manualResolution` is unreachable
+   * and an entry condition written on one would have silenced this sentence for
+   * good; the case below that reaches it through an ordinary conflict is what would
+   * fail if that ordering were ever reversed.
+   *
+   * **That same unavailability is why this editor has two non-committed endings and
+   * the three match surfaces have three.** There is no *Keep my draft* here to
+   * refuse anything, so a reapply that resolved nothing is not a state this screen
+   * can be in; what is exercised below is the unconfirmed reload and the refused
+   * one, and the record says exactly that rather than claiming a third.
+   */
+
+  /**
+   * An editor showing a conflict over an edited draft.
+   *
+   * @param adoption - What the window answers when asked to adopt.
+   * @returns The mounted editor.
+   */
+  async function conflictedEditor(
+    adoption: DiskAdoptionOutcome = 'installed'
+  ): Promise<Mounted> {
+    const editor = mountEditor([{ result: CONFLICTED }], ORIGINAL, adoption);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+    return editor;
+  } // End of function conflictedEditor()
+
+  /** The reason a whole-document draft produces, so a rename is a compile error. */
+  const REASON: RecoveryUnavailable = 'wholeDocumentDraft';
+
+  it('says nothing at all until something has gone wrong', () => {
+    const editor = mountEditor([]);
+    // The shared renderer is mounted and drew nothing, which is its own decision
+    // and not a condition this editor carries.
+    expect(recoveryNote(editor.target)).toBeNull();
+    expect(says(editor.target, recoveryUnavailableKey('wholeDocumentDraft'))).toBe(false);
+    editor.stop();
+  });
+
+  it('offers no save-as-new, keeps the copy it already had, and says why', async () => {
+    const editor = await conflictedEditor();
+
+    // `recoveryNote` is what says the shared renderer drew it; `says` alone could
+    // not tell that from a paragraph of this file's own.
+    expect(recoveryNote(editor.target)).toBe(REASON);
+    expect(says(editor.target, recoveryUnavailableKey('wholeDocumentDraft'))).toBe(true);
+    expect(says(editor.target, recoveryUnavailableKey('operationDraft'))).toBe(false);
+    // No save-as-new: neither the control 3a drew on the two creating surfaces nor
+    // the form it opens is anywhere on this screen.
+    expect(button(editor.target, recoveryChoiceKey('createFromSupportedFields'))).toBeNull();
+    expect(says(editor.target, 'browser.recovery.label')).toBe(false);
+    expect(says(editor.target, 'browser.recovery.transferHeading')).toBe(false);
+    expect(says(editor.target, 'browser.recovery.destination')).toBe(false);
+    // **The copy stays**, which is the half of the sentence that would otherwise be
+    // a promise this screen does not keep: it drafts authored text, so
+    // `conflictChoicesFor` names the copy and this editor draws it.
+    expect(button(editor.target, conflictChoiceKey('copyDraft', 'authoredText'))).not.toBeNull();
+    expect(editor.calls).toHaveLength(1);
+    expect(editor.adoptions).toEqual([]);
+    expect(editor.closed()).toBe(0);
+    editor.stop();
+  }); // End of the "no save-as-new" case
+
+  it('keeps the conflict through both endings that wrote nothing', async () => {
+    /*
+     * **Both**, and not the three the match surfaces have: a reapply that resolved
+     * nothing is unreachable here, so this case exercises the two reload endings and
+     * claims no more.
+     *
+     * **Each asserts `closed()`.** The `close` callback is a spy rather than a
+     * parent unmount, so an editor that had been told to close would go on rendering
+     * and every sentence below would still be found — continued rendering is not
+     * evidence that nothing closed, and the count is.
+     */
+
+    // A reload asked for and not confirmed: nothing spent, everything still drawn.
+    const atTheWarning = await conflictedEditor();
+    control(atTheWarning.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+    flushSync();
+    expect(recoveryNote(atTheWarning.target)).toBe(REASON);
+    expect(atTheWarning.adoptions).toEqual([]);
+    expect(atTheWarning.calls).toHaveLength(1);
+    expect(atTheWarning.closed()).toBe(0);
+    atTheWarning.stop();
+
+    // A reload the window refused: the conflict stayed, and the sentence with it.
+    const refusedReload = await conflictedEditor('refused');
+    control(refusedReload.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+    flushSync();
+    control(refusedReload.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
+    flushSync();
+    expect(refusedReload.adoptions).toHaveLength(1);
+    expect(says(refusedReload.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    expect(recoveryNote(refusedReload.target)).toBe(REASON);
+    expect(refusedReload.calls).toHaveLength(1);
+    expect(refusedReload.closed()).toBe(0);
+    refusedReload.stop();
+  }); // End of the "conflict survives both non-committed endings" case
+
+  it('stops saying it when the person puts the conflict away', async () => {
+    const editor = await conflictedEditor();
+    control(editor.target, conflictChoiceKey('keepEditing', 'authoredText')).click();
+    flushSync();
+
+    expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten')).toBe(false);
+    expect(recoveryNote(editor.target)).toBeNull();
+    expect(says(editor.target, recoveryUnavailableKey('wholeDocumentDraft'))).toBe(false);
+    expect(editor.adoptions).toEqual([]);
+    expect(editor.calls).toHaveLength(1);
+    // A dismissal is an ending that wrote nothing too, and it does not close either.
+    expect(editor.closed()).toBe(0);
+    editor.stop();
+  }); // End of the "dismissal ends the sentence" case
+}); // End of the "what the raw editor says about recovery" suite

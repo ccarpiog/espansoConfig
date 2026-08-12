@@ -100,7 +100,9 @@ import {
   recoveryDestinationsOf,
   recoveryRefusal,
   recoveryRouteOf,
+  recoveryIsAnswerable,
   recoveryView,
+  recoveryWithoutCreation,
   redoRecoveryEdit,
   sendRecoveryCreate,
   sourceConflictState,
@@ -113,7 +115,9 @@ import {
   type InstallTheWaitingForm,
   type RecoveryCreateAnswer,
   type RecoveryDraftKind,
-  type RecoverySession
+  type RecoverySession,
+  type RecoveryUnavailable,
+  type RecoveryWithoutCreationKind
 } from './recovery';
 
 /** The revision the window is projecting when every conflict below arrives. */
@@ -605,7 +609,91 @@ describe('which surface recovery offers a new snippet on', () => {
       )
     ).toEqual({ kind: 'unavailable', reason: 'noConflict' });
   });
+
+  it('answers `noConflict` on all four kinds when there is no conflict at all', () => {
+    // **2c-4c-3b's one model change, and the defect it closes.** Until this step the
+    // route check came first, so a surface that cannot create answered
+    // `operationDraft` or `wholeDocumentDraft` **whatever was going on** — and
+    // `recoveryIsAnswerable` calls both worth a sentence, so the deleter, the mover,
+    // the duplicator and the raw editor would each have carried a permanent
+    // paragraph about a version on disk that was not in dispute. The two creating
+    // kinds are unaffected on a screen: `noConflict` and `notFromManualResolution`
+    // are both refusals nothing draws.
+    const kinds: readonly RecoveryDraftKind[] = [
+      'matchFields',
+      'creationFields',
+      'operationChoice',
+      'wholeDocumentText'
+    ];
+    for (const kind of kinds) {
+      const offer = recoveryAvailability(
+        kind,
+        resolvedNothing<EditorReapplyObstacle>({ kind: 'evidenceNotATarget' }),
+        null,
+        DOCUMENTS,
+        [heldFile(), otherFile()]
+      );
+      expect(offer, kind).toEqual({ kind: 'unavailable', reason: 'noConflict' });
+      expect(recoveryIsAnswerable(offer), kind).toBe(false);
+    } // End of the loop over all four recovery draft kinds
+  }); // End of the "no conflict is asked first" case
 }); // End of the "surface matrix" suite
+
+describe('what a surface that cannot create says about recovery', () => {
+  /** The two kinds `recoveryWithoutCreation` accepts, with the reason each shows. */
+  const SURFACES: readonly (readonly [RecoveryWithoutCreationKind, RecoveryUnavailable])[] = [
+    ['operationChoice', 'operationDraft'],
+    ['wholeDocumentText', 'wholeDocumentDraft']
+  ];
+
+  it('says nothing at all while there is no conflict', () => {
+    for (const [kind] of SURFACES) {
+      expect(recoveryWithoutCreation(kind, null), kind).toBeNull();
+    }
+  });
+
+  it('names what the surface drafts once a conflict is showing', () => {
+    for (const [kind, reason] of SURFACES) {
+      expect(
+        recoveryWithoutCreation(kind, conflictOver<string>('# the whole file\n')),
+        kind
+      ).toBe(reason);
+    }
+  });
+
+  it('answers the same thing as the full gate, whatever else the window holds', () => {
+    // **The agreement this narrowing rests on, driven rather than asserted in a
+    // comment.** `recoveryWithoutCreation` passes no reapply attempt and two empty
+    // document lists, which is safe only because a route that is not
+    // `createsSnippet` reaches neither the reapply check nor the destination list.
+    // That is a property of one ordering in one function, so a later reordering has
+    // to fail here rather than silently making four screens go quiet.
+    const arms: readonly (ReapplyOutcome<unknown, EditorReapplyObstacle> | null)[] = [
+      null,
+      { kind: 'reapplied', session: null },
+      { kind: 'alreadySatisfied', session: null },
+      { kind: 'adoptionRefused' },
+      { kind: 'unavailable' },
+      { kind: 'notAttempted' },
+      resolvedNothing<EditorReapplyObstacle>({ kind: 'evidenceNotATarget' })
+    ];
+    for (const [kind, reason] of SURFACES) {
+      for (const arm of arms) {
+        const full = recoveryAvailability(
+          kind,
+          arm,
+          conflictOver<string>('# the whole file\n'),
+          DOCUMENTS,
+          [heldFile(), otherFile()]
+        );
+        expect(full, kind).toEqual({ kind: 'unavailable', reason });
+        expect(recoveryWithoutCreation(kind, conflictOver<string>('# the whole file\n')), kind).toBe(
+          reason
+        );
+      } // End of the loop over every arm a reapply can leave behind
+    } // End of the loop over the two non-creating surfaces
+  }); // End of the "narrow gate agrees with the full one" case
+}); // End of the "a surface that cannot create" suite
 
 describe('what a retained draft becomes in the new snippet', () => {
   it('carries what the file holds for a field the draft leaves alone', () => {
@@ -1220,6 +1308,8 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'startMatchFieldRecovery',
   'startCreationFieldRecovery',
   'recoveryAvailability',
+  // 2c-4c-3b's one new export: a kind and a conflict in, a code or `null` out.
+  'recoveryWithoutCreation',
   'recoveryDestinationsOf',
   'preferredRecoveryDestination',
   'transferOfField',

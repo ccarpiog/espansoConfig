@@ -280,6 +280,16 @@ renderer is carried by that renderer's mounted suite alone, and a second rendere
 walking the model faithfully**. `MatchMover.svelte:511` still holds the shape duplicate moved away
 from, shipped at 2c-3b and window-read there.
 
+**A model function that returns what to draw does not centralize whether to draw it, and 2c-4c-3b
+shipped that distinction as a High.** `recoveryWithoutCreation` answered both *which* reason and
+*whether there was one* — a real centralization — and four hosts each still carried their own `{#if}`
+and accessor call over its answer, so any one of them could have omitted the sentence while consuming
+the model faithfully. **Deciding and drawing are two rules, and only a renderer can own the second.**
+`src/lib/components/RecoveryWithoutCreation.svelte` owns it: a host mounts it unconditionally and
+carries no condition about the sentence. Its suites prove the **mount**, not the words, through a
+data attribute stamped with the reason the component itself derived — because a host that re-inlined
+the paragraph would put identical text on screen and pass any test written against the words.
+
 **A refusal's sentence must be true of its predicate, not of its name.** `documentHasUnsavedDraft`
 measures **any open match editor**, dirty or not: `isDirty` is derived inside `MatchEditor.svelte`'s
 own session, so no coordinator can observe it (R36), and over-refusing costs one closed editor where
@@ -368,12 +378,20 @@ existing six components are not back-filled. **`resolve.conditions` in `vite.con
 conditionally and that is load-bearing** — the option *replaces* Vite's defaults, and setting it
 unconditionally silently took the production build from 154 to 180 modules and pulled in Svelte's
 **server** build with nothing failing. **The module count is a regression guard**; check it — it is
-**178** as of 2c-4c-3a, and the guard is not the number but the *shape of
+**180** as of 2c-4c-3b, and the guard is not the number but the *shape of
 a change to it*. The ladder, so it can be checked rather than accepted: **171** through 2c-4a-2,
 **172** at 2c-4a-3a (`src/lib/components/clipboard.ts`), **173** and **174** at 2c-4a-3c
 (`src/lib/components/reveal.ts`, then `src/lib/browser/draftKind.ts`), **175** at 2c-4b-2
-(`src/lib/browser/reapply.ts`) — one new source module each time — and then **178** at 2c-4c-3a,
-which moved by three for two source files.
+(`src/lib/browser/reapply.ts`) — one new source module each time — then **178** at 2c-4c-3a,
+which moved by three for two source files, and **180** at 2c-4c-3b, which moved by two for one
+new styled component (`src/lib/components/RecoveryWithoutCreation.svelte`).
+
+**180 is exactly the old regression shorthand, and 2c-4c-3b is where that stopped being usable as
+one.** A legitimate count now sits on the number that used to mean "the Svelte server build leaked
+in", so the number alone decides nothing: at 2c-4c-3b the `<style>` block was deleted (179) and
+restored (180) to prove the arithmetic, and `internal/server`, `svelte/server` and `async_hooks`
+were each searched for in the built bundle and found absent. **Do both** — the arithmetic and the
+bundle search — rather than either.
 
 **That last rung is the first `.svelte` file on the ladder, and it is why "one module per new source
 module" is no longer the whole rule.** 2c-4c-3a made `src/lib/browser/recovery.ts` reachable from the
@@ -381,7 +399,7 @@ entry for the first time (+1), added `src/lib/components/RecoveryPanel.svelte` (
 component's `<style>` block is a module of its own (+1). This was **measured, not inferred** — the
 block was deleted, the build came back 177, and it was restored. So a new component costs **two**,
 a new `.ts` module costs one, and a component with no styles costs one. The other two frontend gates
-move with it: **422** `svelte-check` files and **1744** tests as of 2c-4c-3a. (The test count is the
+move with it: **423** `svelte-check` files and **1767** tests as of 2c-4c-3b. (The test count is the
 one this project has already got wrong: `1623` stood in `PROGRESS.md` for three step records after
 3d-1 committed ten cases behind a harness that made the production figure unobservable. A count only
 a harness-free tree can produce must be **re-derived** on such a tree, never copied forward.) A count

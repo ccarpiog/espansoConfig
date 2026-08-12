@@ -31,6 +31,7 @@
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
@@ -172,6 +173,15 @@
    * **The panel cannot be left while a move is in flight**, for 2c-1b's reason:
    * the request is authorized and cannot be cancelled, so unmounting would leave
    * it free to commit with its outcome drawn nowhere.
+   *
+   * **Recovery here is a reason and not a form** (2c-4c-3b). This surface is one of
+   * the four `recoveryAvailability` answers `unavailable` for, so it mounts
+   * `RecoveryWithoutCreation.svelte` — which decides both the reason and whether
+   * there is one — and draws no control at all: no copy, because a
+   * `MovePlacement` preserves nothing while looking as though it did, and no
+   * save-as-new, because there is no authored text to build one out of. The truthful
+   * next step is the confirmed reload this panel already offers, then a fresh
+   * selection and a fresh move.
    */
 
   const {
@@ -788,6 +798,21 @@
       {/if}
     </div>
   {/if}
+
+  <!-- What recovery is on a surface that cannot create: one sentence, in the place
+       the two surfaces that *can* create draw their form, so all six say it in the
+       same position. There is no control here — no copy and no save-as-new — and its
+       absence is the sentence.
+
+       **Mounted unconditionally**: whether there is anything to say is the shared
+       renderer's decision, taken from the conflict below, and not a condition this
+       markup repeats. Four surfaces that each decided it for themselves is the
+       finding this component closed.
+
+       **Not to be confused with `current.view.recovery`**, this panel's older
+       neighbour and a different subject entirely: that one is what to do about a
+       move whose send may or may not have written, and it is a list of controls. -->
+  <RecoveryWithoutCreation kind="operationChoice" conflict={current.view.conflict} />
 
   {#if current.view.outcome !== null}
     {@const outcome = current.view.outcome}

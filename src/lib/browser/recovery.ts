@@ -16,8 +16,20 @@
  * {@link RECOVERY_CONFLICT_CAPABILITIES}, over transitions that already existed and
  * were already driven by `recovery.test.ts`. **No transition changed.**
  * `src/lib/components/RecoveryPanel.svelte` is the one renderer, shared by the
- * match editor and the creator; the three operation surfaces and the raw editor
- * are 2c-4c-3b's.
+ * match editor and the creator.
+ *
+ * **2c-4c-3b drew the other four, and they draw a reason rather than a form.** The
+ * deleter, the mover, the duplicator and the raw editor cannot create a snippet out
+ * of what they retain, so none of them mounts that panel — its heading, its label
+ * and every control in it are about the product they cannot make. What all four
+ * mount instead is `src/lib/components/RecoveryWithoutCreation.svelte`, the one
+ * renderer of {@link recoveryWithoutCreation}'s one sentence: it asks this module
+ * itself and decides whether to draw, so no host carries that condition. (Its first
+ * round gave each of the four its own copy of that condition, and the step's review
+ * rejected it for this file's own reason.) That step added no transition and changed
+ * one: {@link recoveryAvailability} now asks whether there is a conflict at all
+ * **first**, which is what stops those four explaining recovery on a screen where
+ * nothing has gone wrong.
  *
  * ## What recovery is, stated as the narrowest thing it does
  *
@@ -462,10 +474,28 @@ export function preferredRecoveryDestination(
  * not drawn — `conflictChoicesFor`'s rule, applied to this phase's one new
  * control.
  *
- * The checks are in order of how permanent they are: what the surface's draft
- * **is**, then how the conflict was reached, then whether there is a conflict at
- * all, then what the configuration on disk offers. Only the last can change
- * without a code change.
+ * **Whether there is a conflict at all is asked first, and 2c-4c-3b moved it
+ * there.** Every other check is about what recovery *could* do, and a surface with
+ * no conflict has not reached the question: the route check used to come first, so
+ * the four surfaces that cannot create answered `operationDraft` or
+ * `wholeDocumentDraft` **whether or not anything had gone wrong** — a permanent
+ * answer {@link recoveryIsAnswerable} calls worth a sentence, which is a permanent
+ * paragraph about a version on disk on a screen where no version on disk is in
+ * dispute. Step 3a's own record described `notFromManualResolution` as *the
+ * ordinary state of every surface with no conflict at all*; that was true of the
+ * two surfaces it drew and false of the four it did not, and this ordering is what
+ * makes it true of all six. Nothing changes for a surface that can create: with a
+ * conflict the answers are what they were, and without one both `noConflict` and
+ * `notFromManualResolution` are refusals no screen draws.
+ *
+ * After that the checks are in order of how permanent they are: what the surface's
+ * draft **is**, then how the conflict was reached, then what the configuration on
+ * disk offers. Only the last can change without a code change.
+ *
+ * **The route check standing above the reapply check is what
+ * {@link recoveryWithoutCreation} depends on**, and it is deliberate rather than
+ * incidental: the raw editor's `reapplySupport` is `unavailable`, so it can never
+ * produce a `manualResolution` and would otherwise never reach its own sentence.
  *
  * @typeParam S - The calling surface's session type.
  * @typeParam O - The calling surface's reapply obstacle type.
@@ -484,6 +514,9 @@ export function recoveryAvailability<S, O, T>(
   documents: readonly DocumentSummary[],
   views: readonly DocumentView[]
 ): RecoveryAvailability {
+  if (conflict === null) {
+    return { kind: 'unavailable', reason: 'noConflict' };
+  }
   if (recoveryRouteOf(kind) !== 'createsSnippet') {
     return {
       kind: 'unavailable',
@@ -492,9 +525,6 @@ export function recoveryAvailability<S, O, T>(
   }
   if (attempt === null || attempt.kind !== 'manualResolution') {
     return { kind: 'unavailable', reason: 'notFromManualResolution' };
-  }
-  if (conflict === null) {
-    return { kind: 'unavailable', reason: 'noConflict' };
   }
   const destinations = recoveryDestinationsOf(documents, views, conflict.disk);
   if (destinations.length === 0) {
@@ -2494,17 +2524,20 @@ export function recoveryUnavailableKey(reason: RecoveryUnavailable): Translation
  * Whether a surface has anything to say about recovery at all.
  *
  * **The rule that decides whether a panel is drawn, and it is here rather than in a
- * renderer for 2c-3c-3's reason**: two components ask it today and four more ask it
- * at 2c-4c-3b, and a rule written into one renderer is carried by that renderer's
- * mounted suite alone.
+ * renderer for 2c-3c-3's reason**: a rule written into one renderer is carried by
+ * that renderer's mounted suite alone. **Two components ask it** —
+ * `RecoveryPanel.svelte` directly, for the two surfaces that can create, and
+ * `RecoveryWithoutCreation.svelte` through {@link recoveryWithoutCreation}, for the
+ * four that cannot — so six surfaces are covered by two renderers and one rule.
  *
  * Two of the five refusals mean *recovery has not been reached* rather than
  * *recovery cannot help here*: `notFromManualResolution` is the ordinary state of a
- * conflict nobody has pressed *Keep my draft* on — and of every surface with no
- * conflict at all — and `noConflict` is the same fact from the other side. Drawing
- * either as a permanent sentence would put an explanation of an unoffered control on
- * a screen that is not about it. The other three are the consult's exit criterion:
- * a surface that cannot create says so and names what to do instead.
+ * conflict nobody has pressed *Keep my draft* on, and `noConflict` is what **every**
+ * surface answers with no conflict at all — which it does because
+ * {@link recoveryAvailability} asks that first. Drawing either as a permanent
+ * sentence would put an explanation of an unoffered control on a screen that is not
+ * about it. The other three are the consult's exit criterion: a surface that cannot
+ * create says so and names what to do instead.
  *
  * **It says nothing about an open form.** A recovery form that has been opened
  * outlives the conflict it was opened from — the person may dismiss that panel, and
@@ -2522,6 +2555,63 @@ export function recoveryIsAnswerable(availability: RecoveryAvailability): boolea
     availability.reason !== 'notFromManualResolution' && availability.reason !== 'noConflict'
   );
 } // End of function recoveryIsAnswerable()
+
+/**
+ * The draft kinds recovery cannot make a new snippet out of.
+ *
+ * `Extract` rather than a second literal union, so a renamed member of
+ * {@link RecoveryDraftKind} is a compile error here instead of a type that quietly
+ * stops naming anything.
+ */
+export type RecoveryWithoutCreationKind = Extract<
+  RecoveryDraftKind,
+  'operationChoice' | 'wholeDocumentText'
+>;
+
+/**
+ * What a surface that cannot create says about recovery, or `null` for nothing.
+ *
+ * **The whole of 2c-4c-3b's model side**: the deleter, the mover and the duplicator
+ * draft an `operationChoice` and the raw editor drafts a whole document, so none of
+ * them can reach `RecoveryChoice`, none of them has a destination to write into and
+ * none of them ever draws a form. What those four surfaces show is a **reason**, and
+ * which reason — and whether there is one worth showing at all — is decided here.
+ *
+ * **One caller draws it.** `RecoveryWithoutCreation.svelte` is the only production
+ * caller, and the four surfaces mount that component rather than each asking this
+ * function and writing its own condition. The step's first round did the latter, and
+ * its review rejected it: centralising *which reason* leaves *whether to draw one*
+ * in four renderers, so one of them can fall silent while consuming this answer
+ * faithfully.
+ *
+ * **It delegates rather than re-deciding.** {@link recoveryAvailability} is the only
+ * producer of a recovery answer, and this is that function asked the three questions
+ * a non-creating surface has: the answer for a `null` conflict is `noConflict` and
+ * is drawn nowhere, and the answer for a conflict is the surface's own reason.
+ *
+ * **Why the three arguments it does not take cannot matter**, stated rather than
+ * assumed. A route that is not `createsSnippet` never reaches the reapply check, so
+ * the attempt is not read; it never reaches {@link recoveryDestinationsOf}, so
+ * neither document list is read. That is a property of one ordering in one function,
+ * not of this signature — so `recovery.test.ts` pins it directly, driving every
+ * reapply arm and a populated window against the empty lists below and asserting one
+ * answer.
+ *
+ * @typeParam T - The drafted value the conflict retained.
+ * @param kind - What the surface's retained draft is, for recovery.
+ * @param conflict - The conflict it is showing, or `null`.
+ * @returns The reason to show, or `null` when this surface has nothing to say.
+ */
+export function recoveryWithoutCreation<T>(
+  kind: RecoveryWithoutCreationKind,
+  conflict: ConflictModel<T> | null
+): RecoveryUnavailable | null {
+  const availability = recoveryAvailability(kind, null, conflict, [], []);
+  if (availability.kind === 'offered' || !recoveryIsAnswerable(availability)) {
+    return null;
+  }
+  return availability.reason;
+} // End of function recoveryWithoutCreation()
 
 /**
  * What one row of the transfer table says about the field it stands for.

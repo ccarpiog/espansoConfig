@@ -85,7 +85,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-1** | **The creation and risk contract in Rust**, with no command, no `DocumentEdit` variant and no second writer: `NewMatch` widened from two mandatory fields to those plus four optional ones with `fields()` emitting only present keys in one documented order, and `FindingCode::NewMatchRepeatsLiteralTrigger` — `SuspiciousButPermitted`, content-addressed to the candidate — produced beside `findings_of` **inside** `save_document` for insertion candidates only | ✅ complete — after a review fix round, a confirmation pass and a **third scoped pass**. Round 1 returned **NOT READY** on three Mediums and two Lows, and **one of them was a defect in behaviour**: the locator derived the inserted item's address from candidate-sequence *length*, so a legal mixed batch shifted the anchor and the finding could fire **against an existing item the new snippet does not repeat**. Round 2 confirmed all five closed and found **one new Low the fix had introduced**; round 3 returned **READY with no findings** |
 | **2c-4c-2** | **Recovery as browser values, with nothing drawn**: `src/lib/browser/recovery.ts` — the six-surface route matrix, `recoveryAvailability` as the single producer of both the choice list and the destination list, the six field transfers through `fieldIntent`, destination selection judged by the **disk** projection, `RECOVERY_POSITION` as the only position anywhere, and `sendRecoveryCreate` composing `BrowserState.createMatch` through a callback. No `.svelte`, no `ConflictChoice` member, no dictionary key, no Rust | ✅ complete — after **five** review rounds. Round 1 returned **NOT READY** on five findings; rounds 2–5 each closed what was named and **each found a narrower instance of it**, four of the five times in a path the previous fix had introduced. Only two findings in five rounds were defects in behaviour — round 1's High (`sourceConflictRetained` claiming an intactness the composed wrapper can falsify) and round 5's five missing `closed` guards — and **neither was reachable from a window**, because nothing draws this module yet |
 | **2c-4c-3a** | **The recovery panel, and the first screen in this phase that draws anything**: one shared `src/lib/components/RecoveryPanel.svelte` driven by `recoveryView()`, wired into `MatchEditor.svelte` and `MatchCreator.svelte` only, 58 `browser.recovery.*` keys per language behind seven reactive accessors, and the mounted evidence step 1's live behaviour change never got. **Step 3 was split by the orchestrator**; the four non-creating surfaces are 3b | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on two Highs: `runCreate` never installed the `saving` session before awaiting, so **a double-click sent two writes on one base revision and a late conflict could replace a committed answer** — this project's one absolute prohibition, reachable from a button — and `sourceConflict.retained` claimed an intactness its predicate cannot establish. Round 2 confirmed the fix sound, found **no High and no Medium**, and left one Low: a false sentence **the fix round itself introduced** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3a are complete. Step 3 is split: 3b, the four surfaces that recover without creating, is next** |
+| **2c-4c-3b** | **The four surfaces that recover without creating**: `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and `RawEditor.svelte` draw a **reason and not a form**, through one new shared `src/lib/components/RecoveryWithoutCreation.svelte` mounted unconditionally by all four. `recoveryWithoutCreation()` and one **ordering change** in `recoveryAvailability` — the conflict is asked about first — and no new string, no dictionary key, no transition, no Rust. **With 3b the consult's step-3 matrix is complete on all six surfaces** | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on one High: the four hosts each carried their own `{#if}` and accessor call, so `recoveryWithoutCreation` centralized *which* reason but not *whether it is drawn*, and **one host could omit the sentence while consuming the model faithfully** — the 2c-3c-3 failure mode exactly. The fix built the shared renderer. Round 2 found **no High**, and its one Medium was an over-claim **the fix round's own record introduced** while fixing an over-claim |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3 are complete, 3 in both its halves. Step 4, rebuilding the window instrument, is next** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -2303,6 +2304,45 @@ owner's real configuration **stay open**, recorded rather than quietly absorbed 
 
 ---
 
+## Phase 2c-4c-3b review disposition
+
+Two rounds, in `docs/reviews/phase-2c-4c-3b-code.md`. Round 1 returned **NOT READY** on one High and
+one Medium; round 2 found **no High**, confirmed the High closed, and returned one Medium that the
+fix round's own record had introduced.
+
+| # | Round | Finding | Disposition |
+|---|---|---|---|
+| H1 | 1 | `recoveryWithoutCreation` centralized **which** reason but not **whether it is drawn**: each of the four hosts carried its own `{#if}` and accessor call, so a host could omit the sentence while consuming the model faithfully — the 2c-3c-3 failure mode. The record compounded it with *"one function, six callers, one suite"*, which was false of what shipped | **Fixed by building the shared renderer**, the first of the two answers the review named. `RecoveryPanel.svelte` was **not** redesigned into a discriminated form/reason renderer and its three collaborators were **not** made optional — that was the second answer, and it would have put a possibly-absent prop on the two surfaces that must never be without one. The false claim is retracted in the record rather than reworded |
+| M1 | 1 | The record claimed three surviving endings on *"each surface"*; the raw editor has only **two** reachable, its reapply being deliberately unavailable. No raw case asserted `close` was not called, and a spy `close` means continued local rendering proves nothing | **Fixed by doing the work and correcting the record**: §5 distinguishes two endings from three, and the enumerated endings assert `closed() === 0` |
+| M1 | 2 | The fix for M1 wrote *"every tested non-committed ending on all four surfaces"* into the record — a claim one scope wider than the work. Four pre-existing no-write endings did not assert it, and `alreadySatisfied` is a **distinct** ending rather than duplicate coverage | **Fixed both ways by the orchestrator**: the four named endings now assert it (they pass, so `close` genuinely was not called), **and** the sentence is narrowed to what this step enumerates. The review's list was prefixed *including*, so an exhaustiveness claim over four suites is one nothing verified |
+
+**Three lessons, and the third is the one this phase keeps re-teaching.**
+
+**The model can own a rule and still leave the failure mode open.** `recoveryWithoutCreation` was a
+real centralization — it decided which reason and whether there was one — and it was still the
+2c-3c-3 defect, because *deciding* and *drawing* are two rules and only the first had one home. **A
+function returning what to draw does not make a renderer that draws it**; the four hosts each had to
+choose to. The shared component closes it by owning the `{#if}` itself, and each host's suite proves
+the **mount** rather than the words, through a data attribute carrying the reason **the component**
+derived — so a host that re-inlined the paragraph fails with identical text on screen.
+
+**Not reusing `RecoveryPanel.svelte` was right, and the review agreed with the reasoning rather than
+the convenience.** Its `aria-label`, heading, transfer table, destination list and create control
+are all about a new snippet these four surfaces cannot make, and mounting it would have meant making
+`open`, `create` and `adoptDiskVersion` optional on the two surfaces that must never be without
+them. **A prop that may be absent on the surface that creates is this project's "a control could
+compile and do nothing" failure**, and it would have been paid to reuse thirty characters of markup.
+
+**A fix for an over-claim wrote a bigger over-claim.** Round 1's M1 was a record claiming more
+evidence than existed; the fix for it claimed more evidence than existed, one scope wider. **The
+orchestrator's own brief contributed** — it asked for the assertion on "every tested non-committed
+ending on all four surfaces", and the worker wrote that sentence into the record while implementing
+it only for its own cases. This is the sixth consecutive round on this phase in which a fix produced
+the next round's finding. **Read a fix round's record against its diff, not against the brief that
+commissioned it.**
+
+---
+
 ## Phase 2c-3c-3 review disposition
 
 **Two rounds, four findings, `NOT READY` both times** (`docs/reviews/phase-2c-3c-3-code.md`; round 2
@@ -3482,6 +3522,37 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 2c-4c step 3b
+
+**Record:** `docs/decisions/2c-4c-3b-notes.md`. **Review:** `docs/reviews/phase-2c-4c-3b-code.md`
+(two rounds in one file, round 1 transcribed and round 2 Codex's own bytes — the provenance of each
+is stated in it).
+
+**Every number below was re-derived by the orchestrator on the working tree, each command run on its
+own, never accepted from a worker's report.** Both gate runs were taken — once after the
+implementation and again after the fix round — and the second is what is recorded.
+
+| Gate | Command | Result |
+|---|---|---|
+| Rust | `cargo test --workspace` | **1112 passed, 0 failed** — unchanged; no Rust file was touched |
+| Frontend tests | `npm test` | **1767 passed, 51 files** (1744 → 1764 at the implementation, → 1767 after the fix round) |
+| Types | `npm run check` | **423 files, 0 errors, 0 warnings** |
+| Bundle | `npm run build` | **180 modules** |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+
+**180 is exactly the old regression shorthand, and that is why the number alone was not accepted.**
+The arithmetic is 178 + 2 for one new styled component (`RecoveryWithoutCreation.svelte`): the
+component is one module and its `<style>` block is another. The worker verified it by deleting the
+block (179) and restoring it (180); **the orchestrator independently searched the built bundle for
+`internal/server`, `svelte/server` and `async_hooks` and found none.** `CLAUDE.md`'s ladder now
+carries this rung and the warning that the shorthand is spent.
+
+**+3 tests for zero new cases at the implementation, and +3 more that are new cases.** 1744 → 1764
+is 16 new mounted cases (four on each of the four surfaces) plus four model cases; 1764 → 1767 is
+the three per-source-file `it.each` scanners each gaining one row for the new component. The four
+assertions the orchestrator added in the round-2 fix are inside **existing** cases, so they moved no
+count — which is exactly why they were worth adding rather than counting.
 
 ## Verification — Phase 2c-4c step 3a
 
@@ -7213,26 +7284,86 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Steps 2c-4c-1, 2c-4c-2 and **2c-4c-3a** are complete. **Step 2c-4c-3b — the four surfaces that recover without creating — is next.**
+### Steps 2c-4c-1, 2c-4c-2 and **2c-4c-3 in both its halves** are complete. **Step 2c-4c-4 — rebuild the window instrument — is next.**
 
-**Step 3 was split in two by the orchestrator, and the split is now part of the plan.** The consult's
-six-step cut is unchanged; step 3 is subdivided, exactly as 2c-4a-3 was, and for the same reason: one
-worker cannot coherently carry six components, a new i18n namespace and a mounted suite per component
-in one context.
+**Step 3 was split in two by the orchestrator and both halves are done.** The consult's six-step cut
+is unchanged. 3a built the shared panel, its strings and the two surfaces that can create; 3b drew
+the four that cannot. **The consult's step-3 matrix is now complete on all six surfaces**, its
+positive half proved at 3a and its negative half at 3b.
 
-- **3a — DONE.** The shared panel, its strings, and the two surfaces that can create.
-- **3b — NEXT.** `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and
-  `RawEditor.svelte`. All four are **byte-identical today** — 3a did not touch them, and
-  `git status` at the 3a commit proves it.
+#### What 3b left, in the sentences step 4 needs
 
-#### What 3a hands 3b, in the sentences 3b needs
+1. **`src/lib/components/RecoveryWithoutCreation.svelte` is the second recovery renderer, and there
+   are exactly two.** `RecoveryPanel.svelte` draws the form on the two surfaces that create;
+   this one draws one sentence on the four that cannot, and **owns the decision to draw it** — a
+   host mounts it unconditionally and carries no condition about the sentence. It exports
+   `RECOVERY_WITHOUT_CREATION_ATTRIBUTE` and stamps the derived reason onto its paragraph, which is
+   how each host's suite proves the **mount** rather than the words. A window plan that expects a
+   recovery sentence should look for that element, not for a string.
+2. **`recoveryAvailability` asks `conflict === null` first**, as of 3b. Before it, the four
+   non-creating surfaces answered `operationDraft`/`wholeDocumentDraft` whatever was happening, so
+   drawing them at all would have put a permanent paragraph about a disk version on a screen where
+   none was in dispute. Codex verified the reorder with a **complete disagreement matrix** (round 1
+   of `docs/reviews/phase-2c-4c-3b-code.md`, "Verified without findings"): with a conflict nothing
+   changes for any surface; without one the two creating kinds move from `notFromManualResolution`
+   to `noConflict`, and both are refusals no screen draws. **Do not re-litigate the ordering.**
+3. **The route check stands above the reapply check and that is load-bearing.** The raw editor's
+   `reapplySupport` is `unavailable`, so it can never produce a `manualResolution`; an entry
+   condition written on one would silence its sentence permanently. `recoveryWithoutCreation` passes
+   a null attempt and two empty lists precisely because the route check returns first, and
+   `recovery.test.ts` pins that rather than asserting it.
+4. **No dictionary key was added or changed at 3b.** The two sentences it draws —
+   `browser.recovery.unavailable.operationDraft` and `.wholeDocumentDraft` — are 3a's, in both
+   languages, and each names the truthful next step for its surface.
 
-1. **`src/lib/components/RecoveryPanel.svelte` is the one recovery renderer**, driven by
-   `recoveryView()`, and it is already used by two hosts. 3b's four surfaces are the ones
-   `recoveryAvailability` answers **`unavailable`** for — `operationDraft` for the deleter, mover and
-   duplicator, `wholeDocumentDraft` for the raw editor. **3b draws a reason, not a form.** The
-   sentences already exist: `browser.recovery.unavailable.operationDraft` and
-   `.wholeDocumentDraft`, both languages, both written to name the truthful next step.
+#### The gates, re-derived by the orchestrator on the working tree at the 3b commit
+
+```sh
+npm install                    # required first in a fresh clone; node_modules/ is gitignored
+cargo test --workspace         # expect 1112 passed, 0 failed
+npm test                       # expect 1767 passed, 51 files
+npm run check                  # expect 423 files, 0 errors, 0 warnings
+npm run build                  # expect 180 modules
+```
+
+**⚠️ 180 is exactly the old "the Svelte server build leaked in" shorthand, and at 3b that shorthand
+stopped being usable.** A legitimate count now sits on it. The arithmetic is 178 + 2 for one new
+**styled** component, verified by deleting the `<style>` block (179) and restoring it; and the built
+bundle was independently searched for `internal/server`, `svelte/server` and `async_hooks`, none
+present. **Do both checks, never the number alone.** `CLAUDE.md`'s ladder carries this rung and the
+warning.
+
+The test count is off by more than your own cases whenever a file is added under `src/lib/browser/`
+or `src/lib/components/`: three per-source-file `it.each` scanners add rows. At 3b that was the whole
+of 1764 → 1767. Expect it; do not hunt it.
+
+#### What 2c-4c-3b's review cost, and the lesson worth carrying
+
+Two rounds. Round 1 returned **NOT READY** on one High — the four hosts each deciding independently
+whether to draw the sentence, which is the 2c-3c-3 failure mode reached through a *model function
+that already existed*. **Centralizing which reason to draw did not centralize whether to draw it**,
+and only a renderer can own the second. Round 2 confirmed the High closed and returned one Medium
+that **the fix round's own record introduced**: a claim one scope wider than the work it described.
+The full disposition is "Phase 2c-4c-3b review disposition" above.
+
+**Six consecutive rounds on this phase have now ended with a fix producing the next round's
+finding.** Do not treat a fix round as the end of a step, and read a fix round's record **against its
+diff** rather than against the brief that commissioned it — round 2's Medium was the orchestrator's
+own brief wording, copied into a record by a worker who had implemented something narrower.
+
+#### ⚠️ HISTORICAL — what 3a handed 3b, kept for items 2 and 3, which still bind
+
+**3b is done, so items 1 and 4 are discharged and item 1's headline is now false**: there are **two**
+recovery renderers, not one — see "What 3b left" above. Items 2 and 3 are unchanged and bind every
+remaining step of this phase.
+
+1. ~~**`src/lib/components/RecoveryPanel.svelte` is the one recovery renderer**~~ — superseded at 3b.
+   It is one of two: the form renderer, driven by `recoveryView()`, used by the two hosts that
+   create. 3b's four surfaces were the ones `recoveryAvailability` answers **`unavailable`** for —
+   `operationDraft` for the deleter, mover and duplicator, `wholeDocumentDraft` for the raw editor —
+   and they draw a reason through `RecoveryWithoutCreation.svelte`. The sentences are
+   `browser.recovery.unavailable.operationDraft` and `.wholeDocumentDraft`, both languages, both
+   written to name the truthful next step.
 2. **`sendRecoveryCreate` takes a required third argument, `InstallTheWaitingForm`**, invoked with
    the waiting session **before** the request is authorized and never for a refused form. Any new
    call site must supply one; the type forces that, and forces this module to call it before
@@ -7242,19 +7373,22 @@ in one context.
 3. **Every sentence about `sourceConflictState` names the act, never the outcome**, and all three
    arms now also disclaim knowledge of what the host draft holds now. Round 1's second High was
    exactly this claim; do not reintroduce it in a 3b sentence.
-4. **The mounted matrix 3b owes** is the negative half of the consult's step-3 requirement: that the
-   deleter, the mover and the duplicator offer **neither copy nor save-as-new**, that the raw editor
-   offers **no save-as-new**, and that **the original conflict survives every non-committed ending**
-   on each. 3a proved the positive half on the editor and the creator.
+4. **The mounted matrix 3b owes** — **DISCHARGED at 3b.** It was the negative half of the consult's
+   step-3 requirement: that the deleter, the mover and the duplicator offer **neither copy nor
+   save-as-new**, that the raw editor offers **no save-as-new**, and that **the original conflict
+   survives every non-committed ending** on each. 3a proved the positive half on the editor and the
+   creator. Note what 3b learned about the last clause: the raw editor has only **two** reachable
+   non-committed endings, its reapply being deliberately unavailable, and the three match surfaces
+   have three.
 
-#### The gates, re-derived by the orchestrator on a clean tree at the 3a commit
+#### ⚠️ HISTORICAL — the gates at the 3a commit, superseded by 3b's `1112 / 1767 / 423 / 180`
 
 ```sh
 npm install                    # required first in a fresh clone; node_modules/ is gitignored
 cargo test --workspace         # expect 1112 passed, 0 failed
-npm test                       # expect 1744 passed, 51 files
-npm run check                  # expect 422 files, 0 errors, 0 warnings
-npm run build                  # expect 178 modules
+npm test                       # expect 1744 passed, 51 files    ← superseded: 1767
+npm run check                  # expect 422 files, 0 errors, 0 warnings    ← superseded: 423
+npm run build                  # expect 178 modules              ← superseded: 180
 ```
 
 **178 moved by three for two source files, and that is the expected reading, not a regression.**
@@ -7290,7 +7424,9 @@ a step.
 **2c-4c-4** rebuild the window instrument · **2c-4c-5** the bilingual window reading ·
 **2c-4c-6** remove the instrument and re-derive the gate counts. Their scopes and the evidence each
 owes are the table in the consult disposition above. **The window reading is owed for six surfaces**
-and none of the three kinds of evidence 3a produced is a reading of a screen.
+and none of the evidence 3a or 3b produced is a reading of a screen — 3b in particular drew new
+markup on four surfaces and, per the standing rule, **a window reading is re-taken after any change
+to a component**. Step 4 judges the instrument, not the screen; step 5 is the reading.
 
 ---
 

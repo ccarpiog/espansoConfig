@@ -43,6 +43,7 @@
     DocumentSummary
   } from '../ipc/types';
   import { copyReferenceText } from './clipboard';
+  import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome } from './reveal';
   import SourceText from './SourceText.svelte';
 
@@ -91,6 +92,18 @@
    * surface's `offersReapply` said. What is offered is *Keep editing*, *Copy my
    * text* and *Load the version on disk*, and 2c-4c owns the recovery this editor
    * is left with.
+   *
+   * **And what 2c-4c-3b made of that is one sentence and no new control.** The
+   * consult's Q4 puts this editor **in** the recovery contract and **out** of
+   * save-as-new: a whole document holds no match-shaped value to send to
+   * `create_match`, there is no document-creation command, and V1 forbids both an
+   * automatic merge and a stale overwrite. So `RecoveryPanel.svelte` is not mounted
+   * here — every control in it is about a new snippet — and what is mounted instead
+   * is `RecoveryWithoutCreation.svelte`, whose one sentence names the four things
+   * this editor really does offer. **This surface is the reason that gate asks about the
+   * conflict before it asks about the reapply**: `reapplySupport` is `unavailable`,
+   * so a `manualResolution` is unreachable here and an entry condition written on one
+   * would have silenced this sentence permanently.
    *
    * **A save that failed is never drawn as "nothing was written" unless it was.**
    * A failure at or after the rename may have left the candidate on disk, and the
@@ -514,6 +527,18 @@
         : t('browser.rawEditor.sendFailed')}
     </p>
   {/if}
+
+  <!-- What recovery is on a surface that cannot create: one sentence, in the place
+       the two surfaces that *can* create draw their form, so all six say it in the
+       same position. There is no control here — and no save-as-new anywhere on this
+       screen — and its absence is the sentence. What the sentence *does* name —
+       keep editing, copy, compare, reload — is above and below it.
+
+       **Mounted unconditionally**: whether there is anything to say is the shared
+       renderer's decision, taken from the conflict below, and not a condition this
+       markup repeats. Four surfaces that each decided it for themselves is the
+       finding this component closed. -->
+  <RecoveryWithoutCreation kind="wholeDocumentText" conflict={view.conflict} />
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}

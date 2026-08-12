@@ -26,6 +26,7 @@
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
@@ -164,6 +165,15 @@
    * **The panel cannot be left while a duplicate is in flight**, for 2c-1b's
    * reason: the request is authorized and cannot be cancelled, so unmounting
    * would leave it free to commit with its outcome drawn nowhere.
+   *
+   * **Recovery here is a reason and not a form** (2c-4c-3b). This surface is one of
+   * the four `recoveryAvailability` answers `unavailable` for, so it mounts
+   * `RecoveryWithoutCreation.svelte` — which decides both the reason and whether
+   * there is one — and draws no control at all: no copy, and no
+   * save-as-new — which on this panel would be the split's named failure, a
+   * projection-based copy offered as the way to finish a *duplication*. The truthful
+   * next step is the confirmed reload this panel already offers, then a fresh
+   * selection and a fresh duplicate.
    */
 
   const {
@@ -680,6 +690,22 @@
       {/if}
     </div>
   {/if}
+
+  <!-- What recovery is on a surface that cannot create: one sentence, in the place
+       the two surfaces that *can* create draw their form, so all six say it in the
+       same position. There is no control here — no copy and no save-as-new — and its
+       absence is the sentence: a projection-based new snippet offered as the way to
+       finish a *duplication* is the split's named failure.
+
+       **Mounted unconditionally**: whether there is anything to say is the shared
+       renderer's decision, taken from the conflict below, and not a condition this
+       markup repeats. Four surfaces that each decided it for themselves is the
+       finding this component closed.
+
+       **Not to be confused with `current.view.recovery`**, this panel's older
+       neighbour and a different subject: what to do about a duplication whose send
+       may or may not have written. -->
+  <RecoveryWithoutCreation kind="operationChoice" conflict={current.view.conflict} />
 
   {#if current.view.outcome !== null}
     {@const outcome = current.view.outcome}

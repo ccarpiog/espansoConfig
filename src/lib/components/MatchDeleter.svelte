@@ -25,6 +25,7 @@
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
@@ -114,6 +115,15 @@
    * `conflictDiskText`'s decision and not this markup's. The confirmed reload
    * installs the disk projection and **closes** this panel: nothing is loaded in
    * its place, because finding "the same" snippet in another revision is 2c-4b.
+   *
+   * **Recovery here is a reason and not a form** (2c-4c-3b). This surface is one of
+   * the four `recoveryAvailability` answers `unavailable` for, so it mounts
+   * `RecoveryWithoutCreation.svelte` — which decides both the reason and whether
+   * there is one — and draws no control at all: no copy, because a
+   * `MatchId` preserves nothing while looking as though it did, and no save-as-new,
+   * because there is no authored text to build one out of. The truthful next step is
+   * the confirmed reload this panel already offers, then a fresh selection and a
+   * fresh deletion.
    */
 
   const {
@@ -525,6 +535,17 @@
       {/if}
     </div>
   {/if}
+
+  <!-- What recovery is on a surface that cannot create: one sentence, in the place
+       the two surfaces that *can* create draw their form, so all six say it in the
+       same position. There is no control here — no copy and no save-as-new — and its
+       absence is the sentence.
+
+       **Mounted unconditionally**: whether there is anything to say is the shared
+       renderer's decision, taken from the conflict below, and not a condition this
+       markup repeats. Four surfaces that each decided it for themselves is the
+       finding this component closed. -->
+  <RecoveryWithoutCreation kind="operationChoice" conflict={view.conflict} />
 
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
