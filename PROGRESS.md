@@ -87,7 +87,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-3a** | **The recovery panel, and the first screen in this phase that draws anything**: one shared `src/lib/components/RecoveryPanel.svelte` driven by `recoveryView()`, wired into `MatchEditor.svelte` and `MatchCreator.svelte` only, 58 `browser.recovery.*` keys per language behind seven reactive accessors, and the mounted evidence step 1's live behaviour change never got. **Step 3 was split by the orchestrator**; the four non-creating surfaces are 3b | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on two Highs: `runCreate` never installed the `saving` session before awaiting, so **a double-click sent two writes on one base revision and a late conflict could replace a committed answer** — this project's one absolute prohibition, reachable from a button — and `sourceConflict.retained` claimed an intactness its predicate cannot establish. Round 2 confirmed the fix sound, found **no High and no Medium**, and left one Low: a false sentence **the fix round itself introduced** |
 | **2c-4c-3b** | **The four surfaces that recover without creating**: `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and `RawEditor.svelte` draw a **reason and not a form**, through one new shared `src/lib/components/RecoveryWithoutCreation.svelte` mounted unconditionally by all four. `recoveryWithoutCreation()` and one **ordering change** in `recoveryAvailability` — the conflict is asked about first — and no new string, no dictionary key, no transition, no Rust. **With 3b the consult's step-3 matrix is complete on all six surfaces** | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on one High: the four hosts each carried their own `{#if}` and accessor call, so `recoveryWithoutCreation` centralized *which* reason but not *whether it is drawn*, and **one host could omit the sentence while consuming the model faithfully** — the 2c-3c-3 failure mode exactly. The fix built the shared renderer. Round 2 found **no High**, and its one Medium was an over-claim **the fix round's own record introduced** while fixing an over-claim |
 | **2c-4c-4a** | **The instrument, rebuilt from prose — both halves this time.** 2c-4b-3d-3 deleted `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the whole scratch tree, so unlike 3d-2a (which still had both probe sources) this step had **nothing** to start from. `src-tauri/src/probe.rs` is **authored from the code** for the first time in this project's history: no record carries its source. `launch.sh`, 21 fixtures and a 23-row case table re-authored from four construction records. **Step 4 was split by the orchestrator**; the recovery cases are 4b | ✅ complete — after a review fix round. **Twelve launches (P01–P12), all twelve with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all twelve**; P07–P12 are the proof set, one per write surface. Codex returned **NOT READY** on a High, two Mediums, a Low and an Observation — **the instrument itself was not faulted**: the audit found the six plans credible, the hooks inert without `ECFG_PROBE_PLAN`, and the conflicts genuine. **No executable line changed in the fix round**; all five findings were prose in the record |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2 and 3 are complete, 3 in both its halves, and step 4 is complete in its first half. Step 4b — the recovery cases, whose scope the 4a review sharpened — is next** |
+| **2c-4c-4b** | **The recovery cases**: the three scope items the 4a review sharpened — targeted reporting of `[data-recovery-without-creation]` on the four non-creating surfaces, **assertion and activation** of the editor's and creator's recovery offer, and a `section.recovery`-**scoped** driver through the opened form's create / refusal / conflict endings — plus three expected-byte fixtures and four of the five holes 2c-4b left | ✅ complete — after a review fix round. **Fourteen launches (P13–P26), all fourteen with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all fourteen**; one binary digest ran all fourteen, 7 English / 7 Spanish. It needed a **fourth probe command**, `probe_third_writer` over `ECFG_PROBE_R2`, because a recovery form drafts against the disk revision R1 already produced, so re-running the second writer cannot conflict it. Codex returned **NOT READY** on a High and a Low, **both prose and neither a defect in the instrument or the application** — the record upgraded post-image evidence into first-attempt and chronology guarantees. **No executable line changed in the fix round** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3 and 4 are complete, 3 and 4 in both their halves. Step 5 — the reading — is next, and it owes both languages on all six surfaces** |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -7285,30 +7286,142 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Steps 2c-4c-1, 2c-4c-2, **2c-4c-3 in both its halves** and **2c-4c-4a** are complete. **Step 2c-4c-4b — the recovery cases — is next.**
+### Steps 2c-4c-1, 2c-4c-2, **2c-4c-3 and 2c-4c-4 in both their halves** are complete. **Step 2c-4c-5 — the reading — is next.**
 
 **Step 4 was split in two by the orchestrator**, the way step 3 was, and for the same reason: 4a had
 to rebuild **both** halves of the harness from prose, which 3d-2a never had to do. The consult's
-six-step cut is unchanged.
+six-step cut is unchanged. **The instrument is now finished** — 4a built it, 4b gave it the recovery
+cases — so step 5 launches and judges, and step 6 deletes.
+
+#### What 4b built, in the sentences step 5 needs
+
+The construction record is `docs/decisions/2c-4c-4b-instrument.md`; its **§11 is written for step 5**
+and names the tree, the case list and the rebuild order. Read that section first.
+
+1. **`section.recovery`-scoped driving.** The form has status panels of its own, and an unscoped
+   `[role="status"]` sweep would conflate them with the host surface's. Codex verified the scoping
+   holds and that no selector escapes it.
+2. **Recovery reporting is keyed to the element**, never to a display string —
+   `RECOVERY_WITHOUT_CREATION_ATTRIBUTE` carries the reason the component itself derived. What that
+   closes is the cheaper failure: a host that re-inlined the paragraph and did **not** stamp the
+   attribute. A host that re-inlined it *and* stamped it would read identically (§10.5).
+3. **A fourth probe command, `probe_third_writer` over `ECFG_PROBE_R2`.** A recovery form drafts
+   against the disk revision R1 already produced, so re-running the second writer cannot conflict it.
+   Inert without the variable, and harness-confined.
+4. **The recovery cases are** `editor-recovery-create`, `editor-recovery-refused`,
+   `editor-recovery-conflict` and `creator-recovery-create`; **the reload cases** are
+   `creator-reload`, `deleter-reload-gone`, `mover-reload-gone`, `duplicator-reload-gone` and 4a's
+   `editor-reload-gone`.
+
+#### ⚠️ What step 5 owes, and what 4b explicitly does not give it
+
+- **Both languages on all six surfaces.** 4b's coverage is still **aggregate**: the editor and the
+  creator were each launched in both, but the deleter and duplicator only in English and the mover
+  and raw editor only in Spanish.
+- **A judgement on the geometry, which 4b measured and refused to judge.** `section.recovery` reports
+  a **zero-height bounding rect** in every launch that measured it, while its children lay out
+  normally, and the four recovery-without-creation paragraphs sit at **`y = -14/-15`** on three
+  surfaces. That is a measurement; whether a person can read or reach it is step 5's call.
+- **Nothing in 4b is a window reading.** No launch judged whether anything could be read, reached or
+  understood, and **a transcript cannot fail because a sentence is untrue** — the harness prints the
+  strings the panels drew, and a false one prints exactly as well as a true one. The byte comparison
+  is the harness's only independent evidence (§10.2).
+- **Seventeen of the thirty-one case-table rows have never been launched by any step of this phase**,
+  and 4a's six are a subset of 4b's fourteen. **A case-table row is not evidence** (§10.9).
+- **R38 is untouched**: none of the fifteen corpus fixtures `CLAUDE.md` §4 lists has been through this
+  harness, and the fixture shape is still the easy one — LF, no BOM, no block scalars, no
+  item-owned comments, one sequence.
+- **There is still no invoke spy and no command counter**, so *the refused create issued exactly one
+  command* and *the reload wrote nothing* are **not** established; what P19 shows is a final
+  filesystem state equal to R2 with no backup directory (§10.3).
+
+#### Hole 1 is the one item of 4b's brief that is NOT closed, and it is argued rather than measured
+
+`browser.notice.gone`'s second producer — `repairSelection`'s `clearSelection` arm
+(`src/lib/browser/selection.ts:292`) — was not reached. §5 of the record gives the five-link chain in
+the code: `select()` is its only production caller, it mints the `MatchId` from the projection the
+window already holds, so the revision always agrees and the boundary answers `identityStaleRevision`
+→ `reresolve`, which is the **other** producer. All four reload launches drew the notice from that
+length arm (§6.4).
+
+**Do not record this as measured.** The record states its own limit and step 5 must keep it: *no
+launch attempted it, and no launch could have distinguished "unreachable" from "not attempted."*
+What would close it is a probe command handing `select()` a `MatchId` this window did not mint — which
+is instrumenting the model rather than driving a window, and is a different kind of instrument. That
+is named as the cost, not proposed.
+
+#### Five expected-bytes fixtures are predictions, not measurements
+
+4a's four — `editor-fallback-expected.yml`, `mover-reordered-expected.yml`, `mover-after-expected.yml`,
+`mover-end-expected.yml` — are unchanged, and `editor-recovery-create-expected.yml` joins them: its
+plan arm and case row exist, and it was not launched because P18 exercises that plan through its
+refusal ending and P17 exercises a create. **Read a `bytes=DIFFER` on any of the five as a suspect
+fixture first**, not as an application defect.
+
+#### What 4b's review cost, and the lesson
+
+One round, two findings — **a High and a Low, both prose**, and Codex faulted neither the instrument
+nor the application: it verified the scoping, the structural keying, the third writer's confinement
+and hole 1's accuracy. The High was the record upgrading a **post-image** into first-attempt,
+authorship and chronology guarantees ("matched on the first launch", "never compared", "every gate ran
+after the last edit and nothing has changed since"). **The fix round's own post-fix sweep found a
+fifth instance the review had not named, and the first draft of one narrowing introduced a sixth**
+— *"no launch was discarded from `launches/`"*, which a post-image cannot witness — removed within the
+same round. That is the **ninth consecutive round in this phase where a fix produced a finding**.
+The disposition is at the foot of `docs/reviews/phase-2c-4c-4b-instrument.md`.
+
+**The Low is closed in the record and deliberately left standing in the review**: the record now says
+`$HOME`, and the review keeps the literal because a finding has to name the string it is about — which
+also matches 44 existing `docs/reviews/` files, where Codex output is kept verbatim by standing
+convention.
+
+---
 
 #### ⚠️ The harness is in the working tree and MUST NOT be committed
 
 `git status --short --untracked-files=all` right now lists **four harness paths**, and the checkpoint
-commit for 4a stages `PROGRESS.md` and the two `docs/` files **by path** and nothing else:
+commit for 4b stages `PROGRESS.md` and the two `docs/` files **by path** and nothing else:
 
 ```
  M src-tauri/src/main.rs      ← two hook lines
  M src/main.ts                ← two hook lines
-?? src-tauri/src/probe.rs     ← untracked, authored from the code
-?? src/probe.ts               ← untracked, 981 lines
+?? src-tauri/src/probe.rs     ← untracked, 194 lines (152 at 4a; 4b added the fourth command)
+?? src/probe.ts               ← untracked, 1598 lines (981 at 4a)
 ```
 
-**Never `git commit -a` while these are in the tree.** Step 4b uses them, step 5 reads with them, and
-**step 6 deletes them and re-derives the production gate counts**.
+**Never `git commit -a` while these are in the tree.** Step 5 reads with them, and **step 6 deletes
+them and re-derives the production gate counts**.
 
-**The scratch tree is `/private/tmp/espansoconfig-harness-2c-4c/`** — `launch.sh`, `fixtures/` (21),
-`launches/P01…P12/`, `manifest-2c-4c-4a-post.sha256` (48 entries, all verify), ~493 MB. Steps 4b, 5
-and 6 all need that path.
+**The scratch tree is `/private/tmp/espansoconfig-harness-2c-4c/`** — `launch.sh` (a 31-row case
+table with an `R2` column), `fixtures/` (**24**), `launches/P01…P26/`,
+`manifest-2c-4c-4a-post.sha256` and `manifest-2c-4c-4b-post.sha256` (**55** entries, all verify).
+Steps 5 and 6 both need that path. **4a's manifest was deliberately not regenerated and now reports
+three failures** — the three files 4b edited; see the record's §7.2 before treating that as damage.
+
+#### The gates, re-derived by the orchestrator **with the harness in the tree**
+
+```sh
+cargo test --workspace   # 1112 passed, 0 failed    ← unchanged by the harness
+npm test                 # 1768 passed, 51 files    ← with-harness; production is 1767
+npm run check            # 424 files, 0 errors      ← with-harness; production is 423
+npm run build            # 181 modules              ← with-harness; production is 180
+```
+
+**These are with-harness figures and must never be carried forward as production numbers** — that is
+the defect 2c-4b-3d-3 found and fixed. Step 6 re-derives `1767 / 423 / 180 / 1112` on a harness-free
+tree. The `+1` on each frontend gate is `src/probe.ts`: one new `.ts` module, no styles, and the
+per-source-file `it.each` scanners add its row. **4b added no module**, so the numbers are 4a's.
+
+#### Privacy, verified rather than assumed
+
+No launch artifact contains any path under `$HOME`; the real espanso config directory is untouched;
+no `.espansoconfig-backups` exists outside the launch trees. Every fixture is neutral — `:alpha`,
+`:beta`, `:gamma`, `:probe` and nothing else. **A decision record is a public-repository artifact and
+must say `$HOME` rather than spelling the owner's home path**; that was 4b's Low finding.
+
+---
+
+### ⚠️ HISTORICAL — the step-4a handoff, kept because its provenance limits still bind
 
 #### What 4a established, and the one thing it got wrong
 
