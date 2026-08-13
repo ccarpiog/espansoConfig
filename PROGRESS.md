@@ -7444,9 +7444,31 @@ which is not optional: **ten consecutive rounds in this phase have found a narro
 the round before them closed.** Sweep for what the record now says, not for the words the old
 finding used.
 
+**The three bounds §8 is missing** are named by the review's last verified observation, and they are:
+the **unretained construction chronology** the record nevertheless claims; the **inability to
+attribute a sampled scroll position to an honoured reveal request**; and — now discharged by 5b-1 and
+5b-2, so it becomes a statement of what was found rather than a gap — that the open-form launches
+before P54 **did not remeasure the still-rendered following host outcome** and could not test pointer
+hit-testing. Add the two bounds 5b-2 recorded beside them: `elementFromPoint` is paint order at a
+point and not event delivery, and six of the seven form controls were `outsideViewport` at the
+sampled scroll position, so the verdict rests on one control per launch.
+
+**The exact next command**, for a session resuming cold:
+
+```sh
+wc -l docs/decisions/2c-4c-5-window-reading.md      # 799 lines — the record to rewrite
+cat docs/reviews/phase-2c-4c-5-reading.md           # 52 lines — read the review BEFORE the record
+```
+
+Then delegate the rewrite to a worker, and commission Codex round 2 as
+`docs/reviews/phase-2c-4c-5b-record.md`. **No new launch is required by 5b-3** — P54–P73 are the
+evidence, and their conjunction was re-derived from the artifacts by the orchestrator at both steps.
+
 **Step 6 — the harness removal — still must not run until 5 closes**, and the four harness paths
 (`src/probe.ts`, `src-tauri/src/probe.rs` untracked; two hook lines each in `src/main.ts` and
-`src-tauri/src/main.rs`) must never be committed. Stage by path; never `git commit -a`.
+`src-tauri/src/main.rs`) must never be committed. Stage by path; never `git commit -a`. Step 6 also
+re-derives the production gate counts on a harness-free tree; the figures above are **with-harness**
+(`1112 / 424 / 1768 / 181`) and production is `1112 / 423 / 1767 / 180`.
 
 ---
 
@@ -12871,6 +12893,7 @@ _Updated at each phase boundary._
 | **2c-4c design consult** | **`5027de1`** | ✅ pushed to `origin/main` | **clean** — the consult changed no source file. Staged **by path**: the commit holds **two files**, `docs/reviews/phase-2c-4c-design.md` and this checkpoint. `81bc193` is its parent, and the four production gates were re-run on that pristine tree **before** any edit, which is where the confirmation of `1633` comes from |
 | **2c-4c step 1** | **`dc664ce`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path** even so, out of the habit 2c-4b's harness steps forced: the commit holds **23 files** — nine core sources and tests, four `src-tauri/` files, seven frontend files, the two new documents and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
+| **2c-4c steps 5b-1 and 5b-2** | **`c23b39e`** | ✅ pushed to `origin/main` (`b0751e2..c23b39e`) | **DELIBERATELY NOT CLEAN**, as 4a, 4b and 5 were. **Four** files staged **by path**: `src/lib/components/RecoveryPanel.svelte`, `docs/decisions/2c-4c-5b-1-instrument.md`, `docs/decisions/2c-4c-5b-2-notes.md` and this checkpoint. **This is the first commit in this phase to hold a tracked source change**, and it is one deleted CSS declaration. The same four harness paths were left in the working tree on purpose — `src/main.ts` and `src-tauri/src/main.rs` modified (the four hook lines), `src/probe.ts` (now carrying `reportRecoveryGeometry()`) and `src-tauri/src/probe.rs` untracked. **`git commit -a` from here would commit the instrument.** `git status --short --untracked-files=all` after the commit lists those four paths and **nothing else** — no real-config path, no launch artifact |
 | **2c-4c step 3a** | **`ac4a4b8`** | ✅ pushed to `origin/main` (`d9df5bd..ac4a4b8`) | **clean** — eighteen files staged **by path**, no harness in the tree |
 | **2c-4c step 4b** | **`d464a42`** | ✅ pushed to `origin/main` (`0905133..d464a42`) | **DELIBERATELY NOT CLEAN**, as 4a was. Three files staged **by path**: `docs/decisions/2c-4c-4b-instrument.md`, `docs/reviews/phase-2c-4c-4b-instrument.md` and this checkpoint. **The same four harness paths were left in the working tree on purpose** — `src/main.ts` and `src-tauri/src/main.rs` modified (the four hook lines, byte-identical to 4a's), `src/probe.ts` (now 1598 lines) and `src-tauri/src/probe.rs` (now 194) untracked. **Step 5 reads with them; step 6 deletes them and re-derives the production gate counts.** `git commit -a` from here would commit the instrument. The commit holds **no source file and no test**, because this step changed none — it is the instrument and two documents, and the instrument is not committed |
 | **2c-4c step 4a** | **`7c42a24`** | ✅ pushed to `origin/main` (`cc2db8f..7c42a24`) | **DELIBERATELY NOT CLEAN — and this is the first commit in this phase for which that is true.** Three files staged **by path**: `docs/decisions/2c-4c-4a-instrument-rebuild.md`, `docs/reviews/phase-2c-4c-4a-instrument.md` and this checkpoint. **Four harness paths were left in the working tree on purpose** — `src/main.ts` and `src-tauri/src/main.rs` modified (two hook lines each), `src/probe.ts` and `src-tauri/src/probe.rs` untracked. Steps 4b and 5 use them; **step 6 deletes them and re-derives the production gate counts**. `git commit -a` from here would commit the instrument, which is the one thing the last three instrument steps each had to avoid |
