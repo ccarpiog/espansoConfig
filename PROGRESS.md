@@ -95,7 +95,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-6** | **The harness's removal, and a production baseline that matched.** Both probe sources deleted, the four hook lines reverted **by hand** to byte-identical, the 2.9 GB scratch tree gone, and the four gate figures **re-derived** on the harness-free tree rather than copied forward | ✅ complete — `docs/decisions/2c-4c-6-notes.md`. `git diff HEAD --stat` and `git status --short --untracked-files=all` both **empty**. All four gates match the expectation exactly — **1112 / 423 / 1767 / 180** — and nothing was adjusted to make them: the expectation was written into this file **before** the measurement. Unlike 2c-4b-3d-3, which caught a stale count, this step **caught nothing, because there was nothing to catch**, and §3.3 of its record states how little a matching measurement therefore proves. The −1 in the vitest count was **traced, not assumed**, to `scripts/lint/ipc-detail.test.ts:79`'s per-file `it.each`. Codex returned **NOT READY on nine findings — three High, five Medium, one Low — and every one of the nine was a sentence in the record**, none a defect in the removal or the application; **no executable line changed in the fix round**, because the step has none to change. **The sweep after the fix round found a tenth, created by the fix round itself** — a file count taken through a `\| head` that capped it at ten when the true figure is 19 — the **thirteenth** consecutive round in this phase to find a narrower instance, and the third in a row where the fix round created it |
 | **Phase 2c-4c** | **Recovery fallback** — save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone | ✅ **complete.** Six steps: the Rust contract (1), recovery as values (2), the UI in two halves (3a, 3b), the instrument in two halves (4a, 4b), the reading with its three-part fix round (5, 5b-1, 5b-2, 5b-3), and the removal (6). **The phase's one defect that reached a screen was M2** — `min-height: 0` on `.recovery` collapsing the section to zero height so the host outcome panel overlapped the recovery form's content — found at 5b-1 by a `document.elementFromPoint` hit test, fixed at 5b-2 by deleting one declaration, and **passed over by 27 earlier launches** because the driver presses with `HTMLElement.click()`, which bypasses hit testing. **No other finding in any round of this phase changed a byte written to a user's file** |
 | 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | ✅ **complete — all six steps**, 3 and 4 in both their halves, 5 closed by its three-part fix round **5b** (5b-1 the instrument extension and the measurement, 5b-2 the one-property fix and its re-measurement, 5b-3 the record's rewrite plus Codex rounds 2 and 3), and 6 the removal with the gate figures re-derived on a harness-free tree |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
+| **2c-5 design consult** | **Phase 2c-5 put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-5-design.md` (125 lines). Like every consult since 2c-4a it **changed the phase rather than confirming it**, and it ruled against the handoff brief in three places. It rules restore a **content path on the sixth writer** — the frontend reads the backup's text and sends it through `save_raw_document`, so there is **no seventh writing command** and the new commands are all read-only; it rules **no restore-specific acknowledgeable finding** (a finding belongs to the candidate gate, and *"the person chose Restore"* is UI authorization, not a property validation can infer from identical text — adding route provenance to `SaveContent` to manufacture one would give two identical candidates different verdicts and turn the sixth writer into a hidden seventh protocol); and on Q8 it **disagrees with this project's own history**, ruling the sharpest failure **behavioural rather than prose**. Seven steps |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken; step 1 is next |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -7616,6 +7617,140 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **The 2c-5 design consult is TAKEN. The next thing to do is step 2c-5-1 — the core backup catalogue, in Rust, with no caller.**
+
+The consult is `docs/reviews/phase-2c-5-design.md`, 125 lines, VERDICT plus Q1–Q8. **Read it before
+writing a line**; this section is the handoff, not a substitute for it.
+
+#### The three places the consult ruled against the brief that commissioned it
+
+1. **There is no seventh writing command.** Restore is a **content path on the sixth writer**: the
+   frontend reads the backup's text through a **read-only** command and submits it through the
+   existing `BrowserState.saveRawDocument` → `save_raw_document` → `SaveContent::ReplaceText` path.
+   The three new commands — `list_backup_batches`, `list_backup_entries`, `read_backup_text` — write
+   nothing.
+2. **There is no restore-specific acknowledgeable finding.** A finding belongs to the **candidate
+   gate**, and *"the person chose Restore"* is UI authorization, not a property validation can infer
+   from identical text. Adding route provenance to `SaveContent` to manufacture one would give two
+   byte-identical replacement candidates **different transaction verdicts** and turn the sixth writer
+   into a hidden seventh protocol. The destructive consent is the **one-shot identity-bound
+   confirmation** in the browser layer instead — with the admitted boundary, which the decision
+   record must state **in the same sentence**, that structural TypeScript cannot prove every caller
+   used it (`matchDeletion.ts` has the identical limitation and says so).
+3. **Q8 disagrees with this project's own history.** Asked whether the sharpest failure here is prose,
+   the consult answered **no**: *"perfect prose cannot recover a file replaced under mismatched
+   authorization."* The most likely *review finding* is still a sentence — *version from Tuesday*,
+   *undo*, *unsaved changes* — but the highest-consequence *plausible error* is behavioural.
+
+#### The single instruction the consult says to read before writing a line
+
+> The only restore submission is the exact UTF-8 text whose candidate hash, opaque backup-entry
+> identity, target `DocumentId`, target base revision, and preview generation are bound into one
+> unspent confirmation; send that text unchanged through `BrowserState.saveRawDocument`, and treat
+> every mismatch as "write nothing."
+
+A preview of entry A followed by a write of entry B, a confirmation carried to another document, or
+a base revision refreshed at send time **destroys the wrong bytes while every lower-level write
+primitive behaves correctly**.
+
+#### The seven steps (consult Q7), and what each owes
+
+| Step | Scope | Evidence owed |
+|---|---|---|
+| **2c-5-1** | **The core backup catalogue, with no caller.** Types, the shared batch parser and order, root and marker recognition, the recursive non-following entry scan, the reversible target mapping, the exact byte read, the UTF-8 refusal, typed read errors. Every operation read-only | model tests only — **no** mounted test, **no** window reading |
+| **2c-5-2** | **The read-only Tauri wire.** The three commands, opaque serialized ids, dictionary-contract coverage, `DocumentId`→context mapping, exhaustive TypeScript types | Rust/IPC and TS model tests; **no** mounted test, **no** reading |
+| **2c-5-3** | **Restore as browser values, nothing drawn.** Catalogue/preview state, exact candidate retention, the open-surface refusal, the one-shot confirmation, the sealed invalidation, conflict retention, composition through `saveRawDocument` | model tests; **no** mounted test, **no** reading |
+| **2c-5-4** | **The third-pane screen, i18n and the mounted evidence.** The mode, the candidate through `SourceText`, two-stage controls, typed EN/ES accessors | **the phase's mounted-component evidence**; no reading |
+| **2c-5-5** | **Rebuild the temporary window instrument** from prose — the harness was deleted at 2c-4c-6 and its sources survive in no record | instrument review; no product reading |
+| **2c-5-6** | **The bilingual WKWebView reading** | **the only step that owes the window reading** |
+| **2c-5-7** | **Remove the instrument**, sweep for residue, re-derive the gate figures on a harness-free tree | none |
+
+#### What step 2c-5-1 must build, from consult Q2
+
+`crates/espansoconfig-core/src/persist/backup.rs` today has a write side and **no read side**:
+`rotate` is private and the newest-first ordering a restore UI needs is locked inside it. Add a
+**non-mutating `BackupCatalog`, separate from the stateful `BackupSession`**:
+
+```text
+BackupCatalog::rooted_at(config_root: &Path) -> BackupCatalog
+BackupCatalog::scan_batches() -> Result<BackupBatchScan, BackupReadError>
+BackupCatalog::scan_entries(batch: &BackupBatchId) -> Result<BackupEntryScan, BackupReadError>
+BackupCatalog::entry_for_target(batch: &BackupBatchId, target: &Path)
+    -> Result<Option<BackupEntry>, BackupReadError>
+BackupCatalog::read_entry(entry: &BackupEntryId) -> Result<BackupBytes, BackupReadError>
+BackupBytes::utf8() -> Result<BackupText, BackupReadError>
+```
+
+The rules that are **not** derivable from those signatures:
+
+- **Identities are opaque and revalidated at use.** `BackupBatchId` privately holds the exact
+  directory name plus the parsed `stamp` and numeric `counter`; `BackupEntryId` holds that batch
+  identity plus a **validated relative component path**. `BackupEntry` exposes its id, a display
+  path, a byte length and a target classification (`InConfigRoot { relative_path } |
+  OutsideConfigRoot`) — **never an absolute path the frontend could manufacture**. Every
+  `scan_entries`, mapping and read call **rechecks** root, batch grammar, real-directory status,
+  marker, containment and leaf type, because rotation or another process may change the tree between
+  calls. A disappeared batch or entry is a **typed stale/gone result, not an empty file**.
+- **One ordering function, shared with rotation.** Descending `(stamp string, counter number)` for
+  display; rotation reverses the same order to remove oldest. It exists twice today — the grammar in
+  `parse_batch_name` and a repeated tuple sorted ascending inside `rotate`. **Do not sort whole names
+  lexicographically, and do not parse the stamp into a claimed time.**
+- **A missing root is an outcome, not an error**; an existing root that is a symlink, not a
+  directory, or not private is a **typed refusal**, matching the checks already required before
+  writing.
+- **Never follow a symlink at any level**, exclude the marker, reject `.`/`..` and non-normal
+  components, offer only real regular files. Foreign names, unmarked batch-shaped directories,
+  regular files and symlinked batch names are **skipped, reported, and never counted as eligible**.
+  `BackupBatchScan`/`BackupEntryScan` carry eligible values **plus counts and codes for the
+  unrecognised and unreadable**, so the UI need not turn an incomplete scan into *"no backups"*.
+- **Invalid UTF-8 is `BackupReadError::NotUtf8 { entry, offset }`** and cannot be previewed or sent.
+  Never normalize, never replace invalid bytes, never call the result *"raw bytes"*. This matches
+  `document_text`.
+- **Reading never triggers rotation.** Rotation is the crate's only recursive deletion and is
+  deliberately coupled to a successfully written capture.
+- **The marker means "recognised as this application's batch format", not "untampered"** — anything
+  able to write the root can forge it. Treat every entry as **untrusted input**. **No sentence may
+  say the application verified that it wrote or preserved these bytes.**
+- **The existing path mapping must be made a shared reversible value rather than copied**: in-root
+  targets retain their relative path, `_outside` is an escaped second namespace, non-normal external
+  components are dropped.
+
+Rust tests Q7 names for this step: missing and refused roots, stamp/counter order, foreign, unmarked
+and symlinked batches, symlinks at **every entry depth**, marker exclusion, a non-UTF-8 offset,
+disappearing entries, outside-namespace escaping, target mapping, and **proof that enumeration and
+read never create or rotate**.
+
+`espansoconfig-core` must never depend on `tauri` — check with
+`cargo tree -p espansoconfig-core | rg tauri`, which must find nothing.
+
+#### The production gate baseline
+
+**`1112 / 423 / 1767 / 180`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules, measured at 2c-4c-6 on a harness-free tree. Step 2c-5-1 is Rust-only, so
+only the first figure should move. `npm install` is required before any frontend command will run.
+
+**The module count's shorthand is spent**: 180 is now within one of the number that used to mean
+*the Svelte server build leaked in*, so check **both halves** — the arithmetic (a new `.ts` module
+costs one, a new **styled** component costs two) and the bundle search for `svelte/internal/server`,
+verifying the search can match before trusting its negative.
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty
+cat docs/reviews/phase-2c-5-design.md             # the consult — VERDICT and Q1–Q8
+rg -n "fn rotate|fn parse_batch_name|fn backup_relative_path|fn carries_batch_marker" \
+   crates/espansoconfig-core/src/persist/backup.rs
+```
+
+---
+
+### ⚠️ HISTORICAL — the 2c-5 consult handoff, discharged. Kept because it is what the consult was commissioned against.
+
+**The consult was taken and is `docs/reviews/phase-2c-5-design.md`.** Everything below was the brief
+it was given; the rulings above supersede any assumption it records.
 
 ### **Phase 2c-4c is CLOSED. The next thing to do is the 2c-5 design consult — before any line of 2c-5 is written.**
 
