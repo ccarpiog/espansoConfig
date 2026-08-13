@@ -12607,21 +12607,27 @@ _Updated at each phase boundary._
 | **2c-4c step 1** | **`dc664ce`** | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path** even so, out of the habit 2c-4b's harness steps forced: the commit holds **23 files** — nine core sources and tests, four `src-tauri/` files, seven frontend files, the two new documents and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
 | **2c-4c step 3a** | **`ac4a4b8`** | ✅ pushed to `origin/main` (`d9df5bd..ac4a4b8`) | **clean** — eighteen files staged **by path**, no harness in the tree |
+| **2c-4c step 4b** | **`d464a42`** | ✅ pushed to `origin/main` (`0905133..d464a42`) | **DELIBERATELY NOT CLEAN**, as 4a was. Three files staged **by path**: `docs/decisions/2c-4c-4b-instrument.md`, `docs/reviews/phase-2c-4c-4b-instrument.md` and this checkpoint. **The same four harness paths were left in the working tree on purpose** — `src/main.ts` and `src-tauri/src/main.rs` modified (the four hook lines, byte-identical to 4a's), `src/probe.ts` (now 1598 lines) and `src-tauri/src/probe.rs` (now 194) untracked. **Step 5 reads with them; step 6 deletes them and re-derives the production gate counts.** `git commit -a` from here would commit the instrument. The commit holds **no source file and no test**, because this step changed none — it is the instrument and two documents, and the instrument is not committed |
 | **2c-4c step 4a** | **`7c42a24`** | ✅ pushed to `origin/main` (`cc2db8f..7c42a24`) | **DELIBERATELY NOT CLEAN — and this is the first commit in this phase for which that is true.** Three files staged **by path**: `docs/decisions/2c-4c-4a-instrument-rebuild.md`, `docs/reviews/phase-2c-4c-4a-instrument.md` and this checkpoint. **Four harness paths were left in the working tree on purpose** — `src/main.ts` and `src-tauri/src/main.rs` modified (two hook lines each), `src/probe.ts` and `src-tauri/src/probe.rs` untracked. Steps 4b and 5 use them; **step 6 deletes them and re-derives the production gate counts**. `git commit -a` from here would commit the instrument, which is the one thing the last three instrument steps each had to avoid |
 | **2c-4c step 3b (closes 2c-4c-3)** | **`c0f2e2f`** | ✅ pushed to `origin/main` (`a93323e..c0f2e2f`) | **clean** — fifteen files staged **by path**, no harness in the tree: eleven frontend sources and tests (one of them new), the step's record, its two-round review, `CLAUDE.md` (the module ladder, its spent shorthand, and the deciding-is-not-drawing rule) and this checkpoint. **It holds both review rounds' fixes**, as every phase since `8989c16` does, so no commit carries a demonstrated defect. **The next path that must never be swept in by `-a` appears at 2c-4c-4**, which rebuilds the window instrument |
 | 2c-4c step 2 | `4e29589` | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path**: the commit holds **six files** — `src/lib/browser/recovery.ts`, `src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts`, `docs/decisions/2c-4c-2-notes.md`, `docs/reviews/phase-2c-4c-2-code.md` and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
-`7c42a24` is Phase 2c-4c **step 4a**, the window instrument rebuilt from prose, committed **including
-its review fix round** as every phase since `8989c16` is — so no commit holds a demonstrated defect.
-It contains only three documents, because **the artifact this step produced must not be committed**:
-the record, the one-round review with its orchestrator disposition, and this checkpoint. The
-instrument itself — `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the scratch tree
-at `/private/tmp/espansoconfig-harness-2c-4c/` — stays out of git by design.
+`d464a42` is Phase 2c-4c **step 4b**, the recovery cases, committed **including its review fix round**
+as every phase since `8989c16` is — so no commit holds a demonstrated defect. Like 4a it contains only
+three documents, because **the artifact this step produced must not be committed**: the record, the
+one-round review with its orchestrator disposition, and this checkpoint.
 
-**A fresh session starting 2c-4c-4b resumes at `7c42a24` or later, and must rebuild the harness first
-if the working tree no longer holds it.** The four paths are not recoverable from git; §2 of the
-record says which of them can be re-authored from which record and which must be authored from the
-code. As at 1b-1, `npm install` (or `npm ci`) is required before any frontend command will run.
+`7c42a24` is Phase 2c-4c **step 4a**, the window instrument rebuilt from prose, on the same terms. The
+instrument itself — `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the scratch tree
+at `/private/tmp/espansoconfig-harness-2c-4c/` — stays out of git by design, across both steps.
+
+**A fresh session starting 2c-4c-5 resumes at `d464a42` or later, and must rebuild the harness first
+if the working tree no longer holds it.** The four paths are not recoverable from git. §2 of
+`2c-4c-4a-instrument-rebuild.md` says which can be re-authored from which record and which must be
+authored from the code, and **§3 of `2c-4c-4b-instrument.md` is what 4b added on top** — the fourth
+probe command, the four reporters, the six plans, the `R2` column and the three fixtures. **§11 of
+the 4b record is written for step 5** and names the tree, the case list and the rebuild order. As at
+1b-1, `npm install` (or `npm ci`) is required before any frontend command will run.
 
 `c0f2e2f` is Phase 2c-4c **step 3b**, and it **closes 2c-4c-3 in both its halves**. It is committed
 **on a round-2 verdict of no High**, with that round's one Medium — an over-claim the round-1 fix's
