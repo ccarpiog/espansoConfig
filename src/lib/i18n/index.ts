@@ -114,12 +114,18 @@ import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   BackupError,
+  BackupReadError,
+  BackupReadStep,
+  BackupRootState,
   BackupStep,
+  BackupTarget,
+  BatchSkipped,
   ContentKind,
   DecodeError,
   DiagnosticCode,
   DraftError,
   EditError,
+  EntrySkipped,
   FileKind,
   FindingClass,
   FindingCode,
@@ -154,13 +160,19 @@ import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
 import {
   describeBackupError,
+  describeBackupReadError,
+  describeBackupReadStep,
+  describeBackupRootState,
   describeBackupStep,
+  describeBackupTarget,
+  describeBatchSkipped,
   describeCommandError,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
   describeDraftError,
   describeEditError,
+  describeEntrySkipped,
   describeFileKind,
   describeFindingClass,
   describeFindingCode,
@@ -210,18 +222,29 @@ export { DEFAULT_LOCALE, LOCALES, isLocale, matchLocaleTag, negotiateLocale } fr
 export type { Locale } from './locale';
 export {
   backupErrorKey,
+  backupReadErrorKey,
+  backupReadStepKey,
+  backupRootStateKey,
   backupStepKey,
+  backupTargetKey,
+  batchSkippedKey,
   commandErrorKey,
   contentKindKey,
   decodeErrorKey,
   describeBackupError,
+  describeBackupReadError,
+  describeBackupReadStep,
+  describeBackupRootState,
   describeBackupStep,
+  describeBackupTarget,
+  describeBatchSkipped,
   describeCommandError,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
   describeDraftError,
   describeEditError,
+  describeEntrySkipped,
   describeFileKind,
   describeFindingClass,
   describeFindingCode,
@@ -256,6 +279,7 @@ export {
   documentShapeKey,
   draftErrorKey,
   editErrorKey,
+  entrySkippedKey,
   fileKindKey,
   findingClassKey,
   findingCodeKey,
@@ -1667,3 +1691,96 @@ export function tSourceConflictState(state: SourceConflictState): string {
 export function tDraftError(error: DraftError): string {
   return describeDraftError(locale.current, error);
 } // End of function tDraftError()
+
+// ---------------------------------------------------------------------------
+// The read-only backup catalogue — Phase 2c-5-2
+// ---------------------------------------------------------------------------
+//
+// Six accessors written one sub-phase before anything calls them, because a code
+// with no string is worse than a code with no caller and the only lawful way to
+// reach a `code.` key is an accessor whose return type makes a missing one a
+// compile error. 2c-5-4 is the step that draws them.
+//
+// Every one of them is bounded by what the catalogue establishes. None says a
+// backup is authentic, verified or made by this application; none turns a batch
+// name into a time; none calls an entry a version of anything or promises that
+// it can be recovered.
+
+/**
+ * Renders whether the backup folder was there to be listed, in the current
+ * language.
+ *
+ * **A missing folder is not a failure**, and this sentence does not read as one:
+ * a configuration this application has never saved from legitimately has none.
+ *
+ * @param state - A root state as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tBackupRootState(state: BackupRootState): string {
+  return describeBackupRootState(locale.current, state);
+} // End of function tBackupRootState()
+
+/**
+ * Renders why one entry of the backup folder is not a batch, in the current
+ * language.
+ *
+ * @param reason - A skip reason as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tBatchSkipped(reason: BatchSkipped): string {
+  return describeBatchSkipped(locale.current, reason);
+} // End of function tBatchSkipped()
+
+/**
+ * Renders why one thing inside a batch is not an entry, in the current language.
+ *
+ * @param reason - A skip reason as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tEntrySkipped(reason: EntrySkipped): string {
+  return describeEntrySkipped(locale.current, reason);
+} // End of function tEntrySkipped()
+
+/**
+ * Renders which part of reading the backup folder failed, in the current
+ * language.
+ *
+ * @param step - A read step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tBackupReadStep(step: BackupReadStep): string {
+  return describeBackupReadStep(locale.current, step);
+} // End of function tBackupReadStep()
+
+/**
+ * Renders which target namespace an entry's name occupies, in the current
+ * language.
+ *
+ * **A claim about the name**, never about where any bytes came from.
+ *
+ * @param target - A target classification as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tBackupTarget(target: BackupTarget): string {
+  return describeBackupTarget(locale.current, target);
+} // End of function tBackupTarget()
+
+/**
+ * Renders why a backup-catalogue request did not produce its result, in the
+ * current language.
+ *
+ * **Not every arm is a failed read**: `NotUtf8` is the one where the entry opened
+ * and every byte arrived, and only turning those bytes into a string did not
+ * succeed.
+ *
+ * A missing folder never reaches this: that is an outcome on a successful
+ * listing. A **forged** identity does not reach it either — that is
+ * `unrecognisedBackupBatch` or `unaddressableBackupEntry`, and the difference is
+ * whether anything was asked of the disk at all.
+ *
+ * @param error - A read refusal as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tBackupReadError(error: BackupReadError): string {
+  return describeBackupReadError(locale.current, error);
+} // End of function tBackupReadError()

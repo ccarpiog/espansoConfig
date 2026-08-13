@@ -51,6 +51,9 @@
  * from its neighbour is ever minted. Every other numeric field below is bounded
  * by the size of something already in memory — a file's bytes, a parse's nodes,
  * a directory's files — and the audit is in `docs/decisions/1b-2a-notes.md`.
+ * **The one quantity that is not so bounded crosses as digits rather than as a
+ * number**: {@link BackupEntry.length} is a length `stat` reported for a file in
+ * an untrusted backup batch, so it is a `string`.
  */
 export type DocumentId = number;
 
@@ -731,7 +734,7 @@ export type BackupStep =
   | 'PublishBackupFile';
 
 /**
- * How far the tidy-up of older backups got.
+ * How far the retention tidy-up of recognised backup batches got.
  *
  * Not the same question as what it removed: `ScanFailed` and a `Scanned` that
  * removed nothing produce the same counts and mean opposite things.
@@ -1454,7 +1457,8 @@ export type BackupError =
   | { readonly BackupNameExhausted: { readonly path: string } };
 
 /**
- * What the tidy-up of older backups did, on the one save per session that runs it.
+ * What the retention tidy-up of recognised backup batches did, on the one save
+ * per session that runs it.
  *
  * Counts plus an outcome, never an error: a tidy-up failure must not fail a save
  * that has already been decided. A non-zero `failed`, a non-zero `unreadable` or
@@ -1477,10 +1481,11 @@ export interface Rotation {
 /**
  * One file copied before a session's first change to it, and what the tidy-up did.
  *
- * **Not a promise that the file is recoverable.** Retention is ten batches and a
- * batch is a session, so the eleventh session after this one removes this one's
- * copies. It is also not a version history: it holds the file as it was before
- * the session's first change, not before each change.
+ * **Not a promise that the file is recoverable.** Rotation attempts to retain ten
+ * recognised batch directories by sortable name, but it promises neither how long
+ * this batch remains nor that cleanup succeeds. It is also not a version history:
+ * it holds the file as it was before the session's first change, not before each
+ * change.
  */
 export interface BackupRecord {
   /** Where the copy was written. Lossy — see {@link DocumentView.path}. */
@@ -1735,8 +1740,9 @@ export interface SavedResult {
    *
    * **`false` is a success**: no copy was asked for, nothing was rewritten, or
    * this session had already copied this file. A `true` is **not** a promise that
-   * the file can be recovered — only ten sessions' worth of copies are kept — and
-   * no message may say otherwise.
+   * the file can be recovered: rotation is best-effort, orders batches by
+   * directory label and promises no retention duration. No message may say
+   * otherwise.
    */
   readonly backup_taken: boolean;
   /**
@@ -1865,6 +1871,316 @@ export interface RefusedResult {
  * everything else rejects with a {@link CommandError}. Switch on `outcome`.
  */
 export type SaveResult = SavedResult | ConflictResult | RefusedResult;
+
+// ---------------------------------------------------------------------------
+// The read-only backup catalogue — Phase 2c-5-2
+// ---------------------------------------------------------------------------
+
+/**
+ * The types the three backup commands answer with, and the two a caller hands
+ * back.
+ *
+ * **Nothing in this group writes anything**, and nothing in it is a licence to.
+ * A restore is a whole-document replacement sent through
+ * `saveRawDocument` — the sixth writer, unchanged — so these types carry a
+ * candidate and its identity and no route to write to disk.
+ *
+ * Three claims none of them makes, each of which the Rust side argues at
+ * length:
+ *
+ * 1. **A recognised batch is not an authentic one.** The ownership marker is
+ *    deliberately forgeable by anything able to write inside the backup folder,
+ *    so recognition protects against accident and is not authentication.
+ * 2. **A batch name is not a time.** It is a sortable directory name derived
+ *    from the process clock, with a numeric counter that separates sessions
+ *    created under one label. Ordering by it is proved; *"the version from
+ *    Tuesday"* is not.
+ * 3. **A {@link BackupTarget} is a statement about a name**, never that a file
+ *    exists at that path or that this entry's bytes were copied from it.
+ */
+
+/** Whether the backup folder was there to be listed. */
+export type BackupRootState = 'Missing' | 'Present';
+
+/**
+ * Why one entry of the backup folder is not an eligible batch.
+ *
+ * Every one means *left exactly as found and never counted as a batch*. Only
+ * `Unreadable` means nothing was learned about it, which is what makes a
+ * listing incomplete.
+ */
+export type BatchSkipped = 'ForeignName' | 'NotADirectory' | 'NoMarker' | 'Unreadable';
+
+/**
+ * Why one thing inside a batch is not an entry the catalogue offers.
+ *
+ * `Marker` is the batch's own ownership file, which is bookkeeping and not a
+ * copied document. `Symlink` is the code for a link the walk **observed** — at
+ * any depth, and refused rather than resolved on every platform this application
+ * runs on. It is not a claim that a link created after that observation cannot
+ * be followed: that guarantee is per target and
+ * `src-tauri/src/backup.rs`'s header states both answers.
+ */
+export type EntrySkipped =
+  | 'Marker'
+  | 'Symlink'
+  | 'NotARegularFile'
+  | 'UnusableName'
+  | 'Unreadable';
+
+/** Which part of reading the backup folder failed. */
+export type BackupReadStep =
+  | 'InspectBackupRoot'
+  | 'ListBackupRoot'
+  | 'InspectBatch'
+  | 'ListBatch'
+  | 'InspectEntry'
+  | 'ReadEntry';
+
+/** The name of every {@link BackupTarget} variant. */
+export type BackupTargetName = 'InConfigRoot' | 'OutsideConfigRoot';
+
+/**
+ * Which target namespace one entry's **name** occupies.
+ *
+ * **Mixed in shape**, exactly as {@link UnknownReason} is: `InConfigRoot`
+ * carries a relative path and crosses as a one-key object, `OutsideConfigRoot`
+ * carries nothing and crosses as a bare string.
+ *
+ * A syntactic classification of the entry's own path and nothing more. It does
+ * not say a file exists at `relative_path`, and it does not say this entry's
+ * bytes came from one — a copy published under a disambiguated sibling name
+ * classifies as whatever its literal path says.
+ */
+export type BackupTarget =
+  | {
+      readonly InConfigRoot: {
+        /** The path relative to the configuration folder. Display data. */
+        readonly relative_path: string;
+      };
+    }
+  | 'OutsideConfigRoot';
+
+/**
+ * The opaque identity of one recognised batch.
+ *
+ * **Opaque by contract: compare it, hand it back, and do not build a path from
+ * it.** Its `name` is an ordinary string and a pathname can be composed from it —
+ * what makes it safe is that every command validates it and re-resolves it
+ * beneath the workspace-owned backup root, not that composing a path is out of
+ * reach. Holding one proves nothing about the folder: every call re-resolves it,
+ * and a batch another session's tidy-up removed comes back as a stale refusal
+ * rather than as an empty listing.
+ */
+export interface BackupBatchId {
+  /** The batch folder's name. A label, never a timestamp assertion. */
+  readonly name: string;
+}
+
+/** One recognised batch, as a listing found it. */
+export interface BackupBatch {
+  /** The identity every later call is made with. */
+  readonly id: BackupBatchId;
+  /**
+   * The folder's name, which is the only label there is.
+   *
+   * The same characters as {@link BackupBatchId.name}, deliberately: this is
+   * what a screen may show, and the id is what a call is made with.
+   */
+  readonly display_name: string;
+}
+
+/**
+ * The opaque identity of one entry of one batch.
+ *
+ * {@link BackupBatchId}'s rules, and one more: `relative_path` is the exact
+ * spelling the catalogue addresses the entry by, and it is **not** normalised on
+ * the way back. `match/./base.yml` is refused rather than read as
+ * `match/base.yml`, so an admitted identity carries only plain relative
+ * components and joining it introduces no lexical `.` or `..` escape. Filesystem
+ * containment is a separate matter, and it retains the target-specific
+ * guarantees the core's `ResolvedDirectory` documents.
+ *
+ * Every identity a listing offers survives its own rendering byte for byte — an
+ * entry whose name cannot be spelled on this wire is counted in
+ * {@link BackupEntryListing.unaddressable} instead of being offered.
+ */
+export interface BackupEntryId {
+  /** The batch the entry is inside. */
+  readonly batch: BackupBatchId;
+  /** The entry's path relative to that batch folder. */
+  readonly relative_path: string;
+}
+
+/** One entry a batch offers, as a listing found it. */
+export interface BackupEntry {
+  /** The identity every later call is made with. */
+  readonly id: BackupEntryId;
+  /** The path relative to the batch folder, for display. Lossy. */
+  readonly display_path: string;
+  /**
+   * The byte length observed when the entry was listed, as decimal digits.
+   *
+   * A fact about that moment, not a promise about the next read.
+   *
+   * **A `string`, and that is deliberate.** A filesystem length can exceed
+   * JavaScript's safe-integer range, where not every `u64` is exactly
+   * representable as a JSON number — for example, `2^53 + 1` is rounded. A batch
+   * is untrusted input, so a sparse regular file longer than `2^53 - 1` is
+   * reachable. Decimal digits therefore carry every value losslessly. Use
+   * `BigInt(length)` to compare one, never `Number(length)`.
+   */
+  readonly length: string;
+  /** Which target namespace the entry's own name occupies. */
+  readonly target: BackupTarget;
+}
+
+/**
+ * What one listing of the backup folder found.
+ *
+ * The batches **and** what was skipped, never one without the other: *"there
+ * are no backups"* is a sentence {@link BackupBatchListing.complete} licenses
+ * and an empty `batches` does not.
+ */
+export interface BackupBatchListing {
+  /**
+   * Whether the backup folder existed at all.
+   *
+   * `Missing` is the ordinary state of a configuration this application has
+   * never saved from. An outcome, not a failure.
+   */
+  readonly root: BackupRootState;
+  /** The recognised batches, newest name first. */
+  readonly batches: readonly BackupBatch[];
+  /** One code per entry of the folder that is not an eligible batch. */
+  readonly skipped: readonly BatchSkipped[];
+  /** How many entries of the folder were read and are not batches. */
+  readonly unrecognised: number;
+  /** How many entries of the folder nothing could be learned about. */
+  readonly unreadable: number;
+  /**
+   * Whether every entry of the folder was read.
+   *
+   * Rust's own predicate rather than something derived here from `skipped`:
+   * which reasons mean *nothing was learned* is the core's answer, and a second
+   * copy of that rule in TypeScript would be a second thing to keep in step.
+   */
+  readonly complete: boolean;
+}
+
+/** What one walk of one batch found. */
+export interface BackupEntryListing {
+  /** The batch that was walked. */
+  readonly batch: BackupBatchId;
+  /** The entries it offers and this boundary can name, by relative path. */
+  readonly entries: readonly BackupEntry[];
+  /** One code per thing inside the batch that is not an entry. */
+  readonly skipped: readonly EntrySkipped[];
+  /** How many things inside the batch were read and are not entries. */
+  readonly unrecognised: number;
+  /** How many things inside the batch nothing could be learned about. */
+  readonly unreadable: number;
+  /**
+   * How many entries the batch offers that this boundary cannot name.
+   *
+   * **A property of the wire, not of the folder.** A file name that is not valid
+   * UTF-8 has no exact spelling in a JSON string, so such an entry is counted
+   * here rather than offered under an identity that would not come back. It is
+   * normally zero, and on a filesystem that enforces UTF-8 file names it cannot
+   * be anything else.
+   */
+  readonly unaddressable: number;
+  /**
+   * Whether the whole batch was read **and** every entry it offers is listed.
+   *
+   * Stronger than the folder listing's `complete`, because both
+   * {@link BackupEntryListing.unreadable} and
+   * {@link BackupEntryListing.unaddressable} make `entries` short.
+   */
+  readonly complete: boolean;
+}
+
+/**
+ * One backup entry's exact text, and the live file it maps to.
+ *
+ * Answered only after the entry has been shown to be the one that batch holds
+ * for that document — the check `readBackupText` exists for.
+ */
+export interface BackupTextResponse {
+  /** The entry, as re-observed by the mapping that verified it. */
+  readonly entry: BackupEntry;
+  /** The document the entry maps to, by its session-local identity. */
+  readonly document: DocumentId;
+  /**
+   * The entry's exact text.
+   *
+   * Byte for byte what the file held: no line ending converted, no byte-order
+   * mark added or removed, no final newline supplied, no normalisation. Bytes
+   * that are not valid UTF-8 have no text at all and are refused instead.
+   *
+   * **Untrusted input.** It came out of a folder anything able to write there
+   * could have put a file in.
+   */
+  readonly text: string;
+  /**
+   * The revision of exactly those bytes.
+   *
+   * Evidence that a preview and a later submission are the same bytes. It is
+   * **not** a base revision for the live document, which has a revision of its
+   * own.
+   */
+  readonly revision: ContentRevision;
+}
+
+/** The name of every {@link BackupReadError} variant. */
+export type BackupReadErrorName =
+  | 'RootNotADirectory'
+  | 'RootNotPrivate'
+  | 'StaleBatch'
+  | 'StaleEntry'
+  | 'Io'
+  | 'NotUtf8';
+
+/**
+ * Why a backup-catalogue request could not return its requested result.
+ *
+ * **Not always a failed read**: `NotUtf8` is the arm where the entry opened and
+ * every byte arrived, and only turning those bytes into a string did not succeed.
+ *
+ * **A missing backup folder is not in here**, deliberately: it is the ordinary
+ * state of a configuration nothing has been saved from, and it arrives as
+ * `root: 'Missing'` on a successful listing instead.
+ *
+ * `StaleBatch` and `StaleEntry` mean *this identity does not resolve now*, which
+ * is a statement about the folder. The two refusals for a forged identity —
+ * `unrecognisedBackupBatch` and `unaddressableBackupEntry` in `./errors` — are
+ * raised before anything is opened and say nothing about it.
+ */
+export type BackupReadError =
+  | { readonly RootNotADirectory: { readonly path: string } }
+  | { readonly RootNotPrivate: { readonly path: string; readonly mode: number } }
+  | { readonly StaleBatch: { readonly batch: BackupBatchId } }
+  | { readonly StaleEntry: { readonly entry: BackupEntryId } }
+  | {
+      readonly Io: {
+        readonly step: BackupReadStep;
+        readonly path: string;
+        /** A `std::io::ErrorKind` variant name. A code, never a message. */
+        readonly kind: string;
+        /**
+         * The operating system's own error number, or `null`. Diagnostic data
+         * with no dictionary entry, exactly as {@link BackupError}'s is.
+         */
+        readonly raw_os_error: number | null;
+      };
+    }
+  | {
+      readonly NotUtf8: {
+        readonly entry: BackupEntryId;
+        /** Byte offset of the first invalid sequence. */
+        readonly offset: number;
+      };
+    };
 
 // ---------------------------------------------------------------------------
 // The draft surface — Phase 2b-2b-3

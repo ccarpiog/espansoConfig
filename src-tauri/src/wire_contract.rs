@@ -69,8 +69,9 @@ use espansoconfig_core::patch::{
     VerificationFailure,
 };
 use espansoconfig_core::persist::{
-    Acknowledgement, BackupError, BackupRecord, BackupStep, Rotation, RotationOutcome, SaveError,
-    SaveRefusal, SaveVerdict, TargetDifference, WriteError, WriteStep,
+    Acknowledgement, BackupBatchId, BackupEntryId, BackupError, BackupReadError, BackupReadStep,
+    BackupRecord, BackupRootState, BackupStep, BackupTarget, BatchSkipped, EntrySkipped, Rotation,
+    RotationOutcome, SaveError, SaveRefusal, SaveVerdict, TargetDifference, WriteError, WriteStep,
 };
 use espansoconfig_core::reconcile::{
     ReapplyEvidence, ReapplyPlacement, ReapplyRefusal, ReapplyResolution,
@@ -179,6 +180,18 @@ pub(crate) fn read_without_comments(relative: &str) -> String {
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
     strip_comments(&source)
+}
+
+/// Reads a repository file whole, comments included.
+///
+/// [`read_without_comments`]'s sibling for **Rust** source, where comments are
+/// kept rather than stripped: the two readers of a Rust file below are
+/// `crate::rust_source`'s lexer, which discards comments and attributes itself,
+/// and [`function_body`], which slices a body that has already begun.
+fn read_repository_file(relative: &str) -> String {
+    let path = frontend_file(relative);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()))
 }
 
 /// Removes `/* … */` and `// …` from TypeScript source.
@@ -1407,8 +1420,15 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// `DocumentEdit::DuplicateItem`, built and verified at 2c-3c-1, is the
 /// primitive behind it, so the command was registered only after the core could
 /// express it.
+///
+/// Phase 2c-5-2 adds `list_backup_batches`, `list_backup_entries` and
+/// `read_backup_text`, taking the workspace surface to fifteen and the whole to
+/// sixteen. **None of the three writes**, so the count of writing commands below
+/// is asserted to have stayed at six: the phase's design consult rules that a
+/// restore is a content path on `save_raw_document`, and a seventh writing name
+/// appearing here would be that ruling silently reversed.
 #[test]
-fn the_registered_commands_are_the_workspace_twelve_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_fifteen_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1417,30 +1437,51 @@ fn the_registered_commands_are_the_workspace_twelve_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        12,
-        "the workspace surface is six read-only commands and six that write: {workspace:?}"
+        15,
+        "the workspace surface is nine read-only commands and six that write: {workspace:?}"
     );
-    for mutating in [
+    let writing = [
         "move_match",
         "save_match",
         "create_match",
         "delete_match",
         "save_raw_document",
         "duplicate_match",
-    ] {
+    ];
+    for mutating in writing {
         assert!(
             workspace.contains(mutating),
             "{mutating} writes a user's file and must be declared where the frontend can call it"
         );
     }
+    assert_eq!(
+        writing.len(),
+        6,
+        "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), so \
+         nothing may add a seventh writing command"
+    );
+    for read_only in [
+        "list_backup_batches",
+        "list_backup_entries",
+        "read_backup_text",
+    ] {
+        assert!(
+            workspace.contains(read_only),
+            "{read_only} is Phase 2c-5-2's read-only backup surface and must be declared"
+        );
+        assert!(
+            !writing.contains(&read_only),
+            "{read_only} reads the backup tree and must never be counted among the writers"
+        );
+    } // End of the loop over the backup catalogue's three read-only commands
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
     let declared: BTreeSet<String> = workspace.union(&menu).cloned().collect();
     let registered = registered_commands();
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        13,
-        "Phase 2c-3c-2 registers twelve workspace commands and one menu command, and no more: {registered:?}"
+        16,
+        "Phase 2c-5-2 registers fifteen workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1448,7 +1489,127 @@ fn the_registered_commands_are_the_workspace_twelve_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twelve_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_fifteen_and_the_menu_command()
+
+/// The names no read of the backup tree may so much as mention.
+///
+/// **A fixed vocabulary, and therefore a tripwire rather than a proof.** A writer
+/// introduced under a name that is not on this list is not seen by the scan that
+/// reads it.
+///
+/// Every one is a way bytes reach a user's disk, or a way the *write* side of
+/// the backup module is reached. `BackupSession` is on it because it is the
+/// stateful half that mints a batch, copies a file and runs
+/// `rotate` — this crate's only recursive deletion — and `BackupCatalog` is the
+/// read side that shares none of it.
+///
+/// Deliberately a list of **identifiers** rather than of modules: it is checked
+/// with `crate::rust_source::mentions_identifier`, which lexes, so a name in a
+/// comment, in a doc comment or inside a string literal is not a mention and
+/// `use …::save_document;` is.
+const NO_WRITER_IDENTIFIERS: &[&str] = &[
+    "save_document",
+    "run_one_save",
+    "SaveRequest",
+    "SaveContent",
+    "SaveResult",
+    "BackupSession",
+    "replace_file_atomically",
+    "replace_locked_file",
+    "PathWriteLock",
+];
+
+/// Regression checks for the intended read-only backup-command paths.
+///
+/// **These are regression tripwires for the known read-only routes**: the source
+/// scan rejects a fixed writer vocabulary and the byte oracle
+/// (`crate::backup::tests::no_backup_operation_changes_a_byte_of_the_tree`)
+/// covers one exercised tree, so neither their combination nor either test alone
+/// proves arbitrary callees side-effect-free. A new writer with an unlisted name,
+/// a side-effecting helper, a metadata-only mutation, or a route that fixture
+/// does not exercise passes both.
+///
+/// Two scopes, and the second is what makes the first mean anything:
+///
+/// - **the whole of `src-tauri/src/backup.rs`**, which is where every line of
+///   the three operations lives;
+/// - **the six function bodies in `src-tauri/src/commands.rs` that reach it** —
+///   three `#[tauri::command]` wrappers and the three `WorkspaceSession` methods
+///   under them. `commands.rs` legitimately names every writer, so scanning the
+///   file would say nothing; scanning exactly these six bodies says that the
+///   path from the IPC boundary into `crate::backup` passes through none of
+///   them.
+///
+/// The non-vacuity guard is the third assertion: the same scanner over
+/// `save_raw_document`'s own body **does** find its writer. A scanner that had
+/// been broken into matching nothing would pass the first two silently.
+#[test]
+fn the_known_backup_routes_name_no_writer() {
+    let module = read_repository_file("src-tauri/src/backup.rs");
+    for forbidden in NO_WRITER_IDENTIFIERS {
+        assert!(
+            !crate::rust_source::mentions_identifier(&module, forbidden),
+            "src-tauri/src/backup.rs names {forbidden}, which this tripwire refuses: a route \
+             from the catalogue into the write side must be argued, never introduced quietly"
+        );
+    } // End of the loop over the forbidden identifiers, over the module
+
+    let commands = read_repository_file("src-tauri/src/commands.rs");
+    let reaching = [
+        "list_backup_batches",
+        "list_backup_entries",
+        "read_backup_text",
+        "backup_batches",
+        "backup_entries",
+        "backup_text",
+    ];
+    for name in reaching {
+        let body = function_body(&commands, name);
+        for forbidden in NO_WRITER_IDENTIFIERS {
+            assert!(
+                !body.contains(forbidden),
+                "the body of {name} names {forbidden}, so a route intended to be read-only \
+                 names a writer"
+            );
+        } // End of the loop over the forbidden identifiers, over one body
+    } // End of the loop over the six functions that reach the backup catalogue
+
+    // The control. `save_raw_document` is the sixth writer, and the same reading
+    // of the same file finds what it delegates to — so a negative above is a
+    // statement about those six bodies rather than about a scanner that stopped
+    // reading.
+    assert!(
+        function_body(&commands, "save_raw_document").contains("save_one_raw_document"),
+        "the body reader stopped finding what a writing command delegates to"
+    );
+    assert!(
+        crate::rust_source::mentions_identifier(&commands, "save_document"),
+        "the identifier scanner stopped seeing the writer commands.rs really names"
+    );
+} // End of function the_known_backup_routes_name_no_writer()
+
+/// The text between the braces of the **first** `fn {name}(` in `source`.
+///
+/// Brace-matched from the `{` that opens the body, so a nested block, a closure
+/// and a `match` arm are all inside the answer. Written here rather than parsed
+/// with `syn` because the question is *what does this body mention*, which a
+/// slice answers exactly and a token walk would answer at more cost.
+///
+/// # Panics
+///
+/// When `source` declares no such function, so a renamed command fails loudly
+/// rather than being scanned as an empty body — the vacuous pass every check in
+/// this module exists to avoid.
+fn function_body<'a>(source: &'a str, name: &str) -> &'a str {
+    let marker = format!("fn {name}(");
+    let at = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("no fn {name}( is declared in this source"));
+    let opened = source[at..]
+        .find('{')
+        .unwrap_or_else(|| panic!("fn {name} declares no body"));
+    braced_block(&source[at + opened..], &format!("the body of {name}"))
+} // End of function function_body()
 
 /// The three outcomes of a save are declared exactly as Rust writes them.
 ///
@@ -3042,3 +3203,343 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()
+
+// ---------------------------------------------------------------------------
+// The read-only backup catalogue — Phase 2c-5-2
+// ---------------------------------------------------------------------------
+//
+// Its own tables rather than an extension of `save_transaction_enums`, for the
+// reason Phase 2b-1 gave that group its own: the counts pinned there are the
+// save transaction's, and folding a second family into them would make every one
+// of those numbers mean two things at once. The three checks below are the same
+// three, over the catalogue's own values.
+
+/// A batch identity, for the samples below.
+fn a_batch() -> BackupBatchId {
+    BackupBatchId::parse("2026-01-02T030405Z-0").expect("a name the batch grammar admits")
+}
+
+/// An entry identity, for the samples below.
+fn an_entry() -> BackupEntryId {
+    BackupEntryId::in_batch(a_batch(), Path::new("match/base.yml"))
+        .expect("a relative path this catalogue can address")
+}
+
+/// One value of every [`BackupRootState`] variant.
+fn backup_root_state_samples() -> Vec<BackupRootState> {
+    vec![BackupRootState::Missing, BackupRootState::Present]
+}
+
+/// One value of every [`BatchSkipped`] variant.
+fn batch_skipped_samples() -> Vec<BatchSkipped> {
+    vec![
+        BatchSkipped::ForeignName,
+        BatchSkipped::NotADirectory,
+        BatchSkipped::NoMarker,
+        BatchSkipped::Unreadable,
+    ]
+}
+
+/// One value of every [`EntrySkipped`] variant.
+fn entry_skipped_samples() -> Vec<EntrySkipped> {
+    vec![
+        EntrySkipped::Marker,
+        EntrySkipped::Symlink,
+        EntrySkipped::NotARegularFile,
+        EntrySkipped::UnusableName,
+        EntrySkipped::Unreadable,
+    ]
+}
+
+/// One value of every [`BackupReadStep`] variant.
+fn backup_read_step_samples() -> Vec<BackupReadStep> {
+    vec![
+        BackupReadStep::InspectBackupRoot,
+        BackupReadStep::ListBackupRoot,
+        BackupReadStep::InspectBatch,
+        BackupReadStep::ListBatch,
+        BackupReadStep::InspectEntry,
+        BackupReadStep::ReadEntry,
+    ]
+}
+
+/// One value of every [`BackupTarget`] variant.
+fn backup_target_samples() -> Vec<BackupTarget> {
+    vec![
+        BackupTarget::InConfigRoot {
+            relative_path: WirePath::new("match/base.yml"),
+        },
+        BackupTarget::OutsideConfigRoot,
+    ]
+}
+
+/// One value of every [`BackupReadError`] variant.
+fn backup_read_error_samples() -> Vec<BackupReadError> {
+    vec![
+        BackupReadError::RootNotADirectory { path: a_path() },
+        BackupReadError::RootNotPrivate {
+            path: a_path(),
+            mode: 0o755,
+        },
+        BackupReadError::StaleBatch { batch: a_batch() },
+        BackupReadError::StaleEntry { entry: an_entry() },
+        BackupReadError::Io {
+            step: BackupReadStep::ListBatch,
+            path: a_path(),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        },
+        BackupReadError::NotUtf8 {
+            entry: an_entry(),
+            offset: 11,
+        },
+    ]
+} // End of function backup_read_error_samples()
+
+/// A synthetic configuration with one recognised batch holding one copy.
+///
+/// Hand-authored and neutral (CLAUDE.md section 1). The batch is written
+/// directly rather than taken from a save, because the values under test are the
+/// **read** side and a fixture that had to write a file first would be measuring
+/// the writer.
+///
+/// The temporary directory is returned beside the workspace: dropping it would
+/// remove the tree while the catalogue is still being asked about it.
+fn a_catalogued_workspace() -> (tempfile::TempDir, espansoconfig_core::workspace::Workspace) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("match")).expect("the match directory");
+    std::fs::write(root.join("match").join("base.yml"), MATCH_FILE).expect("the live file");
+
+    let batch = root
+        .join(espansoconfig_core::persist::BACKUP_DIRECTORY_NAME)
+        .join("2026-01-02T030405Z-0");
+    std::fs::create_dir_all(batch.join("match")).expect("the batch directory");
+    std::fs::write(
+        batch.join(espansoconfig_core::persist::BATCH_MARKER_NAME),
+        format!("{}\n", espansoconfig_core::persist::BATCH_MARKER_FORMAT),
+    )
+    .expect("the ownership marker");
+    std::fs::write(batch.join("match").join("base.yml"), "matches: []\n").expect("the copy");
+    std::fs::set_permissions(
+        root.join(espansoconfig_core::persist::BACKUP_DIRECTORY_NAME),
+        std::fs::Permissions::from_mode(0o700),
+    )
+    .expect("a backup root is private to its owner");
+
+    let workspace = espansoconfig_core::workspace::Workspace::open(root).expect("the tree opens");
+    (dir, workspace)
+} // End of function a_catalogued_workspace()
+
+/// Every backup-catalogue struct paired with the JSON `serde` really writes.
+///
+/// Driven through the three read operations rather than built from struct
+/// literals, because four of the seven shapes have private fields the catalogue
+/// fills and a literal would need accessors this crate has no other use for.
+/// What that costs is the *a-field-added-here-fails-to-compile* guard
+/// `save_transaction_structs` gets from its literals; what replaces it is that
+/// these are the values the commands really answer with, which is the stronger
+/// half of the same question.
+fn backup_catalogue_structs() -> Vec<(&'static str, Value)> {
+    let (_dir, workspace) = a_catalogued_workspace();
+    let batches = crate::backup::list_batches(&workspace).expect("the root lists");
+    let batch = batches
+        .batches
+        .first()
+        .expect("the fixture holds one recognised batch")
+        .clone();
+    let key = crate::backup::BackupBatchKey {
+        name: batch.display_name().to_owned(),
+    };
+    let entries = crate::backup::list_entries(&workspace, &key).expect("the batch walks");
+    let entry = entries
+        .entries
+        .first()
+        .expect("the fixture's batch holds one entry")
+        .clone();
+    let document = workspace
+        .list_documents()
+        .iter()
+        .find(|summary| summary.relative_path.as_path().ends_with("base.yml"))
+        .expect("the tree holds base.yml")
+        .id;
+    let text = crate::backup::read_text(
+        &workspace,
+        &crate::backup::BackupEntryKey {
+            batch: crate::backup::BackupBatchKey {
+                name: entry.id().batch().display_name().to_owned(),
+            },
+            relative_path: entry.id().relative_path().to_string_lossy().into_owned(),
+        },
+        document,
+    )
+    .expect("the mapped entry reads");
+    vec![
+        ("BackupBatchId", json_of(batch.id())),
+        ("BackupBatch", json_of(&batch)),
+        ("BackupEntryId", json_of(entry.id())),
+        ("BackupEntry", json_of(&entry)),
+        ("BackupBatchListing", json_of(&batches)),
+        ("BackupEntryListing", json_of(&entries)),
+        ("BackupTextResponse", json_of(&text)),
+    ]
+} // End of function backup_catalogue_structs()
+
+/// Every backup-catalogue enum and the samples for it.
+fn backup_catalogue_enums() -> Vec<(&'static str, Vec<Value>)> {
+    vec![
+        (
+            "BackupRootState",
+            backup_root_state_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BatchSkipped",
+            batch_skipped_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "EntrySkipped",
+            entry_skipped_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BackupReadStep",
+            backup_read_step_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BackupTarget",
+            backup_target_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "BackupReadError",
+            backup_read_error_samples().iter().map(json_of).collect(),
+        ),
+    ]
+} // End of function backup_catalogue_enums()
+
+/// Every backup-catalogue sample list is its enum's declaration.
+///
+/// Read from the core's own source rather than from the list, exactly as the
+/// save transaction's twin is: a list checked against itself is a list that
+/// cannot fail.
+#[test]
+fn every_backup_catalogue_sample_list_is_its_enums_declaration() {
+    let mut variants = 0usize;
+    for (name, samples) in backup_catalogue_enums() {
+        let declared = crate::dictionary_contract::declared_variants_of(name);
+        let enumerated: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(
+            declared, enumerated,
+            "the {name} sample list and the {name} declaration disagree"
+        );
+        assert_eq!(
+            samples.len(),
+            enumerated.len(),
+            "the {name} sample list holds two instances of one variant"
+        );
+        variants += samples.len();
+    } // End of the loop over the backup catalogue's enums
+    assert_eq!(
+        variants, 25,
+        "Phase 2c-5-2 puts twenty-five variants on this wire — BackupRootState's two, \
+         BatchSkipped's four, EntrySkipped's five, BackupReadStep's six, BackupTarget's \
+         two and BackupReadError's six; this list now holds {variants}"
+    );
+} // End of function every_backup_catalogue_sample_list_is_its_enums_declaration()
+
+/// Every backup-catalogue union declares exactly the Rust variants.
+#[test]
+fn every_backup_catalogue_union_declares_exactly_the_rust_variants() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    for (name, samples) in backup_catalogue_enums() {
+        let union = name_union_of(name, &samples);
+        let rust: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        let declared = union_members(&source, &union);
+        assert_same_names(&format!("type {union}"), &rust, &declared);
+    } // End of the loop over the backup catalogue's enums
+} // End of function every_backup_catalogue_union_declares_exactly_the_rust_variants()
+
+/// Every backup-catalogue struct declares exactly what `serde` writes.
+#[test]
+fn every_backup_catalogue_struct_declares_exactly_the_properties_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let structs = backup_catalogue_structs();
+    assert_eq!(
+        structs.len(),
+        7,
+        "the catalogue puts seven struct shapes on this wire"
+    );
+    for (name, value) in structs {
+        let declared = interface_fields(&source, name);
+        let written = json_keys(&value);
+        assert_same_names(&format!("interface {name}"), &written, &declared);
+    } // End of the loop over the backup catalogue's structs
+} // End of function every_backup_catalogue_struct_declares_exactly_the_properties_serde_writes()
+
+/// Every tagged backup-catalogue variant's operands are the keys `serde` writes.
+///
+/// Two of the six enums are mixed in shape — [`BackupTarget`] carries an operand
+/// in one variant and none in the other — so the three counts are pinned exactly,
+/// and a struct variant silently declared as a type reference is a failure rather
+/// than a skip.
+#[test]
+fn every_backup_catalogue_variant_declares_exactly_the_operands_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let mut checked = 0usize;
+    let mut nested = 0usize;
+    let mut unit = 0usize;
+    for (name, samples) in backup_catalogue_enums() {
+        let union = name_union_of(name, &samples);
+        for json in samples {
+            let Value::Object(map) = &json else {
+                unit += 1;
+                continue;
+            };
+            let variant = variant_name(&json);
+            let Some(payload) = map.get(&variant).and_then(Value::as_object) else {
+                nested += 1;
+                continue;
+            };
+            let Some(declared) = tagged_variant_fields(&source, name, &variant) else {
+                nested += 1;
+                continue;
+            };
+            let written: BTreeSet<String> = payload.keys().cloned().collect();
+            assert_same_names(
+                &format!("the {variant} payload of type {union}"),
+                &written,
+                &declared,
+            );
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the backup catalogue's enums
+    assert_eq!(
+        (checked, nested, unit),
+        (7, 0, 18),
+        "Phase 2c-5-2 puts seven struct variants and eighteen unit variants on this wire: \
+         BackupTarget's one operand-carrying arm and BackupReadError's six, against \
+         seventeen bare-name members and BackupTarget::OutsideConfigRoot"
+    );
+} // End of function every_backup_catalogue_variant_declares_exactly_the_operands_serde_writes()
+
+/// An identity a listing produced is exactly what the wire sends back.
+///
+/// **The round-trip claim, measured rather than argued.** The identities on this
+/// wire are opaque, so the only thing that makes handing one back meaningful is
+/// that it comes back as the same identity — and `crate::backup` is what keeps
+/// that true by never offering one whose rendering is lossy.
+#[test]
+fn a_backup_identity_crosses_and_returns_unchanged() {
+    let entry = an_entry();
+    let written = json_of(&entry);
+    assert_eq!(written["batch"]["name"], "2026-01-02T030405Z-0");
+    assert_eq!(written["relative_path"], "match/base.yml");
+
+    let key: crate::backup::BackupEntryKey =
+        serde_json::from_value(written).expect("the wire form is what a caller sends back");
+    assert_eq!(key.batch.name, entry.batch().display_name());
+    assert_eq!(
+        Path::new(&key.relative_path),
+        entry.relative_path(),
+        "an identity that went out must come back naming the same entry"
+    );
+} // End of function a_backup_identity_crosses_and_returns_unchanged()

@@ -22,7 +22,7 @@
  * A type alone would be invisible to both.
  */
 
-import type { DraftError, SaveError } from './types';
+import type { BackupReadError, DraftError, SaveError } from './types';
 
 /**
  * Every code the Rust side may put in a rejection.
@@ -51,7 +51,11 @@ export const COMMAND_ERROR_CODES = [
   'duplicateSourceNotASequenceItem',
   'documentHasNoMatchList',
   'draftRefused',
-  'saveFailed'
+  'saveFailed',
+  'unrecognisedBackupBatch',
+  'unaddressableBackupEntry',
+  'backupEntryIsNotThisDocument',
+  'backupReadFailed'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -373,6 +377,108 @@ export interface SaveFailedError {
   readonly may_have_written: boolean;
 }
 
+/**
+ * A backup batch name is not one the batch grammar admits.
+ *
+ * **A refusal of the request, before any folder is opened**, and deliberately
+ * not the `StaleBatch` arm of a {@link BackupReadError}: that arm means a name
+ * the grammar does admit does not name a recognised batch *now* — it does not
+ * imply that the identity resolved previously — and this one means the name
+ * could never have named one. Telling a person their backup folder had been
+ * tidied away when nothing was asked of the disk is the sentence the two codes
+ * exist to keep apart.
+ *
+ * An identity a listing produced parses by construction, so this is what a
+ * forged one meets.
+ */
+export interface UnrecognisedBackupBatchError {
+  /** The discriminant. */
+  readonly code: 'unrecognisedBackupBatch';
+  /**
+   * The batch name that was sent.
+   *
+   * The caller's own string, echoed back for a console. No sentence
+   * interpolates it: it names nothing this build recognises, and therefore
+   * nothing a person chose.
+   */
+  readonly batch: string;
+}
+
+/**
+ * A backup entry's relative path is not one the catalogue can address.
+ *
+ * The **forged-path** refusal, and it is Rust's own constructor answering rather
+ * than a second opinion about paths: an empty path, an absolute one, one holding
+ * `.` or `..`, one with a repeated or trailing separator, and the batch's own
+ * ownership marker are all this. **Nothing is normalised**, so `match/./base.yml`
+ * is refused rather than quietly read as `match/base.yml`.
+ *
+ * Raised before any folder is opened, so it says nothing about the disk.
+ */
+export interface UnaddressableBackupEntryError {
+  /** The discriminant. */
+  readonly code: 'unaddressableBackupEntry';
+  /** The batch the entry was offered under. */
+  readonly batch: string;
+  /** The relative path that was sent. */
+  readonly relative_path: string;
+}
+
+/**
+ * A backup entry does not map to the document it was asked for.
+ *
+ * **The binding check**, and the reason `readBackupText` takes a document beside
+ * an entry: the batch is asked which entry that document's own resolved path
+ * maps to, and the identity sent has to be that entry. A display path could not
+ * stand in — two distinct filenames can render to one wire string.
+ *
+ * One code for three shapes, because all three are the same refusal and nothing
+ * is read: the batch holds nothing at that name, it holds something there that
+ * is not this entry, or the document is the configuration folder itself.
+ *
+ * **It is not a claim that the entry is a copy of some other file.** An entry's
+ * name says where a copy would have been written, never where any bytes came
+ * from.
+ */
+export interface BackupEntryIsNotThisDocumentError {
+  /** The discriminant. */
+  readonly code: 'backupEntryIsNotThisDocument';
+  /** The document that was asked, by its session-local identity. */
+  readonly document: number;
+}
+
+/**
+ * A backup-catalogue request could not return its requested result, for a reason
+ * reported by the catalogue.
+ *
+ * **Not always a failed read.** The `NotUtf8` arm of a `BackupReadError` is the
+ * one where the entry opened and every byte arrived, and only turning those bytes
+ * into a string did not succeed, so no sentence built on this code may say the
+ * folder could not be read.
+ *
+ * **The typed refusal travels whole**, exactly as {@link SaveFailedError}'s and
+ * {@link DraftRefusedError}'s do: `BackupReadError` has its own dictionary
+ * namespace and its own accessor (`describeBackupReadError` in
+ * `src/lib/i18n/codes.ts`), and a second copy of its taxonomy here would be a
+ * second thing to keep in step.
+ *
+ * **A missing backup folder is not this.** It is the ordinary state of a
+ * configuration this application has never saved from, and it arrives as
+ * `root: 'Missing'` on a *successful* listing.
+ *
+ * There is no `may_have_written` beside it, and there could not be: nothing on
+ * this path writes.
+ */
+export interface BackupReadFailedError {
+  /** The discriminant. */
+  readonly code: 'backupReadFailed';
+  /**
+   * The reason the backup-catalogue request did not produce its requested
+   * result, exactly as Rust reports it.
+   */
+  readonly error: BackupReadError;
+}
+
 /** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
@@ -391,7 +497,11 @@ export type CommandError =
   | DuplicateSourceNotASequenceItemError
   | DocumentHasNoMatchListError
   | DraftRefusedError
-  | SaveFailedError;
+  | SaveFailedError
+  | UnrecognisedBackupBatchError
+  | UnaddressableBackupEntryError
+  | BackupEntryIsNotThisDocumentError
+  | BackupReadFailedError;
 
 /**
  * Where the developer string of an unexpected failure is kept.
@@ -579,7 +689,11 @@ export const COMMAND_ERROR_OPERANDS = {
   duplicateSourceNotASequenceItem: {},
   documentHasNoMatchList: { document: 'number' },
   draftRefused: { error: 'object' },
-  saveFailed: { error: 'object', may_have_written: 'boolean' }
+  saveFailed: { error: 'object', may_have_written: 'boolean' },
+  unrecognisedBackupBatch: { batch: 'string' },
+  unaddressableBackupEntry: { batch: 'string', relative_path: 'string' },
+  backupEntryIsNotThisDocument: { document: 'number' },
+  backupReadFailed: { error: 'object' }
 } as const;
 
 /**
@@ -768,6 +882,19 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'documentHasNoMatchList':
     case 'draftRefused':
     case 'saveFailed':
+    // The four backup-catalogue refusals say nothing about the selection
+    // either, and one of them is worth stating rather than lumping in: a
+    // {@link BackupEntryIsNotThisDocumentError} names a document, so it looks
+    // like an identity failure and is not one. It means the *backup entry* is
+    // not that document's, never that the document has stopped being one this
+    // session holds — `unknownDocument` is the code that says that, and it
+    // clears the selection above. Nothing on the backup path writes, reads a
+    // projection or mints a `MatchId`, so no arm here could honestly do
+    // anything else.
+    case 'unrecognisedBackupBatch':
+    case 'unaddressableBackupEntry':
+    case 'backupEntryIsNotThisDocument':
+    case 'backupReadFailed':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.

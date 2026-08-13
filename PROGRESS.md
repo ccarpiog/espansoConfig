@@ -97,7 +97,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | ✅ **complete — all six steps**, 3 and 4 in both their halves, 5 closed by its three-part fix round **5b** (5b-1 the instrument extension and the measurement, 5b-2 the one-property fix and its re-measurement, 5b-3 the record's rewrite plus Codex rounds 2 and 3), and 6 the removal with the gate figures re-derived on a harness-free tree |
 | **2c-5 design consult** | **Phase 2c-5 put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-5-design.md` (125 lines). Like every consult since 2c-4a it **changed the phase rather than confirming it**, and it ruled against the handoff brief in three places. It rules restore a **content path on the sixth writer** — the frontend reads the backup's text and sends it through `save_raw_document`, so there is **no seventh writing command** and the new commands are all read-only; it rules **no restore-specific acknowledgeable finding** (a finding belongs to the candidate gate, and *"the person chose Restore"* is UI authorization, not a property validation can infer from identical text — adding route provenance to `SaveContent` to manufacture one would give two identical candidates different verdicts and turn the sixth writer into a hidden seventh protocol); and on Q8 it **disagrees with this project's own history**, ruling the sharpest failure **behavioural rather than prose**. Seven steps |
 | **2c-5-1** | **The core backup catalogue, with no caller**: `BackupCatalog` beside the stateful `BackupSession` — opaque `BackupBatchId`/`BackupEntryId` revalidated at every use, the scans carrying eligible values **plus** per-skip codes so a caller need not read an incomplete scan as "no backups", `BackupBytes`/`BackupText` with `NotUtf8 { entry, offset }`, and `compare_batches_newest_first` as the **one** place the `(stamp, counter)` tuple becomes an order — with `rotate` now reversing that comparison instead of spelling the tuple a second time | ✅ complete — after a review round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium, a High in prose, three Mediums and a Low; **the behavioural High was a real, reachable TOCTOU** — every path check was `symlink_metadata` on a pathname and every *use* was a second pathname operation, so a writer inside the backup root could swap a component between check and open and have bytes from outside the batch returned as `BackupBytes`. Round 2 confirmed **six of seven closed and no new behavioural defect**, and returned NOT READY on prose alone |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **step 1 is complete**; step 2 (the read-only Tauri wire) is next |
+| **2c-5-2** | **The read-only Tauri wire**: `list_backup_batches`, `list_backup_entries` and `read_backup_text` — commands thirteen to fifteen, **none of them a writer**. `read_backup_text` takes an opaque `BackupEntryId` **plus** the selected `DocumentId`, re-resolves the latter through the authoritative `DocumentContext` and refuses unless the entry is the one that target maps to, so **a display path is never authority**. Six read-side enums gained `Serialize` (six dictionary namespaces, 25 keys) and four `CommandError` variants their EN/ES sentences through typed accessors. Two decisions step 1 left open were taken: the wire is **exact-or-absent** for entry names — an entry is offered only when its relative path survives lossy rendering byte-for-byte (`is_exactly_spellable`, comparing `OsStr` bytes, never `Path` components), with the rest **disclosed** in an `unaddressable` count rather than silently dropped — and `entry_for_target`'s `None` for a config-root target folds into `backupEntryIsNotThisDocument` as one refusal with three documented shapes | ✅ complete — after a review round and a confirmation round, **two fix rounds**, and no High at any point. **Every finding across both rounds was this project's named worst defect class**: a sentence claiming a guarantee the code does not give. Round 1 returned NOT READY on 5 Medium and 6 Low; its fix closed all eleven and **swept 30 further sites**. Round 2 *still* returned NOT READY on 4 Medium and 2 Low — **narrower instances of the same four defects**, plus one **false claim introduced by the fix itself**. Fix 2 closed those six and swept **27 more**. The one behavioural change is L1: `BackupEntry.length` crosses as **exact decimal digits**, not a JSON number |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1 and 2 are complete**; step 3 (restore as browser values, nothing drawn) is next |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -7618,6 +7619,160 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-2 is COMPLETE. The next thing to do is step 2c-5-3 — restore as browser values, with nothing drawn.**
+
+The consult is `docs/reviews/phase-2c-5-design.md`; its **Q4** is step 3's specification and its
+**Q7 item 3** is the evidence step 3 owes. Step 2's rounds are `docs/reviews/phase-2c-5-2-code.md`
+(the review, 325 lines) and `docs/reviews/phase-2c-5-2-confirmation.md` (the confirmation, 230
+lines). Step 1's are `phase-2c-5-1-code.md` and `phase-2c-5-1-confirmation.md`.
+
+#### The production gate baseline
+
+**`1153 / 424 / 1793 / 180`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. The Rust figure moved from 1131 → 1152 in the implementation (+21: 15 in
+`backup.rs`, 6 in `wire_contract.rs`) and → **1153** in fix round 1 (+1: the length test). It was
+re-derived by the orchestrator by **summing the per-suite totals**, not by trusting any worker's
+figure. `npm run check` moved 423 → **424** (one new test file), `npm test` 1767 → **1793** (+26:
+20 in the new `backupCodes.test.ts`, 5 in `commands.test.ts`, and **1 from
+`scripts/lint/ipc-detail.test.ts`'s per-file `it.each` picking up the new file** — that last one is
+the kind of increment that looks unexplained if you only count the cases you wrote).
+
+**The module count stayed at 180, and that is correct rather than suspicious**: every frontend change
+in this step was a *modification* of an existing module, and the two new files are a test and a Rust
+file — neither is reachable from the entry.
+
+#### ⚠️ The bundle-regression oracle was wrong as previously written, and this is the correction
+
+`CLAUDE.md` says to check **both** the arithmetic and a bundle search for `svelte/internal/server`.
+**That search cannot fail in a production build**: Vite resolves and minifies module specifiers away,
+so the literal string is absent whether or not the server build leaked in. Verified at this step — a
+control search for `svelte/internal/client` in `dist/assets/index-*.js` **also matched nothing**,
+which makes the negative vacuous in both directions. Step 2's implementer reported that control as
+having matched; it does not.
+
+**The oracle that actually discriminates**, and what was used here:
+
+```sh
+# server-only sentinels — must be ABSENT
+rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js
+# client-only constructs — must be PRESENT, proving the search can match at all
+rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js   # → 2 at this step
+```
+
+#### What step 2 built, and the two decisions it took
+
+Three read-only commands — `list_backup_batches`, `list_backup_entries`, `read_backup_text` —
+registered as the thirteenth to fifteenth commands in `src-tauri/src/main.rs`. **No writer was
+added**; restore remains a content path on the sixth writer. Read-only-ness is proved twice: a
+lexical tripwire over the command bodies and a byte-oracle test that drives all three over a real
+tree and compares the whole tree afterwards. **The tripwire's own documentation now says what it does
+and does not prove** — it is a regression tripwire, not a soundness proof, and a writer reached
+through a re-export, an alias, a trait method or a macro would not be seen by it.
+
+- **Non-UTF-8 entry names — *exact-or-absent*.** An entry reaches the wire only when its relative
+  path survives the lossy rendering byte-for-byte, compared as `OsStr` **bytes** rather than `Path`
+  components. The rest are counted in an `unaddressable` operand, so a short listing is **disclosed
+  rather than silently short**. Tested at the identity level with a positive control, because **APFS
+  refuses to create a non-UTF-8 name** and the file cannot be made.
+- **`BackupEntry.length` crosses as exact decimal digits, not a JSON number** — the step's one
+  behavioural change, and a **wire-format change** (`number` → `string`). Nothing consumes it yet;
+  **2c-5-4's screen must use `BigInt(length)`**. Refusing was rejected because it drops an entry from
+  a listing that claims completeness, and capping because it reports a length never observed. The
+  confirmation round adjudicated the mechanism **sound**.
+
+#### The two adjudications the confirmation round settled — do not reopen either
+
+1. **`batch_stamp`'s "sorts lexicographically in the same order it sorts chronologically" is NOT a
+   defect** (`backup.rs:1331`). Its grammatical subject is the fixed UTC **format** applied to `when`,
+   explaining why formatted values compare lexicographically; it makes no claim about the directories
+   on disk, and `rotate()` above it now says on-disk ordering establishes no chronology.
+2. **The `length` wire format is sound.** Only its explanatory *example* was wrong, and that was a
+   false claim **introduced by fix round 1**: `2^53` **is** exactly representable as a JavaScript
+   number, so the first integer demonstrating loss is `2^53 + 1`. The test's illustrative control now
+   uses `MAX_EXACT_WIRE_INTEGER + 2` → `"9007199254740993"`; the loop still carries `MAX + 1` as
+   boundary coverage rather than as a rounding demonstration.
+
+#### The lesson this step re-proved, in the sharpest form yet
+
+**Every one of the seventeen findings across both rounds was a sentence claiming a guarantee the code
+does not give. No High was ever found, and no test could have failed for any of them.**
+
+The narrowing pattern held exactly as the record predicts. Fix round 1 closed eleven findings **and
+swept 30 further sites** — and the confirmation round *still* found **narrower instances of the same
+four defects**. Two details are worth carrying:
+
+- **M2's exact flagged sentence was standing in a second file.** "the eleventh session after this
+  one" was fixed in `backup.rs` and left untouched in `core/persist/save.rs`. Fixing the named site
+  is not fixing the defect.
+- **The fix introduced its own false claim** (the `2^53` example). *A fix is a change, and the round
+  that reviews it is not optional* — this step is now the third consecutive one where that rule paid.
+
+Fix round 2 swept 27 more sites, and used a discriminator worth reusing: **"newest *name* first" is
+hedged and stays; unhedged "older/oldest batch" goes.** The forbidden claims remain forbidden —
+nothing may claim a backup is older or newer than another state, claim recoverability, or claim
+provenance. Batches are sessions, the directory name is a clock-derived label, and retention promises
+neither chronology nor recoverability.
+
+#### Two residues fix round 2 named and deliberately left, for the next session to rule on
+
+1. **`docs/decisions/2a-3b-notes.md:159` still holds "cannot escape the batch directory"** — an
+   unconditional containment claim that the macOS/non-macOS split made false off macOS. It is a
+   Phase 2a record, and **project convention leaves old records as written and corrects them
+   elsewhere**. It needs a *correction block*, not an edit. `docs/` was outside the sweep's scope.
+2. **Four i18n strings are the fixer's own words, not the reviewer's dictated text** —
+   `code.backupStep.writeBatchMarker` and `code.entrySkipped.marker`, EN and ES each. Meaning-parity
+   between the two languages was checked **by reading only**, and **no test can catch a drift there**
+   (the i18n suites check key and placeholder parity, never meaning).
+
+#### Is a third review round owed?
+
+**Not automatically, and the evidence says no.** Round 2 found no High and no behavioural defect;
+fix round 2 changed no executable line except the test control the review itself dictated, and no
+gate figure moved. But this project's history is four passes on step 2c-5-1, and **the cheapest
+version of a third round is narrow**: the two residues above, plus a sweep of `docs/` for the
+containment claim. A fresh session with budget may reasonably take it before starting step 3; it is
+**not** a blocker.
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty
+sed -n '/^## Q4/,/^## Q5/p' docs/reviews/phase-2c-5-design.md   # step 3's specification
+sed -n '/^## Q5/,/^## Q6/p' docs/reviews/phase-2c-5-design.md   # the one-shot confirmation ruling
+rg -n "saveRawDocument" src/lib/browser/state.ts
+rg -n "openWholeDocumentSave" src/lib/browser/invalidation.ts
+```
+
+#### What step 3 must build (consult Q4 and Q7 item 3)
+
+Catalogue and preview state, **exact candidate retention**, open-surface refusal, the **one-shot
+confirmation**, acknowledgement invalidation, conflict retention, and composition through
+`BrowserState.saveRawDocument` plus `openWholeDocumentSave`. **No component changes, so no mounted
+test and no window reading** — this is the project's established value-before-choice cut.
+
+Model/workspace tests owe every binding change, the dirty-unknown wording predicate, all six
+competing surface kinds, `committed: false`, refusal/acknowledgement, conflict/adopt
+`installed | alreadyThere | refused`, a second conflict, send uncertainty, committed invalidation
+failure, and **proof that no save is issued without confirmation**.
+
+The consult's single binding instruction, to read before writing a line:
+
+> The only restore submission is the exact UTF-8 text whose candidate hash, opaque backup-entry
+> identity, target `DocumentId`, target base revision, and preview generation are bound into one
+> unspent confirmation; send that text unchanged through `BrowserState.saveRawDocument`, and treat
+> every mismatch as "write nothing."
+
+**And the limitation that must be stated in the same sentence as what the code does force**:
+structural TypeScript cannot prove every caller used the confirmation — the browser transition can
+make confirmation the only producer it exposes, but a direct IPC import bypasses it. `matchDeletion.ts`
+has the identical limitation and says so. **Claiming the core enforces restore intent would be this
+step's instance of the defect class that produced all seventeen of step 2's findings.**
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-2 handoff, discharged. Kept because its rules are what step 2 was built and reviewed against.
 
 ### **Step 2c-5-1 is COMPLETE. The next thing to do is step 2c-5-2 — the read-only Tauri wire.**
 

@@ -207,8 +207,8 @@ describe('the save-transaction accessors', () => {
     // The register `docs/reviews/phase-2b-1-strings.md` set, applied to the three
     // sentences 2b-2a added. None may promise that a change cannot be lost, that
     // a file is recoverable, or what espanso will do with the result: the write
-    // lock excludes only this application's own writers, and backups are kept for
-    // ten sessions.
+    // lock excludes only this application's own writers, and rotation attempts to
+    // retain at most ten recognised batch directories chosen by sortable name.
     const saved = describeSaveResult(locale, {
       outcome: 'saved',
       revision: 'a'.repeat(64),

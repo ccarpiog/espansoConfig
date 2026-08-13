@@ -507,9 +507,11 @@ pub struct SaveRequest<'a> {
     /// **`None` is legal for [`SaveContent::Edits`] and refused for
     /// [`SaveContent::ReplaceText`]**, before the lock, as
     /// [`SaveError::ReplacementRequiresBackups`]. An edit's commit can destroy
-    /// only the planned spans; a replacement's destroys the whole file, and the
-    /// design consult's Q6 rules that such a commit must leave a recoverable
-    /// pre-commit image behind.
+    /// only the planned spans; a replacement's destroys the whole file, so
+    /// replacement mode requires a [`BackupSession`]. Before that session's first
+    /// committed change to a file, capture writes the bytes then held by the
+    /// target; later saves in the same session write no new copy. This is not a
+    /// promise that any particular state can later be recovered.
     pub backups: Option<&'a BackupSession>,
 }
 
@@ -601,10 +603,11 @@ pub struct SavedDocument {
     /// - the document was refused, in which case there is no [`SavedDocument`] at
     ///   all.
     ///
-    /// A `Some` is **not a promise that the file is recoverable**. Retention is
-    /// ten batches, and a batch is a session; the eleventh session after this one
-    /// removes this one's copies. No string built on this field may say
-    /// otherwise.
+    /// A `Some` is **not a promise that the file is recoverable**. Rotation
+    /// attempts to retain ten recognised batch directories, chosen by their
+    /// sortable names, and a batch is a session; a later session may remove this
+    /// one's copies, and no retention duration is promised. No string built on
+    /// this field may say otherwise.
     pub backup: Option<BackupRecord>,
 }
 
@@ -653,7 +656,8 @@ pub enum SaveError {
     },
     /// A [`SaveContent::ReplaceText`] save was set up with no
     /// [`SaveRequest::backups`] session, so committing it would destroy every
-    /// byte of the file with no recoverable image of what it replaced.
+    /// byte of the file with no copy of what it replaced taken by this
+    /// application.
     ///
     /// Refused **before the lock is taken**, beside
     /// [`SaveError::DocumentIsReadOnly`] and for the same reason: nothing the
@@ -664,15 +668,16 @@ pub enum SaveError {
     /// legal for [`SaveContent::Edits`], where the patch engine bounds what a
     /// commit can destroy to the planned spans and every other byte of the
     /// pre-edit file is still on disk afterwards. A replacement has no such
-    /// bound, which is why the design consult's Q6 rules that *every committed
-    /// raw replacement must have a recoverable pre-commit image* — and a caller
-    /// with no session cannot leave one.
+    /// bound: replacement mode requires a [`BackupSession`]. Before that
+    /// session's first committed change to a file, capture writes the bytes then
+    /// held by the target; later saves in the same session write no new copy.
+    /// This is not a promise that any particular state can later be recovered.
     ///
     /// **A backup that is merely unnecessary is not this.** A session that has
-    /// already copied this file already holds the image plan section 6.6 asks
-    /// for — *before the **first** modification of each file per session* — so
+    /// already copied this file has already taken that first-change copy —
+    /// *before the **first** modification of each file per session* — so
     /// `take_backup` answering `None` there is that rule working rather than a
-    /// missing image, and such a save commits. Only the **absence of a session**
+    /// missing copy, and such a save commits. Only the **absence of a session**
     /// is refused here, and `tests/persist_raw_save.rs` pins both sides.
     ///
     /// [`SaveError::is_refusal`] answers **`true`**: a check of this application
@@ -761,7 +766,7 @@ pub enum SaveError {
     ///
     /// What it can leave behind is stated rather than denied: an **empty batch
     /// directory** carrying its ownership marker, which the next rotation counts
-    /// and eventually removes. No older batch is removed on this path, because
+    /// and eventually removes. No existing batch is removed on this path, because
     /// rotation runs only after a copy has been written
     /// (`docs/decisions/2a-3b-notes.md` section 7).
     ///
@@ -1146,12 +1151,14 @@ impl std::error::Error for SaveError {
 /// [`SaveError::ReplacementRequiresBackups`] raised beside the read-only check,
 /// before the target is opened. An edit's commit can destroy only the spans the
 /// engine planned, so what it replaced is largely still on disk; a replacement's
-/// destroys the file, so the design consult's Q6 requires a recoverable
-/// pre-commit image and a caller with no session cannot leave one.
+/// destroys the file, so replacement mode requires a [`BackupSession`]. Before
+/// that session's first committed change to a file, capture writes the bytes then
+/// held by the target; later saves in the same session write no new copy. This is
+/// not a promise that any particular state can later be recovered.
 ///
-/// A session that has **already copied** this file is not that case. It holds
-/// the image plan section 6.6 asks for, `take_backup` answers `None` because the
-/// first modification per session already happened, and the save commits.
+/// A session that has **already copied** this file is not that case.
+/// `take_backup` answers `None` because the first modification per session
+/// already happened, and the save commits.
 ///
 /// # Errors
 ///
@@ -1176,12 +1183,14 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     }
 
     // Also before the lock, and for the replacement mode **only**: committing one
-    // destroys every byte of the file, so the design consult's Q6 requires a
-    // recoverable pre-commit image and a caller with no `BackupSession` cannot
-    // leave one. `SaveContent::Edits` is untouched — the patch engine bounds what
-    // a commit can destroy to the planned spans — and a session that has already
-    // copied this file is not this: that copy *is* the image, and such a save goes
-    // on to commit.
+    // destroys every byte of the file, so replacement mode requires a
+    // `BackupSession`. Before that session's first committed change to a file,
+    // capture writes the bytes then held by the target; later saves in the same
+    // session write no new copy. This is not a promise that any particular state
+    // can later be recovered. `SaveContent::Edits` is untouched — the patch engine
+    // bounds what a commit can destroy to the planned spans — and a session that
+    // has already copied this file is not this: that copy is the first-change one,
+    // and such a save goes on to commit.
     //
     // It sits below the read-only check on purpose: a package file must not be
     // written whatever the caller supplies, so that answer is the more

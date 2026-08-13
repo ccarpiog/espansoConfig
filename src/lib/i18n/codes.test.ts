@@ -292,6 +292,27 @@ const COMMAND_ERRORS = [
     code: 'saveFailed',
     error: { DocumentIsReadOnly: { path: '/nowhere/packages/one.yml' } },
     may_have_written: false
+  },
+  // Phase 2c-5-2's four. The first two carry the caller's own strings, echoed
+  // back for a console and interpolated into no sentence; the fourth carries a
+  // whole `BackupReadError`, exactly as `saveFailed` carries a `SaveError`.
+  { code: 'unrecognisedBackupBatch', batch: 'not-a-batch-name' },
+  {
+    code: 'unaddressableBackupEntry',
+    batch: '2026-01-02T030405Z-0',
+    relative_path: '../outside'
+  },
+  { code: 'backupEntryIsNotThisDocument', document: 9 },
+  {
+    code: 'backupReadFailed',
+    error: {
+      StaleEntry: {
+        entry: {
+          batch: { name: '2026-01-02T030405Z-0' },
+          relative_path: 'match/base.yml'
+        }
+      }
+    }
   }
 ] as const satisfies readonly CommandError[];
 
@@ -377,7 +398,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 17,
+      commandErrors: 21,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,

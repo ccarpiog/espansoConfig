@@ -152,7 +152,7 @@
 
   "browser.saveOutcome.fileWritten": "Se ha escrito el archivo. Lo que hay ahora en el disco es exactamente el texto que se envió.",
   "browser.saveOutcome.nothingToWrite": "El texto ya era exactamente el que tenía el archivo, así que no se ha escrito nada. Las dos comprobaciones se han hecho igualmente; es un guardado que no tenía nada que hacer.",
-  "browser.saveOutcome.backupTaken": "Se ha guardado una copia de este archivo tal y como estaba antes del primer cambio de esta sesión. Solo se conservan las copias de las diez últimas sesiones, así que esto no garantiza que el archivo se pueda recuperar más adelante.",
+  "browser.saveOutcome.backupTaken": "Se ha guardado una copia de este archivo tal y como estaba antes del primer cambio de esta sesión. La retención se aplica según las etiquetas de las carpetas de sesión y puede fallar, así que esto no garantiza cuánto tiempo seguirá la copia ni que el archivo pueda recuperarse más adelante.",
   "browser.saveOutcome.nothingWasWritten": "No se ha escrito nada. El archivo del disco sigue exactamente igual.",
   "browser.saveOutcome.changedElsewhere": "Este archivo ha cambiado después de que su texto se cargara aquí, así que el guardado se ha rechazado en lugar de aplicarse encima de ese cambio.",
   "browser.saveOutcome.draftKeptInMemory": "Tu texto sigue aquí, exactamente como lo escribiste. No se ha descartado nada ni se ha vuelto a cargar nada.",
@@ -686,7 +686,7 @@
   "code.backupStep.createBackupRoot": "crear la carpeta de copias",
   "code.backupStep.inspectBackupRoot": "leer qué es la carpeta de copias existente",
   "code.backupStep.createBatch": "crear la carpeta de copias de esta sesión",
-  "code.backupStep.writeBatchMarker": "escribir la marca que indica que espansoConfig creó esta carpeta de copias",
+  "code.backupStep.writeBatchMarker": "escribir la marca de propiedad por la que espansoConfig reconoce una carpeta de copias",
   "code.backupStep.createBackupParents": "crear las carpetas que reflejan la ubicación del propio archivo",
   "code.backupStep.createBackupFile": "crear el archivo temporal de la copia",
   "code.backupStep.writeBackupFile": "escribir en la copia los bytes actuales del archivo",
@@ -696,10 +696,46 @@
   "code.backupStep.verifyBackupFile": "comprobar que el nombre temporal de la copia sigue apuntando a ella",
   "code.backupStep.publishBackupFile": "dar a la copia su nombre definitivo",
 
-  "code.rotationOutcome.notAttempted": "En este guardado no se revisaron las copias anteriores.",
+  "code.rotationOutcome.notAttempted": "En este guardado no se examinaron los lotes de copias para aplicar la retención.",
   "code.rotationOutcome.refused": "La carpeta entregada al paso de limpieza no es una carpeta de copias, así que no se examinó nada.",
-  "code.rotationOutcome.scanFailed": "No se pudo listar la carpeta de copias, así que las copias anteriores ni se contaron ni se borraron.",
+  "code.rotationOutcome.scanFailed": "No se pudo listar la carpeta de copias, así que los lotes reconocidos ni se contaron ni se borraron.",
   "code.rotationOutcome.scanned": "Se listó la carpeta de copias y se examinó cada entrada.",
+
+  "code.commandError.unrecognisedBackupBatch": "Ese no es un nombre que espansoConfig reconozca para una carpeta de copias, así que no se buscó nada en el disco.",
+  "code.commandError.unaddressableBackupEntry": "Esa no es una ubicación que espansoConfig pueda direccionar dentro de una carpeta de copias, así que no se buscó nada en el disco.",
+  "code.commandError.backupEntryIsNotThisDocument": "Esta entrada de copia no coincide con el nombre de entrada calculado a partir del archivo que elegiste, así que no se leyó nada.",
+  "code.commandError.backupReadFailed": "espansoConfig no pudo completar esta solicitud del catálogo de copias. Lo que se indica junto a esto es el motivo.",
+
+  "code.backupRootState.missing": "Todavía no hay carpeta de copias, que es el estado normal de una configuración que espansoConfig nunca ha guardado.",
+  "code.backupRootState.present": "La carpeta de copias existe y se listó.",
+
+  "code.batchSkipped.foreignName": "no tiene el nombre con el que espansoConfig nombra una carpeta de copias, así que se dejó tal cual",
+  "code.batchSkipped.notADirectory": "no es una carpeta, así que se dejó tal cual",
+  "code.batchSkipped.noMarker": "no lleva una marca de propiedad con un formato que espansoConfig reconozca, así que se dejó tal cual",
+  "code.batchSkipped.unreadable": "no se pudo leer nada sobre ello, así que espansoConfig no puede decir qué es",
+
+  "code.entrySkipped.marker": "la entrada con el nombre que espansoConfig usa para la marca de propiedad de una carpeta de copias, que no es un archivo copiado",
+  "code.entrySkipped.symlink": "un enlace a otro sitio, que espansoConfig no va a seguir",
+  "code.entrySkipped.notARegularFile": "ni una carpeta ni un archivo corriente",
+  "code.entrySkipped.unusableName": "un nombre que espansoConfig no puede direccionar dentro de una carpeta de copias",
+  "code.entrySkipped.unreadable": "no se pudo leer nada sobre ello, así que espansoConfig no puede decir qué es",
+
+  "code.backupReadStep.inspectBackupRoot": "leer qué es la carpeta de copias",
+  "code.backupReadStep.listBackupRoot": "listar la carpeta de copias",
+  "code.backupReadStep.inspectBatch": "leer qué es una carpeta de copias concreta",
+  "code.backupReadStep.listBatch": "listar una carpeta de copias concreta",
+  "code.backupReadStep.inspectEntry": "leer qué es una entrada",
+  "code.backupReadStep.readEntry": "leer el contenido de una entrada",
+
+  "code.backupTarget.inConfigRoot": "con el nombre de un archivo de dentro de tu carpeta de configuración",
+  "code.backupTarget.outsideConfigRoot": "con el nombre de un archivo de fuera de tu carpeta de configuración",
+
+  "code.backupReadError.rootNotADirectory": "{path} no es una carpeta, así que espansoConfig no leerá copias de ahí.",
+  "code.backupReadError.rootNotPrivate": "A {path} puede llegar alguien que no sea su propietario, así que espansoConfig no leerá copias de ahí.",
+  "code.backupReadError.staleBatch": "Ese nombre no corresponde ahora a una carpeta de copias que espansoConfig reconozca. Vuelve a listar las copias.",
+  "code.backupReadError.staleEntry": "Esa entrada no corresponde ahora a una entrada de esa carpeta de copias. Vuelve a listar sus entradas.",
+  "code.backupReadError.io": "El sistema rechazó una operación sobre {path} mientras se leían las copias.",
+  "code.backupReadError.notUtf8": "Esa entrada no es texto UTF-8 válido, así que espansoConfig no puede mostrarla. El primer byte que no lo es está en la posición {offset}.",
 
   "code.findingClass.editorModelError": "Contradice la forma que espansoConfig modela para un fragmento.",
   "code.findingClass.suspiciousButPermitted": "Parece incorrecto, y espansoConfig no puede demostrar que lo sea.",

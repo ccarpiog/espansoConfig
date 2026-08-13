@@ -55,7 +55,7 @@ use serde::{Serialize, Serializer};
 use espansoconfig_core::discovery::DiscoveryError;
 use espansoconfig_core::draft::DraftError;
 use espansoconfig_core::model::IdentityError;
-use espansoconfig_core::persist::SaveError;
+use espansoconfig_core::persist::{BackupReadError, SaveError};
 use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::WorkspaceError;
 
@@ -385,6 +385,99 @@ pub enum CommandError {
         /// Why the save did not commit, exactly as the core reports it.
         error: SaveError,
     },
+    /// A backup batch name is not one the batch grammar admits.
+    ///
+    /// **A refusal of the request, before any directory is opened**, and it is
+    /// deliberately not [`espansoconfig_core::persist::BackupReadError::StaleBatch`]:
+    /// the stale-batch arm means that a name admitted by the grammar does not
+    /// name a recognised batch now — it does not imply that the identity
+    /// resolved previously — and this one means the caller sent a string that
+    /// could never have named one. Collapsing them would tell a person the
+    /// backup folder had been tidied away when in fact nothing was ever asked
+    /// about the disk.
+    ///
+    /// It is what a **forged** identity meets: an identity minted by
+    /// `list_backup_batches` is a name [`espansoconfig_core::persist::BackupBatchId`]
+    /// produced, so it parses by construction.
+    ///
+    /// The operand is the caller's own string, echoed back for a console. No
+    /// dictionary sentence interpolates it — it is a name this build does not
+    /// recognise, so it names nothing a person chose.
+    UnrecognisedBackupBatch {
+        /// The batch name that was sent.
+        batch: String,
+    },
+    /// A backup entry's relative path is not one this catalogue can address
+    /// inside a batch.
+    ///
+    /// The **forged-path** refusal, and it is
+    /// [`espansoconfig_core::persist::BackupEntryId::in_batch`]'s answer rather
+    /// than a second opinion about paths: an empty path, an absolute one, one
+    /// holding `.` or `..`, one with a repeated or trailing separator, and the
+    /// batch's own ownership marker are all this. **Nothing is normalised** —
+    /// `match/./base.yml` is refused rather than read as `match/base.yml` — so
+    /// an admitted identity carries only plain relative components and joining
+    /// it introduces no lexical `.` or `..` escape. Filesystem containment is a
+    /// separate matter, and it retains the target-specific guarantees the core's
+    /// `ResolvedDirectory` documents.
+    ///
+    /// It is raised before any directory is opened, so it says nothing at all
+    /// about what is on the disk.
+    UnaddressableBackupEntry {
+        /// The batch the entry was offered under.
+        batch: String,
+        /// The relative path that was sent.
+        relative_path: String,
+    },
+    /// A backup entry does not map to the document it was asked for.
+    ///
+    /// **The binding check, and the whole reason `read_backup_text` takes a
+    /// document beside an entry.** The entry the batch holds for that document
+    /// is derived from the document's own
+    /// [`espansoconfig_core::model::DocumentContext`] — the session's
+    /// authoritative absolute path — and the identity the caller sent has to be
+    /// that entry. A display path is never the authority for this: two distinct
+    /// filenames can render to one wire string (`crate::wire_contract`).
+    ///
+    /// It covers three shapes with one code, because all three are the same
+    /// refusal to a caller — nothing is read: the batch holds nothing at the
+    /// name that document maps to, it holds something there that is not this
+    /// entry, and the document is the configuration root itself, which
+    /// [`espansoconfig_core::persist::BackupCatalog::entry_for_target`] refuses
+    /// rather than mapping onto its `_outside_` sentinel.
+    ///
+    /// **It is not a claim that the entry is a copy of some other file.** A
+    /// backup entry's name says where a copy would have been written, never
+    /// where any bytes came from.
+    BackupEntryIsNotThisDocument {
+        /// The document that was asked, by its session-local identity.
+        document: u64,
+    },
+    /// A backup-catalogue request could not return its requested result, for a
+    /// reason reported by the catalogue.
+    ///
+    /// **Not always a failed read.**
+    /// [`espansoconfig_core::persist::BackupReadError::NotUtf8`] is the arm where
+    /// the entry opened and every byte arrived, and only turning those bytes into
+    /// a `String` did not succeed, so neither this code's sentence nor any string
+    /// built on it may say the folder could not be read.
+    ///
+    /// **The typed failure travels whole**, exactly as
+    /// [`CommandError::SaveFailed`]'s and [`CommandError::DraftRefused`]'s do:
+    /// [`espansoconfig_core::persist::BackupReadError`] has its own
+    /// `backupReadError` dictionary namespace and its own accessor, and a second
+    /// copy of its taxonomy here would be a second thing to keep in step.
+    ///
+    /// **A missing backup root is not in here**, and that is the point: a
+    /// configuration this application has never saved from legitimately has no
+    /// backup root, and it arrives as
+    /// [`espansoconfig_core::persist::BackupRootState::Missing`] on a
+    /// *successful* listing rather than as a failure.
+    BackupReadFailed {
+        /// Why the request did not produce its result, exactly as the core
+        /// reports it.
+        error: BackupReadError,
+    },
 } // End of enum CommandError
 
 impl CommandError {
@@ -414,6 +507,10 @@ impl CommandError {
             CommandError::DocumentHasNoMatchList { .. } => "documentHasNoMatchList",
             CommandError::DraftRefused { .. } => "draftRefused",
             CommandError::SaveFailed { .. } => "saveFailed",
+            CommandError::UnrecognisedBackupBatch { .. } => "unrecognisedBackupBatch",
+            CommandError::UnaddressableBackupEntry { .. } => "unaddressableBackupEntry",
+            CommandError::BackupEntryIsNotThisDocument { .. } => "backupEntryIsNotThisDocument",
+            CommandError::BackupReadFailed { .. } => "backupReadFailed",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -482,6 +579,22 @@ impl Serialize for CommandError {
                 // variant's documentation.
                 out.serialize_field("may_have_written", &error.may_have_written())?;
             }
+            CommandError::UnrecognisedBackupBatch { batch } => {
+                out.serialize_field("batch", batch)?;
+            }
+            CommandError::UnaddressableBackupEntry {
+                batch,
+                relative_path,
+            } => {
+                out.serialize_field("batch", batch)?;
+                out.serialize_field("relative_path", relative_path)?;
+            }
+            CommandError::BackupEntryIsNotThisDocument { document } => {
+                out.serialize_field("document", document)?;
+            }
+            CommandError::BackupReadFailed { error } => {
+                out.serialize_field("error", error)?;
+            }
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -501,6 +614,13 @@ impl CommandError {
             | CommandError::UnknownDocument { .. }
             | CommandError::IdentityNoSuchMatch { .. }
             | CommandError::DocumentHasNoMatchList { .. }
+            | CommandError::UnrecognisedBackupBatch { .. }
+            | CommandError::BackupEntryIsNotThisDocument { .. }
+            // One operand, and it is the core's whole refusal, exactly as
+            // `DraftRefused`'s is: a `BackupReadError` has no second question to
+            // answer the way `SaveFailed` does, and in particular no
+            // `may_have_written` — nothing on this path writes.
+            | CommandError::BackupReadFailed { .. }
             // One operand, and it is the core's whole refusal: a `DraftError`
             // has no second question to answer the way `SaveFailed` does.
             | CommandError::DraftRefused { .. } => 1,
@@ -509,6 +629,7 @@ impl CommandError {
             | CommandError::IdentityWrongDocument { .. }
             | CommandError::IdentityStaleRevision { .. }
             | CommandError::InvalidMenuLabels { .. }
+            | CommandError::UnaddressableBackupEntry { .. }
             // One field, two operands: `may_have_written` is derived rather than
             // stored. See the variant's documentation.
             | CommandError::SaveFailed { .. } => 2,
@@ -536,6 +657,7 @@ impl CommandError {
 /// against `COMMAND_ERROR_CODES`, the same failure reaches the TypeScript side.
 #[cfg(test)]
 pub(crate) fn every_command_error() -> Vec<CommandError> {
+    use espansoconfig_core::persist::{BackupBatchId, BackupEntryId};
     use espansoconfig_core::ContentRevision;
     vec![
         CommandError::NoWorkspaceOpen,
@@ -582,6 +704,28 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
         CommandError::SaveFailed {
             error: SaveError::DocumentIsReadOnly {
                 path: std::path::PathBuf::from("/nowhere/match/packages/one/package.yml"),
+            },
+        },
+        CommandError::UnrecognisedBackupBatch {
+            batch: "not-a-batch-name".to_owned(),
+        },
+        CommandError::UnaddressableBackupEntry {
+            batch: "2026-01-02T030405Z-0".to_owned(),
+            relative_path: "../outside".to_owned(),
+        },
+        CommandError::BackupEntryIsNotThisDocument { document: 9 },
+        // The variant that carries the whole read refusal, sampled with the arm
+        // that carries an identity rather than a path: it is the one that proves
+        // a `BackupEntryId` reaches the wire from inside an error as well as
+        // from inside a listing.
+        CommandError::BackupReadFailed {
+            error: BackupReadError::StaleEntry {
+                entry: BackupEntryId::in_batch(
+                    BackupBatchId::parse("2026-01-02T030405Z-0")
+                        .expect("a batch name this grammar admits"),
+                    std::path::Path::new("match/base.yml"),
+                )
+                .expect("a relative path this catalogue can address"),
             },
         },
     ]

@@ -1,5 +1,5 @@
 /**
- * The eleven command wrappers, against a stubbed `invoke`.
+ * The fifteen command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -16,7 +16,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RawSaveInvalidation } from './commands';
-import type { MatchDraft, NewMatch } from './types';
+import type { BackupBatchId, BackupEntryId, MatchDraft, NewMatch } from './types';
 
 /** Every call the stubbed `invoke` received, in order. */
 const calls: Array<{ command: string; args: unknown }> = [];
@@ -67,9 +67,12 @@ const {
   duplicateMatch,
   getDocument,
   getMatch,
+  listBackupBatches,
+  listBackupEntries,
   listDocuments,
   moveMatch,
   openWorkspace,
+  readBackupText,
   reloadDocument,
   saveMatch,
   saveRawDocument
@@ -83,6 +86,18 @@ const EXPORTED_FUNCTIONS = Object.entries(commands)
 
 /** A match identity, exactly as it would have arrived from Rust. */
 const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
+
+/**
+ * A backup batch identity, exactly as a listing would have produced it.
+ *
+ * Synthetic and neutral. The name is the shape the batch grammar admits — a
+ * stamp and a counter — and it is a folder name rather than a claim about when
+ * anything happened.
+ */
+const BATCH_ID: BackupBatchId = { name: '2026-01-02T030405Z-0' };
+
+/** A backup entry identity, exactly as a listing would have produced it. */
+const ENTRY_ID: BackupEntryId = { batch: BATCH_ID, relative_path: 'match/base.yml' };
 
 /**
  * The content of a snippet to create — hand-authored and neutral.
@@ -133,7 +148,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twelve wire names, in order, and export no thirteenth wrapper', async () => {
+  it('call the fifteen wire names, in order, and export no sixteenth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -153,6 +168,9 @@ describe('the command wrappers', () => {
     await saveRawDocument(1, 'a'.repeat(64), 'matches: []\n', { accepted: [] }, () => {});
     outcome = { resolve: undefined };
     await duplicateMatch(IDENTITY, 'a'.repeat(64), { accepted: [] });
+    await listBackupBatches();
+    await listBackupEntries(BATCH_ID);
+    await readBackupText(ENTRY_ID, 1);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'createMatch',
@@ -161,14 +179,17 @@ describe('the command wrappers', () => {
       'duplicateMatch',
       'getDocument',
       'getMatch',
+      'listBackupBatches',
+      'listBackupEntries',
       'listDocuments',
       'moveMatch',
       'openWorkspace',
+      'readBackupText',
       'reloadDocument',
       'saveMatch',
       'saveRawDocument'
     ]);
-  }); // End of the "call the twelve wire names" case
+  }); // End of the "call the fifteen wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -590,3 +611,111 @@ describe('the reload a committed raw save owes', () => {
     expect(order).toEqual(['reloaded', 'resolved']);
   }); // End of the "waits for it" case
 }); // End of the "reload a committed raw save owes" suite
+
+describe('the three read-only backup wrappers', () => {
+  /** A listing of one recognised batch, as Rust would have written it. */
+  const BATCHES = {
+    root: 'Present',
+    batches: [{ id: BATCH_ID, display_name: BATCH_ID.name }],
+    skipped: [],
+    unrecognised: 0,
+    unreadable: 0,
+    complete: true
+  } as const;
+
+  it('send the identities unchanged, and nothing else', async () => {
+    // The whole of what these wrappers do: an identity is opaque, so it goes out
+    // exactly as it arrived. A wrapper that rebuilt one — from a display path,
+    // say — would be inventing an address the catalogue never produced.
+    outcome = { resolve: BATCHES };
+    await listBackupBatches();
+    expect(calls[0]?.command).toBe('list_backup_batches');
+    expect(calls[0]?.args).toEqual({});
+
+    calls.length = 0;
+    outcome = { resolve: undefined };
+    await listBackupEntries(BATCH_ID);
+    expect(calls[0]?.command).toBe('list_backup_entries');
+    expect(calls[0]?.args).toEqual({ batch: BATCH_ID });
+
+    calls.length = 0;
+    await readBackupText(ENTRY_ID, 7);
+    expect(calls[0]?.command).toBe('read_backup_text');
+    expect(calls[0]?.args).toEqual({ entry: ENTRY_ID, document: 7 });
+  }); // End of the "send the identities unchanged" case
+
+  it('send the document beside the entry, because the entry alone binds nothing', async () => {
+    // The argument this command exists for. Rust asks the batch which entry the
+    // *document's own resolved path* maps to and refuses anything else, so a
+    // wrapper that dropped the document would turn a bound read into an
+    // unbound one — the phase's own sharpest failure mode, at the boundary.
+    await readBackupText(ENTRY_ID, 7);
+    const sent = calls[0]?.args as Record<string, unknown>;
+    expect(Object.keys(sent).sort()).toEqual(['document', 'entry']);
+    expect(sent.document).toBe(7);
+  }); // End of the "document beside the entry" case
+
+  it('send no absolute path, no root and no text, so nothing names a write target', async () => {
+    // A display path is never authority, and none of the three sends one. An
+    // entry identity's `relative_path` legitimately holds a separator — it is a
+    // path *relative to a batch folder* — so what is asserted is that no value
+    // sent is **absolute**, which is the shape that could name a file on disk.
+    await listBackupBatches();
+    await listBackupEntries(BATCH_ID);
+    await readBackupText(ENTRY_ID, 7);
+    expect(calls.length).toBe(3);
+    for (const call of calls) {
+      const json = JSON.stringify(call.args);
+      for (const absolute of ['"/', ':"/', '~/']) {
+        expect(json, `${call.command}:${absolute}`).not.toContain(absolute);
+      }
+      expect(json, call.command).not.toContain('"text"');
+      expect(json, call.command).not.toContain('"root"');
+    } // End of the loop over the three calls
+    // The control: the same reading of an argument that *is* absolute finds it,
+    // so the negatives above are about what was sent rather than about a scan
+    // that matches nothing.
+    expect(JSON.stringify({ path: '/nowhere/base.yml' })).toContain('"/');
+  }); // End of the "no absolute path, no root, no text" case
+
+  it('return a typed failure rather than throwing, for each of them', async () => {
+    // The rule the whole module is built on, asserted for the three newest
+    // wrappers: a rejection is a value in the failure arm, never a thrown thing
+    // a caller can forget to catch.
+    outcome = { reject: { code: 'backupReadFailed', error: { StaleBatch: { batch: BATCH_ID } } } };
+    const listing = await listBackupEntries(BATCH_ID);
+    expect(listing.ok).toBe(false);
+    if (listing.ok) {
+      throw new Error('unreachable');
+    }
+    expect(listing.failure.kind).toBe('command');
+    if (listing.failure.kind !== 'command') {
+      throw new Error('unreachable');
+    }
+    expect(listing.failure.error.code).toBe('backupReadFailed');
+
+    outcome = { reject: { code: 'backupEntryIsNotThisDocument', document: 7 } };
+    const text = await readBackupText(ENTRY_ID, 7);
+    expect(text.ok).toBe(false);
+    if (text.ok) {
+      throw new Error('unreachable');
+    }
+    expect(text.failure.kind).toBe('command');
+    if (text.failure.kind !== 'command') {
+      throw new Error('unreachable');
+    }
+    expect(text.failure.error.code).toBe('backupEntryIsNotThisDocument');
+  }); // End of the "typed failure" case
+
+  it('hand a missing backups folder back as a value, never as a failure', async () => {
+    // The ordinary state of a fresh install. A wrapper that treated it as an
+    // error would put a failure in front of a person for having never saved.
+    outcome = { resolve: { ...BATCHES, root: 'Missing', batches: [], complete: true } };
+    const answer = await listBackupBatches();
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) {
+      throw new Error('unreachable');
+    }
+    expect(answer.value.root).toBe('Missing');
+  }); // End of the "missing folder is a value" case
+}); // End of the "three read-only backup wrappers" suite

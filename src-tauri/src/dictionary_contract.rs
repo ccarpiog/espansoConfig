@@ -192,6 +192,25 @@ impl CodeEnum {
 /// that is deliberately not a reason to withhold their strings: *a code with no
 /// string is worse than a code with no caller*, which is the rule this file has
 /// applied since Phase 1b-2b.
+///
+/// **Six were added by Phase 2c-5-2**, all of them from
+/// `crates/espansoconfig-core/src/persist/backup.rs`, and they arrived by the
+/// route this table exists to force. Phase 2c-5-1 built the read-only backup
+/// catalogue and deliberately derived `Serialize` on **nothing**, so no
+/// namespace was owed for a step nothing could reach; the moment 2c-5-2 put the
+/// catalogue on the wire, `BackupRootState`, `BatchSkipped`, `EntrySkipped`,
+/// `BackupReadStep`, `BackupReadError` and `BackupTarget` all became enums
+/// `serde` can write, and
+/// [`every_serializable_enum_is_a_namespace_or_is_named_as_not_a_code`] is what
+/// made the wire types and their thirty-one sentences land in one change rather
+/// than two.
+///
+/// `BackupTarget` is a namespace and not a [`NOT_A_CODE`] address, which is the
+/// one of the six worth arguing. It looks like an address — one of its variants
+/// carries a relative path — but the value a screen shows is **which namespace
+/// the entry's own name occupies**, and *"inside the configuration folder"*
+/// against *"outside it"* is a distinction a person reads rather than a position
+/// a caller resolves. The path beside it is display data.
 const CODE_ENUMS: &[CodeEnum] = &[
     CodeEnum {
         source: "crates/espansoconfig-core/src/model/diagnostic.rs",
@@ -361,6 +380,30 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/reconcile.rs",
         name: "ReapplyPlacement",
     },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupRootState",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BatchSkipped",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "EntrySkipped",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupReadStep",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupReadError",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/persist/backup.rs",
+        name: "BackupTarget",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -380,7 +423,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 17),
+    ("commandError", 21),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -413,6 +456,12 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
     ("reapplyPlacement", 3),
+    ("backupRootState", 2),
+    ("batchSkipped", 4),
+    ("entrySkipped", 5),
+    ("backupReadStep", 6),
+    ("backupReadError", 6),
+    ("backupTarget", 2),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.

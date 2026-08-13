@@ -87,7 +87,9 @@
 //!   bits and extended attributes are copied into
 //!   `<config root>/.espansoconfig-backups/<timestampZ>/<its own relative path>`
 //!   — a *sibling* of `match/`, which is what puts it out of espanso's include
-//!   glob — and the last ten batches are kept. **A batch is a session**, so
+//!   glob — and rotation attempts to retain ten recognised batches, chosen by
+//!   their sortable names and promising no retention duration. **A batch is a
+//!   session**, so
 //!   rotation runs once per session, **after** that session's first copy is on
 //!   disk, and with that session's own batch excluded from removal by identity.
 //!   It removes only directories carrying the batch marker this application
@@ -95,8 +97,10 @@
 //!   ownership. The copy deliberately drops the access control list, because a
 //!   copied `deny delete` entry would make a backup unrotatable. A backup that
 //!   cannot be written **fails the save before the commit**; a *rotation* that
-//!   fails is counted and never fails anything. Retention is ten sessions, not
-//!   forever, and no string may say *your file is recoverable*.
+//!   fails is counted and never fails anything. Rotation attempts to retain at
+//!   most ten recognised batch directories chosen by sortable name; it promises
+//!   neither successful cleanup nor any retention duration, and no string may
+//!   say *your file is recoverable*.
 //!
 //! - **2b-2b-1** — [`draft`]: one match's drafted values, and the **minimal**
 //!   [`patch::DocumentEdit`] batch that realises them. A tri-state

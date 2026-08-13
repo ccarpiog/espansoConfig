@@ -62,7 +62,14 @@ import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   BackupError,
   BackupErrorName,
+  BackupReadError,
+  BackupReadErrorName,
+  BackupReadStep,
+  BackupRootState,
   BackupStep,
+  BackupTarget,
+  BackupTargetName,
+  BatchSkipped,
   ContentKind,
   DecodeError,
   DecodeErrorName,
@@ -73,6 +80,7 @@ import type {
   DraftErrorName,
   EditError,
   EditErrorName,
+  EntrySkipped,
   FileKind,
   FindingClass,
   FindingCode,
@@ -1305,3 +1313,178 @@ export function describeDraftError(locale: Locale, error: DraftError): string {
   const key = draftErrorKey(wireVariantName<DraftErrorName>(error));
   return translate(locale, key, scalarOperands(wireVariantOperands(error)));
 } // End of function describeDraftError()
+
+// ---------------------------------------------------------------------------
+// The read-only backup catalogue — Phase 2c-5-2
+// ---------------------------------------------------------------------------
+//
+// Six enums, and **no renderer yet**: 2c-5-4 is what draws them. They have
+// strings anyway, because a code with no string is worse than a code with no
+// caller — the rule that put `ScalarStyle` and `LineEnding` here at 1b-2b and
+// the correspondence evidence above at 2c-4b-1.
+//
+// Every sentence below is bounded by what the catalogue actually establishes.
+// None of them says a backup is authentic, verified, untampered or made by this
+// application — the ownership marker is deliberately forgeable, so *recognised*
+// is the strongest word available. None of them turns a batch name into a time,
+// calls an entry a version, or promises that anything is recoverable. A target
+// classification is a statement about a **name**, never about where any bytes
+// came from.
+
+/**
+ * The dictionary key for whether the backup folder was there to be listed.
+ *
+ * @param state - A `BackupRootState` as it crossed the boundary.
+ * @returns The key holding that state's sentence.
+ */
+export function backupRootStateKey(state: BackupRootState): TranslationKey {
+  return `code.backupRootState.${uncapitalize(state)}`;
+} // End of function backupRootStateKey()
+
+/**
+ * The dictionary key for one reason an entry of the backup folder is not a
+ * batch.
+ *
+ * @param reason - A `BatchSkipped` as it crossed the boundary.
+ * @returns The key holding that reason's phrase.
+ */
+export function batchSkippedKey(reason: BatchSkipped): TranslationKey {
+  return `code.batchSkipped.${uncapitalize(reason)}`;
+} // End of function batchSkippedKey()
+
+/**
+ * The dictionary key for one reason a thing inside a batch is not an entry.
+ *
+ * @param reason - An `EntrySkipped` as it crossed the boundary.
+ * @returns The key holding that reason's phrase.
+ */
+export function entrySkippedKey(reason: EntrySkipped): TranslationKey {
+  return `code.entrySkipped.${uncapitalize(reason)}`;
+} // End of function entrySkippedKey()
+
+/**
+ * The dictionary key for one step of reading the backup folder.
+ *
+ * @param step - A `BackupReadStep` as it crossed the boundary.
+ * @returns The key holding that step's noun phrase.
+ */
+export function backupReadStepKey(step: BackupReadStep): TranslationKey {
+  return `code.backupReadStep.${uncapitalize(step)}`;
+} // End of function backupReadStepKey()
+
+/**
+ * The dictionary key for one target namespace an entry's name occupies.
+ *
+ * @param name - The variant name of a `BackupTarget`.
+ * @returns The key holding that namespace's phrase.
+ */
+export function backupTargetKey(name: BackupTargetName): TranslationKey {
+  return `code.backupTarget.${uncapitalize(name)}`;
+} // End of function backupTargetKey()
+
+/**
+ * The dictionary key for one reason a backup-catalogue request did not produce
+ * its result.
+ *
+ * @param name - The variant name of a `BackupReadError`.
+ * @returns The key holding that reason's message.
+ */
+export function backupReadErrorKey(name: BackupReadErrorName): TranslationKey {
+  return `code.backupReadError.${uncapitalize(name)}`;
+} // End of function backupReadErrorKey()
+
+/**
+ * The sentence one backup-folder state reads as.
+ *
+ * **`Missing` is not a failure and its sentence may not read as one.** A
+ * configuration this application has never saved from legitimately has no backup
+ * folder.
+ *
+ * @param locale - The dictionary to read from.
+ * @param state - A root state as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeBackupRootState(locale: Locale, state: BackupRootState): string {
+  return translate(locale, backupRootStateKey(state));
+} // End of function describeBackupRootState()
+
+/**
+ * The phrase one skipped entry of the backup folder reads as.
+ *
+ * Each says *left exactly as found, and not counted as a backup folder* — never
+ * that anything was removed, repaired or rejected as invalid.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A skip reason as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeBatchSkipped(locale: Locale, reason: BatchSkipped): string {
+  return translate(locale, batchSkippedKey(reason));
+} // End of function describeBatchSkipped()
+
+/**
+ * The phrase one skipped thing inside a batch reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A skip reason as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeEntrySkipped(locale: Locale, reason: EntrySkipped): string {
+  return translate(locale, entrySkippedKey(reason));
+} // End of function describeEntrySkipped()
+
+/**
+ * The noun phrase one step of reading the backup folder reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param step - A read step as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeBackupReadStep(locale: Locale, step: BackupReadStep): string {
+  return translate(locale, backupReadStepKey(step));
+} // End of function describeBackupReadStep()
+
+/**
+ * The phrase one entry's target namespace reads as.
+ *
+ * **A claim about the entry's own name**, and the sentences say so: where a copy
+ * of that file would have been written. Neither says a file exists at that path,
+ * and neither says this entry's bytes were copied from one.
+ *
+ * The relative path `InConfigRoot` carries is deliberately **not** interpolated:
+ * it is the owner's own file name, it is already on the value the caller holds,
+ * and a screen that wants to show it puts it beside this phrase rather than
+ * inside it.
+ *
+ * @param locale - The dictionary to read from.
+ * @param target - A target classification as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeBackupTarget(locale: Locale, target: BackupTarget): string {
+  return translate(locale, backupTargetKey(wireVariantName<BackupTargetName>(target)));
+} // End of function describeBackupTarget()
+
+/**
+ * The sentence one backup-catalogue refusal reads as.
+ *
+ * **Not every arm is a failed read**: `NotUtf8` is the one where the entry opened
+ * and every byte arrived, and only turning those bytes into a string did not
+ * succeed, so a sentence written here may not say the folder could not be read.
+ *
+ * **A missing backup folder never reaches here**, and no sentence below may be
+ * written as though it could: that state is an outcome on a successful listing.
+ *
+ * `StaleBatch` and `StaleEntry` say *this is not there now*, which is a
+ * statement about the folder. The two refusals for a **forged** identity are
+ * command errors of their own — `unrecognisedBackupBatch` and
+ * `unaddressableBackupEntry` — because nothing was asked of the disk for those,
+ * and a sentence about the folder would not be true.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A read refusal as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeBackupReadError(locale: Locale, error: BackupReadError): string {
+  const key = backupReadErrorKey(wireVariantName<BackupReadErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeBackupReadError()

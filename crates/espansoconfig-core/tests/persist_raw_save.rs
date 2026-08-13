@@ -38,13 +38,16 @@
 //!   nothing — observed through the target's **inode and modification time**, not
 //!   only its content, because a hash cannot tell *not written* from *rewritten
 //!   with the same bytes*;
-//! - a committed replacement has a **recoverable pre-commit image**, and a backup
-//!   that cannot be written fails the save **before** the target is touched;
+//! - before a session's **first committed change** to a file, capture writes the
+//!   bytes then held by the target; later saves in the same session write no new
+//!   copy, and none of this promises that any particular state can later be
+//!   recovered. A backup that cannot be written fails the save **before** the
+//!   target is touched;
 //! - **a replacement with no backup session at all is refused before the lock**,
-//!   with nothing written and without the answer depending on the target at all —
-//!   the design consult's Q6, *do not commit without recoverability* — while a
-//!   session that has **already copied** the file still commits, because that copy
-//!   is the image Q6 asks for;
+//!   with nothing written and without the answer depending on the target at all,
+//!   because replacement mode requires a `BackupSession` — while a session that
+//!   has **already copied** the file still commits, because that first-change
+//!   copy is what the mode requires;
 //! - `notes` is **empty**, asserted rather than assumed: this mode re-encodes no
 //!   scalar and moves no item, so there is no presentation change it could have
 //!   authored;
@@ -1121,21 +1124,22 @@ fn a_byte_identical_replacement_commits_nothing_and_takes_no_backup() {
 } // End of function a_byte_identical_replacement_commits_nothing_and_takes_no_backup()
 
 // ---------------------------------------------------------------------------
-// 5. Backups — the pre-commit image, and the failure that comes before the write
+// 5. Backups — the first-change copy, and the failure that comes before the write
 // ---------------------------------------------------------------------------
 
-/// A committed replacement has a **recoverable pre-commit image**: the copy holds
-/// exactly the bytes the target held before it.
+/// A session's **first committed change** to a file leaves a copy holding exactly
+/// the bytes the target held before it.
 ///
 /// This is the load-bearing half of the mode's safety. An edit can be reasoned
 /// about from its span; a replacement cannot, so the copy of what it replaced is
 /// what a user has left.
 ///
-/// **A `Some` here is not a promise that the file is recoverable forever.**
-/// Retention is ten batches and a batch is a session; no assertion below says
-/// otherwise.
+/// **A `Some` here is not a promise that any particular state can later be
+/// recovered.** Later saves in the same session write no new copy, and rotation
+/// attempts to retain at most ten recognised batch directories chosen by sortable
+/// name; no assertion below says otherwise.
 #[test]
-fn a_committed_replacement_leaves_a_copy_of_what_it_replaced() {
+fn a_sessions_first_committed_replacement_leaves_a_copy_of_what_it_replaced() {
     let (_directory, root, target) = config_root_with(CLEAN);
     let base = revision_on_disk(&target);
     let session = BackupSession::rooted_at(&root);
@@ -1166,7 +1170,7 @@ fn a_committed_replacement_leaves_a_copy_of_what_it_replaced() {
     );
     assert_eq!(session.captured_count(), 1);
     assert!(session.has_captured(&target));
-} // End of function a_committed_replacement_leaves_a_copy_of_what_it_replaced()
+} // End of function a_sessions_first_committed_replacement_leaves_a_copy_of_what_it_replaced()
 
 /// A backup that cannot be written **fails the replacement before the target is
 /// touched**.
@@ -1207,12 +1211,14 @@ fn a_backup_that_cannot_be_written_stops_a_replacement_before_the_commit() {
 /// **A replacement with no backup session at all is refused before the lock**,
 /// and nothing is read and nothing is written.
 ///
-/// The design consult's Q6: *every committed raw replacement must have a
-/// recoverable pre-commit image … do not commit without recoverability.* An edit
-/// can be saved with no session because the patch engine bounds what a commit
-/// destroys to the planned spans, and the rest of the pre-edit file is still on
-/// disk afterwards. A replacement destroys all of it, so a caller that supplied
-/// nowhere to copy it to is refused rather than obliged.
+/// Replacement mode requires a `BackupSession`. Before that session's first
+/// committed change to a file, capture writes the bytes then held by the target;
+/// later saves in the same session write no new copy, and this is not a promise
+/// that any particular state can later be recovered. An edit can be saved with no
+/// session because the patch engine bounds what a commit destroys to the planned
+/// spans, and the rest of the pre-edit file is still on disk afterwards. A
+/// replacement destroys all of it, so a caller that supplied nowhere to copy it
+/// to is refused rather than obliged.
 ///
 /// The `TempDir` holds nothing but `match/base.yml`, so *no backup tree was
 /// minted* is checked as an absence on disk as well as through the typed answer.

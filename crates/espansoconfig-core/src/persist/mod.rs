@@ -31,8 +31,9 @@
 //! window one `rename()` wide remains, in which a **non-cooperating** writer
 //! (vim, espanso, a sync agent) can be overwritten. [`write`]'s module
 //! documentation states the residual race in full; it is a property of the
-//! platform, not of this code, and backups (step 13) are what makes it
-//! recoverable.
+//! platform, not of this code, and backups (step 13) are its only mitigation: a
+//! copy of what the target held before this session's first change to it, which
+//! is not a promise that any particular state can later be recovered.
 //!
 //! **Phase 2a-3a scope:** plan section 7 row 11's unpaid half. [`write`]'s step 7
 //! became two — the target's **access control list and extended attributes** are
@@ -134,9 +135,10 @@
 //! configuration root**, which is what keeps them outside any auto-loaded glob:
 //! espanso's include glob is rooted at `match/`, and no glob rooted at `match/`
 //! can reach a *sibling* of `match/`. The leading dot is belt-and-braces. They
-//! are **a safety net, not a substitute** for revision checks and atomic writes,
-//! and retention is ten batches rather than forever — no string anywhere may say
-//! *your file is recoverable*.
+//! are **a safety net, not a substitute** for revision checks and atomic writes.
+//! Rotation attempts to retain ten recognised batch directories, chosen by their
+//! sortable names, and promises neither a retention duration nor that cleanup
+//! succeeds — no string anywhere may say *your file is recoverable*.
 //!
 //! **A backup deliberately does not carry the target's access control list**,
 //! though the atomic write does. Rotation deletes directories, and a copied

@@ -70,8 +70,9 @@
 //!   `rename()`: a handful of syscalls, one rename wide.
 //!
 //! **This narrows the window. It does not close it, and it cannot be closed at
-//! this layer.** A caller that needs recoverability from the residual race needs
-//! backups (step 13) and a conflict-handling path, not a stronger primitive.
+//! this layer.** A caller that wants a fallback for the residual race needs
+//! backups (step 13) and a conflict-handling path, not a stronger primitive;
+//! neither promises that any particular state can later be recovered.
 //!
 //! # What a failure leaves behind, stated exactly
 //!

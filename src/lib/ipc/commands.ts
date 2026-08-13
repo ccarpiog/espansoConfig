@@ -1,5 +1,5 @@
 /**
- * The twelve workspace commands, typed.
+ * The fifteen workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -41,6 +41,16 @@
  * reload are two facts and this boundary must be able to state both — see the
  * function's own comment for why collapsing them broke `PROGRESS.md` D2.
  *
+ * ## Three of them read the backup folder, and none of those writes
+ *
+ * {@link listBackupBatches}, {@link listBackupEntries} and
+ * {@link readBackupText}, since Phase 2c-5-2. They put the read-only backup
+ * catalogue on this boundary so a later sub-phase can offer a restore — and a
+ * restore is a **content path on {@link saveRawDocument}**, not a seventh
+ * writing command. What {@link readBackupText} answers is a candidate; sending
+ * it is a whole-document replacement like any other, with the destination's own
+ * base revision and the ordinary findings.
+ *
  * ## What is deliberately absent
  *
  * `validate_match`. It has no phase yet, and a wrapper would be a standing
@@ -52,6 +62,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { classifyFailure, type IpcFailure } from './errors';
 import type {
   Acknowledgement,
+  BackupBatchId,
+  BackupBatchListing,
+  BackupEntryId,
+  BackupEntryListing,
+  BackupTextResponse,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -90,7 +105,10 @@ export const COMMAND_NAMES = [
   'create_match',
   'delete_match',
   'save_raw_document',
-  'duplicate_match'
+  'duplicate_match',
+  'list_backup_batches',
+  'list_backup_entries',
+  'read_backup_text'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -746,3 +764,110 @@ export async function duplicateMatch(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('duplicate_match', { id, baseRevision, acknowledgement });
 } // End of function duplicateMatch()
+
+/**
+ * Lists the recognised backup batches of the open workspace, newest name first.
+ *
+ * **The thirteenth command, and the first of three that read the backup folder
+ * and write nothing.** Nothing here creates a folder, removes one or tidies one
+ * away: the read side of the backup module shares none of the write side's
+ * machinery, and a configuration this application has never saved from is left
+ * without a backup folder rather than given one.
+ *
+ * ## A missing folder is an answer, not a failure
+ *
+ * `root: 'Missing'` is the ordinary state of a fresh install, and it resolves
+ * successfully. Only an *existing* folder that is not a real private directory
+ * rejects.
+ *
+ * ## An empty list is not the same as no backups
+ *
+ * Read `complete` before saying anything about what the folder holds: an entry
+ * nothing could be learned about leaves the list short, and the counts beside it
+ * are what distinguish a short list from a whole one.
+ *
+ * ## What a batch is, and is not
+ *
+ * A batch is one editing **session**'s copies, recognised by an ownership marker
+ * that anything able to write inside the folder could also write — so
+ * *recognised* is the strongest word that applies, and *authentic*, *verified*
+ * and *created by this application* are not. Its name is a sortable folder name
+ * derived from the process clock: ordering by it is proved, and reading it as a
+ * time is not.
+ *
+ * @returns The listing, or `noWorkspaceOpen` / `backupReadFailed`.
+ */
+export async function listBackupBatches(): Promise<CommandResult<BackupBatchListing>> {
+  return call<BackupBatchListing>('list_backup_batches', {});
+} // End of function listBackupBatches()
+
+/**
+ * Lists the entries one recognised backup batch offers.
+ *
+ * Writes nothing, exactly as {@link listBackupBatches} does. The batch identity
+ * is re-resolved against the folder first, so a batch removed between two calls
+ * comes back as `backupReadFailed` carrying `StaleBatch` — **never as a batch
+ * with no entries**, which is a sentence about the batch that would not be true.
+ *
+ * ## Two ways the list can be short, and they are counted apart
+ *
+ * `unreadable` is a thing inside the batch nothing could be learned about;
+ * `unaddressable` is an entry whose file name cannot be spelled exactly on this
+ * boundary, which is a property of the wire rather than of the folder and is
+ * normally zero. `complete` is false when either is non-zero.
+ *
+ * @param batch - The opaque identity {@link listBackupBatches} produced. Hand it
+ *   back unchanged; it is not authority, and the command re-resolves it beneath
+ *   the workspace-owned backup folder rather than trusting anything built from
+ *   its strings.
+ * @returns The listing, or `noWorkspaceOpen` / `unrecognisedBackupBatch` /
+ *   `backupReadFailed`.
+ */
+export async function listBackupEntries(
+  batch: BackupBatchId
+): Promise<CommandResult<BackupEntryListing>> {
+  return call<BackupEntryListing>('list_backup_entries', { batch });
+} // End of function listBackupEntries()
+
+/**
+ * Reads one backup entry's exact text, for the document it maps to.
+ *
+ * **The fifteenth command, and it writes nothing.** What it answers is a
+ * *candidate*: to restore it, send that exact string through
+ * {@link saveRawDocument} with the **destination's** base revision. This
+ * function is not a restore and has no route to write to disk.
+ *
+ * ## Both arguments are required, and the second is the whole point
+ *
+ * The batch is asked which entry the *document's own resolved path* maps to, and
+ * the identity passed in has to be that entry, or nothing is read. Without that
+ * check a caller could read one file's copy while believing it was another's —
+ * and a display path could not stand in for the document, because two distinct
+ * filenames can render to one wire string.
+ *
+ * ## The revision beside the text is the candidate's, never the destination's
+ *
+ * It is the hash of exactly the bytes returned, so a caller can prove that what
+ * it previewed and what it later submits are the same bytes. The live file this
+ * text would replace has a revision of its own, and confusing the two is how a
+ * confirmation gets spent on different bytes.
+ *
+ * ## Bytes that are not valid UTF-8 have no text
+ *
+ * They are refused with `backupReadFailed` carrying `NotUtf8` and the offset of
+ * the first invalid sequence. Nothing is decoded lossily and no U+FFFD is
+ * substituted, so such an entry cannot be previewed or restored at all — the
+ * same contract, and the same limit, as {@link documentText}.
+ *
+ * @param entry - The opaque identity {@link listBackupEntries} produced.
+ * @param document - The live file the entry must map to, by identity.
+ * @returns The entry, the document, the exact text and its revision, or
+ *   `noWorkspaceOpen` / `unrecognisedBackupBatch` / `unaddressableBackupEntry` /
+ *   `unknownDocument` / `backupEntryIsNotThisDocument` / `backupReadFailed`.
+ */
+export async function readBackupText(
+  entry: BackupEntryId,
+  document: DocumentId
+): Promise<CommandResult<BackupTextResponse>> {
+  return call<BackupTextResponse>('read_backup_text', { entry, document });
+} // End of function readBackupText()

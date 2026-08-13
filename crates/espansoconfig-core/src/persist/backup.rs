@@ -36,9 +36,11 @@
 //! ever being taken again. That failure mode is designed out here rather than
 //! documented.
 //!
-//! **What retention still means is ten sessions, not forever.** The eleventh
-//! session after this one removes this one's batch. Nothing in this crate, and no
-//! string built on it, may say *your file is recoverable*.
+//! **What retention still means is a bound, not forever.** Rotation attempts to
+//! retain at most ten recognised batch directories, chosen by their sortable
+//! names. A later session may remove this batch, and no retention duration or
+//! recoverability is promised. Nothing in this crate, and no string built on it,
+//! may say *your file is recoverable*.
 //!
 //! # Where a backup must not go
 //!
@@ -125,8 +127,10 @@
 //! `src-tauri/src/dictionary_contract.rs` fails the build without them.
 //!
 //! **A serialized [`BackupRecord`] is display data and counts, and it is not a
-//! promise.** Retention is [`BATCHES_RETAINED`] batches and a batch is a session,
-//! so no string built on it may say a file is recoverable; and a
+//! promise.** Rotation attempts to retain at most [`BATCHES_RETAINED`] recognised
+//! batch directories chosen by sortable name; it promises neither successful
+//! cleanup nor any retention duration, so no string built on it may say a file is
+//! recoverable; and a
 //! [`Rotation::bounded`] that answers `false` is a claim about *tidiness* — the
 //! root may now hold more than ten batches — never about safety. What this
 //! sub-phase still owes Phase 2c is a **path**, [`BackupSession::root`], and that
@@ -147,12 +151,12 @@
 //! - **it shares this module's ordering and its path mapping rather than
 //!   copying them.** [`compare_batches_newest_first`] is the one place the
 //!   `(stamp, counter)` tuple becomes an order — [`rotate`] reverses *that*
-//!   comparison to reach the oldest — and [`BackupTarget`] is the backward
-//!   direction of [`backup_relative_path`], so the two directions of one mapping
-//!   cannot come to disagree. **The mapping is not total, and the exception is
-//!   named rather than assumed**: a target equal to the configuration root goes
-//!   forwards onto a sentinel that comes back as something else, which is
-//!   unreachable from the write side and refused by
+//!   comparison to reach the lowest-sorting name — and [`BackupTarget`] is the
+//!   backward direction of [`backup_relative_path`], so the two directions of one
+//!   mapping cannot come to disagree. **The mapping is not total, and the
+//!   exception is named rather than assumed**: a target equal to the
+//!   configuration root goes forwards onto a sentinel that comes back as
+//!   something else, which is unreachable from the write side and refused by
 //!   [`BackupCatalog::entry_for_target`];
 //! - **an identity is a question, not a handle.** [`BackupBatchId`] and
 //!   [`BackupEntryId`] are opaque, carry no absolute path, and are re-resolved
@@ -223,11 +227,12 @@ use super::write::{copy_extended_attributes, names_the_same_inode, temp_file_nam
 /// belt-and-braces rather than the defence.
 pub const BACKUP_DIRECTORY_NAME: &str = ".espansoconfig-backups";
 
-/// How many batches survive rotation (plan section 6.6: *"retain the last 10
-/// save batches"*).
+/// How many recognised batches rotation **attempts** to leave in place (plan
+/// section 6.6: *"retain the last 10 save batches"*).
 ///
-/// A batch is a **session**, so this is ten sessions' worth of pristine copies —
-/// not ten saves, and not forever.
+/// A batch is a **session**, so this is a bound on sessions rather than on saves,
+/// and it is neither forever nor a duration: [`rotate`] chooses by sortable name,
+/// can fail, and can meet entries it cannot read.
 pub const BATCHES_RETAINED: usize = 10;
 
 /// The batch subdirectory a target that is **not under the configuration root**
@@ -376,8 +381,8 @@ pub struct Rotation {
     ///
     /// A foreign file or directory never consumes one of the ten slots. A
     /// timestamp-shaped directory that carries no [`BATCH_MARKER_NAME`] is one of
-    /// these too: the name is a shape, and only the marker is a claim of
-    /// ownership.
+    /// these too: the name is a shape, and the marker is what makes a directory
+    /// eligible — a claim about **recognition**, never about who created it.
     pub unrecognised: usize,
     /// Entries the directory iterator itself could not produce.
     ///
@@ -435,8 +440,10 @@ impl Serialize for BackupRecord {
     /// where a serializer failure has no typed refusal to fall back to.
     ///
     /// A serialized record is **display data plus counts**. It is not a promise
-    /// that the file is recoverable: retention is [`BATCHES_RETAINED`] batches
-    /// and a batch is a session, so nothing built on this may say otherwise.
+    /// that the file is recoverable: rotation attempts to retain at most
+    /// [`BATCHES_RETAINED`] recognised batch directories chosen by sortable name
+    /// and promises neither successful cleanup nor any retention duration, so
+    /// nothing built on this may say otherwise.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut out = serializer.serialize_struct("BackupRecord", 3)?;
         out.serialize_field("path", &WirePathRef(&self.path))?;
@@ -1000,8 +1007,8 @@ impl BackupSession {
         // fails must not have spent a retention slot on the way. It runs once per
         // session, and this session's own batch is excluded by identity rather
         // than by where its name happens to sort — a clock that went backwards
-        // must not be able to make the directory holding this copy the oldest
-        // candidate.
+        // must not be able to make the directory holding this copy the
+        // lowest-sorting candidate.
         let rotation = if state.rotated {
             Rotation::default()
         } else {
@@ -1083,12 +1090,13 @@ fn lock_ignoring_poison(mutex: &Mutex<SessionState>) -> std::sync::MutexGuard<'_
 ///
 /// **A target outside the configuration root is not a hypothetical**, and this is
 /// the decision rather than an accident: it goes under [`OUTSIDE_CONFIG_ROOT`],
-/// followed by its own absolute path with the root component dropped. That keeps
-/// the whole path visible (so a user can tell which file it was), keeps two files
-/// of the same name apart, and cannot escape the batch directory, because every
-/// component that is not a plain name — the root, a prefix, `.`, `..` — is
-/// dropped rather than joined. The alternative of flattening to a bare file name
-/// was rejected: two files called `base.yml` would then be one backup.
+/// followed by its absolute path with the root component dropped. This keeps the
+/// path visible (so a user can tell which file it was), keeps equal basenames
+/// distinct, and introduces no lexical `.` or `..` escape, because every component
+/// that is not a plain name — the root, a prefix, `.`, `..` — is dropped rather
+/// than joined; filesystem containment retains the target-specific guarantees
+/// documented by `ResolvedDirectory`. The alternative of flattening to a bare file
+/// name was rejected: two files called `base.yml` would then be one backup.
 ///
 /// # The two namespaces are disjoint, and that takes one line of work
 ///
@@ -1236,7 +1244,17 @@ fn unescaped_marker_name(name: &OsStr) -> Option<OsString> {
 ///   the transaction saves regular files, never a directory — and
 ///   [`BackupCatalog::entry_for_target`] answers `None` for it rather than
 ///   offering the copy of a file genuinely called `_outside`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// # On the wire
+///
+/// Externally tagged, and **mixed in shape** exactly as
+/// [`crate::model::UnknownReason`] is: `InConfigRoot` carries one operand and
+/// crosses as a one-key object, while `OutsideConfigRoot` carries none and
+/// crosses as the bare string a unit variant produces. Its operand is a
+/// [`WirePath`], so a name no encoding can spell renders lossily rather than
+/// failing the serializer — the display half of the rule
+/// [`crate::wire`] states, with identity carried by [`BackupEntryId`] instead.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum BackupTarget {
     /// The path maps back into the configuration root, at `relative_path`.
     InConfigRoot {
@@ -1376,8 +1394,8 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 /// `2026-07-29T143012Z.old` are all unrecognised and are therefore left alone.
 ///
 /// The answer is `(stamp, counter)` so that ordering is by stamp first and by
-/// counter **numerically** second — `…Z-2` is older than `…Z-10`, which a
-/// lexicographic comparison of the whole name would get backwards.
+/// counter **numerically** second — `…Z-2` sorts below `…Z-10`, which a
+/// lexicographic comparison of the whole name would reverse.
 fn parse_batch_name(name: &str) -> Option<(&str, u32)> {
     let bytes = name.as_bytes();
     if bytes.len() < 18 {
@@ -1409,7 +1427,7 @@ fn parse_batch_name(name: &str) -> Option<(&str, u32)> {
     Some((stamp, digits.parse().ok()?))
 } // End of function parse_batch_name()
 
-/// The one order two recognised batch names are ever compared in: **newest
+/// The one order two recognised batch names are ever compared in: **newest name
 /// first**, by stamp as a string and then by counter as a number.
 ///
 /// Both operands come from [`parse_batch_name`], and this function is the only
@@ -1417,7 +1435,8 @@ fn parse_batch_name(name: &str) -> Option<(&str, u32)> {
 /// be written out twice — once in the grammar and once inside [`rotate`], sorted
 /// the other way round — and two copies of an ordering are two chances to sort a
 /// destructive operation backwards. [`rotate`] now reverses **this** comparison
-/// to reach the oldest, and [`BackupCatalog::scan_batches`] uses it as it stands.
+/// to reach the lowest-sorting name, and [`BackupCatalog::scan_batches`] uses it
+/// as it stands.
 ///
 /// The stamp compares as a **string** because [`batch_stamp`]'s format sorts in
 /// the same order the clock that produced it advanced; the counter compares as a
@@ -1505,7 +1524,7 @@ impl ChildRefusal {
         match self {
             ChildRefusal::Gone => io::Error::from(io::ErrorKind::NotFound),
             ChildRefusal::Symlink => {
-                io::Error::other("a symbolic link, which this module never follows")
+                io::Error::other("a symbolic link observed by this operation and refused")
             }
             ChildRefusal::WrongKind => {
                 io::Error::other("not the kind of object this module expected")
@@ -2296,10 +2315,11 @@ fn write_backup(
 /// # Nothing is ever overwritten
 ///
 /// `rename` replaces silently, so the refusal `create_new` used to give is made
-/// here instead: every candidate is checked to be free before the rename, and a
-/// candidate that is not free is **skipped, never truncated**. A stale copy of an
-/// older version of a file may be the only pristine copy there is, and losing it
-/// is the data loss this whole module exists to prevent.
+/// here instead: every candidate is checked to be free before the rename. An
+/// existing destination may hold bytes available nowhere else, so it is
+/// **skipped, never truncated**; this code attributes neither provenance nor age
+/// to those bytes. Losing them is the data loss this whole module exists to
+/// prevent.
 ///
 /// # Why a taken name is not always a refusal
 ///
@@ -2363,8 +2383,8 @@ fn publish_backup(
 // Rotation — the one destructive operation in this sub-phase
 // ---------------------------------------------------------------------------
 
-/// Removes all but the newest `keep` batches from `root`, oldest first, never
-/// touching `current`.
+/// Removes all but the highest-sorting `keep` recognised batch names from `root`,
+/// lowest-sorting first, never touching `current`.
 ///
 /// **This deletes directories, and it is the only code in this crate that
 /// does.** Six properties make that safe, and each is a check rather than an
@@ -2383,16 +2403,18 @@ fn publish_backup(
 ///    backup root; that principal is out of scope here exactly as it is for the
 ///    rename (`docs/decisions/2a-3a-notes.md` hole 14);
 /// 3. **it only ever considers real directories.** The type comes from
-///    [`fs::symlink_metadata`], so a *symlink* named like a batch is not a
-///    directory and is skipped; nothing here can follow a link out of the backup
-///    root. [`fs::remove_dir_all`] does not follow symlinks either, so a link
-///    planted *inside* a batch is removed rather than traversed;
+///    [`fs::symlink_metadata`], so a symlink present when that call runs is not
+///    a directory and is skipped, and [`fs::remove_dir_all`] does not traverse a
+///    symlink it encounters, so a link planted *inside* a batch is removed
+///    rather than traversed. The write side resolves by pathname on every
+///    target, so the same-user substitution race between that check and a later
+///    pathname operation remains outside the stated write-side threat model;
 /// 4. **it never considers `current`.** The batch this session is writing into is
 ///    excluded by **identity** — its `(device, inode)` pair, with its path as a
 ///    fallback — rather than by where its name sorts. *Newly created* does not
 ///    imply *newest by name*: a clock adjusted backwards, or ten future-dated
 ///    directories, would otherwise make the directory holding this session's own
-///    copies the oldest candidate;
+///    copies the lowest-sorting candidate;
 /// 5. **it refuses a root that is not a backup root.** The directory's own name
 ///    must be [`BACKUP_DIRECTORY_NAME`]. This function is private and its one
 ///    caller passes [`BackupSession::root`], so the check can only ever fire on a
@@ -2403,11 +2425,15 @@ fn publish_backup(
 ///    discarded, a root that could not be listed ([`RotationOutcome::ScanFailed`])
 ///    and an entry the iterator could not produce ([`Rotation::unreadable`]).
 ///
-/// The newest batches are kept, and *newest* is by name: the stamp compares as a
-/// string because [`batch_stamp`]'s format sorts chronologically, and the
-/// disambiguating counter compares as a number. That ordering decides **which**
-/// old batch goes; it decides nothing about the current one, which property 4
-/// removes from the question entirely.
+/// The highest-sorting batches are kept, and *highest* is **by name and by
+/// nothing else**: the stamp compares as a string because [`batch_stamp`]'s
+/// format sorts lexicographically in the order it was written, and the
+/// disambiguating counter compares as a number. A name is a label, not a
+/// measurement — an adjusted clock or a future-dated directory sorts where its
+/// characters put it — so this ordering establishes **no chronology of any file**
+/// and licenses no sentence about age. It decides **which** batch goes; it decides
+/// nothing about the current one, which property 4 removes from the question
+/// entirely.
 fn rotate(root: &Path, keep: usize, current: Option<&Path>) -> Rotation {
     let mut rotation = Rotation::default();
     if root.file_name() != Some(OsStr::new(BACKUP_DIRECTORY_NAME)) {
@@ -2469,11 +2495,11 @@ fn rotate(root: &Path, keep: usize, current: Option<&Path>) -> Rotation {
     if batches.len() <= kept_elsewhere {
         return rotation;
     }
-    // **The same comparison the catalogue displays with, reversed.** Rotation
-    // wants the oldest at the front, so it takes `compare_batches_newest_first`
-    // and turns it round rather than writing the tuple out a second time: an
-    // ordering spelled twice is an ordering that can come to disagree with
-    // itself, and this is the copy that deletes directories.
+    // **The same comparison the catalogue displays with, reversed: rotation puts
+    // the lowest-sorting name first.** It takes `compare_batches_newest_first` and
+    // turns it round rather than writing the tuple out a second time: an ordering
+    // spelled twice is an ordering that can come to disagree with itself, and this
+    // is the copy that deletes directories.
     batches.sort_by(|left, right| {
         compare_batches_newest_first((&left.0, left.1), (&right.0, right.1)).reverse()
     });
@@ -2498,7 +2524,7 @@ fn rotate(root: &Path, keep: usize, current: Option<&Path>) -> Rotation {
 /// saved from legitimately has no root at all, and a caller that received an
 /// error for it would have to decide whether to show a failure — for the
 /// ordinary state of a fresh install.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum BackupRootState {
     /// Nothing exists at `<config root>/.espansoconfig-backups`.
     Missing,
@@ -2530,7 +2556,7 @@ impl fmt::Display for BackupRootState {
 /// as a batch*; none of them is an error, and a scan that collects several of
 /// them is still a scan, which is what stops a caller turning an incomplete
 /// listing into *"there are no backups"*.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum BatchSkipped {
     /// The name is not one [`parse_batch_name`]'s grammar admits.
     ///
@@ -2587,7 +2613,7 @@ impl fmt::Display for BatchSkipped {
 }
 
 /// Why one thing inside a batch is not an entry this catalogue offers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum EntrySkipped {
     /// The batch's own ownership marker, which is not a copied file.
     ///
@@ -2649,7 +2675,7 @@ impl fmt::Display for EntrySkipped {
 ///
 /// Carried by [`BackupReadError::Io`] so a caller can tell them apart **without
 /// parsing a sentence**, exactly as [`BackupStep`] is for the write side.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum BackupReadStep {
     /// Reading the backup root's own metadata, to check what it is.
     InspectBackupRoot,
@@ -2686,7 +2712,12 @@ impl fmt::Display for BackupReadStep {
     }
 }
 
-/// Why the backup tree could not be read.
+/// Why a backup-catalogue request could not return its requested result.
+///
+/// **Not always a failed read**: [`BackupReadError::NotUtf8`] is the arm where
+/// the entry opened and every byte arrived, and only turning those bytes into a
+/// `String` did not succeed. A sentence built on this type must therefore stay
+/// at *the request did not produce its result, and the reason is beside it*.
 ///
 /// **A missing backup root is not in here**, and that is the point: it is the
 /// ordinary state of a configuration nothing has been saved from, and it is
@@ -2720,20 +2751,24 @@ pub enum BackupReadError {
     ///
     /// Rotation, another process or a person may change the tree between any two
     /// calls, so every identity is rechecked where it is used rather than
-    /// trusted from when it was minted. A gone batch, a batch-shaped directory
-    /// that lost its marker, and a name replaced by a symlink are all this — and
-    /// none of them is an empty listing.
+    /// trusted from when it was minted. An absent batch, a batch-shaped
+    /// directory carrying no marker, and a name a symlink now holds are all this
+    /// — and none of them is an empty listing. **This arm does not imply that
+    /// the identity resolved previously**: a grammatically admissible name that
+    /// never named a batch at all reaches it too.
     StaleBatch {
-        /// The identity that no longer resolves.
+        /// The identity that does not resolve now.
         batch: BackupBatchId,
     },
     /// An entry identity does not name a file this catalogue offers **now**.
     ///
-    /// Gone, replaced by a directory or a symlink, or no longer a real regular
-    /// file. The batch's own ownership marker cannot reach this variant, because
+    /// Absent, a directory or a symlink, or not a real regular file now. The
+    /// batch's own ownership marker cannot reach this variant, because
     /// [`BackupEntryId::in_batch`] refuses to build an identity for it at all.
+    /// **This arm does not imply that the identity resolved previously** either:
+    /// an admissible relative path that never named a file reaches it too.
     StaleEntry {
-        /// The identity that no longer resolves.
+        /// The identity that does not resolve now.
         entry: BackupEntryId,
     },
     /// The filesystem refused a read.
@@ -2794,6 +2829,72 @@ impl fmt::Display for BackupReadError {
     } // End of function fmt() for BackupReadError
 }
 
+impl Serialize for BackupReadError {
+    /// Externally tagged, with the two departures [`BackupError`]'s impl makes
+    /// and for the same reasons: **every** path goes through [`WirePathRef`]
+    /// because a path that is not valid UTF-8 would otherwise fail the
+    /// serializer at the one moment there is no second error to send, and
+    /// [`BackupReadError::Io`] writes **`kind`** — the [`io::ErrorKind`] variant
+    /// name, a code — never the operating system's own sentence, with
+    /// **`raw_os_error`** beside it as diagnostic data rather than a second
+    /// code.
+    ///
+    /// Hand-written so a variant added here is a compile error rather than a
+    /// silent wire addition with no string behind it.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            BackupReadError::RootNotADirectory { path } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupReadError",
+                    0,
+                    "RootNotADirectory",
+                    1,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.end()
+            }
+            BackupReadError::RootNotPrivate { path, mode } => {
+                let mut out = serializer.serialize_struct_variant(
+                    "BackupReadError",
+                    1,
+                    "RootNotPrivate",
+                    2,
+                )?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("mode", mode)?;
+                out.end()
+            }
+            BackupReadError::StaleBatch { batch } => {
+                let mut out =
+                    serializer.serialize_struct_variant("BackupReadError", 2, "StaleBatch", 1)?;
+                out.serialize_field("batch", batch)?;
+                out.end()
+            }
+            BackupReadError::StaleEntry { entry } => {
+                let mut out =
+                    serializer.serialize_struct_variant("BackupReadError", 3, "StaleEntry", 1)?;
+                out.serialize_field("entry", entry)?;
+                out.end()
+            }
+            BackupReadError::Io { step, path, source } => {
+                let mut out = serializer.serialize_struct_variant("BackupReadError", 4, "Io", 4)?;
+                out.serialize_field("step", step)?;
+                out.serialize_field("path", &WirePathRef(path))?;
+                out.serialize_field("kind", &io_kind_name(source))?;
+                out.serialize_field("raw_os_error", &io_raw_os_error(source))?;
+                out.end()
+            }
+            BackupReadError::NotUtf8 { entry, offset } => {
+                let mut out =
+                    serializer.serialize_struct_variant("BackupReadError", 5, "NotUtf8", 2)?;
+                out.serialize_field("entry", entry)?;
+                out.serialize_field("offset", offset)?;
+                out.end()
+            }
+        }
+    } // End of function serialize() for BackupReadError
+}
+
 impl std::error::Error for BackupReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -2807,14 +2908,19 @@ impl std::error::Error for BackupReadError {
     } // End of function source() for BackupReadError
 }
 
-/// A recognised batch directory, as an identity a caller cannot build a path
-/// from.
+/// A recognised batch directory, as an identity that is **opaque by contract**.
 ///
 /// It holds the **exact directory name** plus the two operands
 /// [`parse_batch_name`] read out of it, and nothing else: no root, no absolute
 /// path, no claim about what is inside. Every call that uses one re-resolves it
 /// against the tree, because the directory it names can stop being a recognised
 /// batch between any two calls.
+///
+/// **Opaque is a contract, not an impossibility.** The name is a `String` and
+/// the backup root is reachable, so a pathname *can* be composed from what an
+/// identity exposes; what makes the identity safe is that every use validates it
+/// and re-resolves it beneath the root this module owns, never that composing a
+/// path is out of reach.
 ///
 /// **The stamp is a directory name and not a time.** [`batch_stamp`] formats the
 /// process clock to obtain a sortable name; nothing here parses it back into a
@@ -2837,8 +2943,10 @@ impl BackupBatchId {
     /// only ever name a **single directory component** of the backup root: every
     /// character it admits is an ASCII digit or one of `-`, `T`, `Z`, so no
     /// identity can carry a separator, a `.`, a `..` or an absolute path.
-    /// Containment is therefore a property of this constructor rather than a
-    /// check somewhere else.
+    /// **Lexical** containment is therefore a property of this constructor
+    /// rather than a check somewhere else: joining the identity introduces no
+    /// `.` or `..` escape. Filesystem containment retains the target-specific
+    /// guarantees documented by `ResolvedDirectory`.
     ///
     /// **A name that parses is not a batch.** It is a shape; whether a directory
     /// of that name exists, is a real directory and carries the ownership marker
@@ -2884,6 +2992,27 @@ impl BackupBatchId {
     }
 } // End of impl BackupBatchId
 
+impl Serialize for BackupBatchId {
+    /// Writes **the directory name and nothing else**.
+    ///
+    /// Hand-written rather than derived because the other two fields are
+    /// [`parse_batch_name`]'s reading of that same name: putting them on the
+    /// wire would be three spellings of one value, and a caller could hand back
+    /// a `stamp` and a `counter` that disagree with the `name` beside them.
+    /// Every operand the grammar produces is recovered by
+    /// [`BackupBatchId::parse`] on the way in, so nothing is lost.
+    ///
+    /// The name is a `String` and therefore always spellable: every character
+    /// [`parse_batch_name`] admits is an ASCII digit or one of `-`, `T`, `Z`.
+    /// **This identity round-trips exactly**, and it is the only reason a caller
+    /// may hand one back.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("BackupBatchId", 1)?;
+        out.serialize_field("name", &self.name)?;
+        out.end()
+    } // End of function serialize() for BackupBatchId
+}
+
 /// One recognised batch, as a scan found it.
 ///
 /// The opaque identity and a display name, deliberately **not** a path: a caller
@@ -2907,12 +3036,31 @@ impl BackupBatch {
     }
 } // End of impl BackupBatch
 
-/// One entry of one batch, as an identity a caller cannot build a path from.
+impl Serialize for BackupBatch {
+    /// Writes the opaque identity and the label, which are the two things a
+    /// caller does two different things with.
+    ///
+    /// They carry the same characters, and that is stated rather than hidden:
+    /// `id` is what a later call is made with and `display_name` is what a
+    /// screen may show. Neither is authority: every use re-resolves the identity
+    /// beneath the backup root — see [`BackupBatchId`], which argues why an
+    /// identity is a question and not a handle.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("BackupBatch", 2)?;
+        out.serialize_field("id", &self.id)?;
+        out.serialize_field("display_name", self.display_name())?;
+        out.end()
+    } // End of function serialize() for BackupBatch
+}
+
+/// One entry of one batch, as an identity that is **opaque by contract**.
 ///
 /// It holds the batch identity plus a **validated relative component path** —
-/// every component a plain name, so nothing it carries can climb out of the
-/// batch it names. As with [`BackupBatchId`], holding one proves nothing about
-/// the tree: every use re-resolves it.
+/// every component a plain name, so joining it onto the batch it names
+/// introduces no lexical `.` or `..` escape; filesystem containment retains the
+/// target-specific guarantees documented by `ResolvedDirectory`. As with
+/// [`BackupBatchId`], holding one proves nothing about the tree: every use
+/// re-resolves it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BackupEntryId {
     /// The batch the entry is inside.
@@ -2927,8 +3075,10 @@ impl BackupEntryId {
     /// A path is admitted only when it has at least one component and **every**
     /// component, *as it is spelled*, is a plain name: `.`, `..`, a leading `/`,
     /// a trailing separator and the empty component a repeated separator makes
-    /// are all **refused** rather than normalised away, so a joined identity
-    /// stays inside its batch by construction rather than by a later check.
+    /// are all **refused** rather than normalised away, so joining the identity
+    /// onto its batch introduces no lexical `.` or `..` escape, by construction
+    /// rather than by a later check; filesystem containment retains the
+    /// target-specific guarantees documented by `ResolvedDirectory`.
     /// `match/./base.yml` and `match//base.yml` are therefore `None`, not
     /// `match/base.yml`; [`validated_relative_path`] argues why that has to be
     /// read from the spelling. The batch's own ownership marker is refused too —
@@ -2958,14 +3108,46 @@ impl BackupEntryId {
     }
 } // End of impl BackupEntryId
 
+impl Serialize for BackupEntryId {
+    /// Writes the batch identity and the relative path, the second through
+    /// [`WirePathRef`].
+    ///
+    /// **The rendering is lossy and the identity is not**, which is the whole of
+    /// what this impl claims. A component this filesystem admits and no encoding
+    /// can spell renders with `U+FFFD` and therefore does **not** come back as
+    /// the path it was written from — so an identity that went out lossily is
+    /// one a caller cannot hand back, and every call re-resolves what it is
+    /// given anyway ([`BackupCatalog`]). The lossy rendering is chosen over a
+    /// failing serializer for [`crate::wire`]'s reason: a response that fails to
+    /// serialize reaches a webview as `serde`'s own English prose, and there is
+    /// no second error to send instead.
+    ///
+    /// The boundary that turns *"lossy, therefore unusable"* into *"never
+    /// offered"* is `src-tauri/src/backup.rs`, which lists only entries whose
+    /// identity survives this rendering byte for byte and counts the rest.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut out = serializer.serialize_struct("BackupEntryId", 2)?;
+        out.serialize_field("batch", &self.batch)?;
+        out.serialize_field("relative_path", &WirePathRef(&self.relative))?;
+        out.end()
+    } // End of function serialize() for BackupEntryId
+}
+
 /// One entry a batch offers, as a scan found it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// On the wire it is its four fields exactly: the opaque identity, the lossy
+/// display path, the observed byte length and the target classification. **A
+/// filesystem length is a `u64` and is not inherently bounded by JavaScript's
+/// exact-integer range, so it must cross in a lossless representation** — see
+/// [`serialize_byte_length`]. Nothing here is a path a caller may write to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct BackupEntry {
     /// The identity every later call is made with.
     id: BackupEntryId,
     /// The path relative to the batch, for display.
     display_path: WirePath,
-    /// The byte length the scan observed.
+    /// The byte length the scan observed. Decimal digits on the wire.
+    #[serde(serialize_with = "serialize_byte_length")]
     length: u64,
     /// Which target namespace the entry's own **name** occupies, and — for an
     /// ordinary, undisambiguated in-root name — the live path that would map to
@@ -2992,6 +3174,9 @@ impl BackupEntry {
     /// can change between the two, which is why
     /// [`BackupCatalog::read_entry`] hashes what it actually read rather than
     /// trusting this.
+    ///
+    /// The full `u64` in Rust; [`serialize_byte_length`] is what carries it
+    /// across without rounding.
     pub fn length(&self) -> u64 {
         self.length
     }
@@ -3440,7 +3625,7 @@ impl BackupCatalog {
     /// The whole chain is rechecked before a byte is read — root, batch grammar,
     /// batch directory, marker, component containment, no symlink at any
     /// component it resolves, and a real regular file at the leaf — and an
-    /// identity that no longer resolves is [`BackupReadError::StaleEntry`],
+    /// identity that does not resolve now is [`BackupReadError::StaleEntry`],
     /// **never an empty file**.
     ///
     /// **The bytes are read from the descriptor the leaf check was made on.**
@@ -3486,10 +3671,10 @@ impl BackupCatalog {
     /// from, so the two sides cannot come to disagree about which directory is a
     /// backup root.
     ///
-    /// What it answers on success is a resolved directory, and **every later
-    /// component of that call is resolved against it** rather than against the
-    /// root's name a second time — see `ResolvedDirectory` for exactly how much
-    /// that is worth on each target.
+    /// What it answers on success is a resolved directory. **On macOS, every
+    /// later component is resolved relative to the opened root descriptor. Off
+    /// macOS, later operations re-resolve the stored pathname and retain the
+    /// substitution race documented by `ResolvedDirectory`.**
     fn open_root(&self) -> Result<Option<ResolvedDirectory>, BackupReadError> {
         let root = match ResolvedDirectory::open_root(&self.root) {
             Ok(root) => root,
@@ -3528,10 +3713,12 @@ impl BackupCatalog {
     /// the name still parse, is a real directory there, and does it carry the
     /// ownership marker. Anything else is [`BackupReadError::StaleBatch`].
     ///
-    /// The batch is resolved **inside the root this call just resolved**, and
-    /// cannot leave it: [`BackupBatchId::parse`] admits only names made of ASCII
-    /// digits and `-`, `T`, `Z`, so an identity is always exactly one plain
-    /// component.
+    /// The batch is resolved **against the root this call just resolved**, and
+    /// no lexical escape can leave it: [`BackupBatchId::parse`] admits only
+    /// names made of ASCII digits and `-`, `T`, `Z`, so an identity is always
+    /// exactly one plain component. On macOS that resolution is relative to the
+    /// root's open descriptor; off macOS it lengthens the root's pathname and
+    /// retains the substitution race documented by `ResolvedDirectory`.
     fn recognised_batch(
         &self,
         batch: &BackupBatchId,
@@ -3568,9 +3755,11 @@ impl BackupCatalog {
 /// Admits a relative path made entirely of plain-name components.
 ///
 /// `.`, `..`, an empty component, a leading `/` and the empty path are all
-/// **refused**, so a path this returns can be joined onto a batch directory
-/// without leaving it. It is the one place that containment is decided, and it
-/// is decided by construction rather than by comparing prefixes afterwards.
+/// **refused**, so joining a path this returns onto a batch directory
+/// introduces no lexical `.` or `..` escape. It is the one place that **lexical**
+/// containment is decided, and it is decided by construction rather than by
+/// comparing prefixes afterwards; filesystem containment retains the
+/// target-specific guarantees documented by `ResolvedDirectory`.
 ///
 /// # It reads the spelling, not the components
 ///
@@ -3598,6 +3787,22 @@ fn validated_relative_path(relative: &Path) -> Option<PathBuf> {
     } // End of the loop over the candidate path's spelled components
     Some(validated)
 } // End of function validated_relative_path()
+
+/// Writes an observed filesystem byte length as its exact decimal digits.
+///
+/// **A filesystem length can exceed JavaScript's safe-integer range**, where not
+/// every `u64` is exactly representable as a JSON number — for example, `2^53 + 1`
+/// is rounded. A batch is untrusted input — anything able to write inside the
+/// backup root can put a sparse regular file there — so a length above
+/// [`crate::MAX_EXACT_WIRE_INTEGER`] is reachable. Decimal digits therefore carry
+/// every value losslessly. The alternatives were refusing to offer such an entry,
+/// which would drop it from a listing that claims to be complete, and capping the
+/// value, which would report a length the scan never observed. The digits cross
+/// instead, so the number on the wire is the number `stat` answered whatever the
+/// filesystem holds.
+fn serialize_byte_length<S: Serializer>(length: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&length.to_string())
+} // End of function serialize_byte_length()
 
 /// Builds the entry value one identity and one observed length make.
 ///
@@ -3653,7 +3858,7 @@ impl WalkedDirectory<'_> {
 /// `ResolvedDirectory` argues the split.
 ///
 /// `Ok(None)` is *there is nothing addressable at that path*: a non-plain
-/// component, a component that has gone, a symbolic link at any depth, or a
+/// component, an absent component, a symbolic link at any depth, or a
 /// component that is not a directory. An I/O failure that is none of those is
 /// reported, because a caller must not read a refusal as an absence.
 fn walk_to_parent<'a>(
@@ -3916,9 +4121,10 @@ mod tests {
         } // End of the loop over the names rotation must leave alone
     } // End of function a_name_this_module_did_not_mint_is_not_recognised()
 
-    /// Eleven batches, ten kept, and the one removed is the oldest.
+    /// Eleven recognised batch names, ten kept, and the lowest-sorting name
+    /// removed.
     #[test]
-    fn rotation_keeps_ten_batches_and_removes_the_oldest_first() {
+    fn rotation_keeps_ten_batches_and_removes_the_lowest_sorting_name_first() {
         let (_directory, root) = backup_root();
         let mut seeded = Vec::new();
         for minute in 0..11 {
@@ -3932,11 +4138,14 @@ mod tests {
         assert_eq!(rotation.unrecognised, 0);
         assert_eq!(rotation.unreadable, 0);
         assert!(rotation.bounded());
-        assert!(!seeded[0].exists(), "the oldest batch is the one removed");
+        assert!(
+            !seeded[0].exists(),
+            "the lowest-sorting batch name is the one removed"
+        );
         for kept in &seeded[1..] {
             assert!(kept.exists(), "{} must survive", kept.display());
         }
-    } // End of function rotation_keeps_ten_batches_and_removes_the_oldest_first()
+    } // End of function rotation_keeps_ten_batches_and_removes_the_lowest_sorting_name_first()
 
     /// Ten batches is the retention window, not one over it.
     #[test]
@@ -3957,24 +4166,23 @@ mod tests {
         assert_eq!(fs::read_dir(&root).expect("readable").count(), 10);
     }
 
-    /// The disambiguating counter orders numerically, so `-2` is older than
-    /// `-10`. A lexicographic comparison of the whole name would remove the
-    /// wrong one.
+    /// The disambiguating counter orders numerically, so `-2` sorts below `-10`;
+    /// a lexicographic comparison of the whole name would reverse them.
     #[test]
     fn the_disambiguating_counter_orders_as_a_number_and_not_as_text() {
         let (_directory, root) = backup_root();
-        let oldest = seed_batch(&root, "2026-07-29T143012Z");
+        let lowest_sorting = seed_batch(&root, "2026-07-29T143012Z");
         let second = seed_batch(&root, "2026-07-29T143012Z-2");
-        let newest = seed_batch(&root, "2026-07-29T143012Z-10");
+        let highest_sorting = seed_batch(&root, "2026-07-29T143012Z-10");
 
         let rotation = rotate(&root, 2, None);
         assert_eq!(rotation.removed, 1);
         assert!(
-            !oldest.exists(),
-            "the bare stamp is the oldest of the three"
+            !lowest_sorting.exists(),
+            "the bare stamp has the lowest-sorting name of the three"
         );
         assert!(second.exists());
-        assert!(newest.exists(), "-10 is newer than -2");
+        assert!(highest_sorting.exists(), "-10 sorts above -2");
     } // End of function the_disambiguating_counter_orders_as_a_number_and_not_as_text()
 
     /// A directory rotation does not recognise is left alone **and does not
@@ -3991,7 +4199,10 @@ mod tests {
         } // End of the loop that seeds eleven real batches beside the foreign ones
 
         let rotation = rotate(&root, BATCHES_RETAINED, None);
-        assert_eq!(rotation.removed, 1, "only the eleventh-oldest batch goes");
+        assert_eq!(
+            rotation.removed, 1,
+            "only the lowest-sorting recognised batch name goes"
+        );
         assert_eq!(rotation.unrecognised, 3, "two directories and one file");
         assert!(foreign.exists(), "a foreign directory is never removed");
         assert!(dotted.exists());
@@ -4083,7 +4294,7 @@ mod tests {
     } // End of function a_target_under_the_config_root_keeps_its_relative_path()
 
     /// A target outside the configuration root goes under `_outside`, keeps its
-    /// whole path, and **cannot escape the batch directory**.
+    /// whole component path, and introduces no lexical `.` or `..` escape.
     #[test]
     fn a_target_outside_the_config_root_is_named_rather_than_flattened() {
         let root = Path::new("/tmp/espanso");
@@ -4251,11 +4462,13 @@ mod tests {
         fs::set_permissions(&root, Permissions::from_mode(0o700)).expect("chmod back");
     } // End of function an_existing_backup_root_that_is_not_private_is_refused()
 
-    /// **A timestamp-shaped name is not proof this module minted a directory.**
+    /// **A timestamp-shaped name is not evidence that this module minted a
+    /// directory.**
     ///
-    /// Only the ownership marker is, so a batch-shaped directory without one is
-    /// unrecognised: never removed, and never counted against the retention
-    /// window.
+    /// A recognised ownership marker makes the directory eligible for rotation,
+    /// but remains forgeable and proves neither creation nor provenance; a
+    /// batch-shaped directory without one is left alone and is not counted
+    /// against retention.
     #[test]
     fn rotation_leaves_a_batch_shaped_directory_that_carries_no_marker() {
         let (_directory, root) = backup_root();
@@ -4282,7 +4495,7 @@ mod tests {
         );
         assert!(
             !mine[0].exists(),
-            "the oldest marked batch is the one removed"
+            "the lowest-sorting marked batch name is the one removed"
         );
     } // End of function rotation_leaves_a_batch_shaped_directory_that_carries_no_marker()
 
@@ -4327,9 +4540,10 @@ mod tests {
 
     /// **The batch being written is never a candidate, whatever the clock did.**
     ///
-    /// Ten future-dated batches make the current one the *oldest* by name, which
-    /// is exactly the state a wall clock adjusted backwards produces. Ordering
-    /// decides which old batch goes; it decides nothing about this one.
+    /// Ten future-dated batches make the current one the *lowest-sorting* by
+    /// name, which is exactly the state a wall clock adjusted backwards
+    /// produces. Ordering decides which other batch goes; it decides nothing
+    /// about this one.
     #[test]
     fn rotation_never_removes_the_batch_it_was_told_is_current() {
         let (_directory, root) = backup_root();
@@ -4350,7 +4564,7 @@ mod tests {
         );
         assert!(
             !future[0].exists(),
-            "the oldest of the others is the one that goes"
+            "the lowest-sorting of the others is the one that goes"
         );
 
         // And the same exclusion holds when the current batch is named as a
@@ -4781,7 +4995,7 @@ mod tests {
     } // End of function a_backup_root_that_is_a_symlink_a_file_or_not_private_is_refused()
 
     /// **The stamp orders as text and the counter as a number**, and the
-    /// catalogue displays that order newest first.
+    /// catalogue displays that order newest name first.
     ///
     /// `…Z-2` before `…Z-10` is the mistake a lexicographic comparison of whole
     /// directory names makes, and it is the one rotation would make in the
@@ -4814,7 +5028,7 @@ mod tests {
                 "2026-07-29T143012Z",
                 "2025-01-01T000000Z",
             ],
-            "newest name first, and -10 is newer than -2"
+            "newest name first, and -10 sorts above -2"
         );
         assert!(scan.complete());
         assert_eq!(scan.unrecognised(), 0);
@@ -4822,9 +5036,9 @@ mod tests {
 
         // The identity carries the two operands the order is made of, and the
         // stamp is a name rather than a parsed time.
-        let newest = scan.batches[0].id();
-        assert_eq!(newest.stamp(), "2026-07-30T000000Z");
-        assert_eq!(newest.counter(), 0);
+        let highest_sorting = scan.batches[0].id();
+        assert_eq!(highest_sorting.stamp(), "2026-07-30T000000Z");
+        assert_eq!(highest_sorting.counter(), 0);
         assert_eq!(scan.batches[1].id().counter(), 10);
     } // End of function the_catalogue_lists_batches_newest_name_first_with_the_counter_as_a_number()
 
@@ -4853,12 +5067,12 @@ mod tests {
             .iter()
             .map(|batch| batch.display_name().to_owned())
             .collect();
-        let oldest = listed.last().expect("four batches").clone();
+        let lowest_sorting = listed.last().expect("four batches").clone();
 
         let rotation = rotate(&root, 3, None);
         assert_eq!(rotation.removed, 1);
         assert!(
-            !root.join(&oldest).exists(),
+            !root.join(&lowest_sorting).exists(),
             "rotation removes the one the catalogue lists last"
         );
         for kept in &listed[..listed.len() - 1] {
@@ -5569,7 +5783,7 @@ mod tests {
     } // End of function a_batch_identity_can_only_ever_be_one_plain_component()
 
     /// An entry identity is a **relative path of plain names as they are
-    /// spelled**, so joining one onto a batch cannot leave it.
+    /// spelled**, so joining one onto a batch introduces no lexical escape.
     ///
     /// The interesting half is what is **refused rather than normalised**.
     /// [`Path::components`] drops an interior `.` and collapses repeated
@@ -5611,6 +5825,44 @@ mod tests {
             .components()
             .all(|component| matches!(component, Component::Normal(_))));
     } // End of function an_entry_identity_can_only_ever_be_plain_components()
+
+    /// An entry's observed length crosses as **exact decimal digits**, above
+    /// JavaScript's safe-integer range as well as below it.
+    ///
+    /// A batch is untrusted input, so a sparse regular file longer than
+    /// [`crate::MAX_EXACT_WIRE_INTEGER`] is reachable, and not every `u64` is
+    /// exactly representable as a JSON number. This pins the representation
+    /// rather than the fixture: the fixture holds small files, so nothing that
+    /// reads a real tree can fail when the field goes back to being a number.
+    #[test]
+    fn an_entry_length_crosses_as_exact_digits() {
+        let batch = BackupBatchId::parse("2026-07-29T143012Z").expect("a well-formed name");
+        let id = BackupEntryId::in_batch(batch, Path::new("match/base.yml")).expect("valid");
+
+        // One below, one above and one at the exact-integer boundary.
+        for length in [
+            0,
+            crate::MAX_EXACT_WIRE_INTEGER,
+            crate::MAX_EXACT_WIRE_INTEGER + 1,
+            u64::MAX,
+        ] {
+            let json = serde_json::to_value(entry_of(id.clone(), length))
+                .expect("an entry must serialize");
+            assert_eq!(
+                json["length"],
+                serde_json::Value::String(length.to_string()),
+                "the length must cross as its own digits, never as a number"
+            );
+        } // End of the loop over the lengths that must survive the wire
+
+        // The first integer above `2^53` demonstrates the loss a JSON number can
+        // introduce.
+        let rounded = crate::MAX_EXACT_WIRE_INTEGER + 2;
+        assert_eq!(
+            serde_json::to_value(entry_of(id, rounded)).expect("an entry must serialize")["length"],
+            serde_json::Value::String("9007199254740993".to_owned())
+        );
+    } // End of function an_entry_length_crosses_as_exact_digits()
 
     /// Something inside a batch that is neither a directory nor a regular file
     /// is reported rather than offered.

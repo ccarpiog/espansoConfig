@@ -1,4 +1,4 @@
-//! The thirteen commands, invoked through the real dispatcher.
+//! The sixteen commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -1770,7 +1770,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the thirteen commands.
+/// A page that is not this application cannot reach any of the sixteen commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -1782,7 +1782,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All thirteen are attempted, and the count is asserted against the registered
+/// **All sixteen are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1884,6 +1884,26 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // The three read-only backup commands. They write nothing, and they are
+        // here for `document_text`'s reason rather than for a writer's: a
+        // navigated webview must not be able to read the user's configuration
+        // back out of the application, and a backup entry is a copy of exactly
+        // that.
+        ("list_backup_batches", json!({})),
+        (
+            "list_backup_entries",
+            json!({ "batch": { "name": "2026-01-02T030405Z-0" } }),
+        ),
+        (
+            "read_backup_text",
+            json!({
+                "entry": {
+                    "batch": { "name": "2026-01-02T030405Z-0" },
+                    "relative_path": "match/base.yml",
+                },
+                "document": 0,
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1898,7 +1918,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 13, "the surface is thirteen commands");
+    assert_eq!(attempted.len(), 16, "the surface is sixteen commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)

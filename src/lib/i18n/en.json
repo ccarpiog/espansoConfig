@@ -152,7 +152,7 @@
 
   "browser.saveOutcome.fileWritten": "The file was written. What is on disk now is exactly the text that was sent.",
   "browser.saveOutcome.nothingToWrite": "The text was already exactly what the file held, so nothing was written. Both checks still ran; this is a save with nothing to do.",
-  "browser.saveOutcome.backupTaken": "A copy of this file as it was before this session's first change to it was kept. Only the last ten sessions of copies are kept, so this is not a promise that the file can be recovered later.",
+  "browser.saveOutcome.backupTaken": "A copy of this file as it was before this session's first change to it was kept. Retention is best-effort and orders session batches by their folder labels, so this does not promise how long the copy remains or that the file can be recovered later.",
   "browser.saveOutcome.nothingWasWritten": "Nothing was written. The file on disk is exactly as it was.",
   "browser.saveOutcome.changedElsewhere": "This file changed after its text was loaded here, so the save was refused rather than applied over that change.",
   "browser.saveOutcome.draftKeptInMemory": "Your text is still here, exactly as you wrote it. Nothing has been discarded and nothing has been reloaded.",
@@ -686,7 +686,7 @@
   "code.backupStep.createBackupRoot": "creating the backups folder",
   "code.backupStep.inspectBackupRoot": "reading what the existing backups folder is",
   "code.backupStep.createBatch": "creating this session’s backup folder",
-  "code.backupStep.writeBatchMarker": "writing the marker that says espansoConfig made this backup folder",
+  "code.backupStep.writeBatchMarker": "writing the ownership marker espansoConfig recognises a backup folder by",
   "code.backupStep.createBackupParents": "creating the folders that mirror the file’s own location",
   "code.backupStep.createBackupFile": "creating the copy’s temporary file",
   "code.backupStep.writeBackupFile": "writing the file’s current bytes into the copy",
@@ -696,10 +696,46 @@
   "code.backupStep.verifyBackupFile": "checking that the copy’s temporary name still points at it",
   "code.backupStep.publishBackupFile": "giving the copy its final name",
 
-  "code.rotationOutcome.notAttempted": "Older backups were not looked at on this save.",
+  "code.rotationOutcome.notAttempted": "Backup batches were not examined for retention on this save.",
   "code.rotationOutcome.refused": "The folder handed to the tidy-up step is not a backups folder, so nothing was examined.",
-  "code.rotationOutcome.scanFailed": "The backups folder could not be listed, so older backups were neither counted nor removed.",
+  "code.rotationOutcome.scanFailed": "The backups folder could not be listed, so recognised batches were neither counted nor removed.",
   "code.rotationOutcome.scanned": "The backups folder was listed and every entry examined.",
+
+  "code.commandError.unrecognisedBackupBatch": "That is not a name espansoConfig recognises for a backup folder, so nothing was looked for on disk.",
+  "code.commandError.unaddressableBackupEntry": "That is not a location espansoConfig can address inside a backup folder, so nothing was looked for on disk.",
+  "code.commandError.backupEntryIsNotThisDocument": "This backup entry does not match the entry name computed from the file you chose, so nothing was read.",
+  "code.commandError.backupReadFailed": "espansoConfig could not complete this backup-catalogue request. What it reports beside this is the reason.",
+
+  "code.backupRootState.missing": "There is no backups folder yet, which is the ordinary state of a configuration espansoConfig has never saved.",
+  "code.backupRootState.present": "The backups folder is there and was listed.",
+
+  "code.batchSkipped.foreignName": "not named the way espansoConfig names a backup folder, so it was left exactly as it is",
+  "code.batchSkipped.notADirectory": "not a folder, so it was left exactly as it is",
+  "code.batchSkipped.noMarker": "carries no ownership marker in a format espansoConfig recognises, so it was left exactly as it is",
+  "code.batchSkipped.unreadable": "nothing could be read about it, so espansoConfig cannot say what it is",
+
+  "code.entrySkipped.marker": "the entry at the name espansoConfig uses for a backup folder’s ownership marker, which is not a copied file",
+  "code.entrySkipped.symlink": "a link to somewhere else, which espansoConfig will not follow",
+  "code.entrySkipped.notARegularFile": "neither a folder nor an ordinary file",
+  "code.entrySkipped.unusableName": "a name espansoConfig cannot address inside a backup folder",
+  "code.entrySkipped.unreadable": "nothing could be read about it, so espansoConfig cannot say what it is",
+
+  "code.backupReadStep.inspectBackupRoot": "reading what the backups folder is",
+  "code.backupReadStep.listBackupRoot": "listing the backups folder",
+  "code.backupReadStep.inspectBatch": "reading what one backup folder is",
+  "code.backupReadStep.listBatch": "listing one backup folder",
+  "code.backupReadStep.inspectEntry": "reading what one entry is",
+  "code.backupReadStep.readEntry": "reading one entry\u2019s contents",
+
+  "code.backupTarget.inConfigRoot": "named for a file inside your configuration folder",
+  "code.backupTarget.outsideConfigRoot": "named for a file outside your configuration folder",
+
+  "code.backupReadError.rootNotADirectory": "{path} is not a folder, so espansoConfig will not read backups from it.",
+  "code.backupReadError.rootNotPrivate": "{path} can be reached by someone other than its owner, so espansoConfig will not read backups from it.",
+  "code.backupReadError.staleBatch": "That name does not currently resolve to a backup folder espansoConfig recognises. List the backups again.",
+  "code.backupReadError.staleEntry": "That entry does not currently resolve in that backup folder. List its entries again.",
+  "code.backupReadError.io": "The system refused an operation on {path} while the backups were being read.",
+  "code.backupReadError.notUtf8": "That entry is not valid UTF-8 text, so espansoConfig cannot show it. The first byte that is not is at offset {offset}.",
 
   "code.findingClass.editorModelError": "Contradicts the shape espansoConfig models for a snippet.",
   "code.findingClass.suspiciousButPermitted": "Looks wrong, and espansoConfig cannot prove that it is.",

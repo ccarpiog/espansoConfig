@@ -26,12 +26,13 @@
 //!   session that saves far more than ten files keeps every one of their copies,
 //!   because a batch is a session and rotation, which runs once, cannot consider
 //!   the batch this session is writing into;
-//! - eleven sessions leave ten batches, and the one that goes is the oldest;
+//! - eleven sessions leave ten batches, and the one that goes has the
+//!   lowest-sorting name;
 //! - the copy carries the target's **mode bits** and its **extended attributes**
 //!   and deliberately **not** its access control list;
 //! - a backup that cannot be written **fails the save before the commit**, so the
-//!   call does not rewrite the target — and it removes no older batch on the way
-//!   out, because rotation runs after a copy rather than before one;
+//!   call does not rewrite the target — and it removes no existing batch on the
+//!   way out, because rotation runs after a copy rather than before one;
 //! - a save whose **commit** then fails leaves the file free to be copied again,
 //!   so a retry never rewrites a target without a copy of what it replaced;
 //! - a backup root that is a **symlink**, a backup root anybody else can reach,
@@ -42,9 +43,10 @@
 //!
 //! # What this binary does **not** pin
 //!
-//! - **Nothing here says a file is recoverable.** Retention is ten batches, and
-//!   a batch is a session; no test name and no assertion message may claim
-//!   otherwise.
+//! - **Nothing here says a file is recoverable.** Rotation attempts to retain at
+//!   most ten recognised batch directories chosen by sortable name; it promises
+//!   neither successful cleanup nor any retention duration. A batch is a session;
+//!   no test name and no assertion message may claim otherwise.
 //! - **No second process is involved**, so the residual race is untouched here
 //!   exactly as it is everywhere else in this repository.
 //! - **The ACL assertions can skip.** `chmod +a` is an instrument, and a volume
@@ -517,11 +519,12 @@ fn the_backup_is_not_anywhere_espansos_include_glob_can_reach() {
 /// **The tension, resolved rather than described.**
 ///
 /// A file is copied only on its first modification per session, and rotation
-/// keeps only ten batches — so a long session could in principle rotate away a
-/// file's only pristine copy. It cannot here, because a batch is a **session**:
-/// this session mints one directory, rotation runs once before anything is put
-/// in it, and the directory it would have to remove to lose a copy is its own
-/// newest one.
+/// attempts to retain only ten batches — so a long session could in principle
+/// rotate away a file's only copy. It cannot here, because a batch is a
+/// **session**: this session mints one directory, rotation runs once before
+/// anything is put in it, and the directory it would have to remove to lose a
+/// copy is the one this session is writing into, which rotation excludes by
+/// identity.
 ///
 /// Twenty files in one session, which is twice the retention window.
 #[test]
@@ -583,12 +586,13 @@ fn a_session_that_saves_more_files_than_the_retention_window_keeps_every_copy() 
     );
 } // End of function a_session_that_saves_more_files_than_the_retention_window_keeps_every_copy()
 
-/// Eleven sessions leave ten batches, and the one removed is the oldest.
+/// Eleven sessions leave ten batches, and the one removed has the lowest-sorting
+/// name.
 ///
 /// The sessions run inside one wall-clock second, so this is also the test that
 /// eleven batches minted in the same second are eleven directories.
 #[test]
-fn the_eleventh_session_rotates_the_oldest_batch_away() {
+fn the_eleventh_session_rotates_the_lowest_sorting_batch_name_away() {
     let (_directory, root) = config_root_with(&[("match/base.yml", CLEAN)]);
     let target = root.join("match/base.yml");
     let backup_root = root.join(BACKUP_DIRECTORY_NAME);
@@ -623,13 +627,16 @@ fn the_eleventh_session_rotates_the_oldest_batch_away() {
     assert_eq!(
         batches(&backup_root).len(),
         BATCHES_RETAINED,
-        "ten batches are what retention means"
+        "ten batches is what rotation attempts to retain"
     );
-    assert!(!minted[0].exists(), "the oldest batch is the one removed");
+    assert!(
+        !minted[0].exists(),
+        "the lowest-sorting batch name is the one removed"
+    );
     for kept in &minted[1..] {
         assert!(kept.exists(), "{} must survive", kept.display());
     }
-} // End of function the_eleventh_session_rotates_the_oldest_batch_away()
+} // End of function the_eleventh_session_rotates_the_lowest_sorting_batch_name_away()
 
 /// A directory rotation does not recognise is left alone, and does not consume
 /// one of the ten slots.
@@ -941,24 +948,24 @@ fn seed_marked_batch(backup_root: &Path, name: &str) -> PathBuf {
         format!("{BATCH_MARKER_FORMAT} 1\n"),
     )
     .expect("the ownership marker is written");
-    std::fs::write(batch.join("payload"), b"an older session's copy").expect("written");
+    std::fs::write(batch.join("payload"), b"fixture payload").expect("written");
     batch
 } // End of function seed_marked_batch()
 
-/// **A backup that fails removes no older batch.**
+/// **A backup that fails removes no existing recognised batch.**
 ///
 /// Rotation is the one destructive operation here, and it runs **after** a copy
-/// has been written rather than when the batch directory is minted. Eleven older
-/// batches are waiting, and a save whose copy cannot be written must leave all
-/// eleven where they are: spending a retention slot on an attempt that produced
-/// nothing is how a failed backup costs a user an older one.
+/// has been written rather than when the batch directory is minted. Eleven
+/// recognised batches are present, and a save whose copy cannot be written must
+/// leave all eleven where they are: rotation must not run for an attempt that
+/// produced no copy.
 ///
 /// The obstruction is a configuration directory named exactly like a batch's own
 /// ownership marker, so the copy's parent cannot be created inside the batch —
 /// which is a failure **after** the batch exists, and the only kind that can tell
 /// the two orderings apart.
 #[test]
-fn a_backup_that_fails_after_its_batch_exists_removes_no_older_batch() {
+fn a_backup_that_fails_after_its_batch_exists_removes_no_existing_batch() {
     let relative = format!("{BATCH_MARKER_NAME}/base.yml");
     let (_directory, root) = config_root_with(&[(relative.as_str(), CLEAN)]);
     let target = root.join(&relative);
@@ -970,7 +977,7 @@ fn a_backup_that_fails_after_its_batch_exists_removes_no_older_batch() {
             &backup_root,
             &format!("2026-07-29T14{minute:02}00Z"),
         ));
-    } // End of the loop that seeds eleven older batches
+    } // End of the loop that seeds eleven existing batches
 
     let session = BackupSession::rooted_at(&root);
     let error = save_with(
@@ -988,9 +995,9 @@ fn a_backup_that_fails_after_its_batch_exists_removes_no_older_batch() {
             "{} was removed for a backup that never happened",
             batch.display()
         );
-    } // End of the loop that checks every older batch survived
+    } // End of the loop that checks every existing batch survived
     assert_eq!(session.captured_count(), 0);
-} // End of function a_backup_that_fails_after_its_batch_exists_removes_no_older_batch()
+} // End of function a_backup_that_fails_after_its_batch_exists_removes_no_existing_batch()
 
 /// **A save whose commit fails does not leave the file recorded as copied.**
 ///

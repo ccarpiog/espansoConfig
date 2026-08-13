@@ -163,7 +163,8 @@ pub enum SaveResult {
         /// asked for no backups, nothing was rewritten, this session had already
         /// copied this file, or the save was refused (in which case there is no
         /// `Saved` at all). A `true` is **not** a promise that the file is
-        /// recoverable — retention is ten sessions — and no string built on this
+        /// recoverable: rotation is best-effort, orders batches by directory
+        /// label and promises no retention duration. No string built on this
         /// field may say otherwise.
         ///
         /// The [`espansoconfig_core::persist::BackupRecord`] itself is

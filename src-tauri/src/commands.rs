@@ -1,12 +1,14 @@
 //! The IPC surface — thin wrappers over [`espansoconfig_core::workspace`].
 //!
 //! Plan section 6.4's **read-only** set — `open_workspace`, `list_documents`,
-//! `get_document`, `get_match`, `document_text` and `reload_document` — and six
+//! `get_document`, `get_match`, `document_text` and `reload_document` — six
 //! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), `create_match` and
 //! `delete_match` (2b-2c-2), `save_raw_document` (2b-2c-3b), and
-//! `duplicate_match` (2c-3c-2). Each is one line over a [`WorkspaceSession`]
-//! method, and each of the six read-only ones is one call into
-//! `crate::workspace`, which Phase 1a built to be wrapped this way.
+//! `duplicate_match` (2c-3c-2) — and Phase 2c-5-2's three further readers:
+//! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Each is
+//! one line over a [`WorkspaceSession`] method; each of the original six readers
+//! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
+//! way, and each of the three backup readers is one call into `crate::backup`.
 //!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
@@ -16,7 +18,7 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Six of the twelve commands write, and they write the same way
+//! # Six of the fifteen commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, and 2c-3c-2
@@ -133,6 +135,9 @@ use espansoconfig_core::reconcile::{
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
 use espansoconfig_core::{ContentRevision, DocumentId, SourceDocument};
 
+use crate::backup::{
+    BackupBatchKey, BackupBatchListing, BackupEntryKey, BackupEntryListing, BackupTextResponse,
+};
 use crate::error::CommandError;
 use crate::save::SaveResult;
 
@@ -677,6 +682,50 @@ impl WorkspaceSession {
         })
     } // End of function duplicate_match()
 
+    /// Lists the recognised backup batches of the open workspace.
+    ///
+    /// **The first of three methods that read the backup tree, and none of them
+    /// writes.** Every one goes through [`crate::backup`], which reaches the
+    /// disk only through [`espansoconfig_core::persist::BackupCatalog`] — the
+    /// read side, which creates nothing, removes nothing and rotates nothing.
+    /// It is deliberately not [`WorkspaceSession::with_open`]'s customer: a
+    /// [`BackupSession`] is the *write* side and this half has no use for one.
+    ///
+    /// A missing backup root is an **outcome** and not a failure: a
+    /// configuration this application has never saved from legitimately has no
+    /// root, and it comes back as
+    /// [`espansoconfig_core::persist::BackupRootState::Missing`] on a successful
+    /// listing.
+    pub fn backup_batches(&self) -> Result<BackupBatchListing, CommandError> {
+        self.with_workspace_read(crate::backup::list_batches)
+    }
+
+    /// Lists the entries one recognised batch offers.
+    ///
+    /// The batch identity is re-resolved against the tree, so a batch removed
+    /// between two calls is a typed stale refusal rather than a batch with no
+    /// entries.
+    pub fn backup_entries(
+        &self,
+        batch: &BackupBatchKey,
+    ) -> Result<BackupEntryListing, CommandError> {
+        self.with_workspace_read(|workspace| crate::backup::list_entries(workspace, batch))
+    }
+
+    /// Reads one backup entry's text, for one document it must map to.
+    ///
+    /// **The document is re-resolved through this session's own
+    /// [`espansoconfig_core::model::DocumentContext`]**, and the entry has to be
+    /// the one that document's path maps to inside that batch, or nothing is
+    /// read. A display path is never the authority for that check.
+    pub fn backup_text(
+        &self,
+        entry: &BackupEntryKey,
+        document: DocumentId,
+    ) -> Result<BackupTextResponse, CommandError> {
+        self.with_workspace_read(|workspace| crate::backup::read_text(workspace, entry, document))
+    }
+
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
     fn with_workspace<T>(
@@ -714,6 +763,27 @@ impl WorkspaceSession {
             Some(Open { workspace, backups }) => action(workspace, backups),
         }
     } // End of function with_open()
+
+    /// Runs `action` against the open workspace **immutably**, or refuses
+    /// because there is none.
+    ///
+    /// [`WorkspaceSession::with_workspace`]'s read-only sibling, and the `&`
+    /// rather than `&mut` is the point rather than an economy: a caller reached
+    /// through this one cannot fill the parse cache, cannot evict it, and cannot
+    /// be handed the [`BackupSession`] that [`WorkspaceSession::with_open`]
+    /// exists to lend. The three backup-catalogue methods above are its only
+    /// customers, and *"nothing on that path can write"* is a property of what
+    /// they are given as much as of what they do.
+    fn with_workspace_read<T>(
+        &self,
+        action: impl FnOnce(&Workspace) -> Result<T, CommandError>,
+    ) -> Result<T, CommandError> {
+        let guard = self.lock();
+        match guard.as_ref() {
+            None => Err(CommandError::NoWorkspaceOpen),
+            Some(open) => action(&open.workspace),
+        }
+    } // End of function with_workspace_read()
 
     /// Locks the session, absorbing poisoning. See the module documentation.
     fn lock(&self) -> MutexGuard<'_, Option<Open>> {
@@ -2005,6 +2075,97 @@ pub fn duplicate_match(
 ) -> Result<SaveResult, CommandError> {
     session.duplicate_match(id, base_revision, &acknowledgement)
 } // End of function duplicate_match()
+
+/// Lists the recognised backup batches of the open workspace (design consult
+/// Q3).
+///
+/// **The thirteenth command, and the first of three that are read-only again.**
+/// Phase 2c-5-2 puts the backup catalogue on the wire so that a later sub-phase
+/// can offer a restore; the restore itself is a **content path on
+/// [`save_raw_document`]**, so this phase adds no seventh writing command.
+///
+/// It takes no argument at all: the backup root is a property of the open
+/// workspace, and a command that accepted a root would accept a directory this
+/// application never resolved.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], and
+/// [`CommandError::BackupReadFailed`] for a backup root that exists and is not
+/// a real private directory. **A missing root is not an error** — see
+/// [`WorkspaceSession::backup_batches`].
+#[tauri::command]
+pub fn list_backup_batches(
+    session: State<'_, WorkspaceSession>,
+) -> Result<BackupBatchListing, CommandError> {
+    session.backup_batches()
+} // End of function list_backup_batches()
+
+/// Lists the entries one recognised backup batch offers (design consult Q3).
+///
+/// # Its argument, and why it is the shape it is
+///
+/// - `batch` — the opaque identity [`list_backup_batches`] produced, as the
+///   object it serialized as. **This identity is not authority**: although its
+///   strings can be composed into a pathname, the command accepts only the
+///   identity and re-resolves it beneath the workspace-owned backup root. A
+///   command that took a path instead would accept a directory this application
+///   never resolved. It arrives as a struct of
+///   strings and is validated here rather than by `serde`, because a
+///   deserializer that refuses answers with Tauri's own English sentence and no
+///   `code` at all — the lesson `set_menu_labels` records.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`];
+/// [`CommandError::UnrecognisedBackupBatch`] for a name the batch grammar does
+/// not admit, raised before any directory is opened; and
+/// [`CommandError::BackupReadFailed`] for the catalogue's own refusals, of
+/// which the one to expect is a batch that no longer resolves.
+#[tauri::command]
+pub fn list_backup_entries(
+    session: State<'_, WorkspaceSession>,
+    batch: BackupBatchKey,
+) -> Result<BackupEntryListing, CommandError> {
+    session.backup_entries(&batch)
+} // End of function list_backup_entries()
+
+/// Reads one backup entry's exact text, for the document it maps to (design
+/// consult Q3).
+///
+/// **The fifteenth command, and it writes nothing.** What it answers is a
+/// candidate a later sub-phase may send back through [`save_raw_document`]; the
+/// revision beside the text is the revision of *those bytes*, and never a base
+/// revision for the live document.
+///
+/// # Its arguments, and why both are required
+///
+/// - `entry` — the opaque identity [`list_backup_entries`] produced.
+/// - `document` — the live file the entry must map to, by its session-local
+///   identity. It is not redundant with `entry`: the batch is asked which entry
+///   *this document's own path* maps to, and the identity sent has to be that
+///   entry. Without it a caller could read one file's copy while believing it
+///   was another's — and a display path could not stand in, because two distinct
+///   filenames can render to one wire string (`crate::wire_contract`).
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`];
+/// [`CommandError::UnrecognisedBackupBatch`] and
+/// [`CommandError::UnaddressableBackupEntry`] before anything is opened;
+/// [`CommandError::UnknownDocument`] for a document this session does not hold;
+/// [`CommandError::BackupEntryIsNotThisDocument`] when the entry is not the one
+/// that document maps to; and [`CommandError::BackupReadFailed`] for the
+/// catalogue's own refusals, including bytes that are not valid UTF-8 — which
+/// have no text at all and are never decoded lossily.
+#[tauri::command]
+pub fn read_backup_text(
+    session: State<'_, WorkspaceSession>,
+    entry: BackupEntryKey,
+    document: DocumentId,
+) -> Result<BackupTextResponse, CommandError> {
+    session.backup_text(&entry, document)
+} // End of function read_backup_text()
 
 #[cfg(test)]
 mod tests {
@@ -5798,10 +5959,11 @@ mod tests {
                 ..
             } => {
                 assert!(committed, "the repair is written");
-                // Not `expect_saved`: this session has already copied this file,
-                // and a second copy is deliberately not taken. The first snapshot
-                // **is** the recoverable pre-commit image, and overwriting it
-                // would be worse than keeping it.
+                // Not `expect_saved`: this session already copied the file before
+                // its first change, so a second copy is deliberately not taken.
+                // That first-session copy is not necessarily the state
+                // immediately preceding this write and is not a recoverability
+                // guarantee.
                 assert!(!backup_taken, "one session copies one file once");
             }
             other => panic!("expected a saved result, got {other:?}"),

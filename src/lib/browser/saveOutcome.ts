@@ -538,8 +538,9 @@ export interface SavedModel {
   /**
    * Whether a pre-save copy was written.
    *
-   * Disclosed and never promised: retention is ten batches and a batch is a
-   * session, so `true` is not a promise that the file can be recovered.
+   * Disclosed and never promised: rotation attempts to retain ten recognised
+   * batch folders by sortable name and a batch is a session, so `true` promises
+   * neither how long the copy remains nor that the file can be recovered.
    */
   readonly backupTaken: boolean;
   /**

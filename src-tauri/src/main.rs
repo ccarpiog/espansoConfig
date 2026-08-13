@@ -29,11 +29,19 @@
 //! `commands` for why there is exactly one entry point. The fifth was the last
 //! of Phase 2b-2c; the sixth is Phase 2c-3c's true duplicate, riding the
 //! `DuplicateItem` primitive 2c-3c-1 built.
+//!
+//! Phase 2c-5-2 adds three more, and **not one of them writes**:
+//! `commands::list_backup_batches`, `commands::list_backup_entries` and
+//! `commands::read_backup_text` put Phase 2c-5-1's read-only backup catalogue on
+//! the wire. Restore is a **content path on the sixth writer** — the confirmed
+//! text goes out through `save_raw_document` — so this phase adds no seventh
+//! writing command and no restore-specific finding. See `crate::backup`.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
 // attribute is set here. Add one before the first Windows build, not before.
 
+mod backup;
 mod commands;
 #[cfg(test)]
 mod dictionary_contract;
@@ -62,24 +70,25 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the six read-only commands, the six that write, the menu command,
-/// and the state they share.
+/// Registers the nine read-only workspace commands, the six commands that write,
+/// the menu command, and the state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
 /// application: a command registered in `main` and absent from the test's
 /// builder would make the test's evidence a statement about a different
 /// program.
 ///
-/// The first six are the read-only workspace surface — read a workspace, list
-/// its files, project one, project one match, read one's bytes, re-read one —
-/// and nothing in that half can write to the disk. `move_match`, `save_match`,
-/// `create_match`, `delete_match`, `save_raw_document` and `duplicate_match`
-/// can, and every one of them does it through
+/// The original six workspace readers — read a workspace, list its files,
+/// project one, project one match, read one's bytes, re-read one — and the three
+/// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
+/// `read_backup_text` are read-only. The six save commands `move_match`,
+/// `save_match`, `create_match`, `delete_match`, `save_raw_document` and
+/// `duplicate_match` write, and every one of them does it through
 /// `espansoconfig_core::persist::save_document` and through nothing else. The
-/// thirteenth, `set_menu_labels`, writes nothing either: it hands the macOS
-/// menu the strings the frontend translated, because Tauri builds that menu in
-/// Rust and hardcoding either language here is what plan section 9 forbids. See
-/// `crate::menu`.
+/// menu command, `set_menu_labels`, does not write a user file either: it hands
+/// the macOS menu the strings the frontend translated, because Tauri builds that
+/// menu in Rust and hardcoding either language here is what plan section 9
+/// forbids. See `crate::menu`.
 ///
 /// `capabilities/default.json` stays at `"permissions": []`, **including for
 /// the menu**. A capability grants access to **plugin** commands — everything
@@ -88,7 +97,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the thirteen is a plugin command. `core:menu`'s permissions exist for a
+/// none of the sixteen commands is a plugin command. `core:menu`'s permissions exist for a
 /// frontend that builds menus through `@tauri-apps/api/menu`; this one does
 /// not, and asks Rust for a rebuild instead, so the empty permission list that
 /// Phase 1b-1's review narrowed to stays exactly as narrow and `core:default`
@@ -111,6 +120,9 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::delete_match,
             commands::save_raw_document,
             commands::duplicate_match,
+            commands::list_backup_batches,
+            commands::list_backup_entries,
+            commands::read_backup_text,
             menu::set_menu_labels,
         ])
 } // End of function register()
