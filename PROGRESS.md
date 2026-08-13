@@ -96,7 +96,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **Phase 2c-4c** | **Recovery fallback** — save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone | ✅ **complete.** Six steps: the Rust contract (1), recovery as values (2), the UI in two halves (3a, 3b), the instrument in two halves (4a, 4b), the reading with its three-part fix round (5, 5b-1, 5b-2, 5b-3), and the removal (6). **The phase's one defect that reached a screen was M2** — `min-height: 0` on `.recovery` collapsing the section to zero height so the host outcome panel overlapped the recovery form's content — found at 5b-1 by a `document.elementFromPoint` hit test, fixed at 5b-2 by deleting one declaration, and **passed over by 27 earlier launches** because the driver presses with `HTMLElement.click()`, which bypasses hit testing. **No other finding in any round of this phase changed a byte written to a user's file** |
 | 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | ✅ **complete — all six steps**, 3 and 4 in both their halves, 5 closed by its three-part fix round **5b** (5b-1 the instrument extension and the measurement, 5b-2 the one-property fix and its re-measurement, 5b-3 the record's rewrite plus Codex rounds 2 and 3), and 6 the removal with the gate figures re-derived on a harness-free tree |
 | **2c-5 design consult** | **Phase 2c-5 put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-5-design.md` (125 lines). Like every consult since 2c-4a it **changed the phase rather than confirming it**, and it ruled against the handoff brief in three places. It rules restore a **content path on the sixth writer** — the frontend reads the backup's text and sends it through `save_raw_document`, so there is **no seventh writing command** and the new commands are all read-only; it rules **no restore-specific acknowledgeable finding** (a finding belongs to the candidate gate, and *"the person chose Restore"* is UI authorization, not a property validation can infer from identical text — adding route provenance to `SaveContent` to manufacture one would give two identical candidates different verdicts and turn the sixth writer into a hidden seventh protocol); and on Q8 it **disagrees with this project's own history**, ruling the sharpest failure **behavioural rather than prose**. Seven steps |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken; step 1 is next |
+| **2c-5-1** | **The core backup catalogue, with no caller**: `BackupCatalog` beside the stateful `BackupSession` — opaque `BackupBatchId`/`BackupEntryId` revalidated at every use, the scans carrying eligible values **plus** per-skip codes so a caller need not read an incomplete scan as "no backups", `BackupBytes`/`BackupText` with `NotUtf8 { entry, offset }`, and `compare_batches_newest_first` as the **one** place the `(stamp, counter)` tuple becomes an order — with `rotate` now reversing that comparison instead of spelling the tuple a second time | ✅ complete — after a review round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium, a High in prose, three Mediums and a Low; **the behavioural High was a real, reachable TOCTOU** — every path check was `symlink_metadata` on a pathname and every *use* was a second pathname operation, so a writer inside the backup root could swap a component between check and open and have bytes from outside the batch returned as `BackupBytes`. Round 2 confirmed **six of seven closed and no new behavioural defect**, and returned NOT READY on prose alone |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **step 1 is complete**; step 2 (the read-only Tauri wire) is next |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -7617,6 +7618,149 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-1 is COMPLETE. The next thing to do is step 2c-5-2 — the read-only Tauri wire.**
+
+The consult is `docs/reviews/phase-2c-5-design.md`; its **Q3** is step 2's specification and its **Q7 item 2**
+is the evidence step 2 owes. Step 1's two review rounds are `docs/reviews/phase-2c-5-1-code.md`
+and `docs/reviews/phase-2c-5-1-confirmation.md`.
+
+#### What step 2 must build (consult Q3)
+
+Three commands, **all read-only**: `list_backup_batches`, `list_backup_entries`, `read_backup_text`.
+The first two return step 1's scan summaries. The third takes an opaque `BackupEntryId` **plus the
+selected `DocumentId`**, re-resolves the latter through the workspace's authoritative
+`DocumentContext`, **verifies the entry maps to that target**, and returns
+`{ entry, document, text, revision }`.
+
+- **A display path is never authority.** `DocumentSummary.relative_path` is display data; the
+  session-local id is what callers hand back.
+- **No new writer, and no restore-specific finding** — Q1 and Q3 both. Restore is a content path on
+  `save_raw_document`, and *"the person chose Restore"* is UI authorization, not something validation
+  can infer from identical text.
+- Every new error is a **code plus structured operands** — missing root, refused root,
+  unrecognised/stale batch, stale entry, path/type refusal, I/O, `NotUtf8 { offset }` — and each
+  crosses **both** dictionaries through typed accessors. Components may not construct keys.
+- **Step 1 deliberately derived `Serialize` on nothing.** `src-tauri/src/dictionary_contract.rs`
+  requires every serializable enum in the scanned trees to be a registered namespace, so the wire
+  types and their dictionary entries arrive together in step 2 or the contract test fails. The
+  `code()` accessors are already in place, following the existing `BackupError`/`BackupStep`
+  precedent.
+- Prove a forged id, a forged path, a wrong target, a stale batch, an unreadable entry and invalid
+  UTF-8 are **typed refusals**, and prove **no command calls a writer**.
+- Step 2 owes Rust/IPC and TypeScript **model tests only** — no mounted test, no window reading.
+
+#### Three things step 1 leaves for step 2, from the implementer's own notes
+
+1. **A batch entry whose name is not valid UTF-8 is admitted** — the id holds a real `PathBuf` and
+   display is lossy through `WirePath`. **Step 2 must decide the wire round-trip.** A lossy id simply
+   fails revalidation as `StaleEntry`, which is safe but is not the same as being representable.
+2. **A disambiguated copy (`base.yml-1`, minted by `publish_backup`) is not `entry_for_target`'s
+   answer** — it is not the name the mapping produces. It is still **listed** by `scan_entries`,
+   where `BackupTarget::InConfigRoot` reverse-maps its own literal path. The variant is documented as
+   a statement about the **path**, never that a file exists there or that this copy came from it.
+3. **`entry_for_target` answers `None` for a target equal to the configuration root.** Step 1's fix
+   round made that a behavioural refusal rather than only a documented sentinel, because it was
+   otherwise returning the entry for an in-root file literally named `_outside`.
+
+#### The one decision an owner took during step 1, and it binds step 2 and beyond
+
+**The symlink TOCTOU is closed by descriptor-relative traversal via `openat`/`O_NOFOLLOW`, using the
+`libc` already declared under `[target.'cfg(target_os = "macos")'.dependencies]`.** No new dependency
+was added, and the alternatives — adding `rustix`/`cap-std` as the crate's first *unconditional*
+platform dependency, or narrowing the guarantee instead of closing the race — were both put to the
+owner and declined.
+
+The consequence every later step inherits: **the guarantee is per-target and must always be stated
+that way.**
+
+- **On macOS** the root is opened `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`, children via
+  `openat(…, O_NOFOLLOW)`, classification by `fstatat(AT_SYMLINK_NOFOLLOW)`, confirmation by `fstat`
+  on the descriptor, and listings by `dup`+`fdopendir`+`rewinddir`+`readdir`. `read_entry` reads
+  **the same leaf descriptor** `open_entry` opened — there is no second open by name.
+- **Off macOS** the pathname implementation stays and **a raced substitution can be followed**. This
+  is deliberate and documented, not an oversight.
+- **One macOS residue is real and named**: the backup root's own path is resolved once, with
+  `O_NOFOLLOW` covering only its final component.
+- **`espansoconfig-core` must never depend on `tauri`** — the read side adds no Tauri use, and
+  `cargo tree -p espansoconfig-core | rg tauri` must keep finding nothing.
+
+**A sentence true on macOS and false elsewhere, stated unconditionally, is what round 2 was still
+finding after round 1's fix**, and it is this project's worst defect class. The whole of round 2's
+NOT READY verdict was that one defect at four sites.
+
+#### Two latent bugs step 1's own sweep found, neither named by any review
+
+- **`escape_in_root_path` emitted `_outside_/` for a one-component path**, because `PathBuf::push("")`
+  appends a separator. Normalisation had hidden it; the strict validator exposed it by rejecting a
+  legitimate entry. Its test asserts **`OsStr` spellings byte-for-byte**, because `Path` equality is
+  component-wise and **would not have caught it**.
+- **`fdopendir` on a duplicated descriptor shares the file offset**, so a second listing of one
+  directory returned empty until `rewinddir` was added. Its test lists twice and was verified to fail
+  without the fix.
+
+#### One thing NOT done, deliberately, and it is the cheapest thing a fresh session could do first
+
+**No third review round was commissioned.** Round 2's entire verdict was prose at four named sites,
+the reviewer **dictated the replacement sentence**, and the fix changed **no executable line** — all
+six edits were inside `///` comments, with the test count unchanged at 1131 either side. The
+orchestrator's own sweep then found and fixed a **seventh** site the review had not named: the module
+header's line 76 justified putting the same-user attacker out of scope on the grounds that *"every
+path this module touches is resolved by pathname"*, which the macOS read walk had just made false —
+an **under**-claim, and the mirror image of the defect round 2 closed.
+
+This project's history is that each round finds a narrower instance of the last, and **the seventh
+site is exactly that pattern continuing**. A fresh session with a full budget may reasonably take one
+short round over the doc comments in `crates/espansoconfig-core/src/persist/backup.rs` before
+starting step 2. It is **not** a blocker: no behavioural defect is outstanding, round 2 found none
+new, and it explicitly reported *"no unnamed residual macOS race below the opened backup root"*.
+
+#### What was NOT proved about the non-macOS body, stated as a limitation rather than a result
+
+`x86_64-unknown-linux-gnu` is **not installed** and was deliberately not installed. The `#[cfg]` split
+was instead proved by **compiling it**: every `#[cfg(target_os = "macos")]` in `backup.rs` was
+temporarily flipped to `cfg(any())` and the `not(...)` one to `cfg(all())`, then build, the backup
+tests (45/45, the macOS-only race test correctly excluded) and clippy were run; the tree was restored
+and re-verified, and **no `cfg(any())`/`cfg(all())` artifact survives** — checked independently by the
+orchestrator.
+
+Round 2 ruled that adequate for syntax and type-correctness against the host's standard library, and
+named what it does **not** prove: **Linux target dependency/cfg resolution, linker/ABI compatibility,
+target-specific standard-library differences, and behaviour on a Linux filesystem or kernel.** A true
+target build remains the stronger confirmation and has never been run.
+
+#### The production gate baseline
+
+**`1131 / 423 / 1767 / 180`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. **The first figure moved from 1112 to 1131 in step 1** (+15 in the
+implementation, +4 in the fix round: the raced-swap test, the listing-idempotence test, the
+config-root sentinel test and the disambiguated-sibling test; none removed). It was re-derived by the
+orchestrator by **summing the per-suite totals**, not by trusting a worker's figure. The three
+frontend figures are untouched, because step 1 changed no frontend file — step 2 is the first that
+will.
+
+**The module count's shorthand is spent**: 180 is now within one of the number that used to mean *the
+Svelte server build leaked in*, so check **both halves** — the arithmetic (a new `.ts` module costs
+one, a new **styled** component costs two) and the bundle search for `svelte/internal/server`,
+verifying the search can match before trusting its negative.
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty
+sed -n '/^## Q3/,/^## Q4/p' docs/reviews/phase-2c-5-design.md   # step 2's specification
+rg -n "pub struct BackupCatalog|pub fn scan_batches|pub fn scan_entries|pub fn read_entry|pub fn entry_for_target" \
+   crates/espansoconfig-core/src/persist/backup.rs
+rg -n "BackupError|BackupStep" src-tauri/src/dictionary_contract.rs   # the precedent step 2 follows
+```
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-1 handoff, discharged. Kept because its rules are what step 1 was built and reviewed against.
+
+**Step 2c-5-1 is complete.** The verdict is the 2c-5-1 row in the Status table above; the rules below
+are what it was built to, and Q2 of the consult remains their source.
 
 ### **The 2c-5 design consult is TAKEN. The next thing to do is step 2c-5-1 — the core backup catalogue, in Rust, with no caller.**
 

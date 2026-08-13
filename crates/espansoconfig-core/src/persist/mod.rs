@@ -50,6 +50,31 @@
 //! [`WriteError::may_have_written`] is a statement about the target for exactly
 //! that reason.
 //!
+//! **Phase 2c-5-1 scope:** the **read** side of the backup tree.
+//! [`backup::BackupCatalog`] is the entry point — a stateless, non-mutating view
+//! that lists recognised batches, walks one batch's entries, maps a live target
+//! to the entry its copy would be at, and reads one entry's exact bytes. It
+//! **creates nothing, removes nothing and rotates nothing**: rotation is
+//! deliberately coupled to a successfully written capture, and nothing on the
+//! read side calls it. Every identity it hands out is opaque and is re-resolved
+//! against the tree on every use, and everything it answers is **untrusted
+//! input** — the ownership marker is a claim of recognition, never of
+//! authenticity. It has **no caller** in this step; the commands that reach it
+//! are Phase 2c-5-2's.
+//!
+//! **Its traversal is anchored in descriptors on macOS and in pathnames
+//! elsewhere, and the guarantee is stated per target rather than averaged.** On
+//! macOS the backup root is opened `O_DIRECTORY | O_NOFOLLOW`, every child is
+//! opened relative to its already-open parent with `openat(…, O_NOFOLLOW)`,
+//! `fstat` on the descriptor confirms what was opened, and a read uses that same
+//! leaf descriptor — so a component swapped for a symlink after it was checked
+//! cannot be followed. Off macOS `libc` is not a dependency of this crate
+//! (`Cargo.toml` declares it under `cfg(target_os = "macos")` alone), the same
+//! components are checked with `symlink_metadata`, and the listing or open that
+//! follows is a pathname operation: a link **already present** is refused, and
+//! that swap **can** still be followed. [`backup`]'s own header argues the
+//! split; the application ships on macOS alone.
+//!
 //! **Still to come:** nothing of plan section 6.6. What remains for Phase 2 is
 //! the IPC surface (2b) and the user interface (2c) — including *Reveal backups
 //! in Finder*, whose only obligation on this module was a path, and that is
@@ -123,9 +148,11 @@ pub mod save;
 pub mod write;
 
 pub use backup::{
-    BackupError, BackupRecord, BackupSession, BackupStep, Rotation, RotationOutcome,
-    BACKUP_DIRECTORY_NAME, BATCHES_RETAINED, BATCH_MARKER_FORMAT, BATCH_MARKER_NAME,
-    OUTSIDE_CONFIG_ROOT,
+    BackupBatch, BackupBatchId, BackupBatchScan, BackupBytes, BackupCatalog, BackupEntry,
+    BackupEntryId, BackupEntryScan, BackupError, BackupReadError, BackupReadStep, BackupRecord,
+    BackupRootState, BackupSession, BackupStep, BackupTarget, BackupText, BatchSkipped,
+    EntrySkipped, Rotation, RotationOutcome, BACKUP_DIRECTORY_NAME, BATCHES_RETAINED,
+    BATCH_MARKER_FORMAT, BATCH_MARKER_NAME, OUTSIDE_CONFIG_ROOT,
 };
 pub use save::{
     save_document, verdict, Acknowledgement, SaveContent, SaveError, SaveRefusal, SaveRequest,
