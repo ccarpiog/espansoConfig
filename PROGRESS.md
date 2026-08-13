@@ -88,7 +88,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-3b** | **The four surfaces that recover without creating**: `MatchDeleter.svelte`, `MatchMover.svelte`, `MatchDuplicator.svelte` and `RawEditor.svelte` draw a **reason and not a form**, through one new shared `src/lib/components/RecoveryWithoutCreation.svelte` mounted unconditionally by all four. `recoveryWithoutCreation()` and one **ordering change** in `recoveryAvailability` — the conflict is asked about first — and no new string, no dictionary key, no transition, no Rust. **With 3b the consult's step-3 matrix is complete on all six surfaces** | ✅ complete — after a review fix round and the round that reviewed it. Round 1 returned **NOT READY** on one High: the four hosts each carried their own `{#if}` and accessor call, so `recoveryWithoutCreation` centralized *which* reason but not *whether it is drawn*, and **one host could omit the sentence while consuming the model faithfully** — the 2c-3c-3 failure mode exactly. The fix built the shared renderer. Round 2 found **no High**, and its one Medium was an over-claim **the fix round's own record introduced** while fixing an over-claim |
 | **2c-4c-4a** | **The instrument, rebuilt from prose — both halves this time.** 2c-4b-3d-3 deleted `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the whole scratch tree, so unlike 3d-2a (which still had both probe sources) this step had **nothing** to start from. `src-tauri/src/probe.rs` is **authored from the code** for the first time in this project's history: no record carries its source. `launch.sh`, 21 fixtures and a 23-row case table re-authored from four construction records. **Step 4 was split by the orchestrator**; the recovery cases are 4b | ✅ complete — after a review fix round. **Twelve launches (P01–P12), all twelve with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all twelve**; P07–P12 are the proof set, one per write surface. Codex returned **NOT READY** on a High, two Mediums, a Low and an Observation — **the instrument itself was not faulted**: the audit found the six plans credible, the hooks inert without `ECFG_PROBE_PLAN`, and the conflicts genuine. **No executable line changed in the fix round**; all five findings were prose in the record |
 | **2c-4c-4b** | **The recovery cases**: the three scope items the 4a review sharpened — targeted reporting of `[data-recovery-without-creation]` on the four non-creating surfaces, **assertion and activation** of the editor's and creator's recovery offer, and a `section.recovery`-**scoped** driver through the opened form's create / refusal / conflict endings — plus three expected-byte fixtures and four of the five holes 2c-4b left | ✅ complete — after a review fix round. **Fourteen launches (P13–P26), all fourteen with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all fourteen**; one binary digest ran all fourteen, 7 English / 7 Spanish. It needed a **fourth probe command**, `probe_third_writer` over `ECFG_PROBE_R2`, because a recovery form drafts against the disk revision R1 already produced, so re-running the second writer cannot conflict it. Codex returned **NOT READY** on a High and a Low, **both prose and neither a defect in the instrument or the application** — the record upgraded post-image evidence into first-attempt and chronology guarantees. **No executable line changed in the fix round** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3 and 4 are complete, 3 and 4 in both their halves. Step 5 — the reading — is next, and it owes both languages on all six surfaces** |
+| **2c-4c-5** | **The reading**: 27 launches (P27–P53), all six write surfaces in **both** languages, the recovery form driven to its create / refusal / conflict endings, and the two rectangles 4b measured and refused to judge | 🚧 **taken, and NOT closed.** All 27 reached `--- end` with a zero-byte `probe.err`, none printed `--- failed`, and **all 27 report `bytes=MATCH`** — 13 against authored expected-bytes documents and 14 against fixtures that must be unchanged; the fifth prediction fixture matched on its first launch in both languages. 4b's aggregate language hole is closed. **Codex round 1 returned NOT READY on three Highs, a Medium and a Low**, and the **first High is a defect in the record that the orchestrator verified independently in the code**: `docs/decisions/2c-4c-5-window-reading.md` §3.2 rests M2's *latent, never constructed* classification on `view.outcome === null`, and a conflict **is** an outcome — `conflictOf()` reads it out of `session.outcome` (`src/lib/browser/matchEditor.ts:1078`, `conflictArm(session.outcome)`), which `describeEditSave` sets for every non-saved result (`:1522`, `:1525–1530`). So in P27–P34 the host's outcome panel **was** the rendered sibling immediately after `<RecoveryPanel>` (`MatchEditor.svelte:895–912`, `MatchCreator.svelte:779–795`) and **the overlap state was constructed in eight launches and never measured** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3 and 4 are complete, 3 and 4 in both their halves. Step 5 is taken but NOT closed**: its review returned NOT READY, and closing it needs an **instrument extension** — the sibling rectangle no launch has ever measured — before the geometry judgement can stand. Step 6 (the removal) must not run until then |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3522,6 +3523,59 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-4c step 5 (**taken, NOT closed**)
+
+**Record:** `docs/decisions/2c-4c-5-window-reading.md`. **Review:** `docs/reviews/phase-2c-4c-5-reading.md`
+— **round 1 only, verdict NOT READY**, recovered verbatim from the Codex rollout because the job ran
+read-only and its `apply_patch` was rejected (provenance in the file's header).
+
+**The launch evidence, re-derived by the orchestrator from the artifacts rather than accepted from the
+worker's report:**
+
+```sh
+# 27 step-5 launches, P27–P53, in /private/tmp/espansoconfig-harness-2c-4c/launches/
+grep -h "reached-end" P27…P53/bytes.txt   # 27 × reached-end=yes  (waited 3–5s)
+grep -l -- "--- failed" P27…P53/probe.log # 0 launches
+grep -h "probe.err=" P27…P53/bytes.txt    # 27 × probe.err=0 bytes
+grep -c "bytes=MATCH" P01…P53/bytes.txt   # 53 of 53
+grep -h "^plan=" P27…P53/bytes.txt        # 13 cases × en/es, plus P53 (duplicator-exact:en)
+```
+
+All six write surfaces — editor, creator, deleter, mover, duplicator, raw — have at least one English
+and one Spanish launch, so **4b's aggregate language hole is closed**. Codex verified the same
+partition independently from the raw artifacts and agrees.
+
+**The gates, run by the orchestrator with the harness in the tree, all exit 0:**
+
+```sh
+cargo test --workspace   # 1112 passed, 0 failed
+npm test                 # 1768 passed, 51 files
+npm run check            # 424 files, 0 errors, 0 warnings
+npm run build            # 181 modules
+rg -c "svelte/internal/server|svelte/server|async_hooks" dist/assets/*.js   # no match
+```
+
+Both halves of the module-count check were done — the arithmetic **and** the bundle search — because
+180 is now within one of a legitimate count and the number alone decides nothing. Production remains
+`1767 / 423 / 180 / 1112`; step 6 re-derives it on a harness-free tree.
+
+**Why the step is not closed.** The review returned **NOT READY on three Highs, a Medium and a Low**.
+The orchestrator verified the first High in the code rather than accepting or dismissing it: the
+record's §3.2 rests M2's *latent, never constructed* classification on `view.outcome === null` after a
+reapply, and **a conflict is an outcome** — `conflictOf()` is `conflictArm(session.outcome)`
+(`src/lib/browser/matchEditor.ts:1078`), set by `describeEditSave` for every non-saved result
+(`:1522`, `:1525–1530`), and both creating hosts gate the host outcome panel on exactly that value
+immediately after `<RecoveryPanel>` (`MatchEditor.svelte:910`). `attemptOfReapply` returns the held
+session unchanged for `manualResolution` (`reapply.ts:540–547`), the arm P27–P34 all printed. **The
+overlap state was therefore constructed in eight launches and never measured.** Closing the geometry
+judgement needs an instrument extension and a re-take from P54; the other two Highs, the Medium and
+the Low are prose. The full disposition is in "Next action".
+
+**No finding of the reading or of its review changes a byte written to a user's file**, and all 53
+retained launches report `bytes=MATCH`.
 
 ---
 
@@ -7286,7 +7340,104 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### Steps 2c-4c-1, 2c-4c-2, **2c-4c-3 and 2c-4c-4 in both their halves** are complete. **Step 2c-4c-5 — the reading — is next.**
+### **Step 2c-4c-5 is TAKEN but NOT CLOSED. The next action is its fix round, `2c-4c-5b`, and it needs an instrument extension.**
+
+The reading is `docs/decisions/2c-4c-5-window-reading.md` (799 lines). Its Codex round 1 is
+`docs/reviews/phase-2c-4c-5-reading.md` — **NOT READY, three Highs, one Medium, one Low**. That file
+was recovered verbatim from the job's rollout payload because the job ran read-only and its
+`apply_patch` was rejected; the provenance is stated in its header. **Read the review before the
+record.**
+
+#### The launches happened and their evidence stands
+
+**27 launches, P27–P53**, in `/private/tmp/espansoconfig-harness-2c-4c/launches/`. Every one reached
+`--- end` with a zero-byte `probe.err`, none printed `--- failed`, and **all 27 report
+`bytes=MATCH`** — re-derived by the orchestrator from the artifacts, not taken from the worker's
+report. Thirteen compared against an authored expected-bytes document and fourteen against a fixture
+the case must leave unchanged. `editor-recovery-create-expected.yml`, the fifth prediction fixture,
+matched on its first launch **in both languages**. Codex verified the conjunctions independently and
+confirms **4b's aggregate language hole is closed**: all six surfaces have at least one English and
+one Spanish launch. **None of that is in dispute, and a fix round must not re-run it.**
+
+#### ⚠️ High 1 is a defect in the record, and the orchestrator verified it in the code
+
+The record's §3.2 classifies **M2** — `section.recovery`'s `491x0` border box — as *latent, inferred,
+never constructed*, on this premise: *"In every state this reading reached that value is `null` — the
+reapply that opens recovery is what cleared it."*
+
+**That premise is false, and the check is three lines of source:**
+
+- `conflictOf()` in `src/lib/browser/matchEditor.ts:1078` is `return conflictArm(session.outcome)` —
+  a conflict is **read out of** the outcome, so a session showing one has `outcome !== null`.
+- `describeEditSave` sets that outcome for **every** non-saved result, conflicts included
+  (`matchEditor.ts:1522`, and the `result.outcome !== 'saved'` arm at `:1525–1530`).
+- Both creating hosts draw the host outcome panel as the sibling **immediately after**
+  `<RecoveryPanel>`, gated on exactly that value: `{#if view.outcome !== null}` at
+  `src/lib/components/MatchEditor.svelte:910`, and `MatchCreator.svelte:779–795`.
+- `attemptOfReapply` (`src/lib/browser/reapply.ts:540–547`) returns the **held** session unchanged for
+  `manualResolution`, which is the arm P27–P34 all printed. It clears nothing.
+
+**So the sibling-overlap state was constructed in eight launches — P27 through P34 — and the
+instrument did not measure it.** M2 is not latent. What is unknown is whether the overlap is
+*visible*, and no retained artifact answers that: no launch measured the host outcome panel's
+rectangle while the recovery form was open, and `HTMLElement.click()` bypasses hit testing, so every
+programmatic press succeeding is **not** evidence a person could reach those controls.
+
+#### What the fix round owes
+
+1. **The instrument extension, and it is a deliberate exception to "step 5 is a reading, not
+   construction."** The geometry judgement is step 5's whole deliverable and it cannot be made from
+   the retained artifacts. Extend `src/probe.ts` to report, while the recovery form is open: the host
+   outcome panel's rectangle, the recovery form's own content rectangles, and the scroller's
+   `scrollHeight`/`scrollTop`. **Rebuild in 4a §3's order — `npm run build`, `touch
+   src-tauri/build.rs`, `cargo build -p espansoconfig --features custom-protocol`** — `npm run build`
+   alone changes nothing. Then re-launch the eight editor/creator recovery cases in **both**
+   languages, continuing the ledger at **P54**.
+2. **Judge the overlap on that evidence** and reclassify M2 — it may be a genuine High that reaches a
+   screen, the first in this phase, or it may be harmless once measured. Do not pre-decide it.
+3. **The other two Highs and the Medium are prose**, and each is this project's named worst defect
+   class: post-images upgraded into construction chronology (*"first launch"*, *"no probe source was
+   edited"*, *"no rebuild"*, *"the gates were re-run"* — none retained in any artifact); final bytes
+   and backups upgraded into intermediate write history, which **contradicts the record's own §8.3**;
+   and `revealOutcome` credited with moving the pane when `reveal.ts:57–82` defines `scrollIntoView`
+   as a silent request whose honouring a caller cannot observe. Narrow each to what is retained.
+4. **The Low**: Codex argues L3 is at most an Observation — the unavailable sentences give advice and
+   never promise a verbatim control label. Judge it; do not simply accept it.
+5. **§8 is incomplete** and must gain the three bounds the review names.
+6. **A second Codex round is not optional** — a fix is a change, and **nine consecutive rounds in this
+   phase have found a narrower instance of what the round before them closed.** Sweep for what the
+   record now says, not for the words the old finding used.
+
+#### What must NOT happen
+
+- **Step 6 — the harness removal — must not run until step 5 closes.** The fix round needs the tree,
+  and the extension needs the probe sources.
+- **Never `git commit -a` or `git commit -am`.** Four harness paths are in the working tree; stage by
+  path. `src-tauri/src/probe.rs` and `src/probe.ts` are untracked and must stay that way.
+- **Do not record hole 1 as measured.** `browser.notice.gone`'s second producer
+  (`repairSelection`'s `clearSelection` arm, `src/lib/browser/selection.ts:292`) is untouched, and
+  the review confirms §8.1 bounds it honestly today. Keep that wording.
+- **Do not regenerate `manifest-2c-4c-4a-post.sha256`** (a partial-verify artifact by design).
+
+#### The gates, re-derived by the orchestrator **with the harness in the tree**
+
+```sh
+cargo test --workspace   # 1112 passed, 0 failed
+npm test                 # 1768 passed, 51 files
+npm run check            # 424 files, 0 errors, 0 warnings
+npm run build            # 181 modules
+```
+
+All four were run by the orchestrator after the reading, not copied from the worker, and the built
+bundle was searched for `svelte/internal/server`, `svelte/server` and `async_hooks` — **none
+present**. **These are with-harness figures and must never be carried forward as production
+numbers**; production is `1767 / 423 / 180 / 1112`, and step 6 re-derives them on a harness-free
+tree. Note the review's third High applies here too: no gate transcript is retained, so the record
+may claim these figures **were produced**, not that they were produced after the last edit.
+
+---
+
+### ⚠️ HISTORICAL — the step-4b handoff, kept because its provenance limits still bind
 
 **Step 4 was split in two by the orchestrator**, the way step 3 was, and for the same reason: 4a had
 to rebuild **both** halves of the harness from prose, which 3d-2a never had to do. The consult's
@@ -12612,6 +12763,17 @@ _Updated at each phase boundary._
 | **2c-4c step 3b (closes 2c-4c-3)** | **`c0f2e2f`** | ✅ pushed to `origin/main` (`a93323e..c0f2e2f`) | **clean** — fifteen files staged **by path**, no harness in the tree: eleven frontend sources and tests (one of them new), the step's record, its two-round review, `CLAUDE.md` (the module ladder, its spent shorthand, and the deciding-is-not-drawing rule) and this checkpoint. **It holds both review rounds' fixes**, as every phase since `8989c16` does, so no commit carries a demonstrated defect. **The next path that must never be swept in by `-a` appears at 2c-4c-4**, which rebuilds the window instrument |
 | 2c-4c step 2 | `4e29589` | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path**: the commit holds **six files** — `src/lib/browser/recovery.ts`, `src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts`, `docs/decisions/2c-4c-2-notes.md`, `docs/reviews/phase-2c-4c-2-code.md` and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
+The **2c-4c-5** commit is the reading **as taken and reviewed, not as closed** — the first checkpoint
+in this phase to hold a step whose Codex round returned NOT READY **without** its fix round, because
+the fix needs an instrument extension and a re-take that a fresh session must own. It contains
+**three documents**: `docs/decisions/2c-4c-5-window-reading.md`, the round-1 review
+`docs/reviews/phase-2c-4c-5-reading.md` (recovered verbatim from the Codex rollout — the job ran
+read-only and its `apply_patch` was rejected; the provenance is in the file's header) and this
+checkpoint. **The tree is deliberately not clean**: the four harness paths remain, exactly as at 4a
+and 4b, and everything was staged **by path**. `git status --short --untracked-files=all` after the
+commit lists `src-tauri/src/main.rs`, `src/main.ts`, `src-tauri/src/probe.rs` and `src/probe.ts` and
+**nothing else** — no real-config path, and no launch artifact.
+
 `d464a42` is Phase 2c-4c **step 4b**, the recovery cases, committed **including its review fix round**
 as every phase since `8989c16` is — so no commit holds a demonstrated defect. Like 4a it contains only
 three documents, because **the artifact this step produced must not be committed**: the record, the
@@ -12621,8 +12783,9 @@ one-round review with its orchestrator disposition, and this checkpoint.
 instrument itself — `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the scratch tree
 at `/private/tmp/espansoconfig-harness-2c-4c/` — stays out of git by design, across both steps.
 
-**A fresh session starting 2c-4c-5 resumes at `d464a42` or later, and must rebuild the harness first
-if the working tree no longer holds it.** The four paths are not recoverable from git. §2 of
+**A fresh session starting the 2c-4c-5 fix round resumes at the 2c-4c-5 commit or later, and must
+rebuild the harness first if the working tree no longer holds it.** The four paths are not
+recoverable from git. §2 of
 `2c-4c-4a-instrument-rebuild.md` says which can be re-authored from which record and which must be
 authored from the code, and **§3 of `2c-4c-4b-instrument.md` is what 4b added on top** — the fourth
 probe command, the four reporters, the six plans, the `R2` column and the three fixtures. **§11 of
