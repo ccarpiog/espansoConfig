@@ -92,7 +92,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-5b-1** | **The instrument extension the fix round needed, and the measurement that settled M2**: `reportRecoveryGeometry()` in `src/probe.ts` — `section.recovery`'s next element sibling found **structurally**, the section's children and their combined extent, the scroller's scroll figures under `reportReach`'s restore discipline, the computed flex/min-height diagnosis, and a `document.elementFromPoint` **hit test**, which is the measurement 27 earlier launches could not make because the driver presses with `HTMLElement.click()` and that bypasses hit testing | ✅ complete — `docs/decisions/2c-4c-5b-1-instrument.md`. **Eight launches, P54–P61**, the four editor/creator recovery cases in both languages; the orchestrator re-derived the conjunction from the artifacts — one `--- end`, no `--- failed`, zero-byte `probe.err`, `bytes=MATCH` on all eight. **M2 is not latent and not harmless: it is a real defect that reaches a screen.** `section.recovery` computes `height=0px` while its children extend 1001–1035 px, so the host outcome panel holding the live conflict is placed **7 px below the section's top** instead of below its content, and `elementFromPoint` at the one in-viewport recovery control returned `div.panel[role="status"]` — **not the button** — in all eight |
 | **2c-4c-5b-2** | **The fix, and the first defect in this phase to change a tracked source file**: `min-height: 0` deleted from `.recovery` in `src/lib/components/RecoveryPanel.svelte`, restoring `min-height: auto` so the section is floored at its min-content height like every other item of the host's column. `flex-shrink: 0` was **rejected** — it forbids a legitimate shrink and leaves the misleading declaration standing — and the comment that replaces the property records why its **absence** is load-bearing | ✅ complete — `docs/decisions/2c-4c-5b-2-notes.md`. **Twelve launches, P62–P73**, the conjunction re-derived by the orchestrator on all twelve. The overlap is closed and the arithmetic is exact: the sibling now begins at **children-bottom + 7 px** (the column's own gap) on every surface and language — `1159→1166`, `1210→1217`, `1176→1183`, `1227→1234` — where before it began at section-top + 7. `elementFromPoint` returns **`isTheControl`** in all eight recovery launches, with no `somethingElse` anywhere. P70–P73 prove the ordinary path unshifted: `P70`/`P73` diff against `P25`/`P26` to **the launch directory name alone** |
 | **2c-4c-5b-3** | **The reading record's rewrite, and the rounds that judged the rewrite.** **No executable source file changed** — the only application-source change in the whole of 5b was 5b-2's deleted CSS declaration, already committed at `c23b39e`. `docs/decisions/2c-4c-5-window-reading.md` went from 799 lines to **1296**: M2 reclassified with **all three of its arguments recorded in sequence** (the false latent premise; the withdrawn *"stayed operable through every path this harness drives"* ground, unsound because the driver presses with `HTMLElement.click()`, which bypasses hit testing; and the over-claimed High), **L3 withdrawn and re-judged as O6** with its reasoning stated in the record rather than deferred to the review, **§8 given five bounds and one unexplained observation**, and chronology and write-history claims narrowed throughout, with §8.13 listing the withdrawn sentences | ✅ complete — after **three** Codex rounds. Round 1 (`docs/reviews/phase-2c-4c-5-reading.md`) was NOT READY on three Highs, a Medium and a Low, against the record **as first written**. **Round 2 (`docs/reviews/phase-2c-4c-5b-record.md`, 79 lines) returned NOT READY on two Highs, and both were against 5b-3's own corrections, not against the original record**: (1) the rewrite raised M2 from Medium to **High** on pointer unreachability, which crosses the record's own §8.16 (`elementFromPoint` is paint order at a point, **not** event delivery) and §8.17 (six of seven controls `outsideViewport`, so one control per launch), and which the retained rectangles refute — the sibling began **7 px below** the section's top while the close button began **at** the top and stood **27 px** high, so the button's top 7-px strip was never inside the sibling and no point in it was tested; **M2 restored to Medium**. (2) The rewrite reintroduced construction chronology **inside the passages narrowing it** — a gate run claimed to have happened *before the rewrite was applied*, 5b-2's bundle search claimed to have happened *after its CSS change*, and `PROGRESS.md` offered as *a witness outside the record*; all three withdrawn, §10 now treats all four gate reports as accounts, §1.3 states the manifest's 54-OK/1-FAILED as a **current** comparison, and §8.13 names all three as claims the fix round itself created. **Round 3 (`docs/reviews/phase-2c-4c-5b-record-round3.md`, 55 lines) returned NOT READY on one Medium — again a narrower instance created by the round-2 fix**: the new preamble said *"The two findings are both Mediums"*, which reads as a roster of two when the roster is two Mediums, two Lows and six Observations. It confirmed **both round-2 Highs closed**, confirmed M2 does not now under-claim, confirmed the 7-px qualification supported by the retained geometry, and confirmed **no cited source location, rectangle or count has drifted**. Round 3's Medium was fixed and **no round 4 was commissioned** — a deliberate decision, recorded with its reason in the step's verification section. **These are the eleventh and twelfth consecutive rounds in this phase to find a narrower instance of what the round before closed, and the first two where the fix round created the instance rather than missing it** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3, 4 and 5 are complete**, 3 and 4 in both their halves. **Step 5 is CLOSED**, by its three-part fix round **5b**: 5b-1 (the instrument extension and the measurement), 5b-2 (the one-property fix and its re-measurement) and 5b-3 (the record's rewrite plus Codex rounds 2 and 3). Together they found and closed **the first defect in this phase that reaches a screen, and the first to change a tracked source file**. **Only step 6 remains** — remove the instrument, sweep the residue, and **re-derive** the production gate counts `1112 / 423 / 1767 / 180` on a harness-free tree rather than copying the with-harness figures forward |
+| **2c-4c-6** | **The harness's removal, and a production baseline that matched.** Both probe sources deleted, the four hook lines reverted **by hand** to byte-identical, the 2.9 GB scratch tree gone, and the four gate figures **re-derived** on the harness-free tree rather than copied forward | ✅ complete — `docs/decisions/2c-4c-6-notes.md`. `git diff HEAD --stat` and `git status --short --untracked-files=all` both **empty**. All four gates match the expectation exactly — **1112 / 423 / 1767 / 180** — and nothing was adjusted to make them: the expectation was written into this file **before** the measurement. Unlike 2c-4b-3d-3, which caught a stale count, this step **caught nothing, because there was nothing to catch**, and §3.3 of its record states how little a matching measurement therefore proves. The −1 in the vitest count was **traced, not assumed**, to `scripts/lint/ipc-detail.test.ts:79`'s per-file `it.each`. Codex returned **NOT READY on nine findings — three High, five Medium, one Low — and every one of the nine was a sentence in the record**, none a defect in the removal or the application; **no executable line changed in the fix round**, because the step has none to change. **The sweep after the fix round found a tenth, created by the fix round itself** — a file count taken through a `\| head` that capped it at ten when the true figure is 19 — the **thirteenth** consecutive round in this phase to find a narrower instance, and the third in a row where the fix round created it |
+| **Phase 2c-4c** | **Recovery fallback** — save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone | ✅ **complete.** Six steps: the Rust contract (1), recovery as values (2), the UI in two halves (3a, 3b), the instrument in two halves (4a, 4b), the reading with its three-part fix round (5, 5b-1, 5b-2, 5b-3), and the removal (6). **The phase's one defect that reached a screen was M2** — `min-height: 0` on `.recovery` collapsing the section to zero height so the host outcome panel overlapped the recovery form's content — found at 5b-1 by a `document.elementFromPoint` hit test, fixed at 5b-2 by deleting one declaration, and **passed over by 27 earlier launches** because the driver presses with `HTMLElement.click()`, which bypasses hit testing. **No other finding in any round of this phase changed a byte written to a user's file** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | ✅ **complete — all six steps**, 3 and 4 in both their halves, 5 closed by its three-part fix round **5b** (5b-1 the instrument extension and the measurement, 5b-2 the one-property fix and its re-measurement, 5b-3 the record's rewrite plus Codex rounds 2 and 3), and 6 the removal with the gate figures re-derived on a harness-free tree |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3526,6 +3528,144 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-4c step 6 (**this closes Phase 2c-4c**)
+
+**The record:** `docs/decisions/2c-4c-6-notes.md`. **The review:** `docs/reviews/phase-2c-4c-6.md`
+(round 1, **NOT READY**, nine findings, all nine closed; no round 2 — the reason is recorded in the
+review file itself, not left to be inferred).
+
+**The removal, in the order the handoff prescribed and with the evidence each part produced:**
+
+1. **The hook diff was read first.** `git diff src/main.ts src-tauri/src/main.rs` showed exactly four
+   lines: `mod probe;` and `probe::register_with_probe(...)` in `src-tauri/src/main.rs`, and
+   `import { startProbe } from './probe';` plus a trailing `startProbe();` in `src/main.ts`. Reading
+   it first is what made the by-hand revert possible after the sources were gone.
+2. **Both probe sources deleted.** `src/probe.ts` and `src-tauri/src/probe.rs` were untracked, so
+   this leaves no diff — the evidence is the empty status at (4), not a patch. **They were deleted
+   without being read**, which is why the record refuses to explain the unchanged Rust count.
+3. **The four hook lines reverted by hand**, as four targeted edits rather than a `git restore`.
+4. **Proved byte-identical:** `git diff src/main.ts src-tauri/src/main.rs` **empty**, and — because a
+   bare `git diff` compares the working tree with the *index* — also `git diff HEAD --stat`
+   **empty** and `git status --short --untracked-files=all` **empty**, the latter re-run *after* the
+   build at (6).
+5. **The scratch tree deleted.** `/private/tmp/espansoconfig-harness-2c-4c/` measured **2.9 GB** by
+   `du -sh` — the figure 5b-3 recorded — then `rm -rf`; `ls` afterwards returns *No such file or
+   directory*, and a glob for `/private/tmp/espansoconfig*` finds **no match**, so no sibling
+   scratch tree from an earlier harness generation survives.
+6. **The four gates re-derived on the harness-free tree.**
+
+| Gate | With harness (5b-2) | **Measured at step 6** | Expected |
+|---|---|---|---|
+| `cargo test --workspace` | 1112 passed, 0 failed | **1112 passed, 0 failed**, exit 0 | 1112 |
+| `npm run check` | 424 files, 0 errors, 0 warnings | **423 files, 0 errors, 0 warnings** | 423 |
+| `npm test` | 1768 passed, 51 files | **1767 passed, 51 files** | 1767 |
+| `npm run build` | 181 modules | **180 modules** | 180 |
+
+**All four match, and nothing was adjusted to make them match** — the expectation stood in this
+file's "Next action" *before* the measurement, and the handoff required that a difference be
+recorded and investigated rather than edited away. `CLAUDE.md` §4's rule is discharged in its strong
+reading: these are figures a harness-free tree produced, not figures copied forward.
+
+**The Rust figure was derived, not read off a summary line**: the `N passed` field of every
+`test result:` line was summed — **25 lines**, the `Doc-tests espansoconfig_core` binary included —
+giving **1112**. No line reports a non-zero `ignored`, and a search of the whole output for
+`failures:`, `FAILED`, `error[` and `warning:` finds nothing.
+
+**The vitest −1 was traced rather than assumed**, which is the one place this step did more than the
+handoff asked. `scripts/lint/ipc-detail.test.ts:79` is
+`it.each(scannableFiles().filter((file) => !ALLOWED.has(file)))` — one case per `.ts`/`.svelte` file
+under `src/` minus a two-entry allow-list. There are now **104** such files, so that block generates
+**102** cases and the suite totals **118** (measured with `--reporter=json`); with `src/probe.ts`
+present it was 105 → 103 → 119. That is the entire difference. The other two moving figures have the
+same single cause — `src/probe.ts` was one file svelte-check checked, and one module the entry
+reached through `src/main.ts`'s import. **The Rust count is unchanged at 1112 and the record
+deliberately offers no explanation of why**, because the file that would explain it was deleted
+unread.
+
+**Both halves of the module guard were run, because 180 is now within one of a legitimate count.**
+The arithmetic: 178 at 2c-4c-3a, 180 at 2c-4c-3b (two for one new styled component — the module and
+its `<style>` block), and step 6 adds no source module, so 180 is where a harness-free tree belongs.
+The bundle search: `rg -c "svelte/internal/server|svelte/server|async_hooks" dist/assets/*.js` finds
+**nothing** — and **that negative was checked for falsifiability rather than accepted**, since a
+search that cannot match proves nothing about what it did not find: `rg --count-matches "svelte"`
+over the same file returns **495**.
+
+**Residue.** A targeted search for `ECFG_PROBE`, `startProbe`, `register_with_probe`, `probe::` and
+`from './probe'` outside `docs/` and this file finds nothing. The stronger form is the git fact at
+(4) — every tracked file matches `HEAD`, and `HEAD` never held the harness — **bounded** by the fact
+that neither the git check nor the greps inspect an **ignored** path, `rg` honouring `.gitignore`.
+`dist/` is closed separately: `vite.config.ts:45` sets `emptyOutDir: true`, the build regenerates it
+from tracked sources, and `dist/assets/` afterwards holds exactly one `.js` and one `.css`.
+
+**What this step deliberately did not do:** it verified and regenerated **no manifest** before
+deleting the tree (`manifest-2c-4c-4a-post.sha256` is a partial-verify artifact by design and 5b-3
+states its 54-OK/1-FAILED comparison as a *current* result); it did not reopen step 5; it staged by
+path and never with `git commit -a`/`-am`; and it touched neither `.gitignore` nor the corpus nor
+the sync script, so `CLAUDE.md` §1's post-touch verification is not owed.
+
+**The standing price, stated because it is permanent.** Every artifact P01–P73 is gone. Any claim in
+`2c-4c-4a-instrument-rebuild.md`, `2c-4c-4b-instrument.md`, `2c-4c-5-window-reading.md`,
+`2c-4c-5b-1-instrument.md` or `2c-4c-5b-2-notes.md` that rested on a launch directory now rests on
+**the record of that launch alone** — testimony, not evidence that can be re-derived. So does the
+text of the two probe sources: `PROGRESS.md`'s 2c-4c-4a row already recorded that no record carries
+`probe.rs`'s source, which is why 4a had to author it from the code. A future harness is rebuilt
+from prose again.
+
+**No window reading and no mounted test is owed.** The only edits were to `src/main.ts` and
+`src-tauri/src/main.rs`, and both were returns to what `HEAD` already holds — proved by the empty
+diff at (4). The last change to a tracked source file in this phase remains 5b-2's single deleted
+CSS declaration in `src/lib/components/RecoveryPanel.svelte`, committed at `c23b39e` and read in a
+window across twelve launches (P62–P73).
+
+---
+
+## Phase 2c-4c step 6 review disposition
+
+Codex round 1 returned **NOT READY** on nine findings — **three High, five Medium, one Low — and
+every one of the nine was a sentence in the record**. None was a defect in the removal, in the gate
+figures or in the application. **No executable line changed in the fix round**, because a step that
+changes no tracked source file has none to change.
+
+Three are worth naming, because they are this project's named worst defect class appearing in a step
+that does nothing at all:
+
+| # | Severity | The finding | How it was closed |
+|---|---|---|---|
+| 1 | High | §1.1 offered a bare `git diff` as *"the whole of the proof"* of byte-identity with `HEAD` — but that command compares the working tree with the **index**, so an empty result is also consistent with a staged difference | The section now names the semantics and cites **two** retained facts: the initial status's blank index column, and the empty `git diff HEAD --stat`. The record says an earlier draft got this wrong |
+| 2 | High | §2 explained the unchanged Rust count by asserting that `src-tauri/src/probe.rs` *"was a plain `mod probe;` with no `#[cfg(test)]` module of its own"* — a file the step deleted **without reading**, making the explanation an inference from the very count it explained | The bullet now **offers no explanation at all**, says why one would be circular, and keeps only the observation: 1112 with the harness, 1112 without |
+| 9 | High | §5 declared *"Phase 2c-4c is complete"* and predicted that *"no finding in any round of step 6 changed a byte written to a user's file"* — **before the round had been run** | §5 rewritten to record round 1's actual outcome, to state that the closing commit is what the handoff prescribes, and to drop the prediction entirely |
+
+The other six narrowed unretained claims: an inventory of a directory only ever measured (§1.2), a
+chronology giving 5b-3 three Codex rounds when it took rounds 2 and 3 of step 5's three (§1.3), two
+non-existent filenames — the records are `2c-4c-4a-instrument-rebuild.md` and
+`2c-4c-4b-instrument.md` (§1.3), a git proof stated more broadly than ignored paths allow (§1.4), a
+measurement placed *"at the commit this step produces"* when it was taken on the working tree
+(§3.3), and a process assertion no artifact could support (§4).
+
+**All nine were checked against the artifacts before being applied**, not taken on the reviewer's
+authority: finding 5's filenames by listing `docs/decisions/`, finding 6's chronology against this
+file's 2c-4c-5 and 2c-4c-5b-3 rows.
+
+**The sweep after the fix round found a tenth, and the fix round had created it.** Closing finding 5
+introduced a sentence counting the `docs/` files that name the probe's identifiers; the count was
+taken through a command ending in `| head`, which caps output at ten lines, and the sentence said
+**ten**. Re-derived without the cap: **19**. It is recorded in place at the record's §1.3 rather
+than quietly corrected. This is the **thirteenth** consecutive round in this phase to find a
+narrower instance of what the round before it closed, and **the third in a row where the fix round
+created the instance rather than missing it**. It was found by re-deriving the two figures the fix
+round had newly introduced — the file count, and the `dist/` regeneration claim, which held — and
+that is the only technique that has worked: **check what the record now says, never the words the
+finding used.**
+
+**No round 2 was commissioned, and that is a decision rather than an omission.** The nine findings
+were prose in a record describing a step that changes no tracked source file; all nine were closed
+by *narrowing* claims rather than by adding new ones, which is the direction that cannot introduce a
+new guarantee; and the one instance the fix round did create was found and recorded by the sweep
+this project's history predicts is necessary. The reason is written into
+`docs/reviews/phase-2c-4c-6.md` so a later session can disagree with it knowingly.
 
 ---
 
@@ -7476,6 +7616,82 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Phase 2c-4c is CLOSED. The next thing to do is the 2c-5 design consult — before any line of 2c-5 is written.**
+
+**2c-5 is *restore from backup*: a whole-document replacement through the normal save path, with the
+full identity invalidation.** `2c-split-notes.md` classifies it as the sub-phase that **fails as a
+destructive mistake**, and it is the last sub-phase of 2c.
+
+**The standing rule since 2b-2c binds it: the phase goes to a Codex design consult before any line
+of it is written**, and the consult has changed the phase rather than confirmed it in most of the
+sub-phases that ran one — 2c-4a's ruled the frontend's eager conflict adoption a defect, 2c-4b's
+narrowed the phase and split its confidence rule in two, 2c-4c's rewrote the placement policy. Write
+the consult to `docs/reviews/phase-2c-5-design.md`.
+
+#### What the consult must be told, because it is load-bearing and not derivable from the plan
+
+1. **The write path already exists and must be reused.** A restore *is* a whole-document
+   replacement, and `SaveContent::ReplaceText` (2b-2c-3a) plus `save_raw_document` (2b-2c-3b)
+   already are one. `espansoconfig_core::persist::save_document` is **the only entry point that may
+   write a user's file** — never `replace_file_atomically`, never `replace_locked_file`, and never
+   from inside the transaction, because **the lock is not reentrant and the process hangs silently
+   and forever**. Whether a restore is a seventh writing command or a content path on the sixth is
+   exactly what the consult should decide; this handoff does not assume it.
+2. **The invalidation already has a shape.** `openWholeDocumentSave(sealed, forget)` in
+   `src/lib/browser/invalidation.ts` is the one-shot sealed obligation: after a committed whole-file
+   replacement **every `MatchId` in that file is stale** and `moved` is `null` permanently. A caller
+   that does not discharge it does not have a save result.
+3. **What does NOT exist is the read side of backups, and this is the real work.**
+   `crates/espansoconfig-core/src/persist/backup.rs` can *write* batches (`BackupSession::rooted_at`,
+   the per-session capture, `BackupRecord`) and can *delete* old ones — but its `fn rotate` is
+   **private**, and the module exposes **no public way to enumerate batches, to list what a batch
+   holds, or to read a backed-up file's bytes**. The newest-by-name ordering that a restore UI needs
+   (the stamp compares as a **string** because `batch_stamp`'s format sorts chronologically, and the
+   disambiguating counter compares as a **number**) lives inside that private function. **So 2c-5
+   owes a core-side read API before any command and long before any screen** — and by §3 of
+   `CLAUDE.md` it must be built in the core, with no `tauri` dependency.
+4. **The backup root is `.espansoconfig-backups`**, placed outside every espanso auto-load glob at
+   2a-3b, with ten-batch retention. Rotation is **the only destructive operation in the crate**.
+5. **Three kinds of evidence are owed**, as by every 2c sub-phase since the split: model tests, a
+   **mounted-component test**, and a **window reading**. Budget for the third: the reading harness
+   was deleted by step 6 and **its sources survive in no record**, so 2c-5 rebuilds it from prose
+   exactly as 2c-4c-4a did. That rebuild has cost a full sub-step every time.
+
+#### The production gate baseline a fresh session starts from
+
+**`1112 / 423 / 1767 / 180`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. These were **measured at step 6 on a harness-free tree**, not copied
+forward, and the tree at `HEAD` is the tree that produced them. `npm install` (or `npm ci`) is
+required before any frontend command will run.
+
+**The module count is a regression guard whose shorthand is spent**: 180 is now within one of the
+number that used to mean *the Svelte server build leaked in*, so check **both halves** — the
+arithmetic (a new `.ts` module costs one, a new styled component costs **two**) and the bundle
+search — and verify the search can match before trusting its negative.
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty — the harness is gone
+cat docs/decisions/2c-split-notes.md              # the cut; 2c-5 is its last row
+rg -n "pub fn|pub struct|pub enum" crates/espansoconfig-core/src/persist/backup.rs
+#   ^ the write side. Note there is no listing, no batch enumeration and no read-back.
+```
+
+Then commission the design consult. Do **not** write implementation first: every sub-phase since
+2b-2c that skipped straight to code paid for it in review rounds, and this is the one classified as
+failing destructively.
+
+---
+
+### ⚠️ HISTORICAL — the step-6 handoff, discharged. Kept because its four obligations are what the step's verification section reports against.
+
+**Step 6 is complete.** Everything below was done: both probe sources deleted, the four hook lines
+reverted by hand to byte-identical, the 2.9 GB scratch tree removed, and the four gate figures
+re-derived on the harness-free tree — where they matched the expectation this block recorded
+**before** the measurement. The closing verdict is **"Verification — Phase 2c-4c step 6"** above.
 
 ### **Step 2c-4c-6 — the harness removal — is all that is left of Phase 2c-4c. Step 5 is CLOSED.**
 
