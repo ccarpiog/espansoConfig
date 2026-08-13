@@ -12763,7 +12763,7 @@ _Updated at each phase boundary._
 | **2c-4c step 3b (closes 2c-4c-3)** | **`c0f2e2f`** | ✅ pushed to `origin/main` (`a93323e..c0f2e2f`) | **clean** — fifteen files staged **by path**, no harness in the tree: eleven frontend sources and tests (one of them new), the step's record, its two-round review, `CLAUDE.md` (the module ladder, its spent shorthand, and the deciding-is-not-drawing rule) and this checkpoint. **It holds both review rounds' fixes**, as every phase since `8989c16` does, so no commit carries a demonstrated defect. **The next path that must never be swept in by `-a` appears at 2c-4c-4**, which rebuilds the window instrument |
 | 2c-4c step 2 | `4e29589` | ✅ pushed to `origin/main` | **clean** — `git status --short --untracked-files=all` returns nothing after the commit. Staged **by path**: the commit holds **six files** — `src/lib/browser/recovery.ts`, `src/lib/browser/recovery.test.ts`, `src/lib/browser/workspace.test.ts`, `docs/decisions/2c-4c-2-notes.md`, `docs/reviews/phase-2c-4c-2-code.md` and this checkpoint. **No harness exists to exclude**; the next path that must never be swept in by `-a` appears at 2c-4c-4, which rebuilds the instrument |
 
-The **2c-4c-5** commit is the reading **as taken and reviewed, not as closed** — the first checkpoint
+`e30e1a2` is Phase 2c-4c **step 5**, the reading **as taken and reviewed, not as closed** — the first checkpoint
 in this phase to hold a step whose Codex round returned NOT READY **without** its fix round, because
 the fix needs an instrument extension and a re-take that a fresh session must own. It contains
 **three documents**: `docs/decisions/2c-4c-5-window-reading.md`, the round-1 review
@@ -12783,7 +12783,7 @@ one-round review with its orchestrator disposition, and this checkpoint.
 instrument itself — `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the scratch tree
 at `/private/tmp/espansoconfig-harness-2c-4c/` — stays out of git by design, across both steps.
 
-**A fresh session starting the 2c-4c-5 fix round resumes at the 2c-4c-5 commit or later, and must
+**A fresh session starting the 2c-4c-5 fix round resumes at `e30e1a2` or later, and must
 rebuild the harness first if the working tree no longer holds it.** The four paths are not
 recoverable from git. §2 of
 `2c-4c-4a-instrument-rebuild.md` says which can be re-authored from which record and which must be
