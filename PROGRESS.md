@@ -89,7 +89,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-4c-4a** | **The instrument, rebuilt from prose — both halves this time.** 2c-4b-3d-3 deleted `src/probe.ts`, `src-tauri/src/probe.rs`, the four hook lines and the whole scratch tree, so unlike 3d-2a (which still had both probe sources) this step had **nothing** to start from. `src-tauri/src/probe.rs` is **authored from the code** for the first time in this project's history: no record carries its source. `launch.sh`, 21 fixtures and a 23-row case table re-authored from four construction records. **Step 4 was split by the orchestrator**; the recovery cases are 4b | ✅ complete — after a review fix round. **Twelve launches (P01–P12), all twelve with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all twelve**; P07–P12 are the proof set, one per write surface. Codex returned **NOT READY** on a High, two Mediums, a Low and an Observation — **the instrument itself was not faulted**: the audit found the six plans credible, the hooks inert without `ECFG_PROBE_PLAN`, and the conflicts genuine. **No executable line changed in the fix round**; all five findings were prose in the record |
 | **2c-4c-4b** | **The recovery cases**: the three scope items the 4a review sharpened — targeted reporting of `[data-recovery-without-creation]` on the four non-creating surfaces, **assertion and activation** of the editor's and creator's recovery offer, and a `section.recovery`-**scoped** driver through the opened form's create / refusal / conflict endings — plus three expected-byte fixtures and four of the five holes 2c-4b left | ✅ complete — after a review fix round. **Fourteen launches (P13–P26), all fourteen with a zero-byte `probe.err`, one `--- end` each, no `--- failed`, `bytes=MATCH` on all fourteen**; one binary digest ran all fourteen, 7 English / 7 Spanish. It needed a **fourth probe command**, `probe_third_writer` over `ECFG_PROBE_R2`, because a recovery form drafts against the disk revision R1 already produced, so re-running the second writer cannot conflict it. Codex returned **NOT READY** on a High and a Low, **both prose and neither a defect in the instrument or the application** — the record upgraded post-image evidence into first-attempt and chronology guarantees. **No executable line changed in the fix round** |
 | **2c-4c-5** | **The reading**: 27 launches (P27–P53), all six write surfaces in **both** languages, the recovery form driven to its create / refusal / conflict endings, and the two rectangles 4b measured and refused to judge | 🚧 **taken, and NOT closed.** All 27 reached `--- end` with a zero-byte `probe.err`, none printed `--- failed`, and **all 27 report `bytes=MATCH`** — 13 against authored expected-bytes documents and 14 against fixtures that must be unchanged; the fifth prediction fixture matched on its first launch in both languages. 4b's aggregate language hole is closed. **Codex round 1 returned NOT READY on three Highs, a Medium and a Low**, and the **first High is a defect in the record that the orchestrator verified independently in the code**: `docs/decisions/2c-4c-5-window-reading.md` §3.2 rests M2's *latent, never constructed* classification on `view.outcome === null`, and a conflict **is** an outcome — `conflictOf()` reads it out of `session.outcome` (`src/lib/browser/matchEditor.ts:1078`, `conflictArm(session.outcome)`), which `describeEditSave` sets for every non-saved result (`:1522`, `:1525–1530`). So in P27–P34 the host's outcome panel **was** the rendered sibling immediately after `<RecoveryPanel>` (`MatchEditor.svelte:895–912`, `MatchCreator.svelte:779–795`) and **the overlap state was constructed in eight launches and never measured** |
-| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3 and 4 are complete, 3 and 4 in both their halves. Step 5 is taken but NOT closed**: its review returned NOT READY, and closing it needs an **instrument extension** — the sibling rectangle no launch has ever measured — before the geometry judgement can stand. Step 6 (the removal) must not run until then |
+| **2c-4c-5b-1** | **The instrument extension the fix round needed, and the measurement that settled M2**: `reportRecoveryGeometry()` in `src/probe.ts` — `section.recovery`'s next element sibling found **structurally**, the section's children and their combined extent, the scroller's scroll figures under `reportReach`'s restore discipline, the computed flex/min-height diagnosis, and a `document.elementFromPoint` **hit test**, which is the measurement 27 earlier launches could not make because the driver presses with `HTMLElement.click()` and that bypasses hit testing | ✅ complete — `docs/decisions/2c-4c-5b-1-instrument.md`. **Eight launches, P54–P61**, the four editor/creator recovery cases in both languages; the orchestrator re-derived the conjunction from the artifacts — one `--- end`, no `--- failed`, zero-byte `probe.err`, `bytes=MATCH` on all eight. **M2 is not latent and not harmless: it is a real defect that reaches a screen.** `section.recovery` computes `height=0px` while its children extend 1001–1035 px, so the host outcome panel holding the live conflict is placed **7 px below the section's top** instead of below its content, and `elementFromPoint` at the one in-viewport recovery control returned `div.panel[role="status"]` — **not the button** — in all eight |
+| **2c-4c-5b-2** | **The fix, and the first defect in this phase to change a tracked source file**: `min-height: 0` deleted from `.recovery` in `src/lib/components/RecoveryPanel.svelte`, restoring `min-height: auto` so the section is floored at its min-content height like every other item of the host's column. `flex-shrink: 0` was **rejected** — it forbids a legitimate shrink and leaves the misleading declaration standing — and the comment that replaces the property records why its **absence** is load-bearing | ✅ complete — `docs/decisions/2c-4c-5b-2-notes.md`. **Twelve launches, P62–P73**, the conjunction re-derived by the orchestrator on all twelve. The overlap is closed and the arithmetic is exact: the sibling now begins at **children-bottom + 7 px** (the column's own gap) on every surface and language — `1159→1166`, `1210→1217`, `1176→1183`, `1227→1234` — where before it began at section-top + 7. `elementFromPoint` returns **`isTheControl`** in all eight recovery launches, with no `somethingElse` anywhere. P70–P73 prove the ordinary path unshifted: `P70`/`P73` diff against `P25`/`P26` to **the launch directory name alone** |
+| 2c-4c | **Recovery fallback**: save-draft-as-a-new-snippet, and manual resolution when the target is ambiguous or gone. Fails as a **dead-end** mistake. Six steps: the Rust contract, recovery as values, the UI, the instrument, the reading, the removal | 🚧 **in progress — steps 1, 2, 3 and 4 are complete, 3 and 4 in both their halves. Step 5 is taken but NOT closed**, and its fix round **5b** is cut in three: 5b-1 (the instrument extension and the measurement) and 5b-2 (the one-property fix and its re-measurement) are ✅ complete — together they found and closed **the first defect in this phase that reaches a screen, and the first to change a tracked source file**. **5b-3 remains**: the reading record's rewrite and Codex round 2. Step 6 (the removal) must not run until then |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation | ⬜️ not started |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -7339,6 +7341,118 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-4c-5b is under way, and 5b-1 has settled M2: the overlap is REAL and it reaches a screen.**
+
+**5b was cut in three by the orchestrator** — 5b-1 the instrument extension and the measurement, 5b-2
+the fix and its re-measurement, 5b-3 the reading record's rewrite and the second Codex round. The cut
+exists because the round's first owed item (*judge the overlap*) turned out to be a defect in the
+application rather than a defect in a sentence, which is the first time that has happened in this
+phase.
+
+#### 5b-1 is complete, and what it measured
+
+`docs/decisions/2c-4c-5b-1-instrument.md` is the record. `src/probe.ts` gained
+`reportRecoveryGeometry()`, called from `driveRecoveryForm` **before** any control is typed into or
+pressed: the `section.recovery` **next element sibling** found structurally, that sibling's box and
+first control, the section's children with their boxes and combined extent, the scroller's
+`scrollTop`/`scrollHeight`/`clientHeight` with `reportReach`'s restore discipline kept, a
+`document.elementFromPoint` hit test of every form control with six named cases, and the computed
+`display`/`overflow`/`flex`/`min-height`/`height` of the section, its layout parent and its
+`offsetParent`.
+
+**Eight launches, P54–P61** — `editor-recovery-create`, `editor-recovery-refused`,
+`editor-recovery-conflict`, `creator-recovery-create`, each in both languages. The orchestrator
+re-derived the four-part conjunction from the artifacts rather than taking the worker's report: **one
+`--- end`, no `--- failed`, a zero-byte `probe.err` and `bytes=MATCH` on all eight.**
+
+**The numbers, and they are not ambiguous:**
+
+- `section.recovery` computes to `flex=0 1 auto minHeight=0px height=0px` — a **zero-height** border
+  box — while its ten children lay out over an extent of **1001–1035 px**.
+- Its layout parent (`section.matchEditor` / `section.matchCreator`) is itself a compressed flex
+  column: `height=579.94px` against roughly 1800 px of content.
+- So the section contributes **nothing** to that flow and its next sibling — the host outcome panel,
+  `div.panel[role="status"]`, holding the live conflict — is placed **7 px below the section's top**
+  instead of below its content: `658,165,491x1032` (en editor), `658,181,491x1094` (es editor),
+  `658,182,491x829` (en creator), `658,199,491x873` (es creator). **The recovery form's content and
+  the conflict panel occupy the same vertical band.**
+- The hit test is the consequence, and it is why 27 earlier launches passed over this. At the only
+  recovery control whose centre lay inside the 728-px viewport — *Stop creating this snippet* /
+  *Dejar de crear este fragmento*, box `967,158,182x27` — `document.elementFromPoint` returned
+  `div.panel[role="status"]`, **not the button**, in **all eight** launches. The driver presses with
+  `HTMLElement.click()`, which bypasses hit testing, so every earlier programmatic press succeeded
+  against a control a pointer could not have reached.
+
+**The root cause is one property**, `min-height: 0` on `.recovery` (`RecoveryPanel.svelte:808`): it
+removes the automatic minimum size that would otherwise floor a flex item at its min-content height,
+so the item collapses to zero inside a parent that is already compressed while its children overflow
+visibly over the sibling below. The same declaration on the six write surfaces' own outermost
+sections is the **legitimate** scroller idiom and must not be touched — `.recovery` is the only
+nested instance.
+
+**What this means for the phase**: `RecoveryPanel` is drawn on the editor and the creator only, and
+those are exactly the two surfaces where 2c-4c's recovery **form** can be opened at all. So the
+phase's central deliverable was covered by the panel below it on every screen that can reach it.
+
+#### 5b-2 is complete, and the fix is one deleted declaration
+
+`docs/decisions/2c-4c-5b-2-notes.md` is the record. **`min-height: 0` is deleted from `.recovery`**
+in `src/lib/components/RecoveryPanel.svelte`, restoring `min-height: auto` so the section is floored
+at its min-content height exactly as every other item of the host's column already is.
+**`flex-shrink: 0` was rejected** — it forbids a legitimate shrink and would leave the misleading
+declaration standing — and a comment now occupies the property's place recording why its **absence**
+is load-bearing, because a later editor restoring the idiom would restore the defect.
+
+**Twelve launches, P62–P73**, the four-part conjunction re-derived by the orchestrator on all twelve:
+one `--- end`, no `--- failed`, zero-byte `probe.err`, `bytes=MATCH`.
+
+- **The overlap is closed, and the arithmetic is exact.** The sibling now begins at
+  **children-bottom + 7 px** — the column's own gap — on every surface and in both languages:
+  `1159→1166` (en editor), `1210→1217` (es editor), `1176→1183` (en creator), `1227→1234` (es
+  creator). Before the fix it began at **section-top + 7**.
+- **`elementFromPoint` returns `isTheControl`** in all eight recovery launches. No `somethingElse`
+  survives anywhere in P62–P69.
+- **The ordinary path is unshifted**: `P70` and `P73` diff against their predecessors `P25` and `P26`
+  to **the launch directory name alone**. `section.recovery` still measures `491x0` with
+  `sectionText=""` when there is nothing to offer, so the empty case is unchanged.
+
+Gates re-run by the orchestrator with the harness in the tree: `cargo test --workspace` **1112
+passed, 0 failed**; `npm run check` **424 files, 0 errors, 0 warnings**; `npm test` **1768 passed, 51
+files**; `npm run build` **181 modules**, with `svelte/internal/server`, `svelte/server` and
+`async_hooks` all absent from the built bundle.
+
+**A mounted test cannot close this defect and none was written that appears to.** jsdom performs no
+layout — `getBoundingClientRect` returns zeros there — so no `RecoveryPanel.test.ts` case can
+distinguish the broken CSS from the fixed CSS. The window measurement is the only evidence, which is
+a sharper instance of this project's standing rule that a green suite is not a screen. Three further
+bounds are recorded and must survive into 5b-3: `elementFromPoint` reports **paint order at a point,
+not event delivery**; six of the seven form controls were still `outsideViewport` at the sampled
+scroll position and were **not** hit-tested, so the verdict rests on one control per launch; and the
+creator's host outcome panel measures 812/890 px after against 829/873 before, which is **bimodal
+across pre-fix launches too** (P33 already measured 812, P34 already measured 890 with the old CSS)
+and is therefore not attributed to the fix — **cause unexplained**, recorded rather than resolved.
+
+#### 5b-3 is what remains, and it is the whole of what is left before step 6
+
+The reading record's rewrite: **M2 reclassified as a confirmed High that reached a screen and was
+fixed**, plus the review's two prose Highs (post-images upgraded into construction chronology; final
+bytes and backups upgraded into intermediate write history), its Medium (`revealOutcome` credited
+with a movement `reveal.ts:57-82` defines as an unobservable request), its Low (judge L3 — Codex
+argues Observation; do not simply accept it), and **§8's three missing bounds**. Then Codex round 2,
+which is not optional: **ten consecutive rounds in this phase have found a narrower instance of what
+the round before them closed.** Sweep for what the record now says, not for the words the old
+finding used.
+
+**Step 6 — the harness removal — still must not run until 5 closes**, and the four harness paths
+(`src/probe.ts`, `src-tauri/src/probe.rs` untracked; two hook lines each in `src/main.ts` and
+`src-tauri/src/main.rs`) must never be committed. Stage by path; never `git commit -a`.
+
+---
+
+### ⚠️ HISTORICAL — the step-5 handoff as written before 5b-1 measured M2
+
+**Its item 1 is discharged and its item 2 is answered.** Everything else it owes still binds.
 
 ### **Step 2c-4c-5 is TAKEN but NOT CLOSED. The next action is its fix round, `2c-4c-5b`, and it needs an instrument extension.**
 

@@ -801,11 +801,20 @@
 </section>
 
 <style>
+  /* **No `min-height: 0` here, and its absence is load-bearing.** This section is
+     a flex item of the host surface's own column, and it is not a scroller — the
+     `min-height: 0` idiom belongs to the ancestors that scroll. While it carried
+     one, the host column's negative free space was absorbed entirely by this item:
+     it shrank to a zero-height border box whose children laid out past it, so the
+     host's outcome panel — the sibling drawn immediately after this section —
+     began 7 px below this section's top instead of below its content, and the two
+     occupied one band. `min-height: auto` floors this item at its min-content
+     height, which is what every other item of that column already does, so the
+     form contributes what it draws. It is still 0 tall when it draws nothing. */
   .recovery {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    min-height: 0;
   }
 
   .head {
