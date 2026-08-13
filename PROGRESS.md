@@ -3534,6 +3534,72 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-5 step 2 (the read-only Tauri wire)
+
+**The reviews:** `docs/reviews/phase-2c-5-2-code.md` (round 1, 325 lines) and
+`docs/reviews/phase-2c-5-2-confirmation.md` (round 2, 230 lines). **The specification:** Q3 of
+`docs/reviews/phase-2c-5-design.md`.
+
+Every gate below was run **by the orchestrator**, not taken from a worker's report, and the Rust
+figure was derived by summing the per-suite totals.
+
+| Command | Result |
+|---|---|
+| `cargo test --workspace` | **1153** passed, 0 failed, 0 FAILED suites |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no match — the architecture rule holds |
+| `npm run check` | **424** files, 0 errors, 0 warnings |
+| `npm test` | **1793** passed, 52 files |
+| `npm run build` | **180** modules |
+| `git status --short --untracked-files=all` | no real-corpus path at any point (D1) |
+
+**The module count is unchanged at 180 and that is correct, not suspicious**: every frontend change
+was a modification of an existing module, and the two new files are a test and a Rust file, neither
+reachable from the entry.
+
+**The bundle half of the check was re-derived, because the documented oracle cannot fail.** Searching
+a production bundle for `svelte/internal/server` proves nothing — Vite resolves and minifies module
+specifiers away, and a control search for `svelte/internal/client` **also matched nothing**. Step 2's
+implementer reported that control as having matched; it does not. The discriminating oracle is
+server-only sentinels absent (`$$payload`, `head_payload`, `push_element`) **with** client-only
+constructs present (`window.__svelte`, `svelte-trusted-html` — 2 matches here), and that is what was
+run. `CLAUDE.md`'s wording for this check is now known to be weaker than it reads.
+
+**Two review rounds, two fix rounds, seventeen findings, no High, and no behavioural defect in what
+reaches disk.** Round 1: 5 Medium, 6 Low. Fix 1 closed all eleven and swept **30 further sites**.
+Round 2: 4 Medium, 2 Low — **narrower instances of the same four defects**, plus one false claim
+(`2^53` described as rounded) **introduced by fix 1**. Fix 2 closed those six and swept **27 more**.
+No gate figure moved across fix 2.
+
+**What was NOT done, deliberately:** no third review round. Round 2 found no High and no behavioural
+defect, and fix 2 changed no executable line except the test control the review itself dictated. Two
+residues were named and left for a ruling — `docs/decisions/2a-3b-notes.md:159`'s unconditional
+containment claim (which wants a *correction block*, not an edit, per project convention) and the four
+i18n strings whose EN/ES meaning-parity was checked by reading only. Both are in "Next action".
+
+**What this step does not cover:** step 2 owes Rust/IPC and TypeScript **model tests only**. There is
+**no mounted-component test and no window reading**, by the consult's Q7 — those are steps 4 and 6.
+Nothing here is evidence about a screen.
+
+### Git state — Phase 2c-5 step 2
+
+| Phase | Commit | Push | Tree |
+|---|---|---|---|
+| **2c-5 step 2** | **`c42b1df`** | ✅ pushed to `origin/main` | clean |
+
+`c42b1df` is Phase 2c-5-2 **including both review rounds and both fix rounds** — as with every phase
+since `8989c16`, the step was held open until every finding was closed, so no commit holds a
+demonstrated defect. It contains `src-tauri/src/backup.rs`, the three commands in `commands.rs` and
+their registration in `main.rs`, the wire types in `src/lib/ipc/types.ts`, six new dictionary
+namespaces with 25 keys and four `CommandError` variants across `en.json`/`es.json`, both reviews, and
+this checkpoint. Its parent `7c971c6` is Phase 2c-5-1, whose SHA was never recorded here.
+
+**A fresh session starting step 2c-5-3 should start from `c42b1df` or later.** As at 1b-1,
+`npm install` (or `npm ci`) is required before any frontend command will run.
+
+---
+
 ## Verification — Phase 2c-4c step 6 (**this closes Phase 2c-4c**)
 
 **The record:** `docs/decisions/2c-4c-6-notes.md`. **The review:** `docs/reviews/phase-2c-4c-6.md`
