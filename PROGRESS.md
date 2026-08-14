@@ -99,6 +99,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5-1** | **The core backup catalogue, with no caller**: `BackupCatalog` beside the stateful `BackupSession` — opaque `BackupBatchId`/`BackupEntryId` revalidated at every use, the scans carrying eligible values **plus** per-skip codes so a caller need not read an incomplete scan as "no backups", `BackupBytes`/`BackupText` with `NotUtf8 { entry, offset }`, and `compare_batches_newest_first` as the **one** place the `(stamp, counter)` tuple becomes an order — with `rotate` now reversing that comparison instead of spelling the tuple a second time | ✅ complete — after a review round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium, a High in prose, three Mediums and a Low; **the behavioural High was a real, reachable TOCTOU** — every path check was `symlink_metadata` on a pathname and every *use* was a second pathname operation, so a writer inside the backup root could swap a component between check and open and have bytes from outside the batch returned as `BackupBytes`. Round 2 confirmed **six of seven closed and no new behavioural defect**, and returned NOT READY on prose alone |
 | **2c-5-2** | **The read-only Tauri wire**: `list_backup_batches`, `list_backup_entries` and `read_backup_text` — commands thirteen to fifteen, **none of them a writer**. `read_backup_text` takes an opaque `BackupEntryId` **plus** the selected `DocumentId`, re-resolves the latter through the authoritative `DocumentContext` and refuses unless the entry is the one that target maps to, so **a display path is never authority**. Six read-side enums gained `Serialize` (six dictionary namespaces, 25 keys) and four `CommandError` variants their EN/ES sentences through typed accessors. Two decisions step 1 left open were taken: the wire is **exact-or-absent** for entry names — an entry is offered only when its relative path survives lossy rendering byte-for-byte (`is_exactly_spellable`, comparing `OsStr` bytes, never `Path` components), with the rest **disclosed** in an `unaddressable` count rather than silently dropped — and `entry_for_target`'s `None` for a config-root target folds into `backupEntryIsNotThisDocument` as one refusal with three documented shapes | ✅ complete — after a review round and a confirmation round, **two fix rounds**, and no High at any point. **Every finding across both rounds was this project's named worst defect class**: a sentence claiming a guarantee the code does not give. Round 1 returned NOT READY on 5 Medium and 6 Low; its fix closed all eleven and **swept 30 further sites**. Round 2 *still* returned NOT READY on 4 Medium and 2 Low — **narrower instances of the same four defects**, plus one **false claim introduced by the fix itself**. Fix 2 closed those six and swept **27 more**. The one behavioural change is L1: `BackupEntry.length` crosses as **exact decimal digits**, not a JSON number |
 | **2c-5-3** | **Restore as browser values, with nothing drawn**: `src/lib/browser/restore.ts` — catalogue and preview state, byte-exact candidate retention, a coordinator-owned `OpenWriteSurface` over seven kinds, the **one-shot confirmation** binding `DocumentId`, base revision, `BackupEntryId`, candidate `ContentRevision` and preview generation, and composition through `BrowserState.saveRawDocument` + `openWholeDocumentSave`. No component touched. `saveOutcome.ts` gained `ConflictReloadOutcome::retargetsCandidate`, `SaveOutcomeMessage::reloadRetargetsCandidate` and `ConflictOperation::replaceFileFromBackup`, because all three existing arms are **false sentences** for a restore | ✅ complete — after **four review passes and three fix rounds**. The behavioural High **survived two of them**: round 1 shipped a reusable `StartedRestore`; round 2's `WeakMap` permit closed that but left the *authorization* replayable (two `confirmRestore` calls, two permits, two sends); round 3's `WeakSet` still split the decision into `has` … field reads … `delete`, and **`readonly` does not freeze at runtime**, so a getter could re-enter between them. Closed at round 4 by making the **checked `delete` itself the membership test** — `WeakSet.delete` runs no user code, so only one of any two re-entrant callers receives `true` |
+| **2c-5-4a** | **The restore coordinator wiring in `BrowserState`, with nothing drawn** — the first half of a split of step 4, cut by failure mode: 4a is how the window talks to disk, 4b is the screen and the surfaces it must close. Three thin, unmemoised, re-callable wrappers over the read-only backup commands on a **second injected surface** (`BackupCommands`, all members required), plus `restoreDocument(started, surfaces, invalidate)`, which composes `sendRestore` with `BrowserState.saveRawDocument` — the sixth writer, **called rather than copied** — and routes the four answers to `restoreConfirmationWithdrawn` / `restoreCouldNotBeSent` / `applyRestore`. The `RestoreContext.observed` half is read **here, synchronously, before anything awaits**, narrowing the one hole `restore.ts` names as unforceable; the surfaces half stays the caller's because no coordinator can observe a session held inside a component (R36) | ✅ complete — after a review round, a fix round and a confirmation round. **The review returned NOT READY on a High**, and it was a *narrower surviving instance of the very defect 2c-5-3 spent four passes closing*: round 4 there made the checked `delete` the membership test for `PENDING_CONFIRMATIONS`, but `sendRestore` still called `PERMITS.delete(started)` and **discarded the boolean**, so a getter or proxy trap fired by `permitHolds`'s caller-supplied reads could re-enter synchronously, spend the same permit, and start a second whole-file write while the outer call ignored its own failed deletion — **one confirmation, two destructive writes**. The sequential double-send case could not reach it. Closed by making the deletion the authorization on every path to a sender, pinned by a `Proxy` whose `Symbol.iterator` trap re-enters the coordinator (it fails `expected 1 call, got 2` without the fix). The Medium was a session left permanently in `saving` after a write-safe mismatch — the model freezes every editing transition there, so the record's claimed *ask again* recovery did not exist; closed by a new `RestoreSend::withdrawn` arm and `restoreConfirmationWithdrawn`, and by deleting the redundant `session` parameter that let a permit be paired with a foreign session. The confirmation round found **no High and no Medium**, confirmed all three original findings fully closed, and left one Low — the fix round's own overcorrection, prose calling consent *one-attempt* when the withdrawal deliberately keeps a candidate-bound acknowledgement |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1, 2 and 3 are complete**; step 4 (the third-pane screen, i18n and the mounted evidence) is next |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -2316,6 +2317,53 @@ owner's real configuration **stay open**, recorded rather than quietly absorbed 
 
 ---
 
+## Phase 2c-5-4a review disposition
+
+Three rounds: a code review (`docs/reviews/phase-2c-5-4a-code.md`), a fix round, and a confirmation
+round (`docs/reviews/phase-2c-5-4a-confirmation.md`). The code review returned **NOT READY**.
+
+| # | Finding | Disposition |
+|---|---|---|
+| H1 | **`sendRestore` discarded the result of `PERMITS.delete(started)`.** `permitHolds` reads many properties off caller-supplied `session` and `context` values, and any read can run a getter or a proxy trap. Such a trap can **synchronously re-enter** `sendRestore` with the same `StartedRestore`; the inner call validates, deletes, and enters its sender before the outer `permitHolds` returns, and the outer call then ignores its own failed deletion and sends too. **One confirmation, two whole-file replacements** | **Fixed**: the checked deletion *is* the authorization on every path that reaches a sender, and the mismatch arm consumes the permit with the same checked deletion so a re-entrant winner owns the withdrawal while the loser answers `notAttempted`. Pinned by a case driving a `Proxy` surface list whose `Symbol.iterator` trap re-enters `restoreDocument`: **it fails `expected 1 call, got 2` without the fix**. Confirmed **fully closed** |
+| M1 | **A rejected permit left the session permanently in `saving`.** On mismatch `restoreDocument` returned its input session unchanged; on the intended path that is `started.session`, whose phase confirmation set to `saving`, and the model deliberately makes every editing transition a no-op there. The session came back claiming a send was in flight **when no sender ran**, and no ordinary transition took it back. The record's claimed *the panel has to ask again* recovery therefore did not exist. The mismatch also left the permit in `PERMITS` | **Fixed** in two parts: `RestoreSend` gained a `withdrawn` arm and `restore.ts` gained `restoreConfirmationWithdrawn`, which clears `phase` and `inFlight` while keeping the candidate, its acknowledgement, the catalogue and the chosen entry; and the redundant `session` parameter is **deleted** from `restoreDocument`, which now derives it from `started.session`, so a permit can no longer be paired with a foreign session. Confirmed **fully closed** |
+| L1 | The record claimed the batch identity reaches the command *as the very object it was given*, while the test asserted `toEqual`, which a rebuilt structurally-equal object passes | **Fixed by taking the stronger evidence**, not by weakening the claim: the case captures the call and asserts `toBe(RESTORE_BATCH)`. Confirmed **fully closed** |
+| L2 | *Found by the confirmation round, in the fix round's own prose.* The new sentences justified consuming a mismatched permit with *consent is for one attempt* — but `restoreConfirmationWithdrawn` deliberately **keeps** the acknowledgement, so once a transient obstruction clears, a fresh confirmation mints a permit carrying the same one. Acknowledgement is **candidate-scoped, never one-attempt** | **Fixed by the orchestrator** at all three sites (`restore.ts` module header, the `withdrawn` arm's contract, and the record's §6.2). The corrected sentences claim only that *the confirmation and its permit authorize one send attempt*, and name `boundAcknowledgement` plus the retargeting transitions as what actually forbids consent reaching other bytes. The coordinator's own comment already said this correctly and was left alone |
+
+### The lesson, and it is the sharpest instance yet of one this file already records
+
+**H1 is a narrower surviving instance of the very defect 2c-5-3 spent four review passes closing.**
+That step's own status row records the ending: round 4 closed it "by making the **checked `delete`
+itself the membership test** — `WeakSet.delete` runs no user code, so only one of any two re-entrant
+callers receives `true`." That fix was applied to `PENDING_CONFIRMATIONS`, the confirmation half. The
+**permit** half, one function along, kept `PERMITS.delete(started)` with its boolean discarded — and the
+prose at four sites asserted the atomicity the code no longer gave.
+
+This is the documented narrowing pattern, and it now has an instance that crossed a step boundary: the
+sweep after round 4 was written from the wording of the finding it had just closed. **Sweep for the
+shape — a consuming operation whose result is discarded — not for the words.**
+
+Two further notes the confirmation round settled, so they are not reopened:
+
+1. **`restoreDocument` answering `RestoreSession | null` does not reproduce the `moveMatch` defect
+   shape.** `null` has **one** actionable meaning across all its causes — *this invocation produced no
+   session, so do not install one* — and non-null always means install the returned transition. The
+   three-way distinction is retained in `RestoreSend`, where it is needed to decide whether a transition
+   is owed. This was checked specifically because a two-answer type over a three-answer world is a
+   recorded scar here.
+2. **The re-entrancy test is honest but is one concrete regression vector, not an exhaustive
+   getter/trap matrix.** It would stop exercising re-entry if `competingSurfaceFor` stopped reading
+   `Symbol.iterator` altogether; it does **not** depend on iteration being the *last* read, because an
+   earlier trap would still let the inner call spend before the outer deletion. §6.5 of the notes states
+   that limitation accurately.
+
+The one declined suggestion — making `BrowserState` perform the confirmation from its own projection
+observation — was judged **acceptable to defer**, with its first rationale marked overstated: such a
+helper *would* reduce misuse on the intended component path even though exports permit bypass, so it
+does not literally "close nothing". The other grounds hold. **4b inherits the corrected form of it:
+construct one shared live `RestoreContext` for `restoreView`, `restoreRefusal`, `prepareRestore` and
+`confirmRestore` rather than wrapping only confirmation** — all four gates must agree.
+
+
 ## Phase 2c-4c-3b review disposition
 
 Two rounds, in `docs/reviews/phase-2c-4c-3b-code.md`. Round 1 returned **NOT READY** on one High and
@@ -3534,6 +3582,71 @@ weaker claim wearing the criterion's words. Memoising made the sweep **exhaustiv
 the instruction was not merely principled — it was cheaper.
 
 ---
+
+## Verification — Phase 2c-5 step 4a (the restore coordinator wiring, nothing drawn)
+
+**Step 2c-5-4 was split by the orchestrator before any code was written**, and the split is recorded
+here because a later session will otherwise read the consult's Q7 and expect one step. Q7 item 4 names
+four things — the mode and its catalogue states, the typed accessors, the two-stage controls, and the
+phase's whole mounted matrix — on top of coordinator wiring that did not exist at all. The cut is **by
+failure mode**, which is the same criterion Q7 itself used:
+
+- **2c-5-4a** — how the window talks to disk. `BrowserState` gains the backup reads and the restore
+  send. Nothing is drawn, no i18n key or accessor is added, and no component is touched.
+- **2c-5-4b** — the screen: the i18n keys and their typed accessors, `RestorePane.svelte`, the
+  `DetailPane.svelte` mode, the open-surface predicate, the `InvalidateEverySurface` supplier, and the
+  mounted matrix that is the phase's mounted evidence.
+
+The boundary was **checked against the code rather than assumed**: `workspace.svelte.ts` contained no
+occurrence of `restore` or `backup` at all, and the open-surface knowledge lives in `DetailPane.svelte`
+(`openMatchDrafts()`), so a coordinator cannot observe it and 4a must take it as a parameter. Splitting
+the other way — accessors in 4a — was rejected because it would have shipped `tRestoreRefusal` with no
+component calling it, which is exactly the shape step 3's fourth pass adjudicated right to defer.
+
+### The gates
+
+| Gate | Before | After 4a | Note |
+|---|---|---|---|
+| `cargo test --workspace` | 1153 | **1153** | unchanged; no Rust touched, and that is the acceptance criterion |
+| `npm run check` files | 426 | **426** | 0 errors, 0 warnings; no new file under `src/` |
+| `npm test` | 1936 | **1958** | +19 implementation, then +3 net in the fix round (+2 workspace, +2 `restore.test.ts`, −1 pinning an argument pairing the signature no longer allows) |
+| `npm run build` modules | 180 | **181** | **predicted before building, and it held** |
+
+**The +1 is `restore.ts` becoming reachable from the entry for the first time**, exactly as `recovery.ts`
+was at 2c-4c-3a. Its four value imports were already reachable and its six type imports erase, so the
+module is the whole increment. The fix round added no source module and stayed at 181.
+
+The bundle oracle was run in the discriminating form the 2c-5-2 entry established, **not** the vacuous
+bare `svelte/internal/server` search: server-only `$$payload|head_payload|push_element` → **absent**;
+client-only `window.__svelte|svelte-trusted-html` → **2, present**, proving the search can match at all.
+`cargo tree -p espansoconfig-core | rg tauri` finds nothing.
+
+Every gate above was **re-run by the orchestrator**, not taken from a worker's report.
+
+### What 4a built
+
+Three wrappers — `listBackupBatches`, `listBackupEntries`, `readBackupText` — and `restoreDocument`.
+Two decisions are worth carrying:
+
+- **The three commands went onto a second injected surface, `BackupCommands`, rather than into
+  `BrowserCommands`.** Five full literals of `BrowserCommands` live under `src/lib/components/`, which
+  4a was scoped out of. All members are required: an optional member would let an omission mean *there
+  is none*. **It has a real production default**, so a `createBrowserState` call that omits it reaches
+  `invoke` rather than a script — a live trap for 4b's mounted tests that no type closes.
+- **`restoreDocument` builds `RestoreContext.observed` itself** from `revisionInProjection(views,
+  session.target)`, read synchronously before anything awaits. This is **not** a refreshed base
+  revision: what is written is `permit.submission.baseRevision`, the base the confirmation froze, taken
+  off the permit inside `sendRestore`. Verified by the review against the code, not accepted from the
+  record.
+
+### The two obligations step 3 handed forward
+
+- **The re-ask.** The three wrappers are unmemoised and re-callable, and that is the coordinator
+  affordance. It is **not** the user-visible discharge — whether a screen offers the control is 4b's,
+  and no test here can fail for its absence.
+- **`InvalidateEverySurface`.** Taken as a required parameter with no default and passed through to
+  `applyRestore`. The signature forces that one is supplied, **never that it closes a surface**.
+
 
 ## Verification — Phase 2c-5 step 3 (restore as browser values, nothing drawn)
 
@@ -7837,6 +7950,111 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-4a is COMPLETE. The next thing to do is step 2c-5-4b — the restore screen, its i18n, and the phase's mounted evidence.**
+
+**Step 2c-5-4 was split into 4a and 4b.** The consult's Q7 item 4 is still the specification, but 4a has
+already discharged its coordinator half. Read the "Verification — Phase 2c-5 step 4a" section above for
+what the split is and why the boundary sits where it does, and the "Phase 2c-5-4a review disposition"
+for the three findings and the lesson. **4b is the last step of 2c-5-4, and it carries the phase's whole
+mounted evidence.**
+
+#### The production gate baseline
+
+**`1153 / 426 / 1958 / 181`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. The Rust figure is **unchanged since 2c-5-2** and must stay so unless 4b touches
+Rust, which it should not.
+
+**Predict the module count before building.** `CLAUDE.md` §6 gives the arithmetic, and 4a's +1 is a fresh
+worked example of it: a new `.ts` module reachable from the entry costs **one**; a new component **with a
+`<style>` block costs two**, because the block is a module of its own (measured at 2c-4c-3a, not
+inferred); a component with no styles costs one. So `RestorePane.svelte` with styles is +2, and any new
+`.ts` beside it is +1 each. If the prediction disagrees with the build, **find out why rather than
+rebaselining**. Use the discriminating oracle — a bare `svelte/internal/server` search is **vacuous** in a
+production build:
+
+```sh
+rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js   # server-only — must be ABSENT
+rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js     # client-only — must be PRESENT (2 at 4a)
+```
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty
+sed -n '/^## Q5/,/^## Q7/p' docs/reviews/phase-2c-5-design.md   # the screen, and what restore must never claim
+rg -n 'restoreView|restoreRefusal|canPrepareRestore|prepareRestore|confirmRestore' src/lib/browser/restore.ts
+rg -n 'restoreDocument|BackupCommands|listBackupBatches' src/lib/browser/workspace.svelte.ts
+rg -n 'documentStart|openMatchDrafts|unsavedDraftInDocument' src/lib/components/DetailPane.svelte
+```
+
+#### What 4b must build (consult Q5 and Q7 item 4)
+
+The third-pane mode reached from the document's whole-text surface; catalogue states; the candidate and an
+**optional** loaded-target `SourceText`; two-stage controls; typed English/Spanish accessors; the save
+outcomes; and accessible focus and scroll behaviour. **Every changed component gets a mounted interaction
+test.** The mounted matrix proves exact identity-bound confirmation, withdrawal on every change,
+open-surface refusal, **no direct IPC call**, parse-finding acknowledgement, conflict preservation,
+committed-result wording, and no forbidden historical or authenticity claim.
+
+Four things bind it, carried unchanged from the unsplit handoff:
+
+1. **`SourceText`, never a `<textarea>`.** Input controls normalize carriage returns — a `<textarea>`
+   collapses CR and CRLF to LF, an `<input>` **deletes** the character — and `SourceText` is this
+   project's established read-only representation, with named control characters and horizontal
+   scrolling. Reuse the `documentStart` walk `DetailPane.svelte` already does for the raw viewer.
+   Showing the target's currently held text as a second stacked `SourceText` is useful **only** if
+   labelled as *the window's loaded observation*; it must not be called current disk state. A diff is
+   unnecessary and must never become writable.
+2. **Three states, not a modal detached from its evidence**: select a recognised batch and entry; inspect
+   the candidate; *Prepare to replace file*, which produces the opaque pending confirmation; then a
+   **visually distinct** *Replace entire file with the shown text*. Do **not** add a type-the-filename
+   ritual — the consult rules it adds no stronger binding.
+3. **The batch label is not a timestamp assertion.** The UI may say *Backup batch named 2026-…* and may
+   order recognised batches newest-**name**-first. It may **not** say *taken at*, *the file at*, *version
+   from*, or convert the name into a localized historical time. The counter disambiguates sessions created
+   under one label; it is not an edit sequence.
+4. **Add `tRestoreRefusal(refusal: RestoreRefusal)` to `src/lib/i18n/index.ts` and call it.** Step 3
+   deliberately added no accessor and 4a deliberately added none either; a component renders a code by
+   calling an accessor, **never** by building a key and never `t(restoreRefusalKey(...))`.
+
+#### Five things 4a hands forward, and they are specific
+
+1. **`BackupCommands` has a real production default.** A `createBrowserState` call that omits the third
+   argument reaches `invoke` rather than a script. **No type says so**, and 4b's mounted tests are exactly
+   the call sites that would forget. Inject it explicitly in every mounted case.
+2. **Build one shared live `RestoreContext`** and give it to `restoreView`, `restoreRefusal`,
+   `prepareRestore` **and** `confirmRestore`. All four gates must agree, and wrapping only confirmation is
+   what the confirmation round warned against. Build `observed` with `revisionInProjection(browser.views,
+   session.target)` — the model's own named producer — **never** with `session.baseRevision`, which is the
+   frozen base and legitimately differs from what the window projects.
+3. **`restoreDocument(started, surfaces, invalidate)` answers `RestoreSession | null`.** `null` means
+   *this invocation produced no session, so do not install one*; non-null always means install it. Do not
+   install the confirmation's frozen session on `null` — that would overwrite whatever the call that
+   **did** spend the permit produced.
+4. **4b owns the `InvalidateEverySurface` supplier.** It must synchronously close or mark terminal
+   **every** write surface for that document. 4a forces only that a callback is supplied, never that it
+   closes anything. The pre-send open-surface refusal is an **affordance, not the safety proof**: a
+   surface can open after preview, which is why confirmation rechecks and why this callback exists.
+5. **The acknowledgement is candidate-scoped, not one-attempt.** `restoreConfirmationWithdrawn` keeps it,
+   so after a withdrawal the screen may re-ask for confirmation while an acknowledgement is still held.
+   **Neither 4b's copy nor its mounted cases may be built around consent being re-collected.** This was
+   the confirmation round's one Low, and it was a false claim in 4a's own prose.
+
+#### The lesson 4b inherits, now with two instances behind it
+
+**A check and a spend separated by any property read are not atomic in JavaScript**, because a property
+read can run arbitrary code through a getter or a proxy trap, and `readonly` does not freeze an object at
+runtime. Verifying there is no `await` proves nothing about **synchronous re-entry**. Step 3 spent four
+passes on this; 4a then found a **narrower surviving instance one function along**, because the sweep had
+been written from the closed finding's wording. 4b draws the controls that call `confirmRestore` and
+`sendRestore` through the coordinator: it must not reintroduce a gap between deciding and spending, and
+its sweep must look for the **shape** — a consuming operation whose result is discarded — not the words.
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-4 handoff as written for the unsplit step. Discharged in part by 4a. Kept because its four binding rules are what 4b must still obey.
 
 ### **Step 2c-5-3 is COMPLETE. The next thing to do is step 2c-5-4 — the third-pane screen, i18n, and the phase's mounted evidence.**
 

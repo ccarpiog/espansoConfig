@@ -31,19 +31,32 @@
  * keyed by the confirmed object and reachable from nowhere else.
  * {@link sendRestore} is the only function here that hands anything to a sender; it
  * takes the **live** session and the **live** context, rechecks every bound value
- * against them, and **spends the permit synchronously before the sender is called**.
- * A confirmation carried past a change to the destination, the base revision, the
- * entry, the candidate, the preview generation, the revision this window projects, or
- * the surfaces it has open sends nothing at all.
+ * against them, and **spends the permit with a checked deletion before the sender is
+ * called**. A confirmation carried past a change to the destination, the base
+ * revision, the entry, the candidate, the preview generation, the revision this window
+ * projects, or the surfaces it has open sends nothing at all — and the permit is
+ * consumed by that mismatch rather than left for a retry, because **the confirmation
+ * and its permit authorize one send attempt**. That is a claim about the permit and
+ * nothing else: the acknowledgement a preview carries is *not* spent with it. It stays
+ * bound to the same candidate through {@link restoreConfirmationWithdrawn}, so once a
+ * transient obstruction such as an open write surface is gone, a fresh confirmation can
+ * mint a permit carrying that same acknowledgement. What forbids consent reaching other
+ * bytes is {@link boundAcknowledgement} plus the retargeting transitions that clear it,
+ * never a fresh-consent requirement at the send.
  *
  * The spend happens **twice, at two runtime memberships**, because a value-typed
  * record cannot spend itself: {@link confirmRestore} takes the question out of
  * {@link PENDING_CONFIRMATIONS} with a **checked** `delete` whose success *is* the
  * authorization — one operation, so no getter and no proxy trap runs between deciding
- * and spending — before it mints a permit, and {@link sendRestore} removes the permit
- * from `PERMITS` before it calls the sender. So one question yields at most one permit
- * and one permit yields at most one send — one answered question authorizes at most
- * one write. What that does **not** say is that a session
+ * and spending — before it mints a permit, and {@link sendRestore} takes the permit
+ * out of `PERMITS` with a `delete` that is checked in exactly the same way, before it
+ * calls the sender. **Both are checked for one reason**: each is preceded by checks
+ * that read properties off values a caller supplied, any one of which can reach a
+ * getter or a proxy trap and re-enter here synchronously, so a deletion whose result
+ * is discarded lets the outer call go on to spend what the inner one already spent.
+ * That was the 2c-5-4a review's High, and it stood while every word above except this
+ * paragraph was already written. So one question yields at most one permit and one
+ * permit yields at most one send — one answered question authorizes at most one write. What that does **not** say is that a session
  * can be asked only once: {@link prepareRestore} mints a fresh question every time it
  * is called on a session with none pending, and each is its own authorization,
  * because asking again *is* asking again. The construct — runtime membership keyed on
@@ -1359,10 +1372,20 @@ interface RestorePermit {
  * A `WeakMap` rather than a property, for `invalidation.ts`'s reason one operation
  * along: a property is recoverable by reflection whatever its key is, and object
  * spread and `structuredClone` copy it, while a clone of a {@link StartedRestore} is
- * a different object and therefore not a key here. Deleting the entry is what makes
- * the **permit** one-shot — the question that minted it is spent one step earlier, in
- * {@link PENDING_CONFIRMATIONS} — and {@link sendRestore} deletes it **before** it
- * calls the sender, so a re-entrant caller cannot spend it twice either.
+ * a different object and therefore not a key here. **A checked deletion is what makes
+ * the permit one-shot** — the question that minted it is spent one step earlier, in
+ * {@link PENDING_CONFIRMATIONS} — and {@link sendRestore} performs it **before** it
+ * calls the sender: `WeakMap.delete` answers whether this key was still held *and*
+ * removes it in one operation that runs no user code, so what authorizes the send is
+ * the deletion's own result.
+ *
+ * **Deleting and discarding the result was not the same guarantee**, and that is the
+ * 2c-5-4a review's High. {@link permitHolds} reads a dozen properties off values a
+ * caller supplied; any one of them can be a getter or a proxy trap that re-enters
+ * {@link sendRestore} with this same key, and an inner call that validated, deleted
+ * and entered its sender left the outer call ignoring a deletion that had already
+ * failed and calling the sender a second time. One permit, two whole-file
+ * replacements.
  *
  * The construct is `rememberTheConflict`'s in `./workspace.svelte.ts`: a spend bound
  * to the value the answer arrived on.
@@ -1522,14 +1545,39 @@ export type SendRestore = (
 export type RestoreSend =
   | {
       /**
-       * No unspent permit authorized this send, so the sender was never called.
+       * **This call held no permit at all**, so the sender was never called and this
+       * call has nothing to say about the session.
        *
-       * One arm for all of it, because a person is told the same thing by every
-       * one: nothing was confirmed, the confirmation had already been spent, or
-       * something it was bound to moved before it could be. What is on screen is
-       * {@link restoreRefusal}'s answer over the session as it stands.
+       * Three ways in, and they agree about the session for one reason: nothing was
+       * confirmed; the permit had already been spent by an earlier call; or it was
+       * spent by a **re-entrant** call that reached the checked deletion first. In
+       * the last two, whichever call spent the permit is the one that answers for
+       * the session, and a caller that installed this call's argument instead would
+       * be installing a session that call did not produce.
        */
       readonly kind: 'notAttempted';
+    }
+  | {
+      /**
+       * A permit was there, no longer described the session and the window, and was
+       * consumed. **This restore attempt sent nothing.**
+       *
+       * Distinct from `notAttempted` because the session has to move. The
+       * confirmation put it in `saving`, every editing transition in this module is
+       * a no-op while it is there (see {@link frozen}), and a screen given that
+       * session back would go on saying a replacement is in flight when no command
+       * ran. {@link restoreConfirmationWithdrawn} is the transition that takes it
+       * back to a state a person can act on; what is then drawn is
+       * {@link restoreRefusal}'s answer over the live session and the live window.
+       *
+       * **The permit is spent by the mismatch rather than left for a retry**, which
+       * is a deliberate rule and not bookkeeping: a confirmation authorizes one send
+       * attempt, so a world that moved under it is asked again rather than sent to
+       * once it happens to move back. **This says nothing about the acknowledgement**
+       * — {@link restoreConfirmationWithdrawn} keeps that, still bound to the same
+       * candidate, so asking again does not mean collecting consent again.
+       */
+      readonly kind: 'withdrawn';
     }
   | {
       /** The sender was called exactly once, and this is what it answered. */
@@ -1554,6 +1602,14 @@ export type RestoreSend =
  * a destination the window no longer gives this revision, and a competing surface —
  * so the two cannot disagree about anything but the arm that is inverted by
  * construction.
+ *
+ * **Every read below is caller-controlled and may run arbitrary code.** `session`
+ * and `context` are ordinary values a caller assembled, `readonly` freezes nothing at
+ * runtime, and a `$state` array is a proxy — so a getter or a trap reached here can
+ * re-enter {@link sendRestore} synchronously, before this predicate has returned.
+ * That is why its caller treats the deletion that follows as the authorization
+ * rather than as tidying up, and why this function must never be read as running
+ * atomically.
  *
  * @param permit - What the confirmation authorized.
  * @param session - The session as it stands **now**.
@@ -1607,10 +1663,22 @@ function permitHolds(
  * 2. it is checked against the **live** session and the **live** context — every
  *    value it binds, the candidate's own bytes, the revision this window projects
  *    for the destination, and the surfaces it has open. A confirmation carried past
- *    a change to any of them sends nothing;
- * 3. the permit is **deleted before `send` is called**, synchronously, so a
- *    re-entrant or concurrent caller finds nothing to spend even while the first
- *    send is still in flight.
+ *    a change to any of them sends nothing, and the permit is consumed by the
+ *    mismatch: the answer is `withdrawn`, which is a session the caller has to
+ *    install rather than a session it may leave as it found it;
+ * 3. the permit is **spent by a checked deletion before `send` is called**. The
+ *    deletion's own result is the authorization, so a re-entrant or concurrent
+ *    caller finds nothing to spend — and, just as importantly, a call that *loses*
+ *    that race answers `notAttempted` instead of calling the sender anyway.
+ *
+ * **Step 3 is checked because step 2 is not atomic.** {@link permitHolds} reads a
+ * dozen properties off `session` and `context`, both of which a caller assembled, and
+ * any one of them can be a getter or a proxy trap whose body re-enters this function
+ * with the same {@link StartedRestore}. The inner call can then validate, delete the
+ * permit and enter its own sender before the outer {@link permitHolds} has returned;
+ * with the deletion's result discarded, the outer call sent as well. One permit, two
+ * whole-file replacements — the 2c-5-4a review's High, and the reason the prose here
+ * used to promise atomicity the code did not give.
  *
  * What reaches the wire is the permit's own submission: the retained candidate's
  * exact bytes and the base revision the confirmation was given at. Neither can be
@@ -1625,7 +1693,12 @@ function permitHolds(
  *
  * **What no type here forces**: that `session` and `context` are the live ones — a
  * caller that keeps the pair it confirmed with and never looks again gets agreement
- * it did not earn, which is `observed`'s limit one argument along. Nor that `send`
+ * it did not earn, which is `observed`'s limit one argument along. Nor that `session`
+ * is the one this permit was minted with: `BrowserState.restoreDocument` takes it off
+ * `started` for exactly that reason, and it is a coordinator that closes it rather
+ * than a type here. Nor that a caller installs the transition a `withdrawn` answer
+ * calls for — {@link restoreConfirmationWithdrawn} exists and is named in this type's
+ * own documentation, and nothing makes anybody call it. Nor that `send`
  * is `BrowserState.saveRawDocument`, or that it writes anything at all —
  * `async () => ({ kind: 'failed', mayHaveWritten: false })` type-checks, exactly as
  * `openWholeDocumentSave`'s `forget` may have an empty body. And nothing stops a
@@ -1640,7 +1713,8 @@ function permitHolds(
  *   own open surfaces, read **now** rather than when the question was answered.
  * @param send - `BrowserState.saveRawDocument`. Called at most once, and never at
  *   all without an unspent permit that still holds.
- * @returns What became of the attempt.
+ * @returns What became of the attempt: nothing held, a permit consumed by a
+ *   mismatch, or the sender's own answer.
  */
 export async function sendRestore(
   started: StartedRestore | null,
@@ -1652,12 +1726,25 @@ export async function sendRestore(
     return { kind: 'notAttempted' };
   }
   const permit = PERMITS.get(started);
-  if (permit === undefined || !permitHolds(permit, session, context)) {
+  if (permit === undefined) {
     return { kind: 'notAttempted' };
   }
-  // **Spent before the sender is called**, so nothing that runs during the send —
-  // including the sender itself — can spend it again.
-  PERMITS.delete(started);
+  if (!permitHolds(permit, session, context)) {
+    // **Consumed rather than left for a retry**, and consumed by a *checked*
+    // deletion for the same reason the authorizing one is: a call that finds the
+    // permit already gone did not consume anything, so it has no claim on the
+    // session and says `notAttempted` instead of describing a withdrawal it did not
+    // perform.
+    return PERMITS.delete(started) ? { kind: 'withdrawn' } : { kind: 'notAttempted' };
+  }
+  // **The deletion is the authorization**, not a tidy-up after one. `permitHolds`
+  // above ran caller-supplied getters and proxy traps, so a re-entrant call may
+  // already have spent this permit and entered its own sender; the only way to know
+  // is to ask the operation that also consumes it. A discarded result here is one
+  // permit issuing two whole-file replacements.
+  if (!PERMITS.delete(started)) {
+    return { kind: 'notAttempted' };
+  }
   const answer = await send(
     permit.document,
     permit.submission.baseRevision,
@@ -1806,6 +1893,46 @@ export function applyRestore(
           }
   };
 } // End of function applyRestore()
+
+/**
+ * Records that a confirmation was consumed without anything reaching a command.
+ *
+ * **The session {@link confirmRestore} produced is not a state a person can act
+ * on.** It carries `phase: 'saving'` and the frozen submission, and while it does
+ * every catalogue, selection, candidate and base-revision transition in this module
+ * answers its own argument unchanged ({@link frozen}). So a send that reached no
+ * command has to move the session back, or a screen is left saying that a replacement
+ * is in flight when none is running, with no ordinary transition that takes it
+ * anywhere. That was the 2c-5-4a review's Medium, and the record before it claimed a
+ * recovery — *the panel asks again* — that the model did not have.
+ *
+ * **Nothing about the candidate changes.** The retained bytes, whatever consent they
+ * carry, the catalogue and the chosen entry are all kept, because no command ran and
+ * nothing about the backup entry was learnt. What refuses the next attempt is
+ * {@link restoreRefusal} over the live session and the live window, which is the
+ * sentence a screen already draws; this transition is only what lets it be reached.
+ *
+ * **{@link RestoreSession.submitted} is left as the confirmation set it**, and that
+ * is worth a sentence because the field's own name claims an attempt. What it holds
+ * is the submission derived from the retained candidate at that candidate's base
+ * revision — the same value a second confirmation over the same candidate produces —
+ * so a refusal already on screen can still be consented to. Nothing here says a
+ * command ran.
+ *
+ * **It is not {@link restoreCouldNotBeSent}.** That one is for a command that ran and
+ * produced no outcome, and it raises a {@link SendFailure} because the file may
+ * already hold the candidate. Here no command ran, there is nothing to be uncertain
+ * about, and no failure is raised.
+ *
+ * @param session - The session the consumed confirmation was minted with.
+ * @returns The session back to its resting state, with the candidate retained.
+ */
+export function restoreConfirmationWithdrawn(session: RestoreSession): RestoreSession {
+  // `pending` is already `null` on every session a confirmation minted; setting it
+  // is what makes that true of every path rather than of the ordinary one, which is
+  // `applyRestore`'s reason for the same line.
+  return { ...session, phase: 'editing', inFlight: null, pending: null };
+} // End of function restoreConfirmationWithdrawn()
 
 /**
  * Records that the restore produced no outcome.

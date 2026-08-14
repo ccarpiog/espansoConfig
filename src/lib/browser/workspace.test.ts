@@ -14,9 +14,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
 import { classifyFailure } from '../ipc/errors';
-import type { CommandResult, RawSaveOutcome, ReloadAfterRawSave } from '../ipc/commands';
+import type {
+  CommandResult,
+  RawSaveInvalidation,
+  RawSaveOutcome,
+  ReloadAfterRawSave
+} from '../ipc/commands';
 import type {
   Acknowledgement,
+  BackupBatchId,
+  BackupBatchListing,
+  BackupEntry,
+  BackupEntryListing,
+  BackupTextResponse,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -85,7 +95,30 @@ import {
 } from './recovery';
 import type { ConflictModel, ReloadConfirmation } from './saveOutcome';
 import {
+  acknowledgeRestoreFindings,
+  batchesLoaded,
+  candidateRead,
+  candidateText,
+  chooseBatch,
+  chooseEntry,
+  confirmRestore,
+  entriesLoaded,
+  loadingBatches,
+  loadingEntries,
+  prepareRestore,
+  restoreRefusal,
+  revisionInProjection,
+  startRestore,
+  targetRevisionObserved,
+  type InvalidateEverySurface,
+  type OpenWriteSurface,
+  type RestoreContext,
+  type RestoreSession,
+  type StartedRestore
+} from './restore';
+import {
   createBrowserState,
+  type BackupCommands,
   type BrowserCommands,
   type BrowserState,
   type RawSaveAnswer
@@ -6294,3 +6327,854 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(commands.deleteMatch).toHaveBeenCalledTimes(2);
   }); // End of the "already there" case
 }); // End of the "deferred adoption" suite
+
+/**
+ * The batch every restore case in this file lists entries of.
+ *
+ * A folder name, and nothing here reads it as a time: consult Q6 forbids *taken
+ * at*, *the version from* and every other historical claim, and a fixture that
+ * spelled one would be the first place such a sentence appeared.
+ */
+const RESTORE_BATCH: BackupBatchId = { name: '2026-01-01T00-00-00Z-000' };
+
+/** The file every restore case in this file would replace. */
+const RESTORE_TARGET: DocumentId = 2;
+
+/** The hash of the candidate bytes, which is never a base revision. */
+const CANDIDATE_REVISION: ContentRevision = 'candidate-rev-1';
+
+/** The hash of a second read's bytes. */
+const SECOND_CANDIDATE_REVISION: ContentRevision = 'candidate-rev-2';
+
+/**
+ * The candidate's exact bytes.
+ *
+ * **A byte-order mark, CRLF line endings and a trailing space**, deliberately:
+ * what these cases have to hold is that nothing on the path from
+ * `read_backup_text` to `save_raw_document` touches one of them. A restore
+ * candidate never enters an input control, so the raw editor's carriage-return
+ * refusal does not apply to it.
+ */
+const CANDIDATE = '﻿matches:\r\n  - trigger: ":a"\r\n    replace: "b"   \r\n';
+
+/** A second read's bytes, for the cases about asking again. */
+const SECOND_CANDIDATE = 'matches:\n  - trigger: ":z"\n    replace: "y"\n';
+
+/** A refusal the backup reads answer with. */
+const BACKUP_REFUSAL: IpcFailure = {
+  kind: 'command',
+  error: { code: 'backupReadFailed', error: { StaleBatch: { batch: RESTORE_BATCH } } }
+};
+
+/**
+ * One entry of {@link RESTORE_BATCH}, as a listing found it.
+ *
+ * @param relativePath - The entry's path inside the batch.
+ * @returns The entry.
+ */
+function backupEntry(relativePath = 'match/base.yml'): BackupEntry {
+  return {
+    id: { batch: RESTORE_BATCH, relative_path: relativePath },
+    display_path: relativePath,
+    length: '42',
+    target: { InConfigRoot: { relative_path: relativePath } }
+  };
+} // End of function backupEntry()
+
+/** The batch listing every restore case starts from. */
+const BACKUP_BATCHES: BackupBatchListing = {
+  root: 'Present',
+  batches: [{ id: RESTORE_BATCH, display_name: RESTORE_BATCH.name }],
+  skipped: [],
+  unrecognised: 0,
+  unreadable: 0,
+  complete: true
+};
+
+/** That batch's entry listing. */
+const BACKUP_ENTRIES: BackupEntryListing = {
+  batch: RESTORE_BATCH,
+  entries: [backupEntry()],
+  skipped: [],
+  unrecognised: 0,
+  unreadable: 0,
+  unaddressable: 0,
+  complete: true
+};
+
+/**
+ * What one entry's text read answers.
+ *
+ * @param text - The exact bytes.
+ * @param revision - The hash of exactly those bytes.
+ * @returns The response, as it crosses the boundary.
+ */
+function backupText(text = CANDIDATE, revision = CANDIDATE_REVISION): BackupTextResponse {
+  return { entry: backupEntry(), document: RESTORE_TARGET, text, revision };
+} // End of function backupText()
+
+/** What each of the three backup reads should answer, in order. */
+interface BackupScript {
+  /** What `list_backup_batches` answers, in order. */
+  readonly batches?: readonly CommandResult<BackupBatchListing>[];
+  /** What `list_backup_entries` answers, in order. */
+  readonly entries?: readonly CommandResult<BackupEntryListing>[];
+  /** What `read_backup_text` answers, in order. */
+  readonly texts?: readonly CommandResult<BackupTextResponse>[];
+}
+
+/**
+ * A backup surface that answers from a script.
+ *
+ * Lists rather than single answers for the reason `Script.moves` is one: the
+ * interesting case here is a **second** ask, because a listing dropped while a
+ * restore was in flight is asked for again and this is what tells the two answers
+ * apart.
+ *
+ * @param script - What each of the three reads should answer.
+ * @returns The commands, with `vi.fn` wrappers so calls can be counted.
+ */
+function scriptedBackups(script: BackupScript = {}): BackupCommands {
+  let batches = 0;
+  let entries = 0;
+  let texts = 0;
+  return {
+    listBackupBatches: vi.fn(async () => {
+      const answer: CommandResult<BackupBatchListing> = script.batches?.[batches++] ?? {
+        ok: true,
+        value: BACKUP_BATCHES
+      };
+      return answer;
+    }),
+    listBackupEntries: vi.fn(async () => {
+      const answer: CommandResult<BackupEntryListing> = script.entries?.[entries++] ?? {
+        ok: true,
+        value: BACKUP_ENTRIES
+      };
+      return answer;
+    }),
+    readBackupText: vi.fn(async () => {
+      const answer: CommandResult<BackupTextResponse> = script.texts?.[texts++] ?? {
+        ok: true,
+        value: backupText()
+      };
+      return answer;
+    })
+  };
+} // End of function scriptedBackups()
+
+/**
+ * A ready workspace with a restore opened over `match/base.yml`.
+ *
+ * @param state - The state to open the restore over.
+ * @returns The session, at its resting state with nothing asked for.
+ */
+function openRestore(state: BrowserState): RestoreSession {
+  const view = state.views.find((held) => held.id === RESTORE_TARGET);
+  if (view === undefined) {
+    throw new Error('the destination was expected to be projected');
+  }
+  return startRestore(view);
+} // End of function openRestore()
+
+/**
+ * What this window observes, read the way the model says it must be read.
+ *
+ * `revisionInProjection` over the state's own projections, never
+ * `session.baseRevision`: a confirmation that compares two values minted together
+ * observes nothing, and this helper is what the cases use so that the one case
+ * about **disagreement** can be seen to arrange it deliberately.
+ *
+ * @param state - The window.
+ * @param session - The session being asked about.
+ * @returns The context every gate takes.
+ */
+function windowFor(state: BrowserState, session: RestoreSession): RestoreContext {
+  return { observed: revisionInProjection(state.views, session.target), surfaces: [] };
+} // End of function windowFor()
+
+/**
+ * Walks a session as far as one retained candidate, through the wrappers.
+ *
+ * Every read goes through {@link BrowserState}, which is the point: no `.svelte`
+ * file imports `../ipc/commands`, so this is the path a screen has.
+ *
+ * @param state - The window.
+ * @param session - The session to walk.
+ * @returns The session holding the candidate.
+ */
+async function walkToACandidate(
+  state: BrowserState,
+  session: RestoreSession
+): Promise<RestoreSession> {
+  const listed = batchesLoaded(loadingBatches(session), await state.listBackupBatches());
+  const chosen = chooseBatch(listed, RESTORE_BATCH);
+  const walked = entriesLoaded(
+    loadingEntries(chosen),
+    await state.listBackupEntries(RESTORE_BATCH)
+  );
+  return takeTheCandidate(state, chooseEntry(walked, backupEntry().id));
+} // End of function walkToACandidate()
+
+/**
+ * Reads the chosen entry's text and hands the answer to the session.
+ *
+ * The refusal arm is `candidateRefused`'s and is exercised in `restore.test.ts`;
+ * what this helper is for is the cases that need a candidate, and the cases about
+ * a dropped answer, which need the read to have really happened.
+ *
+ * @param state - The window.
+ * @param session - The session that chose the entry.
+ * @returns The session the answer produced, which is the same session when the
+ *   model dropped it.
+ */
+async function takeTheCandidate(
+  state: BrowserState,
+  session: RestoreSession
+): Promise<RestoreSession> {
+  const entry = session.entry;
+  if (entry === null) {
+    throw new Error('an entry was expected to have been chosen');
+  }
+  const answer = await state.readBackupText(entry, session.target);
+  if (!answer.ok) {
+    throw new Error('this read was expected to answer');
+  }
+  return candidateRead(session, answer.value);
+} // End of function takeTheCandidate()
+
+/**
+ * A workspace, a restore, a candidate and an answered question.
+ *
+ * @param commands - The workspace surface.
+ * @param backups - The backup surface.
+ * @returns The window and the session with the question pending.
+ */
+async function readyToConfirm(
+  commands: BrowserCommands,
+  backups: BackupCommands
+): Promise<{ state: BrowserState; session: RestoreSession }> {
+  const state = createBrowserState(commands, () => undefined, backups);
+  await state.open(null);
+  const withCandidate = await walkToACandidate(state, openRestore(state));
+  return { state, session: prepareRestore(withCandidate, windowFor(state, withCandidate)) };
+} // End of function readyToConfirm()
+
+/**
+ * Sends a confirmed restore and requires an answer about the session.
+ *
+ * `BrowserState.restoreDocument` answers `null` when this call held no permit at all,
+ * which two cases below assert deliberately; everywhere else a `null` would mean the
+ * case sent nothing and every assertion after it would be about a session nobody
+ * produced.
+ *
+ * @param state - The window.
+ * @param started - What the confirmation produced.
+ * @param invalidate - What the caller does about every write surface over the
+ *   replaced file.
+ * @param surfaces - Every write surface this window has open.
+ * @returns The session the send answered with.
+ */
+async function restoreThrough(
+  state: BrowserState,
+  started: StartedRestore,
+  invalidate: InvalidateEverySurface = () => undefined,
+  surfaces: readonly OpenWriteSurface[] = []
+): Promise<RestoreSession> {
+  const answered = await state.restoreDocument(started, surfaces, invalidate);
+  if (answered === null) {
+    throw new Error('this send was expected to answer about the session');
+  }
+  return answered;
+} // End of function restoreThrough()
+
+/** A restore that the transaction refused, so the session stays askable. */
+const RAW_REFUSED: CommandResult<SaveResult> = {
+  ok: true,
+  value: {
+    outcome: 'refused',
+    verdict: 'RefusedForUnacknowledgedSuspicions',
+    findings: [suspicion()]
+  }
+};
+
+/** A restore that wrote nothing because the candidate was the bytes already held. */
+const RAW_UNCHANGED: CommandResult<SaveResult> = {
+  ok: true,
+  value: {
+    outcome: 'saved',
+    revision: 'rev-a',
+    committed: false,
+    notes: [],
+    backup_taken: false,
+    moved: null
+  }
+};
+
+describe('reading the backup catalogue', () => {
+  it('answers the batch listing and says nothing to the developer channel', async () => {
+    const backups = scriptedBackups();
+    const reported: IpcFailure[] = [];
+    const state = createBrowserState(scriptedCommands(), (next) => reported.push(next), backups);
+    await state.open(null);
+
+    expect(await state.listBackupBatches()).toEqual({ ok: true, value: BACKUP_BATCHES });
+    expect(backups.listBackupBatches).toHaveBeenCalledTimes(1);
+    expect(reported).toEqual([]);
+  }); // End of the "batch listing" case
+
+  it('answers a refused batch listing and reports it as well', async () => {
+    // Reported **and** answered, which is the shape every read on this state uses:
+    // the developer channel gets it, and the caller gets it too so the refusal can
+    // be put on a session and drawn. A read that only reported would leave the
+    // catalogue looking like it had never been asked.
+    const backups = scriptedBackups({ batches: [{ ok: false, failure: BACKUP_REFUSAL }] });
+    const reported: IpcFailure[] = [];
+    const state = createBrowserState(scriptedCommands(), (next) => reported.push(next), backups);
+    await state.open(null);
+
+    expect(await state.listBackupBatches()).toEqual({ ok: false, failure: BACKUP_REFUSAL });
+    expect(reported).toEqual([BACKUP_REFUSAL]);
+  }); // End of the "refused batch listing" case
+
+  it('hands the batch identity to the command exactly as it was given', async () => {
+    const backups = scriptedBackups();
+    const state = createBrowserState(scriptedCommands(), () => undefined, backups);
+    await state.open(null);
+
+    expect(await state.listBackupEntries(RESTORE_BATCH)).toEqual({
+      ok: true,
+      value: BACKUP_ENTRIES
+    });
+    // **The same object, and `toBe` is what says so.** It is opaque, it is not
+    // authority, and the command re-resolves it beneath the workspace-owned backup
+    // folder. `toEqual` on the argument list passed a rebuilt but structurally equal
+    // batch, so the record's claim that the identity arrives "as the very object it
+    // was given" was evidence this suite did not hold — the 2c-5-4a review's Low.
+    const call = vi.mocked(backups.listBackupEntries).mock.calls[0]!;
+    expect(call).toHaveLength(1);
+    expect(call[0]).toBe(RESTORE_BATCH);
+  }); // End of the "entry listing" case
+
+  it('answers a refused entry listing and reports it as well', async () => {
+    const backups = scriptedBackups({ entries: [{ ok: false, failure: BACKUP_REFUSAL }] });
+    const reported: IpcFailure[] = [];
+    const state = createBrowserState(scriptedCommands(), (next) => reported.push(next), backups);
+    await state.open(null);
+
+    expect(await state.listBackupEntries(RESTORE_BATCH)).toEqual({
+      ok: false,
+      failure: BACKUP_REFUSAL
+    });
+    expect(reported).toEqual([BACKUP_REFUSAL]);
+  }); // End of the "refused entry listing" case
+
+  it('hands both arguments to the text read and answers the exact bytes', async () => {
+    const backups = scriptedBackups();
+    const state = createBrowserState(scriptedCommands(), () => undefined, backups);
+    await state.open(null);
+
+    const answer = await state.readBackupText(backupEntry().id, RESTORE_TARGET);
+
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) {
+      return;
+    }
+    // Byte for byte: the mark, both carriage returns and the trailing space.
+    expect(answer.value.text).toBe(CANDIDATE);
+    expect(answer.value.revision).toBe(CANDIDATE_REVISION);
+    expect(vi.mocked(backups.readBackupText).mock.calls[0]).toEqual([
+      backupEntry().id,
+      RESTORE_TARGET
+    ]);
+  }); // End of the "text read" case
+
+  it('answers a refused text read and reports it as well', async () => {
+    const backups = scriptedBackups({ texts: [{ ok: false, failure: BACKUP_REFUSAL }] });
+    const reported: IpcFailure[] = [];
+    const state = createBrowserState(scriptedCommands(), (next) => reported.push(next), backups);
+    await state.open(null);
+
+    expect(await state.readBackupText(backupEntry().id, RESTORE_TARGET)).toEqual({
+      ok: false,
+      failure: BACKUP_REFUSAL
+    });
+    expect(reported).toEqual([BACKUP_REFUSAL]);
+  }); // End of the "refused text read" case
+
+  it('remembers nothing about a read, and disturbs nothing this window holds', async () => {
+    // **Three asks, three commands.** Nothing here caches a listing or records that
+    // one was asked for: the catalogue lives on a `RestoreSession`, which is what
+    // makes calling this again the way to ask again. And all three reads leave the
+    // projections, the selection and the viewer's snapshot exactly as they were —
+    // they read a folder, and say nothing about the workspace.
+    const backups = scriptedBackups();
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined, backups);
+    await state.open(null);
+    state.show({ kind: 'document', id: RESTORE_TARGET });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    const heldRevision = state.scopedDocument?.revision;
+    const heldSelection = state.selected;
+
+    await state.listBackupBatches();
+    await state.listBackupBatches();
+    await state.listBackupBatches();
+    await state.listBackupEntries(RESTORE_BATCH);
+    await state.readBackupText(backupEntry().id, RESTORE_TARGET);
+    await state.readBackupText(backupEntry().id, RESTORE_TARGET);
+
+    expect(backups.listBackupBatches).toHaveBeenCalledTimes(3);
+    expect(backups.listBackupEntries).toHaveBeenCalledTimes(1);
+    expect(backups.readBackupText).toHaveBeenCalledTimes(2);
+    expect(state.scopedDocument?.revision).toBe(heldRevision);
+    expect(state.selected).toBe(heldSelection);
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(commands.documentText).toHaveBeenCalledTimes(1);
+  }); // End of the "nothing remembered" case
+}); // End of the "reading the backup catalogue" suite
+
+describe('an answer that lands while a restore is being written', () => {
+  it('drops a candidate read, and the same wrapper is how it is asked for again', async () => {
+    // **2c-5-3's first handed-forward obligation.** A send in flight freezes the
+    // catalogue, the selection and the candidate — that is what
+    // `browser.restore.refused.inFlight` promises — so an answer that lands then is
+    // dropped rather than installed under a submission already on its way. What
+    // step 4 owes is a way to ask again, and it is this method: the coordinator
+    // remembers nothing about a read, so calling it again really does ask again.
+    const backups = scriptedBackups({
+      texts: [
+        { ok: true, value: backupText() },
+        { ok: true, value: backupText(SECOND_CANDIDATE, SECOND_CANDIDATE_REVISION) },
+        { ok: true, value: backupText(SECOND_CANDIDATE, SECOND_CANDIDATE_REVISION) }
+      ]
+    });
+    const { state, session } = await readyToConfirm(
+      scriptedCommands({ raws: [RAW_REFUSED] }),
+      backups
+    );
+    const started = confirmRestore(session, windowFor(state, session));
+    expect(started).not.toBeNull();
+    if (started === null) {
+      return;
+    }
+    const inFlight = started.session;
+
+    // The second read really happens, and the model really drops it.
+    const dropped = await takeTheCandidate(state, inFlight);
+    expect(dropped).toBe(inFlight);
+    expect(candidateText(inFlight.preview!)).toBe(CANDIDATE);
+
+    const answered = await restoreThrough(state, started);
+    expect(answered.phase).toBe('editing');
+    expect(answered.restored).toBe(false);
+
+    // Asked again, and installed this time.
+    const again = await takeTheCandidate(state, answered);
+    expect(candidateText(again.preview!)).toBe(SECOND_CANDIDATE);
+    expect(backups.readBackupText).toHaveBeenCalledTimes(3);
+  }); // End of the "dropped candidate" case
+
+  it('drops a batch listing, and the same wrapper is how it is asked for again', async () => {
+    const backups = scriptedBackups();
+    const { state, session } = await readyToConfirm(
+      scriptedCommands({ raws: [RAW_REFUSED] }),
+      backups
+    );
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    const inFlight = started.session;
+
+    const dropped = batchesLoaded(inFlight, await state.listBackupBatches());
+    expect(dropped).toBe(inFlight);
+
+    const answered = await restoreThrough(state, started);
+    const again = batchesLoaded(loadingBatches(answered), await state.listBackupBatches());
+
+    expect(again.batches).toEqual({ kind: 'loaded', listing: BACKUP_BATCHES });
+    // Three: the walk to the candidate, the dropped ask, and the ask again.
+    expect(backups.listBackupBatches).toHaveBeenCalledTimes(3);
+  }); // End of the "dropped batch listing" case
+}); // End of the "answer landing during a send" suite
+
+describe('sending a confirmed restore', () => {
+  it('sends nothing at all when no confirmation was produced', async () => {
+    // **The proof that no save is issued without a confirmation**, watched rather
+    // than argued from the shape of a signature: the sender is a spy, and the arm
+    // that answers "nothing was attempted" must never have reached it.
+    //
+    // `null` comes back rather than a session, and that is the whole of what this
+    // call can honestly say: there is no confirmation, so there is no session it
+    // could describe, and the caller keeps the one it walked to a candidate with.
+    const commands = scriptedCommands({ raws: [RAW_COMMITTED] });
+    const state = createBrowserState(commands, () => undefined, scriptedBackups());
+    await state.open(null);
+    const session = await walkToACandidate(state, openRestore(state));
+    const invalidations: RawSaveInvalidation[] = [];
+
+    const answered = await state.restoreDocument(null, [], (invalidation) => {
+      invalidations.push(invalidation);
+    });
+
+    expect(answered).toBeNull();
+    expect(session.phase).toBe('editing');
+    expect(commands.saveRawDocument).not.toHaveBeenCalled();
+    expect(invalidations).toEqual([]);
+  }); // End of the "no confirmation" case
+
+  it('sends nothing when this window re-read the file after the confirmation', async () => {
+    // **The revision half of the observation is this state's own answer.** The
+    // caller passes only its open surfaces; the revision comes from
+    // `revisionInProjection` over the projections this state holds, read here. So a
+    // caller that would have handed back the session's own frozen base — which is
+    // the hole `restore.ts` records as unforceable — cannot: the window really did
+    // move, and the permit is refused.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({
+      documents,
+      raws: [RAW_COMMITTED],
+      reload: { ok: true, value: replacedDocument() }
+    });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+
+    expect(await state.rereadDocument(RESTORE_TARGET)).toBeNull();
+    expect(revisionInProjection(state.views, RESTORE_TARGET)).toBe('rev-c');
+
+    const answered = await restoreThrough(state, started);
+
+    expect(commands.saveRawDocument).not.toHaveBeenCalled();
+    // **And what comes back is askable, which is the 2c-5-4a review's Medium.** The
+    // confirmation put this session in `saving`, and the model makes every editing
+    // transition a no-op while it is there — so returning it unchanged left a screen
+    // claiming a send was in flight when no command had run, with nothing that could
+    // take it anywhere. The candidate is kept, the phase is back, and the refusal a
+    // panel would draw is the one that is actually true of the window now.
+    expect(answered.phase).toBe('editing');
+    expect(answered.inFlight).toBeNull();
+    expect(candidateText(answered.preview!)).toBe(CANDIDATE);
+    expect(restoreRefusal(answered, windowFor(state, answered))).toEqual({
+      kind: 'targetMoved'
+    });
+    // The person really can act on it: re-measuring against what this window now
+    // projects is a transition the frozen session refused outright.
+    const remeasured = targetRevisionObserved(
+      answered,
+      revisionInProjection(state.views, RESTORE_TARGET)
+    );
+    expect(remeasured.baseRevision).toBe('rev-c');
+    expect(restoreRefusal(remeasured, windowFor(state, remeasured))).toBeNull();
+  }); // End of the "window moved after the confirmation" case
+
+  it('spends the permit on a mismatch, so the same confirmation cannot be retried', async () => {
+    // **Consent is for one attempt.** A permit that no longer describes the session
+    // and the window is consumed by that mismatch rather than left behind, so a
+    // caller that repairs whatever moved and hands the same confirmation over again
+    // sends nothing: it asks again, which is `prepareRestore` and `confirmRestore`
+    // over the repaired session. The second call held no permit at all, so it has
+    // nothing to say about any session and answers `null`.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({
+      documents,
+      raws: [RAW_COMMITTED],
+      reload: { ok: true, value: replacedDocument() }
+    });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    expect(await state.rereadDocument(RESTORE_TARGET)).toBeNull();
+
+    const withdrawn = await restoreThrough(state, started);
+    expect(withdrawn.phase).toBe('editing');
+
+    const again = await state.restoreDocument(started, [], () => undefined);
+
+    expect(again).toBeNull();
+    expect(commands.saveRawDocument).not.toHaveBeenCalled();
+  }); // End of the "mismatch spends the permit" case
+
+  it('spends one permit on one write when a surface read re-enters the send', async () => {
+    // **The 2c-5-4a review's High, driven rather than argued.** `permitHolds` reads
+    // a dozen properties off the session and the context, and the open surfaces are
+    // the caller's own array — a plain one here, and a proxy whenever a component
+    // holds it in a `$state`. A trap on it re-enters this method synchronously,
+    // *while the outer call is still validating*: the inner call validates, spends
+    // the permit and reaches the sender before the outer `permitHolds` has
+    // returned. With the
+    // permit's deletion unchecked the outer call then sent as well, so one
+    // confirmation replaced the whole file twice. The deletion's own result is now
+    // the authorization, so the outer call finds nothing to spend.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED, RAW_COMMITTED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
+    const inner: Promise<RestoreSession | null>[] = [];
+    let entered = false;
+    // A proxy over the empty surface list. `competingSurfaceFor` iterates it, which
+    // is the last thing `permitHolds` does — so the trap fires after every other
+    // check has passed and before the permit is spent, which is exactly the window
+    // the finding names.
+    const surfaces = new Proxy([] as OpenWriteSurface[], {
+      get(target, property, receiver): unknown {
+        if (!entered && property === Symbol.iterator) {
+          entered = true;
+          inner.push(state.restoreDocument(started, [], () => undefined));
+        }
+        return Reflect.get(target, property, receiver);
+      } // End of function get()
+    });
+
+    const answered = await state.restoreDocument(started, surfaces, () => undefined);
+    const reentrant = await Promise.all(inner);
+
+    // The trap really fired, so this is the re-entrant case and not one that never
+    // re-entered at all.
+    expect(entered).toBe(true);
+    expect(reentrant).toHaveLength(1);
+    // **One write for one confirmation.** Two would be two whole-file replacements.
+    expect(commands.saveRawDocument).toHaveBeenCalledTimes(1);
+    // And exactly one of the two calls answers about the session: the one that spent
+    // the permit. The other held none and says so.
+    const sessions = [answered, ...reentrant].filter((one) => one !== null);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.restored).toBe(true);
+  }); // End of the "re-entrant send" case
+
+  it('spends one confirmation on one write, however often it is handed over', async () => {
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED, RAW_COMMITTED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
+
+    await restoreThrough(state, started);
+    const twice = await state.restoreDocument(started, [], () => undefined);
+
+    // The second call held no permit, so it says nothing about the session: the one
+    // the first call answered with is the one the caller is holding, and handing
+    // back the confirmation's frozen snapshot would have replaced it.
+    expect(twice).toBeNull();
+    expect(commands.saveRawDocument).toHaveBeenCalledTimes(1);
+  }); // End of the "one confirmation, one write" case
+
+  it('writes the candidate byte for byte, at the base the confirmation froze', async () => {
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
+    const invalidations: RawSaveInvalidation[] = [];
+
+    const answered = await restoreThrough(state, started, (invalidation) => {
+      invalidations.push(invalidation);
+    });
+
+    const call = vi.mocked(commands.saveRawDocument).mock.calls[0]!;
+    expect(call[0]).toBe(RESTORE_TARGET);
+    // The base the confirmation froze, never one re-read just before sending.
+    expect(call[1]).toBe(OPEN_REVISION);
+    // The mark, both carriage returns and the trailing space, unchanged.
+    expect(call[2]).toBe(CANDIDATE);
+    expect(call[3]).toEqual(NOTHING_ACKNOWLEDGED);
+    // The caller's whole-document invalidation ran, once, naming the file and the
+    // revision it now holds.
+    expect(invalidations).toEqual([{ document: RESTORE_TARGET, revision: 'rev-c' }]);
+    expect(answered.restored).toBe(true);
+    expect(answered.outcome?.kind).toBe('saved');
+    expect(answered.extraMessages).toEqual([]);
+    // And the window really moved: the projection is of the bytes that were
+    // written, which is `saveRawDocument`'s own invalidation rather than this one.
+    expect(state.views.find((view) => view.id === RESTORE_TARGET)?.revision).toBe('rev-c');
+  }); // End of the "committed restore" case
+
+  it('does not call the caller’s invalidation when nothing was written', async () => {
+    // `committed: false` is a documented success in which the candidate was
+    // byte-identical to what the file already held. Nothing became stale, so no
+    // surface has to be closed and `restored` stays false — this session did not
+    // carry a replacement out.
+    const commands = scriptedCommands({ raws: [RAW_UNCHANGED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    const invalidations: RawSaveInvalidation[] = [];
+
+    const answered = await restoreThrough(state, started, (invalidation) => {
+      invalidations.push(invalidation);
+    });
+
+    expect(commands.saveRawDocument).toHaveBeenCalledTimes(1);
+    expect(invalidations).toEqual([]);
+    expect(answered.outcome?.kind).toBe('saved');
+    expect(answered.restored).toBe(false);
+  }); // End of the "committed: false" case
+
+  it('shows a conflict and installs nothing in this window', async () => {
+    const conflict = makeConflict({ expected: OPEN_REVISION, disk: replacedDocument() });
+    const commands = scriptedCommands({ raws: [{ ok: true, value: conflict }] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+
+    const answered = await restoreThrough(state, started);
+
+    expect(answered.outcome?.kind).toBe('conflict');
+    expect(answered.restored).toBe(false);
+    // Nothing was written and nothing was installed: the projection is still the
+    // one the person was reading, and only a confirmed reload moves it.
+    expect(state.views.find((view) => view.id === RESTORE_TARGET)?.revision).toBe(OPEN_REVISION);
+  }); // End of the "conflict" case
+
+  it('carries a refusal’s findings back on the second attempt', async () => {
+    const shown = suspicion();
+    const refused: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [shown]
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [refused, RAW_COMMITTED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const first = confirmRestore(session, windowFor(state, session));
+    if (first === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+
+    const answered = await restoreThrough(state, first);
+    expect(answered.outcome?.kind).toBe('refused');
+
+    // The acknowledgement is produced by the session from the refusal it is
+    // showing, never assembled by a caller — and it withdraws the question, so the
+    // person is asked again before anything is sent.
+    const consented = acknowledgeRestoreFindings(answered);
+    const asked = prepareRestore(consented, windowFor(state, consented));
+    const second = confirmRestore(asked, windowFor(state, asked));
+    if (second === null) {
+      throw new Error('this second confirmation was expected to be produced');
+    }
+    documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
+    const committed = await restoreThrough(state, second);
+
+    expect(commands.saveRawDocument).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(commands.saveRawDocument).mock.calls[1]![3]).toEqual({ accepted: [shown] });
+    // And still the same bytes, at the same base.
+    expect(vi.mocked(commands.saveRawDocument).mock.calls[1]![2]).toBe(CANDIDATE);
+    expect(vi.mocked(commands.saveRawDocument).mock.calls[1]![1]).toBe(OPEN_REVISION);
+    expect(committed.restored).toBe(true);
+  }); // End of the "acknowledged refusal" case
+
+  it('says the file may already hold the candidate when the send itself failed', async () => {
+    // Not an outcome, and not "nothing was written": a failure at or after the
+    // rename may have left the candidate on disk, and this window cannot tell.
+    const failure: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'saveFailed',
+        error: {
+          Write: {
+            Io: {
+              step: 'SyncDirectory',
+              path: '/tmp/espanso/match/base.yml',
+              kind: 'Interrupted',
+              raw_os_error: 4
+            }
+          }
+        },
+        may_have_written: true
+      }
+    };
+    const commands = scriptedCommands({ raws: [{ ok: false, failure }] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+
+    const answered = await restoreThrough(state, started);
+
+    expect(answered.phase).toBe('editing');
+    expect(answered.outcome).toBeNull();
+    // The arm that claims less: this window cannot tell, and says so, rather than
+    // reporting that nothing was written.
+    expect(answered.sendFailure?.kind).toBe('mayHaveWritten');
+    // And the reason is `null` here rather than the classified failure: a
+    // whole-document save's failed arm carries only `mayHaveWritten`, which is the
+    // raw editor's identical limit and not this step's to widen.
+    expect(answered.sendFailure?.reason).toBeNull();
+    expect(answered.restored).toBe(false);
+  }); // End of the "uncertain send" case
+
+  it('keeps a committed restore committed when the caller’s invalidation throws', async () => {
+    // **`PROGRESS.md` D2, one surface along.** The bytes are on disk and stay
+    // there; what failed is this window's own forgetting, and it comes back as a
+    // line **beside** the committed outcome rather than in place of it.
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
+    const { state, session } = await readyToConfirm(commands, scriptedBackups());
+    const started = confirmRestore(session, windowFor(state, session));
+    if (started === null) {
+      throw new Error('this confirmation was expected to be produced');
+    }
+    documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
+
+    const answered = await restoreThrough(state, started, () => {
+      throw new Error('a surface refused to close');
+    });
+
+    expect(answered.outcome?.kind).toBe('saved');
+    expect(answered.restored).toBe(true);
+    expect(answered.extraMessages).toHaveLength(1);
+  }); // End of the "invalidation threw" case
+}); // End of the "sending a confirmed restore" suite

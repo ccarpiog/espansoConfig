@@ -13,6 +13,11 @@
  * `identityStaleRevision` and watch what the selection does about it. The
  * default is the real boundary; `workspace.test.ts` supplies a scripted one.
  *
+ * **There are two such objects since 2c-5-4a, not one.** {@link BrowserCommands}
+ * holds the twelve; {@link BackupCommands} holds the three read-only backup
+ * commands. Its own note records why they are apart, and the reason is a
+ * constraint on the step that added them rather than a property of the design.
+ *
  * ## Failure has one channel
  *
  * `reportIpcFailure` for the console, `IpcFailure` on the state for the screen.
@@ -43,9 +48,12 @@ import {
   duplicateMatch,
   getDocument,
   getMatch,
+  listBackupBatches,
+  listBackupEntries,
   listDocuments,
   moveMatch,
   openWorkspace,
+  readBackupText,
   reloadDocument,
   saveMatch,
   saveRawDocument
@@ -60,6 +68,11 @@ import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  BackupBatchId,
+  BackupBatchListing,
+  BackupEntryId,
+  BackupEntryListing,
+  BackupTextResponse,
   ConflictResult,
   ContentRevision,
   DocumentId,
@@ -82,6 +95,18 @@ import type { RepairAttribution, SelectionNotice } from './notices';
 import { authorizeDiskAdoption } from './saveOutcome';
 import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
+import {
+  applyRestore,
+  restoreConfirmationWithdrawn,
+  restoreCouldNotBeSent,
+  revisionInProjection,
+  sendRestore,
+  type InvalidateEverySurface,
+  type OpenWriteSurface,
+  type RestoreContext,
+  type RestoreSession,
+  type StartedRestore
+} from './restore';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
@@ -270,6 +295,68 @@ export const REAL_COMMANDS: BrowserCommands = {
   deleteMatch,
   duplicateMatch,
   saveRawDocument
+};
+
+/**
+ * The three read-only backup commands, as one injectable object.
+ *
+ * **A second surface rather than three more members of {@link BrowserCommands},
+ * and the reason is a constraint on the step that added it rather than a
+ * property of the design.** Five object literals under `src/lib/components/`
+ * implement `BrowserCommands` in full — one each in `DetailPane.test.ts`,
+ * `MatchDeleter.test.ts` and `MatchDuplicator.test.ts`, and two in
+ * `MatchMover.test.ts` — and Phase 2c-5-4a was scoped to change no file there;
+ * three required members added to that interface would not compile in any of
+ * them, and three **optional** ones would let an omission compile into "there is
+ * none", which is the shape this repository refuses everywhere else. A second
+ * surface keeps every member required. Whether the two should be folded into
+ * one, in a commit that can update every implementation at once, is left open in
+ * `docs/decisions/2c-5-4a-notes.md`.
+ *
+ * All three **read** and none of them writes; that is proved on the Rust side by
+ * `src-tauri/src/commands.rs`'s lexical tripwire and by the whole-tree byte
+ * oracle 2c-5-2 added, not here. What this interface exists for is the reason
+ * {@link BrowserCommands} exists: a test that cannot run Tauri still has to be
+ * able to drive a missing backup folder, a stale batch and an entry that is not
+ * valid UTF-8, and watch what a restore session does about each.
+ */
+export interface BackupCommands {
+  /**
+   * Lists the recognised backup batches of the open workspace.
+   *
+   * @returns The listing, or a failure. A missing folder is a **successful**
+   *   answer carrying `root: 'Missing'`, never a failure.
+   */
+  listBackupBatches(): Promise<CommandResult<BackupBatchListing>>;
+  /**
+   * Lists one recognised batch's entries.
+   *
+   * @param batch - The opaque identity a batch listing produced, handed back
+   *   unchanged. It is not authority: the command re-resolves it.
+   * @returns The listing, or a failure.
+   */
+  listBackupEntries(batch: BackupBatchId): Promise<CommandResult<BackupEntryListing>>;
+  /**
+   * Reads one backup entry's exact text, for the file it maps to.
+   *
+   * @param entry - The opaque identity an entry listing produced.
+   * @param document - The live file the entry must map to, by identity. The
+   *   command refuses when it does not, so one file's copy can never be read
+   *   under another file's name.
+   * @returns The entry, the document, the exact text and the hash of exactly
+   *   those bytes, or a failure.
+   */
+  readBackupText(
+    entry: BackupEntryId,
+    document: DocumentId
+  ): Promise<CommandResult<BackupTextResponse>>;
+}
+
+/** The real backup boundary, for the running application. */
+export const REAL_BACKUP_COMMANDS: BackupCommands = {
+  listBackupBatches,
+  listBackupEntries,
+  readBackupText
 };
 
 /** Where the workspace load has got to. */
@@ -1183,6 +1270,158 @@ export interface BrowserState {
     text: string,
     acknowledgement: Acknowledgement
   ): Promise<RawSaveAnswer>;
+  /**
+   * Lists the recognised backup batches.
+   *
+   * **A read this state performs and does not remember.** Nothing here caches a
+   * listing, keys one by workspace, or records that one was asked for: the
+   * catalogue lives on a `RestoreSession` in `./restore.ts`, which is the value a
+   * surface owns, exactly as every other editing session in this application is.
+   * So **calling this again is how a listing is asked for again** — the
+   * affordance 2c-5-3 handed forward, because a catalogue answer that lands while
+   * a restore is being written is dropped by `batchesLoaded` rather than installed
+   * over a send in flight. What no type here forces is that a screen offers it.
+   *
+   * It exists on this state rather than being imported from `../ipc/commands` by
+   * whichever component draws the catalogue for one reason: no `.svelte` file in
+   * this repository imports `../ipc/commands`, and that is a fact about the code
+   * as written rather than a guarantee any type gives.
+   *
+   * The failure is **reported and answered**, the shape every read on this state
+   * uses: the developer channel gets it, and the caller gets it too so that the
+   * refusal can be put on the session and drawn.
+   *
+   * @returns Whatever `list_backup_batches` answered, unchanged.
+   */
+  listBackupBatches(): Promise<CommandResult<BackupBatchListing>>;
+  /**
+   * Lists one recognised batch's entries.
+   *
+   * Re-callable and unremembered, exactly as {@link BrowserState.listBackupBatches}
+   * is, and for the same reason.
+   *
+   * **The batch is the caller's and is forwarded unchanged.** It is an opaque
+   * identity a listing produced; this state neither builds one nor checks one, and
+   * the command re-resolves it beneath the workspace-owned backup folder. Nothing
+   * here can require that it is the batch the caller's session is showing —
+   * `entriesLoaded` in `./restore.ts` is what refuses a listing about another
+   * batch, and it refuses it at the session rather than here.
+   *
+   * @param batch - The opaque identity a batch listing produced.
+   * @returns Whatever `list_backup_entries` answered, unchanged.
+   */
+  listBackupEntries(batch: BackupBatchId): Promise<CommandResult<BackupEntryListing>>;
+  /**
+   * Reads one backup entry's exact text, for one destination.
+   *
+   * Re-callable and unremembered, exactly as {@link BrowserState.listBackupBatches}
+   * is. **The candidate this answers is read once per call and this state keeps no
+   * copy of it**: `candidateRead` in `./restore.ts` retains the bytes on the
+   * session, and consult Q1 is why nothing re-reads them at send time.
+   *
+   * **Both arguments are the caller's and are forwarded unchanged.** The command
+   * refuses when the entry does not map to the document, which is what stops one
+   * file's copy being read under another file's name; this state adds no second
+   * opinion about the filesystem and takes none away.
+   *
+   * @param entry - The opaque identity an entry listing produced.
+   * @param document - The live file the entry must map to, by identity.
+   * @returns Whatever `read_backup_text` answered, unchanged.
+   */
+  readBackupText(
+    entry: BackupEntryId,
+    document: DocumentId
+  ): Promise<CommandResult<BackupTextResponse>>;
+  /**
+   * Sends one confirmed restore, and takes its answer.
+   *
+   * **Restore is a content path on the sixth writer and not a seventh.** This
+   * method issues no command of its own: it hands `sendRestore` in `./restore.ts`
+   * a sender that is {@link BrowserState.saveRawDocument}, so the lock, the
+   * revision check, the reparse, the validation verdict, the acknowledgement, the
+   * backup, this state's own cache invalidation and the seal are all the ones a
+   * raw save already has. There is no restore-specific command and consult Q3
+   * rules that there must not be one.
+   *
+   * **Nothing is sent without an unspent permit**, which is consult Q8 and lives
+   * in `./restore.ts` rather than here: `started` is the value `confirmRestore`
+   * produced, the permit it keys is module-private, and `sendRestore` rechecks the
+   * five bound values, the candidate's own bytes and the two window observations
+   * and then spends the permit with a **checked** deletion — the deletion's own
+   * result is the authorization — **before** the sender is called. A `null` here —
+   * a confirmation that never happened, or one that was refused — reaches no
+   * command at all, and reaches no model transition either: there is no session to
+   * derive, so this method answers `null` and the caller keeps what it has. This
+   * method **adds no check of its own between deciding and spending**, because a
+   * check and a spend separated by any property read are not one operation in
+   * JavaScript.
+   *
+   * **The session is the confirmation's own, and is not a parameter.** It is
+   * `started.session`, which is the only session `sendRestore` can accept: a
+   * signature that took one beside `started` let a caller pair a permit with a
+   * different session, which wrote nothing and came back silent (the 2c-5-4a
+   * review's Medium). What no type could have said, this signature simply does not
+   * let a caller say.
+   *
+   * **A mismatch comes back askable rather than frozen.** When the permit no longer
+   * describes the session and the window, `sendRestore` consumes it and answers
+   * `withdrawn`; this method returns `restoreConfirmationWithdrawn`'s session, which
+   * is out of `saving`, has nothing in flight, keeps the candidate and its consent,
+   * and lets `restoreRefusal` say what is now in the way. Without that transition
+   * the session stayed in the phase the confirmation put it in, every editing
+   * transition in the model was a no-op over it, and the panel had no way back.
+   *
+   * **The revision half of the window's observation is read here, from the
+   * projections this state holds**, and that is the one thing this wrapper adds to
+   * the model's own guarantees. `./restore.ts`'s header records that nothing can
+   * force `RestoreContext.observed` to be the live projection's revision rather
+   * than the session's own frozen base — a caller that hands back
+   * `session.baseRevision` gets agreement it did not earn. Here it cannot: the
+   * value comes from `revisionInProjection` over this state's `views`, read
+   * synchronously before the send. **It is not a refreshed base revision**: what
+   * is written is the base the confirmation froze, taken off the permit, and this
+   * observation can only make a send that should be refused actually be refused.
+   *
+   * **The open surfaces are the caller's, because this state cannot observe
+   * them.** Every write surface is a session held inside a component —
+   * `MatchEditor.svelte`'s, `MatchCreator.svelte`'s, and the four others — so no
+   * coordinator can see one, exactly as no coordinator can see a draft's derived
+   * `isDirty` (R36). Whichever component hosts them is the only thing that can
+   * enumerate them, and nothing here can check that the list it was handed is
+   * complete; an empty array claims there are none.
+   *
+   * **The invalidation is the caller's too, and for the same reason.** A committed
+   * whole-document replacement makes every `MatchId` in that file stale, so every
+   * write surface over it has to be closed or marked terminal — and only the
+   * component that holds them can do it. It is passed straight through to
+   * `applyRestore`, which discharges it inside `openWholeDocumentSave`; a body
+   * that throws is classified onto the answer and **never unwrites the file**.
+   * `() => {}` satisfies the type, so what the signature forces is that a caller
+   * cannot take a restore's answer without supplying one.
+   *
+   * **What no type forces, in the same sentence as what one does.** Nothing stops a
+   * component calling {@link BrowserState.saveRawDocument} with any text it likes
+   * and skipping this method, which is the hole every writing command has had
+   * since 2b-2a; and nothing makes a caller *install* the session this answers —
+   * a caller that drops it keeps whatever it was holding, exactly as it does for
+   * every other value-model surface in this directory. What is forced is that the
+   * bytes **this** method sends are the permit's own submission, that no argument
+   * of this signature can substitute them, and that the session this answers about
+   * is the one the confirmation minted rather than one a caller chose.
+   *
+   * @param started - What `confirmRestore` in `./restore.ts` produced, or `null`.
+   * @param surfaces - Every write surface this window has open, in any order.
+   * @param invalidate - What the caller does about every write surface over the
+   *   replaced file. Required, with no default.
+   * @returns The session showing what the restore ended as — including a
+   *   consumed confirmation that sent nothing — or `null` when this call held no
+   *   permit at all and therefore has nothing to say about any session.
+   */
+  restoreDocument(
+    started: StartedRestore | null,
+    surfaces: readonly OpenWriteSurface[],
+    invalidate: InvalidateEverySurface
+  ): Promise<RestoreSession | null>;
 }
 
 /**
@@ -1212,11 +1451,16 @@ interface DuplicateIntent {
  * @param commands - The IPC surface to drive; defaults to the real one.
  * @param report - Where a failure goes for the developer; defaults to the
  *   console reporter of `../ipc/errors`.
+ * @param backup - The read-only backup surface to drive; defaults to the real
+ *   one. Separate from `commands` for the reason {@link BackupCommands} records,
+ *   which is a constraint on the step that added it rather than a property of
+ *   the design.
  * @returns Reactive state a component can read directly.
  */
 export function createBrowserState(
   commands: BrowserCommands = REAL_COMMANDS,
-  report: (failure: IpcFailure) => void = reportIpcFailure
+  report: (failure: IpcFailure) => void = reportIpcFailure,
+  backup: BackupCommands = REAL_BACKUP_COMMANDS
 ): BrowserState {
   let status = $state<BrowserStatus>('loading');
   let failure = $state<IpcFailure | null>(null);
@@ -1673,7 +1917,13 @@ export function createBrowserState(
     }
   } // End of function applyRepair()
 
-  return {
+  // **Named rather than returned anonymously, since 2c-5-4a.** `restoreDocument`
+  // has to hand `sendRestore` the sixth writer itself — restore is a content path
+  // on `saveRawDocument` and not a seventh command — and a name is what lets one
+  // method of this object call another instead of the alternative, which is a
+  // second copy of the seal, the conflict registration and the invalidation. None
+  // of these methods reads `this`, so the reference is a plain closure lookup.
+  const state: BrowserState = {
     get status(): BrowserStatus {
       return status;
     },
@@ -2656,8 +2906,131 @@ export function createBrowserState(
       // document was aimed at, what the transaction answered, and what this
       // state's own invalidation made of it.
       return { kind: 'sealed', sealed: sealWholeDocumentSave(document, answer.value, invalidated) };
-    } // End of function saveRawDocument()
+    }, // End of function saveRawDocument()
+
+    async listBackupBatches(): Promise<CommandResult<BackupBatchListing>> {
+      return reportedRead(await backup.listBackupBatches());
+    },
+
+    async listBackupEntries(batch: BackupBatchId): Promise<CommandResult<BackupEntryListing>> {
+      // The batch travels through untouched: it is an opaque identity a listing
+      // produced, it is not authority, and the command re-resolves it beneath the
+      // workspace-owned backup folder.
+      return reportedRead(await backup.listBackupEntries(batch));
+    },
+
+    async readBackupText(
+      entry: BackupEntryId,
+      document: DocumentId
+    ): Promise<CommandResult<BackupTextResponse>> {
+      // Both arguments travel through untouched, and the command is what refuses
+      // an entry that does not map to the document. Nothing here keeps the text:
+      // `candidateRead` in `./restore.ts` retains it on the session, and a second
+      // copy on this state would be a second thing for a preview to drift from.
+      return reportedRead(await backup.readBackupText(entry, document));
+    },
+
+    async restoreDocument(
+      started: StartedRestore | null,
+      surfaces: readonly OpenWriteSurface[],
+      invalidate: InvalidateEverySurface
+    ): Promise<RestoreSession | null> {
+      if (started === null) {
+        // A confirmation that never happened, or one that was refused. There is no
+        // session to derive and nothing to say about the caller's: not a command, not
+        // a context, not a transition. `restoreRefusal` over what the caller holds is
+        // what a screen draws instead.
+        return null;
+      }
+      // **The session is the confirmation's own.** Taking one as a parameter beside
+      // `started` let a caller pair a permit with a session it was not minted for,
+      // which wrote nothing and answered a frozen session that no ordinary transition
+      // could move (the 2c-5-4a review's Medium). Here there is nothing to pair
+      // wrongly.
+      const session = started.session;
+      // **The revision half is this state's own answer, not the caller's.**
+      // `./restore.ts` records that nothing can force `RestoreContext.observed` to
+      // have come from the live projection rather than from the session's frozen
+      // base; here it did. Read synchronously, before anything awaits, so it
+      // describes the window the permit is about to be checked against — and it is
+      // **not** a refreshed base revision: what gets written is the base the
+      // confirmation froze, taken off the permit inside `sendRestore`. The surfaces
+      // half is the caller's because no coordinator can observe a session held
+      // inside a component (R36).
+      const context: RestoreContext = {
+        observed: revisionInProjection(views, session.target),
+        surfaces
+      };
+      // **The sixth writer, called rather than copied.** Restore is a content path
+      // on `saveRawDocument`: the lock, the revision check, the reparse, the
+      // acknowledgement, the backup, this state's cache invalidation and the seal
+      // are all that method's. The forwarder is written out rather than passing the
+      // method by reference so that nothing here depends on how `this` binds.
+      const sent = await sendRestore(
+        started,
+        session,
+        context,
+        (document, baseRevision, text, acknowledgement) =>
+          state.saveRawDocument(document, baseRevision, text, acknowledgement)
+      );
+      if (sent.kind === 'notAttempted') {
+        // This call held no permit: another call — an earlier one, or a re-entrant
+        // one that reached the checked deletion first — is the one that spent it and
+        // the one that answers for the session. **This restore attempt sent
+        // nothing**, which says nothing about what that other call, or any other
+        // writer, may have done to the file. Answering the confirmation's own session
+        // here would hand back a frozen snapshot in place of whatever that call
+        // produced, so nothing is answered at all.
+        return null;
+      }
+      if (sent.kind === 'withdrawn') {
+        // The permit no longer described the session and the window, so it was
+        // consumed and **this restore attempt sent nothing**. The session has to come
+        // out of the phase the confirmation put it in — the model freezes every
+        // editing transition while it is there — so what comes back keeps the
+        // candidate and its consent and is askable again, with `restoreRefusal`
+        // saying what is in the way.
+        return restoreConfirmationWithdrawn(session);
+      }
+      if (sent.answer.kind === 'failed') {
+        // A command ran and produced no outcome. Whether the file changed is a
+        // second question and `mayHaveWritten` is the only honest answer to it.
+        return restoreCouldNotBeSent(session, sent.answer.mayHaveWritten);
+      }
+      // The answer is sealed, and `applyRestore` is the only way to open it: the
+      // caller's whole-document invalidation is discharged on the way, and a body
+      // that throws comes back as a line beside the committed outcome rather than
+      // in place of it.
+      return applyRestore(session, sent.answer.sealed, invalidate);
+    } // End of function restoreDocument()
   };
+
+  return state;
+
+  /**
+   * Puts a refused read on the developer channel and answers it unchanged.
+   *
+   * **Reported *and* answered**, which is the shape every read on this state uses
+   * and the reason there is no second error path: the developer channel gets the
+   * classified failure, and the caller gets the whole `CommandResult` back so the
+   * refusal can be put on a session and drawn. Written once because the three
+   * backup reads would otherwise each carry the rule, and a rule carried three
+   * times is a rule two of them can lose.
+   *
+   * It is deliberately **not** an invalidation of anything. All three of its
+   * callers read; none of them says anything about the projections, the selection
+   * or the viewer's snapshot, so none of them touches them.
+   *
+   * @typeParam T - Whatever the command answers with.
+   * @param answer - The result exactly as it crossed the boundary.
+   * @returns That same result.
+   */
+  function reportedRead<T>(answer: CommandResult<T>): CommandResult<T> {
+    if (!answer.ok) {
+      report(answer.failure);
+    }
+    return answer;
+  } // End of function reportedRead()
 
   /**
    * Re-reads a document whose bytes this state can no longer vouch for, and

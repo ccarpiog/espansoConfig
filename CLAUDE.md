@@ -290,6 +290,25 @@ carries no condition about the sentence. Its suites prove the **mount**, not the
 data attribute stamped with the reason the component itself derived — because a host that re-inlined
 the paragraph would put identical text on screen and pass any test written against the words.
 
+**Phase 2c-5 — restore from backup — is under way and is complete through 2c-5-4a.** It is seven steps
+(`docs/reviews/phase-2c-5-design.md` Q7): the core catalogue (1), the read-only wire of three commands
+(2), restore as browser values (3), the screen (4), the rebuilt window instrument (5), the bilingual
+reading (6) and the instrument's removal (7). **Step 4 was split into 4a — the coordinator wiring, with
+nothing drawn — and 4b, the screen and the phase's whole mounted evidence.** Restore is **not** a
+seventh writer: it is a content path on `saveRawDocument`, so the lock, the revision check, the
+reparse, the acknowledgement and the backup are all still `save_document`'s.
+
+**A consuming operation whose result is discarded is a check-and-spend defect, and this project has now
+shipped that defect twice in one phase.** `CLAUDE.md` already says a check and a spend separated by any
+property read are not atomic, because a property read runs arbitrary code through a getter or a proxy
+trap and `readonly` does not freeze at runtime. 2c-5-3 spent **four review passes** closing it, ending
+by making a **checked `delete` the membership test** — and applied that only to the confirmation set.
+One function along, `sendRestore` still called `PERMITS.delete(started)` and **threw the boolean away**,
+so a trap fired by `permitHolds`'s caller-supplied reads could re-enter synchronously and spend one
+permit on **two whole-file replacements**; 2c-5-4a's review found it, and no sequential test could.
+**Sweep for the shape — a consuming operation whose result is discarded — never for the words of the
+finding you just closed.**
+
 **A refusal's sentence must be true of its predicate, not of its name.** `documentHasUnsavedDraft`
 measures **any open match editor**, dirty or not: `isDirty` is derived inside `MatchEditor.svelte`'s
 own session, so no coordinator can observe it (R36), and over-refusing costs one closed editor where
@@ -404,10 +423,26 @@ one this project has already got wrong: `1623` stood in `PROGRESS.md` for three 
 3d-1 committed ten cases behind a harness that made the production figure unobservable. A count only
 a harness-free tree can produce must be **re-derived** on such a tree, never copied forward.) A count
 that moves by exactly the number of new source modules **plus one per new styled component** is new
-source; a jump with `svelte/internal/server` in the bundle is the regression — and note that the old
-shorthand for it, "a jump to ~180", is now **within one of a legitimate count**, so check the bundle
-for that import rather than reading the number alone. Rebaseline by building a pristine
-`git archive HEAD` copy and subtracting; never by editing the condition.
+source; a jump with the **server build** in the bundle is the regression — and note that the old
+shorthand for it, "a jump to ~180", is now **below a legitimate count**, so check the bundle rather
+than reading the number alone. Rebaseline by building a pristine `git archive HEAD` copy and
+subtracting; never by editing the condition.
+
+**Searching the bundle for `svelte/internal/server` is a *vacuous* check, and this corrects the
+sentence above as it stood before 2c-5-2.** Vite resolves and minifies module specifiers away, so that
+literal string is absent from a production build whether or not the server build leaked in — measured,
+not reasoned: a control search for `svelte/internal/client` matched nothing either, which makes the
+negative empty in both directions. Use the oracle that discriminates, and read **both** lines — the
+second exists to prove the search can match at all:
+
+```sh
+rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js   # server-only — must be ABSENT
+rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js    # client-only — must be PRESENT
+```
+
+**The counts above are dated anchors, not the current gate.** `PROGRESS.md`'s "Next action" carries the
+live baseline and is authoritative; as of 2c-5-4a it is **1153 / 426 / 1958 / 181** (`cargo test
+--workspace` / `npm run check` files / `npm test` / `npm run build` modules).
 
 **A whole-document save outcome arrives sealed, and the seal is one-shot.**
 `openWholeDocumentSave(sealed, forget)` in `src/lib/browser/invalidation.ts` is the only way to

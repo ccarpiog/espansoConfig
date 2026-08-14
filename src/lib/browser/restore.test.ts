@@ -78,6 +78,7 @@ import {
   openWriteSurfaceKey,
   prepareRestore,
   reloadTheDiskVersion,
+  restoreConfirmationWithdrawn,
   restoreCouldNotBeSent,
   restoreRefusal,
   restoreRefusalKey,
@@ -958,10 +959,62 @@ describe('the permit a confirmation mints', () => {
         live.context ?? at(BASE, []),
         send
       );
-      expect(sent).toEqual({ kind: 'notAttempted' });
+      // `withdrawn` rather than `notAttempted`: a permit was there, it no longer
+      // described the world, and it has been consumed. The distinction is what tells
+      // a caller that the session it was minted with has to be moved out of the
+      // phase the confirmation put it in — nothing else can, because every editing
+      // transition is a no-op while it is `saving`.
+      expect(sent).toEqual({ kind: 'withdrawn' });
       expect(send).not.toHaveBeenCalled();
     }
   );
+
+  it('is spent by a mismatch, so repairing what moved does not revive it', async () => {
+    // **Consent is for one attempt**, and a mismatch is an answer rather than a
+    // pause: the permit goes with it, so a caller that repairs whatever moved and
+    // hands the same confirmation over again sends nothing and is told it held no
+    // permit at all. What the person does instead is ask again, which is
+    // `prepareRestore` and `confirmRestore` over the repaired session.
+    const send = sender();
+    const started = confirmRestore(pending(), at(BASE, []))!;
+    const moved = await sendRestore(started, started.session, at(ELSEWHERE, []), send);
+    expect(moved).toEqual({ kind: 'withdrawn' });
+
+    const repaired = await sendRestore(started, started.session, at(BASE, []), send);
+
+    expect(repaired).toEqual({ kind: 'notAttempted' });
+    expect(send).not.toHaveBeenCalled();
+  }); // End of the "spent by a mismatch" case
+
+  it('takes a consumed confirmation out of the phase it put the session in', async () => {
+    // **The 2c-5-4a review's Medium, as the transition that answers it.** The
+    // session a confirmation mints is frozen: `frozen()` makes every catalogue,
+    // selection, candidate and base-revision transition answer its argument
+    // unchanged while the phase is `saving`. So a send that reached no command has
+    // to be able to give that session back to the person, and this is what does it.
+    const started = confirmRestore(pending(), at(BASE, []))!;
+    expect(started.session.phase).toBe('saving');
+    expect(started.session.inFlight).not.toBeNull();
+
+    const withdrawn = restoreConfirmationWithdrawn(started.session);
+
+    expect(withdrawn.phase).toBe('editing');
+    expect(withdrawn.inFlight).toBeNull();
+    expect(withdrawn.pending).toBeNull();
+    // Nothing was written and nothing about the entry was learnt, so the candidate,
+    // its consent and the catalogue are all still here.
+    expect(candidateText(withdrawn.preview!)).toBe(CANDIDATE);
+    expect(withdrawn.preview!.draft).toBe(started.session.preview!.draft);
+    expect(withdrawn.batches).toEqual(started.session.batches);
+    expect(withdrawn.entry).toEqual(started.session.entry);
+    // No send failure: no command ran, so there is nothing to be uncertain about.
+    expect(withdrawn.sendFailure).toBeNull();
+    expect(withdrawn.restored).toBe(false);
+    // And it is askable again — which the frozen session was not, by construction.
+    expect(restoreRefusal(started.session, at(BASE, []))).toEqual({ kind: 'inFlight' });
+    expect(restoreRefusal(withdrawn, at(BASE, []))).toBeNull();
+    expect(prepareRestore(withdrawn, at(BASE, [])).pending).not.toBeNull();
+  }); // End of the "consumed confirmation" case
 
   it('is spent by the send, so one permit writes at most once', async () => {
     // **The reuse H1 named.** The confirmed value is an ordinary object a caller can
