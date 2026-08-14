@@ -98,7 +98,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5 design consult** | **Phase 2c-5 put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2c-5-design.md` (125 lines). Like every consult since 2c-4a it **changed the phase rather than confirming it**, and it ruled against the handoff brief in three places. It rules restore a **content path on the sixth writer** — the frontend reads the backup's text and sends it through `save_raw_document`, so there is **no seventh writing command** and the new commands are all read-only; it rules **no restore-specific acknowledgeable finding** (a finding belongs to the candidate gate, and *"the person chose Restore"* is UI authorization, not a property validation can infer from identical text — adding route provenance to `SaveContent` to manufacture one would give two identical candidates different verdicts and turn the sixth writer into a hidden seventh protocol); and on Q8 it **disagrees with this project's own history**, ruling the sharpest failure **behavioural rather than prose**. Seven steps |
 | **2c-5-1** | **The core backup catalogue, with no caller**: `BackupCatalog` beside the stateful `BackupSession` — opaque `BackupBatchId`/`BackupEntryId` revalidated at every use, the scans carrying eligible values **plus** per-skip codes so a caller need not read an incomplete scan as "no backups", `BackupBytes`/`BackupText` with `NotUtf8 { entry, offset }`, and `compare_batches_newest_first` as the **one** place the `(stamp, counter)` tuple becomes an order — with `rotate` now reversing that comparison instead of spelling the tuple a second time | ✅ complete — after a review round and a confirmation pass. Round 1 returned **NOT READY** on a High, a Medium, a High in prose, three Mediums and a Low; **the behavioural High was a real, reachable TOCTOU** — every path check was `symlink_metadata` on a pathname and every *use* was a second pathname operation, so a writer inside the backup root could swap a component between check and open and have bytes from outside the batch returned as `BackupBytes`. Round 2 confirmed **six of seven closed and no new behavioural defect**, and returned NOT READY on prose alone |
 | **2c-5-2** | **The read-only Tauri wire**: `list_backup_batches`, `list_backup_entries` and `read_backup_text` — commands thirteen to fifteen, **none of them a writer**. `read_backup_text` takes an opaque `BackupEntryId` **plus** the selected `DocumentId`, re-resolves the latter through the authoritative `DocumentContext` and refuses unless the entry is the one that target maps to, so **a display path is never authority**. Six read-side enums gained `Serialize` (six dictionary namespaces, 25 keys) and four `CommandError` variants their EN/ES sentences through typed accessors. Two decisions step 1 left open were taken: the wire is **exact-or-absent** for entry names — an entry is offered only when its relative path survives lossy rendering byte-for-byte (`is_exactly_spellable`, comparing `OsStr` bytes, never `Path` components), with the rest **disclosed** in an `unaddressable` count rather than silently dropped — and `entry_for_target`'s `None` for a config-root target folds into `backupEntryIsNotThisDocument` as one refusal with three documented shapes | ✅ complete — after a review round and a confirmation round, **two fix rounds**, and no High at any point. **Every finding across both rounds was this project's named worst defect class**: a sentence claiming a guarantee the code does not give. Round 1 returned NOT READY on 5 Medium and 6 Low; its fix closed all eleven and **swept 30 further sites**. Round 2 *still* returned NOT READY on 4 Medium and 2 Low — **narrower instances of the same four defects**, plus one **false claim introduced by the fix itself**. Fix 2 closed those six and swept **27 more**. The one behavioural change is L1: `BackupEntry.length` crosses as **exact decimal digits**, not a JSON number |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1 and 2 are complete**; step 3 (restore as browser values, nothing drawn) is next |
+| **2c-5-3** | **Restore as browser values, with nothing drawn**: `src/lib/browser/restore.ts` — catalogue and preview state, byte-exact candidate retention, a coordinator-owned `OpenWriteSurface` over seven kinds, the **one-shot confirmation** binding `DocumentId`, base revision, `BackupEntryId`, candidate `ContentRevision` and preview generation, and composition through `BrowserState.saveRawDocument` + `openWholeDocumentSave`. No component touched. `saveOutcome.ts` gained `ConflictReloadOutcome::retargetsCandidate`, `SaveOutcomeMessage::reloadRetargetsCandidate` and `ConflictOperation::replaceFileFromBackup`, because all three existing arms are **false sentences** for a restore | ✅ complete — after **four review passes and three fix rounds**. The behavioural High **survived two of them**: round 1 shipped a reusable `StartedRestore`; round 2's `WeakMap` permit closed that but left the *authorization* replayable (two `confirmRestore` calls, two permits, two sends); round 3's `WeakSet` still split the decision into `has` … field reads … `delete`, and **`readonly` does not freeze at runtime**, so a getter could re-enter between them. Closed at round 4 by making the **checked `delete` itself the membership test** — `WeakSet.delete` runs no user code, so only one of any two re-entrant callers receives `true` |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1, 2 and 3 are complete**; step 4 (the third-pane screen, i18n and the mounted evidence) is next |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3531,6 +3532,137 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2c-5 step 3 (restore as browser values, nothing drawn)
+
+**The reviews:** `docs/reviews/phase-2c-5-3-code.md` (round 1) and
+`docs/reviews/phase-2c-5-3-confirmation.md`, which holds **three** rounds — the fix-round
+confirmation, `## Third pass — the H1 spend`, and `## Fourth pass — the atomic spend`.
+**The specification:** Q4 of `docs/reviews/phase-2c-5-design.md`, with Q8 as the binding instruction.
+
+Every gate below was run **by the orchestrator** after each fix round, not taken from a worker's
+report, and the Rust figure was derived by summing the per-suite totals.
+
+| Gate | Command | Result |
+|---|---|---|
+| Rust | `cargo test --workspace` | **1153** passed, 0 failed — **unchanged**; this step touches no Rust |
+| Types | `npm run check` | **426** files, 0 errors, 0 warnings (424 → 426: `restore.ts` and `restore.test.ts`) |
+| Frontend | `npm test` | **1936** passed, 53 files (1793 → 1936) |
+| Bundle | `npm run build` | **180** modules — **unchanged**, and that is the *prediction*, not a surprise |
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| Format | `cargo fmt --check` | clean |
+| Architecture | `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+
+**The module count staying at 180 is the evidence, not the absence of it.** A
+`src/lib/browser/*.ts` module that **no component imports is not reachable from the entry**, and
+nothing draws restore until 2c-5-4 — so a move would have meant something pulled it in. Every IPC
+import in `restore.ts` is `import type`; the model makes no IPC call and takes its sender by
+injection. The discriminating oracle was run in both directions: `$$payload|head_payload|push_element`
+absent, `window\.__svelte|svelte-trusted-html` → **2**. (Do **not** use a bare `svelte/internal/server`
+search — `PROGRESS.md`'s 2c-5-2 entry records why that negative is vacuous.)
+
+### The High that survived two fix rounds, and what each round got wrong
+
+Consult Q8 requires the five bound values to live in **one unspent confirmation**. Four passes were
+needed to get there, and **each round's fix produced the next round's finding** — the pattern this
+file has recorded since 2c-3a-1, in its sharpest instance yet.
+
+1. **Round 1** — `sendRestore` took an already-produced `StartedRestore` and called the sender
+   unconditionally. The value carried only `document` and `submission`, so confirming entry A, moving
+   the session to entry B and then passing the old value **wrote A under stale authorization**.
+2. **Round 2** — a module-private `WeakMap` permit keyed by the returned `StartedRestore` closed
+   reuse of *that object*. It did not close the **authorization before it**: two `confirmRestore`
+   calls on one session minted two permits, both passed the live recheck, and both sent. The fix
+   round's own suite **asserted two sends as correct** and the record adjudicated it an acceptable
+   type-system limit. That adjudication was wrong.
+3. **Round 3** — a `WeakSet` of pending confirmations, but shaped as `has(pending)` … field reads …
+   `delete(pending)` **with the deletion's result ignored**. `readonly` on `PendingRestore` **does not
+   freeze the object at runtime**, and the registered object is handed back to the caller as
+   `session.pending`, so a getter or proxy trap on a field read between the two operations could
+   re-enter, spend, mint a permit, and let the outer call mint a second. The round reasoned about
+   **suspension** — it verified there is no `await` — and synchronous **re-entry** is a different
+   thing.
+4. **Round 4 — closed.** The **checked deletion is the membership test**:
+   `if (!PENDING_CONFIRMATIONS.delete(pending)) { return null; }`, placed after every refusal and
+   field check and before `submissionOf` and `PERMITS.set`. `WeakSet.delete` invokes no user code, so
+   deciding and spending are one operation; two re-entrant callers both reach it and **only one
+   receives `true`**. A refusal taken by an earlier check still leaves the question askable. The
+   redundant `has` was **removed**, because a second membership read is exactly what made a
+   two-operation spend look like one.
+
+**The lesson to carry, in one line: a check and a spend separated by any property read are not
+atomic in JavaScript, because a property read can run arbitrary code.** Absence of `await` proves
+nothing about it.
+
+### What else the four passes established
+
+- **`applyRestore` opens the seal first, always** — verified by the fourth pass at the line level.
+  The original defect was a **committed result stranded** by absent presentation state: the session
+  now freezes the submission *and* its preview in `inFlight`, and classification reads the frozen
+  record, never the mutable current preview. A throwing invalidator is caught by the opener and
+  **cannot replace the committed arm** — a failure after commit never unwrites the file.
+- **`frozen(session)`** (`phase === 'saving' || restored`) makes nine catalogue/selection/candidate/
+  base transitions return their own argument, because the shipped sentence already promised that
+  immutability.
+- **`applyRestore` takes a required `InvalidateEverySurface`**, invoked inside the
+  `openWholeDocumentSave` callback after the revision is recorded, so Q4's obligation to close or
+  terminalize every surface for the document on commit is dischargeable by step 4 rather than
+  unreachable.
+- **The shared-module regression audit found nothing.** `reloadWarningFor` preserves the old mapping
+  exactly — the five match surfaces still declare `closesSurface`, the raw editor still
+  `reseedsDraft` — and the new arm is exhaustive rather than a changed default. Turning its
+  `if`/fall-through into a `switch` means a future arm is now a **compile error** instead of silently
+  inheriting a sentence.
+- **The EN/ES meaning audit is clean.** Six open-surface refusals say a surface is open and must be
+  closed; **neither language asserts the coordinator observed dirty state**, and none of the fifteen
+  new strings claims chronology, authenticity, recoverability, provenance or undo.
+
+### The claim defects, which were again the majority
+
+Of nine findings across four passes, **six were sentences claiming a guarantee the code does not
+give** — and two of them were introduced *by a fix round*, once more.
+
+- **M3** — `refused.targetMoved` said *"Nothing was sent to the file by this attempt."* Its predicate
+  is only that `context.observed` is null or differs from `session.baseRevision`, which is reachable
+  **after** a send, including after an uncertain `mayHaveWritten` answer. Both languages fixed.
+- **L1** — the candidate was described as *"still in the entry"*. The catalogue is untrusted and
+  mutable and the entry is read **once**; the model knows the text was read from an entry and nothing
+  about what that entry holds now. The sweep found three further instances.
+- **M4** — round 3 had to correct ~20 sentences asserting the one-shot guarantee round 2 did not give.
+- **M5** — the record claimed removing `has` left refusal behaviour *"unobservable and unchanged"*.
+  It did not: an already-spent or unregistered question now runs the field reads first, so a throwing
+  getter makes `confirmRestore` **throw** rather than return `null`. The equivalence is about the
+  **answer for inert values**, and it is now written that way.
+- **L3** — `RestoreSession.pending` was documented as *"the question that has been asked and not
+  answered"*. `confirmRestore` returns a **new** session and cannot reach the caller's retained one,
+  so after a successful confirmation that retained session still carries the very object whose
+  membership is gone. Only `PENDING_CONFIRMATIONS` says whether a question is unanswered.
+
+### Three residues, deliberately left and correctly stated
+
+Each was adjudicated by the fourth pass as correct to leave, and each is recorded in
+`docs/decisions/2c-5-3-notes.md` §5:
+
+1. **Nothing forces `sendRestore`'s session and context to be live.** TypeScript cannot prove the
+   provenance or freshness of an ordinary argument — the component boundary owns it. This does *not*
+   excuse the H1 counterexamples, which used live, matching values.
+2. **A catalogue or candidate answer landing during a send is dropped**, a consequence of the truthful
+   freeze. **Step 2c-5-4 owes a way to ask again.**
+3. **`rawEditor.test.ts:487` carries L2's exact old claim** over an identically shaped branch. Left as
+   shipped, separately reviewed work — the `browser.matchMove.refused.unsavedDraft` precedent. The
+   record neither claims it was fixed nor hides it.
+
+### Two things this step does not do, and one it hands forward
+
+It draws nothing, so **no mounted test and no window reading were taken or claimed**. And it adds
+**no reactive `t*` accessor** in `src/lib/i18n/index.ts`: `restoreRefusalKey`/`openWriteSurfaceKey`
+already return `TranslationKey`, so a missing key is a compile error where the mapping is defined,
+and adding an accessor now would make the model reachable from the entry for code no component calls.
+**Step 2c-5-4 must add `tRestoreRefusal(refusal: RestoreRefusal)` and call it from the component** —
+never `t(restoreRefusalKey(...))`, never a hand-built key. At that point the component makes the model
+reachable anyway and the bundle argument disappears.
 
 ---
 
@@ -7686,6 +7818,102 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### **Step 2c-5-3 is COMPLETE. The next thing to do is step 2c-5-4 — the third-pane screen, i18n, and the phase's mounted evidence.**
+
+The consult is `docs/reviews/phase-2c-5-design.md`; its **Q5** is step 4's specification, **Q6** is what
+restore must never claim, and **Q7 item 4** is the evidence step 4 owes. Step 3's rounds are
+`docs/reviews/phase-2c-5-3-code.md` and `docs/reviews/phase-2c-5-3-confirmation.md` (which holds three
+rounds, including the third and fourth passes on the confirmation spend).
+
+#### The production gate baseline
+
+**`1153 / 426 / 1936 / 180`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. The Rust figure is **unchanged** and must stay so unless step 4 touches Rust.
+`npm run check` moved 424 → 426 (two new files); `npm test` 1793 → 1936.
+
+**180 is unchanged and that is correct**: nothing draws `restore.ts`, so it is not reachable from the
+entry. **Step 4 will move this number, and by a known amount** — the ladder in `CLAUDE.md` §6 gives the
+arithmetic: a new `.ts` module reachable from the entry costs **one**, a new component with a `<style>`
+block costs **two** (the block is a module of its own — measured at 2c-4c-3a, not inferred), and a
+component with no styles costs one. Drawing restore makes `restore.ts` reachable for the first time,
+which is **+1 on its own**, exactly as `recovery.ts` was at 2c-4c-3a. Predict the number before
+building, then check the prediction — and if it disagrees, find out why rather than rebaselining.
+**Do both the arithmetic and the bundle search**, and use the discriminating oracle:
+
+```sh
+# server-only sentinels — must be ABSENT
+rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js
+# client-only constructs — must be PRESENT, proving the search can match at all
+rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js   # → 2 at step 3
+```
+
+A bare `svelte/internal/server` search is a **vacuous** negative in a production build; the 2c-5-2
+entry below records why.
+
+#### The exact first commands, for a session resuming cold
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all          # must be empty
+sed -n '/^## Q5/,/^## Q6/p' docs/reviews/phase-2c-5-design.md   # step 4's specification
+sed -n '/^## Q6/,/^## Q7/p' docs/reviews/phase-2c-5-design.md   # what restore must never claim
+rg -n "restoreRefusalKey|openWriteSurfaceKey" src/lib/browser/restore.ts
+rg -n "documentStart" src/lib/components/DetailPane.svelte
+```
+
+#### What step 4 must build (consult Q5 and Q7 item 4)
+
+The third-pane mode reached from the document's whole-text surface; catalogue states; the candidate
+and an **optional** loaded-target `SourceText`; two-stage controls; typed English/Spanish accessors;
+the save outcomes; and accessible focus and scroll behaviour. **Every changed component gets a mounted
+interaction test.** The mounted matrix proves exact identity-bound confirmation, withdrawal on every
+change, open-surface refusal, **no direct IPC call**, parse-finding acknowledgement, conflict
+preservation, committed-result wording, and no forbidden historical or authenticity claim.
+
+Four things bind it specifically:
+
+1. **`SourceText`, never a `<textarea>`.** Input controls normalize carriage returns — a `<textarea>`
+   collapses CR and CRLF to LF, an `<input>` **deletes** the character — and `SourceText` is this
+   project's established read-only representation, with named control characters and horizontal
+   scrolling. Reuse the `documentStart` walk `DetailPane.svelte` already does for the raw viewer.
+   Showing the target's currently held text as a second stacked `SourceText` is useful **only** if
+   labelled as *the window's loaded observation*; it must not be called current disk state. A diff is
+   unnecessary and must never become writable.
+2. **Three states, not a modal detached from its evidence**: select a recognised batch and entry;
+   inspect the candidate; *Prepare to replace file*, which produces the opaque pending confirmation;
+   then a **visually distinct** *Replace entire file with the shown text*. Do **not** add a
+   type-the-filename ritual — the consult rules it adds no stronger binding.
+3. **The batch label is not a timestamp assertion.** The UI may say *Backup batch named 2026-…* and may
+   order recognised batches newest-**name**-first. It may **not** say *taken at*, *the file at*,
+   *version from*, or convert the name into a localized historical time. The counter disambiguates
+   sessions created under one label; it is not an edit sequence.
+4. **Add `tRestoreRefusal(refusal: RestoreRefusal)` to `src/lib/i18n/index.ts` and call it.** Step 3
+   deliberately added no accessor (it would have made the model reachable from the entry for code no
+   component called); the fourth pass adjudicated that sound **at that boundary only**. A component
+   renders a code by calling an accessor, **never** by building a key and never `t(restoreRefusalKey(...))`.
+
+#### Two obligations step 3 hands forward
+
+- **A catalogue or candidate answer landing during a send is dropped** — a consequence of the truthful
+  freeze that keeps a committed answer describable. **Step 4 owes a way to ask again.**
+- **`applyRestore` takes a required `InvalidateEverySurface`.** Step 4 must supply the coordinator's
+  synchronous whole-document invalidator, which closes or marks terminal **every** write surface for
+  that document. The pre-send open-surface refusal is an **affordance, not the safety proof**: a
+  surface can open after preview, which is why confirmation rechecks the coordinator and why this
+  callback exists.
+
+#### The lesson step 3 cost four passes to learn, and step 4 inherits it
+
+**A check and a spend separated by any property read are not atomic in JavaScript**, because a property
+read can run arbitrary code through a getter or a proxy trap, and `readonly` does not freeze an object
+at runtime. Verifying there is no `await` proves nothing about **synchronous re-entry** — that is
+exactly what round 3 verified and exactly what it missed. Step 4 draws the controls that call
+`confirmRestore` and `sendRestore`; it must not reintroduce a gap between deciding and spending.
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-3 handoff, discharged. Kept because its rules are what step 3 was built and reviewed against.
+
 ### **Step 2c-5-2 is COMPLETE. The next thing to do is step 2c-5-3 — restore as browser values, with nothing drawn.**
 
 The consult is `docs/reviews/phase-2c-5-design.md`; its **Q4** is step 3's specification and its
@@ -7780,7 +8008,29 @@ nothing may claim a backup is older or newer than another state, claim recoverab
 provenance. Batches are sessions, the directory name is a clock-derived label, and retention promises
 neither chronology nor recoverability.
 
-#### Two residues fix round 2 named and deliberately left, for the next session to rule on
+#### Two residues fix round 2 named and deliberately left — ✅ **both ruled on at step 3, and closed**
+
+1. **The containment claim is corrected.** `docs/decisions/2a-3b-notes.md` §2.2 keeps its original
+   prose and gains a **correction block**, per the convention that an old record is corrected
+   elsewhere rather than edited. It splits the claim in two: `backup_relative_path()` keeps only
+   `Component::Normal` components, so the **constructed path** introduces no lexical `.` or `..`
+   escape — arithmetic on a `Path`, true on **every** target — while containment **on disk** against a
+   symlink swapped between check and use is closed **on macOS only**, and there only for the
+   descriptor-anchored read walk. `create_backup_root`, `create_batch`, `write_backup`,
+   `publish_backup` and `rotate` all still resolve by pathname on every target, so **§9 hole 15 is
+   unchanged and still describes the write side**. A `docs/`-wide sweep found no other instance; the
+   review files that contain the phrase are quoting it as their own finding.
+2. **The four i18n strings need no change.** `code.backupStep.writeBatchMarker` and
+   `code.entrySkipped.marker` were read in both languages: they are meaning-parallel and follow their
+   neighbours' convention exactly — **EN gerund, ES infinitive** across all twelve `backupStep` keys.
+   Still true that no suite pins meaning; this was a reading, and it is recorded as one.
+
+One residue named below **remains open and is still worth doing**:
+`crates/espansoconfig-core/src/persist/backup.rs:4312` carries a test comment *"Nothing a caller can
+spell escapes the batch"*. It reads as a claim about the **constructed value**, which is the true half,
+so it is not urgent — but it is the last unswept instance of the phrase.
+
+#### The residues as fix round 2 originally wrote them
 
 1. **`docs/decisions/2a-3b-notes.md:159` still holds "cannot escape the batch directory"** — an
    unconditional containment claim that the macOS/non-macOS split made false off macOS. It is a

@@ -186,6 +186,28 @@ export type SaveOutcomeMessage =
       readonly kind: 'reloadAbandonsOperation';
     }
   | {
+      /**
+       * Loading the version on disk **keeps the candidate and moves what it is
+       * measured against**, and the panel stays open.
+       *
+       * **The fourth arm, added at 2c-5-3 for restore.** The other three are all
+       * false of it: nothing the person typed is replaced
+       * ({@link SaveOutcomeMessage} `reloadDiscardsDraft`), and the panel neither
+       * closes nor abandons what was asked for
+       * ({@link SaveOutcomeMessage} `reloadClosesSurface` and
+       * `reloadAbandonsOperation`). A restore's candidate is the exact text read
+       * from a backup entry, which the conflict never touched and the adoption has no
+       * reason
+       * to discard; what the adoption changes is the **revision the candidate would
+       * be written against**, so the confirmation collected against the old one is
+       * withdrawn and has to be given again.
+       *
+       * It says the file is not written either way, because that is the fact the
+       * whole panel exists to make unambiguous.
+       */
+      readonly kind: 'reloadRetargetsCandidate';
+    }
+  | {
       /** The file changed *again* between the refusal and the read that followed it. */
       readonly kind: 'changedAgainSinceRefusal';
     }
@@ -262,7 +284,20 @@ export type ConflictReloadOutcome =
   /** The draft is replaced by the disk version. The raw editor, and only it. */
   | 'reseedsDraft'
   /** The disk projection is installed and the panel closes. The five match surfaces. */
-  | 'closesSurface';
+  | 'closesSurface'
+  /**
+   * The disk projection is installed, the candidate is kept, and the panel stays
+   * open measuring it against the newly installed revision. Restore, and only it.
+   *
+   * **Added at 2c-5-3 rather than reusing one of the two above**, because both
+   * would have been false statements: a restore's candidate is the exact text read
+   * from a backup entry, so there is nothing of the person's to replace and nothing to
+   * abandon, and the surface has no reason to close over a candidate it still
+   * holds. What the adoption really changes is the revision the candidate would be
+   * written against, which is why the confirmation given against the old one is
+   * withdrawn (consult Q4, `docs/reviews/phase-2c-5-design.md`).
+   */
+  | 'retargetsCandidate';
 
 /**
  * How far one surface's reload has got, as far as the labels are concerned.
@@ -786,16 +821,25 @@ function describeRefused(result: RefusedResult, wholeDocument: boolean): Refused
  * @returns The warning to show.
  */
 function reloadWarningFor(capabilities: ConflictCapabilities): SaveOutcomeMessage {
-  if (capabilities.reloadOutcome === 'reseedsDraft') {
-    return { kind: 'reloadDiscardsDraft' };
+  // **A `switch` rather than an `if` with a fall-through tail, since 2c-5-3.** The
+  // first version returned the two `closesSurface` sentences from its `else`, so a
+  // third arm of `ConflictReloadOutcome` would have inherited one of them silently
+  // — which is the shape of defect this whole family of declarations exists to
+  // prevent. A new arm is now a compile error here.
+  switch (capabilities.reloadOutcome) {
+    case 'reseedsDraft':
+      return { kind: 'reloadDiscardsDraft' };
+    case 'retargetsCandidate':
+      return { kind: 'reloadRetargetsCandidate' };
+    case 'closesSurface':
+      // The same rule the three key functions use, over a message code rather than
+      // a key: `draftKindWording` is generic precisely so that a describer choosing
+      // a code and a key function choosing a key are not two rules (3c-4).
+      return draftKindWording<SaveOutcomeMessage>(capabilities.draftKind, {
+        authoredText: { kind: 'reloadClosesSurface' },
+        operationChoice: { kind: 'reloadAbandonsOperation' }
+      });
   }
-  // The same rule the three key functions use, over a message code rather than a
-  // key: `draftKindWording` is generic precisely so that a describer choosing a
-  // code and a key function choosing a key are not two rules (3c-4).
-  return draftKindWording<SaveOutcomeMessage>(capabilities.draftKind, {
-    authoredText: { kind: 'reloadClosesSurface' },
-    operationChoice: { kind: 'reloadAbandonsOperation' }
-  });
 } // End of function reloadWarningFor()
 
 /**
@@ -1007,7 +1051,17 @@ export type ConflictOperation =
    * list and **never** which snippet of the disk version it was — that would be
    * the cross-revision identification 2c-4b owns.
    */
-  | 'moveAfterSnippetNoLongerShown';
+  | 'moveAfterSnippetNoLongerShown'
+  /**
+   * Replace this file's whole text with the selected backup entry's. Restore.
+   *
+   * **It names no batch, no entry and no time**, for the reason every other member
+   * names no snippet: the summary describes the *shape* of the operation, and the
+   * panel's own header is what names what was selected. It says *the selected
+   * backup entry* and never that the entry is older, newer, authentic or
+   * recoverable — the claims consult Q6 forbids outright.
+   */
+  | 'replaceFileFromBackup';
 
 /**
  * The dictionary key holding one operation summary's sentence.
@@ -1033,6 +1087,8 @@ export function conflictOperationKey(operation: ConflictOperation): TranslationK
       return 'browser.saveOutcome.operation.moveAfterSnippet';
     case 'moveAfterSnippetNoLongerShown':
       return 'browser.saveOutcome.operation.moveAfterSnippetNoLongerShown';
+    case 'replaceFileFromBackup':
+      return 'browser.saveOutcome.operation.replaceFileFromBackup';
   }
 } // End of function conflictOperationKey()
 
@@ -1471,6 +1527,8 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
       return 'browser.saveOutcome.reloadClosesSurface';
     case 'reloadAbandonsOperation':
       return 'browser.saveOutcome.reloadAbandonsOperation';
+    case 'reloadRetargetsCandidate':
+      return 'browser.saveOutcome.reloadRetargetsCandidate';
     case 'changedAgainSinceRefusal':
       return 'browser.saveOutcome.changedAgainSinceRefusal';
     case 'windowOutOfStep':

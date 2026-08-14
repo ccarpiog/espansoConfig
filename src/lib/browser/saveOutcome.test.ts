@@ -406,6 +406,27 @@ describe('a conflict, which is terminal and honest', () => {
       expect(messages).toContainEqual({ kind: 'operationKeptInMemory' });
       expect(messages).not.toContainEqual({ kind: 'draftKeptInMemory' });
     } // End of the loop over the three operation-choice surfaces
+    // **The fourth arm, added at 2c-5-3 for restore.** Its candidate is the exact
+    // text read from a backup entry, which the conflict never touched and the
+    // adoption has no reason to discard, so the panel neither reseeds a draft
+    // nobody typed nor
+    // closes over something it can keep: what moves is the revision the candidate
+    // would be written against. All three of the older sentences would have been
+    // false statements here, and before this arm existed `reloadWarningFor`'s
+    // fall-through tail would have handed it one of them silently.
+    const RESTORE: ConflictCapabilities = {
+      draftKind: 'operationChoice',
+      reloadOutcome: 'retargetsCandidate',
+      offersCopyDraft: false,
+      offersReload: false,
+      offersReapply: false,
+      reapplySupport: 'unavailable'
+    };
+    const restoreMessages = describeEditSave(conflictWith(), draftInHand(), RESTORE).messages;
+    expect(restoreMessages).toContainEqual({ kind: 'reloadRetargetsCandidate' });
+    expect(restoreMessages).not.toContainEqual({ kind: 'reloadDiscardsDraft' });
+    expect(restoreMessages).not.toContainEqual({ kind: 'reloadClosesSurface' });
+    expect(restoreMessages).not.toContainEqual({ kind: 'reloadAbandonsOperation' });
     // And the six declarations are what that rests on: one surface reseeds, five
     // close, and a surface cannot omit the field.
     expect(RAW_EDITOR.reloadOutcome).toBe('reseedsDraft');
@@ -1019,6 +1040,7 @@ describe('the sentences behind the model', () => {
     { kind: 'reloadDiscardsDraft' },
     { kind: 'reloadClosesSurface' },
     { kind: 'reloadAbandonsOperation' },
+    { kind: 'reloadRetargetsCandidate' },
     { kind: 'changedAgainSinceRefusal' },
     { kind: 'windowOutOfStep' }
   ];
@@ -1036,7 +1058,8 @@ describe('the sentences behind the model', () => {
     moveToTop: true,
     moveToEnd: true,
     moveAfterSnippet: true,
-    moveAfterSnippetNoLongerShown: true
+    moveAfterSnippetNoLongerShown: true,
+    replaceFileFromBackup: true
   } satisfies Record<ConflictOperation, true>) as readonly ConflictOperation[];
 
   it('map to the key that names them, so two cannot be swapped', () => {

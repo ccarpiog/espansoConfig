@@ -161,6 +161,41 @@ component that is not a plain name — the root, a prefix, `.`, `..` — is drop
 which is asserted directly on `/../../../etc/passwd`. Its leading `_` also puts it out of espanso's
 glob a second time, so the answer does not depend on §2.1 alone.
 
+> **Correction (2c-5-2).** The sentence directly above — *"The construction **cannot escape the batch
+> directory**"* — is an **unconditional** containment claim, and the macOS/non-macOS split introduced at
+> 2c-5-1 made it false off macOS. It was named by 2c-5-2's review rounds
+> (`docs/reviews/phase-2c-5-2-code.md`, `docs/reviews/phase-2c-5-2-confirmation.md`), which corrected the
+> same wording in `crates/espansoconfig-core/src/persist/backup.rs`. The prose above is left exactly as it
+> was written; this block is what is true, and it states the limitation in the same breath as the
+> guarantee because a record that claims more than the code gives is this project's worst defect class.
+>
+> **What the code does force, and it is a claim about the *constructed path*.**
+> `backup_relative_path()` in `crates/espansoconfig-core/src/persist/backup.rs` keeps only
+> `Component::Normal` components: the root, a prefix, `.` and `..` are **dropped rather than joined**, so
+> the relative path it builds holds nothing but plain names and introduces no lexical `.` or `..` escape.
+> That is the whole of what `/../../../etc/passwd` asserts — it inspects the value the function returned.
+> It holds on **every** target, because it is arithmetic on a `Path` and touches no filesystem.
+>
+> **What it does not force, and never did.** Containment *on disk* is a second question: a component of
+> the batch path replaced by a symbolic link **between the moment it was checked and the moment it is
+> used** is a filesystem race, and a lexically clean path says nothing about it. That race is closed **on
+> macOS only**, and there only for the read-only catalogue walk added at 2c-5-1: `ResolvedDirectory`
+> opens the backup root `O_DIRECTORY | O_NOFOLLOW`, resolves every child relative to its already-open
+> parent with `openat(…, O_NOFOLLOW)`, and confirms what it opened with `fstat` **on the descriptor**, so
+> nothing inside the backup tree is resolved by pathname twice and there is no second name lookup to
+> race. Its one remaining pathname resolution is the backup root's own, whose final component
+> `O_NOFOLLOW` protects and whose ancestors are the caller's configuration root. On **every other
+> target** `ResolvedDirectory` holds only the pathname: a symbolic link **already there** is refused by
+> `fs::symlink_metadata`, and a component **swapped between the check and the use can still be
+> followed**. `ResolvedDirectory`'s own doc comment writes both answers out rather than averaging them.
+>
+> **§9 hole 15 is unchanged, and it still describes the write side.** `create_backup_root`,
+> `create_batch`, `write_backup`, `publish_backup` and `rotate` resolve by pathname on **every** target,
+> macOS included; only the catalogue's read walk is descriptor-anchored. So the sentence that may be
+> written here is the per-target one — *the constructed path introduces no lexical `.` or `..` escape;
+> filesystem containment retains the target-specific guarantees documented by `ResolvedDirectory`* — and
+> no sentence anywhere in this record may state that containment unconditionally.
+
 **The two namespaces have to be disjoint, and the first version's were not** (review finding 6). An
 in-root `<config root>/_outside/foo` and an external `/foo` both produced `_outside/foo` — one backup
 for two files, which is the data loss flattening was rejected for, reached by a different road. The fix
