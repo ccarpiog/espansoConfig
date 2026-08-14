@@ -3833,6 +3833,23 @@ Nothing here is evidence about a screen.
 |---|---|---|---|
 | **2c-5 step 3** | **`41b037b`** | ✅ pushed to `origin/main` | clean |
 
+`2fa86ca` is Phase 2c-5-4a **including its review round, its fix round and its confirmation round** —
+as with every phase since `8989c16`, the step was held open until every finding was closed, so **no
+commit holds the demonstrated defects**: neither the discarded `PERMITS.delete` result that let one
+confirmation issue two whole-file replacements under synchronous re-entry, nor the session left
+permanently in `saving` after a write-safe mismatch with no transition able to recover it, nor the
+record claiming object-identity evidence a `toEqual` assertion does not give, nor the fix round's own
+overcorrection calling a candidate-bound acknowledgement *one-attempt*. It contains the restore
+coordinator wiring and `BackupCommands` in `src/lib/browser/workspace.svelte.ts`, the checked spend and
+the `withdrawn` arm with `restoreConfirmationWithdrawn` in `src/lib/browser/restore.ts`, their cases in
+`workspace.test.ts` and `restore.test.ts` (including the `Proxy` re-entrancy case), the corrected
+bundle-regression oracle and the 2c-5 phase narrative in `CLAUDE.md`,
+`docs/decisions/2c-5-4a-notes.md`, `docs/reviews/phase-2c-5-4a-code.md`,
+`docs/reviews/phase-2c-5-4a-confirmation.md` and this checkpoint. **A fresh session starting step
+2c-5-4b should start from `2fa86ca` or later.** As at 1b-1, `npm install` (or `npm ci`) is required
+before any frontend command will run.
+
+
 `41b037b` is Phase 2c-5-3 **including all four review passes and all three fix rounds** — as with
 every phase since `8989c16`, the step was held open until every finding was closed, so **no commit
 holds the demonstrated defect**: not the reusable `StartedRestore` that would have written entry A
