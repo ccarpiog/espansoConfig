@@ -13,12 +13,17 @@
   import { documentHasUnsavedDraft } from '../browser/matchDuplication';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
+  // `OpenWriteSurface` alone: the invalidation supplier below is written against
+  // `RawSaveInvalidation` and is checked against `InvalidateEverySurface` where it
+  // is passed, which is the prop that requires one.
+  import type { OpenWriteSurface } from '../browser/restore';
   import type {
     ConflictModel,
     DiskAdoptionOutcome,
     ReloadConfirmation
   } from '../browser/saveOutcome';
   import type { BrowserState } from '../browser/workspace.svelte';
+  import type { RawSaveInvalidation } from '../ipc/commands';
   import type { Reprojection } from '../browser/matchEditor';
   import type {
     ContentRevision,
@@ -34,6 +39,7 @@
   import MatchEditor from './MatchEditor.svelte';
   import MatchMover from './MatchMover.svelte';
   import RawEditor from './RawEditor.svelte';
+  import RestorePane from './RestorePane.svelte';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -387,6 +393,160 @@
   let creating = $state(false);
 
   /**
+   * What one open restore is over: which file, of which parse, and what this
+   * window had loaded of its text.
+   */
+  interface RestoringSession {
+    /**
+     * The file's projection, captured **in the same assignment** as the file and
+     * the loaded text.
+     *
+     * `startRestore` takes the base revision off it, and that revision is the
+     * only thing standing between a replacement and silently overwriting whatever
+     * has changed the file since (consult Q1 item 3). Taking the three from three
+     * reads would let this pane name one file, measure against another parse and
+     * show a third file's bytes — the 2c-2-2 High, three ways at once.
+     */
+    readonly projection: DocumentView;
+    /** The file it is a projection of, for the person to see which one it is. */
+    readonly file: DocumentSummary;
+    /**
+     * What this window had loaded of that file's text, or `null`.
+     *
+     * **Captured, never read live.** `browser.fileText` follows
+     * `browser.fileTextTarget`, which a click in the sidebar moves; the restore
+     * pane draws this as *what this window loaded of this file*, and a live
+     * reader would make that sentence false the moment the person clicked
+     * elsewhere.
+     */
+    readonly loaded: RawDocumentText | null;
+  }
+
+  // The restore pane's session, or `null`. `$state.raw` for the reason the other
+  // panels' sessions are: the three values are captured once and replaced whole,
+  // and the pane owns the catalogue and the confirmation from then on.
+  let restoring = $state.raw<RestoringSession | null>(null);
+
+  /**
+   * Opens the restore pane over one file, its parse and its loaded text.
+   *
+   * A named function rather than an assignment in the markup so the three values
+   * are captured in **one** statement and TypeScript can see the null check on
+   * the projection — a file this window could not read has none, and
+   * `startRestore` has no base revision to take from nothing.
+   *
+   * @param parse - The file's projection, or `null` when this window holds none.
+   * @param into - The file itself.
+   * @param shown - What the viewer is showing of its text.
+   */
+  function startRestoring(
+    parse: DocumentView | null,
+    into: DocumentSummary,
+    shown: RawDocumentText
+  ): void {
+    if (parse === null) {
+      return;
+    }
+    restoring = { projection: parse, file: into, loaded: shown };
+  } // End of function startRestoring()
+
+  /**
+   * Every write surface this window has open, and which file each would write.
+   *
+   * **`restore.ts`'s `OpenWriteSurface` list, and the only producer of one.** A
+   * restore is refused while another surface over the same file is open, and
+   * `competingSurfaceFor` cannot see a session held inside a component (R36) —
+   * so this pane, which holds them, is the only thing that can enumerate them.
+   * **Nothing anywhere can check that this list is complete**: an empty array
+   * claims there are none, which is exactly why the pre-send refusal it feeds is
+   * an affordance and {@link invalidateEverySurface} is the safety proof.
+   *
+   * **The new-snippet form is deliberately absent.** `MatchCreator` chooses its
+   * own destination and this pane never learns which one, so a surface value for
+   * it would have to invent a document — and consult Q4 is explicit that a
+   * creator naming no file competes with no restore. What keeps it from being
+   * open beside a restore anyway is {@link busy}, which is a fact about this pane
+   * rather than a guarantee of the model's.
+   *
+   * @returns One entry per open surface, in any order.
+   */
+  function openWriteSurfaces(): readonly OpenWriteSurface[] {
+    const open: OpenWriteSurface[] = [];
+    if (editing !== null) {
+      open.push({ kind: 'rawEditor', document: editing.file.id });
+    }
+    if (editingMatch !== null) {
+      open.push({ kind: 'matchEditor', document: editingMatch.match.id.document });
+    }
+    if (deletingMatch !== null) {
+      open.push({ kind: 'matchDeleter', document: deletingMatch.projection.id });
+    }
+    if (movingMatch !== null) {
+      open.push({ kind: 'matchMover', document: movingMatch.projection.id });
+    }
+    if (duplicatingMatch !== null) {
+      open.push({ kind: 'matchDuplicator', document: duplicatingMatch.projection.id });
+    }
+    if (restoring !== null) {
+      open.push({ kind: 'restore', document: restoring.projection.id });
+    }
+    return open;
+  } // End of function openWriteSurfaces()
+
+  /**
+   * Closes every write surface over a file whose whole text has just been
+   * replaced.
+   *
+   * **Consult Q4's post-commit rule, discharged here because only this pane can
+   * discharge it.** A committed whole-document replacement makes every `MatchId`
+   * in that file stale at once, so a panel still holding one is holding an
+   * address that names nothing; the pre-send open-surface refusal is an
+   * affordance, because a surface can open after the preview, and this is the
+   * half that actually holds. It is **synchronous and total**, for
+   * `ForgetReplacedDocument`'s reason: an asynchronous one leaves a window in
+   * which a getter still reads identities minted from bytes that are gone.
+   *
+   * **The restore pane itself is not closed**, and that is deliberate: it is
+   * where the outcome of the write is drawn, and `RestoreSession.restored`
+   * already stops it offering to replace anything again.
+   *
+   * **The new-snippet form is closed whatever file it names**, because this pane
+   * cannot learn which one it chose. That is over-broad by construction — the
+   * conservative direction, since a form left open over a replaced file holds a
+   * position anchor that names nothing — and it costs nothing today, because
+   * {@link busy} means the form cannot be open while a restore is. It is written
+   * for the day that stops being true rather than for today.
+   *
+   * **What no type forces**, in the same sentence as what one does:
+   * `InvalidateEverySurface` forces that a caller supplies a body and never that
+   * the body closes anything, so what is written here is the whole of the
+   * guarantee. A throw would come back beside the committed outcome and never
+   * unwrite the file.
+   *
+   * @param invalidation - The file that was replaced and the revision it holds
+   *   now.
+   */
+  function invalidateEverySurface(invalidation: RawSaveInvalidation): void {
+    const replaced = invalidation.document;
+    if (editing !== null && editing.file.id === replaced) {
+      editing = null;
+    }
+    if (editingMatch !== null && editingMatch.match.id.document === replaced) {
+      editingMatch = null;
+    }
+    if (deletingMatch !== null && deletingMatch.projection.id === replaced) {
+      deletingMatch = null;
+    }
+    if (movingMatch !== null && movingMatch.projection.id === replaced) {
+      movingMatch = null;
+    }
+    if (duplicatingMatch !== null && duplicatingMatch.projection.id === replaced) {
+      duplicatingMatch = null;
+    }
+    creating = false;
+  } // End of function invalidateEverySurface()
+
+  /**
    * The snippet this window is holding unsaved edits for, or `null`.
    *
    * **`moveEligibility`'s `unsavedDraftFor` argument, and the whole of what this
@@ -487,7 +647,7 @@
   } // End of function projectionOf()
 
   /**
-   * Whether one of this pane's six write surfaces is open.
+   * Whether one of this pane's seven write surfaces is open.
    *
    * They outrank the pane's read-only subjects and each other: a draft, a pending
    * confirmation, a chosen destination, an acknowledgement on screen or a save in
@@ -507,6 +667,7 @@
       deletingMatch !== null ||
       movingMatch !== null ||
       duplicatingMatch !== null ||
+      restoring !== null ||
       creating
   );
 </script>
@@ -767,10 +928,40 @@
       {adoptDiskVersion}
       close={() => (creating = false)}
     />
+  {:else if restoring !== null}
+    {@const open = restoring}
+    <!-- **`projections` and `surfaces` are functions, and `loadedText` is not.**
+         The first two are what the restore's four gates ask the window about at
+         the moment each is asked, so a captured array would be a snapshot and a
+         snapshot is what the `targetMoved` refusal exists to notice. The third is
+         drawn as *what this window loaded of this file*, so it has to be the
+         reading that was captured with the projection: `browser.fileText` follows
+         `browser.fileTextTarget`, and reading it live would move that sentence
+         onto another file's bytes.
+
+         **`invalidateEverySurface` is this pane's, and it is the post-commit half
+         of the open-surface rule** — the pre-send refusal is an affordance,
+         because a surface can open after the preview. -->
+    <RestorePane
+      projection={open.projection}
+      file={open.file}
+      loadedText={open.loaded}
+      projections={() => browser.views}
+      surfaces={openWriteSurfaces}
+      listBatches={() => browser.listBackupBatches()}
+      listEntries={(batch) => browser.listBackupEntries(batch)}
+      readEntry={(entry, document) => browser.readBackupText(entry, document)}
+      restore={(started, surfaces, invalidate) =>
+        browser.restoreDocument(started, surfaces, invalidate)}
+      invalidate={invalidateEverySurface}
+      {adoptDiskVersion}
+      close={() => (restoring = null)}
+    />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}
     {@const view = browser.fileText}
     {@const file = browser.fileTextTarget}
     {@const captured = browser.fileTextRevision}
+    {@const parse = projectionOf(file.id)}
 
     <dl>
       <dt>{t('browser.detail.file')}</dt>
@@ -800,6 +991,26 @@
             {t('browser.rawEditor.open')}
           </button>
         </p>
+      {/if}
+      <!-- **The restore mode is reached from here** — the file's whole-text
+           surface, which is where a whole-file replacement belongs (consult Q5)
+           and the one place in this window that is about a file rather than about
+           a snippet.
+
+           **Offered whether or not this application may write the file**, for the
+           reason the deletion, move and duplicate controls are: the panel says
+           why it may not, inline and localized, and `restoreRefusal` is one
+           ordering of reasons rather than a gate repeated here. The one gate is a
+           projection to open over — `startRestore` takes the destination's base
+           revision off one, and a file this window could not read has none. -->
+      {#if parse !== null}
+        <p class="toggle">
+          <button type="button" onclick={() => startRestoring(parse, file, view)}>
+            {t('browser.restore.open')}
+          </button>
+        </p>
+      {:else}
+        <p class="kind">{t('browser.restore.notProjected')}</p>
       {/if}
       {@render fileText(view)}
     </section>

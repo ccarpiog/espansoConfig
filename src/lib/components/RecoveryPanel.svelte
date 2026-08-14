@@ -454,6 +454,13 @@
       case 'copyDraft':
         // Never offered here; see this function's own note.
         return;
+      case 'confirmReloadKeeping':
+        // Never offered here: this surface's declared `reloadOutcome` is not
+        // `retargetsCandidate`, and `conflictChoicesFor` names this second step
+        // only for one that is. The arm exists so the `switch` stays exhaustive —
+        // and it is a compile error until it is written, which is what made this
+        // sixth member of `ConflictChoice` cheap to add (2c-5-4b).
+        return;
     }
   } // End of function conflictAction()
 

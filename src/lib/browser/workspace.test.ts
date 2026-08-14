@@ -93,7 +93,7 @@ import {
   type InstallTheWaitingForm,
   type RecoverySession
 } from './recovery';
-import type { ConflictModel, ReloadConfirmation } from './saveOutcome';
+import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
 import {
   acknowledgeRestoreFindings,
   batchesLoaded,
@@ -6112,6 +6112,93 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.adoptDiskVersion(first, spent)).toBe('refused');
     expect(state.scopedDocument?.revision).toBe('rev-c');
   }); // End of the "retained across a later conflict" case
+
+  it('installs one document from one confirmation, whatever its getters alternate between', async () => {
+    // **The 2c-5-4b confirmation review's third High**, and the reason the fix round's
+    // adjudication of it was unsound. The membership test was a `has` at the top and
+    // the spend an `add` some twenty lines down, with `conflict.source` and
+    // `adoption.disk.id` read in between — both caller-controlled. That was recorded
+    // as harmless because "a re-entrant call that installs bumps the projection
+    // generation, so the outer call then finds the window already holding the
+    // requested revision". **Projection generations are per document**, so a conflict
+    // whose getters alternate between two files defeats exactly that: the inner call
+    // installs document 3 and bumps only document 3's generation, and the outer call —
+    // already past its `has` — resumes with document 2, finds its generation
+    // untouched, and installs that as well. One answer, two projection replacements,
+    // two selection repairs.
+    //
+    // The confirmation is reserved immediately after the test now, with every
+    // caller-controlled read taken before it, so whichever call reaches the pair first
+    // is the only one that can install anything.
+    const others = makeDocument({
+      id: 3,
+      relativePath: 'match/other.yml',
+      revision: 'rev-e',
+      matches: [makeMatch({ node: 21, document: 3, revision: 'rev-e', trigger: ':theirs' })]
+    });
+    const otherConflict: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
+        expected: 'rev-a',
+        found: 'rev-e',
+        disk_revision: 'rev-e',
+        disk_text: DISK_TEXT,
+        disk: others
+      }
+    };
+    const commands = scriptedCommands({ raws: [CONFLICT, otherConflict] });
+    const state = await withTheSecondSnippetSelected(commands);
+    // Two conflicts, over two files, so this state has remembered both origins.
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    await state.saveRawDocument(3, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const here = modelOf();
+    const there = modelOf(otherConflict);
+
+    let showingTheOther = false;
+    let reentered = false;
+    const inner: DiskAdoptionOutcome[] = [];
+    // One model, one confirmation, and four getters that answer for whichever conflict
+    // the flag names. Every one of them is a property of a value a surface assembled,
+    // which is all a getter needs to be reachable from inside this method.
+    const alternating: ConflictModel<string> = {
+      ...here,
+      get source() {
+        if (!reentered) {
+          reentered = true;
+          showingTheOther = true;
+          inner.push(state.adoptDiskVersion(alternating, confirmation));
+          showingTheOther = false;
+        }
+        return showingTheOther ? there.source : here.source;
+      },
+      get disk() {
+        return showingTheOther ? there.disk : here.disk;
+      },
+      get diskRevision() {
+        return showingTheOther ? there.diskRevision : here.diskRevision;
+      },
+      get diskText() {
+        return showingTheOther ? there.diskText : here.diskText;
+      }
+    };
+    const confirmation = confirmReloadDiskVersion(alternating);
+
+    const outer = state.adoptDiskVersion(alternating, confirmation);
+
+    // The re-entry really happened, so this is the opening and not a case that never
+    // reached one.
+    expect(reentered).toBe(true);
+    expect(inner).toHaveLength(1);
+    // **One install, from one answer.** Which of the two calls wins is not the claim;
+    // that only one of them does is.
+    expect([outer, ...inner].filter((one) => one === 'installed')).toHaveLength(1);
+    // And the window agrees: exactly one of the two files moved off the revision it
+    // was loaded at.
+    const moved = state.views.filter((view) => view.revision !== 'rev-a');
+    expect(moved).toHaveLength(1);
+  }); // End of the "one document from one confirmation" case
 
   /**
    * The file as another writer left it: two snippets, at `rev-c`.

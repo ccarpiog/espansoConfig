@@ -108,7 +108,11 @@ const REVISION_EXPECTED_KEYS = [
   // like any other, so its conflict draws the same three revision lines under the
   // same *nothing was written* sentence — and the check below is exactly what that
   // comment above predicted would have to grow with it.
-  'browser.recovery.revisionExpected'
+  'browser.recovery.revisionExpected',
+  // The eighth, added at 2c-5-4b: the restore pane's conflict draws the same
+  // three lines, and this check failed on the commit that added the key — which is
+  // the guard doing exactly what the paragraph above said it would.
+  'browser.restore.revisionExpected'
 ] as const satisfies readonly TranslationKey[];
 
 /**

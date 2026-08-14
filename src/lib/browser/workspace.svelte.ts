@@ -726,6 +726,21 @@ export interface BrowserState {
    * comparison guards **only** the installing branch — because step 5 has already
    * returned, and spent the token, for a window that holds those bytes.
    *
+   * **Step 2 is a reservation, and the 2c-5-4b confirmation review is why.** The
+   * membership test and the spend used to be a `has` at the top and an `add` some
+   * twenty lines down, with `conflict.source` and `adoption.disk.id` read in between —
+   * both caller-controlled, both able to re-enter here synchronously through a getter.
+   * The later revision and generation checks were adjudicated as neutralising that,
+   * and they do not: **projection generations are per document**, so a conflict whose
+   * getters alternate between two remembered documents defeats them. The inner call
+   * installs document B and bumps only B's generation; the outer call, already past
+   * its `has`, resumes with document A, finds A's generation untouched, and installs A
+   * as well. One answer, two projection installations, two selection repairs. The
+   * confirmation is therefore reserved **immediately** after the test, with nothing
+   * between them, and every refusal that follows releases the reservation so that a
+   * refusal still spends nothing. Every caller-controlled read this method makes is
+   * taken into a local **before** the reservation, so nothing can re-enter after it.
+   *
    * **Step 6 is the confirmation pass's High, and the check is a generation rather
    * than `conflict.expected`.** The defect was real: a `rereadDocument` landing
    * while a person read the warning left the window on a *newer* parse, and the
@@ -2039,6 +2054,16 @@ export function createBrowserState(
         // The confirmation was issued for another conflict.
         return 'refused';
       }
+      // **Every caller-controlled read this method makes, taken here.** `source` and
+      // `disk.id` are properties of values a surface assembled, so either can be a
+      // getter or a proxy trap that re-enters this method synchronously. Reading them
+      // *before* the reservation below means the whole decision that follows runs on
+      // this state's own data — a `WeakMap` keyed by object identity, a plain record
+      // this state wrote, and two counters — so nothing between the test and the spend
+      // can run user code, and nothing after the spend can either until the install
+      // itself, by which time the confirmation is gone.
+      const source = conflict.source;
+      const diskDocument = adoption.disk.id;
       if (spentConfirmations.has(confirmation)) {
         // **One-shot.** A confirmation is a person's answer to one question, and
         // spending it twice would install a projection a second time — bumping the
@@ -2046,26 +2071,49 @@ export function createBrowserState(
         // of one click.
         return 'refused';
       }
-      const origin = conflictOrigins.get(conflict.source);
-      if (origin === undefined || origin.document !== adoption.disk.id) {
+      // **Reserved in the same breath as the test, which is the confirmation review's
+      // third High.** A `has` here and an `add` twenty lines down is a check and a
+      // spend with caller-controlled reads between them, and the later revision and
+      // generation checks do not close it: those counters are per document, so a
+      // conflict alternating between two remembered files passes both calls. Nothing
+      // stands between these two statements, and `WeakSet.has` and `WeakSet.add` on an
+      // object key run no user code.
+      spentConfirmations.add(confirmation);
+      /**
+       * Hands the reservation back, for a refusal that installs nothing.
+       *
+       * **Only this call's own reservation can be released.** The arm that finds the
+       * confirmation already reserved returns *above* without reserving, so no path
+       * here gives back a reservation another call made — which is what keeps this
+       * from being the release half of the very defect the reservation closes. A
+       * refusal therefore still spends nothing and the person may press again, which
+       * is the behaviour every surface's *Reload disk version* control has always had.
+       *
+       * @returns `refused`, so each refusal arm stays one statement.
+       */
+      const releaseReservation = (): DiskAdoptionOutcome => {
+        spentConfirmations.delete(confirmation);
+        return 'refused';
+      }; // End of function releaseReservation()
+      const origin = conflictOrigins.get(source);
+      if (origin === undefined || origin.document !== diskDocument) {
         // **A conflict this state never produced.** Its `DocumentId` is another
         // session's number, or the payload has been re-pointed at a different file
         // since; either way this window has no business installing it.
-        return 'refused';
+        return releaseReservation();
       }
       const held = viewOf(origin.document);
       if (held === undefined) {
         // The document is no longer projected here at all — a replaced workspace,
         // or a file dropped after a commit this window could not re-read.
-        return 'refused';
+        return releaseReservation();
       }
       if (held.revision === adoption.diskRevision) {
         // **Satisfied, not refused**, and the confirmation pass is why: the window
         // already holds exactly the bytes that were asked for, so there is nothing
         // to install and a surface may finish its transition. Installing anyway
-        // would repair the selection for no change at all. The confirmation is
-        // spent, because the question it answered has been answered.
-        spentConfirmations.add(confirmation);
+        // would repair the selection for no change at all. The reservation stands,
+        // because the question it answered has been answered.
         return 'alreadyThere';
       }
       if (origin.generation !== projectionGenerationOf(origin.document)) {
@@ -2076,9 +2124,8 @@ export function createBrowserState(
         // two is fresher; installing the older one would move the window backwards
         // and report success for it. The way forward is *Keep editing* and a fresh
         // attempt, which will meet the file as it now is.
-        return 'refused';
+        return releaseReservation();
       }
-      spentConfirmations.add(confirmation);
       // **Everything the six conflict arms used to do eagerly, done here once**,
       // synchronously and before anything can await, for
       // `forgetTheReplacedDocument`'s reason: an asynchronous invalidation has a

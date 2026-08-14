@@ -282,6 +282,79 @@ function pending(): RestoreSession {
 } // End of function pending()
 
 /**
+ * Moves one field of a session **in place**, leaving the object itself alone.
+ *
+ * **The threat model, as a helper.** `readonly` freezes nothing at run time and a
+ * session is an ordinary object literal, so a caller — or a component's own reactive
+ * machinery — can redefine any property of the very session a question was asked on.
+ *
+ * **Replacing the object instead would prove nothing**, and that is what these cases
+ * used to do. Since the 2c-5-4b confirmation round the authorization is keyed by the
+ * session, so a spread is refused for being a copy: a case built that way passes with
+ * every one of the five field rechecks deleted. Moving the field on the asked session
+ * is what makes the recheck the only thing that can refuse it.
+ *
+ * @typeParam K - The field being moved.
+ * @param session - The session to move it on.
+ * @param key - Which field moves.
+ * @param value - What it answers from now on.
+ * @returns The same session, by reference.
+ */
+function moveOnTheSession<K extends keyof RestoreSession>(
+  session: RestoreSession,
+  key: K,
+  value: RestoreSession[K]
+): RestoreSession {
+  Object.defineProperty(session, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
+  return session;
+} // End of function moveOnTheSession()
+
+/**
+ * One session with every own field replaced by a getter that answers the question.
+ *
+ * **The re-entrancy the confirmation review demonstrated, as one fixture.** Whichever
+ * property a transition reads first, that read runs this getter, and this getter calls
+ * {@link confirmRestore} on the very session being withdrawn from. A transition that
+ * revoked *after* reading anything therefore mints a permit from inside the call that
+ * exists to take the question back; one that revokes first cannot, because there is
+ * nothing left under the session by the time any property is touched.
+ *
+ * It fires **once**, so the re-entrant confirmation's own reads do not recurse, and
+ * the values it answers are captured before any getter exists — so every transition
+ * behaves exactly as it would over a plain session.
+ *
+ * @param session - The session to trap. Modified in place.
+ * @returns The same session, and the list the re-entrant confirmations land in.
+ */
+function trapped(session: RestoreSession): {
+  readonly session: RestoreSession;
+  readonly attempts: (StartedRestore | null)[];
+} {
+  const attempts: (StartedRestore | null)[] = [];
+  const held: RestoreSession = { ...session };
+  let entered = false;
+  for (const key of Object.keys(held) as (keyof RestoreSession)[]) {
+    Object.defineProperty(session, key, {
+      get: () => {
+        if (!entered) {
+          entered = true;
+          attempts.push(confirmRestore(session, at(BASE, [])));
+        }
+        return held[key];
+      },
+      configurable: true,
+      enumerable: true
+    });
+  } // End of the loop over every own field of the session
+  return { session, attempts };
+} // End of function trapped()
+
+/**
  * One retained candidate, built by walking a session to it.
  *
  * The only way to obtain a {@link RestorePreview} whose draft this suite did not
@@ -761,19 +834,20 @@ describe('the confirmation and the five values it binds', () => {
 
   it('is refused when the destination named on it is not this session’s', () => {
     // A confirmation carried to another document is one of the three drifts consult
-    // Q8 names. The pending value is branded, so this is the only way to build the
-    // state at all: take a real one and put it on a session about another file.
-    const other = { ...startRestore(target({ id: 99 })), pending: pending().pending };
-    expect(confirmRestore(other, at(BASE, []))).toBeNull();
+    // Q8 names. It is moved **on the session the question was asked on**: a fresh
+    // object would be refused for being a copy of an authorized session and would say
+    // nothing at all about the recheck this case is named for.
+    const moved = moveOnTheSession(pending(), 'target', 99);
+    expect(confirmRestore(moved, at(BASE, []))).toBeNull();
   }); // End of the "another destination" case
 
   it('is refused when the base revision moved under it', () => {
     const moved = targetRevisionObserved(pending(), ELSEWHERE);
     expect(moved.pending).toBeNull();
     expect(moved.baseRevision).toBe(ELSEWHERE);
-    // And a confirmation put back by hand is still refused, because it names the
-    // revision it was issued at.
-    const carried = { ...moved, pending: pending().pending };
+    // And moving it on the asked session is refused too, with the window moved along
+    // with it so that only the permit's own base revision can be the reason.
+    const carried = moveOnTheSession(pending(), 'baseRevision', ELSEWHERE);
     expect(confirmRestore(carried, at(ELSEWHERE, []))).toBeNull();
   }); // End of the "base revision moved" case
 
@@ -783,16 +857,16 @@ describe('the confirmation and the five values it binds', () => {
       textResponse({ entry: entryOf('match/other.yml'), text: OTHER_CANDIDATE })
     );
     expect(other.pending).toBeNull();
-    const carried = { ...other, pending: pending().pending };
+    const carried = moveOnTheSession(pending(), 'preview', other.preview);
     expect(confirmRestore(carried, at(BASE, []))).toBeNull();
   }); // End of the "another entry" case
 
   it('is refused when the candidate hash moved under it', () => {
     const restarted = pending();
-    const rehashed: RestoreSession = {
-      ...restarted,
-      preview: { ...restarted.preview!, revision: OTHER_CANDIDATE_REVISION }
-    };
+    const rehashed = moveOnTheSession(restarted, 'preview', {
+      ...restarted.preview!,
+      revision: OTHER_CANDIDATE_REVISION
+    });
     expect(confirmRestore(rehashed, at(BASE, []))).toBeNull();
   }); // End of the "candidate hash" case
 
@@ -802,9 +876,34 @@ describe('the confirmation and the five values it binds', () => {
     // same document, base revision, entry identity and candidate hash.
     const again = candidateRead(pending(), textResponse());
     expect(again.previewGeneration).toBeGreaterThan(pending().previewGeneration);
-    const carried = { ...again, pending: pending().pending };
+    const carried = moveOnTheSession(pending(), 'previewGeneration', again.previewGeneration);
     expect(confirmRestore(carried, at(BASE, []))).toBeNull();
   }); // End of the "preview generation" case
+
+  it('is refused when the draft and the session disagree about the base revision', () => {
+    // **The 2c-5-4b confirmation review's first High, at the moment it mattered.**
+    // `RestorePermit.baseRevision` came from `session.baseRevision` and
+    // `RestorePermit.submission.baseRevision` from `submissionOf(preview.draft)` — two
+    // separate caller-controlled reads that nothing required to agree, with
+    // `permitHolds` rechecking only the first and `sendRestore` sending only the
+    // second. So a locked write could succeed on a base revision the confirmation
+    // never bound. The disagreement is made **during** `prepareRestore` rather than
+    // after it, which is the only moment at which it was ever observable.
+    const base = withCandidate();
+    const drifted = moveOnTheSession(base, 'preview', {
+      ...base.preview!,
+      draft: { ...base.preview!.draft, baseRevision: ELSEWHERE }
+    });
+
+    const asked = prepareRestore(drifted, at(BASE));
+
+    // No question at all: a snapshot describing two transactions is not a snapshot.
+    expect(asked.pending).toBeNull();
+    expect(asked).toBe(drifted);
+    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    // And the control: the same walk with the two agreeing does ask.
+    expect(prepareRestore(withCandidate(), at(BASE)).pending).not.toBeNull();
+  }); // End of the "draft and session disagree" case
 
   it('is withdrawn by every change to what it binds', () => {
     for (const [name, next] of [
@@ -1081,93 +1180,203 @@ describe('the permit a confirmation mints', () => {
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "one permit per question" case
 
-  it('refuses a structurally cloned question, which is a copy of one nobody asked', () => {
-    // The clone satisfies all five field checks by construction — two numbers and
-    // three strings, one of them nested — so membership is the only thing that can
-    // tell it from the question this module asked. `structuredClone` copies fields,
-    // and a `WeakSet` is not a field.
+  it('refuses any copy of the asked session, however faithful the copy is', () => {
+    // A copy satisfies every field check by construction — numbers and strings, one
+    // of them nested — so membership is the only thing that can tell the session this
+    // module asked from a reproduction of it. A spread copies own properties and
+    // `structuredClone` copies fields; a `WeakMap` entry is neither.
     const session = pending();
-    const cloned: RestoreSession = { ...session, pending: structuredClone(session.pending!) };
-    expect(confirmRestore(cloned, at(BASE, []))).toBeNull();
-    // The refusal spent nothing: the question the clone was made from is still
-    // answerable, which is what makes this a case about the clone alone.
+    expect(confirmRestore({ ...session }, at(BASE, []))).toBeNull();
+    expect(
+      confirmRestore({ ...session, pending: structuredClone(session.pending!) }, at(BASE, []))
+    ).toBeNull();
+    // The refusals spent nothing: the session the copies were made from still
+    // answers, which is what makes this a case about the copies alone.
     expect(confirmRestore(session, at(BASE, []))).not.toBeNull();
-  }); // End of the "cloned question" case
+  }); // End of the "copy of the asked session" case
 
   it('does not spend the question when it refuses, so a repaired session confirms it', () => {
     // **The deletion is after every check for this reason.** A confirmation refused
     // because the window moved, or because the session no longer matches what was
     // asked, must leave the person able to answer the same question once the reason
     // is gone — not silently unable to. Both refusal shapes are here: the one
-    // `restoreRefusal` owns, and one of the five the pending request carries.
-    const session = pending();
-    const moved: RestoreSession = {
-      ...session,
-      previewGeneration: session.previewGeneration + 1
-    };
-    expect(confirmRestore(session, at(ELSEWHERE, []))).toBeNull();
-    expect(confirmRestore(moved, at(BASE, []))).toBeNull();
-    expect(confirmRestore(session, at(BASE, []))).not.toBeNull();
+    // `restoreRefusal` owns, and one of the five the permit carries.
+    const window = pending();
+    const bound = pending();
+    const generation = bound.previewGeneration;
+    expect(confirmRestore(window, at(ELSEWHERE, []))).toBeNull();
+    expect(
+      confirmRestore(moveOnTheSession(bound, 'previewGeneration', generation + 1), at(BASE, []))
+    ).toBeNull();
+    // Put each reason back, and each session answers the question it still holds.
+    expect(confirmRestore(window, at(BASE, []))).not.toBeNull();
+    expect(
+      confirmRestore(moveOnTheSession(bound, 'previewGeneration', generation), at(BASE, []))
+    ).not.toBeNull();
   }); // End of the "refusal spends nothing" case
 
-  it('spends the question before the permit exists, so a confirm inside the confirm finds nothing', () => {
-    // The deletion precedes `PERMITS.set` for the reason the send's precedes its
-    // sender: between them the submission is derived from the retained draft, and a
-    // getter reached there re-enters. That is **one** of the openings, not the only
-    // one — every property read in `confirmRestore` can reach a getter or a proxy
-    // trap, and the case below drives one that fires *before* the spend. This case
-    // pins the ordering alone: with the spend after the permit instead, this
-    // re-entrant call would mint a second permit for one question.
-    const base = pending();
-    const draft = base.preview!.draft;
+  it('reads nothing off the retained draft once the question is spent', async () => {
+    // **The 2c-5-4b review's H1, as the structural property that closes it.** The
+    // submission used to be derived from `preview.draft` *after* the checked
+    // deletion, which is a caller-controlled read on the far side of a spend: a
+    // getter there could answer one value while the question was being validated and
+    // another once it had been answered, and it could re-enter this module
+    // synchronously between the two. The permit is now built by `prepareRestore` and
+    // handed over whole, so none of these getters runs inside `confirmRestore` at
+    // all — which is a stronger claim than "the ordering is right" and the only one
+    // that cannot be re-broken by a read added below the deletion. Each getter also
+    // re-enters, so a read that came back would be a second permit as well as a
+    // count.
+    const send = sender();
+    const session = pending();
+    const draft = session.preview!.draft;
+    // The four values `submissionOf` reads, captured before any getter exists — and
+    // the getters are installed on the **asked session's own draft**, in place, rather
+    // than on a copy of it: since the confirmation round a copy is not a key, so a
+    // case built by spreading would answer `null` for a reason that has nothing to do
+    // with what it is named for.
+    const held = {
+      value: draft.value,
+      baseRevision: draft.baseRevision,
+      consent: draft.consent,
+      generation: draft.generation
+    };
+    const reads = { value: 0, baseRevision: 0, consent: 0, generation: 0 };
     const reentrant: (StartedRestore | null)[] = [];
     let entered = false;
+    for (const field of Object.keys(reads) as (keyof typeof reads)[]) {
+      Object.defineProperty(draft, field, {
+        get: () => {
+          reads[field] += 1;
+          if (!entered) {
+            entered = true;
+            reentrant.push(confirmRestore(session, at(BASE, [])));
+          }
+          return held[field];
+        },
+        configurable: true,
+        enumerable: true
+      });
+    } // End of the loop over the four fields a submission is derived from
+
+    const started = confirmRestore(session, at(BASE, []));
+
+    expect(started).not.toBeNull();
+    // Not one read, so not one opening. Every one of these was a read the old
+    // `submissionOf(preview.draft)` made after the question had been spent.
+    expect(reads).toEqual({ value: 0, baseRevision: 0, consent: 0, generation: 0 });
+    expect(reentrant).toEqual([]);
+    // And the permit is real: the bytes and the base revision the question was asked
+    // about are what the sender is handed.
+    await sendRestore(started, started!.session, at(BASE, []), send);
+    expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
+    // The send does read the live candidate — that is `permitHolds`'s byte
+    // comparison — and the re-entrant confirmation it triggers finds the question
+    // already answered.
+    expect(reentrant.every((one) => one === null)).toBe(true);
+  }); // End of the "reads nothing after the spend" case
+
+  it('sends the base revision bound when the question was asked, never one read later', async () => {
+    // **The sharper half of that High.** `permitHolds` compares `permit.baseRevision`
+    // with the session's and never compares `permit.submission.baseRevision` with
+    // either — and `sendRestore` sends the submission's. So a draft whose
+    // `baseRevision` answers one thing while the question is asked and another
+    // afterwards used to put the second value on the wire with nothing downstream in
+    // a position to notice. The permit freezes the whole submission when the question
+    // is asked, so the second value reaches nothing.
+    const send = sender();
+    const base = withCandidate();
+    const original = base.preview!.draft;
+    let drifting = false;
     const session: RestoreSession = {
       ...base,
       preview: {
         ...base.preview!,
         draft: {
-          ...draft,
-          get value(): string {
-            if (!entered) {
-              entered = true;
-              reentrant.push(confirmRestore(session, at(BASE, [])));
-            }
-            return draft.value;
+          ...original,
+          get baseRevision(): ContentRevision {
+            return drifting ? ELSEWHERE : original.baseRevision;
           }
         }
       }
     };
-    expect(confirmRestore(session, at(BASE, []))).not.toBeNull();
-    expect(reentrant).toEqual([null]);
-  }); // End of the "spent before the permit exists" case
+    const asked = prepareRestore(session, at(BASE));
+    expect(asked.pending).not.toBeNull();
+    // From here the draft answers a different base revision to every reader.
+    drifting = true;
+
+    const started = confirmRestore(asked, at(BASE, []));
+    await sendRestore(started, started!.session, at(BASE, []), send);
+
+    expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
+  }); // End of the "base revision bound when asked" case
+
+  it('sends the bytes bound when the question was asked, never ones read later', async () => {
+    // The candidate half of the same shape, and it ends in a refusal rather than in
+    // different bytes: the permit carries what was shown, `permitHolds` compares
+    // those bytes against what the live preview now answers, and they no longer
+    // agree. Before the fix both sides of that comparison were the *drifted* value —
+    // the permit's because it was derived after the spend — so it passed and the
+    // drifted bytes were written.
+    const send = sender();
+    const base = withCandidate();
+    const original = base.preview!.draft;
+    let drifting = false;
+    const session: RestoreSession = {
+      ...base,
+      preview: {
+        ...base.preview!,
+        draft: {
+          ...original,
+          get value(): string {
+            return drifting ? OTHER_CANDIDATE : original.value;
+          }
+        }
+      }
+    };
+    const asked = prepareRestore(session, at(BASE));
+    drifting = true;
+
+    const started = confirmRestore(asked, at(BASE, []));
+    const sent = await sendRestore(started, started!.session, at(BASE, []), send);
+
+    expect(sent).toEqual({ kind: 'withdrawn' });
+    expect(send).not.toHaveBeenCalled();
+  }); // End of the "bytes bound when asked" case
 
   it('spends the question in one operation, so a getter that re-enters before it mints nothing', async () => {
     // **The counterexample the confirmation review's third pass named.** Asking
-    // `PENDING_CONFIRMATIONS.has` and deleting several lines later is two operations,
-    // and the property reads between them are caller-controlled: `readonly` on
-    // `PendingRestore` freezes nothing at runtime, and `prepareRestore` hands the
-    // exact registered object back on the session. So a getter installed on it fires
+    // `PENDING_AUTHORIZATIONS.has` and deleting several lines later is two
+    // operations, and the property reads between them are caller-controlled:
+    // `readonly` on a session freezes nothing at runtime, and every one of the five
+    // recheck comparisons reads the live session. So a getter installed there fires
     // inside the outer call *before* the spend, re-enters, answers the question,
     // mints a permit — and the outer call then ignored its own failed deletion and
     // minted a second. Two live permits, each passing `sendRestore`'s recheck, is the
     // sender running twice for one answered question. The checked deletion closes it:
-    // `WeakSet.delete` decides and spends in one step that runs no user code.
+    // `WeakMap.delete` decides and spends in one step that runs no user code.
+    //
+    // **The hook is `previewGeneration` rather than the question's own `document`**,
+    // which is where it was until 2c-5-4b: the recheck now compares the frozen
+    // authorization's copies, so nothing reads a `PendingRestore`'s fields at all.
+    // This is the last read `confirmRestore` makes before the spend. It is installed
+    // **on the asked session**, because since the confirmation round a spread of one
+    // is not a key and a case built that way would refuse for the wrong reason.
     const send = sender();
     const session = pending();
-    const question = session.pending!;
-    const bound = question.document;
+    const generation = session.previewGeneration;
     const reentrant: (StartedRestore | null)[] = [];
     let entered = false;
-    Object.defineProperty(question, 'document', {
-      configurable: true,
-      get(): typeof bound {
+    Object.defineProperty(session, 'previewGeneration', {
+      get: () => {
         if (!entered) {
           entered = true;
           reentrant.push(confirmRestore(session, at(BASE, [])));
         }
-        return bound;
-      }
+        return generation;
+      },
+      configurable: true,
+      enumerable: true
     });
     const outer = confirmRestore(session, at(BASE, []));
     // The getter ran, so this really is the pre-spend opening and not a case that
@@ -1182,6 +1391,497 @@ describe('the permit a confirmation mints', () => {
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "spent in one operation" case
 }); // End of the "permit" suite
+
+describe('a withdrawn question authorizes nothing, whoever still holds it', () => {
+  /**
+   * Every transition consult Q5 calls a withdrawal, with a session it can take back.
+   *
+   * **The point of the group** is the 2c-5-4b review's second High: until it, each of
+   * these only wrote `pending: null` into the session it *returned*, so a caller
+   * holding the one it was given could still confirm — and
+   * `BrowserState.restoreDocument` deliberately takes its session from `started`
+   * rather than from live pane state, so that confirmation could have written
+   * candidate A while the pane showed B or showed no question at all.
+   *
+   * @returns One entry per withdrawing transition.
+   */
+  function withdrawals(): readonly {
+    readonly name: string;
+    readonly asked: () => Promise<RestoreSession>;
+    readonly withdraw: (session: RestoreSession) => RestoreSession;
+  }[] {
+    /**
+     * The ordinary starting point: a candidate retained and the question asked.
+     *
+     * @returns The session with a live question.
+     */
+    const asked = async (): Promise<RestoreSession> => pending();
+    return [
+      { name: 'a cancellation', asked, withdraw: (session) => cancelRestore(session) },
+      { name: 'a batch catalogue refresh', asked, withdraw: (session) => loadingBatches(session) },
+      { name: 'a batch being chosen', asked, withdraw: (session) => chooseBatch(session, OTHER_BATCH) },
+      { name: 'an entry catalogue refresh', asked, withdraw: (session) => loadingEntries(session) },
+      {
+        name: 'an entry being chosen',
+        asked,
+        withdraw: (session) => chooseEntry(session, entryOf('match/other.yml').id)
+      },
+      {
+        name: 'a candidate arriving',
+        asked,
+        withdraw: (session) => candidateRead(session, textResponse())
+      },
+      {
+        name: 'a candidate read being refused',
+        asked,
+        withdraw: (session) => candidateRefused(session, FAILURE)
+      },
+      {
+        name: 'this window re-reading the destination',
+        asked,
+        withdraw: (session) => targetRevisionObserved(session, ELSEWHERE)
+      },
+      {
+        name: 'an answer landing',
+        asked,
+        withdraw: (session) => applyRestore(session, sealed(saved()), NO_SURFACES)
+      },
+      {
+        name: 'a consumed confirmation being taken back',
+        asked,
+        withdraw: (session) => restoreConfirmationWithdrawn(session)
+      },
+      {
+        name: 'the findings being acknowledged',
+        asked: async (): Promise<RestoreSession> => {
+          const { session } = await roundTrip(pending(), refusal());
+          return prepareRestore(session, at(BASE));
+        },
+        withdraw: (session) => acknowledgeRestoreFindings(session)
+      },
+      {
+        // **The transition the confirmation review found omitted.** It clears
+        // `pending` through `measuredAgainst` on its successful path, five
+        // caller-controlled operations and one arbitrary callback later, and its two
+        // other arms did not clear it at all. It revokes first now, on every arm,
+        // which is what this row drives: no conflict is showing, so the reload is not
+        // attempted and the revocation is the only thing that happened.
+        name: 'a reload of the disk version being spent',
+        asked,
+        withdraw: (session) => reloadTheDiskVersion(session, adopting().adopt)
+      }
+    ];
+  } // End of function withdrawals()
+
+  it.each(withdrawals().map((one) => [one.name, one] as const))(
+    'cannot be minted from a session retained across %s',
+    async (_name, one) => {
+      const send = sender();
+      const asked = await one.asked();
+      expect(asked.pending).not.toBeNull();
+      // The live pane moves on, and this case **throws the answer away** — which is
+      // exactly what a retained pre-transition reference is.
+      one.withdraw(asked);
+
+      const started = confirmRestore(asked, at(BASE, []));
+
+      expect(started).toBeNull();
+      expect(await sendRestore(started, asked, at(BASE, []), send)).toEqual({
+        kind: 'notAttempted'
+      });
+      expect(send).not.toHaveBeenCalled();
+      // **The control**: asking again over the same retained session mints a fresh
+      // question, and that one confirms. So what is refused above is the withdrawal
+      // and not the shape of the case.
+      const again = prepareRestore(cancelRestore(asked), at(BASE));
+      expect(confirmRestore(again, at(BASE, []))).not.toBeNull();
+    }
+  );
+
+  it.each(withdrawals().map((one) => [one.name, one] as const))(
+    'cannot be minted from inside %s, by a getter the transition itself runs',
+    async (_name, one) => {
+      // **The 2c-5-4b confirmation review's second High, which the sequential cases
+      // above could not see.** Deleting the authorization is only a revocation if it
+      // happens before any caller code runs, and until this round it did not: the
+      // helper's own first operation was `session.pending`, most callers read the
+      // phase, the entry, the batch or the base revision first, the acknowledgement
+      // did its whole state and consent calculation first, and the reload ran an
+      // arbitrary callback first. A getter in any of those positions could answer the
+      // question from inside the very call that exists to take it back — moving the
+      // authorization into a permit the outer deletion can no longer reach.
+      //
+      // Every own field of the session is a getter here, so whichever one a
+      // transition reads first is the opening, and the case cannot go stale by being
+      // written against the wording of the last finding.
+      const send = sender();
+      const { session, attempts } = trapped(await one.asked());
+
+      one.withdraw(session);
+
+      // It really fired — otherwise this case proves nothing at all — and it minted
+      // nothing, because the revocation had already happened.
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]).toBeNull();
+      expect(await sendRestore(attempts[0]!, session, at(BASE, []), send)).toEqual({
+        kind: 'notAttempted'
+      });
+      expect(send).not.toHaveBeenCalled();
+    }
+  );
+
+  it('revokes before the adoption callback runs, so a reload cannot confirm from inside one', async () => {
+    // **The callback half of the same High**, and the one no getter can stand in for:
+    // `reloadTheDiskVersion` hands `adopt` to `spendTheConfirmedReload`, and `adopt`
+    // is an arbitrary function a caller supplied. Until this round the question was
+    // still authorized while it ran.
+    //
+    // The callback does what a component's own reactive machinery could: it takes the
+    // conflict off the session — the only thing refusing a confirmation while one is
+    // showing — and then answers the question. Against a build that revokes after the
+    // callback, that confirmation succeeds and writes the file.
+    const { session: refused } = await roundTrip(pending(), conflictResult());
+    const outcome = refused.outcome;
+    const session = moveOnTheSession(pending(), 'outcome', outcome);
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(session));
+    // The question really did survive the two reload steps, so what refuses below is
+    // the revocation rather than a question that was never carried this far.
+    expect(confirmed.pending).not.toBeNull();
+    const inside: (StartedRestore | null)[] = [];
+
+    const reloaded = reloadTheDiskVersion(confirmed, () => {
+      moveOnTheSession(confirmed, 'outcome', null);
+      inside.push(confirmRestore(confirmed, at(BASE, [])));
+      return 'installed';
+    });
+
+    expect(inside).toEqual([null]);
+    expect(reloaded.pending).toBeNull();
+    expect(confirmRestore(confirmed, at(BASE, []))).toBeNull();
+  }); // End of the "revokes before the adoption callback" case
+
+  it('is refused by the same rule whether the question was answered or withdrawn', async () => {
+    // Two spends of one membership, and they are the same membership: a question
+    // taken back and a question already confirmed both leave `confirmRestore` with
+    // nothing filed under the object it was handed, and both answer `null` before any
+    // permit exists.
+    const send = sender();
+    const answered = pending();
+    expect(confirmRestore(answered, at(BASE, []))).not.toBeNull();
+    expect(confirmRestore(answered, at(BASE, []))).toBeNull();
+
+    const cancelled = pending();
+    cancelRestore(cancelled);
+    expect(confirmRestore(cancelled, at(BASE, []))).toBeNull();
+    expect(await sendRestore(null, cancelled, at(BASE, []), send)).toEqual({
+      kind: 'notAttempted'
+    });
+    expect(send).not.toHaveBeenCalled();
+  }); // End of the "answered or withdrawn" case
+}); // End of the "withdrawn question authorizes nothing" suite
+
+describe('a question being inspected is held, never absent', () => {
+  /**
+   * Runs one body from inside the first read of one session property.
+   *
+   * **Narrower than {@link trapped}, and aimed at different producers.** Those cases
+   * prove that a *spend* cannot happen from inside a withdrawal; these prove that
+   * everything else a getter can reach — asking a second question, carrying the first
+   * one away, taking it back, confirming it — meets a question that is still **there**
+   * while a transition is part-way through deciding about it. The property trapped is
+   * whichever one the transition under test reads first, so each case is written against
+   * the code's shape rather than against a finding's wording.
+   *
+   * @param session - The session to trap. Modified in place.
+   * @param key - The property whose first read runs the body.
+   * @param body - What runs from inside that read. It fires once, so the re-entrant
+   *   call's own reads do not recurse.
+   * @returns Whether the trapped read has happened, as a call.
+   */
+  function whenFirstRead<K extends keyof RestoreSession>(
+    session: RestoreSession,
+    key: K,
+    body: () => void
+  ): () => boolean {
+    const held = session[key];
+    let fired = false;
+    Object.defineProperty(session, key, {
+      get: () => {
+        if (!fired) {
+          fired = true;
+          body();
+        }
+        return held;
+      },
+      configurable: true,
+      enumerable: true
+    });
+    return () => fired;
+  } // End of function whenFirstRead()
+
+  /**
+   * How many whole-file replacements a set of retained sessions can still issue.
+   *
+   * Every one goes through {@link confirmAndSend}, which is the production path, so a
+   * second live authorization shows up as **a sender that ran twice** rather than as a
+   * permit somebody forgot to assert about.
+   *
+   * @param sessions - Every session a caller could still be holding.
+   * @returns How many times the sender was called.
+   */
+  async function replacementsFrom(sessions: readonly RestoreSession[]): Promise<number> {
+    const send = sender();
+    for (const session of sessions) {
+      await confirmAndSend(session, at(BASE, []), send);
+    }
+    return send.mock.calls.length;
+  } // End of function replacementsFrom()
+
+  it('cannot be asked a second time from inside targetRevisionObserved', async () => {
+    // **The second confirmation review's High.** Taking the authorization out of the map
+    // to protect it from being spent made `prepareRestore` see no question at all, and
+    // absence is that function's licence to register another one: the getter below built
+    // a successor session with a permit of its own while the first permit was still
+    // going to be put back, and both could then confirm and both could send. One answer,
+    // two whole-file replacements. A suspension is *present*, so the second question is
+    // refused as the duplicate it is.
+    const asked = pending();
+    const successors: RestoreSession[] = [];
+    const read = whenFirstRead(asked, 'phase', () => {
+      successors.push(prepareRestore(asked, at(BASE)));
+    });
+
+    const idle = targetRevisionObserved(asked, BASE);
+
+    expect(read()).toBe(true);
+    expect(idle).toBe(asked);
+    // Nothing was built: `prepareRestore` answers its own argument when a question
+    // already exists, and a suspended question exists.
+    expect(successors).toHaveLength(1);
+    expect(successors[0]).toBe(asked);
+    expect(await replacementsFrom([asked, ...successors])).toBe(1);
+  }); // End of the "asked a second time from inside targetRevisionObserved" case
+
+  it('cannot be carried away from inside targetRevisionObserved', async () => {
+    // The other producer that tests for presence. `carryTheQuestion` moves an
+    // authorization to the session that replaces it, and a suspended one is not takeable
+    // — another call holds that permit and will put it back, so moving it would leave
+    // one question live on two objects. The successor therefore presents nothing, which
+    // is the conservative direction, and the question stays where the person is looking
+    // at it.
+    const asked = pending();
+    const carried: RestoreSession[] = [];
+    const read = whenFirstRead(asked, 'phase', () => {
+      carried.push(batchesLoaded(asked, { ok: true, value: BATCHES }));
+    });
+
+    targetRevisionObserved(asked, BASE);
+
+    expect(read()).toBe(true);
+    expect(carried).toHaveLength(1);
+    expect(carried[0]!.pending).toBeNull();
+    expect(confirmRestore(carried[0]!, at(BASE, []))).toBeNull();
+    expect(await replacementsFrom([asked, ...carried])).toBe(1);
+  }); // End of the "carried away from inside targetRevisionObserved" case
+
+  it('is not put back when a getter withdrew it, and what comes back says so', () => {
+    // **"Do not resurrect", as a case.** The round that took the entry out of the map
+    // left a re-entrant withdrawal with nothing to delete and then put the permit back
+    // over it, so a cancellation issued from inside this transition was silently undone.
+    // The put-back is identity-checked against the very cell this call left behind, so a
+    // deleted cell stays deleted — and the session that comes back presents no question
+    // either, because the presentation follows the authorization here as everywhere.
+    const asked = pending();
+    const read = whenFirstRead(asked, 'phase', () => {
+      cancelRestore(asked);
+    });
+
+    const idle = targetRevisionObserved(asked, BASE);
+
+    expect(read()).toBe(true);
+    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(idle.pending).toBeNull();
+    expect(confirmRestore(idle, at(BASE, []))).toBeNull();
+  }); // End of the "not put back when a getter withdrew it" case
+
+  it.each([
+    ['another document', textResponse({ document: 99 })],
+    ['another entry', textResponse({ entry: entryOf('match/other.yml') })],
+    ['another batch', textResponse({ entry: entryOf('match/base.yml', OTHER_BATCH) })]
+  ] as const)('survives a candidate response about %s', async (_name, response) => {
+    // **The second confirmation review's Low.** A read for entry B stays in flight, the
+    // person loads entry A and is asked about it, and B's response lands: revoking
+    // before the response had been validated made A's question disappear because of an
+    // answer this transition then rejected as irrelevant. It is suspended across the
+    // validation instead, so an ignored response withdraws nothing and the session comes
+    // back by reference — which is what "the same session" in this transition's own
+    // documentation says, for the authorization as well as for the fields.
+    const send = sender();
+    const asked = pending();
+
+    const same = candidateRead(asked, response);
+
+    expect(same).toBe(asked);
+    expect(same.pending).not.toBeNull();
+    await confirmAndSend(same, at(BASE, []), send);
+    // And the question that survived is the one the person was asked, down to the bytes.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
+  }); // End of the "survives a candidate response about another thing" cases
+
+  it('cannot be asked a second time from inside candidateRead', async () => {
+    // The same producer against the second inspection: a stale response is validated
+    // with the question suspended rather than removed, so a getter reached by any of
+    // those reads cannot register a duplicate under a successor session.
+    const asked = pending();
+    const successors: RestoreSession[] = [];
+    const read = whenFirstRead(asked, 'entry', () => {
+      successors.push(prepareRestore(asked, at(BASE)));
+    });
+
+    const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
+
+    expect(read()).toBe(true);
+    expect(same).toBe(asked);
+    expect(successors).toHaveLength(1);
+    expect(successors[0]).toBe(asked);
+    expect(await replacementsFrom([asked, ...successors])).toBe(1);
+  }); // End of the "asked a second time from inside candidateRead" case
+
+  it('is not put back when a getter withdrew it during a candidate response', () => {
+    const asked = pending();
+    const read = whenFirstRead(asked, 'entry', () => {
+      cancelRestore(asked);
+    });
+
+    const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
+
+    expect(read()).toBe(true);
+    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(same.pending).toBeNull();
+    expect(confirmRestore(same, at(BASE, []))).toBeNull();
+  }); // End of the "withdrew it during a candidate response" case
+
+  it('cannot be confirmed while it is suspended, and is confirmable once it is not', async () => {
+    // **What the suspension itself could expose, asked directly.** A cell that made a
+    // question *confirmable* would be worse than the absence it replaced, so
+    // `confirmRestore` refuses it — by a `WeakSet` membership test that reads no
+    // property and runs no user code. The question is intact afterwards, which is what
+    // separates a suspension from the withdrawal it must not become.
+    const asked = pending();
+    const inside: (StartedRestore | null)[] = [];
+    const read = whenFirstRead(asked, 'entry', () => {
+      inside.push(confirmRestore(asked, at(BASE, [])));
+    });
+
+    const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
+
+    expect(read()).toBe(true);
+    expect(inside).toEqual([null]);
+    expect(await replacementsFrom([same, asked])).toBe(1);
+  }); // End of the "cannot be confirmed while it is suspended" case
+
+  it('is presented by no inspection once a getter inside a nested one withdrew it', async () => {
+    // **The third confirmation review's Low, and the one an owning inspection cannot
+    // show.** `suspendTheQuestion` answers `undefined` to a *nested* inspection because
+    // the outer call owns the cell — and `undefined` used to be enough on its own to
+    // return the argument by reference, without asking the map anything. It is not
+    // enough: a getter the nested call itself runs can withdraw the outer cell, and what
+    // the nested call then handed back presented a question the map no longer held, so a
+    // caller retaining it drew a confirmation control that could do nothing.
+    //
+    // The two traps build that sequence exactly. `candidateRead` reads `entry` first and
+    // that read runs a nested `targetRevisionObserved`; the nested call reads `phase`
+    // first and that read cancels. Neither inspection is meant to change anything else —
+    // the response is about another entry and the observation is `null` — so every
+    // session handed back below comes from an arm that decided nothing.
+    const asked = pending();
+    const retained: RestoreSession[] = [];
+    const outerRead = whenFirstRead(asked, 'entry', () => {
+      retained.push(targetRevisionObserved(asked, null));
+    });
+    const nestedRead = whenFirstRead(asked, 'phase', () => {
+      cancelRestore(asked);
+    });
+
+    retained.push(candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') })));
+
+    // Both really fired, and in that order — otherwise this case is about an ordinary
+    // inspection and proves nothing about a nested one.
+    expect(outerRead()).toBe(true);
+    expect(nestedRead()).toBe(true);
+    expect(retained).toHaveLength(2);
+    for (const one of retained) {
+      // The biconditional, over everything a caller could still be holding: a session
+      // presents a question exactly when it still authorizes one. The nested result is
+      // what fails this against a build whose `undefined` branch skips the map.
+      expect(confirmRestore(one, at(one.baseRevision, [])) !== null).toBe(one.pending !== null);
+    }
+    // And the withdrawal is what stands, on the asked session and on both answers.
+    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(await replacementsFrom([asked, ...retained])).toBe(0);
+  }); // End of the "withdrew it from inside a nested inspection" case
+}); // End of the "question being inspected is held" suite
+
+describe('what a session presents and what it authorizes', () => {
+  /**
+   * Every exported transition, as one call on a session with a live question.
+   *
+   * **The obligation no type can express**, written as a table. With the
+   * authorization keyed by the session, a transition that returns a fresh session
+   * owes one of two things: it revokes and writes `pending: null`, or it carries the
+   * entry across. Forgetting the first is a question that outlives its withdrawal —
+   * the review's second High — and forgetting the second is a question drawn on
+   * screen whose control does nothing. TypeScript sees neither obligation, so the
+   * whole set is driven here rather than each arm being trusted where it was written.
+   *
+   * **The scope is stated rather than implied**: each row starts from a session with
+   * a question pending and nothing else — no conflict, no send in flight, no
+   * committed replacement — because those are the states in which the two halves can
+   * disagree without a second reason for the confirmation to refuse.
+   *
+   * @returns One entry per transition, named for the function it calls.
+   */
+  function transitions(): readonly (readonly [
+    string,
+    (session: RestoreSession) => RestoreSession
+  ])[] {
+    return [
+      ['startRestore', () => startRestore(target())],
+      ['loadingBatches', (session) => loadingBatches(session)],
+      ['batchesLoaded', (session) => batchesLoaded(session, { ok: true, value: BATCHES })],
+      ['a refused batchesLoaded', (session) => batchesLoaded(session, { ok: false, failure: FAILURE })],
+      ['chooseBatch', (session) => chooseBatch(session, OTHER_BATCH)],
+      ['loadingEntries', (session) => loadingEntries(session)],
+      ['entriesLoaded', (session) => entriesLoaded(session, { ok: true, value: entriesIn() })],
+      ['chooseEntry', (session) => chooseEntry(session, entryOf('match/other.yml').id)],
+      ['candidateRead', (session) => candidateRead(session, textResponse())],
+      ['candidateRefused', (session) => candidateRefused(session, FAILURE)],
+      ['targetRevisionObserved, moved', (session) => targetRevisionObserved(session, ELSEWHERE)],
+      ['targetRevisionObserved, unmoved', (session) => targetRevisionObserved(session, BASE)],
+      ['prepareRestore over a live question', (session) => prepareRestore(session, at(BASE))],
+      ['cancelRestore', (session) => cancelRestore(session)],
+      ['confirmRestore', (session) => confirmRestore(session, at(BASE, []))!.session],
+      ['applyRestore', (session) => applyRestore(session, sealed(saved()), NO_SURFACES)],
+      ['restoreConfirmationWithdrawn', (session) => restoreConfirmationWithdrawn(session)],
+      ['restoreCouldNotBeSent', (session) => restoreCouldNotBeSent(session, false)],
+      ['acknowledgeRestoreFindings', (session) => acknowledgeRestoreFindings(session)],
+      ['dismissRestoreOutcome', (session) => dismissRestoreOutcome(session)],
+      ['askToReloadDiskVersion', (session) => askToReloadDiskVersion(session)],
+      ['confirmDiskReload', (session) => confirmDiskReload(session)],
+      ['reloadTheDiskVersion', (session) => reloadTheDiskVersion(session, adopting().adopt)]
+    ];
+  } // End of function transitions()
+
+  it.each(transitions())('agree on the session %s answers', (_name, move) => {
+    const next = move(pending());
+
+    // The biconditional, in one line: a session presents a question exactly when it
+    // still authorizes one. A carry that was forgotten fails the left half; a
+    // revocation that was forgotten fails the right.
+    expect(confirmRestore(next, at(next.baseRevision, [])) !== null).toBe(next.pending !== null);
+  });
+}); // End of the "presents and authorizes" suite
 
 describe('no save is issued without a confirmation', () => {
   /**
@@ -1672,15 +2372,25 @@ describe('the conflict', () => {
     expect(restoreView(withCandidate(), at(BASE)).conflictOperation).toBeNull();
   });
 
-  it('offers no copy and no reapply, and no reload control yet', async () => {
+  it('offers no copy and no reapply, and offers the reload in two steps', async () => {
     // The candidate is not authored text, so `conflictChoicesFor` refuses a copy as
-    // a property of the drafted value; the reapply could never be honest over a
-    // whole document; and the reload control is 2c-5-4's, over the transition this
-    // suite drives below.
-    const view = restoreView(await conflicted(), at(BASE));
-    expect(view.conflictChoices).toEqual(['keepEditing']);
+    // a property of the drafted value, and the reapply could never be honest over a
+    // whole document. The reload is offered as of 2c-5-4b, which flipped
+    // `offersReload` and drew the panel; the transition it names is the one this
+    // suite already drives below.
+    const session = await conflicted();
+    const view = restoreView(session, at(BASE));
+    expect(view.conflictChoices).toEqual(['keepEditing', 'reloadDiskVersion']);
     expect(view.awaitingReloadConfirmation).toBe(false);
     expect(view.reloadUnavailable).toBe(false);
+    // The second step replaces the first rather than standing beside it, which is
+    // `conflictChoicesFor`'s rule and not this surface's — and the choice it names
+    // is `confirmReloadKeeping`, **not** `confirmReload`: this surface's reload
+    // neither discards a draft nor closes the panel, so both of the older
+    // confirmation labels would be false of what it does.
+    const asked = restoreView(askToReloadDiskVersion(session), at(BASE));
+    expect(asked.conflictChoices).toEqual(['keepEditing', 'confirmReloadKeeping']);
+    expect(asked.awaitingReloadConfirmation).toBe(true);
   }); // End of the "no copy and no reapply" case
 
   it('reaches the confirmation only through the warning', async () => {

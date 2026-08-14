@@ -76,6 +76,7 @@ import { CONFLICT_CAPABILITIES as DUPLICATOR } from './matchDuplication';
 import { CONFLICT_CAPABILITIES as MATCH_EDITOR } from './matchEditor';
 import { CONFLICT_CAPABILITIES as MOVER } from './matchMove';
 import { CONFLICT_CAPABILITIES as RAW_EDITOR } from './rawEditor';
+import { CONFLICT_CAPABILITIES as RESTORE } from './restore';
 
 /**
  * Every member of {@link ConflictChoice}, and **exhaustively** so.
@@ -92,7 +93,11 @@ const EVERY_CONFLICT_CHOICE = Object.keys({
   copyDraft: true,
   keepMyDraft: true,
   reloadDiskVersion: true,
-  confirmReload: true
+  confirmReload: true,
+  // The sixth, added at 2c-5-4b for the one surface whose confirmed reload keeps
+  // what it is holding. **This list is what failed when the member was added**,
+  // which is the whole reason it is a `Record` rather than an array.
+  confirmReloadKeeping: true
 } satisfies Record<ConflictChoice, true>) as readonly ConflictChoice[];
 
 /**
@@ -815,6 +820,39 @@ describe('the one authority that decides what a conflict offers', () => {
       expect(label, locale).not.toContain('mi texto');
     } // End of the loop over the two locales
   }); // End of the "labels the confirmation" case
+
+  it('gives a surface whose reload keeps its candidate a confirmation of its own', () => {
+    // **2c-5-4b.** Restore's reload installs the disk observation, keeps the
+    // retained candidate and leaves the panel open, so *Discard my text and load
+    // it* and *Close this and load it* are both false of it — and a false label on
+    // the destructive step of a whole-file replacement is this project's worst
+    // defect class on the worst control to have it on. The choice is picked from
+    // the surface's declared `reloadOutcome`, in the one authority.
+    expect(conflictChoicesFor(RESTORE, 'confirming')).toEqual([
+      'keepEditing',
+      'confirmReloadKeeping'
+    ]);
+    expect(conflictChoicesFor(RESTORE, 'idle')).toEqual(['keepEditing', 'reloadDiskVersion']);
+    // The five surfaces whose reload discards or closes are untouched by it.
+    for (const surface of [RAW_EDITOR, MATCH_EDITOR, CREATOR, MOVER, DELETER, DUPLICATOR]) {
+      expect(conflictChoicesFor(surface, 'confirming')).toContain('confirmReload');
+      expect(conflictChoicesFor(surface, 'confirming')).not.toContain('confirmReloadKeeping');
+    } // End of the loop over the five surfaces that discard or close
+    // One label, whatever the draft is: the sentence is about what the reload
+    // does, so there is no second wording for a draft kind to pick between.
+    expect(conflictChoiceKey('confirmReloadKeeping', 'authoredText')).toBe(
+      conflictChoiceKey('confirmReloadKeeping', 'operationChoice')
+    );
+    // And it claims neither of the two things the other confirmations claim.
+    for (const locale of LOCALES) {
+      const label =
+        DICTIONARIES[locale][conflictChoiceKey('confirmReloadKeeping', 'operationChoice')];
+      const lowered = label.toLowerCase();
+      for (const claimed of ['discard', 'close this', 'descartar', 'cerrar']) {
+        expect(lowered, `${locale}:${claimed}`).not.toContain(claimed);
+      } // End of the loop over the claims this label must not make
+    } // End of the loop over the two locales
+  }); // End of the "a confirmation of its own" case
 
   it('labels the non-destructive way out by what the surface drafts too', () => {
     // **2c-4a-3c's finding 10.2, and it was found by a window and by nothing

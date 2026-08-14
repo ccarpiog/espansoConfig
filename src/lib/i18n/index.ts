@@ -95,6 +95,11 @@ import {
   type RawSaveChoice,
   type RawSaveMessage
 } from '../browser/rawSave';
+// The restore panel's refusals. The import that step 2c-5-3 deliberately did not
+// add — nothing drew them then, and this module is reachable from the application
+// entry, so importing a model nothing drew would have put it in the production
+// bundle. `RestorePane.svelte` draws them now.
+import { restoreRefusalKey, type RestoreRefusal } from '../browser/restore';
 import {
   conflictChoiceKey,
   conflictOperationKey,
@@ -728,6 +733,31 @@ export function tDuplicationSubmissionRefusal(reason: DuplicationSubmissionRefus
 export function tDuplicationRecovery(choice: DuplicationRecovery): string {
   return translate(locale.current, duplicationRecoveryKey(choice));
 } // End of function tDuplicationRecovery()
+
+/**
+ * Renders why this application will not prepare or confirm a replacement of one
+ * file's whole text right now.
+ *
+ * **One accessor for all seven arms, including the six competing surfaces.**
+ * `restoreRefusalKey` in `../browser/restore` delegates its `writeSurfaceOpen`
+ * arm to `openWriteSurfaceKey`, so *which* surface is open is decided in one
+ * place; a second accessor over `CompetingWriteSurfaceKind` would have no caller
+ * here, because a component never reaches that code without the refusal that
+ * carries it.
+ *
+ * **What no test in this repository holds**, in the same sentence as what one
+ * does: `restoreCodes.test.ts` pins that every arm names a real entry in both
+ * dictionaries and that a listed vocabulary of forbidden claims does not appear
+ * in any of them, and nothing anywhere pins what the sentences *mean* — the i18n
+ * suites check key parity and placeholder agreement and never meaning
+ * (`CLAUDE.md` section 6).
+ *
+ * @param refusal - What `restoreRefusal` answered.
+ * @returns The translated sentence.
+ */
+export function tRestoreRefusal(refusal: RestoreRefusal): string {
+  return translate(locale.current, restoreRefusalKey(refusal));
+} // End of function tRestoreRefusal()
 
 /**
  * Renders one line a save outcome shows, in the current language.

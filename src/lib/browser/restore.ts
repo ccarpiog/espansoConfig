@@ -26,9 +26,10 @@
  * {@link PendingRestore} binds all five values and {@link confirmRestore} rechecks
  * all five **plus** the open-surface predicate — but **a confirmation is not the
  * authorization to write**, because it is an ordinary value a caller can hold while
- * the world moves under it. What authorizes a write is a **permit**: a module-private
- * record of the five bound values *and the exact candidate*, held in a `WeakMap`
- * keyed by the confirmed object and reachable from nowhere else.
+ * the world moves under it. What authorizes a write is a **permit**: a module-private,
+ * plain, deeply frozen record of the five bound values *and the exact complete
+ * submission*, built the moment the question is asked and reachable from nowhere
+ * outside this file.
  * {@link sendRestore} is the only function here that hands anything to a sender; it
  * takes the **live** session and the **live** context, rechecks every bound value
  * against them, and **spends the permit with a checked deletion before the sender is
@@ -44,24 +45,128 @@
  * bytes is {@link boundAcknowledgement} plus the retargeting transitions that clear it,
  * never a fresh-consent requirement at the send.
  *
- * The spend happens **twice, at two runtime memberships**, because a value-typed
- * record cannot spend itself: {@link confirmRestore} takes the question out of
- * {@link PENDING_CONFIRMATIONS} with a **checked** `delete` whose success *is* the
- * authorization — one operation, so no getter and no proxy trap runs between deciding
- * and spending — before it mints a permit, and {@link sendRestore} takes the permit
- * out of `PERMITS` with a `delete` that is checked in exactly the same way, before it
- * calls the sender. **Both are checked for one reason**: each is preceded by checks
- * that read properties off values a caller supplied, any one of which can reach a
- * getter or a proxy trap and re-enter here synchronously, so a deletion whose result
- * is discarded lets the outer call go on to spend what the inner one already spent.
- * That was the 2c-5-4a review's High, and it stood while every word above except this
- * paragraph was already written. So one question yields at most one permit and one
- * permit yields at most one send — one answered question authorizes at most one write. What that does **not** say is that a session
- * can be asked only once: {@link prepareRestore} mints a fresh question every time it
- * is called on a session with none pending, and each is its own authorization,
- * because asking again *is* asking again. The construct — runtime membership keyed on
- * the value the answer arrived on, so a spend is bound to its origin — is
- * `rememberTheConflict`'s in `./workspace.svelte.ts`, one operation along.
+ * **One record, two memberships, and it is never rebuilt.** {@link prepareRestore}
+ * builds the permit when it asks the question and files it in
+ * {@link PENDING_AUTHORIZATIONS} under **the session object it returns**;
+ * {@link confirmRestore} takes it out with a **checked** `delete` whose success *is*
+ * the authorization — one operation, so no getter and no proxy trap runs between
+ * deciding and spending — and files that **same frozen record** in {@link PERMITS}
+ * under the {@link StartedRestore} it returns, deriving nothing; and
+ * {@link sendRestore} takes it out of {@link PERMITS} with a `delete` checked in
+ * exactly the same way, before it calls the sender. **Every deletion is checked for
+ * one reason**: each is preceded by checks that read properties off values a caller
+ * supplied, any one of which can reach a getter or a proxy trap and re-enter here
+ * synchronously, so a deletion whose result is discarded lets the outer call go on to
+ * spend what the inner one already spent. That was the 2c-5-4a review's High.
+ *
+ * **The key is the session and not the question, and that is the 2c-5-4b
+ * confirmation review's second High.** It used to be the {@link PendingRestore}
+ * hanging off the session, which meant that naming the authorization at all required
+ * reading `session.pending` — so {@link revokeConfirmation}'s own **first operation**
+ * was a caller-controlled property read, and a getter installed there could answer the
+ * question from inside the very transition that exists to take it back: the
+ * authorization moved to {@link PERMITS} and the outer deletion then found nothing to
+ * revoke. Keyed by the session, a revocation is `WeakMap.delete(session)` — a bare
+ * reference operation that reads no property and runs no user code — so every
+ * withdrawal can revoke **before** it touches the session, the context or any
+ * callback.
+ *
+ * **One base revision, read once, on both fields — the confirmation review's first
+ * High.** {@link prepareRestore} used to take `RestorePermit.baseRevision` from
+ * `session.baseRevision` and `RestorePermit.submission.baseRevision` from
+ * `submissionOf(preview.draft)`: two separate caller-controlled reads that nothing
+ * required to agree, with {@link permitHolds} rechecking only the first and
+ * {@link sendRestore} sending only the second. A locked write could therefore succeed
+ * on a base revision the confirmation never bound. There is now **one local**, used
+ * for both fields; registration is **refused outright** when the draft's own base
+ * disagrees with the session's, because a snapshot describing two transactions is not
+ * a snapshot; and {@link sendRestore} hands the sender `permit.baseRevision` — the
+ * very field {@link permitHolds} rechecks — rather than the submission's copy of it.
+ *
+ * **Deriving the submission after the spend was the 2c-5-4b review's High**, and it
+ * is why the record is built one function earlier than it used to be. `confirmRestore`
+ * used to read `submissionOf(preview.draft)`, the session's target, its base revision
+ * and the preview's entry and hash **after** its checked deletion had already spent
+ * the question. A getter installed on the retained draft could therefore answer one
+ * candidate while the question was being validated and another once it had been
+ * answered: the permit recorded hash A beside submission B, {@link permitHolds}
+ * re-read the same getter and saw B on both sides of its byte comparison, and B
+ * reached the wire. The base revision had it worse — `permitHolds` compares
+ * `permit.baseRevision` with the session's and never compares the submission's base
+ * with either, so a drifting `draft.baseRevision` was not compared with anything at
+ * all. **Nothing after the checked deletion may read a session, preview, draft,
+ * pending or context property**, and nothing does: what follows the spend is one
+ * `WeakMap.set` of a record that was frozen before the question was ever answered.
+ *
+ * So one question yields at most one permit and one permit yields at most one send —
+ * one answered question authorizes at most one write. What that does **not** say is
+ * that a session can be asked only once: {@link prepareRestore} mints a fresh question
+ * every time it is called on a session with none pending, and each is its own
+ * authorization, because asking again *is* asking again. The construct — runtime
+ * membership keyed on the value the answer arrived on, so a spend is bound to its
+ * origin — is `rememberTheConflict`'s in `./workspace.svelte.ts`, one operation along.
+ *
+ * ## Withdrawal revokes, and that is not presentation
+ *
+ * **The 2c-5-4b review's second High, and its confirmation round's.** Every
+ * transition consult Q5 names as a withdrawal — a cancellation, a catalogue refresh,
+ * a batch or entry being chosen, a candidate arriving or being refused, this window
+ * re-reading the destination, an answer landing, a consumed confirmation being taken
+ * back, findings being acknowledged, **and a confirmed reload of the disk version** —
+ * **deletes the authorization from {@link PENDING_AUTHORIZATIONS} as its first
+ * statement**, before it reads anything off the session or the context and before it
+ * calls any callback a caller supplied. Writing `pending: null` into a *returned*
+ * session used to be all any of them did, so a caller holding the pre-transition
+ * session could still confirm it: `BrowserState.restoreDocument` deliberately takes
+ * its session from `started` rather than from live pane state, so that confirmation
+ * could have written candidate A while the pane showed B or showed no question at
+ * all. Revocation is what makes "withdrawn" a statement about authorization rather
+ * than about what is drawn.
+ *
+ * **First is a claim the key had to earn.** The fix round put the revocations first
+ * in program order and left them reading `session.pending` to name what to delete,
+ * which is a caller-controlled property read *inside* the revocation — so there was
+ * still an opening, in the one helper whose whole job was to close it, and
+ * {@link reloadTheDiskVersion} was missed entirely: it cleared `pending` through
+ * `measuredAgainst`, five caller-controlled operations and one arbitrary callback
+ * later. Keying by the session removed the read; auditing every transition that
+ * writes `pending: null` added the reload.
+ *
+ * **A transition that keeps the question moves it**, through
+ * {@link carryTheQuestion}: a listing landing, an outcome being put away and the two
+ * reload steps change nothing a confirmation binds, so the authorization follows the
+ * session they return and is **deleted from the one they were given**, which is why
+ * one question can never be answered from two session objects at once.
+ *
+ * **A transition that cannot decide until it has read the session *suspends* it**, and
+ * that is the second confirmation round's High. Two of them cannot revoke first:
+ * {@link targetRevisionObserved}, which `RestorePane.svelte` runs from an `$effect` on
+ * every change to the session, would revoke a question in the tick it was asked; and
+ * {@link candidateRead} would destroy a live question because of a response that turns
+ * out to be about another entry. Taking the entry *out* of the map and putting it back
+ * closed the spend and opened a second hole in the same motion — **removing a token to
+ * protect it creates a false "nothing here" state for every other producer that tests
+ * for presence**, and {@link prepareRestore} reads absence as permission to ask again,
+ * so a getter reached during the inspection could register a second live authorization
+ * under a successor session while the first was still to be put back. The entry
+ * therefore never leaves: it is replaced by a {@link SuspendedQuestion}, a private cell
+ * {@link confirmRestore} refuses, {@link takeTheQuestion} refuses and
+ * {@link prepareRestore}'s bare `has` counts as the existing question it is. The permit
+ * comes back only if that very cell is still there, from a `finally`, so a throwing
+ * getter cannot strand one — and a re-entrant withdrawal that deleted it has decided,
+ * so it is never resurrected.
+ *
+ * **What no type forces**, in the same sentence as what one does: nothing makes a new
+ * transition call {@link revokeConfirmation} or {@link carryTheQuestion}, and
+ * TypeScript cannot see that a function returning a fresh session owes one of the
+ * two. What *is* forced is that no path outside {@link prepareRestore} can put an
+ * entry in, because {@link PENDING_AUTHORIZATIONS} is module-private; and what a test
+ * holds instead of a type is the table in `restore.test.ts` that drives **every**
+ * exported transition and asserts that the session it answers authorizes a
+ * confirmation exactly when it presents one. Forgetting a carry is the **safe**
+ * direction — the question dies and stops being drawn — and forgetting a revocation
+ * is the unsafe one, which is why the presentation follows the authorization on every
+ * arm rather than the other way round.
  *
  * ## What no type here forces, in the same sentence as what one does
  *
@@ -70,16 +175,17 @@
  *
  * **What is forced** is that a write this module issues carries an **unspent permit
  * whose bound values still describe the session and the window at the moment of the
- * send**, and that the permit came from a question that had not been answered before.
- * {@link confirmRestore} is the only producer of a permit; it needs a
- * {@link PendingRestore} that its own checked deletion finds still in
- * {@link PENDING_CONFIRMATIONS}, whose only producer and only registrar is
- * {@link prepareRestore}; `PENDING`
+ * send**, that the permit came from a question that had not been answered before and
+ * had not been withdrawn, and that every value on it was copied out of the world
+ * **before** the question was asked rather than after it was answered.
+ * {@link prepareRestore} is the only producer of a permit and the only registrar of a
+ * question; {@link confirmRestore} moves that same frozen record from
+ * {@link PENDING_AUTHORIZATIONS} to {@link PERMITS} and computes nothing; `PENDING`
  * and `STARTED` are `unique symbol`s this module never exports, so no literal
  * outside it can have either type; and neither membership is a property of anything —
  * both are weak-collection entries, so reflection, spread and `structuredClone` all
- * find nothing to copy, a clone of a {@link PendingRestore} is not a member of the
- * set, and a clone of a {@link StartedRestore} is not a key of the map.
+ * find nothing to copy, **a spread or a clone of an asked session is not a key of the
+ * first map**, and a clone of a {@link StartedRestore} is not a key of the second.
  * {@link sendRestore} reads the four arguments it sends off the permit rather than
  * off a caller.
  *
@@ -91,7 +197,7 @@
  * anything forced about a caller that never calls {@link sendRestore} at all:
  * `RestoreSession.submitted` carries the candidate and `BrowserState.saveRawDocument`
  * is a public method. Nor is a *session* limited to one question: what is spent is one
- * {@link PendingRestore}, so any caller that reaches {@link prepareRestore} again with
+ * membership, so any caller that reaches {@link prepareRestore} again with
  * none pending — having cancelled, having had one withdrawn, or simply having kept the
  * session from before the first call — gets a second question, and it is a second
  * authorization. That is asking again rather than answering twice, and it is the state
@@ -172,6 +278,7 @@ import type {
   PresentationNote
 } from '../ipc/types';
 import {
+  deepFreeze,
   retargetedDraft,
   savedDraft,
   startDraft,
@@ -544,6 +651,22 @@ declare const PENDING: unique symbol;
  * one of them against the session *and* asks the window for the sixth thing — the
  * revision the live projection gives the destination — before it will produce
  * anything to send.
+ *
+ * **This value is presentation, and it is no longer the key.** It was the key of
+ * {@link PENDING_AUTHORIZATIONS} until the 2c-5-4b confirmation round, which is what
+ * forced {@link revokeConfirmation} to open with `session.pending` — a
+ * caller-controlled property read inside the one helper whose whole purpose is to run
+ * before caller-controlled reads. The authorization is keyed by the session itself
+ * now; what remains here is what a screen needs to draw the question, and the fields
+ * are a **copy** taken off the frozen {@link RestorePermit} rather than the values
+ * anything checks: this object is a plain literal whose properties `defineProperty`
+ * can replace with getters, while the record is deeply frozen and unreachable.
+ *
+ * **It is still branded**, so no literal outside this module can have the type and
+ * `pending !== null` cannot be claimed by a value nobody asked for. What the brand
+ * cannot do is make presentation and authorization agree — that is
+ * {@link revokeConfirmation} and {@link carryTheQuestion} being called by every
+ * transition, and a table in `restore.test.ts` rather than a type.
  */
 export interface PendingRestore {
   /** The brand. Never present at runtime, never nameable outside this module. */
@@ -561,36 +684,354 @@ export interface PendingRestore {
 }
 
 /**
- * Every question that has been asked and not yet answered, by the object itself.
+ * What every unanswered question authorizes, **keyed by the session it was asked on**.
  *
  * **The membership *is* the authorization, and it is the fix for 2c-5-3's H1 in the
- * narrower form its confirmation round found.** The five fields on a
- * {@link PendingRestore} are all values — two numbers and three strings, one of them
- * inside a nested identity — so they compare equal however many copies of the object
- * exist. Consuming the request by writing `pending: null` into the session
- * {@link confirmRestore} *returns* therefore spends nothing at runtime: a caller that
- * discards the returned session, or that kept a `structuredClone` of the one it
- * passed in, still holds a value that satisfies every field check and could mint a
- * second permit over the same answered question.
+ * narrower form its confirmation round found.** Every field a confirmation compares is
+ * a value — numbers and strings, one of them inside a nested identity — so they compare
+ * equal however many copies of the session exist. Consuming the request by writing
+ * `pending: null` into the session {@link confirmRestore} *returns* therefore spends
+ * nothing at runtime: a caller that discards the returned session, or that kept a
+ * `structuredClone` of the one it passed in, still holds a value that satisfies every
+ * field check and could mint a second permit over the same answered question.
  *
- * So membership in this set is what {@link confirmRestore} actually spends, and it
- * spends it by a **checked deletion**: `WeakSet.delete` answers whether the question
+ * So membership in this map is what {@link confirmRestore} actually spends, and it
+ * spends it by a **checked deletion**: `WeakMap.delete` answers whether the question
  * was still a member *and* removes it in one operation that runs no user code, so the
  * test and the spend cannot come apart. Testing with `has` and deleting several lines
  * later is not the same guarantee and was this defect's second form — every property
  * read between the two can reach a getter or a proxy trap, and a caller that re-enters
- * there gets one question answered twice. {@link prepareRestore} is the set's only
+ * there gets one question answered twice. {@link prepareRestore} is the map's only
  * producer; the deletion is placed **after every confirmation check and before the
- * permit is minted**, so a refused confirmation leaves the question askable and no
- * path, ordinary or re-entrant, reaches {@link PERMITS} twice for one question. A
- * clone is not a member, because `structuredClone` copies fields and a `WeakSet` is
- * not a field.
+ * permit is filed in {@link PERMITS}**, so a refused confirmation leaves the question
+ * askable and no path, ordinary or re-entrant, reaches {@link PERMITS} twice for one
+ * question. A clone is not a key, because `structuredClone` copies fields and a
+ * `WeakMap` entry is not a field.
+ *
+ * **The key is the exact session {@link prepareRestore} returned, and that is the
+ * 2c-5-4b confirmation review's second High.** It was the {@link PendingRestore}
+ * hanging off that session until then, and naming the key therefore meant reading
+ * `session.pending` — so the revocation could not precede caller code, because its own
+ * first operation *was* caller code. A session is a key nothing has to read a property
+ * to name: `PENDING_AUTHORIZATIONS.delete(session)` is a bare reference operation, and
+ * that is what lets every withdrawal revoke first. What it costs is that a transition
+ * returning a fresh session which keeps the question must move the entry —
+ * {@link carryTheQuestion} — and that a spread or a `structuredClone` of an asked
+ * session authorizes nothing at all, which is stricter than what it replaced.
+ *
+ * **It holds a value rather than being a bare set, and that is the 2c-5-4b review's
+ * first High.** The {@link RestorePermit} filed here is built by
+ * {@link prepareRestore} out of the world as it stood when the person was asked, is
+ * deeply frozen, and is the *same object* {@link confirmRestore} hands to
+ * {@link PERMITS} — so nothing on the far side of the spend has to be re-derived from
+ * a session, a preview or a draft a caller controls. A `WeakSet` could not carry it,
+ * and carrying it is the whole point.
+ *
+ * **An entry has a third state, and that is the second confirmation round's High.**
+ * {@link SuspendedQuestion} stands in for the permit while a transition that may or may
+ * not withdraw reads the caller's session, so the question is never *absent* while it is
+ * still undecided. Absence is not neutral here: {@link prepareRestore} tests presence,
+ * and a question that briefly looks unasked is a licence to ask a second one.
  *
  * The construct is {@link PERMITS}'s one step earlier, and `rememberTheConflict`'s in
  * `./workspace.svelte.ts`: runtime membership keyed on the object the answer arrived
  * on, reachable from nowhere else.
  */
-const PENDING_CONFIRMATIONS = new WeakSet<PendingRestore>();
+const PENDING_AUTHORIZATIONS = new WeakMap<RestoreSession, RestorePermit | SuspendedQuestion>();
+
+/**
+ * A question held out of a caller's reach while the call that holds it inspects its
+ * session.
+ *
+ * **It exists because absence is not neutral**, which is the 2c-5-4b second confirmation
+ * review's only High. Two transitions have to read caller-controlled properties of a
+ * session that may still be authorized when they are done — {@link targetRevisionObserved},
+ * which `RestorePane.svelte` runs from an `$effect` on every change to the session, and
+ * {@link candidateRead}, whose response may turn out to be about another entry entirely.
+ * Neither may revoke unconditionally, and the round that made them **take** the entry out
+ * and put it back closed the spend while opening a different hole with the same
+ * operation: {@link prepareRestore} treats absence from the map as permission to register
+ * another question, so a getter reached during the inspection could build a successor
+ * session and file a second live authorization under it while the first was still going
+ * to be restored. Both could then confirm, and both permits could send.
+ *
+ * So the entry never leaves; it is replaced by one of these. A caller cannot name this
+ * type, cannot reach an instance and cannot forge one: {@link confirmRestore} refuses it,
+ * {@link takeTheQuestion} refuses it, and {@link prepareRestore}'s bare `has` sees the
+ * existing question it is. The permit comes back only if this very cell is still present.
+ */
+interface SuspendedQuestion {
+  /** The authorization this cell stands in for, to be put back or dropped. */
+  readonly permit: RestorePermit;
+}
+
+/**
+ * Every suspension cell this module has minted.
+ *
+ * A `WeakSet` rather than a field test or an `instanceof`, for {@link PENDING_AUTHORIZATIONS}'s
+ * own reason: telling a suspension from a permit is then a bare reference operation that
+ * reads no property, runs no user code and cannot be answered by anything a caller
+ * assembled. Nothing outside this module can obtain a member to put in it.
+ */
+const SUSPENSIONS = new WeakSet<object>();
+
+/**
+ * Whether one entry of {@link PENDING_AUTHORIZATIONS} is a suspension and not a permit.
+ *
+ * @param held - Whatever the map answered.
+ * @returns `true` when the question is suspended, so nothing may be spent or carried.
+ */
+function isSuspended(held: RestorePermit | SuspendedQuestion): held is SuspendedQuestion {
+  return SUSPENSIONS.has(held);
+} // End of function isSuspended()
+
+/**
+ * Suspends whatever question one session carries, for the length of one call.
+ *
+ * **The replacement is atomic in the sense that matters**: a `get`, a `has` on a private
+ * `WeakSet`, an object literal, an `add` and a `set` are all operations that run no user
+ * code, so there is no instant at which the session looks unasked. What a re-entrant
+ * caller sees throughout is a question it may not spend, may not carry and may not
+ * duplicate — rather than the nothing a take-and-put-back showed it.
+ *
+ * **An already suspended question is not suspended again.** The outer call stays the one
+ * owner of the cell; a second marker would leave two calls each believing they hold the
+ * permit, which is the shape this mechanism exists to refuse. A nested transition that
+ * withdraws still deletes the cell, and that decision stands.
+ *
+ * @param session - The session to hold the question of.
+ * @returns The cell this call now owns, or `undefined` when there was no question to
+ *   suspend or another call already holds it.
+ */
+function suspendTheQuestion(session: RestoreSession): SuspendedQuestion | undefined {
+  const held = PENDING_AUTHORIZATIONS.get(session);
+  if (held === undefined || isSuspended(held)) {
+    return undefined;
+  }
+  const suspension: SuspendedQuestion = { permit: held };
+  SUSPENSIONS.add(suspension);
+  PENDING_AUTHORIZATIONS.set(session, suspension);
+  return suspension;
+} // End of function suspendTheQuestion()
+
+/**
+ * Ends a suspension {@link suspendTheQuestion} started, putting its permit back.
+ *
+ * **Only if this call's own cell is still there.** Anything that ran while the question
+ * was suspended and left something else under the session — a revocation, most of all —
+ * has already decided what that session authorizes, and putting a permit back over it
+ * would be this module answering a question that was taken back. A deleted cell stays
+ * deleted, and this is where "do not resurrect" is written.
+ *
+ * **Called from a `finally`**, so a getter that throws in the middle of an inspection
+ * cannot strand a session suspended, where it could be neither confirmed nor asked
+ * again. A throw is not a decision, so the state it leaves is the one it found.
+ *
+ * @param session - The session the question was suspended on.
+ * @param suspension - What {@link suspendTheQuestion} answered.
+ */
+function restoreTheQuestion(
+  session: RestoreSession,
+  suspension: SuspendedQuestion | undefined
+): void {
+  if (suspension !== undefined && PENDING_AUTHORIZATIONS.get(session) === suspension) {
+    PENDING_AUTHORIZATIONS.set(session, suspension.permit);
+  }
+} // End of function restoreTheQuestion()
+
+/**
+ * What an inspection answers when it decided to change nothing.
+ *
+ * **The presentation still follows the authorization**, which is this module's rule and
+ * is the one thing a suspension could otherwise cost. Ordinarily the argument comes back
+ * by reference, question and all — that identity is what makes `RestorePane.svelte`'s
+ * `$effect` over {@link targetRevisionObserved} converge, and it is the whole point of
+ * the Low this closes: a response about another entry withdraws nothing. But a getter
+ * this inspection ran may itself have **withdrawn** the question, and that decision
+ * stands; answering the argument unchanged there would leave a screen drawing a
+ * confirmation whose control does nothing.
+ *
+ * The map is consulted rather than `session.pending`, because the map is the authority
+ * and asking it reads no property.
+ *
+ * **`undefined` does not excuse this call from asking**, and that is the third
+ * confirmation review's Low. It means only that this call does not *own* a cell —
+ * either there was no question, or an outer inspection owns it — and neither of those
+ * says anything is still authorized. A nested inspection whose own getter reached
+ * {@link revokeConfirmation} deletes the outer call's cell, and returning the argument
+ * by reference then leaves a retained session presenting a question the map no longer
+ * holds. So that branch tests bare **presence**: something is there — this call's
+ * caller's suspension, most of all — and the argument is its owner's state to answer
+ * with; nothing is there, and the copy presenting none is what may be handed back.
+ *
+ * **Presence is not identity here, deliberately.** A suspension owned by an outer call
+ * is the one thing that may be present and not this call's, and it is exactly the thing
+ * that must count: the outer call's own `finally` and its own `unchangedByInspection`
+ * decide what happens to it, and a nested call correcting that would be answering a
+ * question it does not hold.
+ *
+ * @param session - The session being inspected.
+ * @param suspension - What {@link suspendTheQuestion} answered.
+ * @returns The same session, or a copy presenting nothing when the question went.
+ */
+function unchangedByInspection(
+  session: RestoreSession,
+  suspension: SuspendedQuestion | undefined
+): RestoreSession {
+  if (suspension === undefined) {
+    // **Bare presence, not identity**, and the difference is a nested inspection. This
+    // call holds nothing either because there was no question or because an outer
+    // inspection owns the cell; in the second case a getter *this* call ran may have
+    // withdrawn that outer cell, and the map is then empty while the argument still
+    // presents a question. Answering it by reference there hands back a confirmation
+    // control that can do nothing — the third confirmation review's Low.
+    return PENDING_AUTHORIZATIONS.has(session) ? session : withNothingPending(session);
+  }
+  return PENDING_AUTHORIZATIONS.get(session) === suspension
+    ? session
+    : withNothingPending(session);
+} // End of function unchangedByInspection()
+
+/**
+ * Revokes whatever authorization one session still carries.
+ *
+ * **The one place a withdrawal becomes a revocation**, so consult Q5's rule — that
+ * navigation, a selection change, a catalogue refresh, a candidate change and a
+ * cancellation all withdraw the confirmation — is a statement about authorization
+ * rather than about what a screen draws. Before 2c-5-4b every withdrawing transition
+ * only wrote `pending: null` into the session it *returned*, and a caller holding the
+ * one it passed in could still confirm.
+ *
+ * **It reads no property of its argument, and that is the whole point of the key.**
+ * The fix round's version opened with `session.pending` to name what to delete, which
+ * is a caller-controlled read: a getter installed there could call
+ * {@link confirmRestore} on the retained session, move the authorization into
+ * {@link PERMITS}, and leave this deletion with nothing to revoke and a live permit it
+ * cannot reach. `WeakMap.delete` on the session runs no user code, so there is no
+ * instant between deciding to revoke and having revoked.
+ *
+ * **The deletion's result is deliberately not read, and that is not this phase's
+ * recurring defect.** A discarded consuming operation is a defect when its success is
+ * what authorizes something; nothing is minted from a revocation, so there is nothing
+ * a re-entrant caller could spend twice, and a second revocation of the same question
+ * is the same state as the first.
+ *
+ * **It revokes a {@link SuspendedQuestion} as readily as a permit, and that is the
+ * direction the two mechanisms must resolve in.** A withdrawal reached from inside an
+ * inspection is a decision about this session; {@link restoreTheQuestion} then finds its
+ * cell gone and puts nothing back, so the question stays revoked. The opposite rule —
+ * an inspection restoring over a withdrawal — would be this module answering a question
+ * somebody took away.
+ *
+ * @param session - The session whose question is being taken back.
+ */
+function revokeConfirmation(session: RestoreSession): void {
+  PENDING_AUTHORIZATIONS.delete(session);
+} // End of function revokeConfirmation()
+
+/**
+ * Moves one session's authorization to the session that replaces it.
+ *
+ * **For the transitions that change nothing a confirmation binds**: a listing landing,
+ * an outcome being put away, a send that reached no command, and the two steps of a
+ * reload's warning. Each of those returns a *new* session while keeping the question,
+ * so with the authorization keyed by the session it would otherwise be stranded on the
+ * object the caller has just replaced — a question drawn on screen that confirms
+ * nothing. That is the safe direction and it is still a defect.
+ *
+ * **It moves rather than copies.** A checked deletion from the old key is the
+ * membership test, so one question can never be answerable from two session objects at
+ * once, and a caller retaining the pre-transition session cannot confirm it.
+ *
+ * **Every operation here is a bare `WeakMap` call on an object key**, so no user code
+ * runs between the read and the deletion that authorizes the move. The one
+ * caller-controlled thing on this path is building `to`, and that happens at the call
+ * site **before** this function is entered — deliberately, because a getter that
+ * re-entered and confirmed during the spread leaves nothing under `from` and therefore
+ * carries nothing, while reading `from` first and setting `to` afterwards would install
+ * a second live authorization for a question that had just been spent.
+ *
+ * @param from - The session the question was asked on.
+ * @param to - The session that replaces it, already built.
+ * @returns `to`, unchanged.
+ */
+function carryTheQuestion(from: RestoreSession, to: RestoreSession): RestoreSession {
+  const held = takeTheQuestion(from);
+  if (held !== undefined) {
+    PENDING_AUTHORIZATIONS.set(to, held);
+    return to;
+  }
+  // Nothing to carry: either no question was pending, or something answered it while
+  // `to` was being built. Presenting one either way would draw a control that does
+  // nothing, so the presentation follows the authorization here as it does everywhere
+  // else in this module.
+  return withNothingPending(to);
+} // End of function carryTheQuestion()
+
+/**
+ * Takes one session's authorization out of the map, to be dropped or put back.
+ *
+ * **A checked deletion, so it is a claim rather than a copy.** Success means this call
+ * — and no re-entrant one — now holds the only reference to that authorization, so
+ * while the caller does whatever reading it has to do there is nothing for anybody
+ * else to spend. Three bare `WeakMap` and `WeakSet` operations on an object key, with
+ * no user code between them.
+ *
+ * **A suspended question is not takeable**, and that is not a technicality: another
+ * call holds that permit and will put it back under the session it is on, so moving it
+ * to a second session here would end with one question live in two places — the exact
+ * shape {@link SuspendedQuestion} exists to refuse. {@link carryTheQuestion} therefore
+ * carries nothing when it is re-entered from inside an inspection, which is the
+ * conservative direction: the successor presents no question, and the one that was
+ * asked stays where the person is looking at it.
+ *
+ * @param session - The session to take the question off.
+ * @returns The authorization this call now holds, or `undefined` when there was none or
+ *   it is suspended.
+ */
+function takeTheQuestion(session: RestoreSession): RestorePermit | undefined {
+  const held = PENDING_AUTHORIZATIONS.get(session);
+  if (held === undefined || isSuspended(held)) {
+    return undefined;
+  }
+  return PENDING_AUTHORIZATIONS.delete(session) ? held : undefined;
+} // End of function takeTheQuestion()
+
+/**
+ * The session with no question **presented**, for the arms that revoked one anyway.
+ *
+ * **The presentation following the authorization.** Answering the argument unchanged
+ * where the map holds no question for it would leave `pending` describing a question
+ * that authorizes nothing — the one direction in which the two halves may not
+ * disagree, because a screen would go on drawing a confirmation whose control does
+ * nothing.
+ *
+ * The reference is answered unchanged when there was nothing to clear, which the
+ * frozen-transition cases assert by identity.
+ *
+ * **The precondition is that no authorization is reachable under the key this session
+ * will be presented as** — never the narrower "call it only after
+ * {@link revokeConfirmation}", which an earlier version of this comment claimed and
+ * which {@link carryTheQuestion} does not satisfy. It reads `session.pending`, and that
+ * read is safe because a getter reached by it has nothing to spend. Three call families
+ * establish that, by three different routes, and they are deliberately not numbered
+ * here — a count is the kind of claim that rots as callers are added:
+ *
+ * - the **revoke-first** transitions, including their frozen branches, have already
+ *   removed the entry through {@link revokeConfirmation};
+ * - {@link unchangedByInspection} has established that the map holds nothing this call
+ *   may present — either its own suspension is gone, which means something revoked, or,
+ *   with no cell of its own, the map is empty under this session;
+ * - {@link carryTheQuestion} passes a **fresh successor** after {@link takeTheQuestion}
+ *   found nothing transferable, so no revocation has occurred and none is needed: the
+ *   key it hands over is new and no authorization was ever filed under it.
+ *
+ * @param session - A session with no authorization reachable under its key.
+ * @returns The same session when it presented none, or a copy presenting none.
+ */
+function withNothingPending(session: RestoreSession): RestoreSession {
+  return session.pending === null ? session : { ...session, pending: null };
+} // End of function withNothingPending()
 
 /**
  * What one send is carrying, frozen at the moment it was confirmed.
@@ -658,20 +1099,28 @@ export interface RestoreSession {
    * after a catalogue refresh produces the same document, base revision, entry
    * identity and candidate hash, and this is the only one of the five that moves.
    * It is **not** what makes a confirmation one-shot — that is
-   * {@link confirmRestore}'s checked deletion from {@link PENDING_CONFIRMATIONS}, and
-   * no value on a session can do it.
+   * {@link confirmRestore}'s checked deletion from {@link PENDING_AUTHORIZATIONS},
+   * and no value on a session can do it.
    */
   readonly previewGeneration: number;
   /**
-   * The question this session **presents** as pending, or `null`. Only membership in
-   * {@link PENDING_CONFIRMATIONS} says whether it remains unanswered.
+   * The question this session **presents** as pending, or `null`. Only membership of
+   * the session in {@link PENDING_AUTHORIZATIONS} says whether it still authorizes
+   * anything.
    *
-   * **Setting this to `null` is presentation, not a spend.** What records that the
-   * question has been answered is {@link PENDING_CONFIRMATIONS}, because every field
-   * on the value compares equal across copies of it — and because
-   * {@link confirmRestore} returns a *new* session and cannot reach into the one the
-   * caller retained, a session held across a successful confirmation still carries
-   * the very object whose membership has gone.
+   * **Setting this to `null` is presentation, not a spend and not a revocation.** What
+   * records that the question has been answered, or taken back, is
+   * {@link PENDING_AUTHORIZATIONS}, because every field on the value compares equal
+   * across copies of it — and because every transition here returns a *new* session
+   * and cannot reach into the one the caller retained, a session held across a
+   * successful confirmation, or across any withdrawal, still presents the very
+   * question whose entry has gone.
+   *
+   * **The two agree on every session this module answers**, and that is an obligation
+   * on each transition rather than a property of this field: a transition either
+   * revokes and writes `null` here, or carries the entry to the session it returns.
+   * Nothing in TypeScript forces it and `restore.test.ts` drives every transition to
+   * check it.
    */
   readonly pending: PendingRestore | null;
   /** Whether a replacement is in flight. */
@@ -739,10 +1188,14 @@ export interface RestoreSession {
  * base revision to the conflict's `diskRevision`, and withdraw the confirmation —
  * {@link reloadTheDiskVersion} is the transition and its own note is the record.
  *
- * **`offersReload` is `false` and the transition exists anyway**, which is the
- * trade 2c-4a-2 made and 2c-4a-3a collected on: the machinery is built and driven
- * by this module's suite now, and 2c-5-4 flips one boolean when it draws the panel
- * rather than inventing a transition on top of drawing it.
+ * **`offersReload` is `true` as of 2c-5-4b, and flipping one boolean is all it
+ * took** — the trade 2c-4a-2 made and 2c-4a-3a collected on, collected again here.
+ * The transition, its warning step, its refused step and its retargeting of the
+ * candidate were all built at 2c-5-3 and driven by this module's suite while no
+ * control existed; the step that drew the panel invented no machinery, and
+ * `conflictChoicesFor` now names `reloadDiskVersion` before the warning and
+ * `confirmReload` after it. What no boolean here can force is that
+ * `RestorePane.svelte` acts on either label; its mounted suite presses both.
  *
  * **`reapplySupport` is `unavailable` permanently**, for the raw editor's reason
  * (consult Q4 of 2c-4b): the candidate is a whole document, so there is no target,
@@ -754,7 +1207,7 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
   reloadOutcome: 'retargetsCandidate',
   offersCopyDraft: false,
-  offersReload: false,
+  offersReload: true,
   offersReapply: false,
   reapplySupport: 'unavailable'
 };
@@ -871,24 +1324,38 @@ function frozen(session: RestoreSession): boolean {
  *
  * **The one place withdrawal happens**, so consult Q4's rule — *changing the batch,
  * entry, target, candidate or observed target revision withdraws confirmation and
- * acknowledgement* — is one rule rather than one per transition. It drops the
- * pending confirmation, withdraws whatever consent the draft had collected, and
- * bumps {@link RestoreSession.previewGeneration} so a confirmation whose other four
- * values happen to be reproducible is still refused.
+ * acknowledgement* — is one rule rather than one per transition. It **revokes** the
+ * pending question's authorization, drops the question from the session, withdraws
+ * whatever consent the draft had collected, and bumps
+ * {@link RestoreSession.previewGeneration} so a confirmation whose other four values
+ * happen to be reproducible is still refused.
+ *
+ * **{@link revokeConfirmation} is its first statement, and the second argument is a
+ * word rather than a preview for that reason.** Every caller used to pass either
+ * `session.preview` or `null`, and evaluating `session.preview` at the call site is a
+ * caller-controlled property read *before* the revocation — a getter reached there
+ * could confirm the very question this transition exists to take back. Which of the
+ * two a caller wants is now said in a literal, and the read that follows from it
+ * happens on the far side of the revocation. Since the confirmation round the
+ * revocation reads no property either, so "first" is true of the whole operation and
+ * not only of its position.
+ *
+ * **What each caller still owes**, because this function cannot see it: the arms that
+ * answer their own argument unchanged — the {@link frozen} guards — must not reach
+ * here at all, and they do not.
  *
  * The consent goes through `retargetedDraft` at the draft's existing base revision,
  * which is `withdrawnConsent` — findings accepted for one transaction say nothing
  * about the next.
  *
  * @param session - The session to withdraw from.
- * @param preview - The preview it should hold afterwards, which is its own when
- *   nothing about the candidate changed.
- * @returns The session with nothing pending and no consent.
+ * @param candidate - `'kept'` to carry this session's own preview through, which is
+ *   right when nothing about the candidate changed, and `'dropped'` to leave none.
+ * @returns The session with nothing pending, nothing authorized and no consent.
  */
-function withdrawn(
-  session: RestoreSession,
-  preview: RestorePreview | null
-): RestoreSession {
+function withdrawn(session: RestoreSession, candidate: 'kept' | 'dropped'): RestoreSession {
+  revokeConfirmation(session);
+  const preview = candidate === 'kept' ? session.preview : null;
   const carried =
     preview === null
       ? null
@@ -915,7 +1382,7 @@ function withdrawn(
  * @returns The session at that revision, with nothing pending and no consent.
  */
 function measuredAgainst(session: RestoreSession, revision: ContentRevision): RestoreSession {
-  const cleared = withdrawn(session, session.preview);
+  const cleared = withdrawn(session, 'kept');
   const preview = cleared.preview;
   return {
     ...cleared,
@@ -939,9 +1406,14 @@ function measuredAgainst(session: RestoreSession, revision: ContentRevision): Re
  *   same session while it is {@link frozen}.
  */
 export function loadingBatches(session: RestoreSession): RestoreSession {
+  // **Before {@link frozen}, not after it.** That guard reads `session.phase`, which
+  // is a caller-controlled property read — so with the revocation left to
+  // {@link withdrawn} a getter there answered the question from inside this
+  // transition. Seven transitions had that shape and each of them opens this way now.
+  revokeConfirmation(session);
   return frozen(session)
-    ? session
-    : { ...withdrawn(session, session.preview), batches: { kind: 'loading' } };
+    ? withNothingPending(session)
+    : { ...withdrawn(session, 'kept'), batches: { kind: 'loading' } };
 } // End of function loadingBatches()
 
 /**
@@ -957,6 +1429,10 @@ export function loadingBatches(session: RestoreSession): RestoreSession {
  * `browser.restore.refused.inFlight` promises: the person asks for the listing again
  * once the file has answered.
  *
+ * **A listing changes nothing a confirmation binds**, so a question pending over one
+ * is carried rather than revoked — through {@link carryTheQuestion}, because the
+ * authorization is keyed by the session and this one is new.
+ *
  * @param session - The session waiting for an answer.
  * @param answer - What `listBackupBatches` in `../ipc/commands` answered.
  * @returns The session showing the listing or the refusal, or the same session while
@@ -969,12 +1445,12 @@ export function batchesLoaded(
   if (frozen(session)) {
     return session;
   }
-  return {
+  return carryTheQuestion(session, {
     ...session,
     batches: answer.ok
       ? { kind: 'loaded', listing: answer.value }
       : { kind: 'failed', failure: answer.failure }
-  };
+  });
 } // End of function batchesLoaded()
 
 /**
@@ -990,11 +1466,13 @@ export function batchesLoaded(
  *   while it is {@link frozen}.
  */
 export function chooseBatch(session: RestoreSession, batch: BackupBatchId): RestoreSession {
+  // Before {@link frozen} reads the phase, for `loadingBatches`'s reason.
+  revokeConfirmation(session);
   if (frozen(session)) {
-    return session;
+    return withNothingPending(session);
   }
   return {
-    ...withdrawn(session, null),
+    ...withdrawn(session, 'dropped'),
     batch,
     entries: NOTHING_ASKED,
     entry: null
@@ -1009,9 +1487,11 @@ export function chooseBatch(session: RestoreSession, batch: BackupBatchId): Rest
  *   same session while it is {@link frozen}.
  */
 export function loadingEntries(session: RestoreSession): RestoreSession {
+  // Before {@link frozen} reads the phase, for `loadingBatches`'s reason.
+  revokeConfirmation(session);
   return frozen(session)
-    ? session
-    : { ...withdrawn(session, session.preview), entries: { kind: 'loading' } };
+    ? withNothingPending(session)
+    : { ...withdrawn(session, 'kept'), entries: { kind: 'loading' } };
 } // End of function loadingEntries()
 
 /**
@@ -1023,7 +1503,8 @@ export function loadingEntries(session: RestoreSession): RestoreSession {
  * read was in flight therefore gets its session back unchanged.
  *
  * **An answer that lands while the session is {@link frozen} is dropped too**, for
- * `batchesLoaded`'s reason.
+ * `batchesLoaded`'s reason — and a question pending over it is carried for
+ * `batchesLoaded`'s reason as well.
  *
  * @param session - The session waiting for an answer.
  * @param answer - What `listBackupEntries` in `../ipc/commands` answered.
@@ -1040,12 +1521,12 @@ export function entriesLoaded(
   if (answer.ok && answer.value.batch.name !== session.batch?.name) {
     return session;
   }
-  return {
+  return carryTheQuestion(session, {
     ...session,
     entries: answer.ok
       ? { kind: 'loaded', listing: answer.value }
       : { kind: 'failed', failure: answer.failure }
-  };
+  });
 } // End of function entriesLoaded()
 
 /**
@@ -1061,7 +1542,11 @@ export function entriesLoaded(
  *   the same session while it is {@link frozen}.
  */
 export function chooseEntry(session: RestoreSession, entry: BackupEntryId): RestoreSession {
-  return frozen(session) ? session : { ...withdrawn(session, null), entry };
+  // Before {@link frozen} reads the phase, for `loadingBatches`'s reason.
+  revokeConfirmation(session);
+  return frozen(session)
+    ? withNothingPending(session)
+    : { ...withdrawn(session, 'dropped'), entry };
 } // End of function chooseEntry()
 
 /**
@@ -1084,6 +1569,14 @@ export function chooseEntry(session: RestoreSession, entry: BackupEntryId): Rest
  * replaced under a send in flight would leave {@link applyRestore} describing an
  * answer for one candidate against another.
  *
+ * **A response this function ignores withdraws nothing**, and *"the same session"* means
+ * the same authorization too. The question is {@link suspendTheQuestion | suspended}
+ * across the validation rather than revoked before it, so a stale read for another entry
+ * — landing after the person has loaded this one and been asked about it — cannot make a
+ * live question disappear on the way to being rejected as irrelevant. Only the arm that
+ * actually replaces the candidate withdraws, and it withdraws because the candidate
+ * moved. That is the second confirmation review's Low.
+ *
  * @param session - The session.
  * @param response - What `readBackupText` in `../ipc/commands` answered.
  * @returns The session holding the candidate, or the same session when the response
@@ -1093,24 +1586,45 @@ export function candidateRead(
   session: RestoreSession,
   response: BackupTextResponse
 ): RestoreSession {
-  const asked = session.entry;
-  if (frozen(session) || asked === null || response.document !== session.target) {
-    return session;
+  // **Suspended before every one of the reads below**, and there are seven of them here
+  // — the entry, the phase, the destination, the response's own entry and batch. Each is
+  // a caller-controlled property read, and with the revocation left to {@link withdrawn}
+  // any of them could have answered the question from inside this transition. Revoking
+  // outright closed that and cost the second confirmation review's Low: a read for entry
+  // B landing after the person has loaded entry A and asked its question destroyed A's
+  // question over a response this function then rejects as irrelevant. A suspension is
+  // both — nothing spendable while the response is validated, and the question intact
+  // when it turns out not to be about this session.
+  const suspension = suspendTheQuestion(session);
+  try {
+    const asked = session.entry;
+    if (frozen(session) || asked === null || response.document !== session.target) {
+      return unchangedByInspection(session, suspension);
+    }
+    if (
+      response.entry.id.relative_path !== asked.relative_path ||
+      response.entry.id.batch.name !== asked.batch.name ||
+      session.batch === null ||
+      asked.batch.name !== session.batch.name
+    ) {
+      return unchangedByInspection(session, suspension);
+    }
+    // Withdrawn **before** the new preview is built, so the revocation precedes every
+    // remaining caller-controlled read: `cleared.baseRevision` is a plain copy the
+    // spread inside `withdrawn` already took, and reaching for `session.baseRevision`
+    // here would be one more read on the wrong side of it. This is also the one arm
+    // that ends the suspension permanently — the deletion inside it removes the cell,
+    // and `restoreTheQuestion` will find it gone and put nothing back.
+    const cleared = withdrawn(session, 'dropped');
+    const preview: RestorePreview = {
+      entry: response.entry,
+      revision: response.revision,
+      draft: startDraft(cleared.baseRevision, response.text, textDraftRules)
+    };
+    return { ...cleared, preview };
+  } finally {
+    restoreTheQuestion(session, suspension);
   }
-  if (
-    response.entry.id.relative_path !== asked.relative_path ||
-    response.entry.id.batch.name !== asked.batch.name ||
-    session.batch === null ||
-    asked.batch.name !== session.batch.name
-  ) {
-    return session;
-  }
-  const preview: RestorePreview = {
-    entry: response.entry,
-    revision: response.revision,
-    draft: startDraft(session.baseRevision, response.text, textDraftRules)
-  };
-  return { ...withdrawn(session, null), preview };
 } // End of function candidateRead()
 
 /**
@@ -1128,9 +1642,11 @@ export function candidateRefused(
   session: RestoreSession,
   failure: IpcFailure
 ): RestoreSession {
+  // Before {@link frozen} reads the phase, for `loadingBatches`'s reason.
+  revokeConfirmation(session);
   return frozen(session)
-    ? session
-    : { ...withdrawn(session, null), entries: { kind: 'failed', failure } };
+    ? withNothingPending(session)
+    : { ...withdrawn(session, 'dropped'), entries: { kind: 'failed', failure } };
 } // End of function candidateRefused()
 
 /**
@@ -1160,9 +1676,32 @@ export function targetRevisionObserved(
   session: RestoreSession,
   observed: ContentRevision | null
 ): RestoreSession {
-  return frozen(session) || observed === null || observed === session.baseRevision
-    ? session
-    : measuredAgainst(session, observed);
+  // **Suspended before anything is read, and put back only if nothing moved.** The
+  // three reads below — the phase, the committed flag and the base revision — are all
+  // caller-controlled, so simply revoking after them leaves the opening every other
+  // withdrawal here just closed. Revoking *unconditionally* is not available either,
+  // and this is the one transition where that matters: `RestorePane.svelte` runs it
+  // from an `$effect` on every change to the session, so a question would be revoked
+  // in the same tick it was asked.
+  //
+  // **Taking the entry out was not the answer**, and that is the second confirmation
+  // review's High. It did stop a re-entrant call spending the question — nothing was
+  // there — but `prepareRestore` reads absence as permission to ask again, so a getter
+  // on `phase` could register a second live authorization under a successor session and
+  // both would confirm once this call put the first one back. The cell that replaces the
+  // permit is a question to everything that tests for one and a permit to nothing, and
+  // the put-back is identity-checked against it, so a re-entrant withdrawal wins.
+  const suspension = suspendTheQuestion(session);
+  try {
+    // The idle arm answers its own argument by reference, which is what makes that
+    // effect converge — unless a getter it just ran withdrew the question, in which
+    // case what comes back presents none either.
+    return frozen(session) || observed === null || observed === session.baseRevision
+      ? unchangedByInspection(session, suspension)
+      : measuredAgainst(session, observed);
+  } finally {
+    restoreTheQuestion(session, suspension);
+  }
 } // End of function targetRevisionObserved()
 
 /**
@@ -1250,58 +1789,164 @@ export function canPrepareRestore(
  * candidate, a different base revision, or a later preview that happens to
  * reproduce the other four.
  *
- * It is also the only place a question is registered in {@link PENDING_CONFIRMATIONS},
- * which is what {@link confirmRestore} spends. Asking again while one is pending does
- * nothing; asking after the pending one was cancelled or withdrawn mints a **new**
- * question, and that is a second authorization by construction rather than a hole.
+ * It is also the only place a question is registered in
+ * {@link PENDING_AUTHORIZATIONS}, which is what {@link confirmRestore} spends. Asking
+ * again while one is pending does nothing; asking after the pending one was cancelled
+ * or withdrawn mints a **new** question, and that is a second authorization by
+ * construction rather than a hole.
+ *
+ * **The permit is built here, not at the confirmation**, which is the 2c-5-4b review's
+ * first High. Everything a write needs — the destination, the base revision, the
+ * entry's identity as copied primitive fields, the candidate hash, the preview
+ * generation and the **exact complete submission** — is read out of the world at this
+ * one moment, copied into a plain object, deeply frozen, and filed away where no
+ * caller can reach it. {@link confirmRestore} then hands that same record to
+ * {@link PERMITS} and derives nothing, so no property read on the far side of its
+ * checked spend can substitute anything. The bound values a person was asked about are
+ * therefore the bound values that reach the wire, by construction rather than by the
+ * two happening to agree.
+ *
+ * **One base revision, read once, on both fields.** That is the 2c-5-4b confirmation
+ * review's first High: `RestorePermit.baseRevision` used to come from
+ * `session.baseRevision` and `RestorePermit.submission.baseRevision` from
+ * `submissionOf(preview.draft)`, two separate caller-controlled reads that nothing
+ * required to agree — and {@link permitHolds} rechecks only the first while
+ * {@link sendRestore} used to send only the second, so a locked write could succeed on
+ * a base revision the confirmation never bound. There is one local now, and it is what
+ * both fields hold; and where the draft's own base **disagrees** with it the question
+ * is not asked at all, because a snapshot describing two transactions is not a
+ * snapshot of one. That disagreement is unreachable through this module's own
+ * transitions — `startDraft`, `retargetedDraft` and `savedDraft` move the two
+ * together — so the refusal is a guard against a caller assembling a session by hand,
+ * and the cost of it firing is one control that does nothing rather than a write
+ * against a revision nobody was asked about.
+ *
+ * **What no ordering can make atomic**, in the same sentence as what this does force:
+ * these are several property reads on values a caller supplied, so a getter that
+ * answers differently on successive reads can still make the snapshot internally
+ * inconsistent in the one pairing nothing here can check — the candidate's hash and
+ * the candidate's bytes are two different properties of the preview, and this side of
+ * the wire cannot hash anything to compare them. Every other value is read exactly
+ * once. What is forced is that whatever it froze is what a send carries, that
+ * {@link PendingRestore}'s own fields are copied *from the frozen record* rather than
+ * read a second time, and that {@link permitHolds} compares the frozen candidate's
+ * bytes against the live preview's before anything is sent.
+ *
+ * The acknowledgement is cloned as well as frozen, for `acknowledgeRefusal`'s reason
+ * one module along: consent reaching the wire must share no object with a value a
+ * caller could still be holding.
  *
  * @param session - The session.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
  * @returns The session with the question pending, or the same session when it may
- *   not be asked or one is already pending.
+ *   not be asked or one is already authorized.
  */
 export function prepareRestore(
   session: RestoreSession,
   context: RestoreContext
 ): RestoreSession {
-  const preview = session.preview;
-  if (preview === null || session.pending !== null || !canPrepareRestore(session, context)) {
+  // **Asked of the map rather than of `session.pending`**, because the map is the
+  // authority: a session presenting a question that no longer authorizes anything is
+  // a session that may be asked again, and this is a bare reference operation that
+  // reads no property at all.
+  //
+  // **A suspension counts, and that is the second confirmation review's High closed at
+  // its far end.** This test is what a re-entrant caller reaches from inside
+  // {@link targetRevisionObserved} or {@link candidateRead}, and while those held the
+  // permit *out* of the map it answered `false` — so this function built a successor
+  // session and filed a second live authorization under it, and both could confirm once
+  // the first was put back. A {@link SuspendedQuestion} is present, so `has` is `true`
+  // and no second question is minted; no code changed here, which is the point of
+  // suspending rather than removing.
+  if (PENDING_AUTHORIZATIONS.has(session)) {
     return session;
   }
+  const preview = session.preview;
+  if (preview === null || !canPrepareRestore(session, context)) {
+    return session;
+  }
+  // **One read, and both representations of the base revision come from it.** The two
+  // used to be read separately and only one of them was ever rechecked.
+  const baseRevision = session.baseRevision;
+  const submission = submissionOf(preview.draft);
+  if (submission.baseRevision !== baseRevision) {
+    return session;
+  }
+  // Read once each, into locals, so the record cannot describe two entries.
+  const entryId = preview.entry.id;
+  const entry: BackupEntryId = {
+    // Copied primitive fields rather than the caller's identity object, so a getter
+    // or a proxy trap on it cannot answer one path while the question is validated
+    // and another once it has been answered.
+    batch: { name: entryId.batch.name },
+    relative_path: entryId.relative_path
+  };
+  const authorized = deepFreeze<RestorePermit>({
+    document: session.target,
+    baseRevision,
+    entry,
+    candidateRevision: preview.revision,
+    generation: session.previewGeneration,
+    submission: {
+      baseRevision,
+      candidate: submission.candidate,
+      acknowledgement: deepFreeze(structuredClone(submission.acknowledgement)),
+      generation: submission.generation
+    }
+  });
   // The cast is the brand: `PendingRestore` declares a property on a symbol this
   // module does not export, so no literal outside it can have the type and this is
-  // the only place one is built.
+  // the only place one is built. Its five fields are taken **off the frozen record**
+  // rather than read from the session a second time, so the question a screen carries
+  // and the permit it authorizes cannot describe two different transactions.
   const pending = {
-    document: session.target,
-    baseRevision: session.baseRevision,
-    entry: preview.entry.id,
-    candidateRevision: preview.revision,
-    generation: session.previewGeneration
+    document: authorized.document,
+    baseRevision: authorized.baseRevision,
+    entry: authorized.entry,
+    candidateRevision: authorized.candidateRevision,
+    generation: authorized.generation
   } as unknown as PendingRestore;
-  // Registered here and nowhere else, so this exact object — never a copy of it, and
-  // never a second one for the same question — is what a confirmation spends.
-  PENDING_CONFIRMATIONS.add(pending);
-  return { ...session, pending, sendFailure: null };
+  const asked: RestoreSession = { ...session, pending, sendFailure: null };
+  // Registered here and nowhere else, and under the session this returns — so the
+  // exact object a caller installs, never a copy of it and never the one it handed
+  // in, is what a confirmation spends. The spread above is the last caller-controlled
+  // operation on this path, deliberately: a getter reached by it can confirm the
+  // *previous* question, which is a state this call has already refused to be in.
+  PENDING_AUTHORIZATIONS.set(asked, authorized);
+  return asked;
 } // End of function prepareRestore()
 
 /**
- * Takes the question back.
+ * Takes the question back, and takes its authorization with it.
  *
- * **It clears the question from the session and leaves its membership of
- * {@link PENDING_CONFIRMATIONS} alone**, so it withdraws the question rather than
- * answering it: a caller that kept the object could put it back, and the
- * confirmation would then be judged, as always, on the five values it carries, the
- * revision the live projection gives the destination, and the surfaces the window has
- * open. That is the same class as a caller that kept the session from before the
- * question was asked — and it is a caller re-asking, never a second answer to one
- * question, which is what {@link confirmRestore} spends.
+ * **It revokes the entry in {@link PENDING_AUTHORIZATIONS} before it builds anything**,
+ * which is the 2c-5-4b review's second High. Until then it only wrote `pending: null`
+ * into the session it *returned*, so a caller holding the session it was given could
+ * still confirm — and `BrowserState.restoreDocument` takes its session from `started`
+ * rather than from live pane state, so that confirmation could have written the
+ * cancelled candidate while the pane showed another one or showed no question at all.
+ * A cancelled question is now dead: putting it back on a session by hand produces a
+ * value {@link confirmRestore} finds nothing filed under.
+ *
+ * **Asking again is still asking again.** {@link prepareRestore} over the returned
+ * session mints a fresh question with a fresh permit, which is a second authorization
+ * by construction and is exactly the state a screen puts a person in when the question
+ * comes back.
  *
  * @param session - The session.
  * @returns The session with nothing pending, or the same session when nothing was.
  */
 export function cancelRestore(session: RestoreSession): RestoreSession {
-  return session.pending === null ? session : { ...session, pending: null };
+  // **Revoked before anything is read**, so a getter reached by the read below, or by
+  // the spread after it, cannot confirm the question this call exists to take back.
+  // The fix round put this line first and still named its key through
+  // `session.pending`, which left the opening inside the revocation itself.
+  revokeConfirmation(session);
+  if (session.pending === null) {
+    return session;
+  }
+  return { ...session, pending: null };
 } // End of function cancelRestore()
 
 /**
@@ -1340,18 +1985,30 @@ export interface StartedRestore {
 }
 
 /**
- * What one confirmation authorizes, held where no caller can reach it.
+ * What one question authorizes, held where no caller can reach it.
  *
- * The five values consult Q5 binds **and the exact candidate**, so the send does not
- * have to trust anything a caller carried: it compares the permit against the live
- * session, and what it hands the sender is the permit's own submission.
+ * The five values consult Q5 binds **and the exact complete submission**, so the send
+ * does not have to trust anything a caller carried: it compares the permit against the
+ * live session, and what it hands the sender is the permit's own submission.
+ *
+ * **Built by {@link prepareRestore}, deeply frozen, and never rebuilt.** One object
+ * has two lives: it is filed in {@link PENDING_AUTHORIZATIONS} while the question is
+ * unanswered and moved to {@link PERMITS} when it is confirmed. Nothing derives a
+ * second one, because deriving after the spend was the 2c-5-4b review's first High —
+ * a value read on the far side of a checked deletion is a value the deletion did not
+ * authorize.
+ *
+ * Every field is a copy: two numbers and four strings, the entry's identity rebuilt
+ * from its own two strings rather than carried by reference, and the acknowledgement
+ * a `structuredClone`. `deepFreeze` then makes the whole record immutable at runtime,
+ * which `readonly` alone does not.
  */
 interface RestorePermit {
   /** The file that may be replaced. */
   readonly document: DocumentId;
   /** The revision it was expected to hold. */
   readonly baseRevision: ContentRevision;
-  /** The backup entry the candidate was read from. */
+  /** The backup entry the candidate was read from, as copied primitive fields. */
   readonly entry: BackupEntryId;
   /** The hash of exactly the candidate bytes. */
   readonly candidateRevision: ContentRevision;
@@ -1362,19 +2019,28 @@ interface RestorePermit {
    *
    * The bytes reach the wire from **here**, never from the session the caller hands
    * back — the last step of consult Q8's binding.
+   *
+   * **Its `baseRevision` is {@link RestorePermit.baseRevision}, by construction**:
+   * {@link prepareRestore} fills both from one local, and refuses to ask the question
+   * at all when the draft's own base disagrees with the session's. The field is kept
+   * because `DraftSubmission` is what `savedDraft` and `submissionIsStale` take, and
+   * what {@link sendRestore} puts on the wire is the permit's own `baseRevision` — the
+   * field {@link permitHolds} rechecks. Two representations that one function fills and
+   * another checks were the 2c-5-4b confirmation review's first High.
    */
   readonly submission: DraftSubmission<string>;
 }
 
 /**
- * Every permit that has not been spent, keyed by the confirmed object.
+ * Every permit a confirmation has released and no send has spent, keyed by the
+ * confirmed object.
  *
  * A `WeakMap` rather than a property, for `invalidation.ts`'s reason one operation
  * along: a property is recoverable by reflection whatever its key is, and object
  * spread and `structuredClone` copy it, while a clone of a {@link StartedRestore} is
  * a different object and therefore not a key here. **A checked deletion is what makes
- * the permit one-shot** — the question that minted it is spent one step earlier, in
- * {@link PENDING_CONFIRMATIONS} — and {@link sendRestore} performs it **before** it
+ * the permit one-shot** — the question that released it is spent one step earlier, in
+ * {@link PENDING_AUTHORIZATIONS} — and {@link sendRestore} performs it **before** it
  * calls the sender: `WeakMap.delete` answers whether this key was still held *and*
  * removes it in one operation that runs no user code, so what authorizes the send is
  * the deletion's own result.
@@ -1423,7 +2089,7 @@ const PERMITS = new WeakMap<StartedRestore, RestorePermit>();
  *
  * The pending request is **spent, not merely cleared**. Writing `pending: null` into
  * the session this returns is presentation; what spends the question at runtime is
- * *successfully* deleting it from {@link PENDING_CONFIRMATIONS}, and that is the
+ * *successfully* deleting it from {@link PENDING_AUTHORIZATIONS}, and that is the
  * difference between
  * a caller who cannot confirm twice and one who only appears unable to. Consent is
  * for one attempt: a refusal that comes back with findings is acknowledged and then
@@ -1431,7 +2097,7 @@ const PERMITS = new WeakMap<StartedRestore, RestorePermit>();
  * everywhere else in this application.
  *
  * **The spend is one operation, and that is the guarantee.** It is a *checked*
- * `PENDING_CONFIRMATIONS.delete`, and its success is the authorization, so testing
+ * `PENDING_AUTHORIZATIONS.delete`, and its success is the authorization, so testing
  * the membership and consuming it cannot come apart. That is not a refinement: this
  * function reads properties off values a caller supplied, `readonly` freezes nothing
  * at runtime, and any one of those reads can reach a getter or a proxy trap and
@@ -1441,78 +2107,114 @@ const PERMITS = new WeakMap<StartedRestore, RestorePermit>();
  * The deletion is still placed after **every** check, so a refused confirmation does
  * not burn the question — the person repairs whatever moved and confirms the same
  * one — while a second call with the same pending object, ordinary or re-entrant,
- * finds the set no longer holding it and answers `null`.
+ * finds the map no longer holding it and answers `null`.
  *
- * **The permit is minted here and is the whole authorization.** It records the five
- * bound values and the exact submission away from the returned object, so what comes
- * back is a session to install and a key — not an instruction anything can carry to
- * a sender. One question therefore mints at most one permit, whatever the caller does
- * with the session this returns; what stops that permit being spent twice, or being
- * spent after anything it binds has moved, is {@link sendRestore}.
+ * **Nothing caller-controlled is read after the spend, and that is the 2c-5-4b
+ * review's first High.** This function used to derive `submissionOf(preview.draft)`
+ * and re-read the session's target, its base revision, the preview's entry and hash
+ * and its generation *after* the checked deletion had already succeeded — so a getter
+ * on the retained draft could answer candidate A while the question was validated and
+ * candidate B once it had been answered, and B is what reached the wire while every
+ * hash comparison downstream still compared A with A. The permit now comes whole from
+ * {@link prepareRestore}: the session this returns is built **before** the spend, and
+ * the only statement after it is one `WeakMap.set` of a record frozen when the person
+ * was asked. Comparing the five bound values against that record rather than against
+ * {@link RestoreSession.pending}'s own fields closes the same class one step earlier —
+ * the question object is caller-reachable and its properties are redefinable, and the
+ * frozen record is neither.
+ *
+ * **The question is named by the session and not by `session.pending`**, since the
+ * 2c-5-4b confirmation round. That is what lets the lookup be the *first* operation
+ * here — nothing is read off the caller before the module knows whether it is looking
+ * at an authorized session at all — and it is the same change that lets every
+ * withdrawal revoke before caller code. A consequence worth stating: a spread or a
+ * `structuredClone` of an asked session confirms nothing, because a `WeakMap` entry is
+ * not a field.
+ *
+ * **The permit is the whole authorization.** It records the five bound values and the
+ * exact submission away from the returned object, so what comes back is a session to
+ * install and a key — not an instruction anything can carry to a sender. One question
+ * therefore mints at most one permit, whatever the caller does with the session this
+ * returns; what stops that permit being spent twice, or being spent after anything it
+ * binds has moved, is {@link sendRestore}.
  *
  * @param session - The session holding the person's answer.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
- * @returns The waiting session, keyed to a fresh permit, or `null`.
+ * @returns The waiting session, keyed to its permit, or `null`.
  */
 export function confirmRestore(
   session: RestoreSession,
   context: RestoreContext
 ): StartedRestore | null {
-  const pending = session.pending;
+  // Looked up **first**, and by the session itself: a bare reference operation that
+  // reads no property, so every comparison below is against this module's own frozen
+  // record rather than against anything a caller can redefine. It is not yet a spend:
+  // a question withdrawn since it was asked, a session spread or cloned since, and a
+  // session that was never asked are all absent here and answer `null` at once —
+  // which is why `session.pending` is not consulted at all.
+  //
+  // **A suspended question is refused as firmly as an absent one.** Another call is
+  // inside {@link targetRevisionObserved} or {@link candidateRead} holding that permit
+  // and has not yet decided whether it survives; minting from it here would answer a
+  // question twice over, once through this permit and once through the one that call is
+  // about to put back. {@link isSuspended} is a `WeakSet` membership test, so this
+  // refusal runs no user code either.
+  const authorized = PENDING_AUTHORIZATIONS.get(session);
+  if (authorized === undefined || isSuspended(authorized)) {
+    return null;
+  }
   const preview = session.preview;
-  if (pending === null || preview === null || !canPrepareRestore(session, context)) {
+  if (preview === null || !canPrepareRestore(session, context)) {
     return null;
   }
-  if (pending.document !== session.target || pending.baseRevision !== session.baseRevision) {
+  if (authorized.document !== session.target || authorized.baseRevision !== session.baseRevision) {
     return null;
   }
   if (
-    pending.entry.relative_path !== preview.entry.id.relative_path ||
-    pending.entry.batch.name !== preview.entry.id.batch.name
+    authorized.entry.relative_path !== preview.entry.id.relative_path ||
+    authorized.entry.batch.name !== preview.entry.id.batch.name
   ) {
     return null;
   }
   if (
-    pending.candidateRevision !== preview.revision ||
-    pending.generation !== session.previewGeneration
+    authorized.candidateRevision !== preview.revision ||
+    authorized.generation !== session.previewGeneration
   ) {
     return null;
   }
+  // **Built before the spend, on purpose.** A spread reads every own enumerable
+  // property of `session`, which is a caller-controlled read; doing it after the
+  // checked deletion would put user code on the far side of the authorization, which
+  // is precisely the shape the 2c-5-4b review found. The cast is the brand, as it is
+  // for `PendingRestore`: this is the only place a `StartedRestore` is built, and
+  // `sendRestore` takes nothing else.
+  const started = {
+    session: {
+      ...session,
+      phase: 'saving',
+      pending: null,
+      submitted: authorized.submission,
+      inFlight: { submission: authorized.submission, preview },
+      sendFailure: null
+    }
+  } as unknown as StartedRestore;
   // **The spend is the membership test.** Every check above compares numbers and
   // strings, so a clone of an answered question would pass them all; what tells this
-  // question from a copy of it, and from itself already answered, is that
-  // `PENDING_CONFIRMATIONS` still holds it — and `WeakSet.delete` answers that and
+  // session from a copy of it, and from itself already answered or withdrawn, is that
+  // `PENDING_AUTHORIZATIONS` still holds it — and `WeakMap.delete` answers that and
   // removes it in one operation that runs no user code. Asking with `has` first and
   // deleting afterwards was **not** the same thing: every property read between the
   // two can reach a getter or a proxy trap, so a caller could re-enter, answer the
   // question inside its own confirmation, and mint a second permit while the outer
   // call's later deletion returned `false` into nothing. It is placed after all the
   // checks so a refusal still leaves the question askable.
-  if (!PENDING_CONFIRMATIONS.delete(pending)) {
+  if (!PENDING_AUTHORIZATIONS.delete(session)) {
     return null;
   }
-  const submission = submissionOf(preview.draft);
-  // The cast is the brand, as it is for `PendingRestore`: this is the only place a
-  // `StartedRestore` is built, and `sendRestore` takes nothing else.
-  const started = {
-    session: {
-      ...session,
-      phase: 'saving',
-      pending: null,
-      submitted: submission,
-      inFlight: { submission, preview },
-      sendFailure: null
-    }
-  } as unknown as StartedRestore;
-  PERMITS.set(started, {
-    document: session.target,
-    baseRevision: session.baseRevision,
-    entry: preview.entry.id,
-    candidateRevision: preview.revision,
-    generation: session.previewGeneration,
-    submission
-  });
+  // The only statement after the spend, and it reads nothing: the record was frozen
+  // when the question was asked and is filed here exactly as it stands.
+  PERMITS.set(started, authorized);
   return started;
 } // End of function confirmRestore()
 
@@ -1745,9 +2447,14 @@ export async function sendRestore(
   if (!PERMITS.delete(started)) {
     return { kind: 'notAttempted' };
   }
+  // **The base revision sent is the one `permitHolds` checked.** It used to be
+  // `permit.submission.baseRevision`, a second field nothing compared with anything —
+  // and while `prepareRestore` now fills both from one read, sending the checked field
+  // is what makes "the revision the confirmation bound" and "the revision that reaches
+  // the wire" the same expression rather than two that happen to agree.
   const answer = await send(
     permit.document,
-    permit.submission.baseRevision,
+    permit.baseRevision,
     permit.submission.candidate,
     permit.submission.acknowledgement
   );
@@ -1831,6 +2538,12 @@ export function applyRestore(
   sealed: SealedWholeDocumentSave,
   invalidate: InvalidateEverySurface
 ): RestoreSession {
+  // **Revoked first, on every path, and before any property of the argument is
+  // read.** On the ordinary path `confirmRestore` already spent the question, so this
+  // finds nothing; what it closes is a session that reached an answer with a question
+  // still pending — a caller that never installed the confirmation's own session —
+  // leaving an authorization alive over a file this transaction has just answered for.
+  revokeConfirmation(session);
   const submitted = session.inFlight;
   // A holder rather than a bare `let`, because TypeScript's flow analysis assumes a
   // callback did not run and would narrow a `let` back to `null` below.
@@ -1928,6 +2641,9 @@ export function applyRestore(
  * @returns The session back to its resting state, with the candidate retained.
  */
 export function restoreConfirmationWithdrawn(session: RestoreSession): RestoreSession {
+  // Revoked before anything is built, so this transition's name is true of the
+  // authorization and not only of what a screen draws.
+  revokeConfirmation(session);
   // `pending` is already `null` on every session a confirmation minted; setting it
   // is what makes that true of every path rather than of the ordinary one, which is
   // `applyRestore`'s reason for the same line.
@@ -1956,7 +2672,12 @@ export function restoreCouldNotBeSent(
   session: RestoreSession,
   mayHaveWritten: boolean
 ): RestoreSession {
-  return {
+  // Carried rather than revoked, and carried rather than left behind: nothing a
+  // confirmation binds moved, and on the ordinary path there is nothing to carry
+  // because the confirmation spent the question before the send. It is written for
+  // the same reason the `pending: null` lines elsewhere are — so the rule is true of
+  // every path rather than of the ordinary one.
+  return carryTheQuestion(session, {
     ...session,
     phase: 'editing',
     // The send is over however it ended, so nothing is in flight any more. What was
@@ -1964,7 +2685,7 @@ export function restoreCouldNotBeSent(
     // arm has no answer that would spend them.
     inFlight: null,
     sendFailure: sendFailureOf(mayHaveWritten, null)
-  };
+  });
 } // End of function restoreCouldNotBeSent()
 
 /**
@@ -1990,17 +2711,28 @@ export function restoreCouldNotBeSent(
  * outcome is a `saved` arm, which carries no findings to consent to, so
  * `consentForRefusal` already answers the same draft.
  *
+ * **The revocation is the first statement, and it is unconditional** — the 2c-5-4b
+ * confirmation review's second High, in the form this function had it. The fix round
+ * placed it after the state and consent calculation so that "a call which records
+ * nothing takes nothing back", and every one of those reads is caller-controlled: a
+ * getter on `preview`, on `submitted` or on `outcome` could answer the question from
+ * inside the transition that exists to take it back. Taking it back a little too often
+ * costs one question that has to be asked again; taking it back a little too late
+ * costs a whole-file replacement nobody was asked about. The arms that record nothing
+ * now say so by presenting no question either, so the two never disagree.
+ *
  * @param session - The session showing a refusal.
- * @returns The session carrying consent, or the same session.
+ * @returns The session carrying consent, or the same session with nothing pending.
  */
 export function acknowledgeRestoreFindings(session: RestoreSession): RestoreSession {
+  revokeConfirmation(session);
   const preview = session.preview;
   if (preview === null || session.phase === 'saving') {
-    return session;
+    return withNothingPending(session);
   }
   const draft = consentForRefusal(preview.draft, session.submitted, session.outcome);
   if (draft === preview.draft) {
-    return session;
+    return withNothingPending(session);
   }
   return { ...session, preview: { ...preview, draft }, pending: null };
 } // End of function acknowledgeRestoreFindings()
@@ -2029,14 +2761,18 @@ export function dismissRestoreOutcome(session: RestoreSession): RestoreSession {
   if (session.phase === 'saving') {
     return session;
   }
-  return {
+  // **Carried, because putting a panel away binds nothing.** A refusal on screen can
+  // be prepared over — nothing in `restoreRefusal` forbids it — so this really is
+  // reachable with a question pending, and leaving the authorization on the session
+  // the caller has just replaced would draw a question that confirms nothing.
+  return carryTheQuestion(session, {
     ...session,
     submitted: null,
     outcome: null,
     extraMessages: [],
     reload: NOT_RELOADING,
     sendFailure: null
-  };
+  });
 } // End of function dismissRestoreOutcome()
 
 /**
@@ -2048,7 +2784,7 @@ export function dismissRestoreOutcome(session: RestoreSession): RestoreSession {
  */
 export function askToReloadDiskVersion(session: RestoreSession): RestoreSession {
   const next = reloadAsked(conflictOf(session), session.reload);
-  return next === null ? session : { ...session, reload: next };
+  return next === null ? session : carryTheQuestion(session, { ...session, reload: next });
 } // End of function askToReloadDiskVersion()
 
 /**
@@ -2063,7 +2799,7 @@ export function askToReloadDiskVersion(session: RestoreSession): RestoreSession 
  */
 export function confirmDiskReload(session: RestoreSession): RestoreSession {
   const next = reloadConfirmed(conflictOf(session), session.reload);
-  return next === null ? session : { ...session, reload: next };
+  return next === null ? session : carryTheQuestion(session, { ...session, reload: next });
 } // End of function confirmDiskReload()
 
 /**
@@ -2092,22 +2828,38 @@ export function confirmDiskReload(session: RestoreSession): RestoreSession {
  * generation is compared at all, so the request is satisfied and the candidate is
  * re-pointed exactly as it is for an install.
  *
+ * **It is a withdrawing transition, and the 2c-5-4b confirmation review found it
+ * omitted from that list.** Its successful path clears `pending` through
+ * {@link measuredAgainst} — but only after `conflictOf(session)`, `session.reload`,
+ * the arbitrary `adopt` callback, a spread of the session and `conflict.diskRevision`,
+ * every one of which can run caller code and answer the question from inside. The
+ * revocation is now the **first statement**, before the conflict is even looked up,
+ * and it is unconditional: the arms that answer their own argument revoke as well, and
+ * present no question either.
+ *
+ * **Over-revoking costs nothing reachable here.** A question cannot be pending while a
+ * conflict is on screen — `restoreRefusal` refuses `conflictShowing`, so
+ * `prepareRestore` answers its argument unchanged — and this transition draws no
+ * control except on a conflict. What the unconditional revocation buys is that the
+ * claim is about the function rather than about which of its arms a screen can reach.
+ *
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * window really holds the revision it reported.
  *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
  * @returns The session re-pointed at the disk revision, the session at the terminal
- *   refused step, or the same session.
+ *   refused step, or the same session with nothing pending.
  */
 export function reloadTheDiskVersion(
   session: RestoreSession,
   adopt: AdoptTheDiskVersion<string>
 ): RestoreSession {
+  revokeConfirmation(session);
   const conflict = conflictOf(session);
   const spend = spendTheConfirmedReload(conflict, session.reload, adopt);
   if (spend === 'notAttempted' || conflict === null) {
-    return session;
+    return withNothingPending(session);
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the 2c-4a-3a
@@ -2116,7 +2868,7 @@ export function reloadTheDiskVersion(
     // offered and the panel says so. That is a decision about what to draw and
     // **not** a claim that a later ask would be refused too — a refusal spends
     // nothing.
-    return { ...session, reload: RELOAD_REFUSED };
+    return { ...session, reload: RELOAD_REFUSED, pending: null };
   }
   // **`measuredAgainst` rather than `targetRevisionObserved`**, and the difference
   // is load-bearing: that transition answers *unchanged* when the revision it is

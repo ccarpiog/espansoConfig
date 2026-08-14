@@ -17,6 +17,16 @@
  * the selection could not move under the mounted editor at all and the case would
  * have passed before the fix as loudly as after it.
  *
+ * **Since 2c-5-4b it also carries two claims about the restore mode**, and both
+ * are about reachability rather than about restore itself — `RestorePane.test.ts`
+ * is where the operation is driven. The first is that a person can get to the
+ * pane at all, from the file's whole-text surface and over the file's own parse.
+ * The second is mechanical and is the trap 2c-5-4a handed forward: `BackupCommands`
+ * has a **real production default**, so a `createBrowserState` call that omits its
+ * third argument reaches `invoke` rather than a script, and no type says so. This
+ * file injects one and a hoisted mock of `@tauri-apps/api/core` is what would
+ * notice if it stopped.
+ *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
  * helpers here do.
@@ -27,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
 import {
   createBrowserState,
+  type BackupCommands,
   type BrowserCommands,
   type BrowserState
 } from '../browser/workspace.svelte';
@@ -34,6 +45,9 @@ import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
 import type { CommandResult } from '../ipc/commands';
 import type {
+  BackupBatchListing,
+  BackupEntryListing,
+  BackupTextResponse,
   DocumentSummary,
   DocumentView,
   MatchView,
@@ -41,6 +55,22 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import DetailPane from './DetailPane.svelte';
+
+/**
+ * The Tauri boundary, replaced for the whole file.
+ *
+ * `vi.hoisted` because a `vi.mock` factory is lifted above every import and
+ * cannot close over an ordinary `const`. It **rejects**: a call that got this far
+ * is already the defect, and a stub that answered would let a case pass.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
 
 /**
  * The two files this pane is driven over.
@@ -104,6 +134,14 @@ function documentB(): DocumentView {
   });
 } // End of function documentB()
 
+/**
+ * The whole text of `match/a.yml`, as `document_text` answers it.
+ *
+ * Distinguishable from anything else on screen, so a case can tell the file-text
+ * surface from the snippet detail by looking at the rendered text.
+ */
+const FILE_TEXT = 'matches:\n  - trigger: ":a"\n    replace: wholefiletext\n';
+
 /** What the workspace summary says; nothing in this file reads it. */
 const SUMMARY: WorkspaceSummary = {
   root: '/tmp/espanso',
@@ -145,7 +183,9 @@ function scriptedCommands(): BrowserCommands {
     }),
     getMatch: vi.fn(async (): Promise<CommandResult<MatchView>> => refusal),
     reloadDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => refusal),
-    documentText: vi.fn(async (): Promise<CommandResult<string>> => refusal),
+    documentText: vi.fn(async (id: number): Promise<CommandResult<string>> => {
+      return id === 1 ? { ok: true, value: FILE_TEXT } : refusal;
+    }),
     moveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
@@ -155,6 +195,41 @@ function scriptedCommands(): BrowserCommands {
   };
 } // End of function scriptedCommands()
 
+/**
+ * A backup surface that answers an empty, complete catalogue.
+ *
+ * **Injected in every mount, and that is the point.** `createBrowserState` has a
+ * real production default for this argument, so omitting it would send the restore
+ * pane's first listing to `invoke`; the hoisted mock above is what would notice.
+ * The answers themselves are the least interesting thing here — this file proves
+ * the mode is reachable, and `RestorePane.test.ts` drives what it does.
+ *
+ * @returns The commands, with `vi.fn` wrappers so calls can be inspected.
+ */
+function scriptedBackup(): BackupCommands {
+  const refusal: CommandResult<never> = {
+    ok: false,
+    failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+  };
+  return {
+    listBackupBatches: vi.fn(async (): Promise<CommandResult<BackupBatchListing>> => {
+      return {
+        ok: true,
+        value: {
+          root: 'Missing',
+          batches: [],
+          skipped: [],
+          unrecognised: 0,
+          unreadable: 0,
+          complete: true
+        }
+      };
+    }),
+    listBackupEntries: vi.fn(async (): Promise<CommandResult<BackupEntryListing>> => refusal),
+    readBackupText: vi.fn(async (): Promise<CommandResult<BackupTextResponse>> => refusal)
+  };
+} // End of function scriptedBackup()
+
 /** A mounted pane and what a case needs to drive it. */
 interface Mounted {
   /** Where the pane was mounted. */
@@ -163,6 +238,8 @@ interface Mounted {
   readonly state: BrowserState;
   /** The commands behind that state. */
   readonly commands: BrowserCommands;
+  /** The backup commands behind it, injected rather than defaulted. */
+  readonly backup: BackupCommands;
   /** Tears the pane down. */
   readonly stop: () => void;
 }
@@ -174,7 +251,8 @@ interface Mounted {
  */
 async function mountPane(): Promise<Mounted> {
   const commands = scriptedCommands();
-  const state = createBrowserState(commands, () => undefined);
+  const backup = scriptedBackup();
+  const state = createBrowserState(commands, () => undefined, backup);
   await state.open(null);
   const target = document.createElement('div');
   document.body.append(target);
@@ -184,6 +262,7 @@ async function mountPane(): Promise<Mounted> {
     target,
     state,
     commands,
+    backup,
     stop: () => {
       void unmount(component);
       target.remove();
@@ -225,6 +304,7 @@ function control(target: HTMLElement, key: TranslationKey): HTMLButtonElement {
 } // End of function control()
 
 beforeEach(() => {
+  invoked.mockClear();
   locale.setOverride('en');
 });
 
@@ -369,6 +449,59 @@ describe('the mounted detail pane', () => {
     expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.open']);
     pane.stop();
   }); // End of the "duplicate reachable" case
+
+  it('opens the restore pane from the file\u2019s whole-text surface, over its own parse', async () => {
+    // **Reachability, which no test of `RestorePane.svelte` can establish.** That
+    // suite mounts the pane directly; this is the claim that a person can get to
+    // it at all — from the file's whole text, which is where a whole-file
+    // replacement belongs (consult Q5) — and that what it opens over is the file
+    // the viewer is pointed at.
+    const pane = await mountPane();
+    await pane.state.select(snippetOf(pane.state, 1));
+    await pane.state.showFileText(true);
+    flushSync();
+    expect(pane.target.textContent).toContain('wholefiletext');
+
+    control(pane.target, 'browser.restore.open').click();
+    flushSync();
+
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.restore.warning']
+    );
+    expect(pane.target.textContent).toContain('match/a.yml');
+    // The pane outranks this pane's read-only subjects and its other write
+    // surfaces while it is open, so the openers beside it are withdrawn.
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.open']);
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.rawEditor.open']);
+    pane.stop();
+  }); // End of the "restore reachable" case
+
+  it('sends the restore pane\u2019s catalogue read through the injected surface', async () => {
+    // **The trap 2c-5-4a handed forward, closed by a mount rather than by a
+    // type.** `BackupCommands` has a real production default, so a
+    // `createBrowserState` call that omitted it would reach `invoke` here; the
+    // hoisted mock at the top of this file rejects, so the case would fail rather
+    // than pass quietly.
+    const pane = await mountPane();
+    await pane.state.select(snippetOf(pane.state, 1));
+    await pane.state.showFileText(true);
+    flushSync();
+    control(pane.target, 'browser.restore.open').click();
+    flushSync();
+
+    control(pane.target, 'browser.restore.listBatches').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+
+    expect(pane.backup.listBackupBatches).toHaveBeenCalledTimes(1);
+    expect(invoked).not.toHaveBeenCalled();
+    // A missing backups folder is an outcome and not a failure, and the pane says
+    // so with the core's own sentence.
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['code.backupRootState.missing']
+    );
+    pane.stop();
+  }); // End of the "catalogue through the injected surface" case
 
   it('opens the new-snippet form with nothing selected, and offers every file', async () => {
     // The form asks which file itself rather than inheriting the selection, so it

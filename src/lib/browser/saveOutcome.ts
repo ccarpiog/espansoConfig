@@ -253,7 +253,35 @@ export type ConflictChoice =
   | 'copyDraft'
   | 'keepMyDraft'
   | 'reloadDiskVersion'
-  | 'confirmReload';
+  | 'confirmReload'
+  /**
+   * The second step on a surface whose reload **keeps** what it is holding.
+   *
+   * **A sixth member rather than a sixth wording of `confirmReload`, and 2c-5-4b
+   * is why.** The two existing confirmation labels are *Discard my text and load
+   * it* and *Close this and load it*, and {@link conflictChoiceKey} picks between
+   * them by {@link ConflictDraftKind} — which worked while every surface that
+   * offered a reload either discarded a draft or closed. Restore does neither: its
+   * reload installs the disk observation, keeps the retained candidate, moves the
+   * base revision to the conflict's `diskRevision` and withdraws the confirmation,
+   * with the panel still open. Both existing labels are **false** of it, and a
+   * false label on the destructive step of a whole-file replacement is this
+   * project's worst defect class on the worst control to have it on.
+   *
+   * Making the label depend on {@link ConflictReloadOutcome} was the other answer
+   * and it was rejected on cost, not on principle: `conflictChoiceKey`'s second
+   * parameter is a {@link ConflictDraftKind} at some hundred and fifty call sites,
+   * and widening it would have rewritten eight suites to fix one label. A new
+   * member costs one arm in each of the six surfaces that can never reach it —
+   * exactly what `copyDraft` and `keepMyDraft` already cost them — and every one
+   * of those arms is a **compile error** until it is written, which is the safety
+   * property those components' own notes advertise.
+   *
+   * {@link conflictChoicesFor} is still the only thing that decides which of the
+   * two confirmations a surface is offered, and it decides it from the surface's
+   * declared `reloadOutcome`.
+   */
+  | 'confirmReloadKeeping';
 
 /**
  * What one surface's retained draft **is**.
@@ -498,10 +526,35 @@ export function conflictChoicesFor(
     choices.push('keepMyDraft');
   }
   if (capabilities.offersReload && step !== 'unavailable') {
-    choices.push(step === 'idle' ? 'reloadDiskVersion' : 'confirmReload');
+    choices.push(
+      step === 'idle' ? 'reloadDiskVersion' : confirmationChoiceFor(capabilities.reloadOutcome)
+    );
   }
   return choices;
 } // End of function conflictChoicesFor()
+
+/**
+ * Which confirmation a surface is offered, by what its reload **does**.
+ *
+ * **A `switch` rather than a comparison**, for `reloadWarningFor`'s reason one
+ * function along: a fourth arm of {@link ConflictReloadOutcome} is a compile error
+ * here instead of silently inheriting a label that describes something else. The
+ * two surfaces that discard or close share one member and are told apart by their
+ * draft kind in {@link conflictChoiceKey}; the one that keeps its candidate has a
+ * member of its own, because neither of those sentences is true of it.
+ *
+ * @param outcome - What a confirmed reload does on that surface.
+ * @returns The choice to offer at the confirmation step.
+ */
+function confirmationChoiceFor(outcome: ConflictReloadOutcome): ConflictChoice {
+  switch (outcome) {
+    case 'reseedsDraft':
+    case 'closesSurface':
+      return 'confirmReload';
+    case 'retargetsCandidate':
+      return 'confirmReloadKeeping';
+  }
+} // End of function confirmationChoiceFor()
 
 /**
  * Whether one offered list names the reapply control.
@@ -1613,6 +1666,14 @@ export function conflictChoiceKey(
         authoredText: 'browser.saveOutcome.choice.confirmReload',
         operationChoice: 'browser.saveOutcome.choice.confirmReloadClosing'
       });
+    case 'confirmReloadKeeping':
+      // **One label, and the draft kind is deliberately not consulted.** This
+      // choice exists because a surface's reload *keeps* what it is holding, and
+      // that is a statement about the reload rather than about what the draft is:
+      // the sentence names neither text nor an operation, so there is no second
+      // wording for a second draft kind to pick. A surface that drafted authored
+      // text and retargeted it would be told the same true thing.
+      return 'browser.saveOutcome.choice.confirmReloadRetargeting';
   }
 } // End of function conflictChoiceKey()
 
