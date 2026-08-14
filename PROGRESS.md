@@ -3714,6 +3714,26 @@ i18n strings whose EN/ES meaning-parity was checked by reading only. Both are in
 **no mounted-component test and no window reading**, by the consult's Q7 — those are steps 4 and 6.
 Nothing here is evidence about a screen.
 
+### Git state — Phase 2c-5 step 3
+
+| Phase | Commit | Push | Tree |
+|---|---|---|---|
+| **2c-5 step 3** | **`41b037b`** | ✅ pushed to `origin/main` | clean |
+
+`41b037b` is Phase 2c-5-3 **including all four review passes and all three fix rounds** — as with
+every phase since `8989c16`, the step was held open until every finding was closed, so **no commit
+holds the demonstrated defect**: not the reusable `StartedRestore` that would have written entry A
+after the session moved to entry B, not the two permits one session could mint, not the check-and-spend
+a getter could re-enter between, and not the transitions that stayed live during a send while the
+shipped sentence promised they could not. It contains `src/lib/browser/restore.ts` and
+`restore.test.ts`, the three additive members and the exhaustive `switch` in
+`src/lib/browser/saveOutcome.ts` with its suite, 15 new keys in each dictionary,
+`docs/decisions/2c-5-3-notes.md`, both review files, the correction block in
+`docs/decisions/2a-3b-notes.md`, and this checkpoint. **It is the first commit in which restore
+exists as a value, and nothing draws it.** As at 1b-1, `npm install` (or `npm ci`) is required before
+any frontend command will run. **A fresh session starting step 2c-5-4 should start from `41b037b`
+or later.**
+
 ### Git state — Phase 2c-5 step 2
 
 | Phase | Commit | Push | Tree |
