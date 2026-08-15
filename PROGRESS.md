@@ -101,7 +101,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5-3** | **Restore as browser values, with nothing drawn**: `src/lib/browser/restore.ts` — catalogue and preview state, byte-exact candidate retention, a coordinator-owned `OpenWriteSurface` over seven kinds, the **one-shot confirmation** binding `DocumentId`, base revision, `BackupEntryId`, candidate `ContentRevision` and preview generation, and composition through `BrowserState.saveRawDocument` + `openWholeDocumentSave`. No component touched. `saveOutcome.ts` gained `ConflictReloadOutcome::retargetsCandidate`, `SaveOutcomeMessage::reloadRetargetsCandidate` and `ConflictOperation::replaceFileFromBackup`, because all three existing arms are **false sentences** for a restore | ✅ complete — after **four review passes and three fix rounds**. The behavioural High **survived two of them**: round 1 shipped a reusable `StartedRestore`; round 2's `WeakMap` permit closed that but left the *authorization* replayable (two `confirmRestore` calls, two permits, two sends); round 3's `WeakSet` still split the decision into `has` … field reads … `delete`, and **`readonly` does not freeze at runtime**, so a getter could re-enter between them. Closed at round 4 by making the **checked `delete` itself the membership test** — `WeakSet.delete` runs no user code, so only one of any two re-entrant callers receives `true` |
 | **2c-5-4a** | **The restore coordinator wiring in `BrowserState`, with nothing drawn** — the first half of a split of step 4, cut by failure mode: 4a is how the window talks to disk, 4b is the screen and the surfaces it must close. Three thin, unmemoised, re-callable wrappers over the read-only backup commands on a **second injected surface** (`BackupCommands`, all members required), plus `restoreDocument(started, surfaces, invalidate)`, which composes `sendRestore` with `BrowserState.saveRawDocument` — the sixth writer, **called rather than copied** — and routes the four answers to `restoreConfirmationWithdrawn` / `restoreCouldNotBeSent` / `applyRestore`. The `RestoreContext.observed` half is read **here, synchronously, before anything awaits**, narrowing the one hole `restore.ts` names as unforceable; the surfaces half stays the caller's because no coordinator can observe a session held inside a component (R36) | ✅ complete — after a review round, a fix round and a confirmation round. **The review returned NOT READY on a High**, and it was a *narrower surviving instance of the very defect 2c-5-3 spent four passes closing*: round 4 there made the checked `delete` the membership test for `PENDING_CONFIRMATIONS`, but `sendRestore` still called `PERMITS.delete(started)` and **discarded the boolean**, so a getter or proxy trap fired by `permitHolds`'s caller-supplied reads could re-enter synchronously, spend the same permit, and start a second whole-file write while the outer call ignored its own failed deletion — **one confirmation, two destructive writes**. The sequential double-send case could not reach it. Closed by making the deletion the authorization on every path to a sender, pinned by a `Proxy` whose `Symbol.iterator` trap re-enters the coordinator (it fails `expected 1 call, got 2` without the fix). The Medium was a session left permanently in `saving` after a write-safe mismatch — the model freezes every editing transition there, so the record's claimed *ask again* recovery did not exist; closed by a new `RestoreSend::withdrawn` arm and `restoreConfirmationWithdrawn`, and by deleting the redundant `session` parameter that let a permit be paired with a foreign session. The confirmation round found **no High and no Medium**, confirmed all three original findings fully closed, and left one Low — the fix round's own overcorrection, prose calling consent *one-attempt* when the withdrawal deliberately keeps a candidate-bound acknowledgement |
 | **2c-5-4b** | **The restore screen, its i18n, and the phase's whole mounted evidence**: `src/lib/components/RestorePane.svelte` — the **seventh write surface**, a third-pane mode reached from the document's whole-text surface, with three stacked states (recognised batches → entries → the exact candidate through `SourceText` with `documentStart`), the measured byte/code-point facts of the new `src/lib/browser/restoreFacts.ts`, the **labelled** loaded-target observation, a sticky two-stage *Prepare* → visually distinct *Replace entire file*, the catalogue states, the save outcomes, a `conflictChoicesFor` conflict panel with `offersReload` flipped to **`true`**, and parse-finding acknowledgement that re-asks the question. `DetailPane.svelte` reaches it and owns `openWriteSurfaces()` and the synchronous `invalidateEverySurface()`. 50 new keys per dictionary; `tRestoreRefusal` added **and called**, never a hand-built key. 27 mounted cases as first written (59 after the fix round), over a **real** `BrowserState` with `BackupCommands` injected everywhere and a hoisted `invoke` mock asserting **no direct IPC**. **`ConflictChoice` gained a sixth member, `confirmReloadKeeping`** — taken deliberately outside the step's stated scope, because `conflictChoiceKey` labelled restore's confirm control *"Close this and load it"* and **restore's reload closes nothing**; `retargetsCandidate` is declared only by `restore.ts`, so the other seven surfaces still route through `confirmReload`, every existing key is byte-identical and **no shipped sentence moved** | ✅ complete — after **six rounds**: one code review, four confirmation rounds and a documentation fix. **Every round closed one instance of a single shape and the next found a narrower one, three times running, each created by the previous round's fix** — *a check and a spend separated by any property read are not atomic in JavaScript*. Round 1: 2 High, 1 Medium, 2 Low. Round 2: H1 **partially** closed (two caller-controlled sources for one base revision), H2 **still open** (`revokeConfirmation`'s own first operation was a caller read, and `reloadTheDiskVersion` was omitted from the withdrawal set), plus a **new** High — projection generations are per document, so alternating getters across two documents let one confirmation install two projections. Round 3: H1 and H3 closed, H2 narrower still — the take-and-put-back **removed** the authorization while inspecting, and `prepareRestore` reads absence as permission to register a second question. Round 4: **no High, no Medium**, all four closed by a private `SuspendedQuestion` marker that **replaces** the permit under the same key rather than removing it; its one Low was in `unchangedByInspection`, the helper added *beyond* the review's minimal fix. Round 5: one Low in a **JSDoc contract**, fixed directly. **The lesson: removing a token to protect it creates a false "nothing here" state for every other producer that tests for presence.** No Rust touched, and **no window reading is owed here** — 2c-5-6 owes it |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1, 2, 3, 4a and 4b are complete**, so restore is drawn and the phase's mounted evidence is in hand; step 5 (rebuild and review the temporary window instrument) is next |
+| **2c-5-5a** | **The instrument, rebuilt from prose — both halves, for the second time in this project's history.** 2c-4c-6 deleted both probe sources, the four hook lines and the whole scratch tree, so like 2c-4c-4a this step had **nothing** to start from. `src-tauri/src/probe.rs` authored from the code; `src/probe.ts`, `launch.sh`, 9 fixtures and an 11-row case table re-authored from seven construction records. **Step 5 was split by the orchestrator** into 5a (the harness and its proof set) and 5b (the restore-specific cases), exactly as 2c-4c-4 was cut | 🔄 **round-2 fixes applied and verified; the round-3 confirmation is OWED.** Round 1 returned **NOT READY on 8 findings**, and **two were real instrument defects, not prose**: a **High**, `replace_the_target` accepting any `ECFG_PROBE_TARGET` so a callable IPC command could replace an arbitrary file outside `save_document`; and a **Medium**, the frontend `runThirdWriter()` **tree-shaken out of the bundle** while the record called it merely "unexercised" — a silent instrument gap of exactly the kind that stranded an earlier reading. Round 2 confirmed six of eight closed and returned **NOT READY on 4 more**: findings 1 and 2 **PARTIALLY CLOSED** on a shared TOCTOU — the same `symlink_metadata`-then-second-pathname-operation shape 2c-5-1's review found in the **production core** — and one finding that was a **narrower recurrence of the closed finding 7**, the absence over-claim having moved from §4.3 to §6.3. The round-2 fix round removed `/bin/sh` from both writers entirely (`std::fs::read` → `create_new` (`O_EXCL`) → `sync_all` → `rename`), constrained the target to the **exact** synthetic file, and **disclosed the ancestor-directory swap as residual and unproven** rather than claiming it closed |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1, 2, 3, 4a and 4b are complete**; **step 5 is split into 5a and 5b**, and 5a's round-2 fixes are applied and verified with its **round-3 confirmation owed** |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -8258,6 +8259,97 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-5a's round-2 fixes are APPLIED and VERIFIED. The next thing to do is the ROUND-3 CONFIRMATION — a Codex review of the round-2 fixes, and nothing else until it returns.**
+
+**Step 2c-5-5 was split by the orchestrator into 5a and 5b**, exactly as 2c-4c-4 was cut: **5a is the harness itself and its proof set**, 5b is the restore-specific cases. 5a is **not complete** — its round-2 fixes have not been reviewed, and in this project *a fix is a change, and the round that reviews it is not optional*.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all   # expect: 2 hook files modified, 2 probe sources untracked — NOT empty
+docs/reviews/phase-2c-5-5a-instrument.md          # round 1 — 8 findings
+docs/reviews/phase-2c-5-5a-instrument-round2.md   # round 2 — 4 findings, THE ONE BEING FIXED
+docs/decisions/2c-5-5a-instrument-rebuild.md      # the record; §9 is round 1's disposition, §10 is round 2's
+```
+
+#### The state of the tree, and why it is NOT clean
+
+**The harness is deliberately uncommitted and is IN THE TREE right now.** `git status --short --untracked-files=all` shows, and must show:
+
+```
+ M src-tauri/src/main.rs      # two hook lines
+ M src/main.ts                # two hook lines
+?? src-tauri/src/probe.rs     # the Rust probe side
+?? src/probe.ts               # the driver
+```
+
+**Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
+
+#### The gate baseline — TWO figures, and do not confuse them
+
+- **With the harness in the tree: `1153 / 432 / 2124 / 185`.** This is what the gates answer right now, and what a session working on 5a or 5b should expect.
+- **Harness-free production: `1153 / 431 / 2123 / 184`.** This is what **2c-5-7 must re-derive on a harness-free tree** — never copy the with-harness figure forward. The scar is `1623`, which stood in this file for three step records after 3d-1 committed ten cases while the harness was in the tree.
+
+The delta is exactly **+1 module** (`src/probe.ts`), **+1 `svelte-check` file**, **+1 vitest case** (`scripts/lint/ipc-detail.test.ts`'s per-file `it.each`), and **+0 Rust tests**.
+
+#### What round 2 found, and what the round-2 fix round did
+
+Round 1 returned **NOT READY on 8**; six closed. Round 2 returned **NOT READY on 4**:
+
+1. **High — the TOCTOU.** Two arms. **Arm A is now fixed properly**: `/bin/sh` is gone from both writers, replaced by `std::fs::read` → `OpenOptions::create_new(true)` (`O_EXCL`) → `write_all`/`sync_all` → `std::fs::rename`, and the target is constrained to **exactly** `…/launches/<launch>/xdg/espanso/match/conflict.yml`. This subsumes round 1's finding 2 by construction — there is no longer a shell whose exit status can mask anything. **Arm B — an ancestor directory replaced by a symlink between canonicalization and the rename — is DISCLOSED AS RESIDUAL AND UNPROVEN**, not closed: defeating it needs `openat`-style pinned directory handles, which `std` does not offer. The three reasons it is accepted (operator-controlled `/private/tmp` launch root, binary never shipped, 2c-5-7 deletes it) are **stated in the record as not a proof of impossibility**.
+2. **Medium — §9.1/§9.2 over-claimed closure.** Now split into three named parts: closed-and-measured, closed-by-construction, and open.
+3. **Low — the `--- failed` claim.** A rejected `say` reaches `startProbe`'s catch, which reports through **another** `say`; if stdout is still unavailable that call also rejects and `--- end` is never reached. The record now says the driver *attempts* the report and a transcript I/O failure may leave a **silently truncated log**.
+4. **Medium — a narrower recurrence of round 1's closed finding 7.** The absence over-claim moved from §4.3 to §6.3 ("P01 failed before reaching the surface, so no writer ran"). **There is no invoke spy and no command counter in this instrument, so no artifact here can distinguish "no write" from "an identical or transient write".** The fix round then swept the record for that *shape* and found **five further instances**.
+
+#### What the round-3 confirmation must judge
+
+Commission it as `Agent(subagent_type="codex:codex-rescue", ...)`, brief it as a **confirmation round** on the four round-2 findings, and tell it to sweep for the **shape** of each, never its words. Ask specifically:
+
+- Is Arm A genuinely closed, and is Arm B's disclosure honest rather than a softened closure claim?
+- Did the round-2 fix **create** anything? This project's dominant pattern is that the fix round creates the next finding — it has now happened many rounds running, and round 2's own finding 4 was an instance.
+- Does the record's §6.1 general rule actually cover the five swept instances, or does it merely gesture at them?
+- Does §8 tell 5b the truth about the confinement it inherits, now that Arm B is residual?
+
+#### The evidence that exists, re-derived by the orchestrator and not merely reported
+
+**Launches P37–P48** (proof set, binary `0a2d3506…`): every one has a **uniform 10-line `bytes.txt`**, a **zero-byte `probe.err`**, exactly one `--- end`, zero `--- failed`, and `bytes=MATCH`. P37 is `editor-third`, the case that exercises `probe_third_writer`.
+
+**Controls, where a refusal IS the pass** (`failed-lines=1`):
+
+- **N07/N08** — no plan: zero-byte log, zero-line tree diff, and `alive-at-kill=yes` as the positive control that the silence is a **running** window's.
+- **C05/C06** — target and source outside the harness: decoy `unchanged`, refusal quoted.
+- **C07** — **a symlink planted at the exact temporary path**: `create_new` refuses with `File exists (os error 17)`. This is the `O_EXCL` guarantee **measured**, not asserted, and it is Arm A's proof.
+- **C09** — target symlink pointing outside: refused.
+- **C10** — a path *inside* the launches root but not the exact synthetic file: refused by the new exact-path rule. The **old** rule would have accepted it, so this measures the narrowing.
+- **C08** — a **retained discarded attempt**: replacing the launch's own `conflict.yml` with a symlink made the sidebar row never draw, so the plan never reached the writer. Recorded as establishing a timeout and **nothing about any writer**.
+
+`rg -c 'probe_third_writer' dist/assets/index-*.js` → **1** (round 1's finding 3 has not regressed). Bundle oracle, and read **both** lines because a bare `svelte/internal/server` search is a **vacuous** negative:
+
+```sh
+rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js   # server-only — must be ABSENT
+rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js    # client-only — must be PRESENT → 2
+```
+
+#### After round 3 closes: what 5b builds
+
+`docs/decisions/2c-5-5a-instrument-rebuild.md` §8.2 is the specification and it is specific. In outline: seeded **backup-root fixtures** (nothing in this tree writes a `.espansoconfig-backups` directory *before* a launch — the positives produce one *during*, which is a by-product and not a catalogue); the **`RestorePane` drive** — the pane is `section.restore` with four `section.step` blocks, its outcome panel is a **direct child**, and there is **no `.panel.reapply` on it at all**, so `reportReapply` must never be called for a restore or the plan times out; the catalogue / entry / candidate / prepare / replace states, each with the launch that reaches it; and the **byte oracle extended over the backup tree**, because a restore is a whole-file replacement that itself takes a backup and must not disturb the batch it restored from.
+
+**5b must treat `probe_third_writer` as exercised exactly once** (P37) and `runThirdWriter()` as reachable — that is now true where round 1 found it tree-shaken.
+
+#### Two standing traps, both in `CLAUDE.md`, both still binding
+
+1. **One plan per launch, into a fresh bundle path.** An occluded WKWebView stops running `setTimeout` about **six seconds** after launch; `open -a` does not restart it and `-NSAppSleepDisabled` does not prevent it. LaunchServices **silently drops `--env`** for a bundle path it thinks is already running.
+2. **The webview's `localStorage` is not keyed by `HOME`** — the WebKit data store follows the **bundle identifier**, which every probe bundle shares. **A plan must set the language explicitly through the picker.**
+
+#### One measurement this tree makes that no earlier record can be compared against
+
+**The viewport here is `720x728 dpr=1`, where every earlier record reports `1180x728 dpr=2`.** Panel rectangles, reach numbers and negative-`y` observations from this tree therefore say nothing about the ones 3c-2, 3d-2b or 2c-4c-5 recorded, **in either direction**. 2c-5-6 owes its own geometry and may not carry any earlier record's rectangles forward.
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-5 handoff, superseded by the split into 5a/5b. Kept because its specification of step 5 is still what 5b is measured against.
 
 ### **Step 2c-5-4b is COMPLETE. The next thing to do is step 2c-5-5 — rebuild and review the temporary window instrument.**
 

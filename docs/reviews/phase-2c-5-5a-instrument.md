@@ -1,0 +1,24 @@
+NOT READY
+
+Instrument defects
+
+1. **High — `src-tauri/src/probe.rs:109-127,130-145,165-187`; `/private/tmp/espansoconfig-harness-2c-5/launch.sh:112-123`.** The instrument is supposed to confine its external writers to the synthetic launch tree. In fact, `replace_the_target` accepts any path supplied through `ECFG_PROBE_TARGET` and directly replaces it with `cp`/`mv`; no check ties it to `XDG_CONFIG_HOME` or the harness tree. The current launch recipe supplies a synthetic target, but `probe_second_writer` and `probe_third_writer` are registered callable commands on every instrumented launch. Thus `probe.rs` opens a path to replacing an arbitrary user file outside `save_document`. Minimal fix: canonicalize and require the target to equal the synthetic target beneath a canonical harness launch root, and require R1/R2 sources beneath the fixture root, before spawning anything.
+
+2. **Medium — `src-tauri/src/probe.rs:89-96,117-127`.** The code claims the writer installs the named source atomically and reports failure otherwise. The shell body uses `cp …; mv …`, so `mv` runs even if `cp` fails, and its status alone becomes the command status. If a stale `$TARGET.probe-tmp` exists, the command can install the wrong bytes and return success. Minimal fix: use `cp … && mv …` and a unique, validated temporary path.
+
+3. **Medium — `src/probe.ts:592-601,919-921`; `dist/assets/index-CD-pRYDA.js:7`; `docs/decisions/2c-5-5a-instrument-rebuild.md:462-468,537-539`.** The comment claims exporting `thirdWriter` prevents tree-shaking, and the record says the third-writer path is built but unexercised. The retained bundle contains `probe_second_writer` but no `probe_third_writer`; the unused export was tree-shaken. The Rust command is built, but the frontend path is not. Minimal fix: either add and run a real R2 plan before handing it off, or state that only source scaffolding exists and that 5b must make it reachable and rebuild before use.
+
+4. **Medium — `src/probe.ts:844-861`.** The plan parser silently treats every language token other than exact `es` as English; it also ignores additional colon-separated fields. A mistyped future plan such as `case:se` therefore drives English while still retaining the mistyped plan name, rather than failing. Minimal fix: require exactly `<case>:en|es` (or explicitly support a missing language) and reject every unknown or extra segment.
+
+5. **Low — `src-tauri/src/probe.rs:68-84`.** `render_probe` claims transcript writes cannot fail and that absence is therefore unambiguous, but both `writeln!` and `flush` errors are discarded before returning `Ok(())`. Minimal fix: map and return both I/O errors.
+
+6. **Observation — `/private/tmp/espansoconfig-harness-2c-5/launch.sh:45-60,144-148`; `docs/decisions/2c-5-5a-instrument-rebuild.md:405-417`.** The byte oracle discriminates the five positive cases: their expected files differ from both R0 and R1, so an application write that never happened cannot produce `MATCH`. For negative cases, `EXPECT` deliberately equals R1, so `MATCH` proves only final bytes—not that the application performed no identical or transient write. The record accurately discloses that limitation; no fix is required.
+
+Prose defects
+
+7. **Medium — `docs/decisions/2c-5-5a-instrument-rebuild.md:296-315,519-524`; `src/probe.ts:877-903`; `src/main.ts:20,37`; `src-tauri/src/main.rs:55,136`.** The heading and conclusion say the “hooks are inert” and that N01/N02 establish no writer was spawned. N02’s `alive-at-kill=yes` is a valid positive control for a running process, but the retained evidence establishes only zero transcript bytes and an unchanged final tree; it cannot exclude an identical or transient write. Moreover, the hooks are not literally inert: they register four extra IPC commands and perform one startup IPC call, as the record later admits. Minimal fix: rename the claim to “no plan-driven DOM action observed; final synthetic tree unchanged,” and do not attribute “no writer spawned” to N01/N02.
+
+8. **Medium — `docs/decisions/2c-5-5a-instrument-rebuild.md:189-198,347-351`; `/private/tmp/espansoconfig-harness-2c-5/launch.sh:165-181`; `/private/tmp/espansoconfig-harness-2c-5/launches/P02/bytes.txt:10-11`.** The record presents P02 as part of the proof set for the current script. P02’s retained `bytes.txt` has an extra standalone `0`, which the current output block cannot emit; the current script explicitly documents avoiding that duplicate-zero shape. Therefore P02 is not pinned to the current `launch.sh` image—or was subsequently altered—and the post-image manifest cannot establish chronology. Minimal fix: rerun `editor-exact` under a new launch name with the current script, or disclose that P02’s launch-script provenance is unknown and remove it from the proof set.
+
+Codex session ID: 01a00427-ce45-7413-ac42-71448e7bdfba
+Resume in Codex: codex resume 01a00427-ce45-7413-ac42-71448e7bdfba
