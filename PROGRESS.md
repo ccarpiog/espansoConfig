@@ -8365,7 +8365,7 @@ The seven review files are **rounds 1–7** and the record's dispositions are **
 ?? src/probe.ts               # the driver
 ```
 
-**Those four are the harness and they must never be committed.** Everything else — the record, the seven review files and this file — **is** committed, because it is the phase's evidence rather than the instrument. **Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
+**Those four are the harness and they must never be committed.** Everything else — the record, the seven review files and this file — **is** committed at `01461c0` (pushed), because it is the phase's evidence rather than the instrument. **Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
 
 #### The gate baseline — TWO figures, and do not confuse them
 
