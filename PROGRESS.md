@@ -8335,20 +8335,24 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **Step 2c-5-5a's round-5 fixes are APPLIED and VERIFIED. The next thing to do is the ROUND-6 CONFIRMATION — a Codex review of those three fixes, and nothing else until it returns.**
+### **Step 2c-5-5a's round-7 fixes are APPLIED and VERIFIED. THE NEXT ACTION IS AN OWNER DECISION, NOT A COMMAND — see "The decision this needs" below. An eighth round is owed by the standing rule; whether to keep paying for it is the owner's call.**
 
-**Step 2c-5-5 was split by the orchestrator into 5a and 5b**, exactly as 2c-4c-4 was cut: **5a is the harness itself and its proof set**, 5b is the restore-specific cases. 5a is **not complete** — its round-5 fixes have not been reviewed, and in this project *a fix is a change, and the round that reviews it is not optional*.
+**Step 2c-5-5 was split by the orchestrator into 5a and 5b**, exactly as 2c-4c-4 was cut: **5a is the harness itself and its proof set**, 5b is the restore-specific cases. 5a is **not complete** — its round-7 fixes have not been reviewed, and in this project *a fix is a change, and the round that reviews it is not optional*.
 
 #### Read these first, in this order
 
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
 git status --short --untracked-files=all   # expect exactly FOUR lines — NOT empty
-docs/reviews/phase-2c-5-5a-instrument-round5.md   # THE ONE BEING CONFIRMED — 3 findings, all Low
-docs/decisions/2c-5-5a-instrument-rebuild.md      # §13 is round 5's disposition, and the newest section
+docs/reviews/phase-2c-5-5a-instrument-round7.md   # THE LAST ONE — 3 findings, all Low, NO instrument defects
+docs/decisions/2c-5-5a-instrument-rebuild.md      # §15 is round 7's disposition, and the newest section
+#   §15.4 is the trend reading; §15.5 is the convergence question, stated and deliberately NOT decided;
+#   §15.8 is the three extras this fix round's own sweep found that round 7 did not cite.
 ```
 
-The five review files are **rounds 1–5** and the record's dispositions are **§9–§13**, one per round, in order: `phase-2c-5-5a-instrument.md` (8 findings) → §9; `-round2.md` (4) → §10; `-round3.md` (5) → §11; `-round4.md` (6) → §12; `-round5.md` (3, all Low) → §13.
+The seven review files are **rounds 1–7** and the record's dispositions are **§9–§15**, one per round, in order: `phase-2c-5-5a-instrument.md` (8 findings) → §9; `-round2.md` (4) → §10; `-round3.md` (5) → §11; `-round4.md` (6) → §12; `-round5.md` (3, all Low) → §13; `-round6.md` (3, all Low, **no instrument defects**) → §14; `-round7.md` (3, all Low, **no instrument defects**) → §15.
+
+**The §N ↔ round N mapping was itself a round-6 finding.** §13 shipped headed "round-6" while disposing of round 5, and §13.4 additionally said *"what round 6 says the round-5 fixes created"* when round 5 reviewed the **round-4** fixes. Do not re-introduce it: **the initial review is round 1, and `-roundN.md` is round N.**
 
 #### The state of the tree, and why it is NOT clean
 
@@ -8361,41 +8365,52 @@ The five review files are **rounds 1–5** and the record's dispositions are **�
 ?? src/probe.ts               # the driver
 ```
 
-**Those four are the harness and they must never be committed.** Everything else this session produced — the record, the three review files and this file — **is** committed at `f0b2bd4`, because it is the phase's evidence rather than the instrument. **Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
+**Those four are the harness and they must never be committed.** Everything else — the record, the seven review files and this file — **is** committed, because it is the phase's evidence rather than the instrument. **Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
 
 #### The gate baseline — TWO figures, and do not confuse them
 
-- **With the harness in the tree: `1153 / 432 / 2124 / 185`.** This is what the gates answer right now, re-derived by the orchestrator after every fix round of this session, and what a session working on 5a or 5b should expect.
+- **With the harness in the tree: `1153 / 432 / 2124 / 185`.** This is what the gates answer right now, re-derived by the orchestrator after every fix round of this session **and again after the round-7 fixes**, and what a session working on 5a or 5b should expect. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` are clean; the bundle oracle reads **absent / present → 2**; the build emits `index-I5AFZyLL.js`, unchanged since round 4. **Rounds 6 and 7 changed markdown only**, so no gate could have moved and none did.
 - **Harness-free production: `1153 / 431 / 2123 / 184`.** This is what **2c-5-7 must re-derive on a harness-free tree** — never copy the with-harness figure forward. The scar is `1623`, which stood in this file for three step records after 3d-1 committed ten cases while the harness was in the tree.
 
 The delta is exactly **+1 module** (`src/probe.ts`), **+1 `svelte-check` file**, **+1 vitest case** (`scripts/lint/ipc-detail.test.ts`'s per-file `it.each`), and **+0 Rust tests**.
 
-#### The five rounds so far, and the one number that matters
+#### The seven rounds so far, and the one number that matters
 
-| Review file | Findings | Severity ceiling |
-|---|---|---|
-| `phase-2c-5-5a-instrument.md` | 8 (6 closed at once) | High |
-| `-round2.md` | 4 | High |
-| `-round3.md` | 5 | Medium |
-| `-round4.md` | 6 | Medium |
-| `-round5.md` | **3** | **Low** |
+| Review file | Findings | Ceiling | Instrument defects |
+|---|---|---|---|
+| `phase-2c-5-5a-instrument.md` | 8 (6 closed at once) | High | yes |
+| `-round2.md` | 4 | High | yes |
+| `-round3.md` | 5 | Medium | yes |
+| `-round4.md` | 6 | Medium | yes |
+| `-round5.md` | 3 | Low | yes |
+| `-round6.md` | 3 | **Low** | **None.** |
+| `-round7.md` | **3** | **Low** | **None.** |
 
-**Every one of those five rounds answered "did the fix round create anything?" with YES**, which is why none of them was allowed to close without a successor. The trend is the reading that matters: the count fell 8 → 4 → 5 → 6 → 3 and the ceiling fell **High → Medium → Low**. Round 5 is the first round of this step with no High and no Medium.
+**Every one of those seven rounds answered "did the fix round create anything?" with YES**, which is why none was allowed to close without a successor. The counts are 8, 4, 5, 6, 3, 3, 3 — **not monotone**, and the record does not claim they are. What moved is the **kind**: rounds 1–2 changed the instrument's code, rounds 3–5 changed what the record and comments *claimed* about that code, and **rounds 6 and 7 found no instrument defect at all** — six prose findings between them, **five of the six being this record's bookkeeping about its own review history**. **No round has yet returned READY.**
 
-#### What round 5 found, and what the fix round did (all three are wording; no code behaviour changed)
+#### What rounds 6 and 7 found, and what the fix rounds did (all prose; NO code behaviour changed in either)
 
-1. **Low — `src/probe.ts`, the write-back was said to scroll.** Round 4 had replaced *"Nothing here scrolls anything"* with *"scrolls the pane, to a stale position"* — one categorical claim traded for its opposite. `scrollTop` is **clamped against the layout existing when the assignment runs**, so it may leave the position unchanged, may move it, and may land at neither value. Now: the write-back **can overwrite a newer position by attempting to restore the earlier value**, guaranteeing **neither** preservation **nor** restoration.
-2. **Low — the record carried the same over-claim** at §11.6 item 3 (*"would undo"*) and §12.2 (*"restores a stale position"*). Both corrected; §12.2 now states the clamping and the three possible outcomes.
-3. **Low — two references escaped §12.5's terminology sweep** (§7's bundle-search paragraph, §10's P02 paragraph). Both now use the defined terms. Neither was false — the number beside each made the set recoverable — **but §12.5's own claim that the terms were "used everywhere" was**, and §12.5 now carries that correction instead of repeating the claim. §13.3 is the record.
+**Round 6 (→ §14), three Low, `Instrument defects: None.`**
 
-`§13` is the disposition. The orchestrator applied these three by hand rather than by worker, because each had its replacement wording dictated by the review.
+1. **The review-file-to-round mapping was off by one** — six references called `-round5.md` "round 6", and §13.4's lineage was self-contradictory. All six corrected; §14 added as round 6's disposition.
+2. **The preamble had gone stale against §13** — "revised **four** times" and "§12 is the latest", both written before §13 existed. Its claim that *every sentence a fix made false has been rewritten in place* was **falsified by the stale count itself**.
+3. **"Three wordings changed, in two files"** was an unlicensed exact count; §13 now counts findings and enumerates sites.
+4. **Plus two extras (§14.7) the fix round's own sweep found**, both in §7 and both instances of finding 2's shape: "the four fix rounds" / "all five readings", and the build's "185 on all five readings".
 
-#### What round 5 CLOSED, and what it settled that earlier rounds could not
+**Round 7 (→ §15), three Low, `Instrument defects: None.`**
 
-- **The residual list is exhaustive at four.** Round 5 enumerated the re-resolutions **from the code rather than against the list** and found **no fifth**: a target final-component replacement does not follow a newly planted symlink, and every directory walked by the temporary is already the target-path ancestor case.
-- **All of §9.1's per-item labels now match their evidence.** Two were wrong across two rounds — C06 credited with the direct-child source constraint it never exercises, then C09 credited with the exact-shape rule it never reaches. C10 alone measures target shape; C07 measures only a pre-existing temporary entry; C05/C09 measure only the outside-launch-root refusal.
-- **The `drop(handle)` close-error disclosure is correct and not overstated**, read as an acceptance rationale rather than a guarantee: Rust's `File` drop path cannot report a close error to this code, and a checked `sync_all` is a genuine mitigation without proving close succeeded.
-- All five of round 4's swept extras are closed, including the corrected `seventeen of nineteen` (N07/N08 write no transcript at all) and the binary-identity claims now bound to **when** the digest was read.
+1. **The round-6 replacement for the exhaustiveness claim was still one.** *"Each fix round rewrote the sentences its own fixes made false"* is categorical, and *"a sweep, not a guarantee"* after it does not narrow it — **the paragraph disproved itself in its own next sentence**. It now says each round rewrote what **it identified**, that a round has missed one **every time**, and that **no round has yet identified every sentence its fixes falsified**.
+2. **"All three are staleness" flattened three distinct shapes**, and §14.4's *"a seventh round is owed on exactly these three fixes"* contradicted §14.4's own five-site count. Both corrected.
+3. **Two surviving "every fix round re-runs `cargo build --features custom-protocol`" claims**, in §1 and §12.7 — regions no fix round had touched. §13.6/§14.6/§15.7 show rounds 5–7 never ran that row.
+4. **Plus three extras (§15.8) this fix round's own sweep found**: a **third** instance of finding 3's shape in §6.4 that round 7 did not cite; and **two in §14 itself** — the section written one round earlier to document that exact mechanism.
+
+Both fix rounds were applied by the orchestrator by hand rather than by worker, because each finding had its replacement wording dictated by the review.
+
+#### What rounds 6 and 7 CLOSED
+
+- **All three round-5 findings CLOSED** (round 6), and **round 6's findings 1 and 3 CLOSED, finding 2 PARTIALLY CLOSED, both §14.7 extras CLOSED** (round 7).
+- **The four-residual-rebinding disclosure was re-verified intact** by round 7 across §8.1, §13.5, §14.5 and the `probe.rs` module note: open and disclosed, **accepted not proven**, acceptance explicitly not proof of impossibility. **No fix in rounds 6 or 7 touched it.**
+- **No instrument defect in either round**, in either probe source. The instrument has been still since round 2.
 
 #### What is OPEN, and what 5b inherits
 
@@ -8410,18 +8425,25 @@ They are one shape — a name checked at one instant and spent at another, this 
 
 What IS forced, and it belongs in the same sentence: the canonical target must be exactly `<launch>/xdg/espanso/match/conflict.yml` beneath the canonical launches root at the instant of the check (measured by C10), and no entry of any kind existed at the temporary's pathname when `open` ran (`O_EXCL`, measured by C07).
 
-#### What the round-6 confirmation must judge
+#### THE DECISION THIS NEEDS — an owner's call on cost, not a question about the instrument
 
-Commission it as `Agent(subagent_type="codex:codex-rescue", ...)`, brief it as a **confirmation round** on round 5's three findings, and tell it to sweep for the **shape** of each, never its words. Ask specifically:
+**The standing rule is not suspended and was not suspended here: an eighth round is owed on all six changes the round-7 fix round made** (round 7's three, plus §15.8's three). `§15.5` states this in the record and **deliberately does not decide it**; nothing has been accepted unilaterally.
 
-- Do the three corrected wordings now claim exactly what the code gives — neither the old over-claim nor a new one in the opposite direction? 13.1 is the third wording this one sentence has had.
-- **Did the round-5 fix create anything?** Five rounds running have answered yes. §12.5's correction and §13 itself are the new prose and are where to look hardest.
-- Is §13 honest about what is open, and does §13.4's trend claim overstate?
-- Is there any remaining **exhaustiveness** claim in the record or the probe sources that the evidence does not license? That shape has now produced findings in two consecutive rounds (round 4's "exactly three", round 5's "used everywhere").
+What the evidence now supports, stated so the owner can decide without re-reading seven rounds:
 
-**Write the brief so either sandbox works** — say the workspace may be read-only, that its final message IS the deliverable, and that a sandbox limit must not affect the verdict. Round 4's job wrote its own file; round 5's could not, and the orchestrator captured it with `node "$CC" result <job-id> > docs/reviews/…`. **Check whether the file exists and is substantive before writing anything to that path.**
+- **The instrument itself has been still since round 2.** Rounds 6 and 7 found **zero** instrument defects across both probe sources, sweeping them each time.
+- **The remaining defect surface is this record's prose about its own review history.** Five of the last six findings were bookkeeping — how many rounds, how many readings, which section is latest. The mechanism is mechanical: **each round appends a section, the append falsifies a count above it, the next round finds that.** §15.8's extras 2 and 3 are that mechanism operating on §14 — the section written one round earlier **to document that mechanism**.
+- **Every round costs one Codex round-trip**, and **step 2c-5-7 deletes the instrument and this record's subject matter entirely.**
 
-#### After round 6 closes: what 5b builds
+**Two paths. Neither is started.**
+
+**(A) Run round 8.** Brief it as a confirmation on the six round-7 changes. Commission as `Agent(subagent_type="codex:codex-rescue", ...)`; sweep for the **shape**, never the words; look hardest at **§15 in its entirety and §14.2's rewritten account**, which is where a fix round has created the next finding seven times running. Expect the finding to be in §15's own bookkeeping. **This is what the standing rule prescribes.**
+
+**(B) Accept 5a with §15.4's reading as the closing state.** Record in `PROGRESS.md` and in a new §16 that 5a closes with a known-open prose-bookkeeping defect class, that no round returned READY, that the instrument had no defect in its last two reviews, and that the subject is deleted at 2c-5-7. **This is a deliberate exception to the standing rule and only the owner may take it.**
+
+**Write any round-8 brief so either sandbox works** — say the workspace may be read-only, that its final message IS the deliverable, and that a sandbox limit must not affect the verdict. Rounds 6 and 7 both ran read-only and **could not write their own review files**; the orchestrator captured each final message verbatim to `docs/reviews/phase-2c-5-5a-instrument-round{6,7}.md`, each with a capture note under a rule. **Check whether the file exists and is substantive before writing anything to that path.**
+
+#### After 5a closes — by either path — what 5b builds
 
 `docs/decisions/2c-5-5a-instrument-rebuild.md` §8.2 is the specification and it is specific. In outline: seeded **backup-root fixtures** (nothing in this tree writes a `.espansoconfig-backups` directory *before* a launch — the positives produce one *during*, which is a by-product and not a catalogue); the **`RestorePane` drive** — the pane is `section.restore` with four `section.step` blocks, its outcome panel is a **direct child**, and there is **no `.panel.reapply` on it at all**, so `reportReapply` must never be called for a restore or the plan times out; the catalogue / entry / candidate / prepare / replace states, each with the launch that reaches it; and the **byte oracle extended over the backup tree**, because a restore is a whole-file replacement that itself takes a backup and must not disturb the batch it restored from.
 

@@ -1,6 +1,6 @@
 # Phase 2c-5 step 5a — the window-reading instrument, rebuilt from the records
 
-> **This record was revised four times, by four review fix rounds.**
+> **This record was revised seven times, by seven review fix rounds.**
 > `docs/reviews/phase-2c-5-5a-instrument.md` returned **NOT READY on eight findings**; §9 names each
 > one and how it was addressed. `docs/reviews/phase-2c-5-5a-instrument-round2.md` then returned **NOT
 > READY on four more**; **§10** names each of those and how it was addressed.
@@ -8,20 +8,40 @@
 > names each of those, and **four of the five are this record having claimed a guarantee the code does
 > not give**. `docs/reviews/phase-2c-5-5a-instrument-round4.md` then returned **NOT READY on six
 > more**; **§12** names each of those, and **four of the six are again a claim the code or the evidence
-> does not license**. Rounds 1 and 2 changed
+> does not license**. `docs/reviews/phase-2c-5-5a-instrument-round5.md` then returned **NOT READY on
+> three more, all Low**; **§13** names each of those, and **all three are wording**.
+> `docs/reviews/phase-2c-5-5a-instrument-round6.md` then returned **NOT READY on three more, again all
+> Low and again all prose**; **§14** names each of those, and they are **three distinct shapes, not
+> one** — an off-by-one review-file-to-round identity with a false fix lineage behind it (§14.1), this
+> record gone stale against its own newest section (§14.2), and an exact count the changes did not
+> license (§14.3). **§14.7 names two further instances of §14.2's shape alone**, which round 6 did not
+> cite and the fix round's own sweep found. `docs/reviews/phase-2c-5-5a-instrument-round7.md` then
+> returned **NOT READY on three more, all Low, all prose, and `Instrument defects: None.` for the second
+> consecutive round**; **§15** names each of those, **§15.8 names three further instances its own sweep
+> found — two of them in §14, the section written one round earlier to document that very mechanism** —
+> and **§15.5 states the convergence question all this raises and deliberately does not decide it**.
+> Rounds 1 and 2 changed
 > `src-tauri/src/probe.rs`, so every launch taken before them ran a **different binary** and none can
-> stand as evidence for the tree that ships; **rounds 3 and 4 changed only doc comments and prose and
-> took no new launch**, so every launch named below is unmoved. **Two sets are named below and they are not the
+> stand as evidence for the tree that ships; **rounds 3, 4 and 5 changed only doc comments and prose,
+> rounds 6 and 7 changed only this record, and none of those five took a new launch**, so every launch
+> named below is unmoved. **Two sets are named below and they are not the
 > same size**: the **twelve plan-proof launches** are P37–P48, one per case of the case table, and the
 > **nineteen-launch complete proof set** is those twelve plus N07/N08 (the no-plan controls), C05/C06
 > (the static confinement controls) and C07, C09 and C10 (the adversarial ones round 2 asked for) —
-> 12 + 2 + 2 + 3 = 19. Every sentence below that a fix made false has been rewritten
-> in place; nothing that was an honest limitation has been deleted; §9.9 lists the one defect round 1
-> found in its own work and deliberately did not close, and **§9.1, §10.1, §11.1 and §12.1 state
+> 12 + 2 + 2 + 3 = 19. Each fix round rewrote the sentences **it identified** as made false by its own
+> fixes, and the round after it swept for the ones that round missed — **that is a sweep, not a
+> guarantee**, and the weaker verb is load-bearing rather than modest. **A round has missed one every
+> time**: round 6 found this very paragraph still claiming four fix rounds after §13 made it five, and
+> round 7 then found the replacement's own first clause still asserting that the rewriting was complete.
+> **No round of this step has yet identified every sentence its fixes falsified**, and this sentence
+> claims only that each tried and the next one looked. Nothing that was an honest limitation has been
+> deleted; §9.9 lists the one defect round 1
+> found in its own work and deliberately did not close, and **§9.1, §10.1, §11.1, §12.1, §13.5, §14.5
+> and §15.6 state
 > plainly what is *not* closed** — **four** residual rebindings: the source's final component, the
 > temporary's name after `create_new`, an ancestor directory of the target's pathname and an ancestor
-> directory of the **source's**, all residual and unproven and none of them a hole round 3 or round 4
-> closed.
+> directory of the **source's**, all residual and unproven and **not one of them closed by any round
+> from 3 to 7**.
 
 Step 2c-5-6 is the bilingual window reading this phase owes, and 2c-5-5b adds the restore cases it
 needs. **This step is neither**, and nothing here judges a screen. It rebuilds **both halves** of the
@@ -36,9 +56,11 @@ executable here to a source snapshot or to a build command — no build transcri
 `launch.sh` copies whatever `ECFG_BINARY` names without checking a timestamp — so *this source tree
 runs* is not available. What the bundles pin is **which bytes ran**: P37–P48 ran an executable whose
 digest is `0a2d3506…`, and the retained bundles still carry those bytes. **That digest equalled
-`target/debug/espansoconfig`'s when it was first read and does not now** — every fix round re-runs
-§7's `cargo build -p espansoconfig --features custom-protocol` row, which rewrites that path; measured
-at round 4, `target/debug/espansoconfig` is `04988c09…` (§5.10, §12.7). Source inspection separately
+`target/debug/espansoconfig`'s when it was first read and does not now** — the **round-4** run of §7's
+`cargo build -p espansoconfig --features custom-protocol` row rewrote that path; measured
+at round 4, `target/debug/espansoconfig` is `04988c09…` (§5.10, §12.7). **Rounds 5 and 6 did not re-run
+that row at all** (§13.6, §14.6), so nothing after round 4 has rewritten the path and the inequality
+above is a claim about what round 4 measured, not about a rebuild each round performs. Source inspection separately
 establishes that the plans are coherent. **Those two readings may not be conjoined into source
 provenance.**
 
@@ -673,7 +695,9 @@ records its digest. Measured across all launches:
 
 The last was byte-identical to `target/debug/espansoconfig` **when that equality was first read, and is
 not now**: `cargo build -p espansoconfig --features custom-protocol` is one of §7's seven gate rows and
-is re-run after every fix round, so it rewrites that path. **Measured at round 4**:
+**each of the first four fix rounds re-ran it**, rewriting that path; **rounds 5, 6 and 7 did not run it
+at all** (§13.6, §14.6, §15.7), so nothing since round 4 has rewritten it and the inequality is an
+expired equality rather than a rebuild each round performs. **Measured at round 4**:
 `shasum -a 256 target/debug/espansoconfig` answers `04988c09…`, while P37's and C10's retained bundle
 binaries still answer `0a2d3506…` — the retained copies are what pin which bytes ran, and the working
 build tree is not (§12.7). **That the five digests
@@ -914,13 +938,20 @@ arithmetic against the harness-free baseline `PROGRESS.md`'s "Next action" carri
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean | — | |
 | `cargo build -p espansoconfig --features custom-protocol` | finished, no errors | — | |
 
-**All seven rows were re-run after each of the four fix rounds**, and **every figure is unchanged
-across all five readings**. That is itself the expected result and not a surprise: no round added a
-source module — `parsePlan`, `waitForOutcomeChange`, `resolve_existing_file`, `confined_target`,
+**All seven rows were re-run after each of the first four fix rounds**, and **every figure is unchanged
+across those five readings**. The two rounds after them re-derived a **subset**, and this paragraph says
+which rather than implying the whole table: **round 5** re-ran the four gate rows plus `cargo fmt
+--check` and `cargo clippy` (§13.6), and **round 6**, which changed **markdown only**, re-ran the four
+gate rows, `cargo fmt --check`, `cargo clippy` and the bundle oracle (§14.6), and **round 7 re-ran
+exactly the same six rows plus the oracle** (§15.7). Neither round 6 nor round 7 ran the
+`cargo build -p espansoconfig --features custom-protocol` row, which is why §1 and §12.7 no longer say
+every round re-runs it. What is claimed across **all eight readings** is therefore narrower than "seven
+rows every time": **no reading of any round has ever moved a figure in this table.** That is itself the expected result and not a surprise: no round
+added a source module — `parsePlan`, `waitForOutcomeChange`, `resolve_existing_file`, `confined_target`,
 `confined_source`, `temporary_beside` and `copy_then_rename` all live in the two files that already
-existed, and **rounds 3 and 4 changed no executable line at all**, only doc comments in both probe
-sources and
-prose here — so the module count had no reason to move. It is recorded because an unchanged count that
+existed, and **rounds 3, 4 and 5 changed no executable line at all**, only doc comments in the probe
+sources and prose here, while **rounds 6 and 7 changed no file outside markdown** — so the module count
+had no reason to move. It is recorded because an unchanged count that
 was *predicted* to be unchanged is worth more than one nobody checked. **What the round-3 and round-4
 readings are
 *not*** is a re-measurement of anything a launch showed: no launch was re-run and none could have been
@@ -938,8 +969,12 @@ across rounds 1 and 2, the backend is not, and that is exactly the shape of a fi
 
 **The module count was predicted before the build and checked both ways**, which `CLAUDE.md` §6
 requires and the number alone no longer decides. 185 was written down as 184 + 1 and the build answered
-185 on **all five readings** — this sentence said "all three" beside the paragraph above saying "all
-four", which is §12.7's fourth swept count. The discriminating oracle over
+185 on **all eight readings** — this sentence said "all three" beside the paragraph above saying "all
+four" (§12.7's fourth swept count), and then stood at "all five" through rounds 5 and 6, which each ran
+the build again; **it is the same stale-count shape §14.2 closed in the preamble, found by the same
+sweep and corrected at §14.7.** The rounds 5, 6 and 7 builds also emitted the **same**
+`index-I5AFZyLL.js` named below, which is the frontend-byte-identity claim holding three rounds further
+than §5.10 recorded it. The discriminating oracle over
 `dist/assets/index-I5AFZyLL.js`, the bundle every launch of the complete proof set ran:
 
 ```
@@ -1123,9 +1158,14 @@ rewording**, which is this project's precedent; one was left alone deliberately;
 defect round 1's own self-review found and did **not** close; **§10 is round 2, which found that
 §9.1's and §9.2's closures were both overstated**; and **§11 is round 3, which found that §9.1's and
 §10.1's *corrected* closures were still overstated and that §9.1's "closed and measured" bucket held
-two unmeasured items**; and **§12 is round 4, which found a fourth residual rebinding none of those
-lists named and a per-item label that credited C06 with a rule no launch exercises.** Where the four
-disagree, the later section is the later reading, and **§12** is the latest.
+two unmeasured items**; **§12 is round 4, which found a fourth residual rebinding none of those
+lists named and a per-item label that credited C06 with a rule no launch exercises**; **§13 is round 5,
+which closed the residual list at four by enumerating from the code and confirmed every §9.1 label
+against its evidence**; and **§14 is round 6, which found no instrument defect at all and three stale
+prose claims, one of them this paragraph's own**; and **§15 is round 7, which found no instrument defect
+either and three more prose claims, including that §14's own replacement for an exhaustiveness claim was
+still one.** Where the seven
+disagree, the later section is the later reading, and **§15** is the latest.
 
 **9.1 High — the writers were not confined (`replace_the_target`).** **Partially closed at round 1;
 narrowed further at round 2; narrowed again at round 3, which found that two more arms were open and
@@ -1682,7 +1722,7 @@ the read and it. What does not scroll is the **geometry reads**.
 which **can overwrite a newer position by attempting to restore the earlier value**, and does not run at
 all if the `say` rejects. It is **not** said to scroll the pane necessarily, and **not** said to restore
 the earlier position successfully: `scrollTop` is clamped against the layout existing when the assignment
-runs, so the effective position may be unchanged, may move, and may land at neither value — round 6's
+runs, so the effective position may be unchanged, may move, and may land at neither value — round 5's
 instrument finding 1 and prose finding 1 are that over-claim, and §13.1 and §13.2 are the correction. **It is not a guarantee that a reporter cannot leave the pane moved**, and the
 comment now says so in those words. §11.6's item 3 carries a correction block pointing here.
 
@@ -1738,12 +1778,12 @@ no-plan controls, two static confinement controls and three adversarial ones —
 Occurrences were re-read against the section that defines it in §1, §4, §4.1, §5.8, §5.10, §5.12, §6.2,
 §6.3, §6.5, §6.6, §7, §9.8, §11 and §11.6.
 
-**This section claimed that sweep was exhaustive — "used everywhere" — and it was not.** Round 6 found
+**This section claimed that sweep was exhaustive — "used everywhere" — and it was not.** Round 5 found
 **two** references still carrying the old generic wording, one at §7's bundle-search paragraph and one
 in §10's P02 provenance paragraph; §13.3 is that correction. The numbers beside them made the intended
 set recoverable in both cases, so neither was false — but *this sentence* was, and an exhaustiveness
 claim that the sweep does not license is the same defect class as the one §12.5 exists to close. The
-membership and the arithmetic were independently re-derived at round 6 and are correct. **Two of them were not merely
+membership and the arithmetic were independently re-derived at round 5 and are correct. **Two of them were not merely
 ambiguous but false under one reading** — §4.1 said *every launch of the proof set has
 `failed-lines=0`*, which is untrue of the five confinement launches where a `--- failed` **is** the
 pass; and §6.6 said the third-writer path was *"not in the executable the proof set ran"*, which is
@@ -1784,12 +1824,17 @@ found and addressed, and the mandated checks were verified rather than trusted.
    digest rows — the round-0 generation itself ran two. §3 now says five binaries across four
    generations, with the reason.
 3. **A count with two meanings inside one section** (§7). *"The build answered 185 on all three
-   readings"* stood two paragraphs below *"every figure is unchanged across all four readings"*. Both
-   are now **five**, because round 4's own reading is one more.
+   readings"* stood two paragraphs below *"every figure is unchanged across all four readings"*. Round 4
+   set both to **five**, because round 4's own reading was one more. **Both went stale again when
+   rounds 5 and 6 ran, and §14.7 is that correction** — this item records what round 4 did, not what
+   §7 says today.
 4. **A claim whose evidence expired** (§1's preamble, §5.10 and §6.4). All three said the proof
    generation's binary is *byte-identical to `target/debug/espansoconfig` as it stands now*. It is not,
-   and cannot be for long: `cargo build -p espansoconfig --features custom-protocol` is one of §7's
-   seven gate rows and every fix round re-runs it. **Measured at round 4**: `target/debug/espansoconfig`
+   and cannot be relied on to stay so: `cargo build -p espansoconfig --features custom-protocol` is one
+   of §7's seven gate rows and **each of the first four fix rounds re-ran it**, which is what broke the
+   equality. **Rounds 5 and 6 did not run that row** (§13.6, §14.6), so the path has not been rewritten
+   since round 4 — the claim is about an equality that expired, not about a rebuild every round
+   performs. **Measured at round 4**: `target/debug/espansoconfig`
    is `04988c09…`, while `launches/P37/…/MacOS/espansoConfig` and `launches/C10/…/MacOS/espansoConfig`
    both still answer `0a2d3506…`. **The retained bundle copies are what pin which bytes ran; the working
    build tree never did.** All three sentences now say that, with the equality bound to the moment it
@@ -1834,9 +1879,9 @@ found and addressed, and the mandated checks were verified rather than trusted.
 
 ---
 
-## 13. Disposition of the three round-6 review findings
+## 13. Disposition of the three round-5 review findings
 
-Round 6 is `docs/reviews/phase-2c-5-5a-instrument-round5.md`. It returned **NOT READY on three, and all
+Round 5 is `docs/reviews/phase-2c-5-5a-instrument-round5.md`. It returned **NOT READY on three, and all
 three are Low** — the first round of this step whose findings are all Low. It also closed, by
 **independent enumeration from the code rather than against the list**, the question round 4 opened:
 there are **exactly four** residual rebinding classes and **no fifth**, because a target final-component
@@ -1845,7 +1890,10 @@ already the target-path ancestor case. §9.1's per-item labels were re-checked i
 now match their evidence. The `drop(handle)` close-error disclosure was judged correct and not
 overstated, read as an acceptance rationale rather than a guarantee.
 
-**No code behaviour changed in this round either. Three wordings changed, in two files.**
+**No code behaviour changed in this round either. Three findings were addressed through comments and
+prose in two files** — `src/probe.ts` and this record. **More than three wording sites moved**: the
+`reportReach` contract comment, §§11.6 and 12.2, the §7 and §10 terminology references, §12.5's own
+correction, and the whole of this section.
 
 **13.1 Low — `src/probe.ts`, the write-back was said to scroll.** Round 4 replaced *"Nothing here
 scrolls anything"* with a claim that the write-back **scrolls the pane, to a stale position** — trading
@@ -1866,7 +1914,7 @@ now use the defined terms. **Neither was false** — the number beside each made
 recoverable — but **§12.5's own claim that the terms were "used everywhere" was**, and §12.5 now carries
 that correction rather than repeating the claim.
 
-**13.4 What round 6 says the round-5 fixes created, and where it went.** Two things, and both are
+**13.4 What round 5 says the round-4 fixes created, and where it went.** Two things, and both are
 above: the `reportReach` correction created a narrower categorical guarantee (13.1, 13.2), and the
 terminology fix created an exhaustiveness claim it did not license (13.3). **This is the fifth
 consecutive round in which the fix round created the next round's finding**, and it is why no round of
@@ -1887,3 +1935,213 @@ tree: `cargo test --workspace` **1153**, `npm run check` **432 files / 0 errors 
 `npm test` **2124**, `npm run build` **185 modules**; `cargo clippy --workspace --all-targets -- -D
 warnings` and `cargo fmt --check` clean. **No launch was re-run and no new measurement is claimed in
 this section.**
+
+## 14. Disposition of the three round-6 review findings
+
+Round 6 is `docs/reviews/phase-2c-5-5a-instrument-round6.md`. It returned **NOT READY on three, and all
+three are Low and all three are prose** — **`### Instrument defects` is the word "None."**, the first
+round of this step to say so. It confirmed all three of round 5's findings **CLOSED**, and it confirmed
+the two substantive §13 claims it was asked to test: §13.5 still leaves all four pathname rebindings
+open, accepted-not-proven, with acceptance explicitly not proof of impossibility; and §13.4's trend
+sentence does not overstate, because it gives the actual 8 → 4 → 5 → 6 → 3 sequence rather than
+claiming a monotone fall, while the severity ceiling it does claim to fall is supported.
+
+**Nothing in `src/probe.ts` or `src-tauri/src/probe.rs` changed in this round. All three fixes are in
+this record.**
+
+**14.1 Low — the review-file-to-round mapping was off by one.** §13's heading, its opening sentence,
+§13.4's title and three references inside §12 all called
+`docs/reviews/phase-2c-5-5a-instrument-round5.md` **round 6**. The mapping §9–§12 establish is
+initial review → round 1 and `-roundN.md` → round N, so that file is **round 5** and the confirmation
+that found this is round 6. §13.4 was additionally **self-contradictory**: it cited the round-5 review
+while assigning its findings to the round-5 *fixes*, when round 5 reviewed the **round-4** fixes. All
+six references now say round 5, and §13.4 now reads *what round 5 says the round-4 fixes created*. The
+orchestrator found this shape before commissioning round 6 and **put it to the review as a question
+rather than fixing it**, because a unilateral correction would have been an unreviewed change; round 6
+ruled it a defect and dictated the fix.
+
+**14.2 Low — the preamble had gone stale against §13, and its exhaustiveness claim was the casualty.**
+The preamble said the record was revised **four** times by four fix rounds and §9's opening said **§12**
+was the latest, both written before §13 existed and neither updated when it did. That is not merely a
+stale count: the preamble also claimed *every sentence below that a fix made false has been rewritten
+in place*, and **the stale count was itself a sentence a fix had made false**, so the claim falsified
+itself. The ledger names every round and its section — **seven as of §15** — and §9's opening names the
+latest. **The round-6 replacement for the exhaustiveness claim was itself still one, and §15.1 is that
+finding**: *"each fix round rewrote the sentences its own fixes made false"* is categorical, and the
+*"a sweep, not a guarantee"* clause after it did not narrow it. The preamble now says each round
+rewrote what **it identified**, that a round has missed one every time, and that **no round has yet
+identified every sentence its fixes falsified** — see §15.1 for why the weaker verb is the whole point.
+**This paragraph is named as the evidence in the preamble itself**, because a disclaimer with no
+instance behind it reads as modesty rather than as a limit.
+
+**14.3 Low — "Three wordings changed, in two files" was an unlicensed exact count.** Three *findings*
+were addressed, but the sites that moved were the `reportReach` contract comment, §§11.6 and 12.2, the
+§7 and §10 terminology references, §12.5's own correction and the whole of §13 — more than three. §13
+now counts **findings** rather than wordings and enumerates the sites.
+
+**14.4 What round 6 says the round-5 fixes created, and where it went.** Three things, all three in
+this record and **none in either probe source**: the off-by-one round identity (14.1), the stale
+four-round and latest-§12 metadata with the self-falsifying exhaustiveness claim it dragged down
+(14.2), and the unlicensed exact count (14.3). **The fix round then swept for the *shape* of each rather
+than its cited lines and found two more instances of 14.2's, both in §7; §14.7 records them.** Round 6
+cited three; **five were fixed**, and the two extras are named rather than folded silently into the
+three. **This is the sixth consecutive round in which the fix
+round created the next round's finding**, and it is why this round does not close either. Two readings
+matter and they point the same way. The counts are 8, 4, 5, 6, 3, 3 — **not** monotone, and this
+section does not claim they are. The **kind** is what moved: rounds 1 and 2 changed the instrument's
+own code, rounds 3 through 5 changed what the record and the comments *claimed* about that code, and
+round 6 found **no instrument defect at all** and three places where this record had gone stale
+**against itself** rather than against the instrument. **That is a narrower failure surface, not an
+empty one**, and a seventh round is owed on **all five changes this round made** — the three round 6
+cited and the two §14.7 extras — not on the cited three alone.
+
+**14.5 What is still open, unchanged by this round.** Unchanged in the strict sense: **no fix in this
+round touched the confinement disclosure at all.** The **four** residual rebindings of the module note
+in `src-tauri/src/probe.rs` remain **open and disclosed**, not closed — source final component,
+temporary name after `create_new`, an ancestor of the target's pathname, and an ancestor of the
+source's pathname. They are **accepted, not proven**, and **acceptance is not proof of impossibility**.
+2c-5-5b inherits exactly that, and §8.1 and §13.5 both say so in those terms.
+
+**14.6 The gates after this round.** **Markdown only** — this record and the new review file; **no
+`.ts`, `.rs` or `.svelte` file changed**, so no gate *can* have moved. They were re-derived anyway,
+with the harness in the tree, and this is a re-derivation on the tree as it stands rather than a figure
+carried forward: `cargo test --workspace` **1153**, `npm run check` **432 files / 0 errors / 0
+warnings**, `npm test` **2124 in 56 files**, `npm run build` **185 modules**; `cargo clippy --workspace
+--all-targets -- -D warnings` and `cargo fmt --check` clean. The `cargo build -p espansoconfig
+--features custom-protocol` row was **not** re-run this round, and §7 says so rather than implying the
+whole table moved with each round. The bundle oracle was read
+in **both** directions, because a bare `svelte/internal/server` search is a vacuous negative: the
+server-only sentinels `$$payload|head_payload|push_element` are **absent**, and the client-only
+`window.__svelte|svelte-trusted-html` are **present → 2**, which is what proves the search can match at
+all. **No launch was re-run and no new window measurement is claimed in this section.**
+
+**14.7 Two extras this fix round swept up, which round 6 did not cite.** Round 6's finding 2 named the
+preamble and §9's opening. Sweeping for its **shape** — *a count of rounds or readings written before a
+later round existed* — rather than for its two cited line ranges found **two more**, both in §7 and both
+stale in the same direction:
+
+1. **§7 said all seven rows were re-run after each of "the four fix rounds" and were unchanged "across
+   all five readings".** Six rounds had run when this was written, and rounds 5 and 6 had each
+   re-derived a **subset** of the table rather than all seven rows. (**Round 7 then made it seven
+   rounds and eight readings**, and §7 was updated again — this item records the round-6 correction,
+   not what §7 says today.) The paragraph now names the subset per round and narrows what it
+   claims across all seven readings to the thing that is actually true of every one of them: **no
+   reading has ever moved a figure in this table.** The neighbouring sentence *"rounds 3 and 4 changed
+   no executable line at all"* was stale the same way and now covers rounds 3–5 plus round 6's
+   markdown-only change.
+2. **§7 said the build answered 185 on "all five readings".** Rounds 5 and 6 each ran the build, making
+   it **seven** at the time of this correction; **round 7 made it eight**. This is the third time this
+   one sentence had carried a stale count — it said "all three" before §12.7 corrected it to "all five"
+   — which is why the correction names the shape rather than only the number. **It went stale a fourth
+   time one round later**, which is §15.4's reading in miniature: the number is not the defect, the
+   append-without-revisit is.
+
+**Neither was false in the way §14.1 was**, and that distinction is the point: each described a real set
+of readings accurately at the moment it was written, and went stale when a later round appended to the
+record without revisiting it. **That is the same mechanism as §14.2, not a separate defect**, and it is
+the reason the preamble's replacement claim is *a sweep, not a guarantee*. A seventh round is owed on
+these two as much as on the three round 6 cited, because **this paragraph is itself new prose written by
+a fix round.**
+
+## 15. Disposition of the three round-7 review findings
+
+Round 7 is `docs/reviews/phase-2c-5-5a-instrument-round7.md`. It returned **NOT READY on three, all Low,
+all prose, and `### Instrument defects` is "None." for the second consecutive round.** It confirmed
+round 6's findings 1 and 3 **CLOSED** and finding 2 **PARTIALLY CLOSED**, and it confirmed **both**
+§14.7 extras **CLOSED**. It re-checked the four-residual-rebinding disclosure in §8.1, §13.5, §14.5 and
+the `probe.rs` module note and found it intact: open, disclosed, **accepted not proven**, acceptance
+explicitly not proof of impossibility.
+
+**Nothing in `src/probe.ts` or `src-tauri/src/probe.rs` changed in this round either.** Two consecutive
+rounds have now found **no instrument defect**, and every fix of the last two rounds has been in this
+record.
+
+**15.1 Low — the preamble's replacement clause was still a guarantee.** §14.2 replaced *"every sentence
+below that a fix made false has been rewritten in place"* with *"each fix round rewrote the sentences
+its own fixes made false, and the round after it swept for the ones that were missed — that is a sweep,
+not a guarantee."* Round 7's judgement is exact and is the finding this step keeps re-learning: **the
+first clause is still categorical, and the disclaimer after it does not narrow the claim before it.**
+Worse, the paragraph **disproved itself in its own next sentence** — adding §13 falsified the four-round
+count, and that fix round did **not** rewrite it. The clause now says each round rewrote what **it
+identified**, that a round has missed one **every time**, and that **no round of this step has yet
+identified every sentence its fixes falsified**. The weaker verb is load-bearing, not modest.
+
+**15.2 Low — "all three are staleness" flattened three distinct shapes, and "exactly these three fixes"
+contradicted this record's own count.** The preamble said all three round-6 findings were this record
+gone stale against its newest section. Only §14.2 was; §14.1 was an off-by-one identity with a false fix
+lineage, and §14.3 was an unlicensed exact count. The preamble now names the three shapes separately and
+says §14.7's two extras are instances of **§14.2's shape alone**. Separately, §14.4 closed with *"a
+seventh round is owed on exactly these three fixes"* while §14.4 itself said five sites were fixed and
+§14.7 said the seventh round was owed on the extras too — **a contradiction inside one section**. §14.4
+now says all five.
+
+**15.3 Low — two surviving "every fix round re-runs" claims, in regions no fix round had touched.** §1's
+preamble at the `0a2d3506…`/`04988c09…` inequality and §12.7's item 4 both justified the expired equality
+by saying **every** fix round re-runs §7's `cargo build -p espansoconfig --features custom-protocol` row.
+§13.6 enumerates round 5's subset without it and §14.6 says outright it was not run at round 6. Both now
+bind the re-running to **the first four fix rounds**, state that rounds 5 and 6 did not run that row, and
+say the claim is about **an equality that expired**, not a rebuild each round performs. §12.7's item 3
+carried the same staleness — *"Both are now five"* — and now records that as **what round 4 set**, with a
+pointer to §14.7 for what §7 says today.
+
+**15.4 What round 7 says the round-6 fixes created, and the one reading that is now hard to avoid.** All
+four things it names are in prose this fix round wrote or left standing, and **none is in either probe
+source**. **This is the seventh consecutive round in which the fix round created the next round's
+finding.** The counts are 8, 4, 5, 6, 3, 3, 3 and the severity ceiling has been **Low for three rounds
+running**, with **`Instrument defects: None.` for two**. What has not happened in seven rounds is a
+round returning **READY**. The honest reading is that the instrument itself has been still since round 2
+and **the remaining defect surface is this record's prose about its own review history** — each round
+appends a section, the appending falsifies a count or a characterization somewhere above it, and the
+next round finds that. **§15.5 is where that is put to the owner rather than answered here.**
+
+**15.5 The convergence question, stated and not decided.** Seven rounds have cost seven Codex
+round-trips. Rounds 6 and 7 found **zero** instrument defects and six prose defects between them, **five
+of the six being this record's bookkeeping about how many rounds it has had**. The rule that produced
+this is `CLAUDE.md`'s and it is a good rule: *a fix is a change, and the round that reviews it is not
+optional*. **It is not suspended here, and this section does not close 5a.** What it records is that the
+loop's remaining yield is meta-prose in a document describing an instrument that **step 2c-5-7 deletes**,
+and that continuing is now an owner's call about cost rather than a question of whether the instrument is
+sound. **An eighth round is owed on §15 by the standing rule.** The alternative the owner may prefer —
+accepting 5a with §15.4's reading recorded as the closing state — is **not** taken unilaterally, and
+nothing in this section should be read as having taken it.
+
+**15.6 What is still open, unchanged by this round.** No fix in this round touched the confinement
+disclosure. The **four** residual rebindings remain **open and disclosed**, not closed — source final
+component, temporary name after `create_new`, an ancestor of the target's pathname, an ancestor of the
+source's pathname — **accepted, not proven**, and **acceptance is not proof of impossibility**. Round 7
+re-verified this in §8.1, §13.5, §14.5 and the module note. 2c-5-5b inherits exactly that.
+
+**15.7 The gates after this round.** **Markdown only** — this record and the new review file; **no
+`.ts`, `.rs` or `.svelte` file changed**, so no gate *can* have moved, and these are re-derivations on
+the tree as it stands rather than figures carried forward: `cargo test --workspace` **1153**, `npm run
+check` **432 files / 0 errors / 0 warnings**, `npm test` **2124 in 56 files**, `npm run build` **185
+modules**; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. The
+`cargo build -p espansoconfig --features custom-protocol` row was **not** re-run this round either, which
+is why §1 and §12.7 no longer claim every round runs it. The bundle oracle was read in **both**
+directions: server-only `$$payload|head_payload|push_element` **absent**, client-only
+`window.__svelte|svelte-trusted-html` **present → 2**. **No launch was re-run and no new window
+measurement is claimed in this section.**
+
+**15.8 Three extras this fix round swept up, which round 7 did not cite.** Sweeping for the **shape** of
+each finding rather than its cited line ranges — as §14.7 did, and as `CLAUDE.md` requires — found three
+more, and **the fact that §14.7 exists and this section exists too is itself the evidence for §15.4**:
+
+1. **A third "every fix round re-runs it" claim, in §6.4** (the digest table's paragraph). Round 7 cited
+   §1's preamble and §12.7's item 4. §6.4 carried the identical sentence and was **not** cited. It now
+   binds the re-running to the first four fix rounds and names §13.6, §14.6 and §15.7 for the three that
+   did not run that row. **Three sites, one shape, and the review found two of them** — which is exactly
+   why this project sweeps for the shape.
+2. **§14.2's own account of its fix had gone stale against §15.1.** It said *"the exhaustiveness claim
+   is gone — replaced by the narrower truth that each fix round rewrites what its own fixes falsified"*,
+   describing as a fix the very sentence round 7 then found still categorical. It now states that the
+   replacement was itself an exhaustiveness claim and points at §15.1.
+3. **§14.7's two items were written in a present tense that expired one round later** — *"Six rounds
+   have now run"*, *"so it is seven"*. Both now say what was true when the round-6 correction was made
+   and name round 7 for what changed, so the section records **a correction** rather than claiming to
+   describe §7 today.
+
+**Extras 2 and 3 are the append-without-revisit mechanism operating on §14 itself**, one round after §14
+was written to document that mechanism. That is not irony to be enjoyed; it is the measurement §15.4
+reports and §15.5 puts to the owner. **An eighth round is owed on all six changes this round made** —
+round 7's three and these three — and this paragraph is new prose written by a fix round like every one
+before it.
