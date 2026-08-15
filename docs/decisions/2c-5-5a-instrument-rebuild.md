@@ -1,16 +1,27 @@
 # Phase 2c-5 step 5a — the window-reading instrument, rebuilt from the records
 
-> **This record was revised twice, by two review fix rounds.**
+> **This record was revised four times, by four review fix rounds.**
 > `docs/reviews/phase-2c-5-5a-instrument.md` returned **NOT READY on eight findings**; §9 names each
-> one and how it was closed. `docs/reviews/phase-2c-5-5a-instrument-round2.md` then returned **NOT
-> READY on four more**; **§10** names each of those and how it was closed. Both rounds changed
+> one and how it was addressed. `docs/reviews/phase-2c-5-5a-instrument-round2.md` then returned **NOT
+> READY on four more**; **§10** names each of those and how it was addressed.
+> `docs/reviews/phase-2c-5-5a-instrument-round3.md` then returned **NOT READY on five more**; **§11**
+> names each of those, and **four of the five are this record having claimed a guarantee the code does
+> not give**. `docs/reviews/phase-2c-5-5a-instrument-round4.md` then returned **NOT READY on six
+> more**; **§12** names each of those, and **four of the six are again a claim the code or the evidence
+> does not license**. Rounds 1 and 2 changed
 > `src-tauri/src/probe.rs`, so every launch taken before them ran a **different binary** and none can
-> stand as evidence for the tree that ships. **§4's proof set is now P37–P48**, with N07/N08 as the
-> no-plan controls, C05/C06 as the static confinement controls and **C07, C09 and C10 as the
-> adversarial ones round 2 asked for**. Every sentence below that a fix made false has been rewritten
+> stand as evidence for the tree that ships; **rounds 3 and 4 changed only doc comments and prose and
+> took no new launch**, so every launch named below is unmoved. **Two sets are named below and they are not the
+> same size**: the **twelve plan-proof launches** are P37–P48, one per case of the case table, and the
+> **nineteen-launch complete proof set** is those twelve plus N07/N08 (the no-plan controls), C05/C06
+> (the static confinement controls) and C07, C09 and C10 (the adversarial ones round 2 asked for) —
+> 12 + 2 + 2 + 3 = 19. Every sentence below that a fix made false has been rewritten
 > in place; nothing that was an honest limitation has been deleted; §9.9 lists the one defect round 1
-> found in its own work and deliberately did not close, and **§10.1 states plainly what round 2's fix
-> does *not* close** — an ancestor-directory symlink swap, which is residual and unproven.
+> found in its own work and deliberately did not close, and **§9.1, §10.1, §11.1 and §12.1 state
+> plainly what is *not* closed** — **four** residual rebindings: the source's final component, the
+> temporary's name after `create_new`, an ancestor directory of the target's pathname and an ancestor
+> directory of the **source's**, all residual and unproven and none of them a hole round 3 or round 4
+> closed.
 
 Step 2c-5-6 is the bilingual window reading this phase owes, and 2c-5-5b adds the restore cases it
 needs. **This step is neither**, and nothing here judges a screen. It rebuilds **both halves** of the
@@ -24,7 +35,10 @@ true `SaveResult::Conflict` before any reading depended on one.
 executable here to a source snapshot or to a build command — no build transcript was kept, and
 `launch.sh` copies whatever `ECFG_BINARY` names without checking a timestamp — so *this source tree
 runs* is not available. What the bundles pin is **which bytes ran**: P37–P48 ran an executable whose
-digest equals the one now standing at `target/debug/espansoconfig`. Source inspection separately
+digest is `0a2d3506…`, and the retained bundles still carry those bytes. **That digest equalled
+`target/debug/espansoconfig`'s when it was first read and does not now** — every fix round re-runs
+§7's `cargo build -p espansoconfig --features custom-protocol` row, which rewrites that path; measured
+at round 4, `target/debug/espansoconfig` is `04988c09…` (§5.10, §12.7). Source inspection separately
 establishes that the plans are coherent. **Those two readings may not be conjoined into source
 provenance.**
 
@@ -60,25 +74,33 @@ shared path would read as a shared ledger.
            C01…C10/                  probe.log, probe.err, bytes.txt, tree.diff
   launches/C09-plant/                NOT a launch — adversary.sh's sibling plant, one symlink (§4.5)
   manifest-2c-5-5a-post.sha256       40 entries — the round-0 image; 36 still verify (§9.10)
-  manifest-2c-5-5a-fix-post.sha256   78 entries — the round-1 image; 74 still verify (§5.9)
+  manifest-2c-5-5a-fix-post.sha256   78 entries — the round-1 image; 75 still verify (§5.9)
   manifest-2c-5-5a-round2.sha256     55 entries — the round-2 image; all 55 verify (§5.9)
 ```
 
-It is **2.7 GB** after sixty-five launches — roughly 40 MB each, because every script assembles a
-fresh `.app` bundle per launch and every launch keeps its own. That is the growth rate 4a §1 recorded
-and not a measurement of what a rebuild costs.
+It is **2.7 GB**, which is a reading of the tree's size at one moment, over the **sixty-six** launches
+§5.8 names and §5.10 tallies — `P01…P48`, `N01…N08` and `C01…C10`, 48 + 8 + 10 — roughly 40 MB each,
+because every script assembles a fresh `.app` bundle per launch and every launch keeps its own. That is
+the growth rate 4a §1 recorded and not a measurement of what a rebuild costs. **This sentence said
+"sixty-five" until round 3**, which agreed with neither of the two sections that name the launches; §11.5
+is the correction.
 
-**Four generations of launches are retained, and only one of them is the proof set.** P01–P12 and
+**Four generations of launches are retained, and only one of them carries the complete proof set.** P01–P12 and
 N01–N02 ran the **round-0** image and are superseded; P13–P24, N03–N04 and C01–C02 are an
 **intermediate** generation, taken after the first round-1 fixes and before two further corrections
 round 1's own self-review found (§9.9's first paragraph), and nothing in this record cites them;
 P25–P36, N05–N06 and C03–C04 are the **round-1** generation, which the round-1 record cited as its
 proof set and which round 2 superseded by changing `probe.rs` again; **P37–P48, N07–N08, C05–C07 and
-C09–C10 are the proof set**, and every one of them ran the binary whose digest is
-`0a2d3506630256f6a3193de3352b32b23244e4e8ff7c07b9642a85c393954d92`. Keeping the superseded ones is
+C09–C10 are the complete proof set — nineteen launches**, being the **twelve plan-proof launches**
+P37–P48 plus two no-plan controls, two static confinement controls and three adversarial ones
+(12 + 2 + 2 + 3 = 19), and every one of the nineteen ran the binary whose digest is
+`0a2d3506630256f6a3193de3352b32b23244e4e8ff7c07b9642a85c393954d92`. **"The proof set" meant twelve in
+§4 and nineteen here until round 4**; the two terms are now the *twelve plan-proof launches* and the
+*nineteen-launch complete proof set*, and §12.5 is that correction. Keeping the superseded ones is
 deliberate: deleting a generation would leave this record asserting a history the tree no longer shows.
 
-**C08 is retained and is not in the proof set**, for the same reason P01 is: it is a **discarded
+**C08 is retained and is in neither set — not among the twelve and not among the nineteen**, for the
+same reason P01 is: it is a **discarded
 attempt**, and §4.5 says exactly what it does and does not establish. `launches/C09-plant/` is not a
 launch at all — it is `adversary.sh`'s sibling plant, a directory holding one symlink, and §4.5 says
 why the plant had to be a sibling.
@@ -111,11 +133,18 @@ listed four harness paths plus three documents: `src/main.ts` and `src-tauri/src
 `src/probe.ts` and `src-tauri/src/probe.rs` untracked, and this record,
 `docs/reviews/phase-2c-5-5a-instrument.md` and `docs/reviews/phase-2c-5-5a-instrument-round2.md`
 untracked under `docs/`. `git diff --stat` over
-the two hook files was **5 insertions and 1 deletion** and nothing else — **neither fix round changed
+the two hook files was **5 insertions and 1 deletion** and nothing else — **no fix round has changed
 either hook file**, which is what that unmoved diff establishes and the whole of it. **That reading is taken before
 this step's checkpoint commit, and the commit changes it**: the checkpoint stages `PROGRESS.md` and
 this record **by path** and leaves the four harness paths in the working tree for 5b and 6 to use and 7
 to delete.
+
+**The same command, read again at the close of the round-3 fix round**, lists six paths: `src/main.ts`
+and `src-tauri/src/main.rs` still modified, `src/probe.ts` and `src-tauri/src/probe.rs` still untracked,
+`docs/reviews/phase-2c-5-5a-instrument-round3.md` untracked, and **this record now *modified* rather
+than untracked**, because the checkpoint commit above tracked it. The two earlier review files no longer
+appear, for the same reason. `git diff --stat` over the two hook files still reads **5 insertions and 1
+deletion**. Each of these is a reading at one moment and says nothing about the tree before or after it.
 
 **What no artifact here can establish is what this step did *not* alter along the way.**
 `manifest-2c-5-5a-post.sha256` is a **post-image by construction** and cannot say what any file held
@@ -241,16 +270,22 @@ conjunction, on every launch.
 **"Freshly built" is not a claim these artifacts carry.** Nothing in the script checks a timestamp,
 re-runs the build or records a build transcript, and **no build transcript was retained**. The block
 above is the recipe in the order 3b §6.1 requires. What the retained bundles *do* pin is **which bytes
-ran**, and §5.10 is that measurement — including the fact that four **different** binaries ran across
-the three retained generations.
+ran**, and §5.10 is that measurement — including the fact that **five** different binaries ran across
+the **four** retained generations (§1 names the four; §5.10's table has five digest rows, because the
+round-0 generation itself ran two). **This sentence said "four binaries" and "three generations" until
+round 4**, agreeing with neither section; §12.7 is the correction.
 
 ## 4. The proof launches
 
 **Twelve plan launches, P37–P48; two no-plan launches, N07–N08; two static confinement launches,
 C05–C06; three adversarial confinement launches, C07, C09 and C10.**
-**P37–P48 are the proof set** — twelve launches, **one per case of the whole case table**, which is
+**P37–P48 are the twelve *plan-proof* launches** — **one per case of the whole case table**, which is
 this step's own acceptance criterion: every state the case table claims to reach has a launch that
-reached it, and there is no row in `launch.sh` that no launch of this generation ran.
+reached it, and there is no row in `launch.sh` that no launch of this generation ran. **The
+*complete proof set* is all nineteen** — those twelve plus the seven controls named in the line above
+(12 + 2 + 2 + 3 = 19), which is the set §1 and §5.10 count. **This section's rows and predicates are
+about the twelve**, and every unqualified "proof set" in this record read as one or the other until
+round 4 (§12.5).
 
 **P01 is retained from the round-0 generation and is still the diagnosis §2.2's second bullet
 describes** — the first run of the rebuilt driver, which printed `--- failed` on the sidebar row
@@ -367,8 +402,9 @@ a rectangle as a measurement of one launch rather than as a property of a surfac
 
 **A control this list says was "pressed" is one the driver waited for and clicked, and the transcript
 prints no line for it.** `pressNamed` throws when the control does not arrive **enabled**, and
-`startProbe()` **attempts** to print `--- failed`; every launch of the proof set has
-`failed-lines=0` beside `end-lines=1`, and each positive launch's final block says the file was
+`startProbe()` **attempts** to print `--- failed`; every one of the **twelve plan-proof launches** has
+`failed-lines=0` beside `end-lines=1` — which is **not** true of the complete proof set's other seven,
+where a `--- failed` is the pass (§4.4, §4.5) — and each positive launch's final block says the file was
 written. That conjunction is a reader's, not the harness's — and `failed-lines=0` beside a reached
 `--- end` is the pair that carries it, because a `--- failed` that could not be written would also have
 kept `--- end` from arriving (§10.3).
@@ -445,11 +481,18 @@ that cost belongs; neither was measured, and both are gone when 2c-5-7 removes t
 `ECFG_PROBE_TARGET` named, and that `probe_second_writer` and `probe_third_writer` are callable IPC
 commands on every instrumented launch.** That is a path to writing a user's file outside
 `espansoconfig_core::persist::save_document`, which is this project's one absolute prohibition.
-**Round 2 then found that round 1's fix was itself raceable**, and §4.5 and §10.1 are that half. As
-the writers now stand, `replace_the_target` requires a plan, canonicalizes the target and requires it
-to be **exactly** `…/launches/<launch>/xdg/espanso/match/conflict.yml`, and canonicalizes the source
-and requires it to be a document **directly inside** `…/fixtures` — all three before anything is read
-or created, and **with no shell involved at any point**.
+**Round 2 then found that round 1's fix was itself raceable**, and §4.5 and §10.1 are that half;
+**round 3 then found that two of the rebindings round 2 believed closed are still open**, and **round 4
+then found a fourth that every one of those lists had omitted — an ancestor of the *source's* pathname,
+`fixtures` itself being the nearest**; §9.1 and §10.1 name all four. As the writers now stand,
+`replace_the_target` requires a plan, canonicalizes the
+target and requires it to be **exactly** `…/launches/<launch>/xdg/espanso/match/conflict.yml`, and
+canonicalizes the source and requires it to be a document **directly inside** `…/fixtures` — all three
+checks before anything is read or created, **with no shell involved at any point**, and **each a check
+on a pathname at one instant**: the source's name is resolved again by `std::fs::read` and the
+temporary's again by `std::fs::rename`, each of those walking every directory above it a second time,
+so what those checks force is the shape a name had when it was
+resolved and not the identity of the object the write reaches (§9.1).
 
 `confine.sh` measures the two *static* refusals rather than reading them off the code. It builds the
 same bundle, creates a decoy file **outside** the harness root, and points one of the two paths at it:
@@ -471,9 +514,14 @@ make that distinction anywhere.
 
 **What these two do not establish.** They measure two refusals on one command; that is not a proof
 that no path in this build can write outside the tree. They say nothing about the third writer's own
-confinement, which shares the same `replace_the_target` but was not separately pointed outside. And
+confinement, which shares the same `replace_the_target` but was not separately pointed outside. **C06
+measures the *beneath-`fixtures`* half of the source rule and only that half**: its decoy is outside
+the harness root, so the refusal it quotes is `strip_prefix`'s. **Nothing here ever points a writer at a
+nested regular file beneath `fixtures`, so the *direct-child* rule at `src-tauri/src/probe.rs:352-358`
+is closed by source construction and unmeasured** — §9.1's label said C06 measured both until round 4
+(§12.4). And
 they are **static**: a path spelled outside the tree before the launch begins, never a path swapped
-while the launch runs. §4.5 is the adversarial half, and §10.1 states the one case neither half
+while the launch runs. §4.5 is the adversarial half, and §10.1 states the cases neither half
 constructs. Finally, the confinement does **not** protect everything *inside* the harness tree — it
 now protects every file in a launch directory except the one synthetic `conflict.yml` that launch
 seeded, which the writers are supposed to replace.
@@ -497,7 +545,9 @@ All three reached `--- end` with a zero-byte `probe.err` and `tree-diff=0 lines`
 - **C07 is the direct measurement of the `O_EXCL` fix.** The old `cp` would have opened the planted
   link and written R1's bytes into `…probe-decoy-C07.yml`. `OpenOptions::create_new` refuses a path
   that exists at all, symlink included, so the writer stopped with `os error 17`; `ls -l` afterwards
-  shows the planted link still a link, still pointing at the decoy. The temporary's name is normally
+  shows the planted link still a link, still pointing at the decoy. **What C07 measures is a plant that
+  was already there when `create_new` ran, and only that** — it says nothing about a name rebound after
+  the open, which is residual 2 below. The temporary's name is normally
   unpredictable — process id plus a nanosecond stamp — so this control needs `ECFG_PROBE_TEMP_NAME` to
   aim at it, which §5.18 records as a deviation.
 - **C09 had to be built as a sibling plant, and C08 is the retained attempt that shows why.** C08
@@ -510,16 +560,32 @@ All three reached `--- end` with a zero-byte `probe.err` and `tree-diff=0 lines`
   would have been replaced. **That is a reading of round 1's code, not a measurement**: no launch of
   this tree ever pointed a writer at that path under the old rule.
 
-**What this section does not establish, stated as plainly as it can be.** Confinement is **not proven
-against an adversary who replaces an *ancestor directory* of the launch tree with a symlink** between
-the canonicalization and the create-or-rename that follows it. **That case is not constructed here and
-it is not closed.** Defeating it needs `openat`-style pinned directory handles, which `std` does not
-offer; provoking it needs a second process racing a live launch, which this harness has no way to
-spawn. It is *accepted*, and the reasons it is acceptable are the ones that make it a residual risk
-rather than an argument: the launch root is created by `launch.sh` beneath an operator-controlled
-`/private/tmp` path, the instrumented binary is never shipped and never signed, and **step 2c-5-7
-deletes both the binary and the tree**. None of those three is a proof of impossibility, and this
-record does not offer them as one. §10.1 is the finding this paragraph answers.
+**What this section does not establish, stated as plainly as it can be — and it is four cases, not
+one.** Confinement is **not proven** against any of these four rebindings, each of them a name checked
+at one instant and spent at another:
+
+1. **the source's final component**, rebound between `confined_source` and the `std::fs::read` that
+   resolves that pathname again;
+2. **the temporary's name**, rebound between the `create_new` that took it and the `std::fs::rename`
+   that spends it — C07 measures a symlink *already present* when `create_new` runs and nothing after
+   it;
+3. **an *ancestor directory* of the target's pathname** — the launch tree — replaced with a symlink
+   between the canonicalization and the create-or-rename that follows it;
+4. **an *ancestor directory* of the source's pathname**, replaced with a symlink between
+   `confined_source` and the `std::fs::read` that walks it again. The nearest one is **`fixtures`
+   itself**, and it is a **sibling** of `launches`: item 3's wording, "an ancestor directory of the
+   launch tree", never covered it, which is why this list said three until round 4 (§12.3).
+
+**None of the four is constructed here and none is closed.** Defeating them needs `openat`-style
+pinned directory handles, which `std` does not offer; provoking either ancestor case needs a second
+process racing a live launch, which this harness has no way to spawn. They are *accepted*, and the
+reasons they are
+acceptable are the ones that make this a residual risk rather than an argument: the launch root is
+created by `launch.sh` beneath an operator-controlled `/private/tmp` path, the instrumented binary is
+never shipped and never signed, and **step 2c-5-7 deletes both the binary and the tree**. None of those
+three reasons is a proof of impossibility, and this record does not offer them as one. §10.1 is the
+finding this paragraph answers, **§11.1 is why the list grew from one to three at round 3, and §12.1 is
+why it is four.** Every one of the four is **open and disclosed**.
 
 ## 5. Deviations from what the records describe
 
@@ -539,7 +605,10 @@ registration arrangement its §5.3 insists on, and the fourth command `2c-4c-4b-
 describes; everything else — the environment-variable handling, the explicit stdout flush, the error
 strings — is this step's. **The one place it now departs from a record is the writer body**:
 `2c-4a-3c-1-instrument.md` §5.2 quotes a `/bin/sh` command, and round 2 removed the shell entirely
-because a shell is a second pathname resolution the checks cannot cover (§10.1). What survives of that
+because a shell is a *second process* re-resolving pathnames the checks approved (§10.1) — which is
+narrower than "the checks now cover every resolution", because this process still resolves the source's
+name at `std::fs::read` and the temporary's at `std::fs::rename`, **each of them walking every
+directory above that name a second time as well** (§9.1's four residuals). What survives of that
 record's intent is the *ordering* it existed for — the replacement is inline and synchronous, so it is
 finished when the `invoke` resolves. `src/probe.ts` follows every behaviour the records describe; its
 internal shape is this step's.
@@ -573,7 +642,7 @@ data store also uses.
 3d-2a's numbering: those artifacts are gone and a shared numbering would read as a shared ledger. The
 `N` prefix marks the launches that carried no plan; the `C` prefix marks a confinement control, static
 (round 1's) or adversarial (round 2's). **The numbering is continuous across the four generations §1
-describes**, which is why the proof set starts at P37 rather than at P01.
+describes**, which is why the twelve plan-proof launches start at P37 rather than at P01.
 
 **5.9 Three post-image manifests were written, and the older two are left exactly as they were.**
 `manifest-2c-5-5a-post.sha256`, **40 entries**, is the **round-0** image; **36 of its 40 still
@@ -600,9 +669,14 @@ records its digest. Measured across all launches:
 | `3c45d26fc59b2960708c92e490bc14c352905852f2cae68496a94e4e93c547d9` | P02–P12, N01, N02 | round-0 |
 | `a4c8d89f98320d31153d2c6cdcdf68fc75da0049c6ef5809312235e1a63c9b49` | P13–P24, N03, N04, C01, C02 | intermediate |
 | `d22a0fdaf15ecd392511b80ca1090c497f96b82d018f950287f11cd6966d157b` | P25–P36, N05, N06, C03, C04 | round-1, superseded by round 2 |
-| `0a2d3506630256f6a3193de3352b32b23244e4e8ff7c07b9642a85c393954d92` | **P37–P48, N07, N08, C05–C10** | **the proof set** |
+| `0a2d3506630256f6a3193de3352b32b23244e4e8ff7c07b9642a85c393954d92` | **P37–P48, N07, N08, C05–C10** | **the proof generation** — the **nineteen-launch complete proof set** (the twelve plan-proof launches plus seven controls) **plus C08**, the discarded attempt (§1, §4.5) |
 
-The last is byte-identical to `target/debug/espansoconfig` as it stands now. **That the five digests
+The last was byte-identical to `target/debug/espansoconfig` **when that equality was first read, and is
+not now**: `cargo build -p espansoconfig --features custom-protocol` is one of §7's seven gate rows and
+is re-run after every fix round, so it rewrites that path. **Measured at round 4**:
+`shasum -a 256 target/debug/espansoconfig` answers `04988c09…`, while P37's and C10's retained bundle
+binaries still answer `0a2d3506…` — the retained copies are what pin which bytes ran, and the working
+build tree is not (§12.7). **That the five digests
 differ is the whole of what is established**: no retained artifact binds any executable to a source
 snapshot or to a build command, so *the fixes were applied and the bundle rebuilt* is an account of
 what was done and not a reading of these bundles. `launch.sh` would have copied any binary it was
@@ -619,7 +693,8 @@ carries `editor-fallback`, `editor-satisfied`, `editor-ambiguous`, `editor-missi
 `editor-ineligible`, `editor-empty-satisfied`, any reload case, any recovery case, `creator-anchor-gone`,
 `mover-reordered`, `mover-reordered-end`, `mover-after` or `mover-after-changed`. That is a deliberate
 scope: this step's acceptance criterion is that **every case it ships has a launch**, and a case table
-larger than its proof set would break it. Their fixtures and plans are 5b's to add if 5b needs them —
+larger than its twelve plan-proof launches would break it. Their fixtures and plans are 5b's to add if
+5b needs them —
 §8 says which ones it plausibly does.
 
 **5.13 `repeatIfAsked` and the `:twice` third segment do not exist here.** 3d-2a §5.12 and 4a §5.12
@@ -656,12 +731,15 @@ check pins four of its five components, and the fifth is one already-canonicaliz
 a charset rule there would refuse future launch names without narrowing anything.
 
 **5.18 `ECFG_PROBE_TEMP_NAME` exists for one control and no record describes it.** The temporary the
-writer creates is named from the process id and a nanosecond stamp, which is exactly what a script
-outside the process cannot predict — so the adversarial control that must plant a symlink *at that
-path* had nothing to aim at. This variable fixes the name. It is **not** a widening: `probe.rs`
+writer creates is named from the process id and a nanosecond stamp, which a script outside the process
+has no way to name in advance short of guessing the stamp — so the adversarial control that must plant
+a symlink *at that path* had nothing to aim at. This variable fixes the name. It is **not** a widening: `probe.rs`
 requires the value to begin with the target's own file name followed by `.probe-tmp-` and to contain
-no `/`, so the temporary stays in the target's canonical directory either way, and the refusal for a
-bad value is a refusal like any other. Only `adversary.sh` sets it; `launch.sh`, `inert.sh` and
+no `/`, so the temporary's **pathname** stays inside the target's canonical directory either way — a
+property of the name at the moment it is built, which is all a rule over a pathname can force, and not a
+claim about the directory that pathname walks through when it is resolved again (§9.1's four
+residuals) —
+and the refusal for a bad value is a refusal like any other. Only `adversary.sh` sets it; `launch.sh`, `inert.sh` and
 `confine.sh` do not, so every proof launch used a generated name. **What this costs is one more
 environment knob on a build that already registers four extra IPC commands**, and it goes with the
 rest when 2c-5-7 deletes the harness.
@@ -681,10 +759,29 @@ nothing about the real configuration); §8.9 (`--- end` proves the wrapper reach
 statement and nothing else); §8.11 and 3c-1 §7.0 (**there is still no invoke spy and no command
 counter**, so *a refusal issued no save command* is not established — what P43–P48 show is a final
 filesystem state, and a write producing identical bytes or a transient one undone before the launch
-ended would leave the same artifacts). **That limitation is the widest one in this record and it binds
-every absence sentence anywhere in it**: no artifact this harness produces — a final tree, a zero-byte
-log, a `bytes=MATCH`, a `tree-diff=0`, an unchanged decoy — can distinguish *no write* from *an
-identical or transient write*, and no sentence here may be read as making that distinction. 3c-1 §7.1
+ended would leave the same artifacts).
+
+**The general rule that binds every absence sentence anywhere in this record.** An absence observation
+is bounded to **the time it was taken, the corpus it was taken over and the predicate it was taken
+with**, and it establishes nothing about any wider history, any wider corpus or any wider predicate. A
+search that found nothing found nothing *in the files it read, for the string it looked for, at the
+moment it ran*; a directory that is not there now was not there *now*; a final state is a state *at the
+end*. Three consequences this record leans on, and they are consequences rather than three separate
+rules:
+
+- **Time.** Present absence is not chronology. `/private/tmp/espansoconfig-harness-2c-4c/` not existing
+  at the close of this step says nothing about *when* it went or about what removed it (§1).
+- **Corpus and predicate.** A string search over selected files for one string is not a proof about any
+  file it did not read or any string it did not look for — which is exactly what §1's owner-home-path
+  sweep and §5.4's two-halved backup search each say of themselves.
+- **The no-write equivalence, which is this harness's own special case of the rule.** There is no invoke
+  spy and no command counter, so no artifact it produces — a final tree, a zero-byte log, a
+  `bytes=MATCH`, a `tree-diff=0`, an unchanged decoy — can distinguish *no write* from *an identical or
+  transient write*, and no sentence here may be read as making that distinction. §9.2's temporary-file
+  absence and §4.4's and §4.5's `decoy=unchanged` readings are cases of this one; §1's two are cases of
+  the first two.
+
+**This limitation is the widest one in this record.** 3c-1 §7.1
 (a byte match is not a proof of mechanism), §7.2 (the
 correspondence tier is invisible), §7.3 (refusals are not attributed to the rules they were designed
 around) and §7.4 all hold here without amendment.
@@ -698,15 +795,16 @@ sequence, no read-only file, no package. **R38 is untouched: none of the fifteen
 **6.2 The reapply arm is read off a *string*, and that is weaker than reading a value.**
 `reportReapply` compares the block's text against the six `browser.reapply.*` sentences in the
 launch's own language. A re-worded sentence would print as `unrecognised`; a sentence that is on the
-wrong arm would print as the arm it reads like. What the eleven `reapplyArm=` lines of the proof set
+wrong arm would print as the arm it reads like. What the eleven `reapplyArm=` lines of the twelve
+plan-proof launches
 establish (the raw case draws no reapply block at all) is that
 the sentence drawn matched the dictionary entry named — not that the model took that branch.
 
 **6.3 Every one of the six authored expected-bytes files was compared, and each matched.** Unlike 4a
 §6.3 and 3d-2a §6.3, this tree ships **no un-launched prediction fixture**: `editor-exact-expected.yml`,
 `creator-front-expected.yml`, `deleter-exact-expected.yml`, `mover-exact-expected.yml`,
-`duplicator-exact-expected.yml` and `third-r2.yml` were each `cmp`-ed by a launch of the proof set and
-each answered `MATCH`.
+`duplicator-exact-expected.yml` and `third-r2.yml` were each `cmp`-ed by one of the twelve plan-proof
+launches and each answered `MATCH`.
 **That is a statement about the launches `launches/` holds, not about how many attempts preceded
 them**: the manifests are post-images, so nothing retained would show a discarded attempt if there had
 been one — and this step *did* discard three whole generations, which are retained precisely so the
@@ -727,7 +825,8 @@ lists what that sweep changed.
 deleted tree survives, so nothing compares this `launch.sh`, these fixtures or either probe source with
 what 2c-4c-5 ran, and §4.2 shows the digests differ for the two files this step has old digests for.
 The claim this step can make is narrower and is the whole of it: **the retained executable P37–P48 ran
-— whose digest matches the one now at `target/debug/espansoconfig` — reaches all six write surfaces,
+— `0a2d3506…`, still in every retained bundle, and equal to `target/debug/espansoconfig` when that
+equality was read rather than now (§5.10) — reaches all six write surfaces,
 draws the conflict arms those surfaces drew for the earlier readings, and produces the byte predicates
 its case table names, on all twelve of its cases.**
 
@@ -740,28 +839,38 @@ are coherent, and the bundles say which bytes ran. **Source-to-binary provenance
 baseline, and no manifest of any earlier tree survives. *This `probe.rs` behaves as 4b's did* is **not**
 a statement any artifact here supports; what is supported is that this one compiles, passes
 `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings`, leaves
-`cargo test --workspace` at 1153, and drove nineteen launches of the proof generation to `--- end` with
-a zero-byte `probe.err` — twelve plans, two no-plan controls, two static confinement controls and
-three adversarial ones. **Neither probe source has a test of its own**, on either side of the wire:
+`cargo test --workspace` at 1153, and drove **seventeen of the nineteen launches of the complete proof
+set** to `--- end` with a zero-byte `probe.err` — the twelve plan-proof launches, the two static
+confinement controls and the three adversarial ones. **The other two are N07 and N08, which wrote no
+transcript at all**: a zero-byte `probe.log` is what §4.3 measures there, and it is the opposite of
+reaching `--- end`, so the nineteen-launch set was never nineteen launches that reached it. **This
+sentence claimed all nineteen until round 4** (§12.7).
+**Neither probe source has a test of its own**, on either side of the wire:
 `src-tauri/src/probe.rs` declares no `#[test]` and `src/probe.ts` has no spec file, so every rule in
 either — the confinement, the strict plan parser, the exclusive writer — is checked only by a launch or
-by reading. **Two review rounds have now found defects in the confinement that no launch would have
-shown**, which is what that costs (§9.9, §10.1), and 5b's own §8.2 item 7 is the standing note that a
-rule added to either file should come with a test.
+by reading. **Four review rounds have now found defects in the confinement — or in what this record
+said about it — that no launch would have shown**, which is what that costs (§9.9, §10.1, §11.1,
+§12.1), and
+5b's own §8.2 item 7 is the standing note that a rule added to either file should come with a test.
 
 **6.6 `probe_third_writer` is exercised now, and this replaces what this section said before.** The
 earlier text said it was built and unexercised and asked 5b to treat it as untested code. **Finding 3
 showed that was worse than it read**: `runThirdWriter()` was reachable from nothing but an
 `export const thirdWriter = runThirdWriter`, written to defeat tree-shaking, and it **did not defeat
 it** — `rg -c 'probe_third_writer' dist/assets/index-*.js` matched nothing in the retained bundle while
-`probe_second_writer` matched once. The frontend third-writer path **was not in the executable the
-proof set ran**, so 5b would have inherited a path that could not be called at all.
+`probe_second_writer` matched once. The frontend third-writer path **was not in the bundle that search
+read — the one that existed before round 1's fix**, which is the bundle the round-0 and intermediate
+generations ran and not the one any launch of the complete proof set did; so 5b would have inherited a
+path that could not be called at all. **That sentence said "the executable the proof set ran" until
+round 4**, which was false of today's proof set and is one of §12.5's stale readings of that term.
 
 It is now reached from the driver's own plan dispatch — `runCase('editor-third')` → `editorPlan`
 → `runThirdWriter()` — and the unused export is gone. Two things check it, and both are needed:
 `rg -c 'probe_third_writer' dist/assets/index-*.js` answers **1** on the built bundle, and **P37 ran
 it** and printed `--- writer third wrote=yes` before a second conflict against R2 (§4.1). Round 2
-re-ran that search on the bundle its own proof set launched and it still answers **1**, with
+re-ran that search on the bundle its own nineteen-launch complete proof set launched and it still
+answers **1**,
+with
 `probe_second_writer` still answering 1 as the control that makes the search non-vacuous.
 
 **What is still not exercised**, stated so 5b does not read more into P37 than it holds: the third
@@ -805,13 +914,19 @@ arithmetic against the harness-free baseline `PROGRESS.md`'s "Next action" carri
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean | — | |
 | `cargo build -p espansoconfig --features custom-protocol` | finished, no errors | — | |
 
-**All seven rows were re-run after each of the two fix rounds**, on the frozen image each proof set
-launched, and **every figure is unchanged across all three readings**. That is itself the expected
-result and not a surprise: neither round added a source module — `parsePlan`, `waitForOutcomeChange`,
-`resolve_existing_file`, `confined_target`, `confined_source`, `temporary_beside` and
-`copy_then_rename` all live in the two files that already existed — so the module count had no reason
-to move. It is recorded because an unchanged count that was *predicted* to be unchanged is worth more
-than one nobody checked.
+**All seven rows were re-run after each of the four fix rounds**, and **every figure is unchanged
+across all five readings**. That is itself the expected result and not a surprise: no round added a
+source module — `parsePlan`, `waitForOutcomeChange`, `resolve_existing_file`, `confined_target`,
+`confined_source`, `temporary_beside` and `copy_then_rename` all live in the two files that already
+existed, and **rounds 3 and 4 changed no executable line at all**, only doc comments in both probe
+sources and
+prose here — so the module count had no reason to move. It is recorded because an unchanged count that
+was *predicted* to be unchanged is worth more than one nobody checked. **What the round-3 and round-4
+readings are
+*not*** is a re-measurement of anything a launch showed: no launch was re-run and none could have been
+affected, because the compiled behaviour is unchanged. **What the round-4 reading did move is one thing
+no row records**: re-running the `cargo build` row rewrote `target/debug/espansoconfig`, whose digest is
+now `04988c09…` and no longer the proof generation's `0a2d3506…` (§5.10, §12.7).
 
 **Round 2's own arithmetic is worth stating because it is the interesting case.** Round 2 *deleted*
 code from `src-tauri/src/probe.rs` (`std::process::Command` and the shell body) and *added* code to it,
@@ -823,8 +938,9 @@ across rounds 1 and 2, the backend is not, and that is exactly the shape of a fi
 
 **The module count was predicted before the build and checked both ways**, which `CLAUDE.md` §6
 requires and the number alone no longer decides. 185 was written down as 184 + 1 and the build answered
-185 on all three readings. The discriminating oracle over
-`dist/assets/index-I5AFZyLL.js`, the bundle the proof set ran:
+185 on **all five readings** — this sentence said "all three" beside the paragraph above saying "all
+four", which is §12.7's fourth swept count. The discriminating oracle over
+`dist/assets/index-I5AFZyLL.js`, the bundle every launch of the complete proof set ran:
 
 ```
 rg -c '\$\$payload|head_payload|push_element'   → no match (server-only sentinels ABSENT)
@@ -842,7 +958,11 @@ rg -c 'probe_third_writer'   → 1   (was NO MATCH before round 1's fix; probe_s
 ```
 
 Both were re-run at round 2 on the same bundle file and both still answer 1, which is the check that
-round-1 finding 3 has not regressed.
+round-1 finding 3 has not regressed. **Rounds 3 and 4 each re-ran all four searches on that same
+`dist/assets/index-I5AFZyLL.js`** — the file name is unchanged because their only frontend edits are
+comments, which the minifier strips, and an unchanged content hash is itself the reading that says so —
+and the answers are unchanged: the server-only sentinels absent,
+the client-only constructs at 2, `probe_third_writer` at 1 and `probe_second_writer` at 1.
 
 **An unmoved count is evidence of an unmoved count and of nothing broader**, and **no gate transcript
 was retained**: these rows are this record's account of what the commands printed, re-checkable only by
@@ -858,7 +978,10 @@ neither was measured, and both are gone when step 2c-5-7 removes the harness. **
 narrowed what those four commands can do, and neither removed them**: §4.4 and §4.5 measured that the
 writers refuse a path outside the harness tree, a path inside it that is not the synthetic file, and a
 temporary someone else has taken — a smaller surface and not no surface, and one whose confinement is
-**not proven against an ancestor-directory symlink swap** (§4.5's last paragraph, §10.1).
+**not proven against any of four rebindings**: the source's final component between its check and
+`std::fs::read`, the temporary's name between `create_new` and `std::fs::rename`, an
+ancestor-directory symlink swap **above the target**, and another **above the source**, `fixtures`
+included (§4.5's last paragraph, §9.1, §10.1, §12.1).
 
 ## 8. What 2c-5-5b inherits, and what it must build
 
@@ -876,20 +999,37 @@ temporary someone else has taken — a smaller surface and not no surface, and o
   R2, `runThirdWriter()` in `src/probe.ts`, the `editor-third` case that calls it, and
   `fixtures/third-r2.yml`. **P37 ran it and the bundle contains it** — §6.6 is what is still untested
   about it, which is its empty-variable arm and its own confinement refusals.
-- **Both external writers are confined, and 5b must know exactly how far that goes.** What **is**
-  closed, and measured: the target must canonicalize to *exactly*
-  `…/launches/<launch>/xdg/espanso/match/conflict.yml` (C10 is the launch that shows a wrong path
-  *inside* the tree refused); the source must be a document directly inside `…/fixtures` (C06); a
-  plan is required; **there is no shell anywhere in either writer**, so there is no second pathname
-  resolution and no exit status that can mask a failed copy; and the temporary is created with
-  `O_EXCL`, which C07 measures by planting a symlink at the exact temporary path and watching the
-  writer refuse with `File exists` instead of writing through it.
-  **What is NOT closed, and is not claimed to be: an ancestor-directory symlink swap.** If something
-  replaces a directory *above* the launch tree with a symlink between the canonicalization and the
-  create-or-rename, nothing here catches it. That case was not constructed and cannot be defended with
-  `std` alone (it needs `openat`-style pinned directory handles). It is accepted because the launch
-  root sits beneath an operator-controlled `/private/tmp` path, the instrumented binary is never
-  shipped, and 2c-5-7 deletes it — **none of which is a proof, and 5b must not read it as one.**
+- **Both external writers are confined, and 5b must know exactly how far that goes — including that
+  four residual holes come with the inheritance.** What **is** forced, each item with what carries it:
+  a target resolving **outside the launches root** is refused (**measured** — C05 a path spelled
+  outside the tree, C09 a symlinked target resolving outside it); a target **inside** the launch tree
+  that is not exactly `…/launches/<launch>/xdg/espanso/match/conflict.yml` is refused (**measured** —
+  C10, and that is the launch that measures the *exact-shape* rule; C05 and C09 never reach it); the
+  source must resolve **beneath `…/fixtures`** (**measured** — C06, whose decoy is outside the harness
+  root); the source must be a **direct child** of `…/fixtures` rather than nested beneath it
+  (**source construction, unmeasured** — no launch here points a writer at a nested regular file under
+  `fixtures`); a plan is required (**source construction,
+  unmeasured** — §4.3 says no launch exercises it); **no shell runs in either writer**, so no exit
+  status can mask a failed copy and no *second process* re-resolves the checked names (**source
+  construction**); and no pre-existing entry may stand at the temporary's pathname when `create_new`
+  runs (**measured** — C07 plants a symlink at the exact temporary path and the writer refuses with
+  `File exists` instead of writing through it). Every one of those is a check **at one instant**.
+  **What is NOT forced, and 5b inherits all four as open:** the source's final component may be
+  rebound between the check and `std::fs::read`, which resolves that pathname again; the temporary's
+  name may be rebound between `create_new` and `std::fs::rename`, which resolves that pathname again
+  rather than spending the handle; an **ancestor directory of the target's pathname** — the launch
+  tree — may be replaced
+  with a symlink between the canonicalization and the create-or-rename; and an **ancestor directory of
+  the *source's* pathname**, `…/fixtures` itself being the nearest, may be replaced the same way
+  between `confined_source` and `std::fs::read`. **`fixtures` is a sibling of `launches`, so the third
+  item never covered the fourth** — this bullet said three until round 4 (§12.1, §12.3). **All four are
+  one shape — a
+  name checked at one instant and spent at another — none is constructed here, and `std` offers no
+  pinned-directory (`openat`-style) primitive that would close any of them.** They are accepted because
+  the launch root sits beneath an operator-controlled `/private/tmp` path, the instrumented binary is
+  never shipped, and 2c-5-7 deletes it — **none of which is a proof, and 5b must not read it as one.**
+  **Until round 3 this bullet told 5b there was "no second pathname resolution"; there are two, and
+  each of them walks every directory above it as well, which is what the two ancestor items are.**
   `HARNESS_ROOT` in `src-tauri/src/probe.rs` is a **compile-time constant that must agree with
   `launch.sh`'s own `HARNESS`**. Moving the tree means editing both; a mismatch makes every writer
   refuse. §4.4 and §4.5 are the measurements, `confine.sh` and `adversary.sh` are how to re-take them.
@@ -980,36 +1120,96 @@ temporary someone else has taken — a smaller surface and not no surface, and o
 `docs/reviews/phase-2c-5-5a-instrument.md` returned **NOT READY on eight findings**. Each is named
 here with what was done and what was measured. **Two of them were closed by re-running rather than by
 rewording**, which is this project's precedent; one was left alone deliberately; §9.9 records a
-defect round 1's own self-review found and did **not** close; and **§10 is round 2, which found that
-§9.1's and §9.2's closures were both overstated.** Where the two disagree, §10 is the later reading.
+defect round 1's own self-review found and did **not** close; **§10 is round 2, which found that
+§9.1's and §9.2's closures were both overstated**; and **§11 is round 3, which found that §9.1's and
+§10.1's *corrected* closures were still overstated and that §9.1's "closed and measured" bucket held
+two unmeasured items**; and **§12 is round 4, which found a fourth residual rebinding none of those
+lists named and a per-item label that credited C06 with a rule no launch exercises.** Where the four
+disagree, the later section is the later reading, and **§12** is the latest.
 
 **9.1 High — the writers were not confined (`replace_the_target`).** **Partially closed at round 1;
-narrowed further at round 2; one arm remains open and is stated as open.**
+narrowed further at round 2; narrowed again at round 3, which found that two more arms were open and
+had been described as closed; narrowed once more at round 4, which found a fourth open arm and a label
+that over-credited a launch. Four arms remain open and are stated as open.**
 
-- **Closed and measured.** A plan is required. The target must canonicalize to *exactly*
-  `…/launches/<launch>/xdg/espanso/match/conflict.yml` — round 1 required only "beneath `…/launches`",
-  and round 2 tightened it to the file (C10 is the launch that shows the difference). The source must
-  canonicalize to a document directly inside `…/fixtures`. C05, C06, C09 and C10 (§4.4, §4.5) point the
-  second writer at four refused paths and record the decoy unchanged, the launch's own target still at
-  R0, and the refusal quoted from the transcript in each case.
-- **Closed by construction at round 2.** There is **no shell** in either writer, so the canonical path
-  the checks approved is no longer handed to a second process that resolves it again — which was round
-  2's High, and which no static control could have caught. The temporary is created with `O_EXCL`, and
-  C07 measures that by planting a symlink at the exact temporary path and watching the writer refuse.
-- **Open, and not claimed closed.** **An ancestor-directory symlink swap.** Confinement is *not*
-  proven against something that replaces a directory above the launch tree with a symlink between the
-  canonicalization and the create-or-rename. It is not constructed by any control here and cannot be
-  defended with `std` alone. §4.5's last paragraph is the full statement, including the three reasons
-  it is *accepted* — none of which is a proof of impossibility.
+**Every item below carries its own label, because round 3's prose finding 2 was that a bucket headed
+"closed and measured" held two items nothing measures.** No item here has a label true of only some of
+what it claims; each line says *measured by which launch* or *closed by source construction,
+unmeasured*, and where a rule has a measured half and an unmeasured one it is **two lines**. **Round 4
+found that two of these lines still failed that test** — one crediting C09 with the exact-shape rule it
+never reaches, one crediting C06 with the direct-child rule no launch exercises — which is round 3's
+finding 3 recurring narrower, and §12.4 is the record of it.
 
-**9.2 Medium — the writer was not atomic (`cp …; mv …`).** **Closed, but not by the fix this section
-used to describe.** Round 1 changed the shell body to `cp … && mv …`; round 2 **deleted the shell
+**What is forced, item by item:**
+
+- **A plan is required** — `replace_the_target` returns *"refused: the … writer will not run without
+  ECFG_PROBE_PLAN"* before it reads any other variable. **Closed by source construction, unmeasured**:
+  §4.3 says plainly that **no launch exercises this refusal**, because the driver has no way to call a
+  writer without a plan.
+- **A target that resolves outside the launches root is refused**, at the instant of the check.
+  **Measured by C05** (§4.4, a path spelled outside the tree) and **by C09** (§4.5, a symlinked target
+  resolving outside it). Both quote `strip_prefix`'s *"is not beneath …/launches"* refusal, which is the
+  first half of the target rule and the only half either of them reaches.
+- **A target *inside* the launch tree must be exactly
+  `…/launches/<launch>/xdg/espanso/match/conflict.yml`**, at the instant of the check — round 1 required
+  only "beneath `…/launches`", and round 2 tightened it to the file. **Measured by C10** (§4.5), a real
+  file inside the launch tree that is not the synthetic one, refused *by name*. **C10 is the only launch
+  that reaches the shape check**; this line credited C09 with it as well until round 4 (§12.4).
+- **The source must resolve beneath `…/fixtures`**, at the instant of the check. **Measured by C06**
+  (§4.4), which points `ECFG_PROBE_R1` at a decoy outside the harness root and quotes
+  *"is not beneath …/fixtures"*.
+- **The source must be a *direct child* of `…/fixtures`**, not a document nested deeper
+  (`src-tauri/src/probe.rs:352-358`). **Closed by source construction, unmeasured**: C06's decoy is
+  outside the harness root, so it never exercises this rule, and nothing in this harness ever points a
+  writer at a nested regular file beneath `fixtures`. **§9.1 credited C06 with this until round 4**
+  (§12.4).
+- **No pre-existing entry may stand at the temporary's pathname when `create_new` runs** —
+  `O_CREAT|O_EXCL`, which fails on any entry at all, symlink included. **Measured by C07** (§4.5),
+  which plants a symlink at the exact temporary path and quotes *"File exists (os error 17)"*.
+- **No shell runs in either writer.** **Closed by source construction, unmeasured as such**: no launch
+  distinguishes a shell from its absence; what the source shows is that no `std::process::Command`
+  remains, so there is no exit status left to mask and no *second process* re-resolving the checked
+  names. That was round 2's High and no static control could have caught it.
+- **The third writer is confined by the same code.** `probe_third_writer` and `probe_second_writer` are
+  one call of `replace_the_target`, hence one `confined_target`, `confined_source`, `temporary_beside`
+  and `copy_then_rename`. **Closed by source construction, unmeasured**: §4.4 and §6.6 both say that
+  C05, C06, C07, C09 and C10 point the **second** writer at a refused path and never the third.
+
+**What is NOT forced, in the same breath as the above — four residual rebindings, all open:**
+
+- **The source's final component.** `confined_source` approves a canonical pathname and
+  `std::fs::read` **resolves that pathname again**, so the bytes installed are the bytes that name held
+  at the read, not necessarily those of the object the check approved.
+- **The temporary's name after `create_new`.** Exclusivity was obtained for the file this process
+  opened; the handle is then dropped and `std::fs::rename` resolves the **name** a second time, so an
+  entry rebound at that name between the two is what gets installed.
+- **An ancestor directory of the target's pathname** — the launch tree — replaced with a symlink
+  between the canonicalization and the create-or-rename that follows it.
+- **An ancestor directory of the *source's* pathname**, `…/fixtures` itself being the nearest,
+  replaced with a symlink between `confined_source` and the `std::fs::read` that walks it again.
+  `fixtures` is a **sibling** of `launches`, so "an ancestor directory of the launch tree" never
+  covered it, and this list said three until round 4 found the fourth (§12.1).
+
+**All four are the same check-and-spend shape, none is constructed by any control here, and `std`
+offers no pinned-directory (`openat`-style) primitive that would bind a check to the object it
+approved.** They are *accepted* for the three reasons §4.5's last paragraph gives — operator-controlled
+`/private/tmp` launch root, a binary that is never shipped, and step 2c-5-7 deleting both — and
+**acceptance is not proof**. **Until round 3 this section named only the ancestor arm** — it
+called the temporary-name arm closed by construction and did not name the source arm at all; **until
+round 4 the ancestor arm was written as the launch tree's alone.** All four are
+**open and disclosed**, and rounds 3 and 4 each withdrew a claim rather than closing a hole.
+
+**9.2 Medium — the writer was not atomic (`cp …; mv …`).** **Closed as to what the finding named, and
+not one word wider.** Round 1 changed the shell body to `cp … && mv …`; round 2 **deleted the shell
 altogether**, which subsumes the finding by construction: there is no exit status left to mask, because
 there is no second process. The writer now reads the source in Rust, opens the temporary with
 `create_new` (`O_CREAT|O_EXCL`), writes, `sync_all`s, and `rename`s — and a `rename` replaces the final
-component itself rather than writing through it. A failed run *attempts* to remove the temporary and
-**discards whether that worked**, stated in `copy_then_rename`'s own documentation, because the first
-failure is the one worth reporting.
+component itself rather than writing through it, so the target is never seen half-written. **What is
+closed is the masking and the partially-written target. What is not closed is that the install spends a
+*name*** — `rename` resolves the temporary's pathname a second time rather than the handle
+`create_new` returned — and the read spends the source's name the same way; §9.1 lists both, **and the
+two ancestor cases those re-resolutions walk**, as open (rounds 3 and 4). A failed run *attempts* to remove the temporary and **discards whether that worked**, stated
+in `copy_then_rename`'s own documentation, because the first failure is the one worth reporting.
 
 **No launch of this tree exercised a failing read or a failing write.** What C07 exercises is the
 `O_EXCL` refusal. And the "no `.probe-tmp-…` file exists anywhere under `launches/`" reading this
@@ -1065,9 +1265,9 @@ is historical.
 byte pattern `$(grep -c … || echo 0)` leaves when the count is zero, which the current script documents
 avoiding. That identifies a *plausible* earlier script image and is **not** a retained artifact of one:
 no image that produced P02 survives, so its provenance stays unknown. It does not matter any more,
-because **P02 is not in the proof set**: `editor-exact` was re-run under the current script and the
-current binary — as P26 at round 1, and again as **P38** at round 2 — and **all twelve proof launches
-have a ten-line `bytes.txt` with the same ten keys in the same order** (§4). P02 is retained,
+because **P02 is not among the twelve plan-proof launches**: `editor-exact` was re-run under the current script and the
+current binary — as P26 at round 1, and again as **P38** at round 2 — and **all twelve plan-proof
+launches have a ten-line `bytes.txt` with the same ten keys in the same order** (§4). P02 is retained,
 unaltered, as a superseded artifact.
 
 **9.9 What round 1 found in its own work and how it was handled.** Two corrections came out of
@@ -1095,36 +1295,73 @@ four-path `git status` in §1 is the other half, and neither is a before-image.
 `docs/reviews/phase-2c-5-5a-instrument-round2.md` returned **NOT READY on four findings**. One is a
 real defect in `probe.rs` — a TOCTOU §9.1 had called closed — and the other three are places where this
 record claimed more than its artifacts give. Each is named here with what was done, what was measured,
-and what is deliberately left open.
+and what is deliberately left open. **§11 is round 3, and it revised 10.1, 10.2 and 10.4 in place**:
+Arm A was partially closed rather than closed, §9.1's corrected buckets still mislabelled two members,
+and §6.1's rule did not reach two of the five instances §10.4 said it governed. **§12 is round 4, and
+it revised 10.1 and 10.2 again**: Arm B is two ancestor cases and not one, and §9.1's per-item labels
+still over-credited two launches.
 
-**10.1 High — the TOCTOU in `replace_the_target`.** **Two arms, and they got different treatment.**
+**10.1 High — the TOCTOU in `replace_the_target`.** **Two arms, and they got different treatment —
+and round 3 found that Arm A was partially closed rather than closed, so what stands now is one
+measured closure and *four* open rebindings, the fourth being round 4's.**
 
-*Arm A — the temporary-file race. Fixed properly, not narrowed.* `temporary_beside` used to test the
-path with `symlink_metadata` and then let `/bin/sh`'s `cp` open the same pathname; a symlink inserted
-between those two operations was followed, so an outside file could be overwritten through a path that
-had passed every check. **The shell is gone from both writers.** `copy_then_rename` reads the source
-with `std::fs::read`, creates the temporary with `OpenOptions::new().write(true).create_new(true)` —
-`O_CREAT|O_EXCL`, which fails on a path that exists *at all*, symlink included, and therefore defeats
-the insertion race outright rather than shrinking its window — writes, `sync_all`s, and then
-`std::fs::rename`s, which replaces the final component itself and never writes through it.
-`temporary_beside` now *chooses a name and checks nothing*, which is the point: exclusion moved to the
-one place it can be atomic. **This subsumes round-1 finding 2 by construction** — there is no exit
-status left to mask, because there is no second process. **C07 is the measurement**: a symlink planted
-at the exact temporary path, and the writer answering *"could not create the temporary … exclusively:
-File exists (os error 17)"* with the decoy unchanged.
+*Arm A — the temporary-file race. **Partially closed, and round 3 is why this no longer says "fixed
+properly".*** `temporary_beside` used to test the path with `symlink_metadata` and then let `/bin/sh`'s
+`cp` open the same pathname; a symlink inserted between those two operations was followed, so an
+outside file could be overwritten through a path that had passed every check. **The shell is gone from
+both writers.** `copy_then_rename` reads the source with `std::fs::read`, creates the temporary with
+`OpenOptions::new().write(true).create_new(true)`, writes, `sync_all`s, and then `std::fs::rename`s.
+
+What that **forces**: `O_CREAT|O_EXCL` fails on a path that exists *at all*, symlink included, so **no
+pre-existing entry stood at the temporary's pathname when this process took that name** — the
+pre-open insertion race is defeated outright rather than narrowed, and **C07 is the measurement**, a
+symlink planted at the exact temporary path and the writer answering *"could not create the temporary …
+exclusively: File exists (os error 17)"* with the decoy unchanged. `temporary_beside` now *chooses a
+name and checks nothing*, which is the point: exclusion moved to the one place taking a name is atomic.
+**This subsumes round-1 finding 2 by construction** — there is no exit status left to mask, because
+there is no second process.
+
+What it does **not** force, and round 3's Medium is exactly this: the install spends a **name**, not the
+handle. After `write_all`/`sync_all` the handle is dropped and `std::fs::rename(temporary, target)`
+resolves the temporary's pathname a second time, so an entry rebound at that name in between is what
+gets installed. The **source** carries the same shape one step earlier — `confined_source` approved a
+canonical pathname and `std::fs::read` resolves it again, so outside bytes can be installed through a
+name that passed every check. **C07 measures neither of these**: it measures only a symlink already
+present when `create_new` runs. Both are **open and disclosed**, listed beside Arm B in §9.1 and in
+`src-tauri/src/probe.rs`'s own module note. **And both re-resolutions walk every directory above the
+name as well**, which is why Arm B below is two cases rather than one (§12.1).
+
+*Why round 3 was answered by reclassifying rather than by new code.* Binding validation, creation and
+installation to pinned objects needs `openat`-style descriptor-relative primitives, which `std` does not
+offer; writing them with `libc` here would be new, unproven cleverness in a file that is temporary,
+never shipped and deleted at 2c-5-7 — which is the kind of change that produces the next round's
+finding. The context is **acceptance, not proof**, and this record says so rather than calling the arm
+closed.
 
 *Arm A also — the target is constrained to the exact synthetic file.* `confined_target` now requires
-the canonical target to be `…/launches/<launch>/xdg/espanso/match/conflict.yml`, five components with
-four of them fixed, rather than anything beneath `…/launches`; `confined_source` requires the source to
-be a document *directly inside* `…/fixtures`. **C10 is the measurement**: a real file beneath the
-launch directory, refused by name.
+the canonical target, **at the instant of the check**, to be
+`…/launches/<launch>/xdg/espanso/match/conflict.yml`, five components with four of them fixed, rather
+than anything beneath `…/launches`; `confined_source` requires the source, at that same instant, to be
+a document *directly inside* `…/fixtures`. **C10 is the measurement of the target half and of nothing
+else**: a real file beneath the launch
+directory, refused by name. **The source half is measured only as far as *beneath* `…/fixtures`** — C06,
+whose decoy is outside the harness root — and its *direct-child* rule is source construction that no
+launch exercises (§9.1, §12.4); this paragraph read as though C10 carried both until round 4. What a
+rule over a pathname forces is the shape it had when it was
+resolved, which is why the two paragraphs above and the one below are the rest of the sentence.
 
-*Arm B — the ancestor-directory symlink swap. **Disclosed, not attempted, and not closed.*** If
-something replaces a directory **above** the launch tree with a symlink between the canonicalization
-and the create-or-rename, nothing in this instrument catches it. Defeating it needs `openat`-style
-pinned directory handles, which `std` does not offer; provoking it needs a second process racing a live
-launch, which this harness cannot spawn. **Confinement is therefore not proven against an adversarial
-ancestor swap, and this record does not claim it is impossible, unreachable or closed.** It is
+*Arm B — the ancestor-directory symlink swap, **which is two cases and was written as one until round
+4**. **Disclosed, not attempted, and not closed — and since round 3 no longer the only residual**, the
+others being the source and temporary rebindings above.*
+If something replaces a directory **above the target** with a symlink between the canonicalization
+and the create-or-rename, nothing in this instrument catches it. **The same is true of a directory
+above the *source*** — most directly `…/fixtures`, which `std::fs::read` walks again after
+`confined_source` approved the name, and which is a **sibling** of `launches` and so was never covered
+by "above the launch tree" (§12.1, §12.3). Defeating either needs `openat`-style
+pinned directory handles, which `std` does not offer; provoking either needs a second process racing a
+live launch, which this harness cannot spawn. **Confinement is therefore not proven against an
+adversarial ancestor swap on either path, and this record does not claim it is impossible, unreachable
+or closed.** It is
 *accepted* for three stated reasons — the launch root is created by `launch.sh` beneath an
 operator-controlled `/private/tmp` path, the instrumented binary is never shipped or signed, and step
 2c-5-7 deletes both — and **none of the three is a proof**. §4.5's last paragraph and §8.1 carry the
@@ -1136,15 +1373,23 @@ the tree). **C08 is the retained attempt that did not work**: it replaced the la
 `conflict.yml` with a symlink, and the plan never reached the writer — the sidebar row for
 `match/conflict.yml` never arrived, so **C08 establishes a sidebar timeout and nothing about any
 writer**. C09 is the working construction, with the symlink in a sibling launch directory so the
-application still opens an ordinary file. The **ancestor swap is the part that could not be
-constructed**, and it is said here rather than omitted.
+application still opens an ordinary file. The **two ancestor swaps are the part that could not be
+constructed** — above the target and above the source alike — and that is said here rather than
+omitted.
 
-**10.2 Medium — §9 over-claimed closure.** Corrected. §9.1 now reads *partially closed* with three
-named parts — what is closed and measured, what is closed by construction, and what is open — and §9.2
-says the shell removal subsumed it rather than that `cp … && mv …` fixed it. §8.1 tells 5b the same
-thing in the same words: exactly what the confinement covers, and that **the ancestor swap is residual
-and unproven**. Round 2's specific complaint was that §8 told 5b the truth about the third writer but
-not about the confinement it inherits; that gap is what §8.1's rewritten bullet closes.
+**10.2 Medium — §9 over-claimed closure.** Corrected, **corrected again at round 3, which found
+that round 2's own correction still over-claimed, and corrected once more at round 4.** §9.1 labels
+**every item individually** —
+*measured by which launch*, or *closed by source construction and unmeasured* — rather than grouping
+them into buckets whose heading is true of only some members; it listed **three** open rebindings
+where round 2 listed one, and **round 4 made that four** (§12.1). Round 4 also split two of the
+individual labels, because *measured by C09* and *measured by C06* were each true of only part of the
+rule they sat beside (§12.4). §9.2 says the shell removal subsumed round-1 finding 2 rather than that
+`cp … && mv …` fixed it. §8.1 tells 5b the same thing in the same words: exactly what the confinement
+forces, what it does not, and that **all four residual rebindings are open and unproven**. Round 2's
+specific complaint was that §8 told 5b the truth about the third writer but not about the confinement it
+inherits; that gap is what §8.1's rewritten bullet closes, and round 3's and round 4's are what its
+second half now adds.
 
 **10.3 Low — the `--- failed` reporting claim.** Corrected in all four places that carried it:
 `render_probe`'s doc comment, `say`'s, `startProbe`'s and §9.5. The driver **attempts** to emit
@@ -1161,9 +1406,15 @@ one standing one section away, so the whole record was swept for the **shape** �
 *no write happened*, *nothing ran*, *nothing was spawned* or *absence is unambiguous* from a final
 filesystem state, a zero-byte log, a byte match or a search that found nothing. What the sweep changed:
 
-- **§6.1** now states the general rule the instances are cases of — there is no invoke spy and no
-  command counter, so **no artifact this harness produces can distinguish "no write" from "an identical
-  or transient write"**, and no sentence anywhere in the record may be read as making that distinction.
+- **§6.1** now states a general rule the instances are cases of. **Round 3's finding 3 was that the
+  rule it stated at round 2 was too narrow to be the one §10.4 claimed**: *no artifact can distinguish
+  "no write" from "an identical or transient write"* governs §9.2's and §§4.4–4.5's readings, but the
+  two §1 instances are **chronology and scope limits**, not no-write equivalence — present absence
+  cannot say *when* a tree went, and a string search over selected files cannot say what an unread file
+  holds. §6.1 now states the wider rule — **an absence observation is bounded to the time, the corpus
+  and the predicate it was taken over, and proves nothing about any wider history, corpus or
+  predicate** — with the no-write equivalence named as this harness's own special case of it. That
+  wider rule does govern all five; the round-2 one governed three.
 - **§9.2** dropped *"no `.probe-tmp-…` file exists anywhere under `launches/`"* as evidence of anything
   about temporaries: a temporary created and renamed away leaves that same absence by design. What is
   left is the narrower reading, plus the note that `rg --files` does not list symlinks.
@@ -1188,3 +1439,451 @@ verify against the round-1 manifest**, which is the reading that says the script
 twelve plan launches is the same one round 1 froze. `manifest-2c-5-5a-round2.sha256`, 55 entries, is
 this round's post-image and all 55 verify. As always, **all three are post-images**: none can establish
 what was not altered, and the `git status` in §1 is the other half.
+
+## 11. Disposition of the five round-3 review findings
+
+`docs/reviews/phase-2c-5-5a-instrument-round3.md` returned **NOT READY on five findings**. **Four of
+the five are this record — or a doc comment in the instrument — claiming a guarantee the code does not
+give**, which `CLAUDE.md` names as this project's worst defect class and the one no test can fail. The
+fifth is a count contradicting the section that measured it.
+
+**Round 3 changed no executable line.** Every fix below rewrites a doc comment or a paragraph;
+`src-tauri/src/probe.rs`'s and `src/probe.ts`'s compiled behaviour is byte-for-byte the behaviour the
+complete proof set ran. **No launch was re-run and no new measurement is claimed anywhere in this section** —
+the only commands run were the seven gates of §7 and the four bundle searches beside them, all of which
+answered exactly what they answered at round 2.
+
+**11.1 Medium — the instrument's doc comments claimed a confinement the code does not force.**
+
+*What it claimed.* The module note, `confined_target`'s contract and `copy_then_rename`'s contract each
+said that `create_new` closed the temporary-file race and that `rename` safely replaces the final
+component, with **an ancestor-directory swap as the only unproven case**.
+
+*What was actually true.* The exact-target-shape check and the pre-existing-temporary exclusion are
+real, and C10 and C07 measure them. But the code does not bind the later operations to the objects it
+checked. After `write_all`/`sync_all` the handle is dropped and `std::fs::rename(temporary, target)`
+**resolves the temporary's pathname again**, so a racer who rebinds that name between the open and the
+rename gets the *replacement entry* installed rather than the bytes this process wrote. The source has
+the same shape: canonicalized and checked by `confined_source`, then **reopened by pathname** at
+`std::fs::read`. C07 measures a symlink *already present* when `create_new` runs and neither later
+re-resolution.
+
+*What changed, and what did not.* **The classification, not the code.** The review offered two branches
+and this fix takes the second: no `libc`/`openat` descriptor-relative primitives were added, because
+this is a temporary instrument deleted at 2c-5-7 and unproven new cleverness on the one path where
+being wrong is worst is exactly what would produce round 4's finding. Every doc comment in
+`src-tauri/src/probe.rs` that touched confinement now states, **in the same sentence, what is forced and
+what is not**: the module note, `TARGET_TAIL`, `TEMP_NAME_VARIABLE`, `resolve_existing_file`,
+`confined_target`, `confined_source`, `temporary_beside`, `copy_then_rename` and `replace_the_target`.
+
+*What is forced:* the exact target shape — a canonical target of exactly
+`<launch>/xdg/espanso/match/conflict.yml` beneath the canonical launches root, **at the instant of the
+check** — and the exclusion of a **pre-existing** entry at the temporary's pathname via `create_new`'s
+`O_EXCL`, which C07 measures.
+
+*What is **open and disclosed**, and was not closed by this fix:* source final-component rebinding
+between `confined_source` and `std::fs::read`; temporary-name rebinding between `create_new` and
+`std::fs::rename`; ancestor-directory rebinding **above the target** between canonicalization and the
+rename; and — **added at round 4, which found that this list was written as exhaustive and was not** —
+ancestor-directory rebinding **above the source** between `confined_source` and `std::fs::read`,
+`…/fixtures` being the nearest such directory and a **sibling** of `launches` (§12.1, §12.3). **All four
+are one shape — a name checked at one instant and spent at another — and `std` offers no pinned-directory
+primitive that would close any of them.** The temporary, never-shipped, deleted-at-5-7 context is
+**acceptance, not proof**, and every place that states it now says so.
+
+**11.2 Medium — §8.1, §9.1 and §10.1 overstated the same thing three times.**
+
+*What it claimed.* §8.1 told 5b there is "no second pathname resolution"; §9.1 called the
+no-shell/`O_EXCL` part *closed by construction*; §10.1 called Arm A "fixed properly, not narrowed" with
+Arm B the only open case.
+
+*What was actually true.* Removing the shell removed a **second process** re-resolving the checked
+names; it did not remove this process's own two re-resolutions. Arm B's disclosure was honest on its own
+terms — §4.5, §8.1 and §10.1 all plainly say the ancestor swap is unconstructed, unproven and accepted
+rather than proved — but it read as **the only** residual.
+
+*What changed.* All three now carry the same forced/not-forced sentence, and Arm B's honest disclosure
+is kept while ceasing to be the only one. §8.1's bullet tells 5b exactly what it inherits, item by item,
+and says in as many words that **there are two second pathname resolutions and both are open**. §10.1's
+Arm A is now *partially closed*, with the measured half and the open half in separate paragraphs and a
+stated reason for reclassifying rather than writing new code. §4.4, §4.5, §5.2, §5.18, §7 and §9.2 were
+swept for the same over-claim. The three that carry a **count** — §4.4, §4.5 and §7 — named three
+residuals where they had named one, and **round 4 widened those to four**; §5.2, §5.18 and §9.2 name
+the *re-resolutions* rather than a count, and round 4 added to each that a re-resolution walks every
+directory above the name as well (§12.1, §12.3). **This is a
+withdrawal of a claim, not the closing of a hole**: all four rebindings are open.
+
+**11.3 Medium — §9.1's "Closed and measured" bucket held items nothing measures.**
+
+*What it claimed.* One bucket headed *Closed and measured* containing, among genuinely measured items,
+"A plan is required" — and §9.1's construction bucket implicitly covering the third writer's
+confinement.
+
+*What was actually true.* §4.3 says in as many words that **no launch exercises a writer's no-plan
+refusal**, because this driver has no way to call a writer without a plan; and §4.4 and §6.6 both say
+C05/C06/C07/C09/C10 point the **second** writer at a refused path and never the third. Both are source
+properties. The bucket's label was true of some of its members.
+
+*What changed.* **The buckets are gone.** §9.1 now labels **every item individually** — *measured by
+which launch*, naming C05, C06, C07, C09 or C10, or *closed by source construction, unmeasured* — and
+the plan gate and the third writer's shared confinement carry the second label explicitly. §8.1's
+inherited bullet does the same per item, so 5b reads the labels rather than a heading. **Two of those
+per-item labels were still true of only part of what they claimed**, which round 4 found: C09 credited
+with the exact-shape target rule it never reaches, and C06 with the direct-child source rule no launch
+exercises. Both are now **two lines each**, a measured half and an unmeasured one (§12.4). *A label
+being individual does not make it true of its whole item* is the lesson round 4 added to this one.
+
+**11.4 Low — §10.4 claimed §6.1's rule governed five instances it did not reach.**
+
+*What it claimed.* §10.4 said §6.1 states the general rule all five swept absence instances are cases
+of.
+
+*What was actually true.* §6.1's round-2 rule was the **no-write equivalence** — a final state cannot
+distinguish *no write* from *an identical or transient write* — which governs §9.2's temporary-file
+absence and §§4.4–4.5's unchanged-decoy readings. It does not reach §1's two: present absence cannot
+establish **when** the old tree disappeared, and a string search over selected files cannot establish
+that no retained artifact holds private material. Those are **chronology and scope** limits.
+
+*What changed.* §6.1 now states a genuine general negative-evidence rule — **an absence observation is
+bounded to the time, the corpus and the predicate it was taken over, and proves nothing about any wider
+history, corpus or predicate** — with **time**, **corpus and predicate**, and **the no-write
+equivalence** as its three named consequences, the last of them called out as this harness's own special
+case. §10.4 now says which instances the round-2 rule reached (three) and which the wider rule reaches
+(all five). Nothing about what any launch established changed.
+
+**11.5 Low — the tree inventory said 74 where two measured dispositions say 75.**
+
+*What it claimed.* §1's inventory: `manifest-2c-5-5a-fix-post.sha256`, 78 entries, **74 still verify**.
+
+*What was actually true.* §5.9 and §10.5 both record the measurement as **75 of 78**, and both name
+exactly three failures — `confine.sh`, `src/probe.ts` and `src-tauri/src/probe.rs`, the three files
+round 2 changed. **The arithmetic agrees with them**: 78 − 3 = 75. The inventory line was the outlier.
+
+*What changed.* `74` became `75`. No re-verification was run; the corrected figure is the one §5.9 and
+§10.5 measured, and this record now says it in all three places.
+
+**11.6 What the shape sweep found, over and above the five findings**
+
+The five above were **addressed** — and *addressed* is the word, not *closed*: §§11.1 and 11.2 took the
+reclassification branch, which **withdrew a guarantee** rather than closing a hole, so the pathname
+rebindings they name are **open and disclosed** and remain so after round 4, which found a fourth of
+them (§12.1, §12.3). Each was then swept **for its shape rather than for its words**, which
+is the discipline `2c-4a-2-notes.md` §7.6.2 and §10.4 both exist to enforce. Four extra instances were
+found and addressed, and three checks came back clean. **This paragraph said "the five above were
+closed" until round 4** (§12.6).
+
+*Extra instances found and addressed:*
+
+1. **A count contradicting two sections that derive it** (11.5's shape, in a different place). §1 said
+   the tree holds **"sixty-five launches"**. §5.8 names `P01…P48`, `N01…N08` and `C01…C10`, and §5.10
+   tallies every one of them by generation; both give **66**. §1 now says sixty-six with the arithmetic
+   shown and a note that it read sixty-five until round 3.
+2. **A list label true of only some of its members** (11.3's shape, outside §9.1). §5.10's digest table
+   labelled the row `P37–P48, N07, N08, C05–C10` as **"the proof set"**, while §1 says in as many words
+   that **C08 is in no set at all** and §6.5 counts **nineteen** launches. The row is now labelled
+   *the proof generation — the nineteen-launch complete proof set plus C08, the discarded attempt*.
+   **What this fix did not notice is that "the proof set" itself meant twelve in §4 and nineteen in §1**;
+   round 4's prose finding 3 is that, and §12.5 is where the two terms were separated.
+3. **A comment claiming a guarantee the code does not give, in `src/probe.ts`** (11.1's shape, on the
+   frontend). `reportReach`'s contract said the scroller's `scrollTop` "is read and written back, so a
+   reporter can never leave the pane moved". The mechanism is backwards: nothing in the reporter scrolls
+   anything, which is what really leaves the pane where it was, while a `say` is **awaited between the
+   read and the write-back**, so the write-back can overwrite a scroll something else made during that
+   await by attempting to restore the earlier value, and would not run at all if the `say` rejected. The comment was rewritten to say what holds
+   and to call the write-back belt and braces rather than a guarantee. **That rewrite carried a
+   categorical claim of its own — "Nothing here scrolls anything" — which its own next two sentences
+   retract, since `scroller.scrollTop = held` is a write and a write can scroll**; round 4's instrument
+   finding 2 is that, and §12.2 is the correction. The claim that holds is about the **geometry reads**,
+   never about the whole function.
+4. **A construction claim presented without saying it is unmeasured** (11.3's shape, in a doc comment).
+   `startProbe`'s contract said `replace_the_target` refuses without a plan "so neither writer replaces
+   a file either", with nothing marking that as a source property. It now says it is a property of the
+   Rust source and **not** a measurement, because this driver cannot call a writer without a plan.
+
+*Checks that came back clean, recorded so the next round need not re-derive them:*
+
+- **A consuming operation whose result is discarded.** The round-2 review's own sweep was verified
+  rather than trusted and then extended. In `src-tauri/src/probe.rs`: `write_all` and `sync_all` are
+  both assigned to `outcome` and checked; `std::fs::rename`'s `Result` is the function's tail
+  expression; every `canonicalize`, `std::env::var` and `strip_prefix` is mapped and propagated with
+  `?`; `writeln!` and `flush` in `render_probe` are propagated. **The only two discarded results are the
+  two `let _ = std::fs::remove_file(temporary)` cleanups**, which are deliberate and disclosed in
+  `copy_then_rename`'s own documentation and in §9.2. **Round 4 re-verified that and added the one thing
+  it does not cover**: `drop(handle)` runs `std::fs::File`'s own `Drop`, which swallows the **close**
+  error — not a `Result` this code discards, but an error nothing here observes — and the checked
+  `sync_all` above it is what makes that acceptable (§12.7). In `src/probe.ts`: both writer `invoke`s are
+  awaited and their answers read; `probe_plan`'s and `render_probe`'s are awaited. The one result the
+  driver *does* drop is `dispatchEvent`'s boolean in `typeInto`, `pickLanguage` and `creatorPlan` — and
+  that is **not** an instance, because every event constructed there is non-cancelable
+  (`new Event(…, { bubbles: true })` leaves `cancelable` false), so the call cannot answer anything but
+  `true`.
+- **An absence claim not bounded to its time, corpus and predicate** (11.4's shape). Every absence
+  sentence in this record was re-read against the extended §6.1 rule: §1's two, §4.3's, §4.4's and
+  §4.5's `decoy=unchanged`, §5.4's two-halved backup search, §6.6's and §7's bundle searches (each with
+  a control that makes it non-vacuous), §9.2's temporary sweep and §9.10's manifest reading. **All were
+  already bounded**; none needed rewording, and each now falls under a rule that reaches it.
+- **The gates.** All seven rows of §7 were re-run and every figure is unchanged — **1153 / 432 / 2124 /
+  185**, `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` both clean —
+  which is the expected result for a round that changed no executable line, and is recorded because a
+  predicted-unchanged count is worth more than one nobody checked.
+
+## 12. Disposition of the six round-4 review findings
+
+`docs/reviews/phase-2c-5-5a-instrument-round4.md` returned **NOT READY on six findings** — two in the
+instrument's comments and four in this record. **Four of the six are again a claim the code or the
+evidence does not license**, which is the class §11 opened with; the other two are a term used with two
+meanings and the word *closed* standing where *withdrawn* is the truth.
+
+**Round 4 changed no executable line either.** Every fix below rewrites a doc comment or a paragraph:
+no statement in either probe source was added, removed or altered, and **the built bundle is still
+`dist/assets/index-I5AFZyLL.js`** — an unchanged content hash is the reading that says a comments-only
+frontend edit emitted the same bytes. **No launch was re-run and no new window measurement is claimed
+anywhere in this section.** The only new measurements are §7's seven gate rows, the four bundle
+searches, and two `shasum` readings taken to settle a claim about a binary. **One of those readings
+moved**: `target/debug/espansoconfig` was rebuilt by §7's own `cargo build` row and no longer carries
+the proof generation's digest — a fact about the build tree, not about behaviour, and §12.7's item 4 is
+where it belongs.
+
+**12.1 Medium — the instrument's residual list was written as exhaustive and was not.**
+
+*What it claimed.* `src-tauri/src/probe.rs`'s module note, and every site referring to it, said
+**exactly three** residual rebindings survive: the source's final component, the temporary's name after
+`create_new`, and *an ancestor directory of the launch tree*.
+
+*What was actually true.* There is a **fourth**. After `confined_source` returns the canonical source
+pathname, `std::fs::read` walks that pathname again — **every directory above it included** — so an
+ancestor of the *source* can be rebound in between. The nearest such directory is
+`HARNESS_ROOT/fixtures`, which is a **sibling** of `launches`; "an ancestor directory of the launch
+tree" therefore never covered it. The temporary, never-shipped context mitigates severity and does not
+make an exhaustive three-item claim true.
+
+*What changed.* **The classification again, not the code.** The list is **four** items, written as the
+two final components plus an ancestor of *either* approved pathname, `fixtures` named explicitly. Every
+site in `probe.rs` that carried the count or the list was corrected — the module note (both the forward
+reference and the list itself), `resolve_existing_file`'s back-reference (*items 1, 3 and 4*),
+`confined_target`, `confined_source`, `copy_then_rename` and `replace_the_target` — and the count word
+was checked at **every** occurrence in the file, including the ones that mean something else and were
+left alone (`replace_the_target`'s *three refusals*, `TARGET_TAIL`'s *four of five components fixed*).
+
+**The fourth rebinding is open and disclosed. It was not closed, and neither were the other three.**
+Closing any of them still needs `openat`-style pinned directory handles that `std` does not offer, and
+this fix deliberately did not write them with `libc` in an instrument that 2c-5-7 deletes.
+
+**12.2 Low — `reportReach`'s comment contradicted itself.**
+
+*What it claimed.* Round 3's rewrite opened with **"Nothing here scrolls anything."**
+
+*What was actually true.* Its own next two sentences retract it: `scroller.scrollTop = held` is a
+**write**, and a write can scroll the pane when the position changed during the awaited `say` between
+the read and it. What does not scroll is the **geometry reads**.
+
+*What changed.* The comment now says the **measurement** moves nothing — `getBoundingClientRect` and the
+`scrollTop`/`scrollHeight`/`clientHeight` reads are reads — and that the write-back is a different thing
+which **can overwrite a newer position by attempting to restore the earlier value**, and does not run at
+all if the `say` rejects. It is **not** said to scroll the pane necessarily, and **not** said to restore
+the earlier position successfully: `scrollTop` is clamped against the layout existing when the assignment
+runs, so the effective position may be unchanged, may move, and may land at neither value — round 6's
+instrument finding 1 and prose finding 1 are that over-claim, and §13.1 and §13.2 are the correction. **It is not a guarantee that a reporter cannot leave the pane moved**, and the
+comment now says so in those words. §11.6's item 3 carries a correction block pointing here.
+
+**12.3 Medium — the record's exhaustive residual lists had the same hole.**
+
+*What it claimed.* §4.5, §8.1, §9.1, §10.1 and §11.1 each listed the residual rebindings as **three**,
+with the ancestor case written as the launch tree's alone; the opening blockquote, §4.4 and §7 carried
+the same count.
+
+*What was actually true.* 12.1's fourth case is missing from every one of them.
+
+*What changed.* Every list is **four** items and every count word beside one now reads *four*: the
+blockquote, §4.4, §4.5's numbered list, §7's last paragraph, §8.1's inherited bullet, §9.1's *what is
+NOT forced* list, §10.1's Arm A and Arm B, §10.2, §11.1's *open and disclosed* list and §11.2. Each
+says in its own words that the fourth is **open and disclosed**, added by a round that **withdrew a
+claim rather than closing a hole**. The record's other "three"s — three refusals in `launch.sh`, three
+revisions in a conflict block, three adversarial launches, three manifests, three reasons for
+acceptance, three consequences of §6.1's rule — were read one at a time and left as they were, **with
+one exception that was wrong for its own reason**: §3's *three retained generations*, which §12.7's
+item 2 corrects to four.
+
+**12.4 Medium — a per-item label true of only part of its item, one round after the wider one closed.**
+
+*What it claimed.* §9.1's per-item list credited **C06** with measuring that the source is a document
+**directly inside** `…/fixtures`.
+
+*What was actually true.* C06 points `ECFG_PROBE_R1` at a decoy **outside the harness root**, so the
+refusal it quotes is `strip_prefix`'s *"is not beneath …/fixtures"*. **No launch anywhere in this tree
+points a writer at a nested regular file beneath `fixtures`**, so the direct-child rule at
+`src-tauri/src/probe.rs:352-358` is **source construction, unmeasured**. This is round 3's finding 3 —
+a label true of only some of its members — recurring **narrower** inside the fix that closed the wider
+one.
+
+*What changed.* The label is **two lines**: *beneath `…/fixtures`* measured by C06, and *direct child*
+closed by source construction and unmeasured. **Then every other per-item label in §9.1 was re-checked
+against the launch it names, one at a time, rather than assumed right** — and a second instance came
+out of it: the target item credited **C09** with the *exact-shape* rule, when C09's own quoted refusal
+in §4.5 is *"is not beneath …/launches"*, the same `strip_prefix` half C05 measures. **C10 is the only
+launch that reaches the shape check.** That item is now two lines as well. §4.4, §8.1, §10.1 and §11.3
+carry the same split where they repeat the labels.
+
+**12.5 Low — "the proof set" named two different sets.**
+
+*What it claimed.* §1 and §5.10 called **nineteen** launches the proof set — P37–P48, N07–N08, C05–C07
+and C09–C10 — while §4 said *"P37–P48 are the proof set"*, meaning **twelve**.
+
+*What was actually true.* Both sets exist and both matter; only the name was shared. The
+sixty-six-launch total round 3 corrected is unaffected.
+
+*What changed.* Two terms, defined in the blockquote: the **twelve plan-proof launches** (P37–P48, one
+per case of the case table) and the **nineteen-launch complete proof set** (those twelve plus two
+no-plan controls, two static confinement controls and three adversarial ones — 12 + 2 + 2 + 3 = 19).
+Occurrences were re-read against the section that defines it in §1, §4, §4.1, §5.8, §5.10, §5.12, §6.2,
+§6.3, §6.5, §6.6, §7, §9.8, §11 and §11.6.
+
+**This section claimed that sweep was exhaustive — "used everywhere" — and it was not.** Round 6 found
+**two** references still carrying the old generic wording, one at §7's bundle-search paragraph and one
+in §10's P02 provenance paragraph; §13.3 is that correction. The numbers beside them made the intended
+set recoverable in both cases, so neither was false — but *this sentence* was, and an exhaustiveness
+claim that the sweep does not license is the same defect class as the one §12.5 exists to close. The
+membership and the arithmetic were independently re-derived at round 6 and are correct. **Two of them were not merely
+ambiguous but false under one reading** — §4.1 said *every launch of the proof set has
+`failed-lines=0`*, which is untrue of the five confinement launches where a `--- failed` **is** the
+pass; and §6.6 said the third-writer path was *"not in the executable the proof set ran"*, which is
+false of today's proof set and true only of the bundle that existed before round 1's fix. Both now say
+which set they mean.
+
+**12.6 Low — §11.6 called withdrawn guarantees closed.**
+
+*What it claimed.* *"The five above were closed."*
+
+*What was actually true.* §§11.1 and 11.2 took the reclassification branch: they **withdrew** a
+guarantee and left the pathname holes **open**. Calling that closed is the same softening the finding
+it answered was about.
+
+*What changed.* §11.6 now says the five were **addressed**, names §§11.1–11.2 as withdrawals, and says
+the confinement holes remain **open and disclosed** — more of them after 12.1, not fewer. Its list
+heading says *found and addressed* rather than *found and closed*, and the blockquote's two "how it was
+closed" summaries for rounds 1 and 2 now read *how it was addressed*. **Every remaining occurrence of
+*closed* in §§9–12 was then read one at a time against what it verdicts**, and none of them stands over
+a withdrawn guarantee: the genuine closures keep the word (§9.3 by running it, §9.4, §9.5's code half,
+§9.7's rewritten claim, §9.8 by measuring, §11.5's arithmetic), the *closed by source construction,
+unmeasured* label keeps it with its own qualifier attached, and §9.1's and §10.1's verdicts say
+*partially closed* where that is what happened.
+
+**12.7 What the shape sweep found, over and above the six findings**
+
+Each finding was then swept **for its shape rather than for its words**. Five extra instances were
+found and addressed, and the mandated checks were verified rather than trusted.
+
+*Extra instances found and addressed:*
+
+1. **A label true of only some of its members** (12.4's shape, in §6.5). It said this `probe.rs`
+   *"drove nineteen launches of the proof generation to `--- end`"*. **N07 and N08 wrote no transcript
+   at all** — a zero-byte `probe.log` is exactly what §4.3 measures there — so they reached no `--- end`.
+   §6.5 now says **seventeen of the nineteen**, and names the two that did not and why.
+2. **A count with two meanings** (12.5's shape, in §3). It said *"four different binaries ran across the
+   three retained generations"*, where §1 names **four** generations and §5.10's table has **five**
+   digest rows — the round-0 generation itself ran two. §3 now says five binaries across four
+   generations, with the reason.
+3. **A count with two meanings inside one section** (§7). *"The build answered 185 on all three
+   readings"* stood two paragraphs below *"every figure is unchanged across all four readings"*. Both
+   are now **five**, because round 4's own reading is one more.
+4. **A claim whose evidence expired** (§1's preamble, §5.10 and §6.4). All three said the proof
+   generation's binary is *byte-identical to `target/debug/espansoconfig` as it stands now*. It is not,
+   and cannot be for long: `cargo build -p espansoconfig --features custom-protocol` is one of §7's
+   seven gate rows and every fix round re-runs it. **Measured at round 4**: `target/debug/espansoconfig`
+   is `04988c09…`, while `launches/P37/…/MacOS/espansoConfig` and `launches/C10/…/MacOS/espansoConfig`
+   both still answer `0a2d3506…`. **The retained bundle copies are what pin which bytes ran; the working
+   build tree never did.** All three sentences now say that, with the equality bound to the moment it
+   was read.
+5. **Categorical claims in the two probe sources that their own code does not license** (12.1's and
+   12.2's shape, swept over both files). Four, each narrowed in place: `waitFor`'s *"this is where every
+   assertion in this instrument lives"* — **five throws sit outside it**, `parsePlan`'s three,
+   `runCase`'s default and `creatorPlan`'s missing-placement check, and the comment now names them;
+   `enabledNamed`'s *"the one enabled control"* — `find` answers the **first** and nothing forces a
+   scope to hold one, which is what the scoping rule exists for; `confined_target`'s *"the only file any
+   writer can name"* — a categorical sentence its own next paragraph retracts, now written as the only
+   **shape** a target can have **at the instant of the check**; and the module note's *"the one
+   arrangement that keeps `cargo test -p espansoconfig` passing"* — inherited from
+   `2c-4a-3c-1-instrument.md` §5.3 and never established to be the only one. `TEMP_NAME_VARIABLE`'s
+   *"no script outside this process can predict it"* was narrowed to *no way to name it in advance short
+   of guessing the stamp*, in `probe.rs` and in §5.18 alike.
+
+*Checks verified rather than trusted:*
+
+- **A consuming operation whose result is discarded.** Re-read line by line in both files. In
+  `src-tauri/src/probe.rs` the **only** discarded `Result`s are still the two
+  `let _ = std::fs::remove_file(temporary)` cleanups, disclosed in `copy_then_rename`'s own
+  documentation and in §9.2; `write_all` and `sync_all` are assigned to `outcome` and checked,
+  `std::fs::rename`'s `Result` is the tail expression, and every `canonicalize`, `std::env::var` and
+  `strip_prefix` is mapped and propagated. **One thing that sweep does not cover is now written down**:
+  `drop(handle)` runs `std::fs::File`'s own `Drop`, which **swallows the close error** — not a `Result`
+  this code discards, but an error nothing here observes — and the checked `sync_all` immediately above
+  it is what makes that acceptable. In `src/probe.ts` the `dispatchEvent` boolean is a **genuine
+  non-instance**, confirmed by reading all three constructions rather than by trusting the earlier
+  sweep: `typeInto`, `pickLanguage` and `creatorPlan` each build `new Event(…, { bubbles: true })` with
+  no `cancelable`, which defaults to `false`, so `dispatchEvent` cannot answer `false`. The one further
+  discard is `startProbe`'s `void` on its async body; its failure mode is the **already-disclosed**
+  truncated transcript, and its contract now says so.
+- **A categorical statement retracted by its own neighbouring sentences.** Both probe sources were read
+  for the shape, not for `reportReach`'s words; the two instances found are 12.2 and item 5 above.
+- **The gates.** All seven rows of §7 re-run: **1153 / 432 / 2124 / 185**, `cargo fmt --check` clean,
+  `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo build -p espansoconfig
+  --features custom-protocol` finished. The four bundle searches re-run on
+  `dist/assets/index-I5AFZyLL.js` — **whose name is unchanged, which is itself the reading that says a
+  comments-only frontend edit changed no emitted byte** — and unchanged: server-only sentinels absent,
+  client-only constructs at 2, `probe_third_writer` at 1, `probe_second_writer` at 1.
+
+---
+
+## 13. Disposition of the three round-6 review findings
+
+Round 6 is `docs/reviews/phase-2c-5-5a-instrument-round5.md`. It returned **NOT READY on three, and all
+three are Low** — the first round of this step whose findings are all Low. It also closed, by
+**independent enumeration from the code rather than against the list**, the question round 4 opened:
+there are **exactly four** residual rebinding classes and **no fifth**, because a target final-component
+replacement does not follow a newly planted symlink and every directory walked by the temporary is
+already the target-path ancestor case. §9.1's per-item labels were re-checked item by item and **all**
+now match their evidence. The `drop(handle)` close-error disclosure was judged correct and not
+overstated, read as an acceptance rationale rather than a guarantee.
+
+**No code behaviour changed in this round either. Three wordings changed, in two files.**
+
+**13.1 Low — `src/probe.ts`, the write-back was said to scroll.** Round 4 replaced *"Nothing here
+scrolls anything"* with a claim that the write-back **scrolls the pane, to a stale position** — trading
+one categorical statement for another in the opposite direction. `scrollTop` is **clamped against the
+layout existing when the assignment runs**, so assigning the held value may leave the effective position
+unchanged, may move it, and may land at neither the held value nor the current one. The contract now
+says the write-back **can overwrite a newer position by attempting to restore the earlier value**, and
+guarantees **neither** preservation **nor** restoration. The geometry-reads claim is untouched: it was
+the part that always held.
+
+**13.2 Low — the record carried the same over-claim.** §11.6's item 3 said the write-back *"would undo"*
+an intervening scroll and §12.2 said it *"restores a stale position"*. Both now say it *can attempt* to
+restore the earlier value, and §12.2 states the clamping and the three possible outcomes explicitly.
+
+**13.3 Low — two references escaped §12.5's terminology sweep.** §7's bundle-search paragraph said
+*"its own nineteen-launch proof set"* and §10's P02 paragraph said *"all twelve proof launches"*. Both
+now use the defined terms. **Neither was false** — the number beside each made the intended set
+recoverable — but **§12.5's own claim that the terms were "used everywhere" was**, and §12.5 now carries
+that correction rather than repeating the claim.
+
+**13.4 What round 6 says the round-5 fixes created, and where it went.** Two things, and both are
+above: the `reportReach` correction created a narrower categorical guarantee (13.1, 13.2), and the
+terminology fix created an exhaustiveness claim it did not license (13.3). **This is the fifth
+consecutive round in which the fix round created the next round's finding**, and it is why no round of
+this step has been allowed to close without one — but the trend is the reading that matters: 8 findings,
+then 4, 5, 6, and now 3, with the severity ceiling falling from High to Medium to **Low**.
+
+**13.5 What is still open, unchanged by this round.** The **four** residual rebindings of the module
+note in `src-tauri/src/probe.rs` are **open and disclosed**, not closed: source final component,
+temporary name after `create_new`, an ancestor of the target's pathname, and an ancestor of the
+source's pathname. Closing any needs `openat`-style pinned directory handles that `std` does not offer.
+They are **accepted, not proven** — operator-controlled launch root, never-shipped binary, deleted at
+2c-5-7 — and **acceptance is not proof of impossibility**. 2c-5-5b inherits exactly that, and §8.1 says
+so in those terms.
+
+**13.6 The gates after this round.** Comments and prose only, in `src/probe.ts` and this record; no
+`.rs` file changed, so the Rust gates cannot have moved and were re-run anyway. With the harness in the
+tree: `cargo test --workspace` **1153**, `npm run check` **432 files / 0 errors / 0 warnings**,
+`npm test` **2124**, `npm run build` **185 modules**; `cargo clippy --workspace --all-targets -- -D
+warnings` and `cargo fmt --check` clean. **No launch was re-run and no new measurement is claimed in
+this section.**

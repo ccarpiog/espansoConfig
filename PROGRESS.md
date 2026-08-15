@@ -3656,6 +3656,81 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-5 step 5a (the window instrument, rounds 3-5 of its review)
+
+**Status: NOT COMPLETE.** Round 5's three fixes are applied and verified; the round-6 confirmation that
+must review them has not been run. See "Next action".
+
+**What this session did.** Three Codex confirmation rounds and three fix rounds, alternating. It began
+at the point the previous session left: round 2's fixes applied and unreviewed.
+
+| Round | Findings | Ceiling | Fixed by |
+|---|---|---|---|
+| 3 (`-round3.md`) | 5 | Medium | phase worker, + 4 extra by shape sweep |
+| 4 (`-round4.md`) | 6 | Medium | phase worker, + 5 extra by shape sweep |
+| 5 (`-round5.md`) | **3** | **Low** | orchestrator by hand (wording dictated by the review) |
+
+**Every one of the five rounds answered "did the fix round create anything?" with YES.** That is why
+none closed without a successor, and it is the reason this step has taken five rounds. The trend is the
+reading that matters: 8 → 4 → 5 → 6 → 3, ceiling **High → Medium → Low**.
+
+**The substantive outcome: Arm A of round 2's High is PARTIALLY CLOSED, never closed.** Round 3 found
+that the round-2 fix — replacing `/bin/sh` with `create_new` → write/sync → `rename` — had **created** a
+new check-and-spend gap, because `rename` re-resolves the temporary *pathname* and the source is
+reopened by pathname after its check. The orchestrator chose the **reclassify** branch over the
+`openat` branch: no `libc`, no new primitives, **no code behaviour changed in any of the three fix
+rounds**, and the claims withdrawn instead. Round 4 then found the reclassified list was itself
+non-exhaustive — `fixtures` is a **sibling** of `launches`, so "an ancestor of the launch tree" never
+covered a source-ancestor rebinding — and the list went from three to **four**. Round 5 enumerated the
+re-resolutions **from the code rather than against the list** and confirmed **four with no fifth**.
+
+**Four residual rebindings are open and disclosed**, in `probe.rs`'s module note and §8.1 in the same
+terms: source final component; temporary name after `create_new`; an ancestor of the target's pathname;
+an ancestor of the source's pathname. Accepted — operator-controlled launch root, never-shipped binary,
+deleted at 2c-5-7 — and **acceptance is not proof of impossibility**.
+
+**Two label defects, one per round, both of the same shape.** §9.1 credited **C06** with measuring the
+direct-child source constraint it never exercises (round 4), and then, when every label was re-checked
+individually, **C09** with the exact-shape rule it never reaches (the fix round's own sweep). C10 alone
+measures target shape. Round 5 re-checked every remaining label and found them all sound.
+
+**Three count contradictions, found one per round by sweeping for the shape rather than the words.**
+`74` vs a measured `75` of 78 manifest entries; "sixty-five launches" where §5.8 and §5.10 both give
+**66**; and "the proof set" meaning **twelve** in §4 and **nineteen** in §1 and §5.10 — now two defined
+terms, the *twelve plan-proof launches* and the *nineteen-launch complete proof set* (12+2+2+3=19).
+
+**One false claim about the tree, caught by measurement and independently re-measured by the
+orchestrator.** §1/§5.10/§6.4 said the proof binary is byte-identical to `target/debug/espansoconfig`
+*"as it stands now"*. It is not: that path answers `04988c09…` (re-measured by the orchestrator with
+`shasum -a 256`, agreeing exactly), while P37's and C10's retained bundles still answer `0a2d3506…`.
+All three sentences now bind the equality to **when it was read**.
+
+**Also settled by round 5, and worth not re-litigating:** the `drop(handle)` close-error disclosure is
+correct and not overstated (Rust's `File` drop path cannot report a close error to this code; a checked
+`sync_all` is a genuine mitigation without proving close succeeded), and `dispatchEvent`'s discarded
+boolean is a **genuine non-instance** of the check-and-spend shape, because all three constructed events
+omit `cancelable` and so it cannot return `false`.
+
+**Gates, re-derived by the orchestrator after every fix round, never taken from a worker's report**
+(with the harness in the tree): `cargo test --workspace` **1153**, `npm run check` **432 files / 0
+errors / 0 warnings**, `npm test` **2124** in 56 files, `npm run build` **185 modules**;
+`cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` exit 0. Bundle oracle
+read on **both** lines, because a bare `svelte/internal/server` search is a vacuous negative: server-only
+sentinels **absent**, client-only constructs **2 (present)**, `probe_third_writer` **1**,
+`probe_second_writer` **1**.
+
+**No launch was re-run and no new measurement is claimed by any of the three fix rounds.** Every fix
+withdrew, narrowed or corrected a claim. The one exception is filesystem reads: two `shasum` readings
+taken to settle the binary-identity claim above, which is a read and not a launch.
+
+**Decision records:** `docs/decisions/2c-5-5a-instrument-rebuild.md` §11, §12 and §13 are rounds 3, 4
+and 5's dispositions. **Reviews:** `docs/reviews/phase-2c-5-5a-instrument-round{3,4,5}.md`. Round 4's
+Codex job wrote its own review file; round 5's sandbox was read-only and the orchestrator captured the
+reply with `node "$CC" result <job-id> >` that path — **check whether the file exists and is substantive
+before writing to it**, because redirecting over a file Codex already wrote destroys the full review.
+
+---
+
 ## Verification — Phase 2c-5 step 4b (the restore screen, and the phase's whole mounted evidence)
 
 **The record:** `docs/decisions/2c-5-4b-notes.md`. **The rounds:** `docs/reviews/phase-2c-5-4b-code.md`,
@@ -8260,83 +8335,106 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **Step 2c-5-5a's round-2 fixes are APPLIED and VERIFIED. The next thing to do is the ROUND-3 CONFIRMATION — a Codex review of the round-2 fixes, and nothing else until it returns.**
+### **Step 2c-5-5a's round-5 fixes are APPLIED and VERIFIED. The next thing to do is the ROUND-6 CONFIRMATION — a Codex review of those three fixes, and nothing else until it returns.**
 
-**Step 2c-5-5 was split by the orchestrator into 5a and 5b**, exactly as 2c-4c-4 was cut: **5a is the harness itself and its proof set**, 5b is the restore-specific cases. 5a is **not complete** — its round-2 fixes have not been reviewed, and in this project *a fix is a change, and the round that reviews it is not optional*.
+**Step 2c-5-5 was split by the orchestrator into 5a and 5b**, exactly as 2c-4c-4 was cut: **5a is the harness itself and its proof set**, 5b is the restore-specific cases. 5a is **not complete** — its round-5 fixes have not been reviewed, and in this project *a fix is a change, and the round that reviews it is not optional*.
 
 #### Read these first, in this order
 
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
-git status --short --untracked-files=all   # expect: 2 hook files modified, 2 probe sources untracked — NOT empty
-docs/reviews/phase-2c-5-5a-instrument.md          # round 1 — 8 findings
-docs/reviews/phase-2c-5-5a-instrument-round2.md   # round 2 — 4 findings, THE ONE BEING FIXED
-docs/decisions/2c-5-5a-instrument-rebuild.md      # the record; §9 is round 1's disposition, §10 is round 2's
+git status --short --untracked-files=all   # expect SEVEN lines — NOT empty
+docs/reviews/phase-2c-5-5a-instrument-round5.md   # THE ONE BEING CONFIRMED — 3 findings, all Low
+docs/decisions/2c-5-5a-instrument-rebuild.md      # §13 is round 5's disposition, and the newest section
 ```
+
+The five review files are **rounds 1–5** and the record's dispositions are **§9–§13**, one per round, in order: `phase-2c-5-5a-instrument.md` (8 findings) → §9; `-round2.md` (4) → §10; `-round3.md` (5) → §11; `-round4.md` (6) → §12; `-round5.md` (3, all Low) → §13.
 
 #### The state of the tree, and why it is NOT clean
 
-**The harness is deliberately uncommitted and is IN THE TREE right now.** `git status --short --untracked-files=all` shows, and must show:
+**The harness is deliberately uncommitted and is IN THE TREE right now.** `git status --short --untracked-files=all` shows, and must show, exactly these seven:
 
 ```
+ M docs/decisions/2c-5-5a-instrument-rebuild.md
  M src-tauri/src/main.rs      # two hook lines
  M src/main.ts                # two hook lines
+?? docs/reviews/phase-2c-5-5a-instrument-round3.md
+?? docs/reviews/phase-2c-5-5a-instrument-round4.md
+?? docs/reviews/phase-2c-5-5a-instrument-round5.md
 ?? src-tauri/src/probe.rs     # the Rust probe side
 ?? src/probe.ts               # the driver
 ```
 
-**Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
+That is eight lines counting the record; the four **harness** paths are the two hook files plus the two probe sources, and **those four are what must never be committed**. The three review files ARE committed — they are the phase's evidence. **Never `git commit -a` or `git commit -am`.** Stage by path. The scratch tree is `/private/tmp/espansoconfig-harness-2c-5/` — a stable path, not a session scratchpad, because 5b, 6 and 7 are different sessions.
 
 #### The gate baseline — TWO figures, and do not confuse them
 
-- **With the harness in the tree: `1153 / 432 / 2124 / 185`.** This is what the gates answer right now, and what a session working on 5a or 5b should expect.
+- **With the harness in the tree: `1153 / 432 / 2124 / 185`.** This is what the gates answer right now, re-derived by the orchestrator after every fix round of this session, and what a session working on 5a or 5b should expect.
 - **Harness-free production: `1153 / 431 / 2123 / 184`.** This is what **2c-5-7 must re-derive on a harness-free tree** — never copy the with-harness figure forward. The scar is `1623`, which stood in this file for three step records after 3d-1 committed ten cases while the harness was in the tree.
 
 The delta is exactly **+1 module** (`src/probe.ts`), **+1 `svelte-check` file**, **+1 vitest case** (`scripts/lint/ipc-detail.test.ts`'s per-file `it.each`), and **+0 Rust tests**.
 
-#### What round 2 found, and what the round-2 fix round did
+#### The five rounds so far, and the one number that matters
 
-Round 1 returned **NOT READY on 8**; six closed. Round 2 returned **NOT READY on 4**:
+| Review file | Findings | Severity ceiling |
+|---|---|---|
+| `phase-2c-5-5a-instrument.md` | 8 (6 closed at once) | High |
+| `-round2.md` | 4 | High |
+| `-round3.md` | 5 | Medium |
+| `-round4.md` | 6 | Medium |
+| `-round5.md` | **3** | **Low** |
 
-1. **High — the TOCTOU.** Two arms. **Arm A is now fixed properly**: `/bin/sh` is gone from both writers, replaced by `std::fs::read` → `OpenOptions::create_new(true)` (`O_EXCL`) → `write_all`/`sync_all` → `std::fs::rename`, and the target is constrained to **exactly** `…/launches/<launch>/xdg/espanso/match/conflict.yml`. This subsumes round 1's finding 2 by construction — there is no longer a shell whose exit status can mask anything. **Arm B — an ancestor directory replaced by a symlink between canonicalization and the rename — is DISCLOSED AS RESIDUAL AND UNPROVEN**, not closed: defeating it needs `openat`-style pinned directory handles, which `std` does not offer. The three reasons it is accepted (operator-controlled `/private/tmp` launch root, binary never shipped, 2c-5-7 deletes it) are **stated in the record as not a proof of impossibility**.
-2. **Medium — §9.1/§9.2 over-claimed closure.** Now split into three named parts: closed-and-measured, closed-by-construction, and open.
-3. **Low — the `--- failed` claim.** A rejected `say` reaches `startProbe`'s catch, which reports through **another** `say`; if stdout is still unavailable that call also rejects and `--- end` is never reached. The record now says the driver *attempts* the report and a transcript I/O failure may leave a **silently truncated log**.
-4. **Medium — a narrower recurrence of round 1's closed finding 7.** The absence over-claim moved from §4.3 to §6.3 ("P01 failed before reaching the surface, so no writer ran"). **There is no invoke spy and no command counter in this instrument, so no artifact here can distinguish "no write" from "an identical or transient write".** The fix round then swept the record for that *shape* and found **five further instances**.
+**Every one of those five rounds answered "did the fix round create anything?" with YES**, which is why none of them was allowed to close without a successor. The trend is the reading that matters: the count fell 8 → 4 → 5 → 6 → 3 and the ceiling fell **High → Medium → Low**. Round 5 is the first round of this step with no High and no Medium.
 
-#### What the round-3 confirmation must judge
+#### What round 5 found, and what the fix round did (all three are wording; no code behaviour changed)
 
-Commission it as `Agent(subagent_type="codex:codex-rescue", ...)`, brief it as a **confirmation round** on the four round-2 findings, and tell it to sweep for the **shape** of each, never its words. Ask specifically:
+1. **Low — `src/probe.ts`, the write-back was said to scroll.** Round 4 had replaced *"Nothing here scrolls anything"* with *"scrolls the pane, to a stale position"* — one categorical claim traded for its opposite. `scrollTop` is **clamped against the layout existing when the assignment runs**, so it may leave the position unchanged, may move it, and may land at neither value. Now: the write-back **can overwrite a newer position by attempting to restore the earlier value**, guaranteeing **neither** preservation **nor** restoration.
+2. **Low — the record carried the same over-claim** at §11.6 item 3 (*"would undo"*) and §12.2 (*"restores a stale position"*). Both corrected; §12.2 now states the clamping and the three possible outcomes.
+3. **Low — two references escaped §12.5's terminology sweep** (§7's bundle-search paragraph, §10's P02 paragraph). Both now use the defined terms. Neither was false — the number beside each made the set recoverable — **but §12.5's own claim that the terms were "used everywhere" was**, and §12.5 now carries that correction instead of repeating the claim. §13.3 is the record.
 
-- Is Arm A genuinely closed, and is Arm B's disclosure honest rather than a softened closure claim?
-- Did the round-2 fix **create** anything? This project's dominant pattern is that the fix round creates the next finding — it has now happened many rounds running, and round 2's own finding 4 was an instance.
-- Does the record's §6.1 general rule actually cover the five swept instances, or does it merely gesture at them?
-- Does §8 tell 5b the truth about the confinement it inherits, now that Arm B is residual?
+`§13` is the disposition. The orchestrator applied these three by hand rather than by worker, because each had its replacement wording dictated by the review.
 
-#### The evidence that exists, re-derived by the orchestrator and not merely reported
+#### What round 5 CLOSED, and what it settled that earlier rounds could not
 
-**Launches P37–P48** (proof set, binary `0a2d3506…`): every one has a **uniform 10-line `bytes.txt`**, a **zero-byte `probe.err`**, exactly one `--- end`, zero `--- failed`, and `bytes=MATCH`. P37 is `editor-third`, the case that exercises `probe_third_writer`.
+- **The residual list is exhaustive at four.** Round 5 enumerated the re-resolutions **from the code rather than against the list** and found **no fifth**: a target final-component replacement does not follow a newly planted symlink, and every directory walked by the temporary is already the target-path ancestor case.
+- **All of §9.1's per-item labels now match their evidence.** Two were wrong across two rounds — C06 credited with the direct-child source constraint it never exercises, then C09 credited with the exact-shape rule it never reaches. C10 alone measures target shape; C07 measures only a pre-existing temporary entry; C05/C09 measure only the outside-launch-root refusal.
+- **The `drop(handle)` close-error disclosure is correct and not overstated**, read as an acceptance rationale rather than a guarantee: Rust's `File` drop path cannot report a close error to this code, and a checked `sync_all` is a genuine mitigation without proving close succeeded.
+- All five of round 4's swept extras are closed, including the corrected `seventeen of nineteen` (N07/N08 write no transcript at all) and the binary-identity claims now bound to **when** the digest was read.
 
-**Controls, where a refusal IS the pass** (`failed-lines=1`):
+#### What is OPEN, and what 5b inherits
 
-- **N07/N08** — no plan: zero-byte log, zero-line tree diff, and `alive-at-kill=yes` as the positive control that the silence is a **running** window's.
-- **C05/C06** — target and source outside the harness: decoy `unchanged`, refusal quoted.
-- **C07** — **a symlink planted at the exact temporary path**: `create_new` refuses with `File exists (os error 17)`. This is the `O_EXCL` guarantee **measured**, not asserted, and it is Arm A's proof.
-- **C09** — target symlink pointing outside: refused.
-- **C10** — a path *inside* the launches root but not the exact synthetic file: refused by the new exact-path rule. The **old** rule would have accepted it, so this measures the narrowing.
-- **C08** — a **retained discarded attempt**: replacing the launch's own `conflict.yml` with a symlink made the sidebar row never draw, so the plan never reached the writer. Recorded as establishing a timeout and **nothing about any writer**.
+**Four residual rebindings, open and disclosed, not closed** — the module note in `src-tauri/src/probe.rs` and §8.1 both say so in these terms:
 
-`rg -c 'probe_third_writer' dist/assets/index-*.js` → **1** (round 1's finding 3 has not regressed). Bundle oracle, and read **both** lines because a bare `svelte/internal/server` search is a **vacuous** negative:
+1. the **source's final component**, between `confined_source` and `std::fs::read`;
+2. the **temporary's name** after `create_new`, because the `rename` that spends it resolves the name and not the handle;
+3. an **ancestor of the target's** pathname — the launch tree;
+4. an **ancestor of the source's** pathname, most directly `fixtures`, which is a **sibling** of `launches` and so was never covered by item 3.
+
+They are one shape — a name checked at one instant and spent at another, this project's check-and-spend defect class. Closing any needs `openat`-style pinned directory handles that `std` does not offer; writing one with `libc` in throwaway instrument code was **considered and rejected** as new unproven cleverness on the one path where being wrong is worst. All four are **accepted, not proven** — operator-controlled launch root, never-shipped binary, deleted at 2c-5-7 — and **acceptance is not proof of impossibility**. Arm A of round 2's High is therefore **partially closed**, never closed.
+
+What IS forced, and it belongs in the same sentence: the canonical target must be exactly `<launch>/xdg/espanso/match/conflict.yml` beneath the canonical launches root at the instant of the check (measured by C10), and no entry of any kind existed at the temporary's pathname when `open` ran (`O_EXCL`, measured by C07).
+
+#### What the round-6 confirmation must judge
+
+Commission it as `Agent(subagent_type="codex:codex-rescue", ...)`, brief it as a **confirmation round** on round 5's three findings, and tell it to sweep for the **shape** of each, never its words. Ask specifically:
+
+- Do the three corrected wordings now claim exactly what the code gives — neither the old over-claim nor a new one in the opposite direction? 13.1 is the third wording this one sentence has had.
+- **Did the round-5 fix create anything?** Five rounds running have answered yes. §12.5's correction and §13 itself are the new prose and are where to look hardest.
+- Is §13 honest about what is open, and does §13.4's trend claim overstate?
+- Is there any remaining **exhaustiveness** claim in the record or the probe sources that the evidence does not license? That shape has now produced findings in two consecutive rounds (round 4's "exactly three", round 5's "used everywhere").
+
+**Write the brief so either sandbox works** — say the workspace may be read-only, that its final message IS the deliverable, and that a sandbox limit must not affect the verdict. Round 4's job wrote its own file; round 5's could not, and the orchestrator captured it with `node "$CC" result <job-id> > docs/reviews/…`. **Check whether the file exists and is substantive before writing anything to that path.**
+
+#### After round 6 closes: what 5b builds
+
+`docs/decisions/2c-5-5a-instrument-rebuild.md` §8.2 is the specification and it is specific. In outline: seeded **backup-root fixtures** (nothing in this tree writes a `.espansoconfig-backups` directory *before* a launch — the positives produce one *during*, which is a by-product and not a catalogue); the **`RestorePane` drive** — the pane is `section.restore` with four `section.step` blocks, its outcome panel is a **direct child**, and there is **no `.panel.reapply` on it at all**, so `reportReapply` must never be called for a restore or the plan times out; the catalogue / entry / candidate / prepare / replace states, each with the launch that reaches it; and the **byte oracle extended over the backup tree**, because a restore is a whole-file replacement that itself takes a backup and must not disturb the batch it restored from.
+
+**5b must treat `probe_third_writer` as exercised exactly once** (P37) and `runThirdWriter()` as reachable — that is now true where round 1 found it tree-shaken. Bundle oracle, and read **both** lines because a bare `svelte/internal/server` search is a **vacuous** negative:
 
 ```sh
 rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js   # server-only — must be ABSENT
 rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js    # client-only — must be PRESENT → 2
 ```
-
-#### After round 3 closes: what 5b builds
-
-`docs/decisions/2c-5-5a-instrument-rebuild.md` §8.2 is the specification and it is specific. In outline: seeded **backup-root fixtures** (nothing in this tree writes a `.espansoconfig-backups` directory *before* a launch — the positives produce one *during*, which is a by-product and not a catalogue); the **`RestorePane` drive** — the pane is `section.restore` with four `section.step` blocks, its outcome panel is a **direct child**, and there is **no `.panel.reapply` on it at all**, so `reportReapply` must never be called for a restore or the plan times out; the catalogue / entry / candidate / prepare / replace states, each with the launch that reaches it; and the **byte oracle extended over the backup tree**, because a restore is a whole-file replacement that itself takes a backup and must not disturb the batch it restored from.
-
-**5b must treat `probe_third_writer` as exercised exactly once** (P37) and `runThirdWriter()` as reachable — that is now true where round 1 found it tree-shaken.
 
 #### Two standing traps, both in `CLAUDE.md`, both still binding
 
