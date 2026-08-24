@@ -39,6 +39,7 @@
   import SourceText from './SourceText.svelte';
   import {
     t,
+    tBackupReadError,
     tBackupRootState,
     tBatchSkipped,
     tConflictChoice,
@@ -59,11 +60,13 @@
     tBackupTarget
   } from '../i18n';
   import type { CommandResult } from '../ipc/commands';
+  import type { IpcFailure } from '../ipc/errors';
   import type {
     BackupBatchId,
     BackupBatchListing,
     BackupEntryId,
     BackupEntryListing,
+    BackupReadError,
     BackupTextResponse,
     DocumentId,
     DocumentSummary,
@@ -604,6 +607,27 @@
         return;
     }
   } // End of function conflictAction()
+
+  /**
+   * The nested backup-catalogue reason one failure carries, or `null`.
+   *
+   * `backupReadFailed` carries its typed `BackupReadError` at `error.error`, and
+   * `describeCommandError` substitutes only top-level operands — so the generic
+   * sentence, which promises the reason beside itself, cannot name the nested
+   * reason's offset or path. This narrowing is what lets both failed panels keep
+   * that promise by drawing the inner reason through `tBackupReadError`, the
+   * accessor built for it (the 2c-5-6 reading's Medium finding). A failure that
+   * carries no such reason answers `null`, and the panels then draw nothing
+   * beyond the two sentences they always drew.
+   *
+   * @param failure - Why a catalogue request failed, as the boundary classified it.
+   * @returns The typed reason, or `null` when the failure carries none.
+   */
+  function backupReadReasonOf(failure: IpcFailure): BackupReadError | null {
+    return failure.kind === 'command' && failure.error.code === 'backupReadFailed'
+      ? failure.error.error
+      : null;
+  } // End of function backupReadReasonOf()
 </script>
 
 <section class="restore" aria-label={t('browser.restore.label')}>
@@ -651,9 +675,16 @@
       <p class="kind">{t('browser.restore.batchesLoading')}</p>
     {:else if current.view.batches.kind === 'failed'}
       {@const failed = current.view.batches.failure}
+      {@const reason = backupReadReasonOf(failed)}
       <div class="panel">
         <p>{t('browser.restore.entriesRefused')}</p>
         <p>{tIpcFailure(failed)}</p>
+        <!-- The reason both sentences above promise. A `backupReadFailed`
+             nests it where `describeCommandError` cannot substitute, so it is
+             drawn here through its own typed accessor (2c-5-6 §4). -->
+        {#if reason !== null}
+          <p>{tBackupReadError(reason)}</p>
+        {/if}
       </div>
     {:else if current.view.batches.kind === 'loaded'}
       {@const listing = current.view.batches.listing}
@@ -716,12 +747,19 @@
         <p class="kind">{t('browser.restore.entriesLoading')}</p>
       {:else if current.view.entries.kind === 'failed'}
         {@const failed = current.view.entries.failure}
+        {@const reason = backupReadReasonOf(failed)}
         <!-- Both a refused entry listing and a refused text read land here: the
              model puts a refused read on this catalogue, because a candidate it
              could not obtain is a fact about what this batch could give. -->
         <div class="panel">
           <p>{t('browser.restore.entriesRefused')}</p>
           <p>{tIpcFailure(failed)}</p>
+          <!-- The reason both sentences above promise — the not-UTF-8 offset
+               included — through the typed accessor, never a built key
+               (2c-5-6 §4). -->
+          {#if reason !== null}
+            <p>{tBackupReadError(reason)}</p>
+          {/if}
         </div>
       {:else if current.view.entries.kind === 'loaded'}
         {@const listing = current.view.entries.listing}

@@ -839,6 +839,74 @@ describe('the mounted restore pane: the catalogue and the candidate', () => {
     expect(says(pane.target, 'browser.restore.refused.noCandidate')).toBe(true);
     pane.stop();
   }); // End of the "refused read" case
+
+  it('draws the specific reason beside a refused entry read, in both languages', async () => {
+    // The wire nests the reason at `error.error`, where `describeCommandError`
+    // substitutes nothing — so before 2c-5-6b's fix this panel drew two generic
+    // sentences that each promised a reason beside themselves and nothing
+    // supplied one (that reading's §4, the Medium). The offset is 7 rather
+    // than 0 so this case proves the operand travelled, not a default.
+    const notUtf8: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'backupReadFailed',
+        error: {
+          NotUtf8: { entry: { batch: BATCH, relative_path: 'match/base.yml' }, offset: 7 }
+        }
+      }
+    };
+    const pane = await mountRestore([], { reads: [{ ok: false, failure: notUtf8 }] });
+    await walkToCandidate(pane);
+
+    // The two sentences the panel always drew still stand…
+    expect(says(pane.target, 'browser.restore.entriesRefused')).toBe(true);
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['code.commandError.backupReadFailed']
+    );
+    // …and the purpose-built reason now stands beside them, offset substituted,
+    // rendered through the typed accessor and never a hand-built key.
+    expect(pane.target.textContent).toContain(
+      translate('en', 'code.backupReadError.notUtf8', { offset: 7 })
+    );
+    // The same mounted panel re-rendered in Spanish draws the Spanish sentence.
+    locale.setOverride('es');
+    flushSync();
+    expect(pane.target.textContent).toContain(
+      translate('es', 'code.backupReadError.notUtf8', { offset: 7 })
+    );
+    expect(invoked).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "specific reason beside a refused entry read" case
+
+  it('draws the specific reason beside a refused batch listing', async () => {
+    // The batches catalogue's failed panel has the same shape as the entries
+    // one, and no launch can reach it — the seeded root is always a private
+    // directory — so this case is that arm's whole evidence (2c-5-6's record
+    // says so in its disposition).
+    const rootGone: IpcFailure = {
+      kind: 'command',
+      error: {
+        code: 'backupReadFailed',
+        error: { RootNotADirectory: { path: '/tmp/espanso/.espansoconfig-backups' } }
+      }
+    };
+    const pane = await mountRestore([], { batches: [{ ok: false, failure: rootGone }] });
+    control(pane.target, 'browser.restore.listBatches').click();
+    await settle();
+
+    expect(says(pane.target, 'browser.restore.entriesRefused')).toBe(true);
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['code.commandError.backupReadFailed']
+    );
+    // The path operand, substituted through the same typed accessor.
+    expect(pane.target.textContent).toContain(
+      translate('en', 'code.backupReadError.rootNotADirectory', {
+        path: '/tmp/espanso/.espansoconfig-backups'
+      })
+    );
+    expect(invoked).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "specific reason beside a refused batch listing" case
 }); // End of the "catalogue and candidate" suite
 
 describe('the mounted restore pane: the two-stage confirmation', () => {

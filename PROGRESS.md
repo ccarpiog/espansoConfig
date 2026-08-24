@@ -3656,6 +3656,59 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-5 step 6b (PARTIAL — the reading taken, its review NOT READY, twelve re-takes owed and blocked on a locked console)
+
+**2026-08-24. 6b is NOT closed.** What is done: **twenty-four launches** — P63–P74 (part 1: `restore-none`,
+`restore-prepare`, `restore-replace`, `restore-conflict`, `restore-skipped`, `restore-notutf8`, each
+en then es, binary `c4f2ae02…`), P75–P84 (part 2: `restore-preview-bytes`, `restore-withdraw`,
+`restore-findings`, `restore-nothing`, `restore-reload`, each en then es, same binary), and P85/P86
+(the fix round's bilingual re-takes of `restore-notutf8` on the rebuilt `371fc7c1…`). All
+twenty-four: `failed-lines=0`, `end-lines=1`, `probe.err=0 bytes`; all six by-hand displaced-bytes
+readings taken (P67/P68/P79/P80 minted batches `cmp`-identical to `base-r0.yml`; P83/P84 to
+`elsewhere-r1.yml`). The record is `docs/decisions/2c-5-6-window-reading.md` (§§1–12); the
+orchestrator resolved the checkpoint's open scoping question **restore states only** (Q7 item 6 is
+authoritative; the write surfaces had their own bilingual readings), and the review verified that
+resolution against the design.
+
+**The reading found one Medium and judged one Low, and the fix round closed the Medium.** Medium
+(part 1, P73/P74): the refused non-UTF-8 read drew two sentences each promising "the reason beside
+this" with nothing supplying it — `code.backupReadError.notUtf8` existed in both dictionaries and
+was unreachable, `tBackupReadError` having no component caller. Fixed in
+`src/lib/components/RestorePane.svelte` (+38: both failed panels now draw the nested
+`BackupReadError` through the typed accessor via `backupReadReasonOf()`), proven by two new mounted
+cases in `RestorePane.test.ts` (+68) and by P85/P86 in both languages; `src/probe.ts`'s
+`reportRefusedEntryRead` gained a third dictionary-resolved wait; re-take scope P85/P86-only,
+review-confirmed against the component's branches. Low (P83/P84): the conflict-moment covering —
+the sticky actions row under the app header — **accepted as recorded**: the covered control is
+disabled at that moment, both exits hit-test clean, the enabled-state half named as unmeasured.
+
+**The phase review (round 1) returned NOT READY** — captured verbatim to
+`docs/reviews/phase-2c-5-6b-reading.md` (read-only sandbox, standing capture rule). Eleven sampled
+transcripts record-exact, coverage table complete, all four 6a §6 unreachability arguments verified,
+fix and re-take scope confirmed. **Its Medium: the record's completed-timers occlusion derivation
+was unsound** — all ten part-2 launches and both re-takes printed `visibility=hidden hasFocus=false`
+at plan start, and the record derived they "could not have" stayed hidden; but the driver's ~6 s
+grace plus waits that return immediately make a completed plan compatible with a window hidden
+throughout. **Disposition (record §12): the derivation is withdrawn in all three places it stood;
+P75–P84 and P85/P86 are re-classified as document-and-filesystem readings (their byte lines stand;
+their screen claims do not), and twelve re-takes are owed — P87 upward, same cases and languages on
+binary `371fc7c1…`, each accepted only if its own transcript prints `visibility=visible`.** They
+were not taken: at the post-review check the console answered `CGSSessionScreenIsLocked = 1`, and
+no launch can present behind a locked screen. (The lock's timestamp postdates most part-2 launches;
+what hid the windows mid-run is unmeasured — plausibly display idle-sleep — and unclaimed.) The
+review's Low (a "three"-for-four count in §9) is fixed. **A round-2 review scoped to the re-takes
+and the §12 edits is owed once the re-takes are taken.**
+
+Gates re-derived twice after the fix round — by the fix worker and independently by the
+orchestrator: `cargo test --workspace` **1153 / 0 failed**; `npm run check` **432 files / 0 / 0**;
+`npm test` **2126 in 56 files** (+2, the new mounted cases — prediction matched measurement);
+`npm run build` **185 modules**; clippy `-D warnings` clean; `cargo fmt --check` clean; bundle
+oracle **server-absent / client-present → 2**. **The with-harness baseline is now
+`1153 / 432 / 2126 / 185`.** The tree gains launches P63–P86; no manifest was written (the closure
+writes the final post-image); `manifest-2c-5-6a-cases.sha256` still fails on `src/probe.ts` only,
+`manifest-2c-5-6a-fix.sha256` now on `src/probe.ts` plus its already-failing 6a-record entry — kept
+as the record of the fix round. The 2c-5-7 deletion list is not lengthened.
+
 ## Verification — Phase 2c-5 step 6a (the instrument extended to every restore state 6b must reach)
 
 **2026-08-24. Step 2c-5-6 — the bilingual WKWebView reading — was split by the orchestrator into 6a
@@ -8514,6 +8567,91 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-6b is PARTIAL — all 24 launches taken and every state read bilingually, but the round-1 review is NOT READY and its disposition owes TWELVE RE-TAKES that are BLOCKED ON A LOCKED CONSOLE. THE NEXT ACTION IS THE RE-TAKES — P87 upward, on an unlocked screen — then the round-2 review and the manifest.**
+
+**What happened, in one paragraph.** The reading ran P63–P86 (eleven cases × two languages, plus
+P85/P86 re-taking `restore-notutf8` after a fix round closed the reading's own Medium — the
+unreachable `code.backupReadError.notUtf8` sentence, now drawn through `tBackupReadError` in both
+`RestorePane.svelte` failed panels, +2 mounted cases). The phase review verified everything else
+but found the record's occlusion derivation unsound: **all ten part-2 launches and both re-takes
+printed `visibility=hidden` at plan start and nothing proves they were ever presented.** Record
+§12 withdrew the derivation, re-classified those twelve as document-and-filesystem readings (byte
+lines stand; screen claims do not), and owes twelve re-takes. At the post-review check the console
+was locked (`CGSSessionScreenIsLocked = 1`), so they could not be taken. See "Verification — Phase
+2c-5 step 6b" above.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all   # expect exactly FOUR lines — the harness paths, nothing else
+ls /private/tmp/espansoconfig-harness-2c-5/   # the tree is VOLATILE and has been lost twice — check FIRST
+# docs/decisions/2c-5-6-window-reading.md — §12 (the re-take obligation and its terms), §2 (the
+#   reading's rules), §11 (the fix round; the full digest of binary 371fc7c1…), §6 (the ten
+#   sections the re-takes echo), §8 (the coverage table the re-takes re-earn)
+# docs/reviews/phase-2c-5-6b-reading.md — the round-1 verdict, verbatim
+# docs/decisions/2c-5-6a-instrument-extension.md — §2 the cases, §3.3 the reporter's limits
+# docs/decisions/2c-5-5a-instrument-rebuild.md — §3 the launch recipe
+```
+
+#### The re-takes — exactly what is owed
+
+**Twelve launches, P87 upward** (numbering never reuses): `restore-preview-bytes`,
+`restore-withdraw`, `restore-findings`, `restore-nothing`, `restore-reload`, `restore-notutf8`,
+each `:en` then `:es`, all on the binary the fix round built (`371fc7c1…` — full digest in record
+§11; verify `shasum -a 256 target/debug/espansoconfig` FIRST and stop if it differs — a rebuild is
+a new step, not a shrug). The five part-2 cases never enter the branches the fix changed, so the
+one binary serves all twelve. **Acceptance per launch: its own transcript prints
+`visibility=visible`** — plus the standing per-case shapes (record §6/§11.6) and the by-hand
+displaced-bytes readings on the four committed launches (findings → `base-r0.yml`, reload →
+`elsewhere-r1.yml`). Before the first launch: confirm the console is unlocked
+(`CGSSessionScreenIsLocked` absent or 0) and hold the display awake for the run (a background
+`caffeinate -d -u -t <seconds>` is enough); if any launch still reports hidden, stop and fix the
+environment rather than accumulating more unusable numbers. One plan per launch, fresh bundle
+path, serial, language through the picker.
+
+#### After the re-takes
+
+1. Append §13 to `docs/decisions/2c-5-6-window-reading.md`: the twelve launches in the record's
+   per-launch style, the re-earned §8 rows, and the closure of §12's obligation.
+2. **Round-2 review**, scoped to the re-takes, the §12/§9 edits and §13 — commission as
+   `Agent(subagent_type="codex:codex-rescue", ...)`, brief for either sandbox, capture the verdict
+   if read-only, sweep for the SHAPE of the closed findings. The four residual rebindings (5a
+   §8.1) stay inherited-open and are not new findings.
+3. On READY: write `manifest-2c-5-6b-reading.sha256` (the final post-image: five scripts, thirteen
+   fixtures, both probe sources, and every 6b launch's `probe.log` + `bytes.txt`), update this
+   checkpoint, commit by path, push. **Then 2c-5-7** — the instrument's removal and the
+   harness-free re-derivation — is the phase's last step.
+
+#### The gate baseline — TWO figures, and do not confuse them
+
+- **With the harness in the tree: `1153 / 432 / 2126 / 185`** (`cargo test --workspace` / `npm run
+  check` files / `npm test` / `npm run build` modules) — moved 2124 → 2126 at the 6b fix round
+  (two mounted cases; prediction matched measurement). Clippy and fmt clean; bundle oracle
+  **absent / present → 2** (read both lines).
+- **Harness-free production: `1153 / 431 / <re-derive> / 184`** — what **2c-5-7 must re-derive on
+  a harness-free tree**, never copy forward; the npm-test figure moved with the fix round's two
+  cases, so the pre-6b `2123` no longer holds and the scar is still `1623`.
+
+#### The state of the tree
+
+If `/private/tmp/espansoconfig-harness-2c-5/` is gone again, rebuild from 5b §2–§3 plus 6a §2 (both
+recipes proven), re-run `byte-fixtures.sh`, and re-take one positive launch plus the five
+confinement controls on the new binary before using it. It holds: five scripts, thirteen fixtures,
+launches **P49–P86, N09, C11–C15** (+ `C14-plant`), four manifests (each failing set the kept
+record of a later edit — see 6a §8 and record §11.9). Decoys `…-probe-decoy-C11..C14.yml` sit
+outside the tree; 2c-5-7's deletion list is those four, the tree, and the planted symlink
+artifacts. The four harness paths in the repository (`src/main.ts`, `src-tauri/src/main.rs`
+modified two hook lines each; `src/probe.ts`, `src-tauri/src/probe.rs` untracked) are the
+surviving authority and **must never be committed — never `git commit -a` or `git commit -am`;
+stage by path.** The 6b commit additionally holds the fix round's two tracked product files
+(`RestorePane.svelte`, `RestorePane.test.ts`) — the reading's Medium made this a source-carrying
+step, as 2c-4c-5b-1/5b-2 was.
+
+---
+
+### ⚠️ HISTORICAL — the 6a → 6b handoff, superseded by 6b's partial completion above. Its launch plan is executed; what remains of 6b is the twelve re-takes, the round-2 review and the manifest.
 
 ### **Step 2c-5-6a is COMPLETE — seven new cases proven, four states argued unreachable, two review rounds ending READY. THE NEXT ACTION IS STEP 2c-5-6b — the bilingual window reading itself.**
 
@@ -15308,6 +15446,7 @@ _Updated at each phase boundary._
 | **2c-5 step 5a (closure)** | **`9517fd0`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as all three earlier 5a commits were. The commit holds **two** files and no harness path: `docs/decisions/2c-5-5a-instrument-rebuild.md` (§16 appended and three closure edits above it) and this checkpoint. **The same four harness paths were left in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else** — no real-config path, no launch artifact. **`git commit -a` from here would commit the instrument.** The commit holds **no source file and no test** — the closure changed markdown only, and the gates were re-derived rather than assumed (§16.5). **Step 5a IS closed by it**, by the owner's 2026-08-24 decision not to run the eighth round — a deliberate exception recorded in §16, covering exactly the nine changes §16.1 enumerates. The next step is **2c-5-5b**, and **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
 | **2c-5 step 5b** | **`4177097`** | ✅ pushed to `origin/main` (`1065317..4177097`; this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a commit was. The commit holds **three** files and no harness path: `docs/decisions/2c-5-5b-instrument-cases.md` (§§1–8), the captured review `docs/reviews/phase-2c-5-5b-instrument.md` and this checkpoint. **The same four harness paths were left in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else** — no real-config path, no launch artifact. **`git commit -a` from here would commit the instrument.** The commit holds **no tracked source file and no test** — 5b's code lives in the two untracked probe paths and the scratch tree, which is the point. **Step 5b IS closed by it**: the scratch tree was rebuilt after its second loss and proved on its own binaries (P49, N09, C11–C15), the four restore cases ran first-try (P50–P53, `failed-lines=0` on all), the gates were re-derived twice at `1153 / 432 / 2124 / 185`, and the single review round returned **READY with no findings** — the first READY of any instrument step. The next step is **2c-5-6**, the bilingual window reading, and **2c-5-7 still deletes the instrument** (tree, four probe paths, decoys C11–C14, C14-plant artifacts) and re-derives the harness-free gate counts |
 | **2c-5 step 6a** | **`856a8b3`** | ✅ pushed to `origin/main` (`2b7fb07..856a8b3`; this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a/5b commit was. The commit holds **four** files and no harness path: `docs/decisions/2c-5-6a-instrument-extension.md` (§§1–10.1), the two captured reviews `docs/reviews/phase-2c-5-6a-instrument.md` (round 1, NOT READY: one Medium, one Low — both prose) and `…-round2.md` (READY, no findings), and this checkpoint. **The same four harness paths were left in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else** — no real-config path, no launch artifact. **`git commit -a` from here would commit the instrument.** The commit holds **no tracked source file and no test** — 6a's code lives in the untracked `src/probe.ts` and the scratch tree, which is the point; the fix round's two `src/probe.ts` comment corrections travel with the untracked file. **Step 6a IS closed by it**: seven new cases proven first-try on binary `c4f2ae02…` (P55, P56, P58–P62; P54 and P57 retained superseded), four demanded states argued unreachable with review-verified arguments, the gates re-derived three times at `1153 / 432 / 2124 / 185`, round 2 READY. The next step is **2c-5-6b**, the bilingual reading itself, and **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
+| **2c-5 step 6b (partial)** | *(this row recorded by the follow-up commit)* | — | **DELIBERATELY NOT CLEAN**, as every 5a/5b/6a commit was. The commit holds **five** files staged **by path**: `src/lib/components/RestorePane.svelte` and `src/lib/components/RestorePane.test.ts` (the fix round — the reading's Medium made this a source-carrying step, as 2c-4c-5b-1/5b-2 was), `docs/decisions/2c-5-6-window-reading.md` (§§1–12), the captured review `docs/reviews/phase-2c-5-6b-reading.md` (round 1, **NOT READY**: one Medium — the occlusion derivation, §12's disposition; one Low — fixed) and this checkpoint. **The same four harness paths stay in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else**. **`git commit -a` from here would commit the instrument.** **Step 6b is NOT closed by it**: twelve re-takes (P87+, `visibility=visible` required) are owed and were blocked on a locked console; the round-2 review and the manifest follow them. **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
 
 `e83bc31` is Phase 2c-4c **step 6**, the harness's removal, **including its review fix round** — the
 phase was held open until all nine findings were closed, as every phase since `8989c16` has been. It
