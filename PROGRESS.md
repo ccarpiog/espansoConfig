@@ -102,7 +102,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5-4a** | **The restore coordinator wiring in `BrowserState`, with nothing drawn** — the first half of a split of step 4, cut by failure mode: 4a is how the window talks to disk, 4b is the screen and the surfaces it must close. Three thin, unmemoised, re-callable wrappers over the read-only backup commands on a **second injected surface** (`BackupCommands`, all members required), plus `restoreDocument(started, surfaces, invalidate)`, which composes `sendRestore` with `BrowserState.saveRawDocument` — the sixth writer, **called rather than copied** — and routes the four answers to `restoreConfirmationWithdrawn` / `restoreCouldNotBeSent` / `applyRestore`. The `RestoreContext.observed` half is read **here, synchronously, before anything awaits**, narrowing the one hole `restore.ts` names as unforceable; the surfaces half stays the caller's because no coordinator can observe a session held inside a component (R36) | ✅ complete — after a review round, a fix round and a confirmation round. **The review returned NOT READY on a High**, and it was a *narrower surviving instance of the very defect 2c-5-3 spent four passes closing*: round 4 there made the checked `delete` the membership test for `PENDING_CONFIRMATIONS`, but `sendRestore` still called `PERMITS.delete(started)` and **discarded the boolean**, so a getter or proxy trap fired by `permitHolds`'s caller-supplied reads could re-enter synchronously, spend the same permit, and start a second whole-file write while the outer call ignored its own failed deletion — **one confirmation, two destructive writes**. The sequential double-send case could not reach it. Closed by making the deletion the authorization on every path to a sender, pinned by a `Proxy` whose `Symbol.iterator` trap re-enters the coordinator (it fails `expected 1 call, got 2` without the fix). The Medium was a session left permanently in `saving` after a write-safe mismatch — the model freezes every editing transition there, so the record's claimed *ask again* recovery did not exist; closed by a new `RestoreSend::withdrawn` arm and `restoreConfirmationWithdrawn`, and by deleting the redundant `session` parameter that let a permit be paired with a foreign session. The confirmation round found **no High and no Medium**, confirmed all three original findings fully closed, and left one Low — the fix round's own overcorrection, prose calling consent *one-attempt* when the withdrawal deliberately keeps a candidate-bound acknowledgement |
 | **2c-5-4b** | **The restore screen, its i18n, and the phase's whole mounted evidence**: `src/lib/components/RestorePane.svelte` — the **seventh write surface**, a third-pane mode reached from the document's whole-text surface, with three stacked states (recognised batches → entries → the exact candidate through `SourceText` with `documentStart`), the measured byte/code-point facts of the new `src/lib/browser/restoreFacts.ts`, the **labelled** loaded-target observation, a sticky two-stage *Prepare* → visually distinct *Replace entire file*, the catalogue states, the save outcomes, a `conflictChoicesFor` conflict panel with `offersReload` flipped to **`true`**, and parse-finding acknowledgement that re-asks the question. `DetailPane.svelte` reaches it and owns `openWriteSurfaces()` and the synchronous `invalidateEverySurface()`. 50 new keys per dictionary; `tRestoreRefusal` added **and called**, never a hand-built key. 27 mounted cases as first written (59 after the fix round), over a **real** `BrowserState` with `BackupCommands` injected everywhere and a hoisted `invoke` mock asserting **no direct IPC**. **`ConflictChoice` gained a sixth member, `confirmReloadKeeping`** — taken deliberately outside the step's stated scope, because `conflictChoiceKey` labelled restore's confirm control *"Close this and load it"* and **restore's reload closes nothing**; `retargetsCandidate` is declared only by `restore.ts`, so the other seven surfaces still route through `confirmReload`, every existing key is byte-identical and **no shipped sentence moved** | ✅ complete — after **six rounds**: one code review, four confirmation rounds and a documentation fix. **Every round closed one instance of a single shape and the next found a narrower one, three times running, each created by the previous round's fix** — *a check and a spend separated by any property read are not atomic in JavaScript*. Round 1: 2 High, 1 Medium, 2 Low. Round 2: H1 **partially** closed (two caller-controlled sources for one base revision), H2 **still open** (`revokeConfirmation`'s own first operation was a caller read, and `reloadTheDiskVersion` was omitted from the withdrawal set), plus a **new** High — projection generations are per document, so alternating getters across two documents let one confirmation install two projections. Round 3: H1 and H3 closed, H2 narrower still — the take-and-put-back **removed** the authorization while inspecting, and `prepareRestore` reads absence as permission to register a second question. Round 4: **no High, no Medium**, all four closed by a private `SuspendedQuestion` marker that **replaces** the permit under the same key rather than removing it; its one Low was in `unchangedByInspection`, the helper added *beyond* the review's minimal fix. Round 5: one Low in a **JSDoc contract**, fixed directly. **The lesson: removing a token to protect it creates a false "nothing here" state for every other producer that tests for presence.** No Rust touched, and **no window reading is owed here** — 2c-5-6 owes it |
 | **2c-5-5a** | **The instrument, rebuilt from prose — both halves, for the second time in this project's history.** 2c-4c-6 deleted both probe sources, the four hook lines and the whole scratch tree, so like 2c-4c-4a this step had **nothing** to start from. `src-tauri/src/probe.rs` authored from the code; `src/probe.ts`, `launch.sh`, 9 fixtures and an 11-row case table re-authored from seven construction records. **Step 5 was split by the orchestrator** into 5a (the harness and its proof set) and 5b (the restore-specific cases), exactly as 2c-4c-4 was cut | ✅ **CLOSED 2026-08-24 by owner decision — a deliberate exception to the standing rule: the eighth round the round-7 fixes owed was deliberately not run.** The record's **§16** is the closing entry: 16.1 enumerates the nine unreviewed changes the exception covers, 16.2 what did not move (the four residual rebindings, open and disclosed, accepted not proven), 16.3 why it is bounded (2c-5-7 deletes the subject), 16.4 that the rule is narrowed for this closure and not suspended, 16.5 the gates re-derived at closure. Nothing was taken unilaterally. **Seven review rounds in all — 8 → 4 → 5 → 6 → 3 → 3 → 3 findings, ceiling High → Medium → Low — and every one of them answered *"did the fix round create anything?"* with YES**, which is why none before the owner's exception was allowed to close without a successor; **no round ever returned READY**, and the closure converts none of them. **Rounds 6 and 7 found no instrument defect at all** — `### Instrument defects` is "None." in both review files — six prose findings between them, five of the six this record's bookkeeping about its own review history: each round appends a section, the append falsifies a count above it, the next round finds that. **Rounds 3–7 changed no code behaviour at all** (rounds 6–7 changed markdown only, so no gate moved): every fix withdrew, narrowed or corrected a claim, and the instrument has been still since round 2. **Arm A of round 2's High is PARTIALLY CLOSED, never closed** — round 3 found that round 2's own fix had *created* a new check-and-spend gap (`rename` re-resolves the temporary **pathname**; the source is reopened by pathname after its check), and the **reclassify** branch was taken over the `openat` branch, because `libc` in throwaway instrument code is new unproven cleverness on the one path where being wrong is worst. Round 4 then found the reclassified list itself non-exhaustive — `fixtures` is a **sibling** of `launches`, so *"an ancestor of the launch tree"* never covered a source-ancestor rebinding — and three became **four**; round 5 enumerated the re-resolutions **from the code rather than against the list** and confirmed **four with no fifth**. All four are **open and disclosed, accepted and not proven**. Two §9.1 label defects of one shape fell one per round (**C06** credited with the direct-child source constraint it never exercises, then **C09** with the exact-shape rule it never reaches; **C10 alone** measures target shape), and three count contradictions fell to sweeping for the shape rather than the words — `74` against a measured `75` of 78, *"sixty-five launches"* where two sections give **66**, and *"the proof set"* meaning **twelve** in §4 and **nineteen** in §1/§5.10, now two defined terms. One claim was simply **false and fell to measurement**: the proof binary is **not** byte-identical to `target/debug/espansoconfig` *"as it stands now"* — that path answers `04988c09…` against the retained bundles' `0a2d3506…`, re-measured independently by the orchestrator. Round 1 returned **NOT READY on 8 findings**, and **two were real instrument defects, not prose**: a **High**, `replace_the_target` accepting any `ECFG_PROBE_TARGET` so a callable IPC command could replace an arbitrary file outside `save_document`; and a **Medium**, the frontend `runThirdWriter()` **tree-shaken out of the bundle** while the record called it merely "unexercised" — a silent instrument gap of exactly the kind that stranded an earlier reading. Round 2 confirmed six of eight closed and returned **NOT READY on 4 more**: findings 1 and 2 **PARTIALLY CLOSED** on a shared TOCTOU — the same `symlink_metadata`-then-second-pathname-operation shape 2c-5-1's review found in the **production core** — and one finding that was a **narrower recurrence of the closed finding 7**, the absence over-claim having moved from §4.3 to §6.3. The round-2 fix round removed `/bin/sh` from both writers entirely (`std::fs::read` → `create_new` (`O_EXCL`) → `sync_all` → `rename`), constrained the target to the **exact** synthetic file, and **disclosed the ancestor-directory swap as residual and unproven** rather than claiming it closed |
-| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress** — the consult is taken and **steps 1, 2, 3, 4a and 4b are complete**; **step 5 is split into 5a and 5b**, and 5a's round-7 fixes are applied and verified with **the eighth round they owe not run — whether to pay for it is an owner decision, see "Next action"**. Seven review rounds so far: 8 → 4 → 5 → 6 → 3 → 3 → 3 findings, ceiling High → Medium → **Low**, every round's fix created the next round's finding, and **rounds 6 and 7 found no instrument defect at all** |
+| 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | 🔄 **in progress — steps 1 through 6 are COMPLETE, only step 7 (the instrument's removal and the harness-free re-derivation) remains.** Step 5 was split into 5a and 5b, step 6 into 6a (the instrument extended) and 6b (the bilingual reading). 6b took 36 launches across three rounds — P63–P86, then twelve re-takes P87–P98 after the round-1 review found the occlusion derivation unsound — closed one Medium (the unreachable `code.backupReadError.notUtf8` sentence) by a fix round, and ended **round-2 READY with no findings**; the record is `docs/decisions/2c-5-6-window-reading.md` (§§1–13) and the post-image is `manifest-2c-5-6b-reading.sha256` (92/92 OK) |
 | 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -3656,7 +3656,34 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
-## Verification — Phase 2c-5 step 6b (PARTIAL — the reading taken, its review NOT READY, twelve re-takes owed and blocked on a locked console)
+## Verification — Phase 2c-5 step 6b (COMPLETE — the reading, its fix round, the round-1 disposition, the twelve re-takes, and a round-2 READY)
+
+**2026-08-24, closure. 6b is CLOSED.** The twelve owed re-takes were taken as **P87–P98** on an
+unlocked console (`CGSSessionScreenIsLocked` absent from `IOConsoleUsers`; a display-asserting
+`caffeinate -d -u` held through the run), all on the fix-round binary `371fc7c1…`, its digest
+re-verified before the first launch. §11.7 licenses the ten part-2 cases moving off `c4f2ae02…`:
+only `restore-notutf8` traverses the code the fix changed, so one binary serves all twelve.
+**Every launch's own transcript prints `visibility=visible`** — verified per transcript by the
+orchestrator, independently of the worker's report — with `hasFocus=true`, `end-lines=1`,
+`failed-lines=0` and `probe.err=0 bytes`, and the four committed launches passed the by-hand
+displaced-bytes readings (P91/P92 minted batches `cmp`-identical to `base-r0.yml`, P95/P96 to
+`elsewhere-r1.yml`). Record §13 (13.1–13.12 the per-launch entries, 13.13 the re-earned §8 rows,
+13.14 the closure) discharges §12's obligation. One defect was found and fixed during the
+orchestrator's verification, before the review: §13.14's status sentence claimed the tree held
+"exactly the four harness paths, and nothing else" while the record itself sat modified by the
+very append that wrote the sentence — the record-claims-what-is-false shape — and now names its
+own modification, matching §11.9's precedent. **The round-2 review is READY with no findings**,
+written by the reviewer itself into `docs/reviews/phase-2c-5-6b-reading.md` under "Round 2" (a
+writable sandbox this round, unlike round 1's capture): all twelve launches meet §12's
+launch-local acceptance term, the artifacts agree with the standing shapes and §13.1–§13.12, the
+§9/§12 edits resolve both round-1 findings, and the §11.7 binary license holds.
+**`manifest-2c-5-6b-reading.sha256` is written and verifies 92/92 OK** — five scripts, thirteen
+fixtures, both probe sources, and `probe.log` + `bytes.txt` for every 6b launch P63–P98. Gates
+were **not** re-run at closure, deliberately: no product, driver, script or fixture file changed
+after the fix round's double re-derivation — the closure touched only the record, the review file
+and the manifest — so the with-harness baseline stands at `1153 / 432 / 2126 / 185` as derived
+below. The account that follows is the partial state as it stood before the re-takes, kept as the
+history of the round-1 disposition.
 
 **2026-08-24. 6b is NOT closed.** What is done: **twenty-four launches** — P63–P74 (part 1: `restore-none`,
 `restore-prepare`, `restore-replace`, `restore-conflict`, `restore-skipped`, `restore-notutf8`, each
@@ -8567,6 +8594,72 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-6b is COMPLETE — the twelve re-takes taken as P87–P98 on a presented window, the round-2 review READY with no findings, the manifest written and 92/92 OK. THE NEXT ACTION IS STEP 2c-5-7 — the instrument's removal and the harness-free re-derivation, the phase's LAST step.**
+
+**What closed 6b, in one paragraph.** The console lock that blocked the re-takes was gone
+(`CGSSessionScreenIsLocked` absent); a display-asserting `caffeinate -d -u` held through twelve
+serial launches P87–P98 (the six cases `restore-preview-bytes`, `restore-withdraw`,
+`restore-findings`, `restore-nothing`, `restore-reload`, `restore-notutf8`, each `:en` then `:es`),
+all on the fix-round binary `371fc7c1…` under §11.7's license. Every transcript printed
+`visibility=visible` (verified per transcript by the orchestrator); the four committed launches
+passed the by-hand displaced-bytes readings. Record §13 discharges §12's obligation; one
+orchestrator fix before the review closed a §13.14 status sentence that omitted the record's own
+uncommitted append. Round 2 is READY — written by the reviewer itself into
+`docs/reviews/phase-2c-5-6b-reading.md` under "Round 2". See "Verification — Phase 2c-5 step 6b"
+above. **The closure commit is `b9271c1`** (the record's §13 and §13.14 fix plus the review file's
+Round 2, by path); the manifest stays in the harness tree, deliberately uncommitted like its four
+predecessors, and the working tree after the commit lists exactly the four harness paths.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all   # expect exactly FOUR lines — the harness paths, nothing else
+ls /private/tmp/espansoconfig-harness-2c-5/   # the tree is VOLATILE — but for step 7 its LOSS only shortens the deletion list
+sed -n '/^## Q7/,/^## Q8/p' docs/reviews/phase-2c-5-design.md   # item 7 is the removal step's specification
+# docs/decisions/2c-5-6-window-reading.md — §13.14 (the closure's accounting; the 2c-5-7 deletion
+#   list is NOT lengthened by the re-takes), §11.9 (the fix round's accounting)
+# docs/decisions/2c-5-6a-instrument-extension.md — §8 (the decoys and planted artifacts, with paths)
+# docs/decisions/2c-5-5a-instrument-rebuild.md — §8.1 (the four residual rebindings, inherited open)
+```
+
+#### What 2c-5-7 is, and what it owes
+
+The phase's last step: remove the instrument entirely and re-derive every gate on the harness-free
+tree. Its parts, each with its authority:
+
+1. **Revert the two tracked harness files by path** — `src/main.ts` and `src-tauri/src/main.rs`
+   each carry two hook lines (`git restore` them; never a blanket checkout) — and **delete the two
+   untracked probe sources** `src/probe.ts` and `src-tauri/src/probe.rs`.
+2. **Delete the harness artifacts**: the tree `/private/tmp/espansoconfig-harness-2c-5/`, the four
+   decoys `…-probe-decoy-C11..C14.yml` outside it, and the planted symlink artifacts — the exact
+   paths are 6a §8's and record §11.9's, and §13.14 confirms the re-takes lengthened nothing.
+3. **Re-derive the gates on the harness-free tree — measure, never copy**: expected
+   `1153 / 431 / <measured> / 184` (`cargo test --workspace` / `npm run check` files / `npm test` /
+   `npm run build` modules). The npm-test expectation is ~2125 (harness-free 2123 before the 6b fix
+   round, whose two mounted `RestorePane.test.ts` cases are product and stay), but **the figure
+   must come from the harness-free run itself — the scar is `1623`**, a count once copied forward
+   for three step records. Clippy `-D warnings`, `cargo fmt --check`, and the bundle oracle both
+   lines (server-only tokens ABSENT, client-only PRESENT).
+4. **The record and the phase closure** per design Q7 item 7 — whatever review evidence Q7 assigns
+   the step, then the 2c-5 phase row, this checkpoint, commit by path, push.
+
+The four residual rebindings (5a §8.1) stay inherited-open through 6b unwidened; they are not step
+7's to close. After step 7 the with-harness baseline ceases to exist — the harness-free figures
+become the only baseline.
+
+#### The gate baseline — TWO figures, and do not confuse them
+
+- **With the harness in the tree: `1153 / 432 / 2126 / 185`** — unchanged at 6b's closure, which
+  touched only markdown and the manifest; last derived twice at the 6b fix round. Clippy and fmt
+  clean; bundle oracle **absent / present → 2** (read both lines).
+- **Harness-free production: `1153 / 431 / <re-derive> / 184`** — what **2c-5-7 must re-derive on
+  a harness-free tree**, never copy forward.
+
+---
+
+### ⚠️ HISTORICAL — the blocked re-take handoff, superseded by 6b's closure above. Its twelve re-takes are taken as P87–P98, its round-2 review is READY, and its manifest is written and verified.
 
 ### **Step 2c-5-6b is PARTIAL — all 24 launches taken and every state read bilingually, but the round-1 review is NOT READY and its disposition owes TWELVE RE-TAKES that are BLOCKED ON A LOCKED CONSOLE. THE NEXT ACTION IS THE RE-TAKES — P87 upward, on an unlocked screen — then the round-2 review and the manifest.**
 
