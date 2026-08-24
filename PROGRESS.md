@@ -8654,6 +8654,9 @@ headings, bold rulings, first sentences) as their own pass, distinct from the pr
 captured verdict gets a **correction block beneath it, never a rewrite**
 (`docs/reviews/phase-2d-design.md` Q1 now carries the first one). The record is
 `docs/decisions/2d-1-notes.md`; §§6–9 hold the four closure rounds with their correction blocks.
+**The closure commit is `53bdcce`** — the engine, the record, the five-round review, the
+consult's Q1 correction block and this checkpoint, staged by path; the working tree after it is
+clean.
 
 #### Read these first, in this order
 
