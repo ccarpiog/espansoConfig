@@ -1,26 +1,97 @@
 //! Filesystem watching and revision hashing.
 //!
-//! **Phase 0a scope:** [`ContentRevision`] is implemented, because conflict
-//! detection needs a stable content hash and the hash is trivially testable on
-//! its own. The debounced watcher itself is a later phase.
+//! **Phase 0a** implemented [`ContentRevision`], because conflict detection
+//! needs a stable content hash and the hash is trivially testable on its own.
+//! **Phase 2d-1** added the watcher around it, split so that the hard part is
+//! deterministic — in observation shapes, revisions and order; the identity
+//! values inside a projection come from the process-wide session table, as
+//! [`engine`]'s module docs state (`IMPLEMENTATION_PLAN.md` section 6.5; the
+//! Phase 2d design consult's Q1):
 //!
-//! **Later responsibility:** watch `config/` and `match/` and treat watcher
-//! notifications as *hints, not truth* (`IMPLEMENTATION_PLAN.md` section 6.5):
-//! debounce 150–300 ms, wait for content to stabilise across consecutive reads,
-//! read and hash, and **ignore the event when the hash equals the revision the
-//! app just wrote** — that is how the app avoids reacting to its own saves.
-//! A clean draft reloads automatically; a dirty draft enters a conflict state in
-//! which neither side is overwritten.
+//! - [`engine`] — the observation engine. Hints in, typed observations out,
+//!   with the **clock and the reader injected**: per-path debounce, two-read
+//!   stability, exact hashing, projection and validation, membership rescan
+//!   and snapshot-bound correspondence tables, none of it touching a real
+//!   timer or (unless the caller injects one) a real filesystem.
+//! - [`correspond`] — the snapshot-bound correspondence tables a `Changed`
+//!   observation carries, built on `crate::reconcile`'s evidence.
+//! - [`native`] — the `notify`-backed hint source over exactly
+//!   `<root>/config` and `<root>/match` ([`watched_roots`]). The native
+//!   callback contributes **path hints and nothing else**; every decision is
+//!   the engine's.
+//!
+//! Watcher notifications are *hints, not truth*. Self-write suppression —
+//! ignore a stable observation whose bytes hash to the revision the app just
+//! committed — is the command layer's step, keyed by a ledger only the open
+//! session can hold; [`self_write_suppresses`] is the predicate's one
+//! definition and this crate stores no ledger. **This module has no caller in
+//! 2d-1**: no command reaches it, exactly as `crate::persist::save_document`
+//! had none at Phase 2a.
+
+pub mod correspond;
+pub mod engine;
+pub mod native;
 
 use serde::de::{Deserialize, Deserializer, Error as DeError, Unexpected, Visitor};
 use serde::{Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::path::{Path, PathBuf};
+
+/// The exact directories a watcher observes: `<root>/config` and `<root>/match`.
+///
+/// **These two, recursively, and never the configuration root itself** (the 2d
+/// design consult's Q2). The backup root `.espansoconfig-backups` is a
+/// deliberate *sibling* of both — that is what keeps batch creation, entry
+/// copies, marker writes and rotation out of the watch stream by construction.
+/// Watching the root and filtering afterwards would replace that construction
+/// with a proof obligation over every backup temporary, and there is no reason
+/// to accept it. One definition, used by the native adapter and by the
+/// engine's own hint filter, so the two cannot drift apart.
+pub fn watched_roots(root: &Path) -> [PathBuf; 2] {
+    [root.join("config"), root.join("match")]
+}
+
+/// The self-write suppression predicate — byte identity, never authorship.
+///
+/// `true` exactly when `observed` equals `last_committed` — and because these
+/// are two bare revisions, it is the **caller's obligation, not this
+/// predicate's**, that `last_committed` is the latest committed revision
+/// recorded for the *observed document* in the *current workspace epoch*:
+/// handed an equal-hashing entry from another document, from a replaced
+/// workspace, or one a later committed save has superseded, this function
+/// answers `true` just the same and the observation is wrongly suppressed.
+/// The truthful sentence, fixed by the 2d design consult's Q2: *this
+/// application ignores a filesystem hint when the bytes now on disk hash to
+/// the latest revision it recorded after committing that file; this proves the
+/// text is identical, not who wrote it.* An external process rewriting
+/// identical bytes is indistinguishable by this predicate, and ignoring it is
+/// acceptable because the file text — the source of truth — did not change.
+/// Nothing built on it may claim the event "was ours", that no external write
+/// occurred, or that metadata stayed unchanged; hash equality proves byte
+/// identity subject to the hash's collision limit.
+///
+/// The ledger whose correct selection the sentence above leans on — recording
+/// `SavedDocument::revision` only on `committed: true`, keyed per document and
+/// per workspace epoch, retention through the duplicate hints one atomic
+/// replacement generates, replacement on the next committed save, discard on
+/// workspace replacement — is the command layer's (Phase 2d-3), stored beside
+/// the open session. **This crate stores no ledger**, and this function is the
+/// predicate's one definition so 2d-3 cannot restate it differently.
+pub fn self_write_suppresses(
+    last_committed: Option<ContentRevision>,
+    observed: ContentRevision,
+) -> bool {
+    last_committed == Some(observed)
+}
 
 /// A content-addressed identity for the exact bytes of a file on disk.
 ///
 /// Used for two things: conflict detection (does the file still hold what we
-/// based our edits on?) and self-write suppression (did *we* just write this?).
+/// based our edits on?) and self-write suppression (do the bytes now on disk
+/// hash to the latest revision this application recorded after committing
+/// that file? — byte identity, never authorship: an external write of
+/// identical bytes is indistinguishable, as [`self_write_suppresses`] states).
 /// It hashes bytes rather than metadata deliberately — mtime is too coarse and
 /// too easy to fake, and a byte-identical rewrite is not a conflict.
 /// It is ordered so that types embedding it — `crate::model::MatchId` — can
@@ -145,6 +216,31 @@ mod tests {
     }
 
     #[test]
+    fn the_watched_roots_are_config_and_match_and_nothing_else() {
+        let roots = watched_roots(Path::new("/tree"));
+        assert_eq!(
+            roots,
+            [PathBuf::from("/tree/config"), PathBuf::from("/tree/match")]
+        );
+        // The backup root is a sibling of both, so component-wise prefix
+        // matching excludes it without any filter existing.
+        let backup = Path::new("/tree/.espansoconfig-backups/2026/match/a.yml");
+        assert!(roots.iter().all(|root| !backup.starts_with(root)));
+    } // End of function the_watched_roots_are_config_and_match_and_nothing_else()
+
+    #[test]
+    fn the_suppression_predicate_answers_byte_identity_not_authorship() {
+        let committed = ContentRevision::of_bytes(b"matches: []\n");
+        let other = ContentRevision::of_bytes(b"matches: [] \n");
+        // No recorded app write suppresses nothing.
+        assert!(!self_write_suppresses(None, committed));
+        // The exact committed revision is suppressed…
+        assert!(self_write_suppresses(Some(committed), committed));
+        // …and any other revision is not, however close the bytes are.
+        assert!(!self_write_suppresses(Some(committed), other));
+    }
+
+    #[test]
     fn hex_rendering_is_64_lowercase_characters() {
         let hex = ContentRevision::of_bytes(b"").to_hex();
         assert_eq!(hex.len(), 64);
@@ -156,5 +252,5 @@ mod tests {
             hex,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
-    }
+    } // End of function hex_rendering_is_64_lowercase_characters()
 }

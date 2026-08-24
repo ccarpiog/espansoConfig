@@ -105,7 +105,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5-7** | **The instrument's removal, and the harness-free baseline re-derived.** Both probe sources deleted, the four hook lines reverted by path, the 2.3 GB scratch tree gone (57 launch directories, five scripts, thirteen fixtures, five manifests — the final post-image `manifest-2c-5-6b-reading.sha256` verified 92/92 OK immediately before deletion and its digest recorded), the four decoys and planted symlink artifacts gone, and every gate **re-derived** on the harness-free tree rather than copied | ✅ complete — `docs/decisions/2c-5-7-notes.md`; the review is `docs/reviews/phase-2c-5-7-removal.md`, **three rounds ending READY**. Round 1: NOT READY on a **High that was about the phase, not the step** — steps 1–3's last on-file verdicts were NOT READY, their fix rounds recorded only in this file — plus two Mediums and a Low, all sentences in the new record (the prescription-as-history claim the precedent had already rejected, a status sentence false of the tree holding it, a transposed residue count). The High was discharged by a commissioned closure round appended to `phase-2c-5-{1,2,3}-confirmation.md`: step 1 READY; steps 2 and 3 left three narrower comment-level instances (the lexical-containment test comment `PROGRESS.md` itself had marked "still worth doing", the marker provenance helper doc, the `confirming`-as-presentation docs), each fixed. Round 2: NOT READY on **one** narrower Medium — the `write_batch_marker` doc still claiming the marker "says this application minted this batch" — fixed to recognition/eligibility, never provenance. Round 3: **READY**, the reviewer's own sweep finding no live provenance claim. Gates after every fix: `1153 / 431 / 2125 / 184`, clippy and fmt clean |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | ✅ **complete — all seven steps, and with it PHASE 2c IS COMPLETE: 2c-5 is the last of the split's ten sub-phases** (`docs/decisions/2c-split-notes.md` §2). Step 5 was split into 5a and 5b, step 6 into 6a (the instrument extended) and 6b (the bilingual reading: 36 launches across three rounds — P63–P86, then twelve re-takes P87–P98 after the round-1 review found the occlusion derivation unsound — one Medium closed by a fix round, round-2 READY with no findings, record `docs/decisions/2c-5-6-window-reading.md` §§1–13). Step 7 removed the instrument and re-derived the harness-free baseline **`1153 / 431 / 2125 / 184`**, closing after three review rounds; its round 1 also forced on-file closure for steps 1–3, whose fix rounds had lived only in this file. The six items the closure review names for the next phase to inherit explicitly are listed in `docs/reviews/phase-2c-5-7-removal.md` round 1 |
 | **2d design consult** | **Phase 2d put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2d-design.md` (140 lines, written by the consultant itself into the working tree; the sandbox was writable this time). Like every consult since 2c-4a it **changed the phase rather than confirming it**, in four places. It rules the brief's "no dirty draft → reload automatically" **wrong as stated**: this application can prove only that *no write surface capable of targeting the document is open* (R36), so the reload predicate is that narrower conservative sentence and **a pristine open surface takes the conflict path too**. It rules the `notify`-backed watcher and the whole debounce/stability/read/hash/project/validate engine **into the Tauri-free core** with `src-tauri` owning only lifecycle, the app-write revision ledger, an ordered/coalesced queue and a wake-up event — and the **event is an expendable hint**: the frontend drains a `drain_external_changes(afterSequence)` command whose answer is authoritative, because a push may be missed. Automatic reload is **not an adoption** — a distinct guarded installation over the two selection counters, never `adoptDiskVersion`, which stays the only *confirmed-install* door; a watcher-origin conflict is a **distinct discriminant inside the one shared conflict model** (there was no failed save), with `conflictChoicesFor` still the only choice-list producer. All five plan-§6.5 offers ship by reuse — but only Keep/Reload/Copy as controls: *Compare* is the always-visible read-only panel and *Save-as-new* is the staged manual-resolution recovery, never called a duplicate. Eight dependency-ordered steps (Q7); Q8 names the sharpest green-suite failure: **an incomplete or stale open-write-surface registry classifying a live surface as clean**, so an external hint auto-reloads over the only in-memory copy of a draft — which is why step 7's rebuilt instrument owes a **command counter**, closing the inherited no-command-counter limitation for the reading |
-| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult done, 2d-1 not started |
+| **2d-1** | **The core observation engine, with no caller** — consult Q7 item 1. `watch::engine::ObservationEngine` (`start`/`hint`/`tick`/`rescan`/`next_deadline`) over an injected `Millis` clock and `WatchSource` reader: validated 150–300 ms trailing-edge debounce, two-equal-reads stability on **every** route including the baseline scan, exact hashing, projection/validation through the workspace's own path, typed `Changed`/`Added`/`Removed`/`Unreadable`. `watch::correspond` binds one table per base match to both snapshots' revisions; `watch::native` confines `notify` 8.2.0 to hints-and-degradation over exactly `watched_roots()`. `watch::self_write_suppresses` is Q2's predicate **shape** — the ledger, sequences and epochs are deliberately absent (2d-3/2d-4). **Admission and discovery's acceptance are one predicate**: `WatchSource::read` takes the engine's root and applies the walk's whole rule (plain-name components, every intermediate a real directory by `symlink_metadata`, final a regular file), so no route — baseline, hint or rescan — reads what the walk cannot reach | ✅ complete — after **five review rounds**, and the tail of them is this project's named failure mode in miniature. Round 1 NOT READY (2 High: one-read baselines a truncate/write race can tear; a `.yml` symlink reading outside the watched roots — 2 Medium, 1 Low). Round 2 NOT READY: **a narrower instance of all five** — sharpest the rescan route through a newly **symlinked ancestor**, past round 1's final-component-only check. Round 3 NOT READY on one Medium: the module headline still said "deterministic" **as a name** — the concept sweep had matched the site and misread it. Round 4 NOT READY on the same shape twice more: the notes' own D2 **heading** and the consult's Q1 **ruling line** — closed by qualifying the heading in place and a correction block under the ruling, never a rewrite. Round 5 READY, no findings. Three pinning tests verified failing without their fixes; §6–§9 of `2d-1-notes.md` record each round's closure with correction blocks preserving what was false when written |
+| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult and 2d-1 done, 2d-2 next |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -8640,6 +8641,70 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **STEP 2d-1 IS COMPLETE — the core observation engine, closed READY at round 5 of its review. THE NEXT ACTION IS STEP 2d-2 — native lifecycle and the real-filesystem adapter, the one step whose principal integration test belongs in `src-tauri`.**
+
+**Where things stand.** The engine exists in `crates/espansoconfig-core/src/watch/` (engine,
+correspond, native) with no caller, per consult Q7 item 1. Its review took **five rounds**
+(`docs/reviews/phase-2d-1-engine.md`), and the shape of the tail matters for every later step:
+rounds 2–4 each found a **narrower instance of a just-closed finding** — a symlinked *ancestor*
+after the final-component fix, then the bare claim surviving as a module **headline**, then as a
+markdown **heading** and as the consult's own **ruling line**. Sweep name positions (headlines,
+headings, bold rulings, first sentences) as their own pass, distinct from the prose sweep; and a
+captured verdict gets a **correction block beneath it, never a rewrite**
+(`docs/reviews/phase-2d-design.md` Q1 now carries the first one). The record is
+`docs/decisions/2d-1-notes.md`; §§6–9 hold the four closure rounds with their correction blocks.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q7 item 2 is 2d-2's
+#   specification; Q1 (lifecycle owner, polling fallback) and Q3 (the wire is 2d-4's, NOT yet)
+#   bound it. Q1's ruling carries a round-4 correction block — read it with the ruling.
+# docs/decisions/2d-1-notes.md               — what the engine gives 2d-2 to hold: the public
+#   surface (§2), the holes stated open (§5), and the five-round closure history (§§6–9)
+# docs/reviews/phase-2d-1-engine.md          — the five rounds; round 5's sweep notes bind the
+#   sweeps every later fix round owes
+```
+
+#### What 2d-2 is (consult Q7 item 2)
+
+**Native lifecycle and the real-filesystem adapter.** Put one core watcher handle behind the
+open `WorkspaceSession`, with workspace epochs, cancellation/join on successful replacement,
+drop on shutdown, and the native-error polling fallback (Q1: polling is a fallback for an
+unavailable native backend, never the primary mechanism). **A temp-directory integration test
+using real creates, atomic renames, edits and removals under both roots** — the one step whose
+principal integration test belongs in `src-tauri`, because a `notify` callback plus workspace
+replacement is not a pure core question. It must **not** emit to a window or change conflict UI
+(the wire — the event, the queue, `drain_external_changes` — is 2d-4's), and 2d-3 owns the
+suppression ledger. Evidence class per Q7: core/model tests plus the `src-tauri` integration
+test; no mounted or window evidence.
+
+#### The step ladder (consult Q7)
+
+1. **2d-1** core observation engine ✅ (five rounds, READY)
+2. **2d-2** native lifecycle + real-filesystem adapter ← **next**
+3. **2d-3** save composition + suppression ledger
+4. **2d-4** queue, wake event, `drain_external_changes`, wire
+5. **2d-5** browser coordinator + pure surface transitions
+6. **2d-6** components, i18n, mounted evidence
+7. **2d-7** reviewed rebuilt instrument + bilingual WKWebView reading, with a command counter
+8. **2d-8** instrument removal + harness-free closure
+
+#### The gate baseline — re-derived at 2d-1's closure, all four measured on this tree
+
+- **`1198 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules); bundle oracle server-only tokens ABSENT, client-only PRESENT (2) —
+  read both lines. The Rust delta over 2c-5-7's 1153 is 2d-1's 45 (41 + 3 pinning + 1 pinning);
+  the three frontend figures were **re-measured, not carried** — the scar stays `1623`. Clippy
+  `-D warnings` and `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri`
+  empty (notify 8.2.0 is in the core legitimately; tauri is not).
+
+---
+
+### ⚠️ HISTORICAL — the consult→2d-1 handoff, superseded by 2d-1's closure above.
 
 ### **THE PHASE 2d DESIGN CONSULT IS COMPLETE — `docs/reviews/phase-2d-design.md`, eight questions ruled, eight steps cut. THE NEXT ACTION IS STEP 2d-1 — the core observation engine, with no caller.**
 

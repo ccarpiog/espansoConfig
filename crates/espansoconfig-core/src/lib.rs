@@ -124,8 +124,31 @@
 //!   about a screen; an ambiguous or missing candidate is a refusal, and the
 //!   item's index is never a tie-break.
 //!
+//! - **2d-1** — [`watch`] grew from [`ContentRevision`] alone into the
+//!   observation side of plan section 6.5, **with no caller**: no command
+//!   reaches it, exactly as [`persist`] had none at 2a.
+//!   [`watch::engine`] is the engine — hints in, typed
+//!   `Changed`/`Added`/`Removed`/`Unreadable` observations out, with the
+//!   **clock and the reader injected**, per-path trailing-edge debounce inside
+//!   the plan's 150–300 ms band, two-read stability, exact hashing, projection
+//!   and validation through the same source-to-document path a workspace read
+//!   uses, and a membership rescan that only asks. It is deterministic in
+//!   observation shapes, revisions and order; the `DocumentId` and `MatchId`
+//!   values inside a projection come from the process-wide session identity
+//!   table and depend on which paths anything else in the process identified
+//!   first (the engine's module docs state the qualification).
+//!   [`watch::correspond`] is
+//!   the snapshot-bound correspondence table a `Changed` observation carries,
+//!   one row per base match answered at both of [`reconcile`]'s confidence
+//!   policies against one fresh snapshot. [`watch::native`] is the
+//!   `notify`-backed hint source over exactly `<root>/config` and
+//!   `<root>/match`, contributing paths and degradation signals and deciding
+//!   nothing. Self-write suppression is the predicate
+//!   [`watch::self_write_suppresses`] and **no ledger**: recording committed
+//!   revisions is the command layer's (2d-3), beside the open session.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
-//! backup step, and [`watch`] holds only [`ContentRevision`].
+//! backup step.
 
 #![deny(missing_docs)]
 

@@ -27,6 +27,18 @@ marked-yaml = "0.8"
 # real and is recorded in docs/decisions/2a-2a-notes.md section 5: a successful
 # compile here is not proof of a successful compile there.
 regex = "1.13"
+# Phase 2d-1, plan section 6.5 and the 2d design consult's Q1: the native
+# filesystem watcher. **Confined to `crate::watch::native`**, exactly as
+# `saphyr-parser` is confined to `crate::syntax`: the native callback
+# contributes only path hints, and everything the hints mean is decided by the
+# engine in `crate::watch::engine`, whose clock and reader are injected —
+# deterministic in observation shapes, revisions and order, while the identity
+# values inside a projection come from the process-wide session table (the
+# engine's module docs state the qualification).
+# `notify` is a Tauri-independent filesystem crate and **pulls in no
+# tauri**; the architecture check is unchanged and is
+#   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
+notify = "8"
 # Phase 2a-3a, plan section 7 row 11: the atomic save installs a **new inode**,
 # so the target's extended attributes and its access control list have to be
 # copied onto the temp file before the rename or they are dropped — and dropping

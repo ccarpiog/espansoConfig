@@ -26,6 +26,17 @@ saphyr-parser.workspace = true
 # production dependency since Phase 0a, and confined to `crate::validate`.
 # It pulls in no platform code and no tauri.
 regex.workspace = true
+# The native filesystem watcher (Phase 2d-1, plan section 6.5). Confined to
+# `crate::watch::native`; no other module may import it. The callback
+# contributes only path hints — debounce, stability, hashing, projection and
+# validation are the injected-clock/injected-reader engine's, so the hard part
+# stays testable with no filesystem at all and deterministic in observation
+# shapes, revisions and order (the identity values inside a projection come
+# from the process-wide session table; the engine's module docs state the
+# qualification). It pulls in no
+# tauri (the architecture check `cargo tree -p espansoconfig-core | rg tauri`
+# is unchanged and must find nothing).
+notify.workspace = true
 
 # ---------------------------------------------------------------------------
 # macOS only, and for exactly one call: `fcopyfile(3)` with

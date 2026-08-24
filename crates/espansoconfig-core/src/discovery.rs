@@ -290,6 +290,21 @@ pub fn discover(explicit: Option<&Path>) -> Result<ConfigTree, DiscoveryError> {
     enumerate(&root)
 }
 
+/// Classifies one absolute path against the espanso layout rules of `root`,
+/// touching no filesystem.
+///
+/// The entry point the observation engine uses for a path that arrived as a
+/// **watcher hint** rather than through [`enumerate`]: a newly created file has
+/// to be given the same kind, `disabled` flag and relative path a directory
+/// walk would have given it, and a second copy of those rules would be a
+/// second place for them to be wrong. It is a pure function of the two paths —
+/// it does not check that the file exists, and a caller that needs that fact
+/// must read the file.
+pub fn classify_path(root: &Path, path: &Path) -> DiscoveredFile {
+    let packages_root = root.join("match").join("packages");
+    classify(root, &packages_root, path.to_path_buf())
+}
+
 /// Classifies a single path against the espanso layout rules.
 ///
 /// `packages_root` is passed in rather than recomputed so the caller can build
@@ -359,7 +374,11 @@ fn collect_yaml_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Discover
 } // End of function collect_yaml_files()
 
 /// Returns `true` for `.yml` and `.yaml`, case-insensitively.
-fn has_yaml_extension(path: &Path) -> bool {
+///
+/// `pub(crate)` since Phase 2d-1: the observation engine filters watcher hints
+/// with the same rule this walk collects files with, so the two cannot
+/// disagree about what a YAML file is.
+pub(crate) fn has_yaml_extension(path: &Path) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
         .is_some_and(|ext| ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml"))

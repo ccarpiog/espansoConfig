@@ -220,7 +220,12 @@ struct SessionIdentities {
 /// "Session" means the running process, which is what a `DocumentId` is
 /// documented to be scoped to. The table grows by one entry per distinct path
 /// ever opened; a config tree is tens of files, so it never becomes a
-/// consideration.
+/// consideration. Since Phase 2d-1 the observation engine mints from this
+/// same table, and the table is the one input the engine's injected clock and
+/// reader do not cover: the identity values in otherwise identical
+/// observation outputs depend on which paths anything in the process
+/// identified first, which is why every claim of the engine's determinism is
+/// qualified to observation shapes, revisions and order.
 fn session_identities() -> &'static Mutex<SessionIdentities> {
     static IDENTITIES: OnceLock<Mutex<SessionIdentities>> = OnceLock::new();
     IDENTITIES.get_or_init(|| {
@@ -237,7 +242,18 @@ fn session_identities() -> &'static Mutex<SessionIdentities> {
 /// and a poisoned table is still a correct table — the panic that poisoned it
 /// happened elsewhere and left no partial write here, because every mutation
 /// below is two infallible statements.
-fn identity_of(path: &Path) -> DocumentId {
+///
+/// `pub(crate)` since Phase 2d-1: the observation engine projects the files it
+/// stabilizes through the same source-to-document path a workspace read uses,
+/// and the identity it mints for a path **must** be the identity a
+/// [`Workspace`] of the same process resolves for that path — one table, one
+/// answer, and one shared mutable input: prior or concurrent allocation here
+/// changes the identity values in otherwise identical engine outputs, so the
+/// engine's determinism is qualified to observation shapes, revisions and
+/// order (its module docs say so in the same sentence). It stays
+/// crate-private because handing identities out is this module's job, not
+/// part of the public surface.
+pub(crate) fn identity_of(path: &Path) -> DocumentId {
     let mut table = session_identities()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
