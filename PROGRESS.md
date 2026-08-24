@@ -104,7 +104,8 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2c-5-5a** | **The instrument, rebuilt from prose — both halves, for the second time in this project's history.** 2c-4c-6 deleted both probe sources, the four hook lines and the whole scratch tree, so like 2c-4c-4a this step had **nothing** to start from. `src-tauri/src/probe.rs` authored from the code; `src/probe.ts`, `launch.sh`, 9 fixtures and an 11-row case table re-authored from seven construction records. **Step 5 was split by the orchestrator** into 5a (the harness and its proof set) and 5b (the restore-specific cases), exactly as 2c-4c-4 was cut | ✅ **CLOSED 2026-08-24 by owner decision — a deliberate exception to the standing rule: the eighth round the round-7 fixes owed was deliberately not run.** The record's **§16** is the closing entry: 16.1 enumerates the nine unreviewed changes the exception covers, 16.2 what did not move (the four residual rebindings, open and disclosed, accepted not proven), 16.3 why it is bounded (2c-5-7 deletes the subject), 16.4 that the rule is narrowed for this closure and not suspended, 16.5 the gates re-derived at closure. Nothing was taken unilaterally. **Seven review rounds in all — 8 → 4 → 5 → 6 → 3 → 3 → 3 findings, ceiling High → Medium → Low — and every one of them answered *"did the fix round create anything?"* with YES**, which is why none before the owner's exception was allowed to close without a successor; **no round ever returned READY**, and the closure converts none of them. **Rounds 6 and 7 found no instrument defect at all** — `### Instrument defects` is "None." in both review files — six prose findings between them, five of the six this record's bookkeeping about its own review history: each round appends a section, the append falsifies a count above it, the next round finds that. **Rounds 3–7 changed no code behaviour at all** (rounds 6–7 changed markdown only, so no gate moved): every fix withdrew, narrowed or corrected a claim, and the instrument has been still since round 2. **Arm A of round 2's High is PARTIALLY CLOSED, never closed** — round 3 found that round 2's own fix had *created* a new check-and-spend gap (`rename` re-resolves the temporary **pathname**; the source is reopened by pathname after its check), and the **reclassify** branch was taken over the `openat` branch, because `libc` in throwaway instrument code is new unproven cleverness on the one path where being wrong is worst. Round 4 then found the reclassified list itself non-exhaustive — `fixtures` is a **sibling** of `launches`, so *"an ancestor of the launch tree"* never covered a source-ancestor rebinding — and three became **four**; round 5 enumerated the re-resolutions **from the code rather than against the list** and confirmed **four with no fifth**. All four are **open and disclosed, accepted and not proven**. Two §9.1 label defects of one shape fell one per round (**C06** credited with the direct-child source constraint it never exercises, then **C09** with the exact-shape rule it never reaches; **C10 alone** measures target shape), and three count contradictions fell to sweeping for the shape rather than the words — `74` against a measured `75` of 78, *"sixty-five launches"* where two sections give **66**, and *"the proof set"* meaning **twelve** in §4 and **nineteen** in §1/§5.10, now two defined terms. One claim was simply **false and fell to measurement**: the proof binary is **not** byte-identical to `target/debug/espansoconfig` *"as it stands now"* — that path answers `04988c09…` against the retained bundles' `0a2d3506…`, re-measured independently by the orchestrator. Round 1 returned **NOT READY on 8 findings**, and **two were real instrument defects, not prose**: a **High**, `replace_the_target` accepting any `ECFG_PROBE_TARGET` so a callable IPC command could replace an arbitrary file outside `save_document`; and a **Medium**, the frontend `runThirdWriter()` **tree-shaken out of the bundle** while the record called it merely "unexercised" — a silent instrument gap of exactly the kind that stranded an earlier reading. Round 2 confirmed six of eight closed and returned **NOT READY on 4 more**: findings 1 and 2 **PARTIALLY CLOSED** on a shared TOCTOU — the same `symlink_metadata`-then-second-pathname-operation shape 2c-5-1's review found in the **production core** — and one finding that was a **narrower recurrence of the closed finding 7**, the absence over-claim having moved from §4.3 to §6.3. The round-2 fix round removed `/bin/sh` from both writers entirely (`std::fs::read` → `create_new` (`O_EXCL`) → `sync_all` → `rename`), constrained the target to the **exact** synthetic file, and **disclosed the ancestor-directory swap as residual and unproven** rather than claiming it closed |
 | **2c-5-7** | **The instrument's removal, and the harness-free baseline re-derived.** Both probe sources deleted, the four hook lines reverted by path, the 2.3 GB scratch tree gone (57 launch directories, five scripts, thirteen fixtures, five manifests — the final post-image `manifest-2c-5-6b-reading.sha256` verified 92/92 OK immediately before deletion and its digest recorded), the four decoys and planted symlink artifacts gone, and every gate **re-derived** on the harness-free tree rather than copied | ✅ complete — `docs/decisions/2c-5-7-notes.md`; the review is `docs/reviews/phase-2c-5-7-removal.md`, **three rounds ending READY**. Round 1: NOT READY on a **High that was about the phase, not the step** — steps 1–3's last on-file verdicts were NOT READY, their fix rounds recorded only in this file — plus two Mediums and a Low, all sentences in the new record (the prescription-as-history claim the precedent had already rejected, a status sentence false of the tree holding it, a transposed residue count). The High was discharged by a commissioned closure round appended to `phase-2c-5-{1,2,3}-confirmation.md`: step 1 READY; steps 2 and 3 left three narrower comment-level instances (the lexical-containment test comment `PROGRESS.md` itself had marked "still worth doing", the marker provenance helper doc, the `confirming`-as-presentation docs), each fixed. Round 2: NOT READY on **one** narrower Medium — the `write_batch_marker` doc still claiming the marker "says this application minted this batch" — fixed to recognition/eligibility, never provenance. Round 3: **READY**, the reviewer's own sweep finding no live provenance claim. Gates after every fix: `1153 / 431 / 2125 / 184`, clippy and fmt clean |
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | ✅ **complete — all seven steps, and with it PHASE 2c IS COMPLETE: 2c-5 is the last of the split's ten sub-phases** (`docs/decisions/2c-split-notes.md` §2). Step 5 was split into 5a and 5b, step 6 into 6a (the instrument extended) and 6b (the bilingual reading: 36 launches across three rounds — P63–P86, then twelve re-takes P87–P98 after the round-1 review found the occlusion derivation unsound — one Medium closed by a fix round, round-2 READY with no findings, record `docs/decisions/2c-5-6-window-reading.md` §§1–13). Step 7 removed the instrument and re-derived the harness-free baseline **`1153 / 431 / 2125 / 184`**, closing after three review rounds; its round 1 also forced on-file closure for steps 1–3, whose fix rounds had lived only in this file. The six items the closure review names for the next phase to inherit explicitly are listed in `docs/reviews/phase-2c-5-7-removal.md` round 1 |
-| 2d | External change reconciliation — plan §6.5 | ⬜️ not started |
+| **2d design consult** | **Phase 2d put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2d-design.md` (140 lines, written by the consultant itself into the working tree; the sandbox was writable this time). Like every consult since 2c-4a it **changed the phase rather than confirming it**, in four places. It rules the brief's "no dirty draft → reload automatically" **wrong as stated**: this application can prove only that *no write surface capable of targeting the document is open* (R36), so the reload predicate is that narrower conservative sentence and **a pristine open surface takes the conflict path too**. It rules the `notify`-backed watcher and the whole debounce/stability/read/hash/project/validate engine **into the Tauri-free core** with `src-tauri` owning only lifecycle, the app-write revision ledger, an ordered/coalesced queue and a wake-up event — and the **event is an expendable hint**: the frontend drains a `drain_external_changes(afterSequence)` command whose answer is authoritative, because a push may be missed. Automatic reload is **not an adoption** — a distinct guarded installation over the two selection counters, never `adoptDiskVersion`, which stays the only *confirmed-install* door; a watcher-origin conflict is a **distinct discriminant inside the one shared conflict model** (there was no failed save), with `conflictChoicesFor` still the only choice-list producer. All five plan-§6.5 offers ship by reuse — but only Keep/Reload/Copy as controls: *Compare* is the always-visible read-only panel and *Save-as-new* is the staged manual-resolution recovery, never called a duplicate. Eight dependency-ordered steps (Q7); Q8 names the sharpest green-suite failure: **an incomplete or stale open-write-surface registry classifying a live surface as clean**, so an external hint auto-reloads over the only in-memory copy of a draft — which is why step 7's rebuilt instrument owes a **command counter**, closing the inherited no-command-counter limitation for the reading |
+| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult done, 2d-1 not started |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -8639,6 +8640,69 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **THE PHASE 2d DESIGN CONSULT IS COMPLETE — `docs/reviews/phase-2d-design.md`, eight questions ruled, eight steps cut. THE NEXT ACTION IS STEP 2d-1 — the core observation engine, with no caller.**
+
+**Where things stand.** The consult ran to completion in a writable sandbox and wrote its own
+verdict file; two of its load-bearing citations were independently re-read and hold
+(`src/lib/components/DetailPane.svelte:453-469` — the open-surface list nothing can prove
+complete, Q8's subject — and `src-tauri/src/main.rs:73-127` — fifteen workspace commands plus
+one menu command, which is why Q4 orders the "fifteen commands" prose updated when the drain
+command lands). The working tree at this checkpoint holds exactly this consult: the verdict file
+and this `PROGRESS.md` update. **Four of its rulings overrule the handoff brief** — see the
+phase-table row above for the four — and they bind every step below.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d: VERDICT, Q1–Q8; Q7 is the
+#   eight-step split, and step 1's paragraph is 2d-1's specification
+# IMPLEMENTATION_PLAN.md §6.5                — the plan section the consult refines (and, in the
+#   "no dirty draft" sentence, overrules)
+# docs/reviews/phase-2c-5-7-removal.md       — round 1's six inherited items; the consult binds
+#   them into steps 7 (command counter, pathname rebindings) and 8 (carry-forward, never credit)
+```
+
+#### What 2d-1 is (consult Q7 item 1, and Q1/Q2 for its internals)
+
+**The core observation engine, no caller.** In `crates/espansoconfig-core`: add the `notify`
+dependency (the crate, not yet a running watcher — 2d-2 owns lifecycle), the two watched roots,
+per-path debounce (150–300 ms per plan §6.5), consecutive-read stability, exact hashing
+(`ContentRevision`), projection/validation, typed changed/added/removed/unreadable observations,
+rescan, and snapshot-bound correspondence tables. Core tests use **injected hints, clock and
+reader** over synthetic temp trees; the coverage list is Q7 item 1's sentence (bursts, atomic
+renames, partial writes, read-error recovery, non-UTF-8, deletion/recreation, parse failure,
+semantic findings, recursive nested match files, disabled files, packages). **This step must not
+touch Tauri, commands, Svelte, i18n or saves** — the architecture rule (`cargo tree -p
+espansoconfig-core | rg tauri` must stay empty) is part of its acceptance. The fifteen corpus
+fixtures may be enumerated and fed through read/hash tests **without editing or logging their
+text**; the real corpus stays out of any writer harness (Q7's closing paragraphs).
+
+#### The step ladder the consult cut (Q7)
+
+1. **2d-1** core observation engine, no caller ← **next**
+2. **2d-2** native lifecycle + real-filesystem adapter (the one `src-tauri` integration test)
+3. **2d-3** save composition + suppression ledger (`run_one_save`, `conflict_after_the_lock`)
+4. **2d-4** queue, `workspace://reconciliation-ready` wake event, `drain_external_changes`, wire
+5. **2d-5** browser coordinator + pure surface transitions (registry, guarded auto-reload,
+   watcher-origin conflict discriminant)
+6. **2d-6** components, i18n, mounted evidence (all seven write surfaces)
+7. **2d-7** reviewed rebuilt instrument + bilingual WKWebView reading, **with a command counter**
+8. **2d-8** instrument removal + harness-free closure
+
+#### The gate baseline — ONE figure
+
+- **`1153 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules), re-derived at 2c-5-7 on the harness-free tree. The scar stays `1623`:
+  a count only a given tree can produce must be re-derived on that tree, never copied forward.
+  The bundle oracle is the discriminating check (server-only tokens ABSENT, client-only PRESENT —
+  read both lines); a new `.ts` module costs one, a styled component two.
+
+---
+
+### ⚠️ HISTORICAL — the 2c-5→2d handoff, superseded by the consult's completion above.
 
 ### **PHASE 2c-5 IS COMPLETE — all seven steps — AND WITH IT PHASE 2c: 2c-5 is the last of the split's ten sub-phases. THE NEXT ACTION IS THE PHASE 2d DESIGN CONSULT, by the standing rule that every phase since 2b-2c is put to a consult before any line of it is written.**
 
