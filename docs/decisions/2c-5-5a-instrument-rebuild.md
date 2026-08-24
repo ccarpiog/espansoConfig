@@ -1,6 +1,7 @@
 # Phase 2c-5 step 5a — the window-reading instrument, rebuilt from the records
 
-> **This record was revised seven times, by seven review fix rounds.**
+> **This record was revised seven times, by seven review fix rounds, and then closed by the owner's
+> decision recorded in §16.**
 > `docs/reviews/phase-2c-5-5a-instrument.md` returned **NOT READY on eight findings**; §9 names each
 > one and how it was addressed. `docs/reviews/phase-2c-5-5a-instrument-round2.md` then returned **NOT
 > READY on four more**; **§10** names each of those and how it was addressed.
@@ -19,7 +20,8 @@
 > returned **NOT READY on three more, all Low, all prose, and `Instrument defects: None.` for the second
 > consecutive round**; **§15** names each of those, **§15.8 names three further instances its own sweep
 > found — two of them in §14, the section written one round earlier to document that very mechanism** —
-> and **§15.5 states the convergence question all this raises and deliberately does not decide it**.
+> and **§15.5 states the convergence question all this raises and deliberately does not decide it**;
+> **§16 records the owner's answer — 5a accepted and closed, the eighth round deliberately not run**.
 > Rounds 1 and 2 changed
 > `src-tauri/src/probe.rs`, so every launch taken before them ran a **different binary** and none can
 > stand as evidence for the tree that ships; **rounds 3, 4 and 5 changed only doc comments and prose,
@@ -1165,7 +1167,8 @@ against its evidence**; and **§14 is round 6, which found no instrument defect 
 prose claims, one of them this paragraph's own**; and **§15 is round 7, which found no instrument defect
 either and three more prose claims, including that §14's own replacement for an exhaustiveness claim was
 still one.** Where the seven
-disagree, the later section is the later reading, and **§15** is the latest.
+disagree, the later section is the later reading, and **§15** is the latest review disposition; **§16
+is the record's closing entry and is not a review disposition**.
 
 **9.1 High — the writers were not confined (`replace_the_target`).** **Partially closed at round 1;
 narrowed further at round 2; narrowed again at round 3, which found that two more arms were open and
@@ -2145,3 +2148,61 @@ was written to document that mechanism. That is not irony to be enjoyed; it is t
 reports and §15.5 puts to the owner. **An eighth round is owed on all six changes this round made** —
 round 7's three and these three — and this paragraph is new prose written by a fix round like every one
 before it.
+
+## 16. Closure — the owner's decision, and exactly what it accepts
+
+**On 2026-08-24 the owner closed step 5a by deliberate exception to the standing rule, choosing not to
+run the eighth review round that §15.5 and §15.8 record as owed.** The question was put as §15.5 framed
+it — two paths, neither started, the standing rule's prescription named as the default — and the owner
+chose acceptance. Nothing here was taken unilaterally: the decision was asked for and given outside this
+record before this section was written. §15.5's and §15.8's "an eighth round is owed" sentences were
+true when written and stay in place unedited — the debt was declined by the only party who could decline
+it, not retroactively never owed.
+
+**16.1 What is accepted.** 5a closes with:
+
+- **a known-open prose-bookkeeping defect class in this record.** Seven consecutive rounds ended with
+  the fix round creating the next round's finding; five of the last six findings were this record's
+  bookkeeping about its own review history; and the mechanism — each round appends a section, the append
+  falsifies a count or a characterization above it, the next round finds that — operated even on §14,
+  the section written to document it. Closing now accepts that class as open and undischarged, with no
+  claim that a sweep at closure caught its last instance.
+- **no round having returned READY.** Rounds 1–7 all returned NOT READY. This closure converts none of
+  them, and no reviewer has endorsed the record as it stands.
+- **nine unreviewed changes**: the six the round-7 fix round made (round 7's three findings and §15.8's
+  three extras), the three closure edits this section's writing required — the preamble's first
+  sentence, the ledger's §15.5 sentence, and §9's "latest" sentence, each updated because appending §16
+  would otherwise have falsified it, which is the mechanism of 16.1 operating on this very closure —
+  and this section itself.
+
+**16.2 What is NOT accepted, and did not move.** No fix and no closure edit touched the confinement
+disclosure. The **four** residual rebindings (§8.1, §13.5, §14.5, §15.6 and the module note in
+`src-tauri/src/probe.rs`) remain **open and disclosed, accepted not proven**, acceptance explicitly not
+proof of impossibility; this closure neither closes nor re-litigates them, and 5b inherits them
+unchanged. The instrument's standing is likewise not improved by this section: both probe sources have
+been still since round 2, and rounds 6 and 7 each swept them and found **no instrument defect** — that
+measurement, §15.4's reading, is the evidence the owner accepted, not a guarantee this section adds.
+
+**16.3 Why the exception is bounded.** Step 2c-5-7 deletes the instrument — this record's subject
+matter — and every round costs one Codex round-trip. With the remaining defect surface being this
+record's bookkeeping about its own review history, the predicted yield of an eighth round was another
+Low in §15's or this section's bookkeeping, and the loop's structure names no round at which that stops
+being true. §13.4's *"no round of this step has been allowed to close without one"* was true of rounds
+1–7 and stops here: the round-7 fix round is the first change set of this step to close without a
+successor review, and only the owner could take that.
+
+**16.4 The rule is narrowed for this closure, not suspended.** *A fix is a change, and the round that
+reviews it is not optional* still binds every code change and every other record. The exception covers
+exactly the nine changes 16.1 enumerates and nothing else. **This section is itself unreviewed prose
+and the exception knowingly covers it** — reviewing the closing entry would reopen the loop the closure
+ends. Any later substantive change to this file is a new change and owes its own review; nothing here
+pre-spends consent for one.
+
+**16.5 The gates at closure.** Re-derived on the tree as it stands after the closure edits — **markdown
+only, so no gate could have moved, and the re-derivation is the check of that claim rather than a
+substitute for it**: `cargo test --workspace` **1153**, `npm run check` **432 files / 0 errors /
+0 warnings**, `npm test` **2124 in 56 files**, `npm run build` **185 modules**; `cargo clippy
+--workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. The bundle oracle read in
+**both** directions: server-only `$$payload|head_payload|push_element` **absent**, client-only
+`window.__svelte|svelte-trusted-html` **present → 2**. The `cargo build -p espansoconfig --features
+custom-protocol` row was not re-run. **No launch was re-run and no new window measurement is claimed.**
