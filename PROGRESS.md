@@ -3656,6 +3656,59 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-5 step 5b (the restore cases, and the second rebuild of the tree)
+
+**2026-08-24. 5b is COMPLETE: both parts built, launched and recorded, and its one review round
+returned READY with no findings — the first READY any instrument step of this project has produced;
+5a never got one in seven rounds.** The record is `docs/decisions/2c-5-5b-instrument-cases.md`
+(§§1–8); the review is `docs/reviews/phase-2c-5-5b-instrument.md`, captured verbatim by the
+orchestrator because the reviewer's sandbox was read-only — the same capture rule 5a's rounds 6 and 7
+used; the record's §8 is the disposition.
+
+**The scratch tree was lost a second time before this step began.**
+`/private/tmp/espansoconfig-harness-2c-5/` did not exist when the session resumed — a `/private/tmp`
+wipe took all sixty-six retained launches, the three manifests and the nine decoys; the four probe
+paths in the repository survived, with the hook diff still reading exactly 5 insertions / 1 deletion.
+Part 1 rebuilt the tree **at the same path** from the 5a record's §2/§3 plus the surviving driver
+sources, touching none of the four probe paths, and proved the rebuild on the new binary
+(`08229f8c…`): **P49** re-ran `editor-third:en` and reproduced §4.1's transcript shape with
+`bytes=MATCH` against `third-r2.yml`; **N09** was the no-plan control (zero-byte transcript, target
+unchanged); **C11–C15** re-took the five confinement controls, each documented refusal quoted in its
+transcript. Launch numbering continues the lost ranges (P49+, N09+, C11+) so no rebuilt launch can be
+mistaken for a 5a artifact; `manifest-2c-5-5b-rebuild.sha256` (29 entries) is the part-1 post-image.
+The record's §1 states the loss from the filesystem alone, and 5a's measurements remain readings of
+that tree's binary `0a2d3506…` — this tree's controls are the re-takes for its own binaries.
+
+**Part 2 built the four restore cases** — one driver edit (`src/probe.ts`: `restorePlan` plus four
+step-scoped helpers, each `section.step` resolved by its translated heading) and `launch.sh`'s
+seeded `.espansoconfig-backups` catalogue, every layout choice cited from
+`crates/espansoconfig-core/src/persist/backup.rs` in the record's §3.1, plus three restore-only
+independent byte-oracle lines (`entry-cmp=`, `backup-tree=`, `batches=`). On binary `6d3a80de…`:
+**P50** (`restore-replace:en`) reached catalogue, entry, candidate, prepare and replace in one
+launch, with `bytes=MATCH` against the entry, `entry-cmp=MATCH`, `backup-tree=SAME` and
+`batches=before:1 after:2` — the restore's own backup observed without disturbing the seeded batch;
+**P51** (`restore-prepare:es`) reached the question and declined it, nothing written; **P52**
+(`restore-conflict:en`) put the second writer between the question and the confirmation and read this
+tree's own fixture digests in the conflict panel, no backup taken; **P53** (`restore-none:es`) read
+the listed-and-empty catalogue. `failed-lines=0` and `end-lines=1` on every launch;
+`reportReapply` was never called for a restore; **`src-tauri/src/probe.rs` was not touched** and
+`TARGET_TAIL` is unwidened, so §8.2 item 7's test obligation never triggered.
+`manifest-2c-5-5b-cases.sha256` (24 entries, all verify) is the part-2 post-image; part 1's manifest
+was not regenerated and now fails on exactly the two files part 2 edited, kept as the record of the
+change. What 5b deliberately does not reach is enumerated in the record's §5.
+
+Gates re-derived **twice** — by the part-2 worker after the last driver edit, then independently by
+the orchestrator before the review: `cargo test --workspace` **1153**; `npm test` **2124 in 56
+files**; `npm run check` **432 files / 0 errors / 0 warnings**; `npm run build` **185 modules**
+(predicted zero movement, measured zero movement); `cargo clippy --workspace --all-targets -- -D
+warnings` clean; `cargo fmt --check` clean; bundle oracle **absent / present → 2**. The repository
+holds the four harness paths plus this step's record and review file, and nothing else; no mutating
+git command ran during either part.
+
+**One geometry note supersedes the 5a tree's:** this tree's launches measured the viewport at
+**`1180x728 dpr=2 visible`**, where the lost 5a tree's P37–P48 reported `720x728 dpr=1`. Under §6.8's
+incomparability rule neither figure judges the other, and 2c-5-6 still owes its own geometry.
+
 ## Verification — Phase 2c-5 step 5a (closure by owner decision)
 
 **2026-08-24. 5a is CLOSED by path B — the owner's deliberate exception to the standing rule; the
@@ -8401,6 +8454,83 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-5b is COMPLETE — both parts, four restore launches, one review round, READY with no findings. THE NEXT ACTION IS STEP 2c-5-6 — the bilingual window reading.**
+
+**5b closed clean**: the record is `docs/decisions/2c-5-5b-instrument-cases.md` (§§1–8, §8 the
+disposition), the review is `docs/reviews/phase-2c-5-5b-instrument.md` (READY, no findings — the
+first READY any instrument step has produced), and the "Verification — Phase 2c-5 step 5b" section
+above is the checkpoint's account. **The scratch tree was lost a second time and rebuilt at the same
+path** — read that verification section before trusting any older description of the tree's contents.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all   # expect exactly FOUR lines — the harness paths, nothing else
+ls /private/tmp/espansoconfig-harness-2c-5/   # the tree is VOLATILE — check it exists before planning anything
+sed -n '/^## Q7/,/^## Q8/p' docs/reviews/phase-2c-5-design.md   # step 6's specification is Q7 item 6
+docs/decisions/2c-5-5b-instrument-cases.md   # the instrument AS IT NOW EXISTS: §2 the rebuilt scripts and
+#   their proof, §3 the restore machinery, §4 the four restore launches, §5 what 5b does NOT reach
+docs/decisions/2c-5-5a-instrument-rebuild.md # §3 = the launch recipe; §8.3 = what 2c-5-6 owes; §8.1 = the
+#   four residual rebindings, inherited open and unwidened
+```
+
+#### The state of the tree, and the one check to run before anything else
+
+**`/private/tmp/espansoconfig-harness-2c-5/` has now been lost twice** — `/private/tmp` does not
+survive a reboot, and both losses were discovered on session resume. **Check it exists first.** If it
+is gone again, rebuild it from `docs/decisions/2c-5-5b-instrument-cases.md` §2 and §3 (the recipe is
+proven — it has produced a working tree twice) and re-take one positive launch plus the five
+confinement controls on the new binary before using it, exactly as 5b part 1 did. The four harness
+paths in the repository (`src/main.ts` and `src-tauri/src/main.rs` modified by two hook lines each,
+`src/probe.ts` and `src-tauri/src/probe.rs` untracked) are the surviving authority and **must never
+be committed — never `git commit -a` or `git commit -am`; stage by path.**
+
+The tree now holds: the four scripts (`launch.sh` with the seeded backup catalogue and the three
+restore-only byte-oracle lines, `inert.sh`, `confine.sh`, `adversary.sh`), ten fixtures, launches
+**P49–P53, N09, C11–C15** (+ `C14-plant`), and two manifests (`-rebuild` 29 entries of which exactly
+two now fail — `launch.sh` and `src/probe.ts`, the part-2 edits, kept as the record of the change;
+`-cases` 24 entries, all verify). Decoys `…-probe-decoy-C11..C14.yml` sit outside the tree; 2c-5-7's
+deletion list is those four, the tree, and the planted symlink artifacts — the C01–C09 decoys of 5a
+are already gone with the wipe.
+
+#### The gate baseline — TWO figures, and do not confuse them
+
+- **With the harness in the tree: `1153 / 432 / 2124 / 185`** (`cargo test --workspace` / `npm run
+  check` files / `npm test` / `npm run build` modules), re-derived twice at 5b — by the worker after
+  the last driver edit and independently by the orchestrator before the review. Clippy and fmt
+  clean; bundle oracle **absent / present → 2** (read both lines — the bare `svelte/internal/server`
+  search is vacuous).
+- **Harness-free production: `1153 / 431 / 2123 / 184`** — what **2c-5-7 must re-derive on a
+  harness-free tree**, never copy forward. The scar is `1623`.
+
+#### What 2c-5-6 is, and what it owes
+
+The bilingual window reading over the restore surface — design Q7 item 6, the sixth of the phase's
+seven steps. Per 5a's §8.3 it owes **both languages on every surface** (5a §4's coverage is
+aggregate, not per-surface) and **its own geometry**: this tree's launches measured
+**`1180x728 dpr=2 visible`**, the lost 5a tree measured `720x728 dpr=1`, and under §6.8's
+incomparability rule no earlier record's rectangles carry forward in either direction. The instrument
+gives it sixteen cases — the twelve 5a plan-proof cases plus `restore-replace`, `restore-prepare`,
+`restore-conflict` and `restore-none`, each taking `[:en|es]` — and the record's §5 lists the states
+no case reaches, which bounds what a reading can claim. **One plan per launch, into a fresh bundle
+path; the language must be set through the picker** (the WebKit data store follows the shared bundle
+identifier); an occluded WKWebView stops running `setTimeout` about six seconds after launch.
+
+#### Commissioning 2c-5-6's review — the rule 5a learned, 5b confirmed
+
+**Write every review brief so either sandbox works** — the workspace may be read-only, the final
+message IS the deliverable, a sandbox limit must not affect the verdict. 5b's reviewer ran read-only
+and could not create its review file; the orchestrator captured the final message verbatim under a
+capture note, as 5a's rounds 6 and 7 were. **Check whether the review file exists and is substantive
+before writing to that path.** Commission as `Agent(subagent_type="codex:codex-rescue", ...)`, and
+brief the reviewer to sweep for the **shape** of a finding, never the words of the one just closed.
+The four residual rebindings (5a §8.1) are inherited-open, unwidened by 5b, and are not new findings.
+
+---
+
+### ⚠️ HISTORICAL — the step 2c-5-5a → 5b handoff, superseded by 5b's completion above. Its description of the tree predates the second loss and the rebuild: the launches and manifests it names (P37–P48, N07–N08, C05–C10, the three 5a manifests) no longer exist. The rebuilt tree is described in the "Verification — Phase 2c-5 step 5b" section and the 5b record.
 
 ### **Step 2c-5-5a is CLOSED — by the owner's decision of 2026-08-24, recorded in §16 of the record. THE NEXT ACTION IS STEP 2c-5-5b — build the restore-specific cases onto the inherited harness, per §8.2.**
 
