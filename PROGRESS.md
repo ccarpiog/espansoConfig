@@ -8648,9 +8648,9 @@ verdict file; two of its load-bearing citations were independently re-read and h
 (`src/lib/components/DetailPane.svelte:453-469` — the open-surface list nothing can prove
 complete, Q8's subject — and `src-tauri/src/main.rs:73-127` — fifteen workspace commands plus
 one menu command, which is why Q4 orders the "fifteen commands" prose updated when the drain
-command lands). The working tree at this checkpoint holds exactly this consult: the verdict file
-and this `PROGRESS.md` update. **Four of its rulings overrule the handoff brief** — see the
-phase-table row above for the four — and they bind every step below.
+command lands). **The consult commit is `fdb4f07`** — the verdict file and this checkpoint,
+staged by path; the working tree after it is clean. **Four of its rulings overrule the handoff
+brief** — see the phase-table row above for the four — and they bind every step below.
 
 #### Read these first, in this order
 
