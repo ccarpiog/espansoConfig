@@ -1,15 +1,16 @@
 # Phase 2c-5 step 6b — the bilingual window reading over the restore surface
 
-**LAUNCHES P63–P86 TAKEN; ROUND-1 REVIEW NOT READY; TWELVE RE-TAKES OWED (P87+, on a visibly
-presented window) — see §12.** This record was written in three parts plus a review disposition:
-part 1 covers the first six restore cases (twelve launches, P63–P74; §3), part 2 the remaining
-five (ten launches, P75–P84; §6), §11 is the fix round — §4's **Medium** (the refused read's
-wording) fixed, proven and re-taken as **P85/P86**, §7's **Low** (the conflict-moment covering)
-**accepted as recorded** — and §12 is the round-1 phase review's disposition: the twelve launches
-that printed `visibility=hidden` stand as document-and-filesystem readings, and each owes a
-re-take whose own transcript prints `visibility=visible`. No launch failed, none was superseded,
-and no number was reused. No manifest is written here; the closure sub-step writes it after this
-record, as the final post-image.
+**LAUNCHES P63–P98 TAKEN; §12'S TWELVE RE-TAKES TAKEN AS P87–P98 (§13), EACH ON A VISIBLY
+PRESENTED WINDOW.** This record was written in four parts plus a review disposition: part 1 covers
+the first six restore cases (twelve launches, P63–P74; §3), part 2 the remaining five (ten
+launches, P75–P84; §6), §11 is the fix round — §4's **Medium** (the refused read's wording) fixed,
+proven and re-taken as **P85/P86**, §7's **Low** (the conflict-moment covering) **accepted as
+recorded** — §12 is the round-1 phase review's disposition: the twelve launches that printed
+`visibility=hidden` stand as document-and-filesystem readings, and each owed a re-take whose own
+transcript prints `visibility=visible` — and **§13 is those twelve re-takes, P87–P98, each
+accepted on that term**. No launch failed, none was superseded, and no number was reused. No
+manifest is written here; the closure sub-step writes it after this record, as the final
+post-image.
 
 Step 2c-5-6 is the one step of this phase that owes a WKWebView reading
 (`docs/reviews/phase-2c-5-design.md` Q7, items 5 and 6). It was split by the orchestrator into 6a —
@@ -853,12 +854,231 @@ coverage omission — the reviewer verified the table itself is complete.
 A fix is a change and its review is owed: the round scoped to the re-takes and to this
 disposition's edits follows once the re-takes are taken.
 
+## 13. The twelve re-takes — §12's screen evidence, taken on a presented window
+
+This section is the re-take round §12 owed: the same six cases, `:en` then `:es`, each launch
+accepted only on its own transcript printing `visibility=visible`. Numbering continued at **P87**
+and ended at **P98**; none failed, none was superseded, and no number was reused. P75–P86 stay
+retained exactly as §12 classified them — document-and-filesystem readings, never deleted and
+never re-numbered — and nothing below edits any older section.
+
+**The environment, read again before P87** (§12's lock check re-taken): `IOConsoleUsers` carries
+no `CGSSessionScreenIsLocked` entry — the lock §12's session met is gone, the user on console —
+and a display-asserting `caffeinate -d -u` ran through all twelve launches. What hid the part-2
+windows stays unmeasured, exactly as §12 left it; this section claims only what these twelve
+transcripts print.
+
+**The binary every launch pins**: `shasum -a 256 target/debug/espansoconfig` re-answered
+`371fc7c1…a809a0`, §11.4's digest, before the first launch, and all twelve launches record it from
+their own retained bundle copies. **All twelve ran the fix-round build** — for the notutf8 pair
+that is §12's own term, and for the ten part-2 cases it replaces P75–P84's `c4f2ae02…`, a
+resolution the orchestrator took with §11.7 in hand: among reachable launches only
+`restore-notutf8` passes through the code the fix changed, so the other five cases draw the same
+states on either build, and re-taking them on the build that ships keeps every launch of this
+round on one binary. §1's other preconditions were re-verified: the tree present exactly as the
+fix round left it (the five scripts, thirteen fixtures, four manifests, and the launch directories
+through P86), and `git status --short --untracked-files=all` listing exactly the four harness
+paths — this record and the fix round's two product edits, uncommitted at §11.9's reading, were
+committed by the orchestrator's checkpoint between §12 and this section, which is that
+checkpoint's record and not this part's. No git command that changes anything was run by this
+part; no rebuild was run; no driver, probe, script, fixture or product file was edited.
+
+§2's rules bind unchanged — one plan per launch, fresh bundle path, runs serial, the language
+through the picker, every conjunction a reader's. All twelve launches reported viewport `1180x728
+dpr=2 hasFocus=true visibility=visible`, reached `--- end` (`reached-end=yes end-lines=1`),
+counted `failed-lines=0`, left `probe.err=0 bytes`, and recorded `binary=371fc7c1…`; those
+readings are repeated per launch below only where one differs — none does. The visibility line is
+the plan-start reading §6's preamble describes, and **§12's acceptance term — the launch's own
+transcript printing `visibility=visible` — is met by all twelve**; no retained artifact reads
+visibility after plan start, a limit inherited whole, and the `hasFocus=true` beside it is this
+round a reading taken on a window whose transcript reports it presented.
+
+### 13.1 P87 — `restore-preview-bytes:en`
+
+§6.1's state re-drawn presented. The candidate step (`box=658,651,491x274`) quotes *"82 bytes of
+UTF-8, and 80 characters"* (the +2 is the BOM's), the `listedAgrees` sentence, the untouched-text
+sentence, and the three names — *"byte order mark U+FEFF"*, *"invisible character U+0007"*,
+*"carriage return U+000D"* — around the fixture's own text. The geometry reporter on the preview
+tail: five controls, every one `tabIndex=0`; four `isTheControl` and the entry row
+`descendantOfTheControl`; the focus walk `focused=true` on all five, `focus restored=false`
+(6a §3.3's disclosed limit). `final blocks=0`, `notice=absent`. Byte lines: `bytes=MATCH`
+(base-r0), `tree-diff=0`, `entry-cmp=DIFFER`, `backup-tree=SAME`, `batches=before:1 after:1`.
+
+### 13.2 P88 — `restore-preview-bytes:es`
+
+The same walk; the candidate step (`box=658,705,491x274`) quotes *"82 bytes de UTF-8 y 80
+caracteres según los cuenta Unicode"* and the three names — *"marca de orden de bytes U+FEFF"*,
+*"carácter invisible U+0007"*, *"retorno de carro U+000D"*. The geometry block has the same shape
+as P87's — five controls, all `tabIndex=0`, four `isTheControl`, the entry row
+`descendantOfTheControl`, the focus walk clean — measured entirely within this launch. Byte lines
+identical in shape to P87's.
+
+### 13.3 P89 — `restore-withdraw:en`
+
+The question (`box=658,574,491x101`) with *[Replace entire file with the shown text 275x29]
+[Do not replace this file 161x27]*, then *List them again* pressed inside the batches step, and
+afterwards `question=absent` with the single control *[Prepare to replace file 158x27]* and
+`final blocks=0`. Byte lines: `bytes=MATCH` (base-r0), `tree-diff=0`, `entry-cmp=DIFFER`,
+`backup-tree=SAME`, `batches=before:1 after:1`.
+
+### 13.4 P90 — `restore-withdraw:es`
+
+The same chain: the question (`box=658,504,491x171`) with *[Sustituir el archivo entero por el
+texto mostrado 340x29] [No sustituir este archivo 172x27]*, then *Volver a listarlos*, and
+afterwards `question=absent` with *[Preparar la sustitución del archivo 235x27]* and
+`final blocks=0`. Byte lines identical in shape to P89's.
+
+### 13.5 P91 — `restore-findings:en`
+
+The acknowledgement walked to a committed write. The refused outcome (`box=658,466,491x224`)
+quotes *"Nothing was written. The file on disk is exactly as it was."*, the verdict, *"espanso
+will not load this file until this is fixed."*, the parser's position (*"The YAML reader stopped
+at line 3, column 0."*) and the `acknowledgedAsksAgain` sentence — `willNotLoad=present`,
+`acknowledgedAsksAgain=present` — with *[Save anyway] [Leave this as it is]*. *Save anyway*
+re-asks the destructive question, and the second confirmation commits: `replaced=present`,
+`nothingToWrite=absent`, `windowOutOfStep=absent`, the final block with the backup-taken sentence,
+and the actions row afterwards holding *Prepare to replace file* above the `alreadyRestored`
+sentence.
+
+Byte lines: `bytes=MATCH` against `restore-broken.yml`, `entry-cmp=MATCH`, `backup-tree=SAME`,
+`batches=before:1 after:2`, `tree-diff=14 lines` read whole: exactly two things, the minted batch
+`2026-08-24T162006Z` and the target's own change, nothing else in the tree moved. **The
+displaced-bytes reading, taken by hand**: the minted batch holds `.espansoconfig-batch` plus
+`match/conflict.yml`, and `cmp` of that entry against `fixtures/base-r0.yml` answers
+**identical**.
+
+### 13.6 P92 — `restore-findings:es`
+
+The same walk and both confirmations; the refused outcome (`box=658,448,491x241`) quotes *"No se
+ha escrito nada. El archivo del disco sigue exactamente igual."*, *"espanso no cargará este
+archivo mientras no se corrija."* and *"El lector de YAML se detuvo en la línea 3, columna 0."*
+with *[Guardar de todos modos] [Dejarlo como está]* — `willNotLoad=present`,
+`acknowledgedAsksAgain=present` — and the second confirmation commits with the Spanish final
+block and *Preparar la sustitución del archivo* above the Spanish `alreadyRestored` sentence.
+Byte lines identical in shape to P91's, `tree-diff=14` read whole (the minted batch
+`2026-08-24T162024Z` and the target's change, nothing else). **The displaced-bytes reading, taken
+by hand in this launch too**: the minted entry `cmp`s **identical** to `base-r0.yml`.
+
+### 13.7 P93 — `restore-nothing:en`
+
+The `committed: false` success: `nothingToWrite=present`, `replaced=absent`,
+`windowOutOfStep=absent`, the final block (`box=658,611,491x78`) quoting *"The text was already
+exactly what the file held, so nothing was written. Both checks still ran; this is a save with
+nothing to do."*, and the actions row afterwards offering plain *Prepare to replace file* again —
+not `alreadyRestored`. Byte lines: `bytes=MATCH` (base-r0), `tree-diff=0`, `entry-cmp=MATCH`,
+`backup-tree=SAME`, `batches=before:1 after:1` — no backup minted.
+
+### 13.8 P94 — `restore-nothing:es`
+
+The same chain: `nothingToWrite=present` (*"El texto ya era exactamente el que tenía el archivo,
+así que no se ha escrito nada…"*, `box=658,594,491x95`), `replaced=absent`,
+`windowOutOfStep=absent`, *Descartar*, and afterwards plain *Preparar la sustitución del
+archivo*. Byte lines identical in shape to P93's.
+
+### 13.9 P95 — `restore-reload:en`
+
+The full chain. The writer moves the file after the question (`--- writer second wrote=yes`); the
+conflict panel (`box=658,78,491x611`) holds `2543689c… / beba1b1f… / beba1b1f…` — `expected ≠
+found`, `diskRevision == found`, the reader's conjunction — with exactly two choices *[Leave this
+as it is 108x23] [Load the version on disk 147x23]*, `keepMyDraft=absent keepMyRequest=absent`,
+`readiness ready=absent readyOperation=absent`. The geometry reporter at the conflict moment,
+measured entirely within this launch: the pane at its maximum scroll (`scrollTop=1338
+scrollHeight=1983 clientHeight=645`), seven controls all `tabIndex=0`, four upper-pane controls
+`outsideViewport`, both choices `isTheControl`, and the disabled prepare control (`box=658,2`,
+`disabled=true`) answered `somethingElse(tag=header)` — §7's covering, reproduced on a launch
+whose transcript reports the window presented; the judgement stands as §11.8 disposed it, its
+unmeasured half unchanged. The focus walk: six `focused=true`, prepare `skipped=disabled`,
+`restored=false`. The reload warning quotes the withdrawal sentence, the three revision
+sentences, the retained operation and the disk version whole; *Load it and keep the text selected
+here* clears the panel (`afterReload outcomePanel=absent`), and the second prepare/confirm
+commits: `replaced=present`, `nothingToWrite=absent`, `windowOutOfStep=absent`.
+
+Byte lines: `bytes=MATCH` against `restore-entry.yml`, `entry-cmp=MATCH`, `backup-tree=SAME`,
+`batches=before:1 after:2`, `tree-diff=18 lines` read whole: the minted batch `2026-08-24T162108Z`
+and the target's own change, nothing else. **The displaced-bytes reading, taken by hand**: the
+minted entry `cmp`s **identical** to `fixtures/elsewhere-r1.yml` — the displaced text is the
+writer's, which is only possible if the write happened over the adopted disk version; the
+adoption-`installed` discrimination is §6.9's reader's conjunction, unchanged.
+
+### 13.10 P96 — `restore-reload:es`
+
+The same chain; the conflict panel holds the same three revision digests with *[Dejarlo como está
+113x23] [Cargar la versión del disco 159x23]*, and the geometry block reads the same shape
+entirely within this launch (`scrollTop=1392 scrollHeight=2037`; four catalogue controls
+`outsideViewport`, both choices `isTheControl`, the disabled *Preparar la sustitución del
+archivo* answered `somethingElse(tag=header)`). The reload warning quotes *"Tu confirmación queda
+retirada…"* and its confirm control *"Cargarla y mantener aquí el texto elegido"*; the panel
+clears, and the second prepare/confirm commits. Byte lines identical in shape to P95's,
+`tree-diff=18` read whole (the minted batch `2026-08-24T162128Z` and the target's change, nothing
+else). **The displaced-bytes reading, taken by hand in this launch too**: the minted entry `cmp`s
+**identical** to `elsewhere-r1.yml`.
+
+### 13.11 P97 — `restore-notutf8:en`
+
+The fixed refusal, presented: the entries step re-drawn with **three** sentences — the two
+generic ones beside *"That entry is not valid UTF-8 text, so espansoConfig cannot show it. The
+first byte that is not is at offset 0."* — with `candidateStep=absent`, `final blocks=0`,
+`notice=absent`. Byte lines: `bytes=MATCH` (base-r0), `tree-diff=0`, `entry-cmp=DIFFER`,
+`backup-tree=SAME`, `batches=before:1 after:1` — a refused read writes nothing.
+
+### 13.12 P98 — `restore-notutf8:es`
+
+The same chain (`lang picked=es lang=es`): the two generic sentences beside *"Esa entrada no es
+texto UTF-8 válido, así que espansoConfig no puede mostrarla. El primer byte que no lo es está en
+la posición 0."*, `candidateStep=absent`, `final blocks=0`. Byte lines identical in shape to
+P97's.
+
+### 13.13 The §8 rows, re-earned on a presented window
+
+Every §8 row whose citations §12 re-classified now carries a launch whose own transcript prints
+`visibility=visible`; the part-1 rows (P63–P74) printed it when taken and stand unchanged. The
+table's part-2 and fix-round citations are re-earned so:
+
+| §8 row | English | Spanish |
+|---|---|---|
+| BOM/CRLF/control-character preview | P87 | P88 |
+| confirmation withdrawal by a change | P89 | P90 |
+| parse-finding acknowledgement | P91 | P92 |
+| `committed: false` | P93 | P94 |
+| target changed after preview, the window-side half; adoption `installed` | P95 | P96 |
+| non-UTF-8 entries — the fixed wording, with P85/P86 behind it and P73/P74 behind them | P97 | P98 |
+| committed restore | P67, and now P91, P95 | P68, and now P92, P96 |
+| keyboard / focus / scroll / viewport reachability / hit testing | the reporter blocks of P87 (preview tail) and P95 (conflict moment) | P88; P96 |
+
+The four unreachable states stay dispositioned on 6a §6's arguments, untouched by this round; the
+recognised-batches and valid-entries rows are additionally re-drawn by every catalogue walk
+above.
+
+### 13.14 The closure of §12's obligation, and this part's accounting
+
+- **§12's obligation is discharged**: twelve re-takes owed, twelve taken — P87–P98, the six cases
+  `:en` then `:es` — and every one accepted on its own transcript's `visibility=visible`. None
+  failed, none was superseded, every number used once.
+- The displaced-bytes reading was taken by hand in **all four** committed launches (P91, P92,
+  P95, P96), each minted entry `cmp`-identical to its case's displaced fixture — `base-r0.yml`
+  for the findings pair, `elsewhere-r1.yml` for the reload pair.
+- **No new defect was found**: every drawn state agreed with the standing shape §6 or §11 states,
+  §4's Medium stays fixed (P97/P98 draw all three sentences), and §7's Low stays accepted as
+  recorded — the enabled-state covering remains unmeasured, exactly as §11.8 left it. No reporter
+  call was added and no component changed, so no further re-take is owed by this part.
+- The repository after this part: `git status --short --untracked-files=all` lists exactly the
+  four harness paths **plus this record, modified by this very section's append** — the same
+  self-listing §11.9's reading carried for its own edits. No git command that changes anything
+  was run.
+- The 2c-5-7 deletion list is not lengthened: no decoy, no outside-tree file and no symlink was
+  created by any of these twelve launches; the tree gains the twelve launch directories P87–P98.
+  **No manifest is written by this part** — the closure sub-step writes the final post-image.
+- The review §12 named — scoped to these re-takes and to that disposition's edits — follows this
+  section; nothing here pre-empts it.
+
 ---
 
-**LAUNCHES P63–P86 TAKEN; ROUND-1 REVIEW NOT READY; TWELVE RE-TAKES OWED (P87+, on a visibly
-presented window).** §11 is the fix round's record: §4's Medium is fixed, proven in the mounted
+**LAUNCHES P63–P98 TAKEN; §12'S TWELVE RE-TAKES TAKEN AS P87–P98, EACH TRANSCRIPT PRINTING
+`visibility=visible`.** §11 is the fix round's record: §4's Medium is fixed, proven in the mounted
 suite and drawn by P85/P86 in both languages on the rebuilt binary `371fc7c1…`; §7's Low is
 accepted as recorded with its unmeasured half still named. §12 is the round-1 review's
-disposition: the twelve `visibility=hidden` launches stand as document-and-filesystem readings,
-and the screen evidence they were to give is owed again on an unlocked console. The closure
-sub-step writes the manifest after this record, as the final post-image.
+disposition: the twelve `visibility=hidden` launches stand as document-and-filesystem readings —
+and §13 is the screen evidence taken again: P87–P98 on an unlocked console, every case in both
+languages, all twelve on `371fc7c1…`, no new defect found. The review scoped to the re-takes and
+to §12's edits follows; the closure sub-step writes the manifest after this record, as the final
+post-image.

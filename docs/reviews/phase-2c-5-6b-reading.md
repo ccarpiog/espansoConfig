@@ -78,3 +78,9 @@ VERDICT: NOT READY
 
 Codex session ID: 01a03422-cd9e-7e52-8d3c-df8772c3c2da
 Resume in Codex: codex resume 01a03422-cd9e-7e52-8d3c-df8772c3c2da
+
+## Round 2
+
+READY
+
+P87–P98 each satisfy §12's launch-local acceptance term in their own `probe.log` (`visibility=visible`), and their `probe.log`, `probe.err`, `bytes.txt`, retained bundle, and `tree.diff` artifacts agree with the standing case shapes and the per-launch claims in `docs/decisions/2c-5-6-window-reading.md` §13.1–§13.12; the four committed launches' retained minted entries independently compare identical to the displaced fixtures claimed in §13.5, §13.6, §13.9, §13.10, and §13.14 (`launches/P91` and `P92` against `fixtures/base-r0.yml`, `launches/P95` and `P96` against `fixtures/elsewhere-r1.yml`). The §12 edits correctly withdraw the unsupported presentation derivation and preserve P75–P86 only as document-and-filesystem readings, while §9 now correctly counts the four unreachable states (`docs/decisions/2c-5-6-window-reading.md` §9 and §12). The fix-round-binary resolution in §13 is licensed by §11.7: P87–P96 all traverse successful catalogue and entry reads, whereas only P97/P98 (`restore-notutf8`) traverse the changed failed-entry branch and refusal reporter; consequently the re-earned coverage rows in §13.13 and closure of §12's obligation in §13.14 are supported by the launch-local artifacts.
