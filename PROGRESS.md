@@ -3656,6 +3656,66 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2c-5 step 6a (the instrument extended to every restore state 6b must reach)
+
+**2026-08-24. Step 2c-5-6 — the bilingual WKWebView reading — was split by the orchestrator into 6a
+and 6b, exactly as 2c-5-5 was cut: 6a extends the instrument to every restore state the reading must
+reach, 6b is the reading itself. 6a is COMPLETE: seven new cases proven by launch, four demanded
+states argued unreachable with code-grounded arguments, the reporter machinery for 6b's
+keyboard/focus/scroll/hit-testing obligations built and exercised, one review round NOT READY on two
+prose findings, a fix round, and a second round READY with no findings.** The record is
+`docs/decisions/2c-5-6a-instrument-extension.md` (§1 the work-list dispositions, §6 the four
+unreachability arguments, §10/§10.1 the review dispositions); the reviews are
+`docs/reviews/phase-2c-5-6a-instrument.md` (round 1: one Medium, one Low — both prose, no instrument
+defect) and `…-round2.md` (READY), both captured verbatim under the standing read-only-sandbox rule.
+
+**The seven cases and their states**: `restore-skipped` (P55 — the three `BatchSkipped` arms
+`ForeignName`/`NotADirectory`/`NoMarker` drawn from one seeded junk set; `Unreadable` deliberately
+not seeded — it breaks `cp -R`/`diff -r` themselves and Q7 does not demand `batchesIncomplete`),
+`restore-notutf8` (P56 — the refused read, `entriesRefused` drawn), `restore-preview-bytes` (P58 —
+BOM, BEL and bare-CR names all drawn; the geometry reporter's first run), `restore-withdraw` (P59 —
+withdrawal by catalogue change, where 5b's P51 was a decline by control), `restore-findings` (P60 —
+`DocumentDoesNotParse` acknowledged and the unparseable text committed; `acknowledgedAsksAgain`
+drawn), `restore-nothing` (P61 — `committed: false`, no backup minted), `restore-reload` (P62 —
+the conflict adopted through the two-step reload, adoption `installed`, then a commit over the
+adopted base; the hit test caught the sticky actions row sliding under the app header with the
+prepare control disabled at that moment — 6b judges whether that covering matters). P54 and P57 are
+retained superseded demonstrations (`diff -r`'s symlink-loop guard; the CRLF-only fixture that drew
+no CR name, which is `sourceText.ts` naming only a lone CR — the fixture gained a bare CR). All on
+binary `c4f2ae02…`, pinned per launch; **`src-tauri/src/probe.rs` untouched, no confinement
+widened, no N/C launch owed**; the four residual rebindings stay inherited-open.
+
+**The four unreachability arguments (record §6), each verified against the shipped code by round 1**:
+open-surface refusal (DetailPane's surfaces are mutually exclusive — the restore pane is never drawn
+beside another surface); the persistent `targetMoved` sentence (the projection re-observation
+re-points a moved revision, and `alreadyRestored` orders ahead of it); adoption
+`alreadyThere`/`refused` (no reachable restore-pane control independently moves the projection); and
+committed-but-reprojection-failed (**P60 measured the hypothesized deterministic route closed** — a
+parse failure is a diagnostic on a successful projection, not an IPC refusal, so producing the state
+needs a nondeterministic race plus a `probe.rs` change; 2c-5-3's model evidence keeps covering it).
+Q7's own "where reachable" qualifier licenses all four dispositions.
+
+**The review rounds.** Round 1: Medium — two `src/probe.ts` comments claimed the `findings` tail
+reaches a failed window-side re-read, the record's own §6.4 having said the opposite correctly (the
+record-over-claim defect class, living in a comment); Low — three transcript misreadings in the
+record's §4. Both fixed (comments and markdown only; no behavior, no launch re-taken); the
+shape-sweep also sharpened one §6.4 sentence ("line" → "sentence"). Round 2, scoped to the fix,
+returned **READY with no findings** and verified the sweep left no narrower instance standing.
+`manifest-2c-5-6a-cases.sha256` (38 entries) now fails on exactly `src/probe.ts`, kept as the
+record of the fix; `manifest-2c-5-6a-fix.sha256` is the fix-round post-image (its record entry
+fails in turn, recording §10.1's own write — stated there).
+
+Gates re-derived **three times** — by the worker after the last driver edit, independently by the
+orchestrator before round 1, and again after the fix round (prediction: no movement; measured: no
+movement): `cargo test --workspace` **1153 / 0 failed**; `npm run check` **432 files / 0 / 0**;
+`npm test` **2124 in 56 files**; `npm run build` **185 modules**; clippy `-D warnings` clean;
+`cargo fmt --check` clean; bundle oracle **server-absent / client-present → 2**. The repository
+holds the four harness paths plus this step's record and two review files, and nothing else; the
+hook diff still reads 5 insertions / 1 deletion; no mutating git command ran during the worker's
+part. The tree gains `byte-fixtures.sh`, three byte-exact fixtures (digests in the record's §2.2),
+launches P54–P62 and the two manifests; **the 2c-5-7 deletion list is not lengthened** (no new
+decoys or outside-tree artifacts).
+
 ## Verification — Phase 2c-5 step 5b (the restore cases, and the second rebuild of the tree)
 
 **2026-08-24. 5b is COMPLETE: both parts built, launched and recorded, and its one review round
@@ -8454,6 +8514,87 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **Step 2c-5-6a is COMPLETE — seven new cases proven, four states argued unreachable, two review rounds ending READY. THE NEXT ACTION IS STEP 2c-5-6b — the bilingual window reading itself.**
+
+**Step 2c-5-6 was split by the orchestrator into 6a and 6b**, exactly as 2c-5-5 was cut: 6a extended
+the instrument to every restore state the reading must reach — done, see "Verification — Phase 2c-5
+step 6a" above — and **6b is the reading**: the only window evidence the phase owes (design Q7 item
+6), in both languages, on every reachable restore state.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all   # expect exactly FOUR lines — the harness paths, nothing else
+ls /private/tmp/espansoconfig-harness-2c-5/   # the tree is VOLATILE and has been lost twice — check FIRST
+sed -n '/^## Q7/,/^## Q8/p' docs/reviews/phase-2c-5-design.md   # item 6 is the reading's specification
+docs/decisions/2c-5-6a-instrument-extension.md   # the instrument as it NOW exists: §1 every state's case,
+#   §3.3 the reporter's limits (keyboard activation is unmeasurable — untrusted events), §5 what no case
+#   reaches, §6 the four unreachability arguments (verified by review), §10-10.1 the review dispositions
+docs/decisions/2c-5-5b-instrument-cases.md       # §3 the restore machinery, §4 the P50-P53 launches
+docs/decisions/2c-5-5a-instrument-rebuild.md     # §3 = the launch recipe; §8.1 = the residual rebindings
+```
+
+#### The state of the tree
+
+If `/private/tmp/espansoconfig-harness-2c-5/` is gone again, rebuild from 5b §2-§3 plus 6a §2 (both
+recipes proven), re-run `byte-fixtures.sh`, and re-take one positive launch plus the five confinement
+controls on the new binary before using it. The tree holds: five scripts (`launch.sh` with **23 case
+rows** — twelve 5a, four 5b, seven 6a — `byte-fixtures.sh`, `inert.sh`, `confine.sh`,
+`adversary.sh`), thirteen fixtures, launches **P49–P62, N09, C11–C15** (+ `C14-plant`), and four
+manifests, of which two deliberately fail on known entries (`-rebuild` on `launch.sh` +
+`src/probe.ts`; `-cases` (6a) on `src/probe.ts`; `-fix` on the 6a record — each failure the kept
+record of a later edit, stated in the records). Decoys `…-probe-decoy-C11..C14.yml` sit outside the
+tree; 2c-5-7's deletion list is those four, the tree, and the planted symlink artifacts. The four
+harness paths in the repository (`src/main.ts`, `src-tauri/src/main.rs` modified two hook lines
+each; `src/probe.ts`, `src-tauri/src/probe.rs` untracked) are the surviving authority and **must
+never be committed — never `git commit -a` or `git commit -am`; stage by path.**
+
+#### The gate baseline — TWO figures, and do not confuse them
+
+- **With the harness in the tree: `1153 / 432 / 2124 / 185`** (`cargo test --workspace` / `npm run
+  check` files / `npm test` / `npm run build` modules) — re-derived three times at 6a, last after
+  its fix round. Clippy and fmt clean; bundle oracle **absent / present → 2** (read both lines).
+- **Harness-free production: `1153 / 431 / 2123 / 184`** — what **2c-5-7 must re-derive on a
+  harness-free tree**, never copy forward. The scar is `1623`.
+
+#### What 2c-5-6b is, and what it owes
+
+Q7 item 6's reading, over the restore surface: **both languages on every reachable restore state**
+(6a §1's table maps each demanded state to its case or its unreachability argument; the eleven
+restore cases each take `[:en|es]`), **its own geometry** (6a launches measured `1180x728 dpr=2` on
+most and `1080x728` on P61-P62 — nothing carries forward between launches, §6.8's rule), the
+keyboard/focus/scroll/viewport/hit-testing readings through 6a's reporter (its §3.3 names what the
+reporter cannot measure), and the byte comparisons every launch's `bytes.txt` already carries. One
+scoping decision is 6b's to take with the design in hand: 5a §4's sentence says 2c-5-6 "owes both
+languages on every surface" in the context of the twelve write-surface proof cases, but Q7 item 6 —
+the authoritative specification — demands restore states only, and the write surfaces had their own
+bilingual window readings in their own phases; resolve that against the design before planning
+launches rather than inheriting either reading silently. Launch numbering continues at **P63+**;
+one plan per launch, fresh bundle path, language **through the picker**; an occluded WKWebView
+stops running `setTimeout` about six seconds after launch. **Any component fix invalidates and
+re-takes the affected readings** (and is product code: gates and a review round follow it). A
+driver edit means rebuilding in 5a §3's order before the first dependent launch. Two 6a
+observations 6b should carry into its plans: the refused non-UTF-8 read draws **two generic
+sentences and never the offset** (`tBackupReadError` has no component caller — read what is drawn,
+do not expect the offset); and P62 found the sticky actions row sliding **under the app header**
+with the disabled prepare control's centre answering `somethingElse(header)` — whether that
+covering matters on the read state is 6b's to judge. The record is
+`docs/decisions/2c-5-6-window-reading.md`, in the bounded evidential style.
+
+#### Commissioning 6b's review — the standing rule
+
+**Write every review brief so either sandbox works** — the final message IS the deliverable; check
+whether the review file exists and is substantive before writing to that path (all three 6a-era
+verdicts were captured by the orchestrator). Commission as
+`Agent(subagent_type="codex:codex-rescue", ...)`, and brief the reviewer to sweep for the **shape**
+of a finding, never the words of the one just closed. The four residual rebindings (5a §8.1) are
+inherited-open, unwidened by 5b and 6a both, and are not new findings.
+
+---
+
+### ⚠️ HISTORICAL — the 5b → 6 handoff, superseded by 6a's completion above. Its "sixteen cases" inventory predates the seven 6a cases, `byte-fixtures.sh`, the three byte-exact fixtures and the two 6a manifests.
 
 ### **Step 2c-5-5b is COMPLETE — both parts, four restore launches, one review round, READY with no findings. THE NEXT ACTION IS STEP 2c-5-6 — the bilingual window reading.**
 
