@@ -2094,11 +2094,14 @@ fn create_batch(root: &Path, stamp: &str) -> Result<PathBuf, BackupError> {
     })
 } // End of function create_batch()
 
-/// Writes the file that says **this application minted this batch**.
+/// Writes the recognition marker that makes this newly created directory
+/// **eligible for rotation** — proving nothing about who created it, since
+/// anything able to write here can forge one.
 ///
 /// A timestamp-shaped name is a shape, and a shape is not a claim of ownership: a
 /// user, an archiver or another program can create one innocently, and [`rotate`]
-/// would then recursively delete it. This is what rotation actually trusts.
+/// would then recursively delete it. The marker is what rotation actually
+/// recognises, and recognition is not provenance.
 ///
 /// It is created with `create_new` and `0o600`, and it holds
 /// [`BATCH_MARKER_FORMAT`] and a version so that a later format can be recognised
@@ -4309,8 +4312,9 @@ mod tests {
         let other = backup_relative_path(root, Path::new("/elsewhere/base.yml"));
         assert_ne!(outside, other);
 
-        // Nothing a caller can spell escapes the batch: every component that is
-        // not a plain name is dropped.
+        // No lexical `.` or `..` escape: every component that is not a plain
+        // name is dropped. That is arithmetic on the constructed `PathBuf`;
+        // containment on disk is `ResolvedDirectory`'s per-target contract.
         let hostile = backup_relative_path(root, Path::new("/../../../etc/passwd"));
         assert_eq!(hostile, PathBuf::from("_outside/etc/passwd"));
         assert!(hostile

@@ -153,9 +153,11 @@ fn save_with(
 
 /// Every **copy** inside a batch, as paths relative to it, sorted.
 ///
-/// The batch's own ownership marker is not a copy: it is the file that tells
-/// rotation this application minted the directory, and every batch carries one.
-/// It is asserted for separately rather than filtered silently.
+/// The batch's own ownership marker is not a copy: it is the file that makes
+/// the directory eligible for rotation — recognition, never provenance, since
+/// a marker is forgeable and proves nothing about who minted the directory —
+/// and every batch carries one. It is asserted for separately rather than
+/// filtered silently.
 fn copies_under(batch: &Path) -> Vec<PathBuf> {
     assert!(
         batch.join(BATCH_MARKER_NAME).is_file(),

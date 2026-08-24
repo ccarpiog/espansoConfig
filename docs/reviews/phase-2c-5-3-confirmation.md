@@ -148,3 +148,11 @@ Section 2.2a's account of why round 2 missed H1 at `2c-5-3-notes.md:191-198` is 
 No new behavioural finding was found. H1 does not stand in a narrower form: M5 concerns observability before a failed spend, and L3 concerns the meaning of a retained value; neither supplies a second successful deletion or a second permit for one question.
 
 No further finding was found in the third-round confirmation-spend change or its touched sentences.
+
+## Closure round (commissioned at phase closure, 2026-08-24)
+
+VERDICT: NOT READY
+
+M5 is closed at its authoritative site: the record now limits equivalence to the answer for ordinary inert values and explicitly states that the removed early membership check changes observable getter/proxy behaviour (`docs/decisions/2c-5-3-notes.md:200-216`). L3's originally cited field comment is also corrected: `RestoreSession.pending` is now described as presentation, while only private membership says whether it still authorizes anything; it expressly covers a retained session whose authorization has gone (`src/lib/browser/restore.ts:1107-1123`). A shape-based sweep nevertheless found L3 still standing in two narrower comments:
+
+1. **Low — `src/lib/browser/restore.ts:647-669` and `:2907-2908` (derived at `:2997`) — presentation values are still described as an unanswered question.** `PendingRestore` is headed “A restore the person has been asked about and has not yet confirmed,” and `RestoreView.confirming` says “the person has been asked and has not answered”; the latter is computed only as `session.pending !== null`. As the corrected `RestoreSession.pending` documentation itself explains at `src/lib/browser/restore.ts:1111-1117`, a caller's retained session and its `PendingRestore` survive after the private authorization has been answered or revoked. These comments therefore repeat L3's presentation-equals-authorization claim in narrower types. Discharge them by describing `PendingRestore` as the presentation of a question and `confirming` as whether this session presents that question, or by deriving an actual unanswered/authorized predicate from `PENDING_AUTHORIZATIONS` before retaining the stronger wording.

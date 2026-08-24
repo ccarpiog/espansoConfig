@@ -228,3 +228,13 @@ Sound.
 
 Codex session ID: 019ffc5a-1739-7863-a342-619111f7fa46
 Resume in Codex: codex resume 019ffc5a-1739-7863-a342-619111f7fa46
+
+## Closure round (commissioned at phase closure, 2026-08-24)
+
+VERDICT: NOT READY
+
+The current tree closes the chronology/recoverability wording at the reviewed production sites: retention is now explicitly sortable-name based and promises no duration or recoverability (`crates/espansoconfig-core/src/persist/backup.rs:39-43`, `:1430-1445`; `crates/espansoconfig-core/src/persist/save.rs:671-674`; `src-tauri/src/commands.rs:5962-5966`). It also closes the `NotUtf8` taxonomy and field-comment finding (`src/lib/ipc/errors.ts:450-478`) and corrects the lossless-length explanation and discriminator to `2^53 + 1` (`crates/espansoconfig-core/src/persist/backup.rs:3793-3798`, `:5858-5863`; `src/lib/ipc/types.ts:2022-2031`). The ordinary containment prose now distinguishes lexical construction from target-specific filesystem containment (`crates/espansoconfig-core/src/persist/backup.rs:1091-1098`, `:3674-3677`, `:3755-3762`). Two narrower instances of the last verdict's Medium claim shapes remain:
+
+1. **Medium — `crates/espansoconfig-core/src/persist/backup.rs:4312-4318` — the test comment still says “Nothing a caller can spell escapes the batch.”** The assertions inspect only the returned `PathBuf` and prove absence of `ParentDir`/`RootDir`; they do not establish on-disk containment against the documented non-macOS substitution race. This was left deliberately: `PROGRESS.md:9439-9442` calls it the last unswept instance and says it remains open. It is therefore neither closed nor a new finding. Discharge it by saying that no caller spelling introduces a **lexical** `.` or `..` escape and by leaving filesystem containment to `ResolvedDirectory`'s per-target guarantee.
+
+2. **Medium — `crates/espansoconfig-core/tests/persist_backup.rs:156-158` — the ownership-marker helper still attributes provenance to the marker.** It says the marker “tells rotation this application minted the directory,” but the current production contract says the marker is forgeable and is worth recognition, never provenance (`crates/espansoconfig-core/src/persist/backup.rs:74-86`, `:3426-3432`, `:4465-4472`). This is a narrower instance of the last verdict's marker-provenance finding, not a separate new defect. Discharge it by saying that the marker is bookkeeping which makes the directory eligible for rotation and proves neither who minted the directory nor its provenance.

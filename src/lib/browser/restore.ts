@@ -645,7 +645,11 @@ export function candidateText(preview: RestorePreview): string {
 declare const PENDING: unique symbol;
 
 /**
- * A restore the person has been asked about and has not yet confirmed.
+ * A restore the window presents as awaiting confirmation.
+ *
+ * Presentation, never the private authorization's own state: a retained
+ * session can still carry this value after that authorization has been spent
+ * or revoked, and nothing is sent on its word alone.
  *
  * **The five values consult Q5 binds**, and {@link confirmRestore} rechecks every
  * one of them against the session *and* asks the window for the sixth thing — the
@@ -2904,7 +2908,10 @@ export interface RestoreView {
   readonly canPrepare: boolean;
   /** Why it does not, as a code, or `null`. */
   readonly refusal: RestoreRefusal | null;
-  /** Whether the person has been asked and has not answered. */
+  /**
+   * Whether a prepared restore is presented for confirmation — presentation
+   * (`pending !== null`), not the private authorization's state.
+   */
   readonly confirming: boolean;
   /** Whether a replacement is in flight. */
   readonly restoring: boolean;
