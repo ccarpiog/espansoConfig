@@ -3707,9 +3707,23 @@ binary and the +1 in the workspace total is that test rather than a recount.
 - **`watch_check`'s exact-zero assertion was kept rather than weakened**, and the timing argument it
   rests on is recorded as unmeasured (§5 item 30) instead of being asserted as sound. Weakening it
   would have removed the only executable check on the tally's ordinary-path value.
+
+  > **Correction (round 11).** The last sentence is **false**, and it is round 11's Medium. The check
+  > on the stamp is the **bounded positive wait** for `suppressed >= 1` twenty lines above the
+  > assertion, not the assertion — proved by neuter: with the worker's stamp taken once at first use
+  > rather than per pass, the test fails at *timed out waiting for the save's own bytes to be
+  > suppressed*, the wait's message. **The assertion is removed at round 11** and item 30 is closed
+  > as a defect, its residue standing.
 - **The doc states its own limit in the same sentence as its claim** — it says what sustained growth
   would indicate and, in the same breath, that no threshold is enforced anywhere. That is this
   project's standing rule about guarantees the code does not give.
+
+  > **Correction (round 11).** **It did not**, and this bullet is round 11's second High seen at the
+  > checkpoint's own name position. The claim ended in a full stop and *No threshold is enforced
+  > anywhere* began a new sentence, so this line claimed compliance with the standing rule that the
+  > code it describes did not give — the one defect class no test can fail. The doc's bullet is one
+  > sentence as of round 11, and the concession is widened to name that the tally keeps no per-path
+  > count and that nothing fails when the counter climbs.
 
 **Open risks and deviations:** none deviated from the reviewer's remedy. Three new residues are
 recorded honestly in §16.6 rather than as reassurances — items 30, 31 and 32 — and the standing
@@ -3717,6 +3731,74 @@ posture is that such items are expected to become real defects, not merely suspe
 them have; item 25 is the first to survive its round.
 
 **Git state:** `82c7dc5`, tree clean, pushed. Frontend untouched across the whole step.
+
+---
+
+### Phase 2d-3 — round 11 of the ledger review, and its fix round
+
+**Completed.** Round 11 was briefed from the round-10 fix and returned **NOT READY with 2 High, 1
+Medium and 1 Low**. All four are fixed and the fix is green. **Round 10's clean sheet lasted exactly
+one round**, and the shape of what broke it is the lesson: **round 10 corrected a *conclusion* and
+left its *premise* standing, in the same paragraph.** Its Low was the tally doc's *on a healthy
+production path this stays zero*; the rewrite that closed it kept, in the very next clause, *the hints
+one commit generates are decided after that commit's anchor and **never** reach this arm*. Eleventh
+consecutive name-position finding; third consecutive that was a premise rather than a word. **Both
+Highs were this project's declared worst defect class.**
+
+**Acceptance:**
+
+- **High 1 closed** — the doc's *never* and §16.6 item 30's *nothing enforces this ordering* were
+  written in the same fix round and contradicted each other from the moment both existed. The doc now
+  says zero is the **usual** outcome, says *usually is all it is* in the same breath, and names the
+  stall that produces the exception. §16.1's first bullet carries a correction block.
+- **High 2 closed** — §16.1 asserted the tally doc stated its concession *in the same sentence* as its
+  claim. It did not. The doc's bullet is now one sentence and the concession is **widened**, naming
+  that no per-path count exists and that nothing fails when the counter climbs.
+- **Medium closed** — `watch_check`'s `preceded_a_commit == 0` removed. **Proved by neuter, not
+  argued**: the worker's per-pass `Instant::now()` replaced by a `OnceLock` initialized at first use —
+  the permanently early stamp in production shape — makes the test fail at *timed out waiting for the
+  save's own bytes to be suppressed* (`watch_check.rs:141`, 128.06 s), the **wait's** message, not the
+  removed line's. `watch.rs` restored byte-identically and absent from the diff.
+- **Low closed** — the test's four-tuple message said *no other decision was taken* while step 3 takes
+  and asserts a withhold; corrected, and `withheld == 1` now asserted.
+
+**Verification** — every gate measured by the orchestrator, **twice**: on the clean tree before the
+fix and again after it.
+
+```sh
+cargo test --workspace                    # 1268 passed, 0 failed, 26 result lines, exit 0 (both runs)
+cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1
+                                          # 20/20, 223 filtered out, 64.77 s then 64.85 s, exit 0
+cargo clippy --workspace --all-targets -- -D warnings   # exit 0
+cargo fmt --check                         # exit 0
+cargo tree -p espansoconfig-core | rg tauri             # empty — architecture rule holds
+git diff --name-only 052dd38~1 HEAD | rg '^src/'        # empty — no frontend path across the step
+```
+
+The totals are **unchanged at 1268**, and that is the expected result rather than a missing
+measurement: this round removed one assertion and added one, and neither is a test.
+
+**Decisions, and why:**
+
+- **A removed check must be proved redundant, not argued redundant.** The reviewer's Medium and the
+  comment above the assertion both said the positive wait carries the detection, but round 10's record
+  had said the opposite with equal confidence. The neuter is what settles it, and it is recorded in
+  §17.6b with the failing message quoted.
+- **The concession was widened rather than relocated.** Satisfying the same-sentence rule by moving a
+  clause would have left the weaker claim intact; the doc now also says the tally keeps no per-path
+  count and that nothing fails when the counter climbs, which is what makes *sustained growth* legible
+  as a suspicion rather than a diagnosis.
+- **Item 30 is closed as a defect and kept as a residue.** The assertion it was written about is gone,
+  but no test exercises the rename-to-record window and none can without a deterministic
+  production-stamping seam — which is 2d-4's shape, not this step's.
+
+**Open risks and deviations:** none deviated from the reviewer's remedy. Two new residues are recorded
+in §17.7 — item 33 (the save-thread stall has no test) and item 34 (`watch_check` now asserts strictly
+less: the surviving wait proves a **permanent** early stamp only, so an intermittent one still passes).
+Item 34 is the sharpest thing round 12 inherits, because round 11 removed a check and the round that
+reviews it must decide whether the trade was right rather than accept the argument that removed it.
+
+**Git state:** `411658f`, tree clean, pushed. Frontend untouched across the whole step.
 
 ---
 
