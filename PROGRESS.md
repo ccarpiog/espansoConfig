@@ -8642,6 +8642,92 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### **STEP 2d-2 IS COMPLETE — native lifecycle and the real-filesystem adapter, closed READY at round 5 of its review. THE NEXT ACTION IS STEP 2d-3 — save composition and the suppression ledger (`run_one_save`, `conflict_after_the_lock`).**
+
+**Where things stand.** The 2d-1 engine now runs behind the open `WorkspaceSession`:
+`src-tauri/src/watch.rs` is `WatcherLifecycle` — one worker thread per open workspace driving
+the `ObservationEngine` with real clock and filesystem, owning the `NativeWatch`, with epochs
+minted by a checked allocator in `WorkspaceSession::open` (typed `EpochSpaceExhausted`, never
+reuse), teardown that can never join the worker on itself (same-thread detection routed to a
+never-blocking reaper: each sweep joins every handle it observes finished, blocking on no
+unfinished handle), the polling fallback engaged only on native failure (Q1), `HintSpelling`
+reconciling FSEvents' resolved paths onto discovery's spelling, and epoch-tagged observations
+to an injected `ObservationSink` whose production instance discards until 2d-4's queue.
+`src-tauri/src/watch_check.rs` is the real-filesystem evidence: 18 serial integration tests —
+the eight create/rename/edit/remove × config//match/ matrix cells asserting exact source
+bytes, reopen/failed-reopen/last-owner teardown, sink re-entry without deadlock, a parked
+worker not blocking a later reap, epoch boundaries, polling fallback, shutdown.
+
+**The review took five rounds** (`docs/reviews/phase-2d-2-lifecycle.md`), and the shape of
+the tail matters for 2d-3: round 1's High (a claimed no-gap handoff and a mandatory gate
+"failing") was **sandbox-confounded evidence** — the Codex sandbox blocks FSEvents delivery,
+so exactly the delivery-dependent tests timed out there while the supported host passed them
+repeatedly; every later round therefore reviewed statically with host-measured evidence
+supplied in the brief, and that split must be repeated for any future FSEvents-adjacent
+review. Rounds 2–4 each found the narrower survivor of a just-closed finding (self-join via
+the sink after the mutex fix; serial-reaper starvation after the self-join fix; a chronological
+"exit-order" claim after the starvation fix — closed as wording, since nothing needs the
+order). One measured scar is recorded and binds gate-taking: **the workspace suite is
+evidence on a quiet host only** — one contended run failed ten `watch_check` bounded-wait
+timeouts (exit 101) on a tree that passed 1223/0 and 18/18 twice quiet
+(`2d-2-notes.md` §4 and §6 round 4).
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q7 item 3 is 2d-3's
+#   specification; Q1 (with its round-4 correction block) and Q3 (the wire is 2d-4's) bind it.
+# docs/decisions/2d-2-notes.md               — what the lifecycle gives 2d-3: the surface (§2),
+#   the holes stated open (§5 — the reaper policy is item 12), the five-round closure (§6)
+# docs/reviews/phase-2d-2-lifecycle.md       — the five rounds; round 1's sandbox confound is
+#   the precedent for briefing any future watcher review
+# docs/decisions/2d-1-notes.md               — the engine's own contract (§2, §5)
+```
+
+#### What 2d-3 is (consult Q7 item 3)
+
+**Save composition and the suppression ledger.** The save path (`run_one_save` in
+`src-tauri/src/commands.rs`, and `conflict_after_the_lock`) composes with observation: a save
+this application commits must not come back through the watcher as a foreign external change.
+2d-3 owns that suppression ledger. The consult's Q7 item 3 paragraph is the specification;
+do not pre-empt it from this summary. Still not 2d-3's: the queue, the wake event,
+`drain_external_changes` and any window wiring (2d-4, per Q3), and the browser coordinator
+(2d-5).
+
+#### The step ladder (consult Q7)
+
+1. **2d-1** core observation engine ✅ (five rounds, READY)
+2. **2d-2** native lifecycle + real-filesystem adapter ✅ (five rounds, READY)
+3. **2d-3** save composition + suppression ledger ← **next**
+4. **2d-4** queue, wake event, `drain_external_changes`, wire
+5. **2d-5** browser coordinator + pure surface transitions
+6. **2d-6** components, i18n, mounted evidence
+7. **2d-7** reviewed rebuilt instrument + bilingual WKWebView reading, with a command counter
+8. **2d-8** instrument removal + harness-free closure
+
+#### The gate baseline — re-derived at 2d-2's closure, all four measured on this tree
+
+- **`1223 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules); bundle oracle server-only tokens ABSENT, client-only PRESENT (2) —
+  read both lines. The Rust delta over 2d-1's 1198 is 2d-2's 25 (accounted round by round in
+  `2d-2-notes.md` §4); the focused serial `watch_check::` suite is 18/18 and belongs to every
+  future Rust gate run — quiet host required, per the scar above. Clippy `-D warnings` and
+  `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri` empty.
+
+#### Open items 2d-3 inherits (stated, not discharged)
+
+- The production `ObservationSink` discards; several lifecycle items carry
+  `#[cfg_attr(not(test), allow(dead_code))]` with named pending consumers (2d-4's queue).
+- The `Degraded` runtime-error arm is reviewed, not test-driven (`2d-2-notes.md` §5.7).
+- A permanently unfinished worker's handle stays held for the process life (§5 item 12).
+- The two watched roots are watched whole; per-save suppression granularity is 2d-3's to design.
+
+---
+
+### ⚠️ HISTORICAL — the 2d-1→2d-2 handoff, superseded by 2d-2's closure above.
+
 ### **STEP 2d-1 IS COMPLETE — the core observation engine, closed READY at round 5 of its review. THE NEXT ACTION IS STEP 2d-2 — native lifecycle and the real-filesystem adapter, the one step whose principal integration test belongs in `src-tauri`.**
 
 **Where things stand.** The engine exists in `crates/espansoconfig-core/src/watch/` (engine,

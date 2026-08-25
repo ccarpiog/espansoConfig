@@ -24,6 +24,16 @@
 //! [`NativeWatch::unavailable`] at start, because a fresh espanso install may
 //! legitimately have only one of the two directories.
 //!
+//! **An event that says the backend dropped events is degradation, not a
+//! hint.** `notify` forwards a backend's dropped-events condition — on macOS,
+//! FSEvents' `MustScanSubDirs` after a kernel or user-space queue overflow —
+//! as a successful event flagged `Rescan`, whose paths name directories to
+//! sweep rather than files that changed. Forwarding those paths as hints
+//! would let the engine's own YAML/root filter silently discard the one
+//! notification that writes were missed, so [`signal_of`] maps any
+//! rescan-flagged event to [`NativeSignal::Degraded`]: the caller's rescan is
+//! exactly the sweep the flag demands.
+//!
 //! # Lifetime
 //!
 //! Dropping the [`NativeWatch`] stops the backend and its callbacks. Who holds
@@ -71,6 +81,25 @@ impl fmt::Display for NativeWatchError {
 
 impl std::error::Error for NativeWatchError {}
 
+/// Maps one backend delivery onto the signal a caller acts on.
+///
+/// Three arms, and the middle one is the reason this function exists as a
+/// testable value rather than inline in the callback: an `Ok` event whose
+/// rescan flag is set means the backend **dropped events** and demands a
+/// sweep — its paths name directories, which the engine's hint filter would
+/// drop — so it is degradation, never hints. An ordinary event contributes
+/// its paths as hints; a backend error is degradation with its diagnostic
+/// text.
+fn signal_of(event: Result<notify::Event, notify::Error>) -> NativeSignal {
+    match event {
+        Ok(event) if event.need_rescan() => NativeSignal::Degraded(
+            "the backend reported dropped events and demands a rescan".to_string(),
+        ),
+        Ok(event) => NativeSignal::Hints(event.paths),
+        Err(error) => NativeSignal::Degraded(error.to_string()),
+    }
+} // End of function signal_of()
+
 /// A running native watcher over the two watched roots.
 ///
 /// Keeps the backend alive; dropping it stops the callbacks. There is no
@@ -103,10 +132,7 @@ impl NativeWatch {
     ) -> Result<NativeWatch, NativeWatchError> {
         let mut watcher =
             notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
-                match event {
-                    Ok(event) => sink(NativeSignal::Hints(event.paths)),
-                    Err(error) => sink(NativeSignal::Degraded(error.to_string())),
-                }
+                sink(signal_of(event))
             })
             .map_err(|error| NativeWatchError {
                 reason: error.to_string(),
@@ -187,5 +213,36 @@ mod tests {
         let watch = NativeWatch::start(dir.path(), discard).expect("a native watcher");
         assert!(watch.established().is_empty());
         assert_eq!(watch.unavailable().len(), 2);
+    }
+
+    #[test]
+    fn an_ordinary_event_becomes_hints_carrying_its_paths() {
+        let event = notify::Event::new(notify::EventKind::Any)
+            .add_path(PathBuf::from("/somewhere/base.yml"));
+        assert_eq!(
+            signal_of(Ok(event)),
+            NativeSignal::Hints(vec![PathBuf::from("/somewhere/base.yml")])
+        );
+    }
+
+    #[test]
+    fn a_rescan_flagged_event_is_degradation_not_hints() {
+        // The shape notify emits for FSEvents' MustScanSubDirs: a successful
+        // event, flagged Rescan, whose paths name directories to sweep. Were
+        // it forwarded as hints, the engine's YAML filter would silently drop
+        // the one notification that writes were missed.
+        let event = notify::Event::new(notify::EventKind::Other)
+            .add_path(PathBuf::from("/somewhere"))
+            .set_flag(notify::event::Flag::Rescan);
+        assert!(matches!(signal_of(Ok(event)), NativeSignal::Degraded(_)));
+    }
+
+    #[test]
+    fn a_backend_error_is_degradation_with_its_text() {
+        let error = notify::Error::generic("the backend gave up");
+        let NativeSignal::Degraded(reason) = signal_of(Err(error)) else {
+            panic!("a backend error must map to Degraded");
+        };
+        assert!(reason.contains("the backend gave up"));
     }
 }

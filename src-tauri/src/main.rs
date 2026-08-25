@@ -36,6 +36,14 @@
 //! the wire. Restore is a **content path on the sixth writer** — the confirmed
 //! text goes out through `save_raw_document` — so this phase adds no seventh
 //! writing command and no restore-specific finding. See `crate::backup`.
+//!
+//! Phase 2d-2 adds **no command and no event**: `watch` puts the core's
+//! observation engine behind the open workspace — one epoch-tagged watcher per
+//! open, cancelled and joined on successful replacement, dropped on shutdown,
+//! polling only when the native backend fails. What it observes goes to a sink
+//! that discards it until Phase 2d-4 wires the queue and the wake event (the
+//! 2d design consult's Q3); `watch_check` is the real-filesystem integration
+//! evidence the consult's Q7 item 2 places in this crate.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
@@ -55,6 +63,9 @@ mod menu_contract;
 #[cfg(test)]
 mod rust_source;
 mod save;
+mod watch;
+#[cfg(test)]
+mod watch_check;
 #[cfg(test)]
 mod wire_contract;
 

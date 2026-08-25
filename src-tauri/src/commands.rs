@@ -115,7 +115,7 @@
 //! window. There is deliberately no `statePoisoned` code.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -140,6 +140,10 @@ use crate::backup::{
 };
 use crate::error::CommandError;
 use crate::save::SaveResult;
+use crate::watch::{
+    discarding_sink, EpochSpaceExhausted, LifecycleConfig, ObservationSink, WatchStatusView,
+    WatcherLifecycle, WorkspaceEpochs,
+};
 
 /// The one key a match list lives under, in the document's root mapping.
 ///
@@ -185,10 +189,15 @@ pub enum NewMatchPosition {
 
 /// One open configuration directory, and the session state that belongs to it.
 ///
-/// The two travel together because they have the same lifetime and the same
+/// The three travel together because they have the same lifetime and the same
 /// scope: a [`BackupSession`] is *"which files this editing session has already
-/// copied, and which batch folder its copies go in"*, and both questions are
-/// about the directory that is open. Opening another one replaces both.
+/// copied, and which batch folder its copies go in"*, a [`WatcherLifecycle`]
+/// is *"the worker observing this directory for external change"*, and all of
+/// those questions are about the directory that is open. Opening another one
+/// replaces all three — the replaced watcher cancelled and joined, ordinarily
+/// before that open returns; the one exception is a teardown initiated from
+/// that watcher's own sink callback, see [`WorkspaceSession::open`] — and
+/// dropping the session drops them.
 #[derive(Debug)]
 struct Open {
     /// The configuration directory, its file list and its parse cache.
@@ -204,6 +213,20 @@ struct Open {
     /// of which passes `Some(&self.backups)`, and there is no code path in this
     /// crate that passes `None`.
     backups: BackupSession,
+    /// The filesystem watcher over this directory — Phase 2d-2.
+    ///
+    /// **Owned here because its lifetime is exactly this workspace's** (the 2d
+    /// design consult's Q1): it starts when a successful open installs the
+    /// workspace, it is cancelled and joined when a later successful open
+    /// replaces it — after that open has installed the successor and released
+    /// the session lock, and — unless that open ran inside this watcher's own
+    /// sink callback, where the join is the reaper's — before it returns, see
+    /// [`WorkspaceSession::open`] — and it is dropped — which also cancels
+    /// and joins, see [`WatcherLifecycle`]'s `Drop` — when the session itself
+    /// is dropped. What it observes goes to
+    /// [`WorkspaceSession::observations`]; in 2d-2 that sink discards,
+    /// because the queue and the wake event are 2d-4's.
+    watcher: WatcherLifecycle,
 }
 
 /// The one piece of state this application manages.
@@ -213,17 +236,114 @@ struct Open {
 /// [`CommandError::NoWorkspaceOpen`] until then — rather than opening one
 /// implicitly, which would make "which directory am I looking at?" a question
 /// with an answer nobody asked for.
-#[derive(Debug, Default)]
+///
+/// Beside it, two values every watcher this session starts inherits: the
+/// observation sink and the lifecycle timing. They live on the session rather
+/// than on [`Open`] because they outlive any one workspace — a replacement
+/// changes which directory is watched, never where its observations go.
 pub struct WorkspaceSession {
     open: Mutex<Option<Open>>,
+    /// The session's epoch allocator — checked, never reusing a value, and
+    /// only ever asked while the session lock is held, so the order epochs
+    /// are minted in is the order workspaces are installed in.
+    ///
+    /// Its own mutex is a leaf: [`WorkspaceEpochs::allocate`] runs no caller
+    /// code, so no lock cycle can pass through it.
+    epochs: Mutex<WorkspaceEpochs>,
+    /// Where every watcher's observations go, across replacements.
+    ///
+    /// [`discarding_sink`] in production until Phase 2d-4 wires the queue and
+    /// the wake event; a channel in the `crate::watch_check` integration
+    /// tests. Not behind the mutex: it is immutable for the session's life.
+    observations: ObservationSink,
+    /// The timing every watcher this session starts runs under.
+    watch_config: LifecycleConfig,
+    /// Test-only economy switch: `true` for every production constructor,
+    /// `false` only for [`WorkspaceSession::unwatched`], where the reason
+    /// lives. `cfg(test)` is what keeps the economy out of the built
+    /// application — in a production build the field does not exist and
+    /// every open watches.
+    #[cfg(test)]
+    watching: bool,
+}
+
+impl Default for WorkspaceSession {
+    /// [`WorkspaceSession::new`], as a trait for whoever asks through one.
+    fn default() -> WorkspaceSession {
+        WorkspaceSession::new()
+    }
+}
+
+impl std::fmt::Debug for WorkspaceSession {
+    /// Hand-written because a sink is a closure with no `Debug` of its own.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkspaceSession")
+            .field("open", &self.open)
+            .field("watch_config", &self.watch_config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl WorkspaceSession {
     /// An empty session, with no workspace open.
+    ///
+    /// Its watchers' observations go to [`discarding_sink`] — produced and
+    /// dropped, stated rather than hidden, because the queue that will consume
+    /// them is Phase 2d-4's and building it early would put a wire where the
+    /// consult's Q3 says none may exist yet.
     pub fn new() -> WorkspaceSession {
+        WorkspaceSession::observing(discarding_sink(), LifecycleConfig::default())
+    }
+
+    /// A session whose watchers report to `sink` under `config`'s timing.
+    ///
+    /// **The seam where Phase 2d-4's queue lands**, and until then the way the
+    /// `crate::watch_check` integration tests capture what a real filesystem
+    /// makes the watcher observe. The sink is shared by every watcher this
+    /// session ever starts; each tags its observations with its own epoch, so
+    /// one receiver can tell a replaced watcher's output from its successor's.
+    pub fn observing(sink: ObservationSink, config: LifecycleConfig) -> WorkspaceSession {
         WorkspaceSession {
             open: Mutex::new(None),
+            epochs: Mutex::new(WorkspaceEpochs::new()),
+            observations: sink,
+            watch_config: config,
+            #[cfg(test)]
+            watching: true,
         }
+    }
+
+    /// A session whose opens start no watcher — a **test-only economy**.
+    ///
+    /// One active FSEvents stream measurably costs seconds to establish and
+    /// tear down on this platform, serialized process-wide by the events
+    /// daemon, so the command tests — which are not about the watcher — would
+    /// otherwise pay minutes per suite run and starve the real watcher tests
+    /// toward their bounded timeouts (measured: the bin target went from
+    /// under a minute to 217 s with two timeouts when every test session
+    /// watched). Every lifecycle claim is carried by `crate::watch_check`'s
+    /// sessions and by `crate::dispatch_check`'s production-built ones, never
+    /// by these; and `cfg(test)` is what keeps the economy out of the built
+    /// application — no production constructor can produce an unwatched
+    /// session, because the switch it reads does not exist there.
+    #[cfg(test)]
+    pub(crate) fn unwatched() -> WorkspaceSession {
+        WorkspaceSession {
+            open: Mutex::new(None),
+            epochs: Mutex::new(WorkspaceEpochs::new()),
+            observations: discarding_sink(),
+            watch_config: LifecycleConfig::default(),
+            watching: false,
+        }
+    } // End of function unwatched()
+
+    /// Replaces the session's epoch allocator — the boundary tests' seam,
+    /// used to put a session at the edge of the epoch space without minting
+    /// `u64::MAX` epochs first.
+    #[cfg(test)]
+    pub(crate) fn seed_epochs(&self, epochs: WorkspaceEpochs) {
+        *self.epochs.lock().unwrap_or_else(PoisonError::into_inner) = epochs;
     }
 
     /// Locates a configuration directory and opens it.
@@ -248,6 +368,51 @@ impl WorkspaceSession {
     /// unread field the only thing between a user and a destructive operation
     /// performed without the copy that exists to survive it.
     ///
+    /// # The watcher is replaced here, and only on success
+    ///
+    /// Phase 2d-2, the 2d design consult's Q1: on a **successful** discovery
+    /// the session lock is held only for the swap — the epoch is minted (from
+    /// the session's checked [`WorkspaceEpochs`] allocator, so a replacement
+    /// can never reuse one), the new [`WatcherLifecycle`] starts over the new
+    /// root, and the new workspace is installed in the previous one's place —
+    /// and the previous watcher is then cancelled **and joined after the lock
+    /// is released — before this method returns, unless this method itself
+    /// runs inside that watcher's own sink callback** (the next two
+    /// paragraphs). On a **failed** discovery this method returns before
+    /// touching the session, so the previous workspace *and its watcher* both
+    /// stay exactly as they were.
+    ///
+    /// **The join must not run under the session lock.** The worker calls the
+    /// injected [`ObservationSink`] synchronously, and a sink is allowed to
+    /// call back into this session (2d-4's queue consumer may well ask
+    /// [`WorkspaceSession::watch_status`]); a join under the lock would then
+    /// be a deadlock — the worker waiting for the lock inside its callback,
+    /// the open waiting for the worker inside the join. Joining after the
+    /// release keeps the guarantee that matters: **called from any thread but
+    /// the replaced watcher's own worker, when this method returns the
+    /// replaced worker has exited and nothing of its epoch can reach the sink
+    /// again.** A sink callback may also call this method itself, replacing
+    /// the callback's own lifecycle, and there join-before-return is
+    /// deliberately **not** claimed, because a thread cannot join itself: the
+    /// teardown hands the join to the watch module's reaper and returns, the
+    /// replaced worker exits after the initiating callback returns and its
+    /// engine pass completes, and observations of the replaced epoch may
+    /// reach the sink until it does (see [`WatcherLifecycle`]'s `Drop`).
+    /// While any replacement is in flight the two watchers may interleave at
+    /// the sink, and the epoch tag on every observation is what tells them
+    /// apart. Commands arriving during the join see the already installed
+    /// successor, never an emptied session.
+    ///
+    /// **An exhausted epoch space starts no watcher.** When the allocator
+    /// answers [`EpochSpaceExhausted`] — unreachable in any physical
+    /// execution, typed rather than hoped away — the open still succeeds, per
+    /// the same principle as a worker thread that cannot be spawned (a
+    /// missing watcher degrades reconciliation, not the session), and the
+    /// workspace gets [`WatcherLifecycle::without_epoch`]: it watches
+    /// nothing, reports [`crate::watch::NO_EPOCH`], and tags no observation,
+    /// because an observation that cannot be attributed to a distinct epoch
+    /// must not be produced.
+    ///
     /// # Errors
     ///
     /// [`CommandError::NotADirectory`] for an explicit path that is not one,
@@ -259,10 +424,87 @@ impl WorkspaceSession {
         let workspace = Workspace::discover(root)?;
         let summary = workspace.summary();
         let backups = BackupSession::rooted_at(workspace.root());
-        let mut guard = self.lock();
-        *guard = Some(Open { workspace, backups });
+        let replaced = {
+            let mut guard = self.lock();
+            // Minted under the session lock, so epochs install in the order
+            // they are allocated; a failed discovery returned above, so a
+            // failure never spends one.
+            let allocated = self
+                .epochs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .allocate();
+            let watcher = match allocated {
+                Ok(epoch) => self.watcher_for(workspace.root(), epoch),
+                Err(EpochSpaceExhausted) => WatcherLifecycle::without_epoch(),
+            };
+            guard.replace(Open {
+                workspace,
+                backups,
+                watcher,
+            })
+        }; // End of the block that holds the session lock for the swap
+        if let Some(previous) = replaced {
+            // Cancelled AND joined, outside the lock — see the doc comment
+            // for why the order is load-bearing. On every path but one, when
+            // `shut_down` returns the old worker has exited and its native
+            // backend is dropped; when this `open` itself runs inside that
+            // worker's sink callback, the join is the reaper's instead (see
+            // `WatcherLifecycle`'s `Drop`). The replaced workspace and backup
+            // session drop with `previous` either way.
+            previous.watcher.shut_down();
+        }
         Ok(summary)
     } // End of function open()
+
+    /// The watcher an open workspace owns — real for every production
+    /// session, inert for one built by the test-only
+    /// [`WorkspaceSession::unwatched`].
+    ///
+    /// The `cfg` block is confined to this helper on purpose: `open` itself
+    /// has one shape in both builds, and in a production build this function
+    /// is exactly its last line.
+    fn watcher_for(&self, root: &Path, epoch: u64) -> WatcherLifecycle {
+        #[cfg(test)]
+        if !self.watching {
+            return WatcherLifecycle::inert(epoch);
+        }
+        WatcherLifecycle::start(
+            root,
+            epoch,
+            self.watch_config,
+            Arc::clone(&self.observations),
+        )
+    } // End of function watcher_for()
+
+    /// The open workspace's watcher, observed. `None` when nothing is open.
+    ///
+    /// An observability accessor, not a control surface (`PROGRESS.md` R24: a
+    /// property nothing can observe is a property nothing can test): the
+    /// integration checks in `crate::watch_check` read it to wait for a
+    /// baseline and to see the polling fallback engage. Nothing in production
+    /// reads it yet, and nothing anywhere can steer the watcher through it.
+    // The allow is scoped to non-test builds so the accessor stays lint-armed
+    // exactly where its consumers exist.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn watch_status(&self) -> Option<WatchStatusView> {
+        let guard = self.lock();
+        guard.as_ref().map(|open| open.watcher.status())
+    }
+
+    /// The open workspace watcher's teardown-completion probe — `None` when
+    /// nothing is open.
+    ///
+    /// The `crate::watch_check` teardown tests capture it **before**
+    /// triggering a callback-initiated replacement or final drop, then wait
+    /// on it: the probe is stored only after the worker's join actually
+    /// returned, so "the replaced worker was joined, off its own thread"
+    /// becomes a bounded assertion rather than an inference from silence.
+    #[cfg(test)]
+    pub(crate) fn watcher_join_probe(&self) -> Option<crate::watch::JoinProbe> {
+        let guard = self.lock();
+        guard.as_ref().map(|open| open.watcher.join_probe())
+    }
 
     /// Every file of the open workspace, parsed or not.
     pub fn documents(&self) -> Result<Vec<DocumentSummary>, CommandError> {
@@ -760,7 +1002,9 @@ impl WorkspaceSession {
         let mut guard = self.lock();
         match guard.as_mut() {
             None => Err(CommandError::NoWorkspaceOpen),
-            Some(Open { workspace, backups }) => action(workspace, backups),
+            Some(Open {
+                workspace, backups, ..
+            }) => action(workspace, backups),
         }
     } // End of function with_open()
 
@@ -2236,8 +2480,13 @@ mod tests {
     }
 
     /// A session with the synthetic tree open.
+    ///
+    /// Unwatched, like every session in this module's tests: these tests are
+    /// about the commands, the watcher costs real seconds per FSEvents
+    /// stream, and the lifecycle's own evidence lives in `crate::watch_check`
+    /// (see [`WorkspaceSession::unwatched`]).
     fn open_session(dir: &TempDir) -> WorkspaceSession {
-        let session = WorkspaceSession::new();
+        let session = WorkspaceSession::unwatched();
         session
             .open(Some(dir.path()))
             .expect("the synthetic tree is a directory");
@@ -2308,7 +2557,7 @@ mod tests {
     #[test]
     fn open_workspace_summarises_a_directory_without_parsing_it() {
         let dir = synthetic_tree();
-        let session = WorkspaceSession::new();
+        let session = WorkspaceSession::unwatched();
         let summary = session.open(Some(dir.path())).expect("a directory");
         assert_eq!(summary.documents, 3);
         assert_eq!(summary.config_profiles, 1);
@@ -2323,7 +2572,7 @@ mod tests {
     #[test]
     fn a_path_that_is_not_a_directory_is_a_typed_refusal() {
         let dir = synthetic_tree();
-        let session = WorkspaceSession::new();
+        let session = WorkspaceSession::unwatched();
         let file = dir.path().join("match").join("base.yml");
         let error = session.open(Some(&file)).expect_err("a file is not a tree");
         assert_eq!(error.code(), "notADirectory");
@@ -2345,7 +2594,7 @@ mod tests {
     /// from an empty file.
     #[test]
     fn every_command_refuses_before_a_workspace_is_open() {
-        let session = WorkspaceSession::new();
+        let session = WorkspaceSession::unwatched();
         let id = DocumentId(0);
         let identity = MatchId {
             document: id,
@@ -2866,7 +3115,7 @@ mod tests {
             "the premise: a bare PathBuf cannot carry these bytes across serde"
         );
 
-        let session = WorkspaceSession::new();
+        let session = WorkspaceSession::unwatched();
         let error = session
             .open(Some(&root))
             .expect_err("a path that is not a directory is refused");
