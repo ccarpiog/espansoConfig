@@ -3907,7 +3907,7 @@ file list is a convention, not a check — nothing compares such a list against 
 standing posture holds: **seven** §5 items recorded as bounded residues have since been found to be
 real defects.
 
-**Git state:** recorded in the checkpoint below.
+**Git state:** `d079dd5`, tree clean, pushed. Frontend untouched across the whole step.
 
 ---
 
