@@ -1225,19 +1225,35 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // thread stalled between the rename and `record_app_write` lets the worker
     // stamp and settle the saved bytes first, this application's own hint is then
     // refused once as `PrecedesACommit`, the engine takes the settlement back, the
-    // re-reading is stamped after the anchor and *is* suppressed — correct
-    // behaviour throughout, and the old line failed on it. The round-10 record
-    // kept the assertion on the ground that weakening it would remove the only
-    // production-path check on the stamp; **that ground was false**, and
-    // `docs/decisions/2d-3-notes.md` §16.6 item 30 carries the correction.
+    // re-reading is stamped after the anchor and *is* suppressed — usually, and
+    // only usually, because that stamp follows the anchor in program order while
+    // `Instant` is not guaranteed strictly increasing and `decide` refuses at
+    // equality, so a clock collision can refuse successive re-readings until one
+    // stamp strictly exceeds the anchor; correct behaviour throughout either way,
+    // and the old line failed on it. The round-10 record kept the assertion on
+    // the ground that weakening it would remove the only production-path check on
+    // the stamp; **that ground was false**, and `docs/decisions/2d-3-notes.md`
+    // §16.6 item 30 carries the correction.
     //
     // The check it was credited with is the **bounded positive wait** twenty
     // lines above: a worker whose stamp were taken too early *permanently* — at
     // its start rather than immediately before each engine pass — refuses this
     // hint as `PrecedesACommit` on every re-reading, so it is never suppressed
-    // and that wait times out. Removing the assertion costs nothing it detected
-    // and removes a line that could fail with no defect present. A stamp taken
-    // too *late* stays invisible to every test in this crate, as it always was.
+    // and that wait times out.
+    //
+    // **Removing the assertion is a trade and not a free lunch — round 12's
+    // second High.** The wait carries the *permanent* case, so the removal keeps
+    // that detection; what it loses, in the same breath, is the *intermittent*
+    // one: `LedgerTally` is cumulative for the session, so a stamp taken too
+    // early on one pass only left `preceded_a_commit` non-zero forever and the
+    // exact-zero line failed, whereas the rollback's correctly stamped re-pass
+    // satisfies this wait and the test now passes. The trade was still right —
+    // the removed line could not tell that defect from the harmless save-thread
+    // stall above, so it failed with no defect present — but it costs a
+    // detection, and recording it as costing nothing was false. Distinguishing
+    // the two needs a deterministic production-stamping seam, which this test
+    // does not have. A stamp taken too *late* stays invisible to every test in
+    // this crate, as it always was.
 
     // Different bytes, written by something else: admitted, numbered, and the
     // record it superseded is gone.

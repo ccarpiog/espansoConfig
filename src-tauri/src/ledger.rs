@@ -477,8 +477,15 @@
 //! matters**: a refusal at the stamped door is *answered* — [`admitting_sink`]
 //! returns [`crate::watch::ObservationOutcome::Undecided`], the engine's
 //! settlement is taken back and the path is observed again — and the
-//! re-observation's own stamp is taken after the anchor, so it cannot be refused
-//! by it a second time.
+//! re-observation's own stamp is taken after the anchor **in program order
+//! only**, which makes one refusal per commit the usual outcome and not a
+//! guaranteed one, because [`std::time::Instant`] is monotonic and expressly not
+//! guaranteed strictly increasing while [`decide`] puts equality on the refusing
+//! side, so the same anchor can refuse successive re-readings until one stamp
+//! *strictly* exceeds it and nothing in the type system forces the two clock
+//! reads apart. That retry is bounded by the host clock advancing rather than by
+//! construction, and it is bounded in the safe direction: every refusal is
+//! answered by a re-observation and none of them publishes anything.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -862,21 +869,33 @@ pub struct LedgerTally {
     ///   especially growth for a path this session has stopped committing to,
     ///   which a correctly stamped pipeline cannot produce, because a refusal
     ///   here is answered and the re-observation's own stamp is taken after the
-    ///   anchor, so one commit refuses one reading once — **and no threshold is
-    ///   enforced anywhere for it**: nothing in the type system and no test
+    ///   anchor, so one commit **usually** refuses one reading once — usually
+    ///   and not always, because that stamp follows the anchor in program order
+    ///   only while [`std::time::Instant`] is not guaranteed strictly increasing
+    ///   and [`decide`] refuses at equality, so a clock collision can make one
+    ///   anchor refuse successive re-readings until one stamp *strictly* exceeds
+    ///   it — **and no threshold is enforced anywhere for it**: nothing in the
+    ///   type system and no test
     ///   distinguishes proportionate growth from disproportionate, the tally
     ///   keeps no per-path count to read one from, and nothing fails when the
     ///   counter climbs, so this is a suspicion to read and never a diagnosis
-    ///   this crate can make. That whole sentence is round 11's second High: the
-    ///   claim and its concession stood as two sentences while §16.1 of the
-    ///   record said, in as many words, that they were one;
+    ///   this crate can make. That whole sentence is round 11's second High —
+    ///   the claim and its concession stood as two sentences while §16.1 of the
+    ///   record said, in as many words, that they were one — and its *one
+    ///   refusal per commit* clause is round 12's first High, which is why the
+    ///   clock concession above sits inside the same sentence too;
     /// - `crate::watch_check`'s
     ///   `a_committed_save_is_suppressed_while_a_later_external_write_is_not`,
     ///   whose **bounded positive wait** for a suppression is what detects a
     ///   stamp permanently taken too early. It asserted an exact zero beside that
     ///   wait through round 10; round 11 removed the assertion, because the stall
-    ///   above makes it a line that can fail with no defect present while the
-    ///   wait already carries the detection the assertion was credited with.
+    ///   above makes it a line that can fail with no defect present — and the
+    ///   removal is a real loss of coverage, not a free one, because that line
+    ///   also failed on a stamp taken too early only *intermittently*, which the
+    ///   surviving wait cannot see: the tally is cumulative, so one transient
+    ///   refusal left it non-zero for the session, while a rollback and a
+    ///   correctly stamped re-pass satisfy the wait. Round 12's second High is
+    ///   that this was recorded as costing nothing.
     ///
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
@@ -3979,6 +3998,15 @@ mod tests {
         //    does not move a second time. A stamp taken in the wrong place would
         //    keep refusing this path — sustained growth is the diagnosis, and a
         //    single non-zero value cannot support it.
+        //
+        //    **The single re-reading here is this test's construction and not a
+        //    production guarantee**, which is round 12's first High seen from
+        //    the test side: `admit_now` stamps through `later_than_now`, which
+        //    is `Instant::now()` plus a nanosecond and therefore *strictly*
+        //    greater than the anchor by construction, while a production stamp
+        //    merely follows the anchor in program order and `decide` refuses at
+        //    equality — so a clock collision can refuse successive re-readings
+        //    of one path against one anchor.
         assert_eq!(
             admit_now(&ledger, 1, path, ObservedState::Content(theirs)),
             Admission::Admitted {
@@ -3989,7 +4017,9 @@ mod tests {
         assert_eq!(
             ledger.tally().preceded_a_commit,
             1,
-            "one increment for one commit spanned: the anchor refuses the re-reading no second time"
+            "one increment for one commit spanned: this anchor refuses this re-reading no second \
+             time, because `later_than_now` puts the stamp strictly beyond it — a production stamp \
+             equal to the anchor would be refused again, which is round 12's first High"
         );
     } // End of function a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading()
 }

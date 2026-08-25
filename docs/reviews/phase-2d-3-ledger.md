@@ -599,3 +599,93 @@ NOT READY
 
 Codex session ID: 01a03af4-c86c-7f33-aae1-ff0cf045f19b
 Resume in Codex: codex resume 01a03af4-c86c-7f33-aae1-ff0cf045f19b
+
+---
+
+## Round 12 — NOT READY (2 High, 3 Low)
+
+Scoped to round 11's fix. **Round 11 corrected two premises in one paragraph, and round 12's brief
+asked whether a third stood in the same paragraphs. It did** — and it had been sitting in `decide()`'s
+own comment the whole time: `Instant` is monotonic and expressly **not** guaranteed strictly
+increasing, the comparison is `read_after <= at`, and equality lands on the **refusing** side. So *the
+re-observation's own stamp is taken after the anchor* is true in **program order** and says nothing
+about the two values, and one refusal per commit is not the guarantee four positions said it was.
+
+That is the **twelfth consecutive** round with a name-position finding and the **fourth consecutive**
+where the finding is a *premise* rather than a word. **Both Highs are again this project's declared
+worst defect class**, and the second one is worse in a specific way: it is a claim about **a check the
+same round deleted**, and it made the deletion look free.
+
+**High 1 — program order does not give a strictly greater `Instant`**, so a clock collision lets the
+same anchor refuse the same re-reading again. Four positions presented one refusal per commit as
+guaranteed: `ledger.rs:480` (*"cannot be refused … a second time"*), `ledger.rs:861`
+(*"one commit refuses one reading once"*), `watch_check.rs:1227` (*"the re-reading … **is**
+suppressed"*) and this record's §16.6 item 30. **`decide()`'s comparison is not changed** — round 10
+already cleared equality-refuses as correct behaviour — only the prose that over-claimed it. Each of
+the four now carries the concession **in the same sentence** as the claim, which is round 11's own
+High 2 applied to round 11's own fix.
+
+**High 2 — the assertion-removal record said the removal cost nothing, and it cost a detection.** The
+`OnceLock` neuter §17.6b ran is the *permanently* early stamp, so it proves the surviving positive wait
+catches **that** case and nothing else. An **intermittently** early stamp ends differently: one pass
+refused, the engine's rollback producing a correctly stamped pass, that pass suppressed, the wait
+satisfied, the test **green** — while the cumulative, never-reset `preceded_a_commit` the removed line
+read was left at one and **failed**. So *"exactly as it did before"* is false in its last three words.
+**The removal stands** — the line could not tell that defect from the harmless save-thread stall, so it
+failed on healthy executions — but it is a trade, and the price is now recorded as §18.7 item 35.
+
+**Low 1 — the named suspect, confirmed.** §16.1's closing paragraph — a **bold first sentence** — still
+said the old paragraph's first half was *intact* and the production assertion of zero was *kept*.
+Round 11 changed the first half from *never* to *usually* and **removed** the assertion, three sections
+below, without touching it. Round 10's brief carried a suspect that turned out not to be a defect; this
+one is.
+
+**Low 2 — §17.6's file list named three files and `git show 411658f --stat` lists five.** The two
+omitted are `PROGRESS.md` and `docs/reviews/phase-2d-3-ledger.md`. Half of it is an undeclared habit —
+**no** *what changed, file by file* section in this record has ever named the review file, seven
+sections over seven rounds — and half is new, because round 11's is the first 2d-3 fix commit to carry
+`PROGRESS.md` at all.
+
+**Low 3 — item 33 assigned the deterministic production-stamping seam to 2d-4, and the authority does
+not.** `phase-2d-design.md` Q7 item 4 scopes 2d-4 to the queue, the wake event, the drain command and
+the wire contracts; Q7 item 3 is the **suppression ledger**, which is this step, and the stamp is taken
+in `WatchWorker::observe`, which Q7 item 2 placed in 2d-2. The attribution is **removed** and the debt
+carried unassigned. Round 9 reversed a rejection and round 10 downgraded an item, so the authority was
+read before deciding — here it backs the reviewer.
+
+**Nothing was cleared as a non-defect**: all five findings verified against the code, all five real,
+all five fixed. The fix round's own **shape** sweep then found **three more instances the reviewer did
+not name** — §15.3's *"no re-observation loop exists"*, §16.1's third bullet, and the assertion message
+closing `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading`, the
+last of them a **name position**. The reviewer **cleared**, with reasons: the corrected four-tuple
+message and the `withheld == 1` assertion, §17.5's supplied sweep counts, the absence of behavioural or
+control-flow change, and the permanent-early-stamp neuter's actual result.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`08a3366`: `cargo test --workspace` 1268 passed / 0 failed across 26 result lines, exit 0; focused
+serial `watch_check::` 20/20, 223 filtered out, 71.24 s, exit 0; clippy `-D warnings` exit 0;
+`cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` empty. `git diff
+--name-only 052dd38~1 HEAD | rg '^src/'` is empty, so 431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- src-tauri/src/ledger.rs:480, src-tauri/src/ledger.rs:861, src-tauri/src/watch_check.rs:1227, docs/decisions/2d-3-notes.md:5004 — The third premise remains false: taking the re-observation’s stamp after the anchor in program order does not guarantee that its `Instant` value is greater, because ordered calls may be equal and `decide()` refuses equality at line 1966. A clock collision can therefore make the same anchor refuse the re-reading again, contradicting “cannot be refused … a second time,” “one commit refuses one reading once,” and “the re-reading … is suppressed.” Minimal fix: state in each claim’s same sentence that equality can cause repeated refusals until a stamp strictly exceeds the anchor; do not present one refusal per commit as guaranteed.
+
+- docs/decisions/2d-3-notes.md:4993, docs/decisions/2d-3-notes.md:5073, docs/decisions/2d-3-notes.md:5139, docs/decisions/2d-3-notes.md:5179, src-tauri/src/watch_check.rs:1234 — The assertion-removal record falsely claims the exact-zero line detected nothing beyond the positive wait and that its removal “costs nothing”; the permanent-stamp neuter proves only that the wait catches a permanently early stamp. With an intermittently early stamp, one save pass is refused, rollback produces a correctly stamped pass, suppression satisfies the wait, and the test now passes; before removal, the cumulative non-zero tally failed the exact-zero assertion. Thus item 34’s “exactly as it did before” is also false. Minimal fix: retain removal of the timing-unsound assertion, but record that it loses detection of transient/intermittent early stamping and add a deterministic production-stamping seam if that coverage is required.
+
+## Low
+
+- docs/decisions/2d-3-notes.md:4883 — The named suspect is a live false claim at a bold first-sentence position, not adequately superseded by the preceding corrections: it says the old paragraph’s first half is intact and the zero assertion is kept, although round 11 changed the first half from a guarantee to “usually” and removed the assertion. Minimal fix: add a correction block directly beneath this paragraph or rewrite it as explicit historical text naming both changes.
+
+- docs/decisions/2d-3-notes.md:5127 — §17.6’s “file by file” list is incomplete: `git show 411658f --stat` lists five changed files, including `PROGRESS.md` and `docs/reviews/phase-2d-3-ledger.md`, while the section names only the two Rust files and the decision record. Minimal fix: list both omitted documentation files and correct every four-file claim derived from this list.
+
+- docs/decisions/2d-3-notes.md:5174 — Item 33 correctly records the real untested rename-to-`record_app_write` window, but falsely assigns the needed deterministic stamping seam to 2d-4; authority Q7 item 4 scopes 2d-4 to the queue, wake event, drain command, and wire contracts, while stamping and suppression remain 2d-3 concerns. Minimal fix: remove the 2d-4 attribution and either add the seam here or carry the test debt without a false phase assignment.
+
+I cleared the corrected four-tuple message and `withheld == 1` assertion, the supplied sweep counts, the absence of behavioral/control-flow changes, and the permanent-early-stamp neuter’s actual result. Removing the flaky exact-zero assertion was appropriate; claiming it surrendered no distinct detection was not. No tests, builds, watcher checks, npm commands, or network access were used.
+
+NOT READY
+
+Codex session ID: 01a03b0f-cc25-76c1-9127-df788259dd6d
+Resume in Codex: codex resume 01a03b0f-cc25-76c1-9127-df788259dd6d

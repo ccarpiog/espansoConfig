@@ -4587,6 +4587,19 @@ path is re-hinted, and the re-observation's own stamp is taken after the anchor 
 refused by the same anchor twice, and no re-observation loop exists. In steady state the anchor is
 inert: every observation produced after this session's last commit to a path beats it.
 
+> **Correction (round-12 fix round, §18.1).** *"So it cannot be refused by the same anchor twice, and
+> no re-observation loop exists"* is **false as a guarantee**, and this paragraph is a **narrower
+> instance of round 12's first High that the reviewer did not name** — found by §18.5's shape sweep,
+> two per-round sections above the four positions the finding lists. The re-observation's stamp
+> follows the anchor in **program order** only; `Instant` is monotonic and expressly not guaranteed
+> strictly increasing, `decide` compares `read_after <= at` and so puts equality on the **refusing**
+> side (`ledger.rs`'s own comment above that comparison says exactly this, and the test helper
+> `later_than_now` exists because of it), so a clock collision refuses the re-reading again against
+> the same anchor. A short re-observation loop therefore **does** exist in principle and is bounded
+> by the host clock advancing rather than by construction — bounded in the safe direction, since
+> every one of those refusals is answered by a re-observation and none publishes anything. The
+> module doc this paragraph describes now carries the concession in the same sentence as the claim.
+
 **Across a `begin_epoch`** the anchor is discarded with everything else, which is the whole of its
 lifetime rule and is why it carries no *clearing* logic of its own. **Across a failed reload** it is
 untouched, because a reload says nothing about when this session last wrote. And the `epoch` field is
@@ -4880,9 +4893,33 @@ not.
 > sentence, and widened the concession to name what is missing: no per-path count to read growth
 > from, and nothing that fails when the counter climbs.
 
+> **Correction (round-12 fix round, §18.1).** The **third** bullet — *a correctly stamped pipeline
+> cannot produce sustained growth, because a refusal is answered and the re-observation's stamp is
+> taken after the anchor* — is round 12's first High one level down, and it is a **narrower instance
+> the reviewer did not name**, found by §18.5's shape sweep. The re-observation's stamp follows the
+> anchor in **program order** only, and since `decide` compares `read_after <= at` a clock collision
+> refuses the same reading again, so a correctly stamped pipeline **can** move this counter more than
+> once per commit and the premise this bullet argues from is not enforced anywhere. The doc comment
+> it describes now says *usually* and carries that concession in the same sentence as the claim, so
+> this bullet's description of it is superseded on that point as well as on the last bullet's.
+
 **It does not overclaim in the other direction.** The counter is not meaningless: it still counts
 refusals and never losses, the *first* half of the old paragraph is intact, and the one production
 assertion of zero is kept rather than weakened — see §16.6 item 30 for what keeping it costs.
+
+> **Correction (round-12 fix round, §18.3).** **Both claims in the sentence above became false at
+> round 11 and stood uncorrected for a whole round**, which is round 12's first Low and the twelfth
+> consecutive name-position finding in this review — a bold first sentence whose two supporting
+> clauses had each been overtaken by the fix round that runs three sections below it. The *first half
+> of the old paragraph* is **not** intact: round 11's first High changed it from *never* to
+> **usually**, because a save thread stalled between the rename and `record_app_write` for longer
+> than one debounce plus one probe lets the worker stamp and settle the saved bytes first (§17.1).
+> And *the one production assertion of zero* is **not** kept: round 11's Medium **removed** it from
+> `watch_check.rs` as a line that could fail with no defect present (§17.3), and §16.6 item 30 —
+> which this sentence points at for *what keeping it costs* — was closed as a defect in the same
+> round. What survives of the sentence is only its first clause: the counter still counts refusals
+> and never losses. What the removal costs is now stated where the removal is recorded, and it is not
+> nothing (§18.2).
 
 ### 16.2 The sweeps
 
@@ -5005,6 +5042,25 @@ evidence that the pattern has ended.
     > after the anchor and *is* suppressed — correct behaviour throughout, and the old line failed on
     > it. Item 30 is therefore **closed as a defect and survives only as its unchanged residue**: no
     > test exercises the rename-to-record window, and a stamp taken too *late* remains invisible.
+
+    > **Correction (round-12 fix round, §§18.1 and 18.2).** The block above is **round 11's**, and two
+    > of its sentences are false. **(a)** *"The re-reading is stamped after the anchor and is
+    > suppressed"* holds in program order only: `decide` compares `read_after <= at`, so equality
+    > refuses and a clock collision can refuse the same reading again against the same anchor —
+    > correct behaviour throughout, but not the single refusal the block presents. **(b)** *"It
+    > detected nothing the wait does not"* is **false**, and it is round 12's second High. The
+    > neuter §17.6b ran — `WatchWorker::observe`'s per-pass `Instant::now()` replaced by a `OnceLock`
+    > — is the **permanently** early stamp, and it proves only that the surviving wait catches that
+    > case. An **intermittently** early stamp is a different story with a different ending: one save
+    > pass is refused as `PrecedesACommit`, the engine's rollback produces a correctly stamped pass,
+    > that pass is suppressed, the wait is satisfied and the test **passes** — while before the
+    > removal the cumulative, never-reset `preceded_a_commit` was left non-zero for the session and
+    > the exact-zero line **failed**. So the removal is a real trade: it keeps the permanent-case
+    > detection, drops the intermittent-case detection, and buys a line that can no longer fail on the
+    > harmless save-thread stall this item describes. **Keeping the removal is still right** — the
+    > removed line could not tell the intermittent defect from the stall, so it was a two-reason line
+    > that named one reason — but recording it as costing nothing was not, and §18.7 item 35 carries
+    > the lost coverage and what recovering it would cost.
 31. **"Sustained growth" is prose, not a check.** `LedgerTally` keeps one cumulative `u64` per
     decision for the whole session; it counts no refusals per path and holds nothing to compare a
     count against, so the very data a growth reading needs is not kept. Nothing fails when the counter
@@ -5087,6 +5143,17 @@ settlement back, the re-reading is stamped after the anchor and *is* suppressed.
 the correction and is **closed as a defect**, surviving only as its unchanged residue — no test
 exercises the rename-to-record window, and a stamp taken too *late* is still invisible.
 
+> **Correction (round-12 fix round, §§18.1 and 18.2).** Two claims in the paragraph above are false.
+> **(a)** *"The re-reading is stamped after the anchor and is suppressed"* is true in program order
+> and not in `Instant` values, because `decide` compares `read_after <= at` and refuses at equality,
+> so a clock collision can refuse the same reading again (§18.1). **(b)** *"It detected nothing the
+> wait does not"* is round 12's second High: the removed exact-zero line **did** detect one thing the
+> surviving wait cannot, an **intermittently** early stamp, because `preceded_a_commit` is cumulative
+> and never reset while a rollback's correctly stamped re-pass satisfies the wait and leaves the test
+> green (§18.2). The removal stands — the line could not tell that defect from the harmless stall, so
+> it named one of its two reasons — but it is a trade, not a free saving, and §18.7 item 35 carries
+> what it costs.
+
 ### 17.4 The Low — the test's message denied a decision the test itself took
 
 `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading` asserted the
@@ -5136,6 +5203,24 @@ one assertion. No result is discarded.
   bullet, §16.6 item 30) and this §17.
 - **no core file, no `src/` path, and no command, wire type, event, queue or user-visible string.**
 
+> **Correction (round-12 fix round, §18.4).** **This list was incomplete, and it is round 12's second
+> Low.** `git show 411658f --stat` lists **five** files, not three: the two Rust files and this record
+> above, plus **`docs/reviews/phase-2d-3-ledger.md`** (round 11's verbatim reply appended, +68 lines)
+> and **`PROGRESS.md`** (the round-11→round-12 handoff, +176 lines). Both belong in a section headed
+> *what changed, file by file*, and every four-file or three-file claim derived from this list is
+> wrong by the same two names.
+>
+> **The omission has a history, and half of it is a convention this record never declared.** No
+> *"what changed, file by file"* section in this record has ever named `docs/reviews/phase-2d-3-ledger.md`
+> — §§10.2, 11.2, 12.4, 13.3, 14.6, 15.6 and 16.3 all omit it, seven sections over seven rounds,
+> because the review file receives the reviewer's reply verbatim rather than an authored change.
+> That is a defensible thing to exclude and an indefensible thing to exclude **silently**, so it is
+> declared here rather than continued: **from §18 on, these sections name every file in the fix
+> round's commit and say which of them is a verbatim append.** The `PROGRESS.md` omission has no such
+> excuse — round 11's commit is the **first** 2d-3 fix commit to carry `PROGRESS.md` at all (round
+> 10's fix, `82c7dc5`, holds exactly four files and none of them is `PROGRESS.md`), so §17.6 dropped
+> a file that was new to the shape rather than one an old habit covered.
+
 ### 17.6b The neuter that justifies the removal, and the gates
 
 **§17.3's claim is proved, not inherited.** Removing an assertion on the argument that a neighbouring
@@ -5152,6 +5237,18 @@ Under it, `a_committed_save_is_suppressed_while_a_later_external_write_is_not` f
 — **the bounded positive wait, not the removed assertion.** The detection §16.6 item 30 credited to
 the exact-zero line is carried by the wait, and the line's removal costs nothing. `watch.rs` was
 restored from a byte-identical copy immediately afterwards and is absent from this round's diff.
+
+> **Correction (round-12 fix round, §18.2).** *"The line's removal costs nothing"* is **false**, and
+> it is round 12's second High at the position that was supposed to prove the removal. **The neuter
+> above is the right neuter for a claim it was not asked to prove.** A `OnceLock` stamp is the
+> *permanently* early stamp, so the run proves the wait catches that case — and nothing more. The
+> case the removed line caught alone is the **intermittently** early stamp: one pass refused, the
+> engine's rollback producing a correctly stamped pass, that pass suppressed, the wait satisfied and
+> the test green, while the cumulative `preceded_a_commit` the old line read was left at one and
+> **failed**. What the removal actually costs is therefore one detection, named in §18.7 item 35; the
+> removal is still right, because the removed line could not separate that defect from the harmless
+> save-thread stall of §17.1 and so failed on a healthy execution. **A neuter proves the claim it
+> instruments and no neighbouring claim**, and this record spent a round reading it as proving both.
 
 | Gate | Result |
 |---|---|
@@ -5176,8 +5273,372 @@ because its three changes are all removals of false claims rather than new mecha
     and `record_app_write`. The doc now *describes* it; no test *drives* it. Driving it needs a
     deterministic production-stamping seam, which is the reviewer's own alternative remedy and is
     2d-4's shape, not this step's.
+
+    > **Correction (round-12 fix round, §18.4).** *"Which is 2d-4's shape, not this step's"* is
+    > **false**, and it is round 12's third Low. The authority is `docs/reviews/phase-2d-design.md`
+    > Q7, and its item 4 scopes 2d-4 to *"the typed queue, `workspace://reconciliation-ready`,
+    > `drain_external_changes`, TypeScript types/wrapper, command registration/dispatch tests,
+    > sequence/epoch/coalescing tests, and EN/ES code namespaces/accessors for every visible
+    > failure"* — a wire step, naming no stamp and no suppression. Q7 item 3 is *"save composition and
+    > **suppression ledger**"*, which is this step; the stamp itself is taken in `WatchWorker::observe`,
+    > which Q7 item 2 put in 2d-2. **No ruling assigns the seam to 2d-4**, so the attribution is
+    > removed rather than re-pointed: the test debt is carried here, unassigned, because inventing a
+    > phase for it is exactly the false-precision this review keeps finding. The residue stands as
+    > written on its first three sentences.
 34. **`watch_check` now asserts strictly less than it did**, and that is the intended trade: the
     removed line detected nothing the surviving positive wait does not, but the surviving wait proves
     a *permanent* early stamp only. An early stamp that is intermittent still passes, exactly as it
     did before. §5 item 14's third half is unchanged — a stamp taken too **late** is invisible to
     every test in this crate.
+
+    > **Correction (round-12 fix round, §18.2).** **Two of the three claims above are false**, and
+    > together they are round 12's second High at the position that records the trade. *"The removed
+    > line detected nothing the surviving positive wait does not"* is wrong: the removed line was the
+    > only reader of a **cumulative** counter, so an early stamp on one pass alone left
+    > `preceded_a_commit` at one for the rest of the session and failed it, while the wait sees only
+    > the suppression the rollback's correctly stamped re-pass produces. *"An early stamp that is
+    > intermittent still passes, exactly as it did before"* is wrong in its last three words: **before
+    > the removal it did not pass** — that is the whole of what the removal gave up. What is true is
+    > the middle claim and the first four words: the surviving wait proves a *permanent* early stamp
+    > only, and `watch_check` really does assert strictly less. The trade is still the right one, for
+    > the reason item 30's correction gives — the removed line could not tell an intermittently early
+    > stamp from a healthy save-thread stall, so it was a line with two causes and one message — but
+    > it is a trade with a price, and the price is item 35.
+
+---
+
+## 18. The round-12 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 12 returned **NOT READY** with **two Highs and three Lows**.
+Round 11's lesson was *round 10 corrected a conclusion and left its premise standing, in the same
+paragraph*; round 11 then corrected two premises, and the brief for round 12 asked, in as many words,
+whether **a third stood in the same paragraphs**. It did — and the third one had been sitting in
+`decide()`'s own comment the whole time, which is the sharpest thing about it.
+
+**That makes twelve consecutive rounds with a name-position finding, and four consecutive where the
+finding is a *premise* rather than a word.** Both Highs are again this project's declared worst defect
+class — a record claiming a guarantee the code does not give — and the second of them is worse than
+its predecessors in one specific way: it is a claim about **a check that was deleted**, made in the
+same round that deleted it, and it made the deletion look free.
+
+**Every one of the five findings was verified against the code before anything was written**, because
+this review has an eleven-round history in which a fix round's own fix became the next round's
+finding. Four are real and are fixed. **One is real and is fixed by removing an attribution rather
+than by adding machinery**, and the authority that settles it is quoted in §18.4. **None was cleared**
+— unlike round 9, which reversed a rejection, and round 10, which downgraded an item, round 12 found
+nothing this record could defend.
+
+### 18.1 High 1 — program order does not give a strictly greater `Instant`, and four claims said it did
+
+**The premise, in the code that decides it.** `decide`'s chronology check is
+
+```rust
+AdmissionDoor::StampedPublication(read_after) => anchor.is_some_and(|at| read_after <= at),
+```
+
+so **equality is on the refusing side**, deliberately and correctly — the comment directly above it
+says why in as many words (*"`Instant` is monotonic but expressly not guaranteed strictly increasing,
+so two ordered clock reads may answer the same value — and at equality this comparison proves nothing
+about which of the two calls came first"*), the round-10 review cleared that behaviour as right, and
+this round does not touch the comparison. The test helper `later_than_now()` exists **because** of it:
+it is `Instant::now() + 1ns`, and its own doc says `Instant::now()` alone would not be strictly later.
+
+**The false claim, in four places.** *The re-observation's own stamp is taken after the anchor* is
+true in **program order** and says nothing about the two `Instant` **values**. So a clock collision
+lets the same anchor refuse the same path's re-reading again, and each of these presented one refusal
+per commit as a guarantee (**line numbers as the reviewer cited them, at `08a3366`**, not on the
+finished tree):
+
+| Position | What it said |
+|---|---|
+| `ledger.rs:480` (module doc, *the anchor outlives the record*) | *"so it cannot be refused by it a second time"* |
+| `ledger.rs:861` (`LedgerTally::preceded_a_commit`) | *"so one commit refuses one reading once"* |
+| `watch_check.rs:1227` (the rewritten paragraph) | *"the re-reading is stamped after the anchor and **is** suppressed"* |
+| `2d-3-notes.md:5004` (§16.6 item 30's round-11 correction block) | the same sentence as `watch_check`'s |
+
+**The fix is one sentence at each of the four positions**, claim and concession together, never a
+concession beginning a new sentence — round 11's High 2 was a record claiming that rule was satisfied
+when the concession began a new sentence, and repeating that here would have been the fourth-round
+instance of the same shape. The three code positions now say *usually* and name the mechanism in the
+same breath: program order only, `Instant` not guaranteed strictly increasing, `decide` refusing at
+equality, so successive re-readings can be refused until one stamp *strictly* exceeds the anchor.
+`ledger.rs:480` adds what bounds the retry, because a reader's next question is whether this is a
+livelock: **the host clock advancing**, not construction — and it is bounded in the safe direction,
+since every refusal is answered by a re-observation and none of them publishes anything.
+
+**The shape sweep found two more instances the reviewer did not name** (§18.5), both in per-round
+record sections and both now carrying correction blocks: §15.3's *"so it cannot be refused by the same
+anchor twice, and no re-observation loop exists"*, and §16.1's **third** bullet, whose sustained-growth
+diagnosis is argued from the same premise. It also found one at a **name position** — the assertion
+message closing
+`a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading`, which read
+*"one increment for one commit spanned: the anchor refuses the re-reading no second time"* and
+generalized a property that test has **by construction** through `later_than_now`. That message and
+the step-5 comment above it now say which of the two they are.
+
+### 18.2 High 2 — the removal of the exact-zero assertion was recorded as costing nothing, and it cost a detection
+
+**What was checked before this was written.** `WatchWorker::observe` takes `let read_after =
+Instant::now();` **per pass**, immediately before `engine.tick`. A refusal at the stamped door returns
+`ObservationOutcome::Undecided`, `deliver` calls `engine.revert_settlement`, and the path settles again
+on a later pass with a **fresh** stamp. `decide`'s `PrecedesACommit` arm does
+`ledger.tally.preceded_a_commit += 1`, and `LedgerTally` is **cumulative for the session**: nothing
+resets it, `begin_epoch` clears the records, the path index and the anchors but not the tally.
+
+**So the two stamping defects have two different endings, and only one of them is caught now:**
+
+- a **permanently** early stamp — the worker stamping once at start — refuses the save's own hint on
+  *every* re-reading, so it is never suppressed, and the bounded positive wait for `suppressed >= 1`
+  times out. §17.6b's `OnceLock` neuter drove exactly this and the test failed **at the wait**;
+- an **intermittently** early stamp — one pass stamped before `record_app_write`, the next after —
+  is refused once, the engine's rollback produces a correctly stamped pass, that pass **is**
+  suppressed, the wait is satisfied, and the test **passes**. Before round 11 the cumulative
+  `preceded_a_commit` was left at one and the exact-zero assertion **failed**.
+
+**The removal therefore surrendered a distinct detection**, and three sentences of the round-11 record
+said it did not: item 30's correction block and §17.3 both say *"it detected nothing the wait does
+not"*, §17.6b says *"the line's removal costs nothing"*, and §17.7 item 34 says an intermittent early
+stamp *"still passes, exactly as it did before"* — which is false in its last three words, because
+before the removal it did not pass. The same false claim stood at a **name position in the code**:
+`watch_check.rs:1234`, *"Removing the assertion costs nothing it detected"*.
+
+**The neuter was the right neuter for a claim it was not asked to prove**, and that is the general
+lesson worth more than this instance: a `OnceLock` stamp instruments the *permanent* case only, so the
+run proves the wait catches that case and is silent about every other. §17.6b read one run as proving
+two claims.
+
+**The removal stands.** Round 11 established that the assertion was timing-unsound — the save-thread
+stall of §17.1 makes it fail with correct behaviour throughout — and round 12 does not dispute it. The
+honest statement is a **trade**: the removed line could not tell an intermittently early stamp from a
+harmless stall, so it was a line with two causes and one message, and deleting it bought a suite that
+no longer fails on a healthy execution at the price of the only check that could see the intermittent
+defect. Correction blocks dated to this round sit under §16.6 item 30, §17.3, §17.6b and §17.7 item
+34; `watch_check.rs`'s own paragraph now states the trade where the assertion used to be; and
+`LedgerTally::preceded_a_commit`'s second bullet says it too, because that doc is where a maintainer
+looks for what the counter is for. **What the lost coverage would cost to recover is §18.7 item 35**,
+and building it is not in this round's scope.
+
+### 18.3 The first Low — the named suspect, confirmed at a bold first sentence
+
+§16.1's closing paragraph — ***"It does not overclaim in the other direction."*** — supported itself
+with two clauses, and **round 11 falsified both, three sections below, without touching this
+paragraph**:
+
+- *the **first** half of the old paragraph is intact* — round 11's High 1 changed it from **never** to
+  **usually**;
+- *the one production assertion of zero is **kept** rather than weakened — see §16.6 item 30 for what
+  keeping it costs* — round 11's Medium **removed** it, and closed item 30 as a defect in the same
+  round, so the sentence points at a section that no longer says what it is cited for.
+
+The brief offered this as a **question**, not as a finding, exactly as round 10's brief offered a
+suspect that turned out not to be a defect. This one is a defect: it survived a whole round at a bold
+first-sentence position with no correction block, while three correction blocks were added above it.
+A round-12 correction block now sits directly beneath it, naming both changes and saying what survives
+— only the first clause, that the counter still counts refusals and never losses.
+
+### 18.4 The other two Lows — an incomplete file list, and a residue assigned to a phase that does not own it
+
+**Low 2 — §17.6 named three files and the commit holds five.** `git show 411658f --stat` lists
+`PROGRESS.md`, `docs/decisions/2d-3-notes.md`, `docs/reviews/phase-2d-3-ledger.md`,
+`src-tauri/src/ledger.rs` and `src-tauri/src/watch_check.rs`; §17.6 named the two Rust files and this
+record. The correction block under §17.6 names both omissions and, more usefully, separates them:
+**no** *what changed, file by file* section in this record has ever named
+`docs/reviews/phase-2d-3-ledger.md` — §§10.2, 11.2, 12.4, 13.3, 14.6, 15.6 and 16.3, **seven sections
+over seven rounds** — because the review file receives the reviewer's reply verbatim rather than an
+authored change. That exclusion is defensible and was never declared, so **§18.6 declares it and names
+the file anyway**. The `PROGRESS.md` omission is not covered by any such habit: round 11's is the
+**first** 2d-3 fix commit to carry `PROGRESS.md` at all (round 10's fix, `82c7dc5`, holds four files
+and none of them is `PROGRESS.md`). Every four-file claim derived from that list is wrong by the same
+two names; the ones inside this record are corrected here, and the ones in `PROGRESS.md` are the
+orchestrator's, reported rather than edited, because a phase worker does not write `PROGRESS.md`.
+
+**Low 3 — item 33 assigned the deterministic production-stamping seam to 2d-4, and the authority does
+not.** `docs/reviews/phase-2d-design.md` Q7 was read before deciding, because round 9 reversed a
+rejection and round 10 downgraded an item, and disagreeing with the reviewer is legitimate when the
+authority backs it. It does not back it here. Q7 item 4 is
+
+> **2d-4 — queue, event wake, drain command, and wire contracts.** Add the typed queue,
+> `workspace://reconciliation-ready`, `drain_external_changes`, TypeScript types/wrapper, command
+> registration/dispatch tests, sequence/epoch/coalescing tests, and EN/ES code namespaces/accessors
+> for every visible failure.
+
+— a **wire** step, which names no stamp and no suppression. Q7 item 3 is *"2d-3 — save composition and
+**suppression ledger**"*, which is this step, and the stamp itself is taken in `WatchWorker::observe`,
+which Q7 item 2 placed in 2d-2. **No ruling assigns the seam to any phase**, so the attribution is
+**removed** rather than re-pointed, and the test debt is carried unassigned. Inventing a phase for a
+debt is a false precision that reads as a plan, and this review has spent twelve rounds finding
+sentences that read as more than they are.
+
+### 18.5 The two sweeps
+
+Both were run as **separate passes**, and the counts below are line counts from `rg -c`, given as
+**before → after** wherever this round's own edits move them, so a later round re-running them does
+not read its own predecessor's work as a discrepancy.
+
+**Pass 1 — for the shape, never for the words of the finding just closed.** Two shapes: *an ordering
+or timing argument presented as a guarantee*, and *a removal presented as costless*.
+
+```sh
+rg -c 'after the anchor|after the record|refuses? one reading once|a second time|refused by it|refused by the same anchor' \
+  src-tauri/src/{ledger,watch_check,commands,watch}.rs docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md
+rg -c 'costs nothing|cost nothing|detected nothing|detects nothing|loses nothing|lost nothing|exactly as it did before|no cost' \
+  src-tauri/src docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md
+```
+
+- the ordering shape, **at `08a3366` → on the finished tree**: `ledger.rs` **8 → 7**,
+  `watch_check.rs` **1 → 1**, `commands.rs` **5 → 5**, `watch.rs` **0 → 0**, this record
+  **14 → 24**, `phase-2d-design.md` **0 → 0**. `ledger.rs` falls by one because the module-doc
+  sentence §18.1 rewrote no longer says *a second time*; this record rises by ten because of §18.1's
+  own two correction blocks and this section quoting the pattern's own words back. Every hit at
+  `08a3366` was read. The five `commands.rs` hits and `ledger.rs`'s at 1860, 1875 and 1996 are the
+  **serialized doors'** argument — *a read the caller performed itself, under the session lock, after
+  the record in program order* — and that is sound and is not this finding: those doors set
+  `precedes_a_commit = false` by a `match door` and consult **no clock at all**, so no collision can
+  reach them. `ledger.rs:3157` is a test comment whose next line is `later_than_now()`, true by
+  construction. The remaining hits are the four §18.1 fixes, the two the reviewer did not name, and
+  the one assertion message;
+- the costless-removal shape, on the **narrowed** pattern printed above — the word *free* was
+  deliberately dropped from it after a first pass, because *deadlock-free* and *free function* put
+  ten hits in `commands.rs`, two in `watch.rs` and four in `phase-2d-design.md` that have nothing to
+  do with this shape — **at `08a3366` → on the finished tree**: `ledger.rs` **1 → 1**,
+  `watch_check.rs` **1 → 0**, `commands.rs` **0 → 0**, `watch.rs` **0 → 0**, this record
+  **9 → 25**, `phase-2d-design.md` **1 → 1**. `watch_check.rs` falls to zero because *"Removing the
+  assertion costs nothing it detected"* is the sentence §18.2 replaced; this record rises by sixteen
+  because four correction blocks quote the false claims they correct, and §18.2 and this bullet quote
+  them again. Of the nine hits at `08a3366`: §§1188, 1192, 3256 and 3656 of this record are about a
+  **sequence not spent** — the ledger's economy, not a deleted check — §3924 is about a paragraph's
+  content, `ledger.rs:1099` is about **lock contention** (*"it costs nothing because the one thread
+  that could hold the gate for any length of time is a save"*), and `phase-2d-design.md:104`'s
+  *"`refused` closes nothing"* is an adoption outcome. The remaining **four** in this record, plus
+  `watch_check.rs`'s one, are exactly the five positions §18.2 corrects — and §17.7 item 34 matched
+  **twice over**, on *detected nothing* and on *exactly as it did before*, the second phrase being in
+  the pattern only because the reviewer's finding named it. That is worth recording as a limit of the
+  method: the sweep would have found item 34 on the first phrase anyway, but a sweep written from the
+  *words* of a finding cannot find the instance whose wording nobody has thought of yet.
+
+**§17.5's two carried counts move, and both numbers are given so round 13 does not read this round's
+own work as a discrepancy.** `rg -c 'same sentence'` over §17.5's five files was `ledger.rs` **6**
+and this record **11**, total **17**, on the tree round 12 reviewed; it is now `ledger.rs` **7** and
+this record **18**, **total 25** — one in the code because §18.1's fix says *in the same sentence*
+where it puts the concession, and seven here because §18 states the rule at every position it applied
+it, this paragraph included. (`docs/reviews/phase-2d-3-ledger.md`, which §17.5 did not sweep, holds a
+further **5**.)
+`rg -c 'preceded_a_commit'` was `ledger.rs` **15**, `watch_check.rs` **1**, `commands.rs` **1**; it is
+now `ledger.rs` **15**, `watch_check.rs` **2**, `commands.rs` **1** — the identifier returns to
+`watch_check` in §18.2's replacement paragraph, which has to name the counter to say what the removed
+line read. **No identifier was added to production code and none was removed.**
+
+**Pass 2 — name positions, as a distinct pass.** Headings, bold ruling lines, first sentences, doc
+comments, module headers, test names and assertion messages, over the same files.
+
+```sh
+rg -n '^\s*fn [a-z_]+\(' src-tauri/src/{ledger,watch_check,commands,watch}.rs -o | rg -i 'once|never|always|cannot|no_|second|suppress|preced'
+rg -n '^#{2,4} .*(once|never|always|cannot|costs?|nothing|guarantee)' -i docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+rg -n '^\*\*[^*]{0,120}(never|always|cannot|once|costs nothing|guarantee)' -i docs/decisions/2d-3-notes.md
+```
+
+- **it found two, and both are fixed**: the bold first sentence of §16.1's closing paragraph (the
+  Low the brief named, §18.3) and the assertion message at the end of
+  `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading` (§18.1);
+- **24 test names matched and every one was judged.** The five `never` names —
+  `a_reading_taken_before_a_commit_never_supersedes_its_record`,
+  `a_serialized_door_reading_is_never_refused_by_a_commit_anchor`,
+  `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes`,
+  `a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours` and
+  `a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_commit` — are all
+  **sound, and three of them for a reason worth stating: equality moves the outcome toward
+  *refusal*, so a clock collision makes a *never-supersedes* claim more true and never less.** The
+  other two are control-flow claims about a `match door` that reads no clock;
+- **the test name `…_is_counted_once_and_admitted_on_its_next_reading` was judged and left**, and the
+  reason is recorded rather than assumed: a test name names the scenario the test **drives**, and
+  this one drives a hand-passed `later_than_now()` stamp for which *counted once* is true by
+  construction. What generalized was the assertion message inside it, and that is what changed;
+- the eight `### … What is guaranteed now, and what is not` sections were read for a *one refusal per
+  commit* claim. **None carries one.** §§10.5 and 11.5's *a watcher reading cannot place strictly
+  after its own last committed write* is a claim about what is **refused**, so equality strengthens
+  it.
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule, and 2c-5-4a's scar): this round
+adds no operation, consumes nothing and discards no result. It changes one assertion message, adds
+comments, and adds correction blocks.
+
+### 18.6 What changed, file by file
+
+**Declared, per §18.4: this list names every file in the round's commit, and says which is a verbatim
+append.**
+
+- **`src-tauri/src/ledger.rs`** — the module doc's *widening the refusal is safe* sentence rewritten
+  to carry the clock concession (§18.1); `LedgerTally::preceded_a_commit`'s **first** bullet given the
+  same concession inside the same sentence, and its **second** bullet rewritten to state the
+  removal's real cost (§§18.1, 18.2); the step-5 comment and the closing assertion **message** of
+  `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading` scoped to
+  that test's construction (§18.1). **One assertion message changed and no assertion added or
+  removed; no test added or removed; no behaviour, no signature, no control flow, and `decide`'s
+  comparison untouched.**
+- **`src-tauri/src/watch_check.rs`** — inside
+  `a_committed_save_is_suppressed_while_a_later_external_write_is_not`, the *is suppressed* sentence
+  given the clock concession (§18.1), and *"Removing the assertion costs nothing it detected"*
+  replaced by the trade it actually is (§18.2). **Comments only.** The removed assertion is **not**
+  restored.
+- **`docs/decisions/2d-3-notes.md`** — **nine** correction blocks, one per corrected position:
+  §15.3's *widening the refusal* paragraph, §16.1's third bullet, §16.1's closing paragraph, §16.6
+  item 30, §17.3, §17.6, §17.6b, §17.7 item 33 and §17.7 item 34 — **and this §18**. Every one is
+  **added beneath** the text it corrects; nothing is deleted or silently rewritten, including the
+  round-11 correction blocks that two of these correct in their turn.
+- **`docs/reviews/phase-2d-3-ledger.md`** — round 12's section appended: a prose preamble and the
+  reviewer's reply **verbatim**. The verbatim half is not an authored change.
+- **`PROGRESS.md`** — the orchestrator's, not this round's: the round-12→round-13 handoff and the
+  commit row. **Named here because §17.6 not naming it is round 12's second Low.**
+- **no core file, no `src/` path, and no command, wire type, event, queue, i18n key or user-visible
+  string.**
+
+### 18.6b The gates, and what this round did not measure
+
+No neuter was run and none was owed: this round changes no production behaviour, deletes no check and
+adds none. The one code change with a runtime existence — an assertion **message** — is exercised by
+the test that carries it on every run.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1268 passed, 0 failed** (exit 0, summed over **26** `test result` lines — unchanged, and it must be: this round adds and removes no test, and changes one assertion's message only) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, **223** filtered out, quiet host, no timeout; this round changed only comments in that file) |
+
+**One measurement moved and it is not this round's doing, so it is stated rather than left for round 13
+to trip over.** The focused serial gate ran **71.24 s** before the fix and **285.53 s** then **253.40 s**
+after it, the second of those on a verified-quiet host with no orphaned test binary. All three runs are
+**20 passed, 0 failed, 223 filtered out, exit 0**. The suite is built of bounded waits, so a slower host
+lengthens the run without changing the verdict, and this round edited only comments in that file — no
+timing constant, no wait, no test. **The duration is host state, not a property of the tree**, and the
+ladder of past figures (64.77 s, 64.85 s, 71.24 s) must not be read as a regression baseline: what the
+gate asserts is 20/20 and no timeout, never a wall-clock.
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched no core file) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §18.6's file list and of `git diff --name-only 08a3366 -- src/` being empty |
+
+### 18.7 What this round's own change leaves open
+
+Written with the expectation §15 states and this round does not weaken: **seven** §5 items recorded as
+bounded residues have since been found to be real defects. Round 12's own two Highs are a further
+warning of a different kind — both were **records about a residue**, written by the round that created
+it, and both overstated it. What this round leaves:
+
+35. **The intermittent-early-stamp detection is gone and nothing replaces it.** This is §18.2's price,
+    stated as a debt rather than as a trade already paid. Recovering it needs a **deterministic
+    production-stamping seam**: a way to make `WatchWorker::observe` take a stamp a test chooses, and
+    a way to hold `record_app_write` behind a settle, so the interleaving can be driven instead of
+    argued. Both are production code changed for a test's benefit on the one path where being wrong is
+    worst, and this step has not built one. **Q7 assigns it to no phase** (§18.4), so
+    it is carried here unassigned and must not be quietly attached to one. Until then the suite
+    catches a *permanently* early stamp, through one bounded positive wait, and nothing else.
+36. **Every correction this round made is prose, and no test fails if a later round un-makes one.**
+    The four claims of §18.1 and the five of §18.2 are enforced by nothing — this is the same gap
+    `CLAUDE.md` records for the i18n suites, where parity and placeholders are checked and *meaning*
+    is not, and it is why twelve rounds of review have each found a false sentence that every gate was
+    green over. The concession now lives inside the same sentence as its claim at every position, which
+    makes it harder to lose by accident and not losable by moving a full stop alone — the exact failure
+    round 11's High 2 named — but *harder* is the whole of the claim, and nothing enforces it.
+37. **§18.6's declaration is a convention, not a check.** Nothing compares a *what changed, file by
+    file* list against `git show <commit> --stat`, so the next incomplete list will be found by the
+    next reviewer or not at all — which is exactly how this one was found, seven sections after the
+    habit started.
