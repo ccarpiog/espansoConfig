@@ -1,4 +1,5 @@
-//! Real-filesystem integration checks for the watcher lifecycle — Phase 2d-2.
+//! Real-filesystem integration checks for the watcher lifecycle — Phase 2d-2 —
+//! and for the app-write ledger on the production save path — Phase 2d-3.
 //!
 //! The 2d design consult's Q7 item 2 puts **this crate's one integration
 //! test** here on purpose: a `notify` callback plus workspace replacement is
@@ -7,9 +8,18 @@
 //! [`crate::commands::WorkspaceSession`] over real temp trees with real
 //! creates, atomic renames, edits and removals under **both** watched roots,
 //! and reads the results through the same seam Phase 2d-4's queue will use —
-//! an injected [`ObservationSink`]. The operation matrix is **one test per
+//! an injected [`AdmittedSink`]. The operation matrix is **one test per
 //! cell** — four operation shapes times two roots — so an early timeout in
 //! one cell cannot hide what the rest of the matrix would have shown.
+//!
+//! Since Phase 2d-3 that seam sits **behind** `crate::ledger`'s admission gate,
+//! which `WorkspaceSession::observing` installs for every session a production
+//! constructor builds as well as for every one built here. The two checks at
+//! the end of this file are what make that a measured fact rather than a
+//! reading of the constructor: a real `save_document` transaction, with its
+//! real rename and its real pre-save copy, is suppressed rather than reported,
+//! while an external write of different bytes to the same file is admitted and
+//! numbered.
 //!
 //! # Flakiness policy
 //!
@@ -43,11 +53,14 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 use espansoconfig_core::discovery::FileKind;
+use espansoconfig_core::persist::{Acknowledgement, BACKUP_DIRECTORY_NAME, BATCH_MARKER_NAME};
 use espansoconfig_core::watch::engine::{EngineConfig, Observation, StableContent};
-use espansoconfig_core::ContentRevision;
+use espansoconfig_core::{ContentRevision, DocumentId};
 
 use crate::commands::WorkspaceSession;
-use crate::watch::{EpochObservation, LifecycleConfig, ObservationSink, WorkspaceEpochs, NO_EPOCH};
+use crate::ledger::{AdmittedObservation, AdmittedSink, AppWrite};
+use crate::save::SaveResult;
+use crate::watch::{LifecycleConfig, WorkspaceEpochs, NO_EPOCH};
 
 /// How long a positive expectation may take before the test fails.
 ///
@@ -106,9 +119,9 @@ fn fast_config() -> LifecycleConfig {
 /// Exactly the shape 2d-4's queue will take the observations through; here the
 /// receiver is the test's, so what the watcher observed is what the test can
 /// assert about.
-fn channel_sink() -> (ObservationSink, Receiver<EpochObservation>) {
+fn channel_sink() -> (AdmittedSink, Receiver<AdmittedObservation>) {
     let (sender, receiver) = std::sync::mpsc::channel();
-    let sink: ObservationSink = Arc::new(move |observation| {
+    let sink: AdmittedSink = Arc::new(move |observation| {
         // The send fails only when the test dropped its receiver first, at
         // which point what the watcher still observes is not under test.
         let _ = sender.send(observation);
@@ -140,10 +153,10 @@ fn wait_until_ready(session: &WorkspaceSession) {
 /// Unrelated observations are collected rather than dropped, so a timeout
 /// panic says what actually arrived instead of only what did not.
 fn await_observation(
-    observations: &Receiver<EpochObservation>,
+    observations: &Receiver<AdmittedObservation>,
     what: &str,
-    mut matches: impl FnMut(&EpochObservation) -> bool,
-) -> EpochObservation {
+    mut matches: impl FnMut(&AdmittedObservation) -> bool,
+) -> AdmittedObservation {
     let deadline = Instant::now() + PATIENCE;
     let mut unrelated = Vec::new();
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
@@ -157,7 +170,10 @@ fn await_observation(
 } // End of function await_observation()
 
 /// Collects everything the sink receives inside `window`.
-fn drain_for(observations: &Receiver<EpochObservation>, window: Duration) -> Vec<EpochObservation> {
+fn drain_for(
+    observations: &Receiver<AdmittedObservation>,
+    window: Duration,
+) -> Vec<AdmittedObservation> {
     let deadline = Instant::now() + window;
     let mut seen = Vec::new();
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
@@ -170,17 +186,17 @@ fn drain_for(observations: &Receiver<EpochObservation>, window: Duration) -> Vec
 } // End of function drain_for()
 
 /// Whether an observation is a `Changed` at exactly `path`.
-fn is_changed_at(observation: &EpochObservation, path: &Path) -> bool {
+fn is_changed_at(observation: &AdmittedObservation, path: &Path) -> bool {
     matches!(&observation.observation, Observation::Changed { path: at, .. } if at.as_path() == path)
 }
 
 /// Whether an observation is an `Added` at exactly `path`.
-fn is_added_at(observation: &EpochObservation, path: &Path) -> bool {
+fn is_added_at(observation: &AdmittedObservation, path: &Path) -> bool {
     matches!(&observation.observation, Observation::Added { file, .. } if file.path.as_path() == path)
 }
 
 /// Whether an observation is a `Removed` at exactly `path`.
-fn is_removed_at(observation: &EpochObservation, path: &Path) -> bool {
+fn is_removed_at(observation: &AdmittedObservation, path: &Path) -> bool {
     matches!(&observation.observation, Observation::Removed { path: at, .. } if at.as_path() == path)
 }
 
@@ -211,13 +227,8 @@ fn assert_exact_source_bytes(content: &StableContent, expected: &str, what: &str
 } // End of function assert_exact_source_bytes()
 
 /// The path an observation is about, whatever its kind.
-fn observed_path(observation: &EpochObservation) -> &Path {
-    match &observation.observation {
-        Observation::Changed { path, .. }
-        | Observation::Removed { path, .. }
-        | Observation::Unreadable { path, .. } => path,
-        Observation::Added { file, .. } => &file.path,
-    }
+fn observed_path(observation: &AdmittedObservation) -> &Path {
+    crate::ledger::observed_path(&observation.observation)
 }
 
 /// The file [`synthetic_tree`] seeds under a watched root, with its bytes and
@@ -233,7 +244,7 @@ fn seeded_file_of(subdir: &str) -> (&'static str, &'static str, FileKind) {
 /// Opens a watching session over a fresh synthetic tree, waits for its
 /// baseline, and asserts the healthy-native framing every matrix cell
 /// shares: the first epoch, and no polling.
-fn watched_tree() -> (TempDir, WorkspaceSession, Receiver<EpochObservation>) {
+fn watched_tree() -> (TempDir, WorkspaceSession, Receiver<AdmittedObservation>) {
     let dir = synthetic_tree();
     let (sink, observations) = channel_sink();
     let session = WorkspaceSession::observing(sink, fast_config());
@@ -415,6 +426,19 @@ fn a_real_removal_under_match_reaches_the_sink() {
 /// (A reopen initiated from inside the replaced worker's own sink callback
 /// deliberately does not get join-before-return; that case is the two
 /// teardown tests below.)
+///
+/// **The join probe is what carries the leak verdict, and since Phase 2d-3 it
+/// is the only thing that can.** This test's original verdict was the drain
+/// window at the end: a leaked epoch-1 worker would have observed the write
+/// into the replaced tree and reached the sink. The 2d-3 admission gate now
+/// discards a replaced epoch's observation *before* the sink, so that window
+/// would stay clean over exactly the regression it exists to catch — round 1's
+/// Medium. The probe replaces it with the direct fact: `open` on a thread that
+/// is not the replaced worker cancels **and joins** that worker before it
+/// returns, and the probe's flag is stored only after that join returned. The
+/// drain window is kept for what it still says — that the successor's epoch is
+/// the only one delivering, and that nothing of the replaced *tree's* paths
+/// arrives — never as the leak detector.
 #[test]
 fn a_successful_reopen_cancels_and_joins_the_old_watcher_and_bumps_the_epoch() {
     let first = synthetic_tree();
@@ -426,10 +450,25 @@ fn a_successful_reopen_cancels_and_joins_the_old_watcher_and_bumps_the_epoch() {
         .expect("the first tree opens");
     wait_until_ready(&session);
     assert_eq!(session.watch_status().expect("open").epoch, 1);
+    // Captured before the reopen, because the reopen consumes that lifecycle.
+    let replaced_worker = session
+        .watcher_join_probe()
+        .expect("the first watcher is running");
+    assert!(
+        !replaced_worker.completed(),
+        "the premise: the watcher about to be replaced is still running"
+    );
 
     session
         .open(Some(second.path()))
         .expect("the second tree opens");
+    // The leak verdict, and it needs no wait: an ordinary `open` joins the
+    // replaced worker in place, and the probe is stored only after that join
+    // returned. A regression that forgot to cancel and join fails here.
+    assert!(
+        replaced_worker.completed(),
+        "an ordinary open must have joined the replaced worker before returning"
+    );
     // `open` returned, so the previous watcher was joined before this line;
     // the status now reads the successor.
     assert_eq!(
@@ -456,9 +495,11 @@ fn a_successful_reopen_cancels_and_joins_the_old_watcher_and_bumps_the_epoch() {
     });
     assert_eq!(got.epoch, 2);
 
-    // A short window behind the fence. Were the replaced watcher alive — the
-    // defect this test exists to catch — its observation of the old tree
-    // would run the same debounce cadence the live edit just demonstrated.
+    // A short window behind the fence. It is no longer the leak detector —
+    // the probe above is, since the admission gate discards a replaced epoch's
+    // observation before the sink — but it still pins that the successor's
+    // epoch is the only one delivering and that no path of the replaced tree
+    // arrives.
     let late = drain_for(&observations, Duration::from_millis(600));
     assert!(
         late.iter()
@@ -598,13 +639,13 @@ fn a_sink_that_reenters_the_session_during_replacement_does_not_deadlock() {
     let (reentered_tx, reentered) = std::sync::mpsc::channel::<bool>();
 
     let target = first.path().join("match/base.yml");
-    let sink: ObservationSink = {
+    let sink: AdmittedSink = {
         let slot = Arc::clone(&session_slot);
         let target = target.clone();
         // A `Receiver` is not `Sync` and the sink must be, so the sink's
         // waiting end travels behind a mutex only the worker thread locks.
         let proceed = Mutex::new(proceed);
-        Arc::new(move |observation: EpochObservation| {
+        Arc::new(move |observation: AdmittedObservation| {
             if !is_changed_at(&observation, &target) {
                 return;
             }
@@ -692,17 +733,17 @@ fn a_sink_that_reopens_the_workspace_does_not_join_its_own_worker() {
     let second = match_only_tree();
 
     let session_slot: Arc<OnceLock<Weak<WorkspaceSession>>> = Arc::new(OnceLock::new());
-    let (forward, observations) = std::sync::mpsc::channel::<EpochObservation>();
+    let (forward, observations) = std::sync::mpsc::channel::<AdmittedObservation>();
     let (reopened_tx, reopened) = std::sync::mpsc::channel::<Result<(), String>>();
     let reopen_once = Arc::new(AtomicBool::new(false));
 
     let target = first.path().join("match/base.yml");
     let second_root = second.path().to_path_buf();
-    let sink: ObservationSink = {
+    let sink: AdmittedSink = {
         let slot = Arc::clone(&session_slot);
         let reopen_once = Arc::clone(&reopen_once);
         let target = target.clone();
-        Arc::new(move |observation: EpochObservation| {
+        Arc::new(move |observation: AdmittedObservation| {
             let reopens =
                 is_changed_at(&observation, &target) && !reopen_once.swap(true, Ordering::SeqCst);
             let _ = forward.send(observation);
@@ -787,16 +828,16 @@ fn a_sink_that_becomes_the_last_owner_drops_the_session_without_joining_itself()
     // The test surrenders its own strong reference into this slot, so the
     // callback's take makes the callback the last owner.
     let last_owner: Arc<Mutex<Option<Arc<WorkspaceSession>>>> = Arc::new(Mutex::new(None));
-    let (forward, observations) = std::sync::mpsc::channel::<EpochObservation>();
+    let (forward, observations) = std::sync::mpsc::channel::<AdmittedObservation>();
     let (dropped_tx, dropped) = std::sync::mpsc::channel::<()>();
     let drop_once = Arc::new(AtomicBool::new(false));
 
     let target = dir.path().join("match/base.yml");
-    let sink: ObservationSink = {
+    let sink: AdmittedSink = {
         let last_owner = Arc::clone(&last_owner);
         let drop_once = Arc::clone(&drop_once);
         let target = target.clone();
-        Arc::new(move |observation: EpochObservation| {
+        Arc::new(move |observation: AdmittedObservation| {
             let drops =
                 is_changed_at(&observation, &target) && !drop_once.swap(true, Ordering::SeqCst);
             let _ = forward.send(observation);
@@ -887,14 +928,14 @@ fn a_parked_worker_does_not_block_the_reap_of_a_worker_that_exited_behind_it() {
     let stuck_once = Arc::new(AtomicBool::new(false));
 
     let stuck_target = stuck_tree.path().join("match/base.yml");
-    let stuck_sink: ObservationSink = {
+    let stuck_sink: AdmittedSink = {
         let stuck_owner = Arc::clone(&stuck_owner);
         let stuck_once = Arc::clone(&stuck_once);
         let target = stuck_target.clone();
         // A `Receiver` is not `Sync` and the sink must be, so the parked
         // callback's waiting end travels behind a mutex only the worker locks.
         let release = Mutex::new(release);
-        Arc::new(move |observation: EpochObservation| {
+        Arc::new(move |observation: AdmittedObservation| {
             if !is_changed_at(&observation, &target) || stuck_once.swap(true, Ordering::SeqCst) {
                 return;
             }
@@ -942,11 +983,11 @@ fn a_parked_worker_does_not_block_the_reap_of_a_worker_that_exited_behind_it() {
     let finished_once = Arc::new(AtomicBool::new(false));
 
     let finished_target = finished_tree.path().join("match/base.yml");
-    let finished_sink: ObservationSink = {
+    let finished_sink: AdmittedSink = {
         let finished_owner = Arc::clone(&finished_owner);
         let finished_once = Arc::clone(&finished_once);
         let target = finished_target.clone();
-        Arc::new(move |observation: EpochObservation| {
+        Arc::new(move |observation: AdmittedObservation| {
             if !is_changed_at(&observation, &target) || finished_once.swap(true, Ordering::SeqCst) {
                 return;
             }
@@ -1047,3 +1088,239 @@ fn an_exhausted_epoch_space_opens_unwatched_rather_than_reusing_an_epoch() {
         "exhaustion stays exhausted across further replacements"
     );
 } // End of function an_exhausted_epoch_space_opens_unwatched_rather_than_reusing_an_epoch()
+
+// ---------------------------------------------------------------------------
+// Phase 2d-3 — the app-write ledger, on the production path
+// ---------------------------------------------------------------------------
+
+/// Opens a watching session over a tree holding only `match/`, waits for its
+/// baseline, and asserts the framing the two 2d-3 checks ride.
+///
+/// The missing `config/` root engages the polling fallback at start, so the
+/// rescan cadence delivers whatever happens under `match/` **whether or not
+/// FSEvents does** — the same technique the three teardown tests use, and the
+/// reason no verdict below depends on native delivery. What is under test here
+/// is the admission gate, which is indifferent to how a hint arrived.
+fn polled_tree() -> (TempDir, WorkspaceSession, Receiver<AdmittedObservation>) {
+    let dir = match_only_tree();
+    let (sink, observations) = channel_sink();
+    let session = WorkspaceSession::observing(sink, fast_config());
+    session
+        .open(Some(dir.path()))
+        .expect("a tree with only match/ opens");
+    wait_until_ready(&session);
+    let status = session.watch_status().expect("a workspace is open");
+    assert_eq!(status.epoch, 1, "the first open is the first epoch");
+    assert!(
+        status.polling,
+        "the missing config/ root must engage the rescan cadence"
+    );
+    (dir, session, observations)
+} // End of function polled_tree()
+
+/// The identity of `<root>/<relative>` in an open session.
+fn document_id(session: &WorkspaceSession, relative: &str) -> DocumentId {
+    session
+        .documents()
+        .expect("the workspace is open")
+        .iter()
+        .find(|summary| summary.relative_path == Path::new(relative))
+        .unwrap_or_else(|| panic!("no document at {relative}"))
+        .id
+}
+
+/// Commits one whole-document replacement through the open session and answers
+/// the revision it committed.
+fn commit_raw_save(session: &WorkspaceSession, id: DocumentId, text: &str) -> ContentRevision {
+    let before = session.document(id).expect("the file reads");
+    let result = session
+        .save_raw_document(id, before.revision, text, &Acknowledgement::none())
+        .expect("the raw save runs");
+    match result {
+        SaveResult::Saved {
+            revision,
+            committed,
+            backup_taken,
+            ..
+        } => {
+            assert!(committed, "the premise: this save rewrote the file");
+            assert!(backup_taken, "the premise: this save copied the file first");
+            assert_eq!(
+                revision,
+                ContentRevision::of_bytes(text.as_bytes()),
+                "the premise: the committed revision hashes the submitted bytes"
+            );
+            revision
+        }
+        other => panic!("expected a committed save, got {other:?}"),
+    } // End of the match over the save's outcome
+} // End of function commit_raw_save()
+
+/// **The gate is installed on the production path, and it suppresses a real
+/// committed save.**
+///
+/// Everything here is real: a real session, a real watcher over a real
+/// directory, a real `save_document` transaction with its real rename, and the
+/// gate `WorkspaceSession::observing` installs — the same one
+/// `WorkspaceSession::new` installs, since both go through that constructor.
+/// The positive verdict is the tally: without it, "no observation arrived" is
+/// indistinguishable from a watcher that never noticed the write, which is the
+/// mistake a negative-only test would make. Then the negative behind it — the
+/// sink saw nothing for that file — and finally the discrimination that makes
+/// the suppression a predicate rather than a blindfold: an external write of
+/// **different** bytes to the same file is admitted, and is this epoch's first
+/// numbered observation.
+#[test]
+fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
+    const SAVED: &str = "matches:\n  - trigger: ':saved'\n    replace: by this application\n";
+    const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: written elsewhere\n";
+
+    let (dir, session, observations) = polled_tree();
+    let target = dir.path().join("match/base.yml");
+    let id = document_id(&session, "match/base.yml");
+    let committed = commit_raw_save(&session, id, SAVED);
+    assert_eq!(
+        session.ledger().recorded_write(id),
+        Some(AppWrite {
+            epoch: 1,
+            revision: committed
+        }),
+        "the committed revision is recorded, tagged with this workspace epoch"
+    );
+
+    // The watcher really did see the rename, stabilize on it and meet the
+    // record — a bounded positive wait, not an inference from silence.
+    wait_for("the save's own bytes to be suppressed", || {
+        session.ledger().tally().suppressed >= 1
+    });
+    let seen = drain_for(&observations, Duration::from_millis(600));
+    assert!(
+        seen.iter().all(|o| observed_path(o) != target),
+        "this application's own committed write reached the sink: {seen:?}"
+    );
+    assert_eq!(
+        session.ledger().tally().admitted,
+        0,
+        "nothing at all was admitted while only this application had written"
+    );
+    // **And it was suppressed rather than merely refused as old.** The
+    // chronology check the round-2 fix round added sits above the suppression
+    // predicate, so a worker whose stamp were taken too early — at its start
+    // rather than immediately before each engine pass — would refuse this hint
+    // as `PrecedesACommit`, the positive wait above would time out, and this
+    // line names why. It is the one production-path claim about the stamp that
+    // a test can make; a stamp taken too *late* is invisible to every test and
+    // is stated as a hole instead.
+    assert_eq!(
+        session.ledger().tally().preceded_a_commit,
+        0,
+        "the save's own hint was read after its record, so no reading was refused as older"
+    );
+
+    // Different bytes, written by something else: admitted, numbered, and the
+    // record it superseded is gone.
+    fs::write(&target, EXTERNAL).expect("the external write");
+    let got = await_observation(&observations, "the external write", |o| {
+        is_changed_at(o, &target)
+    });
+    assert_eq!(got.epoch, 1);
+    assert_eq!(
+        got.sequence, 1,
+        "the external change is this epoch's first admitted observation"
+    );
+    let Observation::Changed { content, .. } = &got.observation else {
+        unreachable!("the predicate admitted only Changed");
+    };
+    assert_exact_source_bytes(content, EXTERNAL, "the external write");
+    assert_eq!(
+        session.ledger().recorded_write(id),
+        None,
+        "an accepted different revision supersedes the record"
+    );
+} // End of function a_committed_save_is_suppressed_while_a_later_external_write_is_not()
+
+/// **Neither a real backup-producing save nor writes under the backup root
+/// itself are ever observed**, because that root is a *sibling* of the watched
+/// roots rather than a filtered subtree of them (the 2d design consult's Q2).
+///
+/// Three things are driven rather than argued. The save's premise is checked —
+/// it reports `backup_taken` and the backup root really holds files afterwards,
+/// so a version of this that silently stopped taking backups would fail rather
+/// than pass vacuously. Then the shapes a backup batch and its **rotation**
+/// perform are written and removed under that root by hand: a batch directory
+/// appearing, a `.yml` entry copy inside it — deliberately named exactly like a
+/// watched file, so it would pass the engine's own extension filter if the
+/// scope were wrong — a batch marker, and the whole batch going away again.
+/// Finally the fence that makes the negative mean something: in the same window
+/// and on the same cadence, one real external write **under a watched root** is
+/// admitted, and it is this epoch's only numbered observation.
+#[test]
+fn neither_a_backup_producing_save_nor_the_backup_root_is_ever_observed() {
+    const SAVED: &str = "matches:\n  - trigger: ':backed-up'\n    replace: with a copy\n";
+    const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: written elsewhere\n";
+
+    let (dir, session, observations) = polled_tree();
+    let target = dir.path().join("match/base.yml");
+    let id = document_id(&session, "match/base.yml");
+    commit_raw_save(&session, id, SAVED);
+
+    let backups = dir.path().join(BACKUP_DIRECTORY_NAME);
+    assert!(
+        backups.is_dir(),
+        "the premise: a backup-producing save really wrote under {backups:?}"
+    );
+    assert!(
+        !walk_files(&backups).is_empty(),
+        "the premise: the backup root holds the batch marker and the entry copy"
+    );
+    wait_for("the save's own bytes to be suppressed", || {
+        session.ledger().tally().suppressed >= 1
+    });
+
+    // The shapes a batch and its rotation perform, under that root, by hand.
+    let batch = backups.join("1970-01-01T00-00-00Z-synthetic");
+    fs::create_dir_all(batch.join("match")).expect("the synthetic batch");
+    fs::write(batch.join("match/base.yml"), SAVED).expect("the entry copy");
+    fs::write(batch.join(BATCH_MARKER_NAME), "synthetic\n").expect("the batch marker");
+    fs::remove_dir_all(&batch).expect("the rotation of that batch");
+
+    // The fence: a real write under a watched root, in the same window.
+    fs::write(&target, EXTERNAL).expect("the external write");
+    let got = await_observation(&observations, "the external write", |o| {
+        is_changed_at(o, &target)
+    });
+    assert_eq!(got.epoch, 1);
+    assert_eq!(
+        got.sequence, 1,
+        "the external change is this epoch's first admitted observation"
+    );
+
+    let seen = drain_for(&observations, Duration::from_millis(600));
+    assert!(
+        seen.iter().all(|o| !observed_path(o).starts_with(&backups)),
+        "a backup path reached the sink: {seen:?}"
+    );
+    assert_eq!(
+        session.ledger().tally().admitted,
+        1,
+        "only the external write under a watched root was ever admitted"
+    );
+} // End of function neither_a_backup_producing_save_nor_the_backup_root_is_ever_observed()
+
+/// Every regular file under `root`, recursively — the backup tree, listed by
+/// this test rather than by discovery, which cannot see it at all.
+fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(walk_files(&path));
+        } else {
+            found.push(path);
+        }
+    } // End of the loop over one backup directory's entries
+    found
+} // End of function walk_files()

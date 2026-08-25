@@ -76,6 +76,32 @@
 //! evidence a later sub-phase acts on, and the reason it is built here rather
 //! than later is written on [`run_one_save`].
 //!
+//! # Every writing command now records what it committed
+//!
+//! Phase 2d-3, the 2d design consult's Q2. [`run_one_save`] writes one
+//! [`crate::ledger::AppWrite`] per document — `{ workspace_epoch, revision }` —
+//! for `Ok(SavedDocument { committed: true, .. })` and for nothing else, so
+//! that the watcher this session runs does not report this application's own
+//! save back to it as a foreign external change. The rule is
+//! [`committed_revision`], one exhaustive expression, and the record is taken
+//! in the shared tail rather than in six wrappers for the reason every other
+//! rule here is: six copies drift, and this one drifts **silently**.
+//!
+//! **The record alone does not give that property, and this module composes
+//! with two other things that do.** [`commit_and_record`] holds `crate::ledger`'s
+//! commit gate across the transaction, so no admission can decide between the
+//! rename and the record; and every observation carries an instant its reads
+//! follow, which is what places a reading the engine had already stabilized
+//! before this save began — a gate serializes decisions and cannot reach a read
+//! that already happened. The two save-path refreshes below take that instant on
+//! the line above their own `Workspace::refresh`, for the same reason.
+//!
+//! What it licenses is narrower than authorship and is written on
+//! `crate::ledger`: the bytes on disk hash to what this application last
+//! committed, which proves the text is identical and **not** who wrote it. It
+//! adds no command, no writer and no route around the one entry point that
+//! writes.
+//!
 //! # Three constraints this module inherits and does not drop
 //!
 //! - **One writer, one entry point.** Every byte this application puts on a
@@ -116,6 +142,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -139,10 +166,11 @@ use crate::backup::{
     BackupBatchKey, BackupBatchListing, BackupEntryKey, BackupEntryListing, BackupTextResponse,
 };
 use crate::error::CommandError;
+use crate::ledger::{admitting_sink, discarding_sink, AdmittedSink, ObservedState, WriteLedger};
 use crate::save::SaveResult;
 use crate::watch::{
-    discarding_sink, EpochSpaceExhausted, LifecycleConfig, ObservationSink, WatchStatusView,
-    WatcherLifecycle, WorkspaceEpochs,
+    EpochSpaceExhausted, LifecycleConfig, ObservationSink, WatchStatusView, WatcherLifecycle,
+    WorkspaceEpochs, NO_EPOCH,
 };
 
 /// The one key a match list lives under, in the document's root mapping.
@@ -237,10 +265,12 @@ struct Open {
 /// implicitly, which would make "which directory am I looking at?" a question
 /// with an answer nobody asked for.
 ///
-/// Beside it, two values every watcher this session starts inherits: the
-/// observation sink and the lifecycle timing. They live on the session rather
-/// than on [`Open`] because they outlive any one workspace — a replacement
-/// changes which directory is watched, never where its observations go.
+/// Beside it, three values every watcher this session starts inherits: the
+/// observation sink, the lifecycle timing and the app-write ledger. They live
+/// on the session rather than on [`Open`] because they outlive any one
+/// workspace — a replacement changes which directory is watched, never where
+/// its observations go, and the ledger is *emptied* by a replacement rather
+/// than replaced by one ([`WriteLedger::begin_epoch`]).
 pub struct WorkspaceSession {
     open: Mutex<Option<Open>>,
     /// The session's epoch allocator — checked, never reusing a value, and
@@ -252,10 +282,28 @@ pub struct WorkspaceSession {
     epochs: Mutex<WorkspaceEpochs>,
     /// Where every watcher's observations go, across replacements.
     ///
-    /// [`discarding_sink`] in production until Phase 2d-4 wires the queue and
-    /// the wake event; a channel in the `crate::watch_check` integration
-    /// tests. Not behind the mutex: it is immutable for the session's life.
+    /// **Since Phase 2d-3 this is always [`admitting_sink`]**, the app-write
+    /// admission gate over [`WorkspaceSession::ledger`]; what a caller of
+    /// [`WorkspaceSession::observing`] injects is the sink *behind* it, which
+    /// is [`discarding_sink`] in production until Phase 2d-4 wires the queue
+    /// and the wake event, and a channel in the `crate::watch_check`
+    /// integration tests. Not behind the mutex: it is immutable for the
+    /// session's life.
     observations: ObservationSink,
+    /// This session's app-write record, published-state map and observation
+    /// sequence allocator — Phase 2d-3.
+    ///
+    /// Shared with [`WorkspaceSession::observations`]'s gate, which runs on a
+    /// watcher's worker thread, so its mutexes are **leaves** exactly as
+    /// [`WorkspaceSession::epochs`]'s is: `crate::ledger` runs no
+    /// caller-supplied code under either, and the gate drops both guards before
+    /// calling anything. It holds two — a commit gate and its state — and the
+    /// order is always **session → gate → state**: the worker takes gate →
+    /// state with no session lock at any point, and the two callers that hold
+    /// the session lock ([`commit_and_record`], through
+    /// [`WorkspaceSession::with_open`], and [`WorkspaceSession::open`]) take
+    /// the gate below it. Never the reverse, in either pair.
+    ledger: Arc<WriteLedger>,
     /// The timing every watcher this session starts runs under.
     watch_config: LifecycleConfig,
     /// Test-only economy switch: `true` for every production constructor,
@@ -288,31 +336,44 @@ impl std::fmt::Debug for WorkspaceSession {
 impl WorkspaceSession {
     /// An empty session, with no workspace open.
     ///
-    /// Its watchers' observations go to [`discarding_sink`] — produced and
-    /// dropped, stated rather than hidden, because the queue that will consume
-    /// them is Phase 2d-4's and building it early would put a wire where the
-    /// consult's Q3 says none may exist yet.
+    /// Its watchers' admitted observations go to [`discarding_sink`] —
+    /// produced, decided and dropped, stated rather than hidden, because the
+    /// queue that will consume them is Phase 2d-4's and building it early would
+    /// put a wire where the consult's Q3 says none may exist yet.
     pub fn new() -> WorkspaceSession {
         WorkspaceSession::observing(discarding_sink(), LifecycleConfig::default())
     }
 
-    /// A session whose watchers report to `sink` under `config`'s timing.
+    /// A session whose watchers' **admitted** observations reach `sink`, under
+    /// `config`'s timing.
     ///
     /// **The seam where Phase 2d-4's queue lands**, and until then the way the
     /// `crate::watch_check` integration tests capture what a real filesystem
-    /// makes the watcher observe. The sink is shared by every watcher this
-    /// session ever starts; each tags its observations with its own epoch, so
-    /// one receiver can tell a replaced watcher's output from its successor's.
-    pub fn observing(sink: ObservationSink, config: LifecycleConfig) -> WorkspaceSession {
+    /// makes the watcher observe. What is installed on the watcher itself is
+    /// [`admitting_sink`] over this session's [`WriteLedger`], and `sink` sits
+    /// behind that gate: a caller therefore sees what this session decided to
+    /// admit — never what it suppressed as its own committed write, coalesced
+    /// into an already published state, or discarded for carrying a replaced
+    /// epoch. Every constructor of a session goes through here, so a production
+    /// session and a test session get the same gate.
+    ///
+    /// The sink is shared by every watcher this session ever starts; each
+    /// observation carries the epoch of the watcher that produced it, so one
+    /// receiver can tell a replaced watcher's output from its successor's — and
+    /// since 2d-3 the gate is what makes that discrimination act rather than
+    /// merely be possible.
+    pub fn observing(sink: AdmittedSink, config: LifecycleConfig) -> WorkspaceSession {
+        let ledger = Arc::new(WriteLedger::new());
         WorkspaceSession {
             open: Mutex::new(None),
             epochs: Mutex::new(WorkspaceEpochs::new()),
-            observations: sink,
+            observations: admitting_sink(Arc::clone(&ledger), sink),
+            ledger,
             watch_config: config,
             #[cfg(test)]
             watching: true,
         }
-    }
+    } // End of function observing()
 
     /// A session whose opens start no watcher — a **test-only economy**.
     ///
@@ -327,16 +388,32 @@ impl WorkspaceSession {
     /// by these; and `cfg(test)` is what keeps the economy out of the built
     /// application — no production constructor can produce an unwatched
     /// session, because the switch it reads does not exist there.
+    /// **The ledger is real in an unwatched session**, and deliberately so:
+    /// nothing about the app-write record depends on a watcher running, so the
+    /// six writers' recording behaviour is tested here at no FSEvents cost, and
+    /// what an unwatched session says nothing about is only what a *watcher*
+    /// would have observed. It is built **through**
+    /// [`WorkspaceSession::observing`] and then flips the one switch, so that
+    /// constructor stays the single site where the ledger is created and its
+    /// admission gate installed — an economy that assembled its own session
+    /// would be a second such site, and a second one is where the two would
+    /// drift apart.
     #[cfg(test)]
     pub(crate) fn unwatched() -> WorkspaceSession {
-        WorkspaceSession {
-            open: Mutex::new(None),
-            epochs: Mutex::new(WorkspaceEpochs::new()),
-            observations: discarding_sink(),
-            watch_config: LifecycleConfig::default(),
-            watching: false,
-        }
+        let mut session =
+            WorkspaceSession::observing(discarding_sink(), LifecycleConfig::default());
+        session.watching = false;
+        session
     } // End of function unwatched()
+
+    /// This session's app-write ledger — the observability seam the 2d-3 tests
+    /// read (`PROGRESS.md` R24), never a control surface: nothing can steer
+    /// suppression through it, and every producer of a record is inside
+    /// [`run_one_save`].
+    #[cfg(test)]
+    pub(crate) fn ledger(&self) -> &WriteLedger {
+        &self.ledger
+    }
 
     /// Replaces the session's epoch allocator — the boundary tests' seam,
     /// used to put a session at the edge of the epoch space without minting
@@ -403,6 +480,20 @@ impl WorkspaceSession {
     /// apart. Commands arriving during the join see the already installed
     /// successor, never an emptied session.
     ///
+    /// **The app-write ledger is emptied here, in the same block.** Phase
+    /// 2d-3, the consult's Q2: a replacement discards every recorded app
+    /// write, every published state and the epoch's sequence allocator
+    /// ([`WriteLedger::begin_epoch`]). Not tidiness — a document identity
+    /// survives a replacement, because the process-wide identity table is keyed
+    /// by path, so an entry kept across one could suppress an observation of a
+    /// **different** directory's file that happens to hash the same. The
+    /// adoption happens before the successor watcher is started, so the
+    /// successor's first observation can never meet an epoch the ledger has not
+    /// yet adopted. [`WriteLedger::begin_epoch`] takes the ledger's commit gate
+    /// below this method's own session lock, which is the same order a save
+    /// takes them in ([`commit_and_record`]) and the reverse of nothing: the
+    /// watcher's worker takes the gate with no session lock at all.
+    ///
     /// **An exhausted epoch space starts no watcher.** When the allocator
     /// answers [`EpochSpaceExhausted`] — unreachable in any physical
     /// execution, typed rather than hoped away — the open still succeeds, per
@@ -434,6 +525,12 @@ impl WorkspaceSession {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .allocate();
+            // The ledger adopts the epoch **before** the successor starts, so
+            // the successor's very first observation cannot be discarded as
+            // stale by an epoch the ledger had not yet heard of — and this is
+            // where the previous workspace's app-write records, published
+            // states and sequences are discarded (the consult's Q2).
+            self.ledger.begin_epoch(allocated.unwrap_or(NO_EPOCH));
             let watcher = match allocated {
                 Ok(epoch) => self.watcher_for(workspace.root(), epoch),
                 Err(EpochSpaceExhausted) => WatcherLifecycle::without_epoch(),
@@ -635,10 +732,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
+        self.with_open(|workspace, records| {
             move_one_match(
                 workspace,
-                backups,
+                records,
                 id,
                 after,
                 base_revision,
@@ -692,10 +789,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
+        self.with_open(|workspace, records| {
             save_one_match(
                 workspace,
-                backups,
+                records,
                 id,
                 draft,
                 base_revision,
@@ -749,10 +846,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
+        self.with_open(|workspace, records| {
             create_one_match(
                 workspace,
-                backups,
+                records,
                 document,
                 new_match,
                 position,
@@ -795,8 +892,8 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
-            delete_one_match(workspace, backups, id, base_revision, acknowledgement)
+        self.with_open(|workspace, records| {
+            delete_one_match(workspace, records, id, base_revision, acknowledgement)
         })
     } // End of function delete_match()
 
@@ -854,10 +951,10 @@ impl WorkspaceSession {
         text: &str,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
+        self.with_open(|workspace, records| {
             save_one_raw_document(
                 workspace,
-                backups,
+                records,
                 document,
                 base_revision,
                 text,
@@ -919,8 +1016,8 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, backups| {
-            duplicate_one_match(workspace, backups, id, base_revision, acknowledgement)
+        self.with_open(|workspace, records| {
+            duplicate_one_match(workspace, records, id, base_revision, acknowledgement)
         })
     } // End of function duplicate_match()
 
@@ -981,30 +1078,45 @@ impl WorkspaceSession {
         }
     } // End of function with_workspace()
 
-    /// Runs `action` against the open workspace **and its backup session**, or
-    /// refuses because there is none.
+    /// Runs `action` against the open workspace **and the session records a
+    /// save writes to**, or refuses because there is none.
     ///
-    /// [`WorkspaceSession::with_workspace`]'s sibling for the four methods that
+    /// [`WorkspaceSession::with_workspace`]'s sibling for the six methods that
     /// write. It exists for the same reason that one does — the refusal for *no
-    /// workspace is open* is written once — and it hands out the two borrows
+    /// workspace is open* is written once — and it hands out the borrows
     /// separately, which is what lets the planning free functions take a
-    /// `&mut Workspace` and a `&BackupSession` at the same time.
+    /// `&mut Workspace` and a [`SaveRecords`] at the same time.
     ///
     /// **A writing method uses this one and not [`WorkspaceSession::with_workspace`]**,
     /// because a save with no [`BackupSession`] is a save with no safety net:
     /// [`espansoconfig_core::persist::SaveRequest::backups`] is an `Option` whose
     /// `None` means *no backup at all*, and a method that could not reach the
     /// session's would have nothing to pass but that.
+    ///
+    /// Since Phase 2d-3 the second borrow is a [`SaveRecords`] rather than a
+    /// bare [`BackupSession`], because a save now writes to **two** session-owned
+    /// records and they travel together for the same reason: a planner that
+    /// could reach one without the other could write with no safety net, or
+    /// commit bytes this session cannot afterwards tell from an external write.
+    /// The ledger comes from the session rather than from [`Open`] because a
+    /// replacement empties it rather than replacing it, and because the
+    /// watcher's own admission gate holds the same one.
     fn with_open<T>(
         &self,
-        action: impl FnOnce(&mut Workspace, &BackupSession) -> Result<T, CommandError>,
+        action: impl FnOnce(&mut Workspace, SaveRecords<'_>) -> Result<T, CommandError>,
     ) -> Result<T, CommandError> {
         let mut guard = self.lock();
         match guard.as_mut() {
             None => Err(CommandError::NoWorkspaceOpen),
             Some(Open {
                 workspace, backups, ..
-            }) => action(workspace, backups),
+            }) => action(
+                workspace,
+                SaveRecords {
+                    backups,
+                    ledger: &self.ledger,
+                },
+            ),
         }
     } // End of function with_open()
 
@@ -1163,6 +1275,24 @@ fn document_at(
     Ok(snapshot)
 } // End of function document_at()
 
+/// The two session-owned records a save writes to, lent together.
+///
+/// One value rather than two parameters, because neither is a planner's to
+/// choose and the six of them pass both straight through: a
+/// [`BackupSession`] is *where this session's pre-save copies go*, a
+/// [`WriteLedger`] is *what this session committed last, per document*, and a
+/// save that reached one without the other could write with no safety net or
+/// commit bytes it can never afterwards tell from an external write.
+/// [`WorkspaceSession::with_open`] is the only producer.
+#[derive(Clone, Copy)]
+struct SaveRecords<'a> {
+    /// Plan section 6.6 step 13's pre-save copy — never `None`, see
+    /// [`WorkspaceSession::open`].
+    backups: &'a BackupSession,
+    /// Phase 2d-3's app-write record, written only by [`run_one_save`].
+    ledger: &'a WriteLedger,
+}
+
 /// One save's own inputs, beside the session it runs against.
 ///
 /// A struct rather than six more parameters, and not only to keep the argument
@@ -1228,6 +1358,35 @@ struct OneSave<'a> {
 /// (Phase 2c-4b design consult, Q9 item 2). Nothing reads it on any path but the
 /// conflict one, and nothing it can say changes what is written to disk.
 ///
+/// # The app-write record is taken here, and only here
+///
+/// Phase 2d-3, the 2d design consult's Q2. A save this application commits must
+/// not come back through the watcher as a foreign external change, and the
+/// record that makes that possible is one entry per document —
+/// `{ workspace_epoch, revision }` — written **inside the same commit window as
+/// the transaction that earned it**, and therefore before the outcome is handed
+/// to [`after_a_save`]. [`commit_and_record`] is that window, and it is what
+/// this tail delegates the transaction to; it belongs in this shared tail
+/// rather than in six command wrappers for the same reason every other rule
+/// here does: six copies of a policy drift, and this one drifts silently,
+/// because a wrapper that forgot to record would look exactly like a wrapper
+/// whose save was ignored by an external writer.
+///
+/// What is recorded is decided by [`committed_revision`] alone, which is
+/// exhaustive over the outcome: **a commit's revision, and nothing else,
+/// ever**. The truthful sentence the record licenses is `crate::ledger`'s, and
+/// it is narrower than authorship — the bytes hash to what this application
+/// last committed, which proves the text is identical and not who wrote it.
+///
+/// Both refreshes below are themselves observations of the disk, and both go
+/// through the ledger's **same** admission a native hint does — same decision,
+/// same four operands, their own `read_after` stamped before their own read — so
+/// a later hint at the state they saw is a duplicate rather than a second
+/// report. Both run
+/// **after** [`commit_and_record`] has returned and released the commit gate,
+/// which is not an incidental ordering: an admission takes that gate, and a
+/// `std::sync::Mutex` is not reentrant.
+///
 /// # The four outcomes
 ///
 /// - **committed, or committed nothing** — [`after_a_save`], which re-reads and
@@ -1248,7 +1407,7 @@ struct OneSave<'a> {
 /// workspace's own for a document context that cannot be read.
 fn run_one_save(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     save: OneSave<'_>,
 ) -> Result<SaveResult, CommandError> {
     let OneSave {
@@ -1268,13 +1427,32 @@ fn run_one_save(
         content,
         acknowledgement,
         // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(backups),
+        backups: Some(records.backups),
     };
-    match save_document(request) {
-        Ok(saved) => Ok(after_a_save(workspace, document, at, saved)),
+    // The transaction and its record are one window at the ledger's commit
+    // gate, and the gate is released before either refresh below — see
+    // `commit_and_record`.
+    let outcome = commit_and_record(records.ledger, document, &context.path, request);
+    match outcome {
+        Ok(saved) => Ok(after_a_save(
+            workspace,
+            records.ledger,
+            document,
+            &context.path,
+            at,
+            saved,
+        )),
         Err(SaveError::RevisionMismatch {
             expected, found, ..
-        }) => conflict_after_the_lock(workspace, document, expected, found, &reapply),
+        }) => conflict_after_the_lock(
+            workspace,
+            records.ledger,
+            document,
+            &context.path,
+            expected,
+            found,
+            &reapply,
+        ),
         Err(SaveError::Refused(refusal)) => Ok(SaveResult::Refused {
             verdict: refusal.verdict,
             findings: refusal.findings,
@@ -1288,6 +1466,96 @@ fn run_one_save(
     } // End of the match over the transaction's four outcomes
 } // End of function run_one_save()
 
+/// Runs one save transaction and takes its app-write record **inside one
+/// commit window**, so that no admission can decide in between.
+///
+/// This step's round-1 first High, and the reason it is a function rather than
+/// four lines inside [`run_one_save`]: `save_document` performs the rename
+/// before it returns, while the watcher's worker thread enters
+/// [`WriteLedger::admit`] holding no session lock at all. With the ledger's
+/// state mutex alone, the save could rename to revision A, be descheduled
+/// before recording A, and have its own bytes admitted as an **external**
+/// change — self-write suppression having already failed. The mirror
+/// interleaving admits an external revision before the delayed record and
+/// leaves a stale record standing behind it.
+///
+/// [`WriteLedger::begin_commit`] is taken **before** `save_document` and the
+/// guard lives to the end of this function's block, so every arm releases it,
+/// including the one that records nothing. It is an RAII value rather than a
+/// paired release call precisely so that a panic or an early return cannot
+/// strand it.
+///
+/// **The gate is released before this returns**, which is what lets
+/// [`run_one_save`] hand the outcome to [`after_a_save`] or
+/// [`conflict_after_the_lock`]: both of those admit an observation, both
+/// therefore take the same gate, and a `std::sync::Mutex` is not reentrant.
+/// Nothing in the type system forces that ordering — this function's block
+/// scope is what keeps it.
+///
+/// **Nothing caller-supplied runs under the gate.** `save_document` takes a
+/// [`SaveRequest`] of plain data, holds no reference to this session and cannot
+/// reach the ledger, so the window is one save's own I/O; the lock order is
+/// session → gate → state throughout, and the worker takes gate → state with no
+/// session lock, so no cycle exists.
+///
+/// **What this window does not reach**, said here rather than discovered again:
+/// a read that already happened. The engine stabilizes an observation one
+/// debounce and one probe before the gate ever sees it, so an observation
+/// constructed *before* this window opened can still decide *after* it closes —
+/// this step's round-2 High. What places such a reading is not the gate but the
+/// instant [`WriteLedger::record_app_write`] takes on its own recording line,
+/// against the instant the observation's producer took before its reads; see
+/// `crate::ledger`'s *stamp* section. Widening this window would not have helped,
+/// which is why it was not widened.
+///
+/// What is recorded is [`committed_revision`]'s answer and nothing else.
+fn commit_and_record(
+    ledger: &WriteLedger,
+    document: DocumentId,
+    path: &Path,
+    request: SaveRequest<'_>,
+) -> Result<SavedDocument, SaveError> {
+    let gate = ledger.begin_commit();
+    let outcome = save_document(request);
+    // **The one app-write record in this crate**, taken before the outcome is
+    // handed on, exactly as the consult's Q2 requires. `committed_revision` is
+    // exhaustive over the transaction's outcome, so no error can reach this
+    // line — an uncertain write included, whose committed revision is by
+    // definition unknown, which is why `SaveError::may_have_written` is not a
+    // second condition here but an absence of one.
+    if let Some(revision) = committed_revision(&outcome) {
+        ledger.record_app_write(&gate, document, path, revision);
+    }
+    outcome
+} // End of function commit_and_record()
+
+/// The revision one save outcome licenses recording as this application's own
+/// write — `None` for every outcome but a commit.
+///
+/// **The whole of the ledger's write-side rule, as one exhaustive expression**,
+/// so that the claim *only a committed revision is ever recorded* is a property
+/// of the type rather than of a reviewer's reading of four branches. Every
+/// negative arm is deliberate and each is a different fact:
+///
+/// - `Ok(SavedDocument { committed: false, .. })` — no rename happened, so
+///   there is nothing this application wrote for a watcher to ignore;
+/// - `Err(SaveError::Refused(_))` — a gate declined; nothing was written;
+/// - `Err(SaveError::RevisionMismatch { .. })` — the locked read refused the
+///   write, and recording the disk's revision here would suppress the very
+///   external change the watcher exists to report;
+/// - **any other `Err`, including one that
+///   [`SaveError::may_have_written`]** — the rename may have completed, and the
+///   revision it committed is *unknown*. Recording a guess would suppress a
+///   real observation; recording nothing means a later stable observation of
+///   that file is external and is admitted, which is the safe direction. The
+///   cache eviction that arm already performed is unchanged.
+fn committed_revision(outcome: &Result<SavedDocument, SaveError>) -> Option<ContentRevision> {
+    match outcome {
+        Ok(saved) if saved.committed => Some(saved.revision),
+        Ok(_) | Err(_) => None,
+    }
+}
+
 /// Plans and runs one move against an open workspace.
 ///
 /// A free function rather than a method so that the session's mutex guard is
@@ -1295,7 +1563,7 @@ fn run_one_save(
 /// arrive here as two independent borrows.
 fn move_one_match(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     id: MatchId,
     after: Option<MatchId>,
     base_revision: ContentRevision,
@@ -1338,7 +1606,7 @@ fn move_one_match(
     let edits = [DocumentEdit::MoveItem(edit)];
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document: id.document,
             base_revision,
@@ -1391,7 +1659,7 @@ fn move_one_match(
 /// [`SaveResult::Conflict`] rather than a wrong write.
 fn save_one_match(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     id: MatchId,
     draft: &MatchDraft,
     base_revision: ContentRevision,
@@ -1423,7 +1691,7 @@ fn save_one_match(
         plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document: id.document,
             base_revision,
@@ -1518,7 +1786,7 @@ fn placement_of<'a>(
 /// document names a match list at all.
 fn create_one_match(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     document: DocumentId,
     new_match: &NewMatch,
     position: &NewMatchPosition,
@@ -1579,7 +1847,7 @@ fn create_one_match(
     ))];
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document,
             base_revision,
@@ -1614,7 +1882,7 @@ fn create_one_match(
 /// instead.
 fn delete_one_match(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     id: MatchId,
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
@@ -1637,7 +1905,7 @@ fn delete_one_match(
     ))];
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document: id.document,
             base_revision,
@@ -1678,7 +1946,7 @@ fn delete_one_match(
 /// unchanged, because the identity codes mean the same thing for every command.
 fn duplicate_one_match(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     id: MatchId,
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
@@ -1708,7 +1976,7 @@ fn duplicate_one_match(
     let edits = [DocumentEdit::DuplicateItem(edit)];
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document: id.document,
             base_revision,
@@ -1756,7 +2024,7 @@ fn duplicate_one_match(
 /// which is design-consult Q3's ruling and is permanent by construction.
 fn save_one_raw_document(
     workspace: &mut Workspace,
-    backups: &BackupSession,
+    records: SaveRecords<'_>,
     document: DocumentId,
     base_revision: ContentRevision,
     text: &str,
@@ -1764,7 +2032,7 @@ fn save_one_raw_document(
 ) -> Result<SaveResult, CommandError> {
     run_one_save(
         workspace,
-        backups,
+        records,
         OneSave {
             document,
             base_revision,
@@ -1845,17 +2113,39 @@ fn save_one_raw_document(
 /// documentation gives: [`Workspace::refresh`] reads through `read_utf8`, so a file
 /// that is not valid UTF-8 fails the `?` below and no `Conflict` is built at all.
 ///
+/// # The refresh is external, and the ledger is told so rather than fed
+///
+/// Phase 2d-3. This path records **no** app write: nothing was written, and an
+/// entry naming the disk's revision would make this application ignore the
+/// external change it has just discovered. The refresh is instead put through
+/// the ledger's ordinary admission, which is why *external rather than self* is
+/// one rule with two callers rather than two rules that agree today — a native
+/// hint stabilizing at the same state afterwards is then a duplicate, not a
+/// second conflict. There is exactly one case in which that admission answers
+/// *self-write*: when the disk holds bytes this application itself committed
+/// earlier and the caller's base was older still. Suppressing there is correct
+/// and is the predicate's own limit — byte identity, never authorship.
+///
 /// # Errors
 ///
 /// The refresh's own failure, unchanged: a file that cannot be re-read has no
 /// disk side to describe, and inventing one would be worse than refusing.
 fn conflict_after_the_lock(
     workspace: &mut Workspace,
+    ledger: &WriteLedger,
     document: DocumentId,
+    path: &Path,
     expected: ContentRevision,
     found: ContentRevision,
     reapply: &ReapplyRequest,
 ) -> Result<SaveResult, CommandError> {
+    // Stamped **before** the read it bounds, which is the whole of its
+    // contribution: `crate::ledger::WriteLedger::admit_at_current_epoch` uses it
+    // to place this reading against this application's own last committed write
+    // to the path, and a stamp taken after the refresh would place it wrongly in
+    // the one direction that matters. Nothing in the type system pairs the two
+    // lines; their adjacency does.
+    let read_after = Instant::now();
     let fresh = workspace.refresh(document)?;
     let disk_text = fresh.source.clone();
     // The fourth operand out of the same snapshot, and the reason it is computed
@@ -1865,6 +2155,19 @@ fn conflict_after_the_lock(
     // described.
     let reapply = reconcile(reapply, fresh);
     let disk = Box::new(fresh.view.clone());
+    // **No app write is recorded on this path, and that is the load-bearing
+    // half of it**: this transaction wrote nothing, so recording the disk's
+    // revision would suppress the very external change the watcher exists to
+    // report. What is taken instead is the ordinary admission — the same
+    // decision a native hint gets, so the disk state this payload was built
+    // from is published once and a later hint at it coalesces rather than
+    // producing a second conflict (the consult's Q2).
+    //
+    // Nothing consumes the decision yet: 2d-4's queue is what will turn an
+    // `Admission::Admitted` into a value a window can drain, and until it
+    // exists the publication *is* the effect — one sequence spent, one state
+    // published.
+    let _ = ledger.admit_at_current_epoch(path, ObservedState::Content(disk.revision), read_after);
     Ok(SaveResult::Conflict {
         expected,
         found,
@@ -1921,27 +2224,61 @@ fn conflict_after_the_lock(
 /// A skipped commit is `None` for a different and equally deliberate reason: no
 /// new revision exists, so there is no new identity to mint — and the caller's
 /// own identity, minted from the revision the file still holds, is still valid.
+///
+/// # A refresh that disagrees is an external observation, and it is admitted
+///
+/// Phase 2d-3, the consult's Q2. When this re-read finds a revision the
+/// transaction never saw, some other writer replaced the file after it: **the
+/// ledger still records only the revision this application actually
+/// committed** — that record was taken in [`run_one_save`] before this function
+/// ran and is not amended here — and the differing state is put through the
+/// ledger's ordinary admission, exactly as [`conflict_after_the_lock`]'s
+/// refresh is. So a post-commit external replacement is **not** suppressed, and
+/// the native hint that follows it coalesces into the state already published.
+/// A committed write is never relabelled a failure by any of this.
+///
+/// The publication is conditional on **disagreement with the revision the
+/// transaction last saw**, and on nothing else. Agreement means either the
+/// bytes this save committed — already recorded, and suppressed by that record
+/// rather than published — or a skipped commit, where the file holds what the
+/// caller already had and there is no observation to make.
 fn after_a_save(
     workspace: &mut Workspace,
+    ledger: &WriteLedger,
     document: DocumentId,
+    path: &Path,
     at: Option<&DocumentPath>,
     saved: SavedDocument,
 ) -> SaveResult {
     // A flag rather than a clone of the fresh view: the borrow only has to end
-    // before `evict`, and the answer taken out of it is one `MatchId`, while a
-    // `DocumentView` owns every trigger and every `replace` body of the file.
+    // before `evict`, and the answers taken out of it are one `MatchId` and one
+    // revision, while a `DocumentView` owns every trigger and every `replace`
+    // body of the file.
     let mut lost = false;
+    let mut observed = None;
+    // Stamped before the read, for `conflict_after_the_lock`'s reason. No
+    // *concurrent* commit can refuse it — the record this save took, if it took
+    // one, was taken before this line ran — but **one refusal is reachable and
+    // is not denied here**: the ledger accepts only a strictly later stamp, and
+    // these are two adjacent `Instant::now()` calls on one thread, which a
+    // coarse clock may answer equally. What that costs is one publication not
+    // made; nothing is written and the record stands, and the external write
+    // this refresh saw has native hints of its own. See
+    // `crate::ledger::WriteLedger::admit_at_current_epoch`.
+    let read_after = Instant::now();
     let moved = match workspace.refresh(document) {
-        Ok(fresh) => at
-            .filter(|_| saved.committed && fresh.view.revision == saved.revision)
-            .and_then(|address| {
-                fresh
-                    .view
-                    .matches
-                    .iter()
-                    .find(|candidate| candidate.path.as_ref() == Some(address))
-                    .map(|candidate| candidate.id)
-            }),
+        Ok(fresh) => {
+            observed = Some(fresh.view.revision);
+            at.filter(|_| saved.committed && fresh.view.revision == saved.revision)
+                .and_then(|address| {
+                    fresh
+                        .view
+                        .matches
+                        .iter()
+                        .find(|candidate| candidate.path.as_ref() == Some(address))
+                        .map(|candidate| candidate.id)
+                })
+        }
         Err(_) => {
             lost = true;
             None
@@ -1949,6 +2286,12 @@ fn after_a_save(
     }; // End of the match over the re-read that follows every save
     if lost {
         let _ = workspace.evict(document);
+    }
+    // See this function's own note: only a refresh that disagrees with the
+    // transaction's last read is an observation, and nothing consumes the
+    // decision until 2d-4's queue exists to.
+    if let Some(revision) = observed.filter(|revision| *revision != saved.revision) {
+        let _ = ledger.admit_at_current_epoch(path, ObservedState::Content(revision), read_after);
     }
     SaveResult::Saved {
         revision: saved.revision,
@@ -2414,7 +2757,8 @@ pub fn read_backup_text(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft, NewMatch};
     use espansoconfig_core::model::{DocumentView, MatchId};
@@ -2428,6 +2772,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{NewMatchPosition, WorkspaceSession};
+    use crate::ledger::{Admission, AppWrite, LedgerTally, ObservedState, WriteLedger};
     use crate::save::SaveResult;
 
     /// A match file with two snippets and one unrecognised key.
@@ -2491,6 +2836,17 @@ mod tests {
             .open(Some(dir.path()))
             .expect("the synthetic tree is a directory");
         session
+    }
+
+    /// The absolute path an open session resolved for `document`.
+    ///
+    /// The key the app-write ledger is written under, taken from the same
+    /// `DocumentContext` `run_one_save` takes it from, so a test never invents
+    /// a second spelling of a path the session already resolved.
+    fn path_of(session: &WorkspaceSession, document: DocumentId) -> std::path::PathBuf {
+        session
+            .with_workspace(|workspace| Ok(workspace.document_context(document)?.path.clone()))
+            .expect("the session holds the document")
     }
 
     /// The identity of `<root>/<relative>` in an open session.
@@ -3634,11 +3990,14 @@ mod tests {
             "the fixture must exercise a file that moved twice"
         );
 
+        let at = path_of(&session, id);
         let payload = session
             .with_workspace(|workspace| {
                 super::conflict_after_the_lock(
                     workspace,
+                    session.ledger(),
                     id,
+                    &at,
                     expected,
                     found,
                     // The request is a parameter here, so this call also pins
@@ -3813,9 +4172,18 @@ mod tests {
         let later = ContentRevision::of_bytes(LATER.as_bytes());
         assert_ne!(found, later, "the fixture must move the file twice");
 
+        let at = path_of(&session, id);
         let payload = session
             .with_workspace(|workspace| {
-                super::conflict_after_the_lock(workspace, id, expected, found, &request)
+                super::conflict_after_the_lock(
+                    workspace,
+                    session.ledger(),
+                    id,
+                    &at,
+                    expected,
+                    found,
+                    &request,
+                )
             })
             .expect("the fresh read succeeds");
         let SaveResult::Conflict {
@@ -5826,7 +6194,10 @@ mod tests {
         let landed = espansoconfig_core::patch::DocumentPath::root(0)
             .with_key("matches")
             .with_index(1);
-        match super::after_a_save(&mut workspace, id, Some(&landed), saved) {
+        let ledger = crate::ledger::WriteLedger::new();
+        ledger.begin_epoch(1);
+        let path = dir.path().join("match").join("base.yml");
+        match super::after_a_save(&mut workspace, &ledger, id, &path, Some(&landed), saved) {
             SaveResult::Saved {
                 committed, moved, ..
             } => {
@@ -6423,4 +6794,506 @@ mod tests {
             "neither probe path exists, so resolution must fail rather than invent a directory"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Phase 2d-3 — the app-write ledger on the save path
+    // -----------------------------------------------------------------------
+
+    /// Runs one writing command against a fresh tree holding `source`, and
+    /// answers what the command reported beside what the session's ledger holds
+    /// for that document afterwards.
+    ///
+    /// The session is `unwatched()` like every session in this module: the
+    /// ledger is real there, and nothing about the app-write record depends on
+    /// a watcher running. What a watcher would then have observed is
+    /// `crate::watch_check`'s claim, on a real filesystem.
+    fn ledger_after(
+        source: &str,
+        save: impl FnOnce(
+            &WorkspaceSession,
+            &DocumentView,
+            DocumentId,
+        ) -> Result<SaveResult, crate::error::CommandError>,
+    ) -> (SaveResult, Option<AppWrite>, u64) {
+        let Opened {
+            dir: _dir,
+            session,
+            id,
+            before,
+        } = opened_on(source);
+        let result = save(&session, &before, id).expect("the writing command runs");
+        let recorded = session.ledger().recorded_write(id);
+        let epoch = session.ledger().current_epoch();
+        (result, recorded, epoch)
+    } // End of function ledger_after()
+
+    /// **All six writing commands record the revision they committed, and each
+    /// records it because they all end in one tail.**
+    ///
+    /// The record is taken in `run_one_save` and nowhere else, so this drives
+    /// every writer's own path to it rather than trusting that "they all go
+    /// through the tail" is still true: a command wired to a second, copied tail
+    /// would pass every other test in this module and fail here. What is
+    /// asserted for each is the whole claim — the entry exists, it carries
+    /// **exactly** the revision the command answered with, and it is tagged with
+    /// the epoch the session is observing under.
+    #[test]
+    fn every_writing_command_records_only_the_revision_it_committed() {
+        let moved = ledger_after(TWO_SNIPPETS, |session, before, _| {
+            session.move_match(
+                before.matches[1].id,
+                None,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        let drafted = ledger_after(TWO_SNIPPETS, |session, before, _| {
+            session.save_match(
+                before.matches[0].id,
+                &draft_replace("changed"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        let created = ledger_after(TWO_SNIPPETS, |session, before, id| {
+            session.create_match(
+                id,
+                &new_snippet(),
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        let deleted = ledger_after(TWO_SNIPPETS, |session, before, _| {
+            session.delete_match(
+                before.matches[1].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )
+        });
+        let raw = ledger_after(TWO_SNIPPETS, |session, before, id| {
+            session.save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':raw'\n    replace: replaced whole\n",
+                &Acknowledgement::none(),
+            )
+        });
+        // The duplicate's ordinary path is two calls: the clone keeps its
+        // source's trigger, so the first attempt is refused with a suspicion
+        // and the second carries it back.
+        let duplicated = ledger_after(TWO_SNIPPETS, |session, before, _| {
+            let refused = session.duplicate_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::none(),
+            )?;
+            let findings = match refused {
+                SaveResult::Refused { findings, .. } => findings,
+                other => panic!("a duplicate is refused before it commits, got {other:?}"),
+            };
+            session.duplicate_match(
+                before.matches[0].id,
+                before.revision,
+                &Acknowledgement::of(&findings),
+            )
+        });
+
+        for (what, (result, recorded, epoch)) in [
+            ("move", moved),
+            ("scalar save", drafted),
+            ("creation", created),
+            ("deletion", deleted),
+            ("raw replacement", raw),
+            ("duplicate", duplicated),
+        ] {
+            let (revision, _) = expect_saved(result, what);
+            assert_eq!(
+                recorded,
+                Some(AppWrite { epoch, revision }),
+                "a committed {what} records exactly the revision it answered with"
+            );
+        } // End of the loop over the six writing commands
+    } // End of function every_writing_command_records_only_the_revision_it_committed()
+
+    /// A save that commits nothing records nothing — and publishes nothing.
+    ///
+    /// `committed: false` means no rename happened, so there is no revision this
+    /// application wrote for a watcher to ignore; recording the revision the
+    /// file already held would suppress a later external write of those same
+    /// bytes for no reason at all. The re-read that follows agrees with what the
+    /// transaction last saw, so it is not an observation either.
+    #[test]
+    fn a_save_that_commits_nothing_records_no_app_write() {
+        let Opened {
+            dir: _dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let result = session
+            .save_match(
+                before.matches[0].id,
+                &draft_replace("first"),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a draft that changes nothing is not an error");
+        match result {
+            SaveResult::Saved { committed, .. } => assert!(!committed, "nothing was written"),
+            other => panic!("expected a saved result, got {other:?}"),
+        }
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            None,
+            "a skipped commit has no committed revision to record"
+        );
+        assert_eq!(
+            session.ledger().tally().admitted,
+            0,
+            "a refresh that agrees with the transaction is no observation"
+        );
+    } // End of function a_save_that_commits_nothing_records_no_app_write()
+
+    /// A save the semantic gate refuses records nothing, and takes no refresh at
+    /// all.
+    ///
+    /// The refusal arm of `run_one_save` returns before either refresh, so there
+    /// is neither a record nor a publication — and the file is untouched, which
+    /// is what makes the absence of a record correct rather than merely tidy.
+    #[test]
+    fn a_refused_save_records_no_app_write() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let result = session
+            .save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':unclosed\n",
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome, not a failure");
+        match result {
+            SaveResult::Refused { findings, .. } => assert!(
+                findings.iter().any(|finding| matches!(
+                    finding.code,
+                    FindingCode::DocumentDoesNotParse { .. }
+                )),
+                "the premise: the gate refused this text, {findings:?}"
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(base_bytes(&dir), TWO_SNIPPETS, "nothing was written");
+        assert_eq!(session.ledger().recorded_write(id), None);
+        assert_eq!(session.ledger().tally(), LedgerTally::default());
+    } // End of function a_refused_save_records_no_app_write()
+
+    /// **A conflict records no app write, and its refresh is admitted as
+    /// external.**
+    ///
+    /// The sharp defect this exists to catch: were `conflict_after_the_lock` to
+    /// record the disk's revision as an app write, the very external change the
+    /// watcher exists to report would be suppressed the moment it stabilized.
+    /// So three things are asserted — no record, the disk state published under
+    /// this epoch's sequence allocator, and a second hint at that same state
+    /// coalescing rather than producing a second report.
+    #[test]
+    fn a_conflict_records_no_app_write_and_admits_its_refresh_as_external() {
+        const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: written elsewhere\n";
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let path = path_of(&session, id);
+        // An external writer replaces the file behind this session's back, so
+        // the locked read refuses the save.
+        fs::write(&path, EXTERNAL).unwrap();
+        let result = session
+            .save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':mine'\n    replace: mine\n",
+                &Acknowledgement::none(),
+            )
+            .expect("a conflict is an outcome, not a failure");
+        let disk_revision = match result {
+            SaveResult::Conflict { disk_revision, .. } => disk_revision,
+            other => panic!("expected a conflict, got {other:?}"),
+        };
+        assert_eq!(
+            disk_revision,
+            ContentRevision::of_bytes(EXTERNAL.as_bytes()),
+            "the premise: the payload describes the external writer's bytes"
+        );
+        assert_eq!(base_bytes(&dir), EXTERNAL, "this attempt wrote nothing");
+
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            None,
+            "a conflict wrote nothing, so it records nothing"
+        );
+        assert_eq!(
+            session.ledger().published_state(&path),
+            Some(ObservedState::Content(disk_revision)),
+            "the refresh is published as an external observation"
+        );
+        let tally = session.ledger().tally();
+        assert_eq!(tally.admitted, 1, "one sequence was spent, {tally:?}");
+        assert_eq!(tally.suppressed, 0, "nothing here was this app's own write");
+        // …and a native hint stabilizing at that same state is a duplicate of
+        // what the conflict already published, not a second conflict.
+        assert_eq!(
+            session.ledger().admit(
+                session.ledger().current_epoch(),
+                &path,
+                ObservedState::Content(disk_revision),
+                // A hint read now, which is after everything above it. No app
+                // write was recorded on this path at all, so the chronology
+                // check has nothing to compare against either way.
+                Instant::now(),
+            ),
+            Admission::Duplicate
+        );
+    } // End of function a_conflict_records_no_app_write_and_admits_its_refresh_as_external()
+
+    /// A conflict against bytes **this application itself committed** is
+    /// suppressed rather than published, and the record survives it.
+    ///
+    /// The one case in which the conflict refresh's admission answers
+    /// *self-write*, and it is reachable only through the raw save, which
+    /// deliberately takes no pre-transaction revision check: every other writing
+    /// command refuses a stale base with `identityStaleRevision` first. What is
+    /// suppressed is byte identity and never authorship — the disk holds exactly
+    /// the bytes this session's previous save committed.
+    #[test]
+    fn a_conflict_against_this_apps_own_committed_bytes_is_suppressed() {
+        const MINE: &str = "matches:\n  - trigger: ':mine'\n    replace: mine\n";
+        let Opened {
+            dir: _dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let path = path_of(&session, id);
+        let first = session
+            .save_raw_document(id, before.revision, MINE, &Acknowledgement::none())
+            .expect("the first raw save runs");
+        let (committed, _) = expect_saved(first, "raw replacement");
+        assert_eq!(committed, ContentRevision::of_bytes(MINE.as_bytes()));
+
+        // The same stale base again: the pre-transaction check is deliberately
+        // absent on this command, so the locked read is what refuses it.
+        let result = session
+            .save_raw_document(
+                id,
+                before.revision,
+                "matches:\n  - trigger: ':again'\n    replace: again\n",
+                &Acknowledgement::none(),
+            )
+            .expect("a conflict is an outcome, not a failure");
+        match result {
+            SaveResult::Conflict { disk_revision, .. } => assert_eq!(
+                disk_revision, committed,
+                "the premise: the disk holds what this session committed"
+            ),
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            Some(AppWrite {
+                epoch: session.ledger().current_epoch(),
+                revision: committed
+            }),
+            "suppression retains the record"
+        );
+        assert_eq!(
+            session.ledger().published_state(&path),
+            None,
+            "nothing external was observed, so nothing was published"
+        );
+        assert_eq!(session.ledger().tally().suppressed, 1);
+    } // End of function a_conflict_against_this_apps_own_committed_bytes_is_suppressed()
+
+    /// **Only a committed outcome licenses an app-write record**, and the rule
+    /// is one exhaustive expression rather than four branches a reader has to
+    /// agree about.
+    ///
+    /// The fourth case is the one no command test can produce: a write that
+    /// **may have completed** and whose committed revision is therefore unknown.
+    /// Recording a guess there would suppress a real later observation of that
+    /// file; recording nothing makes it external, which is the safe direction.
+    /// The test asserts its own premise — that the constructed error really is
+    /// one `SaveError::may_have_written` — so it cannot pass by holding an error
+    /// of the wrong kind.
+    #[test]
+    fn only_a_committed_outcome_licenses_an_app_write_record() {
+        use espansoconfig_core::persist::{SaveError, SavedDocument, WriteError};
+
+        let revision = ContentRevision::of_bytes(b"what the rename installed");
+        let committed = SavedDocument {
+            revision,
+            text: String::new(),
+            replacements: Vec::new(),
+            notes: Vec::new(),
+            findings: Vec::new(),
+            committed: true,
+            backup: None,
+        };
+        let skipped = SavedDocument {
+            committed: false,
+            ..SavedDocument {
+                revision,
+                text: String::new(),
+                replacements: Vec::new(),
+                notes: Vec::new(),
+                findings: Vec::new(),
+                committed: true,
+                backup: None,
+            }
+        };
+        assert_eq!(
+            super::committed_revision(&Ok(committed)),
+            Some(revision),
+            "a commit is the one outcome that licenses a record"
+        );
+        assert_eq!(
+            super::committed_revision(&Ok(skipped)),
+            None,
+            "a skipped commit wrote nothing"
+        );
+
+        let mismatch: Result<SavedDocument, SaveError> = Err(SaveError::RevisionMismatch {
+            path: PathBuf::from("/tree/match/base.yml"),
+            expected: revision,
+            found: ContentRevision::of_bytes(b"what the disk holds"),
+        });
+        assert!(!mismatch.as_ref().unwrap_err().may_have_written());
+        assert_eq!(super::committed_revision(&mismatch), None);
+
+        let uncertain: Result<SavedDocument, SaveError> =
+            Err(SaveError::Write(WriteError::VerificationFailed {
+                path: PathBuf::from("/tree/match/base.yml"),
+                expected: revision,
+                found: ContentRevision::of_bytes(b"what came back off the disk"),
+            }));
+        assert!(
+            uncertain.as_ref().unwrap_err().may_have_written(),
+            "the premise: this failure may have written"
+        );
+        assert_eq!(
+            super::committed_revision(&uncertain),
+            None,
+            "an uncertain write's committed revision is unknown, so nothing is recorded"
+        );
+    } // End of function only_a_committed_outcome_licenses_an_app_write_record()
+
+    /// **A post-commit external replacement is not suppressed, and the commit is
+    /// not relabelled a failure.**
+    ///
+    /// The interleaving no command can produce — an external writer replaces the
+    /// file between the transaction's return and the re-read — so the shared
+    /// tail is driven directly, exactly as
+    /// `a_committed_save_whose_re_read_fails_names_nothing_and_stays_saved` does.
+    /// Three claims: the answer still says committed and still names the
+    /// revision this application wrote; the ledger never records the **external**
+    /// revision as an app write; and the differing state is admitted rather than
+    /// suppressed, which is what leaves the watcher free to report it.
+    #[test]
+    fn a_post_commit_external_replacement_is_admitted_and_never_recorded_as_ours() {
+        use espansoconfig_core::persist::SavedDocument;
+        use espansoconfig_core::workspace::Workspace;
+
+        const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: theirs\n";
+        let dir = tree_holding(TWO_SNIPPETS);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the file reads");
+        let path = workspace
+            .document_context(id)
+            .expect("the document is known")
+            .path
+            .clone();
+
+        let ledger = WriteLedger::new();
+        ledger.begin_epoch(1);
+        // The record `commit_and_record` takes inside the commit window, before
+        // `run_one_save` hands the outcome on. The window is scoped to this
+        // block exactly as it is there, because `after_a_save` below admits an
+        // observation and would deadlock against a gate still held.
+        let ours = ContentRevision::of_bytes(b"the bytes this application committed");
+        {
+            let gate = ledger.begin_commit();
+            ledger.record_app_write(&gate, id, &path, ours);
+        }
+
+        fs::write(&path, EXTERNAL).unwrap();
+        let saved = SavedDocument {
+            revision: ours,
+            text: String::new(),
+            replacements: Vec::new(),
+            notes: Vec::new(),
+            findings: Vec::new(),
+            committed: true,
+            backup: None,
+        };
+        let landed = espansoconfig_core::patch::DocumentPath::root(0)
+            .with_key("matches")
+            .with_index(0);
+        match super::after_a_save(&mut workspace, &ledger, id, &path, Some(&landed), saved) {
+            SaveResult::Saved {
+                committed,
+                revision,
+                moved,
+                ..
+            } => {
+                assert!(committed, "a committed write is never relabelled a failure");
+                assert_eq!(
+                    revision, ours,
+                    "the answer names what this application wrote"
+                );
+                assert!(
+                    moved.is_none(),
+                    "the fresh read disagrees, so no identity is minted in it"
+                );
+            }
+            other => panic!("a committed save is answered as Saved, got {other:?}"),
+        } // End of the match over the tail's answer
+
+        let external = ContentRevision::of_bytes(EXTERNAL.as_bytes());
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Content(external)),
+            "the differing refresh is admitted as an external observation"
+        );
+        let tally = ledger.tally();
+        assert_eq!(tally.admitted, 1);
+        assert_eq!(
+            tally.suppressed, 0,
+            "an external replacement of a committed write is not suppressed"
+        );
+        assert_ne!(
+            ledger.recorded_write(id),
+            Some(AppWrite {
+                epoch: 1,
+                revision: external
+            }),
+            "the external revision is never recorded as this application's write"
+        );
+        assert_eq!(
+            ledger.recorded_write(id),
+            None,
+            "and the accepted external state supersedes the record of ours"
+        );
+    } // End of function a_post_commit_external_replacement_is_admitted_and_never_recorded_as_ours()
 }

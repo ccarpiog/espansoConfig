@@ -46,6 +46,26 @@
 //! projected either way, and a snapshot that failed to parse carries its
 //! diagnostics exactly as a workspace read of the same bytes would.
 //!
+//! # A settlement is provisional until the next tick
+//!
+//! Stabilizing updates the tracked table in the same call that returns the
+//! observation, so a caller that **cannot use** a conclusion would otherwise
+//! lose it for good: the engine now believes it has announced that state, and a
+//! later hint stabilizing to the same state coalesces to nothing. That is not a
+//! hypothetical — 2d-3's round-3 review found it as a live defect one layer out,
+//! where an application-session rule can refuse an observation the engine had
+//! already settled.
+//!
+//! [`ObservationEngine::revert_settlement`] is the answer, and it is the whole
+//! of what this engine knows about the matter: *the caller could not use that
+//! conclusion; put the state that stood before it back and observe the path
+//! again*. It knows nothing about why — no save, no ledger, no application
+//! session enters this module. What it forces is that the state the settlement
+//! replaced is kept until the next [`ObservationEngine::tick`]; **what it cannot
+//! force** is that a caller reverts before ticking again, because the undo of a
+//! pass is discarded when the next pass begins. A caller that ticks first has an
+//! observation it cannot take back, and nothing in the type system says so.
+//!
 //! # What TypeScript-style discipline cannot do here, stated plainly
 //!
 //! Rust forces the clock and the reader to be arguments, so no code path in
@@ -384,9 +404,31 @@ pub enum Observation {
     },
 }
 
+impl Observation {
+    /// The path this observation is about, whatever its kind.
+    ///
+    /// One accessor rather than a match at every consumer, because *which path
+    /// an observation names* is one rule: a caller that has to take the path
+    /// out in order to hand the observation on — to revert its settlement, say
+    /// ([`ObservationEngine::revert_settlement`]) — must not be spelling a
+    /// second copy of it.
+    pub fn path(&self) -> &Path {
+        match self {
+            Observation::Changed { path, .. }
+            | Observation::Removed { path, .. }
+            | Observation::Unreadable { path, .. } => path,
+            Observation::Added { file, .. } => &file.path,
+        }
+    } // End of function path()
+}
+
 /// The last stably read content of a path, kept through an unreadable
 /// interlude so a recovery can still say what it recovered *from*.
-#[derive(Debug)]
+///
+/// `Clone` for exactly one caller: [`ObservationEngine::settle_failed`] is the
+/// one settlement that carries part of the state it replaces *into* the state it
+/// installs, so the undo copy cannot be the replaced value itself.
+#[derive(Debug, Clone)]
 struct LastContent {
     revision: ContentRevision,
     /// `None` when the content was present but not UTF-8.
@@ -394,7 +436,12 @@ struct LastContent {
 }
 
 /// The engine's held state for one tracked path.
-#[derive(Debug)]
+///
+/// `Clone` for [`LastContent`]'s one reason, and it is used on that one arm
+/// only: the other two settlements hand their replaced value to the undo store
+/// by **move**, so a rescan that re-hints every tracked path and coalesces
+/// clones no snapshot at all.
+#[derive(Debug, Clone)]
 enum Tracked {
     /// The last stable state was projected UTF-8 content.
     Projected { snapshot: Box<SourceDocument> },
@@ -472,6 +519,34 @@ pub struct ObservationEngine {
     config: EngineConfig,
     tracked: BTreeMap<PathBuf, Tracked>,
     pending: BTreeMap<PathBuf, Pending>,
+    /// For each path the **most recent** [`ObservationEngine::tick`] emitted an
+    /// observation for, the tracked state that settlement replaced — `None`
+    /// where nothing was tracked before it.
+    ///
+    /// The whole of [`ObservationEngine::revert_settlement`]'s memory, and it is
+    /// deliberately one pass deep: it is cleared at the top of every tick, so a
+    /// settlement becomes final the moment the caller asks for the next pass.
+    /// Nothing in the type system enforces that ordering; the module docs' own
+    /// *provisional* section states it, and the caller that relies on it calls
+    /// its sink for every observation of a pass before it ticks again.
+    ///
+    /// Only a path that actually produced an observation has an entry: a
+    /// coalescing settlement — the same revision again, the same failure kind
+    /// again — changes nothing a caller could refuse.
+    undo: BTreeMap<PathBuf, Option<Tracked>>,
+}
+
+/// One settlement: the observation it produced, and the tracked state it
+/// replaced so that [`ObservationEngine::revert_settlement`] can put it back.
+///
+/// A struct rather than a tuple because the two halves travel to different
+/// places — one to the caller, one to [`ObservationEngine::undo`] — and a tuple
+/// would make which is which a matter of position.
+struct Settled {
+    /// What the caller is told.
+    observation: Observation,
+    /// What the settlement replaced; `None` where nothing was tracked.
+    replaced: Option<Tracked>,
 }
 
 impl ObservationEngine {
@@ -509,6 +584,7 @@ impl ObservationEngine {
             config,
             tracked: BTreeMap::new(),
             pending: BTreeMap::new(),
+            undo: BTreeMap::new(),
         };
         for file in source.enumerate(root)? {
             if !engine.watches(&file.path) {
@@ -587,7 +663,16 @@ impl ObservationEngine {
     /// output sequence of observation shapes, revisions and order; the
     /// identity *values* inside their projections come from the process-wide
     /// session table (module docs), the one input no argument here carries.
+    ///
+    /// **Every settlement the previous pass produced becomes final here**, on
+    /// the first line: the undo this pass fills is only this pass's, so
+    /// [`ObservationEngine::revert_settlement`] can take back a conclusion a
+    /// caller has just been handed and nothing older. Nothing in the type system
+    /// makes a caller finish with one pass's observations before asking for the
+    /// next; the module docs' *provisional* section is where that obligation is
+    /// written down.
     pub fn tick(&mut self, now: Millis, source: &mut dyn WatchSource) -> Vec<Observation> {
+        self.undo.clear();
         let due: Vec<PathBuf> = self
             .pending
             .iter()
@@ -661,6 +746,51 @@ impl ObservationEngine {
         Ok(())
     } // End of function rescan()
 
+    /// Takes back the settlement the **most recent** tick made for `path`:
+    /// restores the tracked state that settlement replaced, and puts `path` back
+    /// into the pipeline as a fresh hint at `now`.
+    ///
+    /// *The caller could not use that conclusion.* That is all this engine knows
+    /// and all it is told — no reason travels with the call, because the reasons
+    /// are facts about an application session and this is a fact about a
+    /// directory (module docs). The state the caller could not act on is
+    /// therefore un-announced as far as the engine is concerned, so the re-hint
+    /// stabilizes to it again and produces **the same observation again**,
+    /// rather than coalescing to nothing against a tracked state that was never
+    /// really reported.
+    ///
+    /// # What it does not do, said beside what it does
+    ///
+    /// - It reverts **one pass**. A path this engine did not settle in the last
+    ///   tick — or one whose settlement a later tick has already made final —
+    ///   has nothing to restore, and this call is then a plain hint. That is
+    ///   deliberate rather than an error case, because the hint is the half that
+    ///   is right in both readings; **nothing in the type system distinguishes
+    ///   them**, and a caller that ticks before reverting silently gets the
+    ///   weaker one;
+    /// - it does not undo the *observation*. The value was handed to the caller
+    ///   and this engine has no way to recall it; what is undone is the engine's
+    ///   own memory of having concluded it;
+    /// - it schedules a read, so it emits nothing itself. The observation comes
+    ///   back out of a later [`ObservationEngine::tick`], with whatever the file
+    ///   holds **then** — which may no longer be the state that was refused, and
+    ///   that is the honest answer rather than a replay of a stale reading.
+    pub fn revert_settlement(&mut self, path: &Path, now: Millis) {
+        match self.undo.remove(path) {
+            Some(Some(replaced)) => {
+                self.tracked.insert(path.to_path_buf(), replaced);
+            }
+            Some(None) => {
+                // Nothing was tracked before the settlement, so restoring it
+                // means removing what the settlement installed — an `Added`
+                // taken back leaves the path untracked, exactly as it was.
+                self.tracked.remove(path);
+            }
+            None => {}
+        } // End of the match over what there was to take back
+        self.hint(path, now);
+    } // End of function revert_settlement()
+
     /// The next instant at which [`ObservationEngine::tick`] has work, or
     /// `None` when nothing is pending. A caller sleeps until this rather than
     /// polling; a test asserts quiescence with it.
@@ -732,17 +862,25 @@ impl ObservationEngine {
     } // End of function project_bytes()
 
     /// Turns one stabilized outcome into at most one observation, updating the
-    /// tracked table in the same call.
+    /// tracked table in the same call — and remembering, for exactly one pass,
+    /// the state that update replaced.
+    ///
+    /// The remembering happens **here** rather than in each settlement, so that
+    /// *every* emitted observation is revertible by construction: a fourth
+    /// settlement kind added below would have to answer [`Settled`] to compile,
+    /// and answering it is what files the undo.
     fn settle(&mut self, path: &Path, outcome: ReadOutcome) -> Option<Observation> {
-        match outcome {
+        let settled = match outcome {
             ReadOutcome::Present(bytes) => self.settle_present(path, bytes),
             ReadOutcome::Missing => self.settle_missing(path),
             ReadOutcome::Failed(kind) => self.settle_failed(path, kind),
-        }
-    }
+        }?;
+        self.undo.insert(path.to_path_buf(), settled.replaced);
+        Some(settled.observation)
+    } // End of function settle()
 
     /// A path stably holds `bytes`.
-    fn settle_present(&mut self, path: &Path, bytes: Vec<u8>) -> Option<Observation> {
+    fn settle_present(&mut self, path: &Path, bytes: Vec<u8>) -> Option<Settled> {
         let revision = ContentRevision::of_bytes(&bytes);
         // Coalesce against the tracked *content* state: a byte-identical
         // rewrite is not a content observation. An unreadable state never
@@ -753,8 +891,11 @@ impl ObservationEngine {
             _ => {}
         }
         let content = self.project_bytes(path, bytes);
-        let prior = self.tracked.remove(path);
-        let observation = match prior {
+        // Removed, read by reference, and then handed to the undo store by
+        // **move**: everything the observation needs from the replaced state is
+        // borrowed, so this settlement clones nothing.
+        let replaced = self.tracked.remove(path);
+        let observation = match replaced.as_ref() {
             None => Observation::Added {
                 file: classify_path(&self.root, path),
                 content: content.clone(),
@@ -776,46 +917,58 @@ impl ObservationEngine {
         };
         self.tracked
             .insert(path.to_path_buf(), tracked_from(content));
-        Some(observation)
+        Some(Settled {
+            observation,
+            replaced,
+        })
     } // End of function settle_present()
 
     /// A path is stably absent.
-    fn settle_missing(&mut self, path: &Path) -> Option<Observation> {
-        let prior = self.tracked.remove(path)?;
-        Some(Observation::Removed {
-            path: path.to_path_buf(),
-            previous_revision: prior.revision(),
+    fn settle_missing(&mut self, path: &Path) -> Option<Settled> {
+        let replaced = self.tracked.remove(path)?;
+        Some(Settled {
+            observation: Observation::Removed {
+                path: path.to_path_buf(),
+                previous_revision: replaced.revision(),
+            },
+            replaced: Some(replaced),
         })
     }
 
     /// A path stably fails to read with `kind`.
-    fn settle_failed(&mut self, path: &Path, kind: io::ErrorKind) -> Option<Observation> {
-        let (before, coalesce) = match self.tracked.remove(path) {
-            Some(Tracked::Unreadable { kind: held, before }) => (before, held == kind),
-            Some(Tracked::Projected { snapshot }) => (
-                Some(LastContent {
-                    revision: snapshot.revision,
-                    snapshot: Some(snapshot),
-                }),
-                false,
-            ),
-            Some(Tracked::NotUtf8 { revision }) => (
-                Some(LastContent {
-                    revision,
-                    snapshot: None,
-                }),
-                false,
-            ),
-            None => (None, false),
+    fn settle_failed(&mut self, path: &Path, kind: io::ErrorKind) -> Option<Settled> {
+        let prior = self.tracked.remove(path);
+        let coalesce =
+            matches!(&prior, Some(Tracked::Unreadable { kind: held, .. }) if *held == kind);
+        // **The one settlement that clones**, and only on the arm that emits.
+        // It carries part of the state it replaces (`before`) into the state it
+        // installs, so unlike the other two it cannot hand the replaced value
+        // itself to the undo store. A repeat of the same failure kind coalesces
+        // and clones nothing.
+        let replaced = if coalesce { None } else { prior.clone() };
+        let before = match prior {
+            Some(Tracked::Unreadable { before, .. }) => before,
+            Some(Tracked::Projected { snapshot }) => Some(LastContent {
+                revision: snapshot.revision,
+                snapshot: Some(snapshot),
+            }),
+            Some(Tracked::NotUtf8 { revision }) => Some(LastContent {
+                revision,
+                snapshot: None,
+            }),
+            None => None,
         };
         self.tracked
             .insert(path.to_path_buf(), Tracked::Unreadable { kind, before });
         if coalesce {
             return None;
         }
-        Some(Observation::Unreadable {
-            path: path.to_path_buf(),
-            kind,
+        Some(Settled {
+            observation: Observation::Unreadable {
+                path: path.to_path_buf(),
+                kind,
+            },
+            replaced,
         })
     } // End of function settle_failed()
 } // End of impl ObservationEngine
@@ -941,6 +1094,95 @@ mod tests {
         );
         assert!(engine.revision_of(&link).is_none());
     } // End of function a_yaml_symlink_inside_a_watched_root_never_reads_outside_content()
+
+    #[test]
+    fn a_reverted_settlement_is_observed_again_instead_of_coalescing_away() {
+        // 2d-3's round-3 High, as the engine-side half of it. A settlement
+        // updates the tracked table in the same call that returns the
+        // observation, so a caller that cannot use the conclusion would lose
+        // the state for good: the identical bytes re-read a moment later
+        // coalesce against the tracked state the refused settlement installed.
+        // `revert_settlement` is what makes that recoverable, and the second
+        // drain below is the whole assertion — without the revert it is empty.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().join("tree");
+        std::fs::create_dir_all(root.join("match")).expect("the watched root");
+        let path = root.join("match/base.yml");
+        let before = "matches: []\n";
+        let after = "matches:\n  - trigger: ':x'\n    replace: y\n";
+        std::fs::write(&path, before).expect("the tracked file");
+
+        let mut source = FsWatchSource;
+        let mut engine = ObservationEngine::start(&root, EngineConfig::default(), &mut source)
+            .expect("a baseline scan");
+        assert_eq!(
+            engine.revision_of(&path),
+            Some(ContentRevision::of_bytes(before.as_bytes()))
+        );
+
+        std::fs::write(&path, after).expect("an external replacement");
+        engine.hint(&path, Millis(0));
+        let first = drain_real(&mut engine, &mut source);
+        assert_eq!(first.len(), 1, "one observation: {first:?}");
+        assert_eq!(
+            engine.revision_of(&path),
+            Some(ContentRevision::of_bytes(after.as_bytes())),
+            "the settlement installed the new state, which is what makes it losable"
+        );
+
+        // The caller could not use it. The engine forgets having concluded it
+        // and puts the path back in the pipeline.
+        engine.revert_settlement(&path, Millis(1000));
+        assert_eq!(
+            engine.revision_of(&path),
+            Some(ContentRevision::of_bytes(before.as_bytes())),
+            "the state the settlement replaced is back"
+        );
+        assert!(
+            engine.next_deadline().is_some(),
+            "and the path is pending again rather than merely rolled back"
+        );
+
+        // The file still holds the same bytes, and they are observed again
+        // rather than coalescing into the tracked state of a refused reading.
+        let second = drain_real(&mut engine, &mut source);
+        assert_eq!(
+            second.len(),
+            1,
+            "the refused state is observed again: {second:?}"
+        );
+        match &second[0] {
+            Observation::Changed {
+                previous_revision,
+                content,
+                ..
+            } => {
+                assert_eq!(
+                    *previous_revision,
+                    Some(ContentRevision::of_bytes(before.as_bytes())),
+                    "and it is the same observation, from the same base"
+                );
+                assert_eq!(
+                    content.revision(),
+                    ContentRevision::of_bytes(after.as_bytes())
+                );
+            }
+            other => panic!("expected the same `Changed` again, got {other:?}"),
+        } // End of the match over the re-observed conclusion
+          // One more pass — nothing is due, so it observes nothing — makes that
+          // second settlement final. A revert then has nothing left to take back
+          // and is a plain hint, which stabilizes to what the engine already
+          // tracks and observes nothing. **This is the half no type enforces**:
+          // the same call means two different things either side of a tick.
+        assert!(engine.tick(Millis(1500), &mut source).is_empty());
+        engine.revert_settlement(&path, Millis(2000));
+        assert_eq!(
+            engine.revision_of(&path),
+            Some(ContentRevision::of_bytes(after.as_bytes())),
+            "nothing was restored, because that settlement is final"
+        );
+        assert!(drain_real(&mut engine, &mut source).is_empty());
+    } // End of function a_reverted_settlement_is_observed_again_instead_of_coalescing_away()
 
     #[cfg(unix)]
     #[test]

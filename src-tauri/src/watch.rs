@@ -42,6 +42,20 @@
 //! late native callback from a replaced watcher finds its channel gone and is
 //! discarded before it can name a document (consult Q1).
 //!
+//! # Stamps
+//!
+//! Every observation also carries [`EpochObservation::read_after`], an instant
+//! its reads are known to follow, taken once per engine pass immediately before
+//! that pass reads anything ([`WatchWorker::observe`]). The epoch says *which
+//! workspace this is about*; the stamp says *how new this reading is*, and it
+//! exists because `crate::ledger`'s commit gate can serialize decisions and
+//! cannot reach a read that already happened: an observation stabilized before
+//! a save's rename would otherwise decide, after that save's record, that the
+//! bytes it read are not the recorded ones — clearing the record and making the
+//! application's own write come back as foreign. This module mints the stamp
+//! and claims nothing with it; the comparison, and everything it licenses,
+//! is `crate::ledger`'s.
+//!
 //! # The polling fallback is a fallback
 //!
 //! Consult Q1: polling is for an **unavailable native backend, never the
@@ -58,12 +72,15 @@
 //!
 //! **No wire.** Nothing here emits a Tauri event, holds a queue, or answers a
 //! command — the wake event and `drain_external_changes` are Phase 2d-4's
-//! (consult Q3) — and nothing here compares an observation against an
-//! app-write ledger, which is Phase 2d-3's. Until 2d-4 wires the queue, the
-//! production sink is [`discarding_sink`]: observations are produced and
-//! dropped, which is this project's established primitive-before-caller cut —
-//! the lifecycle exists and is tested before anything consumes it, exactly as
-//! `persist::save_document` existed at 2a with no command behind it.
+//! (consult Q3). Nothing here compares an observation against an app-write
+//! ledger either: since Phase 2d-3 that decision is `crate::ledger`'s, and the
+//! [`ObservationSink`] a session hands every watcher is that module's admission
+//! gate. What the gate admits reaches a downstream sink which, in production,
+//! is still `crate::ledger::discarding_sink` — observations are produced,
+//! decided and dropped, which is this project's established
+//! primitive-before-caller cut: the lifecycle and the gate exist and are tested
+//! before anything consumes them, exactly as `persist::save_document` existed
+//! at 2a with no command behind it.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -122,20 +139,36 @@ const QUIET_PARK_MS: u64 = 60_000;
 const REAPER_SCAN_MS: u64 = 50;
 
 /// One core observation, tagged with the workspace epoch of the watcher that
-/// produced it.
+/// produced it and with an instant its reads are known to follow.
 ///
 /// The epoch is the session's, assigned at [`WatcherLifecycle::start`]; the
 /// observation is the engine's, meaning exactly what
-/// [`Observation`] documents. Nothing else travels — sequences are facts about
-/// 2d-4's queue and are deliberately absent here.
-// Read by `crate::watch_check` today and by 2d-4's queue in production; the
-// allow is scoped to non-test builds so the fields stay lint-armed exactly
-// where their consumers exist.
-#[cfg_attr(not(test), allow(dead_code))]
+/// [`Observation`] documents. Nothing else travels: a **sequence** is a fact
+/// about this session's admission order rather than about a watcher, so it is
+/// minted one layer out, by `crate::ledger`, and rides
+/// `crate::ledger::AdmittedObservation` instead.
 #[derive(Debug)]
 pub struct EpochObservation {
     /// The workspace epoch under which this observation was produced.
     pub epoch: u64,
+    /// An instant **every read behind this observation happened at or after**.
+    ///
+    /// A lower bound rather than a timestamp: it is taken once per engine pass,
+    /// immediately before the reads that pass performs
+    /// (`WatchWorker::observe`), so it is at or before the settling read of
+    /// every observation that pass returns. A consumer may therefore conclude
+    /// *this reading is at least as new as anything that happened before this
+    /// instant* and nothing stronger — in particular it says nothing about when
+    /// the **first** of the two stability reads happened, which was an earlier
+    /// pass, and nothing about when the file was written.
+    ///
+    /// `crate::ledger` is what reads it, to refuse an observation it cannot
+    /// place at or after this application's own last committed write to that
+    /// path. **Nothing in the type system ties this field to the reads it
+    /// claims to bound**: it is an ordinary `Instant`, and a producer that took
+    /// it after its reads would type-check and would silently restore the
+    /// defect it exists to close.
+    pub read_after: Instant,
     /// The engine's stabilized conclusion.
     pub observation: Observation,
 }
@@ -149,23 +182,96 @@ pub struct EpochObservation {
 /// including tearing its own watcher down — re-entering `open`, or dropping
 /// the last strong session reference — and that teardown then routes its join
 /// through the reaper rather than joining the running worker on itself (see
-/// [`WatcherLifecycle`]'s `Drop`). Phase 2d-4's queue is the intended
-/// production implementation; until then the production sink is
-/// [`discarding_sink`] and tests inject a channel.
-pub type ObservationSink = Arc<dyn Fn(EpochObservation) + Send + Sync>;
-
-/// The production sink until Phase 2d-4 wires the queue: it drops every
-/// observation.
+/// [`WatcherLifecycle`]'s `Drop`).
 ///
-/// Deliberate and stated rather than smoothed over — the lifecycle is built
-/// and tested before its consumer exists, and a sink that pretended to store
-/// anything would be a queue built one phase early. Until that consumer
-/// exists, observations are produced and deliberately unconsumed in
-/// production: a value this sink drops is gone, and no present code recovers
-/// it. Whatever recovery 2d-4 offers is 2d-4's to build and to claim.
-pub fn discarding_sink() -> ObservationSink {
-    Arc::new(|_| {})
+/// **Since Phase 2d-3 the session's one instance of this type is
+/// `crate::ledger::admitting_sink`**, the app-write admission gate: it takes
+/// its decision under a leaf mutex, drops the guard, and only then forwards the
+/// observations it admitted to a `crate::ledger::AdmittedSink`. Suppression,
+/// coalescing, the sequence and the epoch check all happen there, and the sink
+/// a test injects is the one **behind** the gate.
+///
+/// **It answers**, since the round-3 fix round, and the answer is not advisory:
+/// an [`ObservationOutcome::Undecided`] means the engine's settlement must be
+/// taken back, or the state the observation described is lost for good. See
+/// [`deliver`], which is the one place that answer is read.
+pub type ObservationSink = Arc<dyn Fn(EpochObservation) -> ObservationOutcome + Send + Sync>;
+
+/// What a sink did with one observation, as far as the producing engine has to
+/// care.
+///
+/// **Not a report and not a status**: the worker acts on it. A sink that cannot
+/// decide an observation leaves the state it described unreported, while
+/// `ObservationEngine::tick` has *already* installed that state as the engine's
+/// tracked one — so a later hint stabilizing to it coalesces to nothing and the
+/// state is never observed again. This enum is what closes that, and it carries
+/// no reason: the reasons are facts about an application session, and the engine
+/// is a fact about a directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservationOutcome {
+    /// The sink decided this observation — published it, suppressed it,
+    /// coalesced it, or discarded it for a reason re-reading cannot change. The
+    /// engine's settlement stands.
+    Decided,
+    /// The sink could **not** decide this observation, so the state it asserts
+    /// is still unreported and the engine must un-conclude it
+    /// (`ObservationEngine::revert_settlement`).
+    ///
+    /// A refusal that re-reading *can* change, and nothing weaker: an arm whose
+    /// answer would be the same however often the path is re-observed belongs in
+    /// [`ObservationOutcome::Decided`], because reverting it would spin the
+    /// pipeline over one path forever.
+    Undecided,
 }
+
+/// Hands one engine pass's observations to `sink`, and takes back from `engine`
+/// every settlement the sink could not decide.
+///
+/// **The two halves are one function on purpose**, exactly as
+/// [`WatchWorker::observe`] bundles the stamp with the pass it bounds and as
+/// `crate::ledger::WriteLedger::enter_gate` bundles its announcement with its
+/// acquisition. This step's **round-3 High** is what that shape exists for:
+/// `ObservationEngine::tick` installs a stabilized state into its tracked table
+/// *before* returning it, so a sink that refuses the observation leaves the
+/// engine believing that state was announced — and a later hint stabilizing to
+/// the same state coalesces to nothing inside the engine, so the state is never
+/// reported at all. A refusal handled anywhere but beside the call that produced
+/// it is a refusal that silently discards a genuine external change.
+///
+/// The re-hint uses the pass's own `now` rather than a fresh clock read: it is
+/// the instant those reads were scheduled at, and a debounce measured from it
+/// therefore covers the whole interval since the conclusion the caller refused.
+///
+/// **What the types do not force**, beside what they do: the return value of
+/// `sink` cannot be ignored — it is matched here and this is its only caller —
+/// but nothing makes `engine` the engine that produced `observations`, and
+/// nothing makes this run before the next `tick`, which is when
+/// `ObservationEngine::revert_settlement` stops being able to take anything
+/// back. One worker loop with one call site is what keeps both.
+pub(crate) fn deliver(
+    engine: &mut ObservationEngine,
+    sink: &ObservationSink,
+    epoch: u64,
+    read_after: Instant,
+    now: Millis,
+    observations: Vec<Observation>,
+) {
+    for observation in observations {
+        // Taken **before** the observation is handed on, because handing it on
+        // moves it. One accessor rather than a second spelling of *which path
+        // an observation names* (`Observation::path`).
+        let path = observation.path().to_path_buf();
+        let outcome = sink(EpochObservation {
+            epoch,
+            read_after,
+            observation,
+        });
+        match outcome {
+            ObservationOutcome::Decided => {}
+            ObservationOutcome::Undecided => engine.revert_settlement(&path, now),
+        } // End of the match over what the sink could do with this observation
+    } // End of the loop over one pass's observations
+} // End of function deliver()
 
 /// A session's workspace-epoch allocator — checked, and it never hands out
 /// the same value twice.
@@ -878,6 +984,51 @@ impl WatchWorker {
         }
     } // End of function absorb()
 
+    /// One engine pass: the stamp first, then the reads it bounds.
+    ///
+    /// **The two lines are one function on purpose**, exactly as
+    /// `crate::ledger::WriteLedger::enter_gate` bundles its announcement with
+    /// its acquisition. [`EpochObservation::read_after`] is only worth anything
+    /// if it was taken *before* the reads it claims to bound, and nothing in the
+    /// type system says so: an `Instant` taken after
+    /// [`ObservationEngine::tick`] type-checks, forwards, compares, and
+    /// silently restores this step's round-2 High. Keeping the stamp and the
+    /// pass in one two-line function with one caller is what holds it, together
+    /// with this paragraph.
+    ///
+    /// The stamp bounds the reads of **this** pass, which for a settling path
+    /// is its second stability read — the first happened in an earlier pass and
+    /// is deliberately not bounded here, because what a consumer needs to place
+    /// is the reading the observation asserts, which is the later one.
+    fn observe(
+        &mut self,
+        engine: &mut ObservationEngine,
+        now: Millis,
+    ) -> (Instant, Vec<Observation>) {
+        let read_after = Instant::now();
+        (read_after, engine.tick(now, &mut self.source))
+    } // End of function observe()
+
+    /// Hands one pass's observations to this worker's sink — see [`deliver`],
+    /// which is the whole of it and is a free function so a test can drive it
+    /// with a real engine and the real gate.
+    fn publish(
+        &self,
+        engine: &mut ObservationEngine,
+        read_after: Instant,
+        now: Millis,
+        observations: Vec<Observation>,
+    ) {
+        deliver(
+            engine,
+            &self.sink,
+            self.epoch,
+            read_after,
+            now,
+            observations,
+        );
+    }
+
     /// How long the loop may sleep before something is due.
     fn wake_after(&self, engine: &ObservationEngine) -> Duration {
         let now = self.now();
@@ -911,9 +1062,14 @@ impl WatchWorker {
     ///
     /// The loop's shape is the engine's contract read literally: sleep until
     /// the next deadline or the next rescan (a message wakes it early), absorb
-    /// whatever arrived, rescan if the fallback cadence is due, tick, and hand
-    /// every stabilized observation to the sink tagged with this watcher's
-    /// epoch. The engine trusts this caller to keep ticking until
+    /// whatever arrived, rescan if the fallback cadence is due, take the pass's
+    /// stamp and tick ([`WatchWorker::observe`], which is the two of those in
+    /// one function), and hand every stabilized observation to the sink tagged
+    /// with this watcher's epoch and that stamp — **taking the engine's
+    /// settlement back for every observation the sink could not decide**, which
+    /// is [`deliver`] and is the second two-in-one-function shape in this loop.
+    /// The engine trusts this caller
+    /// to keep ticking until
     /// `next_deadline()` is `None` — that is the caller obligation its module
     /// docs state Rust cannot enforce, and this loop is where it is met.
     fn run(mut self, inbox: Receiver<WorkerMessage>, hints: Sender<WorkerMessage>) {
@@ -951,12 +1107,8 @@ impl WatchWorker {
                     self.next_poll = Some(now.plus(self.config.poll_ms));
                 }
             }
-            for observation in engine.tick(now, &mut self.source) {
-                (self.sink)(EpochObservation {
-                    epoch: self.epoch,
-                    observation,
-                });
-            }
+            let (read_after, observations) = self.observe(&mut engine, now);
+            self.publish(&mut engine, read_after, now, observations);
         } // End of the worker's main loop
     } // End of function run()
 } // End of impl WatchWorker

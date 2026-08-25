@@ -44,6 +44,30 @@
 //! that discards it until Phase 2d-4 wires the queue and the wake event (the
 //! 2d design consult's Q3); `watch_check` is the real-filesystem integration
 //! evidence the consult's Q7 item 2 places in this crate.
+//!
+//! Phase 2d-3 adds **no command and no event either**: `ledger` is the
+//! per-document app-write record and the admission gate the session installs
+//! between every watcher and its downstream sink, so an observation of bytes
+//! this application itself committed is suppressed, a repeat of an already
+//! published state is coalesced, a replaced epoch's observation is discarded,
+//! and everything admitted is numbered. The record is written in one place —
+//! `commands::commit_and_record`, the window `run_one_save` runs its
+//! transaction in, for a committed save and for nothing else — and the two
+//! refreshes on the save path (`after_a_save`'s and `conflict_after_the_lock`'s)
+//! go through the same gate a native hint does. **Three** things together make a
+//! save's own rename un-reportable as somebody else's without losing anybody
+//! else's write: a **commit gate** distinct from the ledger's state, which makes
+//! the transaction and its record one window no admission can *decide* inside; a
+//! **stamp** on every observation, taken before the reads that produced it,
+//! which is what places a reading that was already in hand when that window
+//! opened — the gate cannot reach a read that already happened; and a **taken
+//! back settlement**, because the engine installs a stabilized state as tracked
+//! before the ledger ever sees it, so a refusal that is not answered leaves that
+//! state coalescing to nothing forever. A reading the session cannot place
+//! strictly after its own last commit to that path is discarded rather than
+//! published, it does not clear the record, and the engine is told to
+//! un-conclude it and observe the path again. What the gate admits still reaches
+//! a sink that discards it, until 2d-4.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
@@ -57,6 +81,7 @@ mod dictionary_contract;
 mod dispatch_check;
 mod error;
 mod events;
+mod ledger;
 mod menu;
 #[cfg(test)]
 mod menu_contract;

@@ -76,6 +76,36 @@ unchanged. Steps 6 and 7 (automatic reload, conflict) are frontend transitions (
 numbers and workspace epochs are likewise absent: they are facts about a session, and this engine
 is a fact about a directory.
 
+> **Correction (2d-3 round-2 fix round).** The caller obligation enumerated above — record on
+> `committed: true`, retain through duplicate hints, replace on the next committed save, discard on
+> workspace replacement — turned out to be **four items of five**. The fifth is *place the
+> observation's reads relative to the recorded write*: a caller that hands the predicate the right
+> entry for the right document and epoch can still be handing it a reading taken **before** the
+> save that produced that entry, and acting on the answer then clears a record the caller has just
+> taken and makes its own committed write come back as foreign. `docs/decisions/2d-3-notes.md` §8
+> is where that obligation is discharged, with an instant stamped before the reads against an
+> instant stamped after the rename. **Nothing in this engine changed**, and nothing here is asked
+> to change: the engine is a fact about a directory, the ordering is a fact about a session, and
+> the two instants are the session's own. The paragraph above is left as written, per this
+> project's correction-block convention; this block is the addition it needs.
+
+> **Correction (2d-3 round-3 fix round).** The block above says *nothing in this engine changed,
+> and nothing here is asked to change*. The first half stayed true through round 2; the second was
+> wrong, and round 3 found why. A caller discharging the fifth obligation **refuses** observations,
+> and `ObservationEngine::tick` installs a stabilized state into `tracked` *before* returning it —
+> so a refused observation left the engine believing it had announced that state, and the same
+> bytes re-read afterwards coalesced to nothing **inside the engine**. A genuine external change
+> refused once was never reported again, with native delivery working perfectly. Closing it needed
+> the engine, so **this is the first change 2d-3 made to `crates/espansoconfig-core`**:
+> `ObservationEngine::revert_settlement(path, now)`, a one-pass undo of the tracked-table update
+> plus a re-hint, and `Observation::path()` beside it so a caller taking the path out of an
+> observation is not spelling a second copy of that rule. The engine learns **nothing** about saves,
+> ledgers or application sessions by it — the call says only *the caller could not use that
+> conclusion* — and §2.1's D1 boundary is unchanged: step 4 is still not here. What the engine now
+> forces is that the state a settlement replaced is kept until the next `tick`; **what it cannot
+> force** is that a caller reverts before ticking again. `docs/decisions/2d-3-notes.md` §9 is the
+> record.
+
 ### 2.2 D2 — determinism in shape by injection: the clock and the reader are arguments, one tick takes one read per path, and identity values come from the process-wide session table
 
 `hint(path, now)` records and never reads. Every hint-driven read happens inside

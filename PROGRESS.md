@@ -8642,6 +8642,138 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — the write ledger and the admission gate are built and every gate is green, but the step review stands at round 3 of an expected five. THE NEXT ACTION IS ROUND 4 OF THE 2d-3 REVIEW, against the round-3 fix.**
+
+**Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1, 2 and 3 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 4's brief is
+written from round 3's fix, exactly as rounds 2 and 3 were written from theirs.
+
+**Where things stand.** `src-tauri/src/ledger.rs` is `WriteLedger`: the consult Q2 record
+`last_app_write[DocumentId] = { workspace_epoch, revision }`, the per-epoch observation-sequence
+allocator, the published-state map that coalesces, and the **commit gate** — a second mutex, distinct
+from the state mutex, held across `save_document` *and* the record by RAII. The intake sits at
+`WorkspaceSession::observing`, which wraps the injected sink in `admitting_sink`; the seam a test
+injects at is therefore `AdmittedSink`/`AdmittedObservation`, one layer out from 2d-2's, and
+`unwatched()` builds *through* `observing` so there is one installation site. `run_one_save`
+delegates to `commit_and_record`; `after_a_save` admits a refresh that disagrees with the
+transaction; `conflict_after_the_lock` records nothing and admits its refresh through the same
+decision. Admitted observations still end at `discarding_sink`, because the queue is 2d-4's. **No
+command, no event, no queue, no wire, no frontend file** — Q3 holds.
+
+**The lock order is `session → gate → state`, everywhere.** The worker takes `gate → state` with no
+session lock; `save_document` never touches the ledger. Nothing holding a ledger lock ever waits for
+the session lock, and that one sentence is the whole deadlock argument.
+
+#### The three review rounds, and why the tail matters more than the head
+
+Each round found **a narrower instance of the finding the round before had just closed** — the same
+shape as 2d-1's and 2d-2's tails, now three-for-three in this step:
+
+1. **Round 1** — two High, one Medium. Commit and record were not atomic with admission; a committed
+   save did not invalidate the path's published state and coalescing returned before clearing the
+   record; and the seam move had **weakened** 2d-2's reopen test, which the neuter run confirmed
+   passed with a deliberately leaked worker.
+2. **Round 2** — one High: the commit gate was acquired only *after* the engine had stabilized an
+   observation, so a save could slip between the stabilization and the decision and have its own
+   write admitted as foreign. It **overturned** the fix round's own §5 item 10, which had recorded
+   that race as unavoidable and "over-reporting only". It is neither.
+3. **Round 3** — two High. `PrecedesACommit` could **swallow a genuine external change permanently**,
+   because `ObservationEngine::tick` installs the stabilized state into `tracked` *before* the ledger
+   decides — demonstrated with *perfect* native delivery, which is what killed the "inherited
+   delivery residue" framing. And the `Instant` implication was unsound at equality: `Instant` is
+   monotonic but **not strictly increasing**, so `>=` did not prove the read followed the record.
+   Round 3 also **cleared** the test the previous round had deleted (its coverage is carried by
+   `no_admission_can_decide_between_a_commit_and_its_record` and
+   `a_different_revision_is_admitted_and_supersedes_the_record`), plus construction sites, the wire
+   boundary, lock order and the merged lookup.
+
+**Round 3's fix made the first core change of this step.** `ObservationEngine` now keeps, for exactly
+one pass, the tracked state each settlement replaced (`Settled { observation, replaced }`, a private
+`undo` map cleared on `tick`'s first line), and `revert_settlement(path, now)` restores it and
+re-hints. `ObservationSink` **answers** `ObservationOutcome`; `watch::deliver` — one function, one
+call site — reverts on `Undecided`, which only `PrecedesACommit` produces. The core learns nothing
+about saves or ledgers, stays Tauri-free, and `docs/decisions/2d-1-notes.md` carries a correction
+block beneath the affected statement rather than a rewrite. Serializing the settling `tick` was
+rejected on a **re-derived** basis, not the inherited cost one: the unit a lock can span is `tick`,
+not one read, so it would hold a ledger lock across every due path's read *and* YAML projection, and
+`WatchSource::read` is an injected trait — caller-supplied code — which destroys the leaf-mutex
+argument outright.
+
+**The fourth narrower instance was found by that fix round in its own new code**, and closed
+structurally: `admitting_sink` had decided twice over one `Admission` (an `if let` for the downstream
+call, a separate `outcome_of` for the engine's answer), which would let a future arm forward a value
+to a consumer *and* have the engine un-conclude it underneath. One exhaustive match now produces
+both, so the arm that forwards is the arm that answers `Decided`.
+
+#### What round 4 must attack
+
+Write the brief from the round-3 fix, and keep the two standing rules: **sweep for the shape, never
+for the words of the closed finding**, and **sweep name positions — headlines, section headings, bold
+ruling lines, first sentences, doc comments, module headers, test names — as a pass distinct from the
+prose sweep.** Specific surfaces:
+
+- **the provisional-settlement rollback**, which is new core machinery: is the `undo` map's one-pass
+  lifetime correct on every path; can a revert race a concurrent hint; does `tick` clearing `undo` on
+  its first line lose an undo a caller still needed; is the re-hint guaranteed to produce a fresh
+  observation *this* time, or is that the round-3 claim again in new words?
+- **`ObservationSink` answering `ObservationOutcome`** — a dropped answer is invisible to every test
+  (§5 item 14), and that is the shape of a check-and-spend whose result is discarded;
+- **the strict `read_after > recorded_at`** proof, rewritten in the module's *stamp* section and §9.2;
+- **the four holes stated open** (§5 items 13, 14, 16, 17) — judge each as honestly bounded or quietly
+  optimistic, the way round 2 judged item 10 and found it wrong on both counts;
+- **the record against the code**, `docs/decisions/2d-3-notes.md` and the correction blocks in
+  `docs/decisions/2d-1-notes.md`. Rounds 1, 2 and 3 each found a false claim in this record.
+
+**Brief the review the way rounds 1–3 were briefed, and this is not optional:** the Codex sandbox
+**blocks FSEvents delivery**, so a delivery-dependent test times out there while the supported host
+passes it repeatedly. Tell the reviewer to work **statically**, never to run `cargo test` or anything
+matching `watch_check::`, and supply the host-measured numbers in the brief. 2d-2's round-1 High was
+sandbox-confounded evidence, and that precedent binds every FSEvents-adjacent review.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-3-ledger.md          — rounds 1–3 verbatim. THE work list for round 4.
+# docs/decisions/2d-3-notes.md               — the record: the decisions, the fix-round sections,
+#   the early-return audit, the per-test audit, and §5's holes stated open
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q2 is the suppression ruling
+#   and carries the truthful sentence; Q7 item 3 is this step's spec; Q1 (with its round-4
+#   correction block) and Q3 (nothing of the wire yet) bind it
+# docs/decisions/2d-1-notes.md               — the engine's contract, plus the two correction
+#   blocks this step added to §2.1
+# docs/decisions/2d-2-notes.md               — §2.1, the lock and join argument this composes with
+```
+
+#### The gate baseline — all measured on this tree by the orchestrator, not by the author
+
+- **`1249 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The Rust delta over 2d-2's 1223 is **+26**. Focused serial
+  `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` is **20/20**
+  and belongs to every future Rust gate run. Clippy `-D warnings` and `cargo fmt --check` clean;
+  `cargo tree -p espansoconfig-core | rg tauri` empty. **The frontend was never touched** across the
+  whole step, so its three numbers are carried, not re-measured.
+- **The scar still binds:** the workspace suite is evidence on a **quiet host only**. A contended run
+  once failed ten `watch_check` bounded-wait timeouts (exit 101) on a tree that passed quiet. Re-run
+  quietly before concluding anything from a timeout.
+
+#### Open items 2d-3 still carries into 2d-4 (stated, not discharged)
+
+- The production `ObservationSink` discards, so a sequence and a publication are spent on a value no
+  present code recovers; those two save-path publications are where consult Q5's *save-origin
+  conflict wins over a native duplicate* must land.
+- `SavedDocument::revision` is a **post-rename read-back**, so a foreign process writing between the
+  rename and that read makes this session record *their* revision as its own (§5 item 15, inherited,
+  not introduced here).
+- A stamp taken too **late** has no test that can fail, and neither has a dropped sink answer.
+- A save-path refresh can be refused by a clock collision; it has no settlement to take back, so it
+  costs one publication and never a write.
+
+---
+
+### ⚠️ HISTORICAL — the 2d-2→2d-3 handoff, superseded by the 2d-3 status above.
+
 ### **STEP 2d-2 IS COMPLETE — native lifecycle and the real-filesystem adapter, closed READY at round 5 of its review. THE NEXT ACTION IS STEP 2d-3 — save composition and the suppression ledger (`run_one_save`, `conflict_after_the_lock`).**
 
 **Where things stand.** The 2d-1 engine now runs behind the open `WorkspaceSession`:
