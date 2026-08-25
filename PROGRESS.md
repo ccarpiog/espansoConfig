@@ -8670,7 +8670,9 @@ the sink after the mutex fix; serial-reaper starvation after the self-join fix; 
 order). One measured scar is recorded and binds gate-taking: **the workspace suite is
 evidence on a quiet host only** — one contended run failed ten `watch_check` bounded-wait
 timeouts (exit 101) on a tree that passed 1223/0 and 18/18 twice quiet
-(`2d-2-notes.md` §4 and §6 round 4).
+(`2d-2-notes.md` §4 and §6 round 4). **The closure commit is `c68f537`** — the lifecycle, the
+integration suite, the core's one `signal_of` change, the record, the five-round review and
+this checkpoint, staged by path; the working tree after it is clean.
 
 #### Read these first, in this order
 
