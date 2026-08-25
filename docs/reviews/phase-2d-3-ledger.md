@@ -249,3 +249,61 @@ NOT READY
 
 Codex session ID: 01a0393a-6baf-7731-b98e-1fc80671c6f8
 Resume in Codex: codex resume 01a0393a-6baf-7731-b98e-1fc80671c6f8
+
+## Round 7 — NOT READY (1 High, 2 Low)
+
+Scoped to round 6's fix. The brief's first and hardest instruction was to **judge the deviation**:
+round 6's High 2 asked that ledger publication be routed through the engine's two-read
+stabilization, and the round-6 fix round adopted the first half of that remedy and **rejected the
+second deliberately**, arguing *publish **and** ask* from consult Q2, Q5 and round 3's
+swallowed-change defect (`2d-3-notes.md` §12.2).
+
+**Round 7 judged the deviation wrong, and the reason is a reading of Q3 the record got backwards.**
+Q3's guarantee is *for each document the frontend acts only on the **highest sequence it has
+accepted***. That forbids a consumer regressing to an older sequence; it does **not** oblige one to
+wait for a sequence that does not exist yet. So a phantom P published at sequence *n* is not made
+harmless by a stabilized Q arriving at *n+1* — a 2d-4 drain between the two legitimately accepts P as
+the highest sequence it has seen, and the concrete cost the reviewer names is a person confirming
+*Reload* against P and **losing their draft**, which Q at *n+1* cannot give back. §5 item 3's
+replacement, written by the round-6 fix round, rests on exactly that false reading. It is the sixth
+consecutive round to find a false claim in this record, and the **second** time item 3 has been wrong.
+
+The two Lows are the class every round of this review has produced: a module headline whose
+"composes with five other things" omits the settlement rollback and is really six, and a §5 item 22
+whose scenario is narrower than the code's — an unchanged owed observation can spend a sequence for a
+path this session **never committed to**, reached through a baseline-established-but-unannounced
+state after a failed conflict refresh.
+
+What round 7 inspected and **cleared**: the worker-before-tail Q→P ordering is real and an owed
+request reaching a live worker does correct it; debt re-insertion in `settle`, rollback re-owing
+through `Undone`/`revert_settlement`, native-hint behaviour across the `schedule_paths`/`HintOrigin`
+split, both `ReObserve` loop arms, baseline retention, admission ordering, epoch replacement, §5 item
+21's replacement bound, and the spawned-worker test's two-arm limitation (§12.7) — all sound.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`9bb4695`: `cargo test --workspace` 1261/0; focused serial `watch_check::` 20/20 (66.60 s); clippy
+`-D warnings` clean; `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri` empty;
+no frontend `src/` path in any of the three 2d-3 commits, so 431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- [commands.rs:2549](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2549), [2d-3-notes.md:749](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:749) — “Publish and ask” does not make the single-read phantom harmless: Q3 restricts the frontend to the highest sequence it has already accepted, not to a future sequence that does not yet exist. Concrete scenario: the app commits A → `after_a_save` reads transient P and publishes it → 2d-4 drains P before the owed observation settles → an open write surface accepts P as its current conflict and the person confirms Reload, discarding their draft → the engine later stabilizes Q and publishes a higher sequence, but Q cannot restore the discarded draft. A missing/stopped watcher makes P permanent instead. This violates Q2’s stable-observation premise and falsifies §5 item 3’s claim that Q3 makes P harmless. Minimal fix: keep the immediate read for cache/conflict construction, but do not place it in the external sequence; publish only the engine-stabilized result, while retaining a separate provisional save-conflict marker for Q5 duplicate suppression.
+
+## Medium
+
+None.
+
+## Low
+
+- [commands.rs:90](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:90) — the module headline says the record composes with five other mechanisms but omits the settlement rollback, so the true count is six: commit gate, watcher stamp, settlement rollback, session-lock ordering, re-observation, and owed debt. A maintainer following this supposedly exhaustive list could remove `revert_settlement` and restore round 3’s lost-observation defect. Minimal fix: change five to six and name the rollback.
+
+- [2d-3-notes.md:969](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:969) — §5 item 22 falsely says an unchanged owed observation costs a sequence only for a path the session committed to. Concrete scenario: the watcher baseline establishes B without announcing it → a stale save conflicts without committing → the conflict refresh fails and requests re-observation → the engine emits `Changed { B → B }` → with no record or publication, the ledger spends a sequence despite this session having committed nothing. Minimal fix: describe the actual cases—baseline-established but unpublished state following a failed conflict refresh or uncertain-write request—and retain the warning that consumers must treat the equality as reaffirmation, not an external change.
+
+I statically inspected the round-6 record, design rulings, debt and rollback machinery, baseline retention, both `ReObserve` loop arms, native-hint routing, save tails, admission ordering, epoch replacement, and the requested name/count positions. The worker-before-tail Q→P ordering is real, and an owed request that reaches a live worker does correct it; debt re-insertion, rollback re-owing, native-hint behavior, item 21’s replacement bound, and the spawned-worker test’s two-arm limitation are sound. No tests, builds, watcher checks, or network access were used.
+
+NOT READY
+
+Codex session ID: 01a03981-7fd6-7351-bb5f-fa8602c3f7b8
+Resume in Codex: codex resume 01a03981-7fd6-7351-bb5f-fa8602c3f7b8

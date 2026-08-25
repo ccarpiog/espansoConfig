@@ -88,10 +88,18 @@
 //! rule here is: six copies drift, and this one drifts **silently**.
 //!
 //! **The record alone does not give that property, and this module composes
-//! with five other things that do** — the commit gate, the watcher's stamp, the
-//! session lock, a re-observation asked of the watcher (the round-5 fix round)
-//! and, since the round-6 fix round, the fact that such a request is an **owed**
-//! observation the engine must answer rather than a hint it may coalesce away.
+//! with six other things that do** — the commit gate, the watcher's stamp, the
+//! **settlement rollback** (the round-3 fix round: a refused reading is answered
+//! by `ObservationEngine::revert_settlement`, without which the engine keeps
+//! believing it announced a state nobody heard and the same bytes re-read
+//! coalesce to nothing forever), the session lock, a re-observation asked of the
+//! watcher (the round-5 fix round) and, since the round-6 fix round, the fact
+//! that such a request is an **owed** observation the engine must answer rather
+//! than a hint it may coalesce away. **The count and the list are re-derived by
+//! counting the list**, which round 7's first Low is: it said five while naming
+//! five and omitting the rollback, and a maintainer reading it as exhaustive
+//! could remove `revert_settlement` and restore round 3's lost-observation
+//! defect.
 //! [`commit_and_record`] holds `crate::ledger`'s
 //! commit gate across the transaction, so no admission can decide between the
 //! rename and the record; and every **watcher** observation carries an instant
@@ -101,7 +109,8 @@
 //! **no** such instant, since the round-4 fix round: they run under the session
 //! lock, which is the lock every producer of a record holds, so their ordering
 //! is program order rather than a clock comparison two adjacent reads could lose
-//! ([`WriteLedger::admit_under_the_session_lock`]).
+//! ([`WriteLedger::mark_under_the_session_lock`],
+//! [`WriteLedger::withhold_under_the_session_lock`]).
 //!
 //! **And where this application has no reading to bring at all, or one it
 //! cannot prove stable**, it asks for one rather than inventing one or leaving
@@ -111,14 +120,24 @@
 //! transaction may have renamed without saying what it wrote (the round-5 fix
 //! round). Two hold a **single** read they act on, where the engine takes two:
 //! [`conflict_after_the_lock`]'s successful refresh and [`after_a_save`]'s
-//! disagreeing one, both of which publish into the ledger, and either of which a
-//! foreign non-atomic write can hand a parseable intermediate that never stably
-//! existed (the round-6 fix round). Each hands the path to
-//! [`crate::watch::ReObserver::re_observe`]. Nothing is published from a read
-//! that did not complete and no record is cleared by one; what a single read
-//! publishes is kept, because the consult requires it and it is the state the
-//! person is shown; and the state that finally reaches the ledger for that path
-//! is the engine's, read twice and stamped.
+//! disagreeing one, either of which a foreign non-atomic write can hand a
+//! parseable intermediate that never stably existed (the round-6 fix round).
+//! Each hands the path to [`crate::watch::ReObserver::re_observe`].
+//!
+//! **No single read of this application's own enters the observation sequence,
+//! since the round-7 fix round.** Nothing is published from a read that did not
+//! complete and no record is cleared by one; and a read that *did* complete is
+//! not published either, because one read is not stability and consult Q3 does
+//! not make a phantom in the sequence harmless — it forbids a consumer
+//! regressing to an older sequence, and obliges none to wait for a later one.
+//! What each single read may do instead is exactly what it can justify:
+//! [`conflict_after_the_lock`]'s **marks** its state for coalescing, because
+//! consult Q5 requires a native duplicate at the same document and revision to
+//! be coalesced and the person has been shown that state in the payload;
+//! [`after_a_save`]'s **withholds** it entirely, because nobody has been shown
+//! it and a marker would coalesce the engine's own later reading of it into
+//! silence. In both cases the state that finally reaches the sequence for that
+//! path is the engine's, read twice and stamped.
 //!
 //! What it licenses is narrower than authorship and is written on
 //! `crate::ledger`: the bytes on disk hash to what this application last
@@ -1468,14 +1487,18 @@ struct OneSave<'a> {
 /// last committed, which proves the text is identical and not who wrote it.
 ///
 /// Both refreshes below are themselves observations of the disk, and both go
-/// through the ledger's **same** decision a native hint does — the same
-/// suppression, supersession, coalescing and sequence allocation — so a later
-/// hint at the state they saw is a duplicate rather than a second report. What
-/// differs is only how each proves *when* its reads happened: a native hint
-/// carries a stamp taken before them, while these two prove it by construction,
-/// because this whole function runs under the session lock and that is the lock
-/// every producer of an app-write record holds
-/// ([`WriteLedger::admit_under_the_session_lock`]). Both run
+/// through the ledger's **same** checks a native hint meets — the same
+/// suppression, the same supersession and the same coalescing. Two things differ,
+/// and each is a property of the door rather than of the caller. How each proves
+/// *when* its reads happened: a native hint carries a stamp taken before them,
+/// while these two prove it by construction, because this whole function runs
+/// under the session lock and that is the lock every producer of an app-write
+/// record holds. And what each may do with a state that survives: **neither may
+/// publish**, since the round-7 fix round, because a single read is not a
+/// stabilized observation — [`conflict_after_the_lock`]'s marks its state for
+/// coalescing ([`WriteLedger::mark_under_the_session_lock`]) and
+/// [`after_a_save`]'s records nothing at all
+/// ([`WriteLedger::withhold_under_the_session_lock`]). Both run
 /// **after** [`commit_and_record`] has returned and released the commit gate,
 /// which is not an incidental ordering: an admission takes that gate, and a
 /// `std::sync::Mutex` is not reentrant.
@@ -1498,22 +1521,26 @@ struct OneSave<'a> {
 /// # A reading this application cannot act on is replaced by one the engine
 /// stabilizes
 ///
-/// This step's **round-5 High**, widened by its **round-6 second** one, and it
-/// applies to **five** arms of this function. Three of them hold no usable
-/// reading at all — the two refreshes that can fail, and the uncertain write
-/// that reads nothing — and two of them hold a reading they act on that is a
-/// **single** read where the engine takes two: `conflict_after_the_lock`'s
-/// successful refresh and [`after_a_save`]'s disagreeing one, both of which
-/// publish into the ledger.
+/// This step's **round-5 High**, widened by its **round-6 second** one and
+/// finished by its **round-7** one, and it applies to **five** arms of this
+/// function. Three of them hold no usable reading at all — the two refreshes
+/// that can fail, and the uncertain write that reads nothing — and two of them
+/// hold a reading they act on that is a **single** read where the engine takes
+/// two: `conflict_after_the_lock`'s successful refresh and [`after_a_save`]'s
+/// disagreeing one.
 ///
 /// **A failed read is not published and clears no app-write record**, because a
 /// single failed read is not a stabilized observation: it would put an `Absent`
 /// or `Unreadable` state into the sequence that never stably existed and, by
 /// clearing the record, make this save's own hints foreign. **A successful one
-/// is published**, because the consult requires it (Q2, Q5) and because it is
-/// the state the person is being shown — but it is not thereby proved stable,
-/// and a foreign non-atomic write can make it an intermediate that never
-/// existed.
+/// is not published either**, since round 7: it is not proved stable, a foreign
+/// non-atomic write can make it an intermediate that never existed, and a
+/// phantom in the sequence is one a 2d-4 drain may act on before anything
+/// corrects it. What each successful read may do is narrower and is decided by
+/// the door it comes through — a coalescing marker for the state the person is
+/// shown in a conflict payload (consult Q5), and nothing at all for the state
+/// nobody is shown (consult Q2, whose *queued as external* is then met by the
+/// engine's stabilized reading rather than by this one).
 ///
 /// Every one of the five therefore calls [`ReObserver::re_observe`]: the path
 /// goes back through the watcher's ordinary two-read pipeline as an **owed**
@@ -2244,15 +2271,15 @@ fn save_one_raw_document(
 /// Phase 2d-3. This path records **no** app write: nothing was written, and an
 /// entry naming the disk's revision would make this application ignore the
 /// external change it has just discovered. The refresh is instead put through
-/// the ledger's ordinary admission, which is why *external rather than self* is
+/// the ledger's ordinary checks, which is why *external rather than self* is
 /// one rule with two callers rather than two rules that agree today — a native
 /// hint stabilizing at the same state afterwards is then a duplicate, not a
-/// second conflict. There is exactly one case in which that admission answers
+/// second conflict. There is exactly one case in which that decision answers
 /// *self-write*: when the disk holds bytes this application itself committed
 /// earlier and the caller's base was older still. Suppressing there is correct
 /// and is the predicate's own limit — byte identity, never authorship.
 ///
-/// The door is [`WriteLedger::admit_under_the_session_lock`], and it takes no
+/// The door is [`WriteLedger::mark_under_the_session_lock`], and it takes no
 /// chronology stamp: this function runs under the session lock, which is the
 /// lock every producer of an app-write record holds, so any record it is decided
 /// against provably precedes the refresh. That is round 4's fix, and what it
@@ -2260,25 +2287,35 @@ fn save_one_raw_document(
 ///
 /// # Both arms ask the watcher, because neither read proves a stable state
 ///
-/// This step's **round-5 High** on the error path, and its **round-6 second
-/// High** on the successful one. A refresh that raises has no state to admit at
-/// all: it is a single read that did not complete, so publishing `Absent` or
-/// `Unreadable` from it would put a state into the sequence that was never
-/// proved stable **and clear the app-write record**. A refresh that *succeeds*
-/// has a state, and it is still **one** read where the engine takes two — so a
-/// foreign non-atomic write in progress can hand it a parseable intermediate
-/// that never stably existed, which this function then publishes as the disk
-/// side of a conflict and into the ledger's coalescing map.
+/// This step's **round-5 High** on the error path, its **round-6 second High**
+/// on the successful one, and its **round-7 High** on what that one was then
+/// allowed to do. A refresh that raises has no state to admit at all: it is a
+/// single read that did not complete, so publishing `Absent` or `Unreadable`
+/// from it would put a state into the sequence that was never proved stable
+/// **and clear the app-write record**. A refresh that *succeeds* has a state,
+/// and it is still **one** read where the engine takes two — so a foreign
+/// non-atomic write in progress can hand it a parseable intermediate that never
+/// stably existed.
 ///
 /// So both arms hand the path to [`ReObserver::re_observe`], which puts it back
 /// through the watcher's ordinary two-read pipeline as an **owed** observation;
 /// whatever stabilizes is decided by the stamped door like any other
-/// observation. What each arm keeps is different and deliberate: the error arm
-/// publishes nothing and clears nothing, while the success arm publishes exactly
-/// what the person is being shown — the consult's Q2 requires that publication,
-/// and Q5 requires it so that a native hint at the same revision is a duplicate
-/// rather than a second conflict. The stabilized reading then arrives at a
-/// **later** sequence and supersedes it, or coalesces into it.
+/// observation, and **that is the only thing this path can put into the
+/// observation sequence**. What each arm records is different and deliberate:
+/// the error arm records nothing and clears nothing, while the success arm
+/// **marks** the state it read as this path's coalescing entry — consult Q5
+/// requires a native duplicate at the same document and revision to be coalesced
+/// rather than raised as a second conflict, and the person has that state
+/// already, in the payload below. Marking spends no sequence, so a state that
+/// never stably existed never reaches a consumer; the stabilized reading is what
+/// does, and it coalesces against the marker when the single read was right.
+///
+/// **Until round 7 the success arm published**, and the argument was that consult
+/// Q3 made the phantom harmless because the stabilized reading arrives at a later
+/// sequence. Q3 rules the opposite way round: it stops a consumer regressing to
+/// an older sequence and obliges none to wait for a newer one, so a drain between
+/// the two accepts the phantom and a person confirming a reload against it loses
+/// a draft nothing can give back.
 ///
 /// The refusal this function returns is unchanged, and the ask cannot change it:
 /// nothing about a conflict payload depends on whether a watcher was listening.
@@ -2318,15 +2355,26 @@ fn conflict_after_the_lock(
     // **No app write is recorded on this path, and that is the load-bearing
     // half of it**: this transaction wrote nothing, so recording the disk's
     // revision would suppress the very external change the watcher exists to
-    // report. What is taken instead is the ordinary admission — the same
-    // decision a native hint gets, so the disk state this payload was built
-    // from is published once and a later hint at it coalesces rather than
-    // producing a second conflict (the consult's Q2).
+    // report. What is taken instead is the ledger's ordinary decision — the same
+    // suppression, the same supersession and the same coalescing a native hint
+    // gets — through the **marking** door.
+    //
+    // **It marks and does not publish, and that is round 7's High.** This is
+    // **one** read where the engine takes two, so a foreign non-atomic write in
+    // progress can hand it a parseable intermediate that never stably existed;
+    // publishing such a state spends a sequence on a phantom that a 2d-4 drain
+    // may legitimately accept before anything corrects it. Consult Q3 does not
+    // make that harmless — it forbids a consumer regressing to an older
+    // sequence, and obliges none to wait for a later one. What Q5 does require
+    // is that a native duplicate at this same document and revision be
+    // *coalesced* rather than raised as a second conflict, and that needs the
+    // coalescing entry alone. So the state is announced here — the person is
+    // being shown it, in the payload built above — and it is announced nowhere
+    // else.
     //
     // Nothing consumes the decision yet: 2d-4's queue is what will turn an
-    // `Admission::Admitted` into a value a window can drain, and until it
-    // exists the publication *is* the effect — one sequence spent, one state
-    // published.
+    // `Admission::Admitted` into a value a window can drain, and until it exists
+    // the marker *is* the effect — no sequence spent, one state announced.
     //
     // **No stamp, and that is the round-4 fix**: this call runs under the
     // session lock, which is the lock every producer of an app-write record
@@ -2336,22 +2384,18 @@ fn conflict_after_the_lock(
     // nothing here could retry.
     let _ = side
         .ledger
-        .admit_under_the_session_lock(path, ObservedState::Content(disk.revision));
-    // **Round 6's second High.** The state just published came from **one**
-    // read, and one read is not stability: a foreign non-atomic write in
-    // progress can present a parseable intermediate that never stably existed,
-    // and nothing else would ever correct it — the refresh *succeeded*, so
-    // until this line no re-observation was asked for, and the native hint that
-    // would carry the writer's final state is one `2d-2-notes.md` §2.3 declines
-    // to guarantee. The path therefore goes to the watcher too, as an owed
-    // observation: whatever it stabilizes to is admitted at a **later**
-    // sequence, and consult Q3's rule — a consumer acts on the highest sequence
-    // it has accepted for a document — is what makes the earlier one harmless.
-    // A stable state equal to what was just published coalesces here, so the
-    // ordinary case adds nothing to the sequence.
+        .mark_under_the_session_lock(path, ObservedState::Content(disk.revision));
+    // **Round 6's second High, and what makes round 7's fix a fix rather than a
+    // silence.** The marker announces nothing to the observation sequence, so
+    // the watcher is what puts this path's state into it: the request is an owed
+    // observation, and whatever the engine's two reads settle on is decided by
+    // the stamped door. Equal to the marker, it coalesces — which is Q5's rule
+    // holding, and the person already has that state. Different from it, it is
+    // published, and the truth enters the sequence while the intermediate never
+    // did.
     //
-    // It is taken **after** the admission, and both ledger guards are already
-    // dropped: `admit_under_the_session_lock` returns a value (`crate::ledger`'s
+    // It is taken **after** the marking, and both ledger guards are already
+    // dropped: `mark_under_the_session_lock` returns a value (`crate::ledger`'s
     // *the gate is a leaf*), so nothing here sends on a channel under a lock.
     let _asked = side.watcher.re_observe(path);
     Ok(SaveResult::Conflict {
@@ -2413,19 +2457,30 @@ fn conflict_after_the_lock(
 /// new revision exists, so there is no new identity to mint — and the caller's
 /// own identity, minted from the revision the file still holds, is still valid.
 ///
-/// # A refresh that disagrees is an external observation, and it is admitted
+/// # A refresh that disagrees is an external observation, and it supersedes the
+/// record
 ///
 /// Phase 2d-3, the consult's Q2. When this re-read finds a revision the
 /// transaction never saw, some other writer replaced the file after it: **the
 /// ledger still records only the revision this application actually
 /// committed** — that record was taken in [`run_one_save`] before this function
 /// ran and is not amended here — and the differing state is put through the
-/// ledger's ordinary admission, exactly as [`conflict_after_the_lock`]'s
+/// ledger's ordinary checks, exactly as [`conflict_after_the_lock`]'s
 /// refresh is. So a post-commit external replacement is **not** suppressed, and
-/// the native hint that follows it coalesces into the state already published.
-/// A committed write is never relabelled a failure by any of this.
+/// the record naming this application's own bytes is cleared, because the file
+/// no longer holds them. A committed write is never relabelled a failure by any
+/// of this.
 ///
-/// The publication is conditional on **disagreement with the revision the
+/// **What that decision does *not* do, since the round-7 fix round, is announce
+/// anything.** It spends no sequence — one read is not stability, and round 7's
+/// High is that a phantom in the sequence is one a consumer can act on — and it
+/// records no coalescing marker either, because nobody has been shown this
+/// state: the answer below is a `Saved`, which carries no disk side, so a marker
+/// would coalesce the engine's own later stabilized reading of the same state
+/// into silence. Consult Q2's *queued as external* is met by that stabilized
+/// reading, asked for in the next section.
+///
+/// The decision is conditional on **disagreement with the revision the
 /// transaction last saw**, and on nothing else. Agreement means either the
 /// bytes this save committed — already recorded, and suppressed by that record
 /// rather than published — or a skipped commit, where the file holds what the
@@ -2440,31 +2495,30 @@ fn conflict_after_the_lock(
 /// no promise from the native backend that it would report the same replacement
 /// (`docs/decisions/2d-2-notes.md` §2.3). The consult requires this observation
 /// to be queued as external, so losing it was losing an external change.
-/// [`WriteLedger::admit_under_the_session_lock`] proves the same ordering from
+/// [`WriteLedger::withhold_under_the_session_lock`] proves the same ordering from
 /// the session lock this function is already inside, and consults no clock.
 ///
-/// # A disagreeing refresh is one read, so it asks for a stabilized one too
+/// # A disagreeing refresh is one read, so the stabilized one is what is queued
 ///
-/// This step's **round-6 second High**. The publication above comes from a
-/// single `Workspace::refresh`, and the engine's own observations are two equal
+/// This step's **round-6 second High** and its **round-7** one. The read above is
+/// a single `Workspace::refresh`, and the engine's own observations are two equal
 /// consecutive reads for a reason: a foreign writer replacing this file
 /// non-atomically can present a parseable intermediate state that never stably
-/// existed. Published, that phantom becomes the last word on the path — it
-/// spends a sequence, it sits in the coalescing map, and because the refresh
-/// *succeeded* nothing here used to ask for anything further, so the writer's
-/// final state entered the sequence only if the native backend delivered a hint
-/// for it, which `docs/decisions/2d-2-notes.md` §2.3 expressly declines to
-/// guarantee.
+/// existed. Published — as it was until round 7 — that phantom becomes the last
+/// word on the path: it spends a sequence and it sits in the coalescing map. The
+/// argument that this was harmless read consult Q3 backwards; Q3 stops a consumer
+/// regressing to an older sequence and obliges none to wait for a newer one, so a
+/// 2d-4 drain between the phantom and its correction accepts the phantom.
 ///
-/// **The publication stays** — the consult requires this observation to be
-/// queued as external (Q2), and Q5 requires the state the person is shown to be
-/// published so that a native hint at the same revision coalesces rather than
-/// raising a second conflict — **and an owed re-observation is asked for beside
-/// it**. The state the engine then stabilizes is admitted at a later sequence
-/// and supersedes the phantom, or coalesces into it when the single read was
-/// right after all. Consult Q3's rule that a consumer acts only on the highest
-/// sequence it has accepted for a document is what makes the earlier value
-/// harmless; `docs/decisions/2d-3-notes.md` §5 item 3 is what remains.
+/// **So the read announces nothing and an owed re-observation is asked for**, and
+/// the state the engine stabilizes is what enters the sequence — which is consult
+/// Q2's *queued as external*, met by a reading that was actually stable. Round 6's
+/// half stands unchanged: because the refresh *succeeded*, nothing here used to
+/// ask for anything further, so the writer's final state entered the sequence only
+/// if the native backend delivered a hint for it, which
+/// `docs/decisions/2d-2-notes.md` §2.3 expressly declines to guarantee. What is
+/// left is a workspace with no watcher to ask, where nothing is announced at all:
+/// `docs/decisions/2d-3-notes.md` §5 items 3 and 19.
 ///
 /// # A refresh that *fails* is handed to the watcher, and admits nothing
 ///
@@ -2545,21 +2599,32 @@ fn after_a_save(
     // answered them equally refused the observation outright: no settlement to
     // revert, no loop to retry it, and no guarantee the native backend would
     // report the same replacement (`2d-2-notes.md` §2.3). That was round 4's
-    // High. See `crate::ledger::WriteLedger::admit_under_the_session_lock`.
+    // High. See `crate::ledger::WriteLedger::withhold_under_the_session_lock`.
     if let Some(revision) = observed.filter(|revision| *revision != saved.revision) {
+        // **Withheld, and that is round 7's High plus the half its remedy did
+        // not name.** This is one read where the engine takes two, so it may not
+        // publish: a phantom in the sequence is a phantom a 2d-4 drain can
+        // accept before anything corrects it. And it may not be *marked* for
+        // coalescing either, because nobody has been shown it — the answer this
+        // function returns is a `Saved`, which carries no disk side — so a
+        // marker would coalesce the engine's own later reading of the same state
+        // into silence and consult Q2's *the differing post-save observation is
+        // queued as external* would be met by nothing at all. Q5's coalescing
+        // rule is about a conflict registered by `conflict_after_the_lock`, and
+        // there is no conflict here.
+        //
+        // What this reading *does* decide is the record, which is the one thing
+        // it can prove: the file does not hold the bytes this save committed, so
+        // the entry saying it does must not go on suppressing somebody else's
+        // later write of exactly those bytes.
         let _ = side
             .ledger
-            .admit_under_the_session_lock(path, ObservedState::Content(revision));
-        // **Round 6's second High**, and the same sentence as
-        // `conflict_after_the_lock`'s: this publication came from **one** read,
-        // and a foreign non-atomic write in progress can present a parseable
-        // intermediate that never stably existed. Because the refresh
-        // *succeeded*, nothing asked for a stabilized reading — so the phantom
-        // was the last word on that path and the writer's final state entered
-        // the sequence only through a native hint `2d-2-notes.md` §2.3 declines
-        // to guarantee. The watcher is asked as well, and whatever its two reads
-        // settle on is admitted at a later sequence, or coalesces into what was
-        // just published when the single read was right after all.
+            .withhold_under_the_session_lock(path, ObservedState::Content(revision));
+        // **Round 6's second High**, and since round 7 it is the *only* thing
+        // that puts this state into the observation sequence. The watcher's two
+        // reads produce a state the stamped door admits and publishes; with no
+        // watcher to ask, nothing here is announced at all, which is
+        // `2d-3-notes.md` §5 item 19 sharpened again rather than a new hole.
         //
         // Both ledger guards are dropped by the line above returning a value, so
         // nothing here sends on a channel under a lock.
@@ -7341,17 +7406,18 @@ mod tests {
         assert_eq!(session.ledger().tally(), LedgerTally::default());
     } // End of function a_refused_save_records_no_app_write()
 
-    /// **A conflict records no app write, and its refresh is admitted as
-    /// external.**
+    /// **A conflict records no app write, and its refresh is marked for
+    /// coalescing rather than published.**
     ///
     /// The sharp defect this exists to catch: were `conflict_after_the_lock` to
     /// record the disk's revision as an app write, the very external change the
     /// watcher exists to report would be suppressed the moment it stabilized.
-    /// So three things are asserted — no record, the disk state published under
-    /// this epoch's sequence allocator, and a second hint at that same state
-    /// coalescing rather than producing a second report.
+    /// So four things are asserted — no record, the disk state announced as this
+    /// path's coalescing entry, **no sequence spent on it** (round 7's High: one
+    /// read is not stability), and a second hint at that same state coalescing
+    /// rather than producing a second report (consult Q5).
     #[test]
-    fn a_conflict_records_no_app_write_and_admits_its_refresh_as_external() {
+    fn a_conflict_records_no_app_write_and_marks_its_refresh_for_coalescing() {
         const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: written elsewhere\n";
         let Opened {
             dir,
@@ -7388,15 +7454,20 @@ mod tests {
             "a conflict wrote nothing, so it records nothing"
         );
         assert_eq!(
-            session.ledger().published_state(&path),
+            session.ledger().announced_state(&path),
             Some(ObservedState::Content(disk_revision)),
-            "the refresh is published as an external observation"
+            "the refresh is announced as this path's coalescing marker"
         );
         let tally = session.ledger().tally();
-        assert_eq!(tally.admitted, 1, "one sequence was spent, {tally:?}");
+        assert_eq!(
+            (tally.admitted, tally.marked),
+            (0, 1),
+            "and announcing it spends no sequence, which is round 7's High, {tally:?}"
+        );
         assert_eq!(tally.suppressed, 0, "nothing here was this app's own write");
         // …and a native hint stabilizing at that same state is a duplicate of
-        // what the conflict already published, not a second conflict.
+        // what the conflict already showed the person, not a second conflict —
+        // consult Q5, which is the whole reason the marker exists.
         assert_eq!(
             session.ledger().admit(
                 session.ledger().current_epoch(),
@@ -7409,7 +7480,7 @@ mod tests {
             ),
             Admission::Duplicate
         );
-    } // End of function a_conflict_records_no_app_write_and_admits_its_refresh_as_external()
+    } // End of function a_conflict_records_no_app_write_and_marks_its_refresh_for_coalescing()
 
     /// A conflict against bytes **this application itself committed** is
     /// suppressed rather than published, and the record survives it.
@@ -7462,7 +7533,7 @@ mod tests {
             "suppression retains the record"
         );
         assert_eq!(
-            session.ledger().published_state(&path),
+            session.ledger().announced_state(&path),
             None,
             "nothing external was observed, so nothing was published"
         );
@@ -7551,10 +7622,17 @@ mod tests {
     /// `a_committed_save_whose_re_read_fails_names_nothing_and_stays_saved` does.
     /// Three claims: the answer still says committed and still names the
     /// revision this application wrote; the ledger never records the **external**
-    /// revision as an app write; and the differing state is admitted rather than
-    /// suppressed, which is what leaves the watcher free to report it.
+    /// revision as an app write; and the differing state supersedes the record
+    /// rather than being suppressed by it, which is what leaves the watcher free
+    /// to report it.
+    ///
+    /// **What the differing state does *not* do, since the round-7 fix round, is
+    /// get announced by this tail at all** — no sequence and no coalescing entry.
+    /// Nobody was shown it, so an entry would coalesce the engine's own
+    /// stabilized reading of the same state into silence; the ask on the line
+    /// after it is what queues that reading as external (consult Q2).
     #[test]
-    fn a_post_commit_external_replacement_is_admitted_and_never_recorded_as_ours() {
+    fn a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours() {
         use espansoconfig_core::persist::SavedDocument;
         use espansoconfig_core::workspace::Workspace;
 
@@ -7629,12 +7707,17 @@ mod tests {
 
         let external = ContentRevision::of_bytes(EXTERNAL.as_bytes());
         assert_eq!(
-            ledger.published_state(&path),
-            Some(ObservedState::Content(external)),
-            "the differing refresh is admitted as an external observation"
+            ledger.announced_state(&path),
+            None,
+            "the differing refresh announces nothing: one read is not stability, and \
+             nobody was shown this state, so nothing may coalesce against it"
         );
         let tally = ledger.tally();
-        assert_eq!(tally.admitted, 1);
+        assert_eq!(
+            (tally.admitted, tally.marked, tally.withheld),
+            (0, 0, 1),
+            "it is withheld, and the engine's stabilized reading is what will be queued, {tally:?}"
+        );
         assert_eq!(
             tally.suppressed, 0,
             "an external replacement of a committed write is not suppressed"
@@ -7652,10 +7735,10 @@ mod tests {
             None,
             "and the accepted external state supersedes the record of ours"
         );
-    } // End of function a_post_commit_external_replacement_is_admitted_and_never_recorded_as_ours()
+    } // End of function a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours()
 
-    /// **A disagreeing post-save refresh is admitted even when no clock could
-    /// place it after the record.**
+    /// **A disagreeing post-save refresh is never refused, even when no clock
+    /// could place it after the record.**
     ///
     /// Round 4's High, driven rather than reviewed. Until the round-4 fix,
     /// `after_a_save` stamped `Instant::now()` a few lines after its own save had
@@ -7674,8 +7757,16 @@ mod tests {
     /// through `WriteLedger::recorded_at`, taken from the other end. The instant
     /// is put an hour ahead: any build that still consulted a stamp here refuses
     /// deterministically, and the shipped one cannot notice.
+    ///
+    /// **What "not refused" means here changed at round 7 and the claim did
+    /// not.** A refusal ([`Admission::PrecedesACommit`]) retains the app-write
+    /// record and decides nothing; what this door does instead is supersede that
+    /// record, which is exactly what a reading placed after the commit is
+    /// entitled to do. It announces nothing either way — see the withholding
+    /// door — so the observable difference between refused and not refused is
+    /// the record and the tally, and both are asserted.
     #[test]
-    fn a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record() {
+    fn a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record() {
         use espansoconfig_core::persist::SavedDocument;
         use espansoconfig_core::workspace::Workspace;
         use std::time::Duration;
@@ -7732,14 +7823,11 @@ mod tests {
             other => panic!("a committed save is answered as Saved, got {other:?}"),
         } // End of the match over the tail's answer
 
-        let external = ContentRevision::of_bytes(EXTERNAL.as_bytes());
-        assert_eq!(
-            ledger.published_state(&path),
-            Some(ObservedState::Content(external)),
-            "the differing refresh is queued as external whatever the clock says"
-        );
         let tally = ledger.tally();
-        assert_eq!(tally.admitted, 1, "one sequence was spent, {tally:?}");
+        assert_eq!(
+            tally.withheld, 1,
+            "the differing refresh reached the door's own arm whatever the clock says, {tally:?}"
+        );
         assert_eq!(
             tally.preceded_a_commit, 0,
             "and no chronology refusal was reachable here, {tally:?}"
@@ -7749,7 +7837,7 @@ mod tests {
             None,
             "the accepted external state supersedes the record of ours"
         );
-    } // End of function a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record()
+    } // End of function a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record()
 
     /// **A post-save refresh that fails asks the watcher for a second look, and
     /// publishes nothing from the read that failed.**
@@ -7832,7 +7920,7 @@ mod tests {
             "the path this application could not read is handed to the watcher"
         );
         assert_eq!(
-            ledger.published_state(&path),
+            ledger.announced_state(&path),
             None,
             "and nothing is published from the read that failed"
         );
@@ -7906,7 +7994,7 @@ mod tests {
             vec![path.clone()],
             "and the path is handed to the watcher rather than left to a hint nobody promised"
         );
-        assert_eq!(ledger.published_state(&path), None, "nothing is published");
+        assert_eq!(ledger.announced_state(&path), None, "nothing is published");
         assert_eq!(
             ledger.recorded_write(id),
             None,
@@ -7957,23 +8045,28 @@ mod tests {
             .expect("the evicted entry reparses on the next read");
     } // End of function an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation()
 
-    /// **A disagreeing post-save refresh publishes what it read *and* asks for a
+    /// **A disagreeing post-save refresh announces nothing at all, and asks for a
     /// reading the engine stabilizes.**
     ///
-    /// Round 6's second High, on `after_a_save`. The publication is required —
-    /// the consult wants a differing post-save observation queued as external
-    /// (Q2) — and it comes from **one** read, so a foreign non-atomic write in
-    /// progress can make it an intermediate state that never stably existed.
-    /// Because the refresh *succeeded*, nothing used to ask for anything
-    /// further, and the writer's final state entered the sequence only through a
-    /// native hint `docs/decisions/2d-2-notes.md` §2.3 declines to guarantee.
+    /// Round 6's second High on `after_a_save`, as round 7 finished it. The read
+    /// is **one** read, so a foreign non-atomic write in progress can make it an
+    /// intermediate state that never stably existed; because the refresh
+    /// *succeeded*, nothing used to ask for anything further, and the writer's
+    /// final state entered the sequence only through a native hint
+    /// `docs/decisions/2d-2-notes.md` §2.3 declines to guarantee.
     ///
-    /// **Both halves are asserted**, because either alone would be the wrong
-    /// fix: dropping the publication would leave the person's conflict payload
-    /// unqueued and let a native hint raise a second report of it, and asking
-    /// without publishing would put the same hole back.
+    /// **Three halves are asserted, and each rules out a different wrong fix.**
+    /// No sequence is spent (round 7: a phantom a 2d-4 drain can accept is not
+    /// made harmless by a later correction, because consult Q3 forbids
+    /// *regressing* to an older sequence and obliges nobody to wait for a newer
+    /// one). No coalescing marker is left either — the assertion that the
+    /// announced state is `None` is the one that separates this tail from
+    /// `conflict_after_the_lock`'s, because a marker here would coalesce the
+    /// engine's own stabilized reading of the same state and consult Q2's
+    /// *queued as external* would be met by nothing. And the ask happens, which
+    /// is what makes the withholding a deferral rather than a silence.
     #[test]
-    fn a_disagreeing_post_save_refresh_publishes_and_still_asks_for_a_stabilized_reading() {
+    fn a_disagreeing_post_save_refresh_announces_nothing_and_asks_for_a_stabilized_reading() {
         use espansoconfig_core::persist::SavedDocument;
         use espansoconfig_core::workspace::Workspace;
 
@@ -8030,32 +8123,56 @@ mod tests {
         } // End of the match over the tail's answer
 
         assert_eq!(
-            ledger.published_state(&path),
-            Some(ObservedState::Content(ContentRevision::of_bytes(
-                INTERMEDIATE.as_bytes()
-            ))),
-            "the differing refresh is still queued as external, as consult Q2 requires"
+            ledger.announced_state(&path),
+            None,
+            "nothing is announced for this path: no sequence, and no coalescing entry either"
+        );
+        let tally = ledger.tally();
+        assert_eq!(
+            (tally.admitted, tally.marked, tally.withheld),
+            (0, 0, 1),
+            "the one read is withheld, which is round 7's High, {tally:?}"
         );
         assert_eq!(
             inbox.re_observations(),
             vec![path.clone()],
             "and the path is handed to the watcher, because one read is not stability"
         );
+        // The half that proves the withholding is a deferral: the state the
+        // engine will settle on is not pre-coalesced away. Nothing has announced
+        // this path, so a stabilized reading of exactly the state the single read
+        // saw is still queued as external — consult Q2, met by a reading that was
+        // actually stable.
+        assert_eq!(
+            ledger.admit(
+                ledger.current_epoch(),
+                &path,
+                ObservedState::Content(ContentRevision::of_bytes(INTERMEDIATE.as_bytes())),
+                Instant::now(),
+            ),
+            Admission::Admitted {
+                sequence: crate::ledger::FIRST_OBSERVATION_SEQUENCE
+            },
+            "a marker here would have swallowed this, which is why there is none"
+        );
         assert_eq!(
             ledger.recorded_write(id),
             None,
             "the accepted state supersedes the record, unchanged by this round"
         );
-    } // End of function a_disagreeing_post_save_refresh_publishes_and_still_asks_for_a_stabilized_reading()
+    } // End of function a_disagreeing_post_save_refresh_announces_nothing_and_asks_for_a_stabilized_reading()
 
-    /// **A conflict refresh publishes its disk side *and* asks for a reading the
-    /// engine stabilizes.**
+    /// **A conflict refresh marks its disk side without spending a sequence, and
+    /// asks for a reading the engine stabilizes.**
     ///
-    /// Round 6's second High on its other arm. The publication is what makes a
-    /// later native hint at the same revision a duplicate rather than a second
-    /// conflict (consult Q5), and it is still one read.
+    /// Round 6's second High on its other arm, as round 7 finished it. The
+    /// coalescing entry is what makes a later native hint at the same revision a
+    /// duplicate rather than a second conflict (consult Q5) — and that is all Q5
+    /// asks for. The sequence is what round 7 took away: the same single read can
+    /// be an intermediate of somebody else's non-atomic write, and a phantom in
+    /// the sequence is one a 2d-4 drain can act on.
     #[test]
-    fn a_conflict_refresh_publishes_its_disk_side_and_still_asks_for_a_stabilized_reading() {
+    fn a_conflict_refresh_marks_its_disk_side_and_still_asks_for_a_stabilized_reading() {
         use espansoconfig_core::workspace::Workspace;
 
         const INTERMEDIATE: &str = "matches:\n  - trigger: ':theirs'\n";
@@ -8101,11 +8218,17 @@ mod tests {
         } // End of the match over the tail's answer
 
         assert_eq!(
-            ledger.published_state(&path),
+            ledger.announced_state(&path),
             Some(ObservedState::Content(ContentRevision::of_bytes(
                 INTERMEDIATE.as_bytes()
             ))),
-            "the disk side is still published once, as consult Q2 and Q5 require"
+            "the disk side is announced once, so a native duplicate at it coalesces (Q5)"
+        );
+        let tally = ledger.tally();
+        assert_eq!(
+            (tally.admitted, tally.marked),
+            (0, 1),
+            "and no sequence is spent on a single read, which is round 7's High, {tally:?}"
         );
         assert_eq!(
             inbox.re_observations(),
@@ -8117,5 +8240,5 @@ mod tests {
             None,
             "a conflict records no app write, unchanged by this round"
         );
-    } // End of function a_conflict_refresh_publishes_its_disk_side_and_still_asks_for_a_stabilized_reading()
+    } // End of function a_conflict_refresh_marks_its_disk_side_and_still_asks_for_a_stabilized_reading()
 }

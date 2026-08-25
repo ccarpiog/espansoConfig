@@ -49,12 +49,13 @@
 //! per-document app-write record and the admission gate the session installs
 //! between every watcher and its downstream sink, so an observation of bytes
 //! this application itself committed is suppressed, a repeat of an already
-//! published state is coalesced, a replaced epoch's observation is discarded,
+//! announced state is coalesced, a replaced epoch's observation is discarded,
 //! and everything admitted is numbered. The record is written in one place —
 //! `commands::commit_and_record`, the window `run_one_save` runs its
 //! transaction in, for a committed save and for nothing else — and the two
 //! refreshes on the save path (`after_a_save`'s and `conflict_after_the_lock`'s)
-//! go through the same gate a native hint does. **Six** things together make a
+//! go through the same checks a native hint meets, through doors of their own
+//! that cannot spend a sequence. **Six** things together make a
 //! save's own rename un-reportable as somebody else's without losing anybody
 //! else's write: a **commit gate** distinct from the ledger's state, which makes
 //! the transaction and its record one window no admission can *decide* inside; a
@@ -85,12 +86,18 @@
 //! the read that did not happen**: the path is handed back to the watcher
 //! (`watch::ReObserver`), whose ordinary two reads produce the state and whose
 //! stamp places it — this step's round-5 High, which was round 4's exposure
-//! reached through an error arm. **Where such a refresh *succeeds*, what it
-//! publishes is kept and a stabilized reading is asked for beside it**: one read
-//! can be an intermediate state of somebody else's non-atomic write, so the
-//! state the engine settles on lands at a later sequence and supersedes it —
-//! this step's round-6 second High. What the gate admits still reaches
-//! a sink that discards it, until 2d-4.
+//! reached through an error arm. **Where such a refresh *succeeds*, nothing
+//! enters the observation sequence from it either, and a stabilized reading is
+//! asked for instead**: one read can be an intermediate state of somebody else's
+//! non-atomic write, and publishing one spends a sequence on a state that never
+//! stably existed — this step's round-6 second High and its round-7 one. What
+//! each successful single read may do is what it can justify and no more:
+//! `conflict_after_the_lock`'s **marks** its state so a native duplicate at it
+//! coalesces rather than raising a second conflict (the consult's Q5, and the
+//! person has been shown that state in the payload), while `after_a_save`'s
+//! records nothing at all, because nobody has been shown it and a marker would
+//! coalesce the engine's own later reading of it into silence. What the gate
+//! admits still reaches a sink that discards it, until 2d-4.
 
 #![deny(missing_docs)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
