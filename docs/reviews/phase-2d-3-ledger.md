@@ -307,3 +307,68 @@ NOT READY
 
 Codex session ID: 01a03981-7fd6-7351-bb5f-fa8602c3f7b8
 Resume in Codex: codex resume 01a03981-7fd6-7351-bb5f-fa8602c3f7b8
+
+---
+
+## Round 8 — NOT READY (1 High, 2 Low)
+
+Scoped to round 7's fix — the split of one admission door into three. The brief's first instruction
+was to judge the fix round's own deliberate deviation (the third door: `after_a_save`'s disagreeing
+arm *withholds* rather than *marks*), and its second was to ask whether `decide`'s **shared** steps
+1–4 still mean the same thing for a door that will not announce.
+
+**The deviation was cleared and the shared steps were not.** Round 8 is the first round of this
+review since round 6 whose High is a defect in **behaviour** rather than a sentence in the record,
+and it is in step 2 — `self_write_suppresses` — which the brief pointed at only obliquely by naming
+step 4's `Duplicate`. The reviewer cleared `Duplicate` explicitly and found the same shape one step
+higher: **suppression runs before the door is consulted, so a stale app-write record can make a
+serialized save-tail reading answer `SelfWrite`** — retaining the record, announcing nothing and
+marking nothing — even though that tail has independently proved the reading differs from the
+transaction it just ran. The reachable path needs no watcher race: `reload_document` accepts a
+foreign revision into the workspace **without touching the ledger**, and a save that returns
+`committed: false` records nothing, so the previous record stands while the workspace has moved on.
+On the marking door that costs consult Q5's coalescing marker, which is what stops a native duplicate
+raising a **second** conflict at 2d-5; on the withholding door the owed stabilized reading meets the
+same retained record and the differing post-save external observation never enters the sequence at
+all.
+
+The first Low is the record following the behaviour: §13 predicts `Marked` / `Withheld`, record
+removal and a later publication for a case where the code answers `SelfWrite`, retains the record and
+suppresses the owed observation. The second is the **eighth consecutive name-position miss** — the
+`published` → `announced` sweep §13.7 claims complete still leaves six present-tense positions
+calling the map a "published-state map" or "already published state", in two type headlines, the
+tally and session-field documentation, the epoch-discard prose and the sink documentation.
+
+What round 8 inspected and **cleared**: the marker/withholding asymmetry itself; `Duplicate` before
+the withholding arm when an earlier announcement genuinely exists; a marker overwriting a newer
+publication as over-reporting rather than silence; marker invalidation on commit; the explicitly
+recorded no-watcher trade; and the absence of any core, wire, queue, event, command or frontend scope
+creep.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`5ad461b`: `cargo test --workspace` 1262/0; focused serial `watch_check::` 20/20 (69.27 s); clippy
+`-D warnings` clean; `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri` empty;
+no frontend `src/` path in any 2d-3 commit, so 431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- [ledger.rs:1385](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1385), [commands.rs:2603](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2603), [commands.rs:733](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:733) — Behaviour: the shared suppression step can prevent a serialized save-tail reading from superseding a stale record even though that tail has independently proved the reading differs from the current transaction. Concrete scenario: the app commits A and records A → the watcher misses an external B → `reload_document` accepts B into the workspace without touching the ledger → an unchanged save of B returns `committed: false`, so no new record replaces A → an external writer restores A before `after_a_save` refreshes → the refresh observes A ≠ saved B and enters the withholding door → `decide` answers `SelfWrite` before supersession, retains record A, and the owed stabilized A is suppressed by the same record, so this differing post-save external observation never enters the sequence. The analogous stale-record shape can make the marking door answer `SelfWrite` instead of installing its Q5 marker. Minimal fix: make suppression door-specific: a serialized marker/withholding reading is already classified by its save-tail context and must supersede any prior record before marking or withholding; retain `SelfWrite` suppression for the stamped watcher door. Add regressions with `record A → explicitly accept B → serialized read A`, requiring `Marked`/`Withheld`, record removal, and—after withholding—a stamped A admission.
+
+## Medium
+
+None.
+
+## Low
+
+- [2d-3-notes.md:3456](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3456), [2d-3-notes.md:3600](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3600), [2d-3-notes.md:3715](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3715) — Record: §13 falsely claims the serialized doors respectively answer `Marked`/`Withheld`, that every disagreeing post-save read clears its record, and that withholding ensures the stabilized reading is queued, although the shared `SelfWrite` return can do none of those things. In the A → accepted B → restored A scenario above, the record predicts `Withheld`, record removal, and a later publication, while the code answers `SelfWrite`, retains A, and suppresses the owed observation. Minimal fix: after correcting the behaviour, amend §2.6, §13.1, §13.4, §13.6, and the evidence claims to state which checks are actually door-specific and add the stale-record case to the evidence.
+
+- [ledger.rs:592](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:592), [ledger.rs:636](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:636), [commands.rs:335](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:335), [commands.rs:398](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:398), [commands.rs:527](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:527), [2d-3-notes.md:3761](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3761) — Record/documentation: the `published` → `announced` name-position sweep is incomplete, despite §13.7 claiming the relevant present-tense positions were amended. A marker can occupy the map without any publication, yet current type headlines, tally documentation, session-field documentation, epoch-discard prose, and sink documentation still call it a “published-state map” or “already published state”; a maintainer following those contracts could treat every coalesced entry as sequence-backed or omit markers from invalidation. Minimal fix: change these present-tense positions and corresponding assertion messages to “announced,” reserving “published” for cases known to have spent a sequence.
+
+I statically inspected the seven prior rounds, Q2/Q3/Q5/Q7, all three doors and `decide`’s ordering, both save tails, ledger invalidation, the watcher/debt contracts, §5 items 3/19/21/22, §13, lock order, scope, counts, names, and assertions. I cleared the marker/withholding asymmetry itself, `Duplicate` before the withholding arm when an earlier announcement genuinely exists, marker-overwriting-publication as over-reporting rather than silence, marker invalidation on commit, the explicitly recorded no-watcher trade, and the absence of core/Tauri, wire, queue, event, command, or frontend scope creep. No tests, builds, watcher checks, or network access were used.
+
+NOT READY
+
+Codex session ID: 01a039be-9574-71f3-8462-19378c31f064
+Resume in Codex: codex resume 01a039be-9574-71f3-8462-19378c31f064

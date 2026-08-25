@@ -54,8 +54,11 @@
 //! `commands::commit_and_record`, the window `run_one_save` runs its
 //! transaction in, for a committed save and for nothing else — and the two
 //! refreshes on the save path (`after_a_save`'s and `conflict_after_the_lock`'s)
-//! go through the same checks a native hint meets, through doors of their own
-//! that cannot spend a sequence. **Six** things together make a
+//! go through the same coalescing and the same supersession a native hint meets,
+//! through doors of their own that cannot spend a sequence and are asked
+//! **neither** retaining check: not the chronology one, because they read no
+//! clock, and not the suppression one, because a native hint is exactly what
+//! they are not. **Six** things together make a
 //! save's own rename un-reportable as somebody else's without losing anybody
 //! else's write: a **commit gate** distinct from the ledger's state, which makes
 //! the transaction and its record one window no admission can *decide* inside; a

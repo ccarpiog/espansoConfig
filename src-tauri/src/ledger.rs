@@ -312,6 +312,75 @@
 //! workspace got instead, before round 7, was a single read that no second read
 //! ever confirmed and that nothing could correct.
 //!
+//! # Suppression is the stamped door's question, because only a publication can
+//! misreport
+//!
+//! This step's **round-8 High**, and it is the round-7 split finished. Until
+//! that round every door was asked every check, which read as symmetry and was
+//! really a shared step meaning three different things. Suppression exists for
+//! one purpose, stated by consult Q2 in the same breath as the rule itself:
+//! *keep a matching entry long enough to absorb the several native
+//! notifications one atomic replacement may generate*. A **native
+//! notification** arrives through exactly one door — the watcher's stamped
+//! one — so on the other two the check has no work to do and only harm to do.
+//!
+//! **The harm is a stale record, and it needs no race to reach.** The record
+//! says *the last revision this application committed for this path*, and
+//! nothing outside this ledger keeps it describing what the session now
+//! believes: `crate::commands::reload_document` accepts a foreign revision into
+//! the workspace and touches the ledger not at all, and a save returning
+//! `committed: false` records nothing, so the previous entry stands. A save tail
+//! that then reads exactly those recorded bytes answered `SelfWrite` — retaining
+//! the record, announcing nothing, marking nothing — although that tail had
+//! independently established that its reading differs from the transaction it
+//! just ran. What that cost was **both** halves of round 7's split: the marking
+//! door lost the coalescing entry consult Q5 requires, so a native duplicate
+//! would raise a second conflict at 2d-5, and the withholding door left the
+//! record standing, so the owed stabilized reading it asks for in the same
+//! breath met that same record and was suppressed too — consult Q2's *the
+//! differing post-save observation is queued as external* met by nothing at all,
+//! which is the swallowed change the withholding door exists to prevent, reached
+//! through the check above it.
+//!
+//! **Why the narrowing is safe rather than merely useful.** The mistake
+//! suppression prevents is *reporting this application's own write as somebody
+//! else's* — the consult's Q8, and reporting is what a **publication** does.
+//! Since round 7 neither serialized door publishes, so neither can make that
+//! mistake whatever it decides: the marking door announces to the coalescing map
+//! alone and the withholding door records nothing. And **where a serialized
+//! reading equals the entry it meets, that entry was never taken by the running
+//! transaction**: `conflict_after_the_lock` runs where the transaction was
+//! refused, which records nothing, and `after_a_save`
+//! reaches its door only where the refresh **disagrees** with the revision its
+//! transaction last saw, which no record of that transaction can equal. So the
+//! entry a `SelfWrite` used to protect on these doors was always an earlier
+//! save's, and never the one the running save had just taken.
+//!
+//! **What it costs, said in the same place**, because clearing a record whose
+//! bytes are still on disk gives up two things:
+//!
+//! - **the suppression of that write's own pending hints.** On the marking door
+//!   the marker takes the job over **while it stands**: the state is in
+//!   [`LedgerState::announced`], so a hint stabilizing at it answers
+//!   [`Admission::Duplicate`] instead of [`Admission::SelfWrite`] — a different
+//!   counter, the same silence. What removes a marker is a committed app write
+//!   or a differing announcement, and after either the chronology check is what
+//!   places an older hint: refused if its reads preceded the newer record, and
+//!   otherwise describing a disk somebody wrote those bytes back to. On the
+//!   withholding door nothing takes it over, and such a hint is **published**.
+//!   That is deliberate and is the direction this module takes everywhere:
+//!   announcing a state the disk demonstrably holds is over-reporting, where the
+//!   alternative is silence about an external change. The withholding door is
+//!   reached only where an external write landed between a save's locked read
+//!   and its read-back, so the state announced is one somebody else wrote;
+//! - **the chronology anchor for readings older than that record.** Step 1
+//!   refuses only while an entry stands, so once any step-3 clearing happens a
+//!   reading stamped before the record is publishable. That is **not new** —
+//!   supersession has cleared the anchor on every accepted differing state since
+//!   this module was written, which is the ordinary conflict — and round 8
+//!   widens the inputs that reach it by one class rather than adding a class.
+//!   `docs/decisions/2d-3-notes.md` §5 item 23 is the standing statement of it.
+//!
 //! # The gate is a leaf, and that is load-bearing
 //!
 //! [`admitting_sink`] wraps the downstream sink: it takes one decision under
@@ -442,6 +511,15 @@ pub enum Admission {
     /// retain one — [`Admission::PrecedesACommit`] is the other, and it was
     /// added by the round-2 fix round — and the only one of those two that
     /// makes a claim about the bytes: see [`decide`].
+    ///
+    /// **Only [`WriteLedger::admit`] can answer it**, since the round-8 fix
+    /// round, and for the same shape of reason [`Admission::PrecedesACommit`]
+    /// is that door's alone: the several hints this arm exists to absorb are
+    /// native ones, and a native hint has exactly one door. A serialized
+    /// save-tail reading of the recorded bytes is not one of them, and
+    /// answering `SelfWrite` to it withheld the marker consult Q5 needs and
+    /// kept a record that then suppressed the owed stabilized reading. See this
+    /// module's *suppression is the stamped door's* section.
     SelfWrite,
     /// Coalesced: this path's last announced state is already exactly this
     /// state, so a consumer that acted on the earlier one has nothing new to act
@@ -455,9 +533,10 @@ pub enum Admission {
     /// are one map (see [`LedgerState::announced`]).
     ///
     /// Any app-write record for that path is **cleared** on the way here, like
-    /// every arm below the two retaining checks — reaching this one at all
-    /// means the reads are placed after this application's last commit at that
-    /// path and the bytes are not the ones it committed there.
+    /// every arm below the retaining checks — which for a *stamped* reading
+    /// means its reads are placed after this application's last commit at that
+    /// path and the bytes are not the ones it committed there, and for a
+    /// serialized one means [`decide`]'s step 3 second bullet.
     Duplicate,
     /// Refused: this epoch has spent every sequence `u64` can carry. Terminal
     /// until the next workspace open, because an observation that cannot be
@@ -496,8 +575,10 @@ pub enum Admission {
     /// state to be in the coalescing map. Marking is exactly that half and no
     /// more.
     ///
-    /// Like every arm below the two retaining checks it **clears** any app-write
-    /// record for the path.
+    /// Like every arm below the retaining checks it **clears** any app-write
+    /// record for the path, and since the round-8 fix round it reaches a record
+    /// naming the observed bytes too: neither retaining check is asked of this
+    /// arm's door at all.
     Marked,
     /// Withheld: neither published nor marked, and nothing about this state was
     /// recorded anywhere.
@@ -510,11 +591,14 @@ pub enum Admission {
     /// state a `Duplicate` and consult Q2's *the differing post-save observation
     /// is queued as external* would be met by nothing at all. What this reading
     /// is allowed to decide is the **record** and only the record: the file does
-    /// not hold what this application committed, so the entry saying it does
-    /// must go.
+    /// not hold the revision the transaction last saw, so the entry for that
+    /// path — this save's own, or an earlier save's where this one committed
+    /// nothing — has stopped describing what any consumer should decide on.
     ///
-    /// Like every arm below the two retaining checks it **clears** any app-write
-    /// record for the path — which is the whole of its effect.
+    /// Like every arm below the retaining checks it **clears** any app-write
+    /// record for the path — which is the whole of its effect, and since the
+    /// round-8 fix round it reaches a record naming the observed bytes too, not
+    /// only one naming different ones.
     Withheld,
 }
 
@@ -588,8 +672,16 @@ pub struct LedgerTally {
     /// Observations admitted and numbered.
     pub admitted: u64,
     /// Observations suppressed as this application's own committed bytes.
+    ///
+    /// **Only [`WriteLedger::admit`] can move it**, since the round-8 fix
+    /// round: the several native hints one atomic replacement generates are
+    /// what this decision absorbs, and they all arrive through the stamped
+    /// door. A serialized save-tail reading is never counted here, whatever it
+    /// read — see [`Admission::SelfWrite`].
     pub suppressed: u64,
-    /// Observations coalesced into the state already published for their path.
+    /// Observations coalesced into the state already **announced** for their
+    /// path — by a publication or by a marker, which [`Admission::Duplicate`]
+    /// deliberately cannot tell apart.
     pub coalesced: u64,
     /// Observations discarded for carrying a replaced workspace epoch.
     pub stale_epoch: u64,
@@ -633,7 +725,7 @@ pub struct LedgerTally {
     pub withheld: u64,
 }
 
-/// The per-document app-write record, the published-state map and the
+/// The per-document app-write record, the announced-state map and the
 /// per-epoch sequence allocator, behind two leaf mutexes.
 ///
 /// **Beside the open session, never in core global state and never in the
@@ -919,8 +1011,25 @@ impl WriteLedger {
     } // End of function admit()
 
     /// The decision for one single read this session took and **showed to the
-    /// person**: it is checked like any other reading and, if it survives, it is
-    /// recorded as the path's coalescing marker rather than published.
+    /// person**: it is checked against this path's announced state and, if it
+    /// survives, it supersedes the app-write record and is recorded as the
+    /// path's coalescing marker rather than published.
+    ///
+    /// **Two of [`decide`]'s five steps are not asked of it**, and each has its
+    /// own round: chronology, because it read no clock (round 4), and
+    /// suppression, because it is not one of the native hints a commit generates
+    /// (round 8). The consequence of the second is the one to state here: a
+    /// reading that finds **exactly** the recorded bytes now clears the record
+    /// and marks, where it used to answer [`Admission::SelfWrite`] and do
+    /// neither. What that gives up is the suppression of that write's own
+    /// pending hints — and the marker takes the job over **while it stands**,
+    /// since a hint stabilizing at the marked state answers
+    /// [`Admission::Duplicate`], which is the same silence through a different
+    /// counter; see this module's *suppression is the stamped door's* section
+    /// for what happens after a later commit or announcement removes it. What it buys is consult
+    /// Q5's coalescing entry in the one case a stale record could withhold it,
+    /// and the removal of an entry that would otherwise suppress the owed
+    /// stabilized reading this caller asks for in the same breath.
     ///
     /// `crate::commands::conflict_after_the_lock`'s refresh, and it has no other
     /// caller. That function reads the disk once to build the disk side of a
@@ -1007,8 +1116,23 @@ impl WriteLedger {
     } // End of function mark_under_the_session_lock()
 
     /// The decision for one single read this session took and **showed to
-    /// nobody**: it is checked like any other reading and, if it survives, it
-    /// supersedes the path's app-write record and is recorded nowhere else.
+    /// nobody**: it is checked against this path's announced state and, if it
+    /// survives, it supersedes the path's app-write record and is recorded
+    /// nowhere else.
+    ///
+    /// **The same two steps are not asked of it** as of
+    /// [`WriteLedger::mark_under_the_session_lock`], for the same two reasons,
+    /// and here the suppression exemption is the whole of round 8's High rather
+    /// than half of it. This door's *only* effect is the record removal, so a
+    /// `SelfWrite` answer left it with no effect at all — and the caller's owed
+    /// stabilized reading then met the same retained record and was suppressed
+    /// in its turn, so the differing post-save observation consult Q2 requires
+    /// to be queued as external reached the sequence not at all. Nothing takes
+    /// the suppression job over here, which is deliberate: this door is reached
+    /// only where an external write landed between a save's locked read and its
+    /// read-back, so a later hint at those bytes is announced rather than
+    /// absorbed, and announcing a state the disk demonstrably holds is the
+    /// direction this module takes over silence.
     ///
     /// `crate::commands::after_a_save`'s disagreeing refresh, and it has no
     /// other caller. That function re-reads the file after a commit and may find
@@ -1033,11 +1157,19 @@ impl WriteLedger {
     /// on this path.
     ///
     /// **What it does decide is the record**, and it is the one thing this
-    /// reading can prove: the file does not hold the bytes this application
-    /// committed, so an entry saying it does would go on suppressing somebody
-    /// else's later write of exactly those bytes. That is [`decide`]'s
-    /// supersession step, unchanged, and it is why this is a door rather than
-    /// nothing at all.
+    /// reading can prove: the file does not hold the revision this caller's
+    /// transaction last saw, so the entry for that path has stopped describing
+    /// what any consumer should be deciding on, and leaving it there is what
+    /// suppresses the owed stabilized reading. That is [`decide`]'s supersession
+    /// step, and it is why this is a door rather than nothing at all.
+    ///
+    /// **The sentence is deliberately not *the file does not hold the bytes this
+    /// application committed***. That was true of every reading this door could
+    /// act on before the round-8 fix round, and is false of the one it added:
+    /// where this save committed, the entry names `saved.revision` and the
+    /// reading differs from it by this door's own condition; where it committed
+    /// nothing, the entry is an **earlier** save's and may name the very bytes
+    /// just read.
     ///
     /// **What that costs, said in the same place**: with no watcher to ask (see
     /// `docs/decisions/2d-3-notes.md` §5 item 19) nothing publishes this state,
@@ -1198,10 +1330,12 @@ impl Default for WriteLedger {
     }
 }
 
-/// Which door a reading came through, which decides **two** things about it:
+/// Which door a reading came through, which decides **three** things about it:
 /// how its caller can place its reads against the latest write this application
-/// committed to the same path, and what this ledger may do with a state that
-/// survives every check.
+/// committed to the same path, whether it is one of the native hints such a
+/// write generates, and what this ledger may do with a state that survives the
+/// checks this door **is** asked. The count is re-derived by counting
+/// [`decide`]'s matches over this enum.
 ///
 /// **Private, and built by the three entry points rather than passed to them**,
 /// which is the whole of its design. A mode that a caller could choose would be
@@ -1219,14 +1353,19 @@ impl Default for WriteLedger {
 /// single unstabilized read that publishes is round 7's High itself. A door
 /// cannot express them.
 ///
-/// [`decide`] matches it exhaustively **twice**, so a fourth door — a future
-/// caller that can place its reads some other way, or that may do something else
-/// with them — is a compile error in both places rather than a silently skipped
-/// check or a silently spent sequence.
+/// [`decide`] matches it exhaustively **three times** — since the round-8 fix
+/// round, which made suppression the third — so a fourth door is a compile error
+/// in every one of them rather than a silently skipped check or a silently spent
+/// sequence. The three questions are *can this reading be placed after the
+/// record*, *is this reading one of the hints a commit generates*, and *what may
+/// a state that survives do*; a future caller that can place its reads some
+/// other way, that is not a native hint, or that may do something else with what
+/// it read has to answer each of them for itself.
 enum AdmissionDoor {
     /// The producer took this [`Instant`] **before** the reads that stabilized
     /// the state, and this session knows nothing else about when they happened;
-    /// a state that survives every check is **published**, spending a sequence
+    /// a state that survives every check — and this is the one door asked every
+    /// one of them — is **published**, spending a sequence
     /// and reaching the downstream sink.
     ///
     /// The watcher's case, and since the round-7 fix round the only door that
@@ -1240,8 +1379,11 @@ enum AdmissionDoor {
     StampedPublication(Instant),
     /// The caller holds the lock that every producer of a record must hold, so
     /// the record it is being compared against was written before this reading
-    /// was taken, in program order; a state that survives every check is
-    /// **marked** for coalescing and published nowhere.
+    /// was taken, in program order; a state that survives the checks it is asked
+    /// is **marked** for coalescing and published nowhere. **It is asked neither
+    /// the chronology question nor the suppression one**, the first because it
+    /// consulted no clock and the second because it is not a native hint — the
+    /// round-4 and round-8 Highs respectively.
     ///
     /// `crate::commands::conflict_after_the_lock`'s case. The chronology half is
     /// the round-4 fix round's mechanism: no clock is consulted, so no clock
@@ -1252,9 +1394,10 @@ enum AdmissionDoor {
     /// [`WriteLedger::mark_under_the_session_lock`] — nothing in the type system
     /// can carry a lock this module does not own.
     SerializedMarker,
-    /// The same chronology proof as [`AdmissionDoor::SerializedMarker`], and a
-    /// state that survives every check is recorded **nowhere**: it supersedes
-    /// the app-write record and nothing else.
+    /// The same chronology proof as [`AdmissionDoor::SerializedMarker`], and the
+    /// same exemption from suppression; a state that survives the checks it is
+    /// asked is recorded **nowhere**: it supersedes the app-write record and nothing
+    /// else.
     ///
     /// `crate::commands::after_a_save`'s disagreeing case, and the reason it is
     /// a third door rather than the second one reused is at
@@ -1285,14 +1428,37 @@ enum AdmissionDoor {
 ///    construction, so this step asks it nothing — the round-4 High, and this
 ///    module's *two proofs* section;
 /// 2. **suppression**, which retains its record too — the several native hints
-///    one atomic replacement generates must all meet the same entry;
+///    one atomic replacement generates must all meet the same entry. **It is
+///    asked of the stamped door alone**, since the round-8 fix round: a native
+///    hint arrives through exactly one door, and a serialized caller brings a
+///    read of its own taken under the session lock after the record, through a
+///    door that cannot publish. See this module's *suppression is the stamped
+///    door's* section, and step 3 below for what that changes about it;
 /// 3. **supersession**, which clears any app-write record for this path. It
-///    needs no condition of its own, in either direction: a `Content` state
-///    reaching here was already proved by step 2 not to be the recorded bytes,
-///    and an `Absent` or `Unreadable` state says the file holds no bytes at
-///    all. Either way the record would from here on suppress a real
-///    observation — a later external revert to those exact bytes — rather than
-///    this application's own write;
+///    needs no condition of its own, in either direction, and since the round-8
+///    fix round the reason is **two** reasons rather than one, because the doors
+///    reach this step differently:
+///    - a *stamped* `Content` state was proved by step 2 not to be the recorded
+///      bytes, and an `Absent` or `Unreadable` state — through **any** door,
+///      which is what makes these two bullets a partition — says the file holds
+///      no bytes at all. Either way the record would from here on suppress a
+///      real observation — a later external revert to those exact bytes —
+///      rather than this application's own write;
+///    - a *serialized* `Content` state may be **exactly** the recorded bytes,
+///      and clearing the record is still right. The reading was taken under the
+///      session lock, after the record in program order, by a save tail that
+///      has already classified it: `conflict_after_the_lock` read a file its
+///      own transaction did not write, and `after_a_save` reaches its door only
+///      where the read disagrees with the revision its transaction last saw. The
+///      entry cleared is therefore one of two, and both are right to clear:
+///      **this save's own**, which the reading differs from — the only case that
+///      could reach this step before the round-8 fix round — or an **earlier**
+///      save's, which is the only entry that can name the bytes just read, and
+///      whose licence this reading is the moment to spend rather than let a
+///      record made stale by anything outside this ledger go on suppressing the
+///      owed stabilized reading these doors ask for. What the removal costs is at
+///      [`WriteLedger::mark_under_the_session_lock`] and
+///      [`WriteLedger::withhold_under_the_session_lock`];
 /// 4. **coalescing**, against the state last announced for this path — by a
 ///    publication or by a marker, which are the same answer to *does a consumer
 ///    already have this state*;
@@ -1317,7 +1483,11 @@ enum AdmissionDoor {
 /// The two overlap on exactly one input — a *stamped* reading of the recorded
 /// bytes, stamped before the record — and both answers are true of it, both
 /// retain the
-/// record and both publish nothing. Chronology is asked first because it is a
+/// record and both publish nothing. **They overlap only there**, and since the
+/// round-8 fix round that is a property of the doors as well as of the states:
+/// the serialized doors are asked neither question, one because they read no
+/// clock and one because they are not native hints. Chronology is asked first
+/// because it is a
 /// question about the *reading* rather than about the bytes, which is the same
 /// class as [`WriteLedger::admit`]'s epoch check; a consequence worth stating is
 /// that a self-write hint stamped before its own record is counted as
@@ -1336,7 +1506,9 @@ enum AdmissionDoor {
 /// step 1, which is the only arm added since that argument was written, neither
 /// announces nor clears, so it cannot put one back either. Round 7's marker does
 /// not weaken that: it announces only below step 3, where the record has just
-/// been cleared.
+/// been cleared. Round 8's door-scoping does not weaken it either, and in the
+/// one direction worth naming it strengthens it: narrowing step 2 sends *more*
+/// readings through step 3, which clears, and none through a new early return.
 /// Step 3's position is therefore reviewed rather than driven — the second
 /// statement of one rule, exactly as [`AppWrite::epoch`] is for the discard on
 /// workspace replacement.
@@ -1346,7 +1518,9 @@ fn decide(
     state: ObservedState,
     door: AdmissionDoor,
 ) -> Admission {
-    // One lookup, read by both retaining checks. Two lookups of the same entry
+    // One lookup, read by both retaining checks — neither of which is asked of
+    // a serialized door, which is why the lookup sits above them rather than
+    // inside either. Two lookups of the same entry
     // under one guard could not disagree today, but they are two statements of
     // *which entry this path has* and only one of them would be updated by a
     // future change to the key — the shape this step has already shipped twice.
@@ -1378,7 +1552,24 @@ fn decide(
         ledger.tally.preceded_a_commit += 1;
         return Admission::PrecedesACommit;
     }
-    if let ObservedState::Content(observed) = state {
+    // **Suppression is the stamped door's question and nobody else's**, which is
+    // round 8's High. It exists so that the several native hints one atomic
+    // replacement generates all meet one retained entry, and a native hint
+    // arrives through exactly one door. A serialized caller brings a read it
+    // performed itself, under the session lock, after the record it is being
+    // decided against and after the transaction whose tail it is — and since
+    // round 7 neither serialized door can publish, so neither can commit the
+    // error suppression exists to prevent. What a `SelfWrite` costs *them* is
+    // the two things their door exists to do: the marker consult Q5 needs, and
+    // the removal of a record whose licence has outlived the last reading that
+    // could spend it — an entry that in this arm is always an *earlier* save's,
+    // never the running transaction's. See this module's *suppression is the
+    // stamped door's* section for the whole argument, including what the
+    // removal costs.
+    //
+    // The match is over the door, exactly as the chronology check's is, so a
+    // fourth door cannot be added without answering this question for itself.
+    let suppressed_as_a_self_write = match door {
         // Absence and unreadability are deliberately not routed through the
         // predicate: this application never removes a file and never makes one
         // unreadable, so neither state can be a self-write, and asking the
@@ -1387,10 +1578,17 @@ fn decide(
         // is **not** narrowed that way: a stale reading of an absence would
         // otherwise clear the record of a file this application has since
         // written, which is the round-2 High with a different state in it.
-        if self_write_suppresses(recorded.map(|entry| entry.write.revision), observed) {
-            ledger.tally.suppressed += 1;
-            return Admission::SelfWrite;
-        }
+        AdmissionDoor::StampedPublication(_) => match state {
+            ObservedState::Content(observed) => {
+                self_write_suppresses(recorded.map(|entry| entry.write.revision), observed)
+            }
+            ObservedState::Absent | ObservedState::Unreadable(_) => false,
+        },
+        AdmissionDoor::SerializedMarker | AdmissionDoor::SerializedWithholding => false,
+    };
+    if suppressed_as_a_self_write {
+        ledger.tally.suppressed += 1;
+        return Admission::SelfWrite;
     }
     if let Some(document) = ledger.documents_by_path.remove(path) {
         ledger.writes.remove(&document);
@@ -1740,7 +1938,7 @@ mod tests {
         );
         assert_eq!(ledger.tally().suppressed, 3);
         assert_eq!(ledger.tally().admitted, 0);
-        assert_eq!(ledger.announced_state(path), None, "nothing was published");
+        assert_eq!(ledger.announced_state(path), None, "nothing was announced");
     } // End of function the_recorded_revision_is_suppressed_and_survives_duplicate_hints()
 
     #[test]
@@ -1836,7 +2034,7 @@ mod tests {
         assert_eq!(
             admit_now(&ledger, 1, path, ObservedState::Content(bytes)),
             Admission::Duplicate,
-            "the state already published produces no second observation"
+            "the state already announced produces no second observation"
         );
         assert_eq!(
             admit_now(&ledger, 1, path, ObservedState::Absent),
@@ -1883,7 +2081,7 @@ mod tests {
         assert_eq!(
             ledger.announced_state(Path::new("/tree/match/other.yml")),
             None,
-            "the published states are discarded"
+            "the announced states are discarded, publications and markers alike"
         );
         // The very bytes the previous workspace committed are now an ordinary
         // external observation, numbered from the start of the new epoch.
@@ -2047,7 +2245,7 @@ mod tests {
         assert_eq!(
             ledger.announced_state(path),
             None,
-            "a committed app write invalidates what was last published for its path"
+            "a committed app write invalidates what was last announced for its path"
         );
 
         // 3. Its own hints are still suppressed, and the record survives them.
@@ -2154,7 +2352,7 @@ mod tests {
             }),
             "a refusal retains the record"
         );
-        assert_eq!(ledger.announced_state(path), None, "nothing was published");
+        assert_eq!(ledger.announced_state(path), None, "nothing was announced");
     } // End of function no_admission_can_decide_between_a_commit_and_its_record()
 
     #[test]
@@ -2842,6 +3040,120 @@ mod tests {
             "one sequence spent in all, and it is the engine's reading, {tally:?}"
         );
     } // End of function a_marker_coalesces_a_stabilized_twin_and_a_withheld_reading_does_not()
+
+    #[test]
+    fn a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes() {
+        // **Round 8's High**, as the two doors' halves of it, and the ledger
+        // reaches the scenario with no watcher, no thread and no clock: the
+        // record goes stale because nothing outside this module keeps it fresh.
+        // `crate::commands::reload_document` accepts a foreign revision into the
+        // workspace and touches the ledger not at all, and a save that answers
+        // `committed: false` records nothing, so an earlier commit's entry is
+        // still standing when a save tail reads exactly those bytes back.
+        //
+        // Before the fix both doors answered `SelfWrite` there: the marking door
+        // lost consult Q5's coalescing entry, and the withholding door — whose
+        // *only* effect is the record removal — did nothing at all, so the owed
+        // stabilized reading it asks for met the same record and was suppressed
+        // in its turn.
+        let ledger = ledger_at_epoch(1);
+        let shown = Path::new("/tree/match/shown.yml");
+        let unshown = Path::new("/tree/match/unshown.yml");
+        let marking = DocumentId(97);
+        let withholding = DocumentId(98);
+        // A: what this application committed, and what the record still names.
+        let ours = revision("the bytes an earlier save of this session committed");
+
+        // The marking door: `conflict_after_the_lock` refreshing a file whose
+        // disk state is the recorded revision.
+        record(&ledger, marking, shown, ours);
+        assert_eq!(
+            ledger.mark_under_the_session_lock(shown, ObservedState::Content(ours)),
+            Admission::Marked,
+            "a serialized reading is not one of the native hints suppression absorbs"
+        );
+        assert_eq!(
+            ledger.recorded_write(marking),
+            None,
+            "and it supersedes the record it was decided against"
+        );
+        assert_eq!(
+            ledger.announced_state(shown),
+            Some(ObservedState::Content(ours)),
+            "consult Q5's coalescing entry is installed, which a `SelfWrite` withheld"
+        );
+        // …and the marker takes the suppression job over: a native hint at those
+        // bytes is silent through a different counter.
+        assert_eq!(
+            admit_now(&ledger, 1, shown, ObservedState::Content(ours)),
+            Admission::Duplicate,
+            "the app's own pending hints still reach a consumer not at all"
+        );
+
+        // The withholding door: `after_a_save` refreshing after a save that
+        // committed nothing, and finding the recorded bytes rather than the
+        // revision its transaction last saw.
+        record(&ledger, withholding, unshown, ours);
+        assert_eq!(
+            ledger.withhold_under_the_session_lock(unshown, ObservedState::Content(ours)),
+            Admission::Withheld,
+            "the same exemption, on the door whose only effect is the record"
+        );
+        assert_eq!(
+            ledger.recorded_write(withholding),
+            None,
+            "the record removal is this door's whole effect, and a `SelfWrite` skipped it"
+        );
+        assert_eq!(
+            ledger.announced_state(unshown),
+            None,
+            "it announces nothing, so nothing pre-coalesces the reading it asked for"
+        );
+        // The half the finding turns on: the owed stabilized reading of exactly
+        // those bytes is now queued as external (consult Q2) rather than
+        // suppressed by the record this door has just cleared.
+        assert_eq!(
+            admit_now(&ledger, 1, unshown, ObservedState::Content(ours)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE
+            },
+            "Q2: the differing post-save observation reaches the sequence"
+        );
+
+        // **The discrimination, in the same test**: the check was narrowed to
+        // one door and not removed. The same record and the same bytes, through
+        // the stamped door, are still the several native hints one atomic
+        // replacement generates, and they still meet the retained entry.
+        let hinted = Path::new("/tree/match/hinted.yml");
+        let stamped = DocumentId(99);
+        record(&ledger, stamped, hinted, ours);
+        assert_eq!(
+            admit_now(&ledger, 1, hinted, ObservedState::Content(ours)),
+            Admission::SelfWrite,
+            "consult Q2's suppression is unchanged where a native hint is what asks"
+        );
+        assert_eq!(
+            ledger.recorded_write(stamped),
+            Some(AppWrite {
+                epoch: 1,
+                revision: ours
+            }),
+            "and it retains the record, so the next hint of the same replacement meets it too"
+        );
+
+        let tally = ledger.tally();
+        assert_eq!(
+            (
+                tally.suppressed,
+                tally.marked,
+                tally.withheld,
+                tally.coalesced,
+                tally.admitted
+            ),
+            (1, 1, 1, 1, 1),
+            "one suppression, and its door is the stamped one, {tally:?}"
+        );
+    } // End of function a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes()
 
     #[test]
     fn a_reading_of_an_absence_taken_before_a_commit_is_refused_too() {

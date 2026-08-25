@@ -28,10 +28,12 @@ under two leaf mutexes it drops before calling anything. `commands.rs` composes 
 places and only three: `commit_and_record` — the window `run_one_save` runs its transaction
 in — records a committed revision (and nothing else, ever),
 `after_a_save` puts a refresh that disagrees with what the transaction last saw through the same
-checks a native hint meets and **withholds** it from the sequence and from the coalescing map
-alike, and `conflict_after_the_lock` records **no** app write and puts its refresh through those
-same checks, **marking** the state it read so a later hint at it coalesces. Neither can publish;
-only the watcher's stamped door can (§13).
+supersession and the same coalescing a native hint meets and **withholds** it from the sequence and
+from the coalescing map alike, and `conflict_after_the_lock` records **no** app write and puts its
+refresh through those same two steps, **marking** the state it read so a later hint at it coalesces.
+Neither can publish; only the watcher's stamped door can (§13). **Neither is asked either retaining
+check** — not chronology, because neither reads a clock (§10), and not suppression, because neither
+is a native hint (§14).
 
 > **Correction (round-1 fix round, §7).** The headline above stood, before §7's fix, as a claim
 > the code did not give: `save_document` performs its rename before returning and the watcher
@@ -146,6 +148,24 @@ only the watcher's stamped door can (§13).
 > the only item of that section to have been wrong twice, and six of that section's items have now
 > been found to be real defects after being written as honestly bounded (10, 16, 18, 20, 3, and 3
 > again). This round changed **no** core file at all.
+
+> **Correction (round-8 fix round, §14).** The headline as §13 left it said the two save tails go
+> through *the same checks a native hint meets*, and that was the **eighth** consecutive round's
+> finding — the first since round 6 that is a defect in behaviour rather than a sentence. Round 7
+> gave each tail its own door and left `decide`'s steps 1–4 shared, so **suppression ran before the
+> door was consulted**: a record made stale by anything outside this ledger — `reload_document`
+> accepting a foreign revision into the workspace, or a save answering `committed: false` and
+> recording nothing — could answer `SelfWrite` to a save tail that had already established its
+> reading differs from its own transaction. The marking door then lost consult Q5's coalescing
+> entry, and the withholding door, whose *only* effect is the record removal, had no effect at all —
+> so the same record went on to suppress the owed stabilized reading that tail asked for, and consult
+> Q2's *the differing post-save observation is queued as external* was met by nothing. §14 closes it
+> by making suppression **door-scoped**, exactly as chronology has been since §10: the check exists
+> to absorb the several **native hints** one atomic replacement generates, and a native hint arrives
+> through the stamped door alone. The sentence above is amended to say which steps are shared and
+> which are the stamped door's, because saying *the same checks* is what let a shared step mean three
+> different things. §5 gains items 23 and 24, both of them holes this round **found** rather than
+> made. This round changed **no** core file at all.
 
 The consult is `docs/reviews/phase-2d-design.md`; **Q7 item 3** is this step's specification,
 **Q2** is the ruling on the predicate, the ledger's location and lifetime, where the update
@@ -570,6 +590,40 @@ it is a property of `Workspace::refresh` rather than one this step introduces.
 > weakness correctly for the third round running, and the conclusion drawn from it is now that
 > neither single read may be numbered at all.
 
+> **Correction (round-8 fix round, §14).** Two sentences in this section are now false, and the
+> second of them was round 8's High.
+>
+> The **first** is this section's own *"one rule, two callers"* paragraph, which ends: *"the
+> conflict's admission answers `SelfWrite` and publishes nothing. That is correct and is the
+> predicate's own limit: byte identity, never authorship."* The premise is unchanged — a raw save
+> against a stale base really can conflict against bytes this session committed earlier — and the
+> verdict was wrong. Suppression exists, in consult Q2's own words, to *absorb the several native
+> notifications one atomic replacement may generate*, and this reading is not one of them: it is a
+> read `conflict_after_the_lock` performed itself, under the session lock, after the record, through
+> a door that since §13 cannot publish. Answering `SelfWrite` to it withheld consult Q5's coalescing
+> entry — the thing that stops a native duplicate at the same document and revision raising a second
+> conflict — for no gain, because a door that cannot publish cannot make the mistake suppression
+> prevents. The state is now **marked**, and the app write's own pending hints coalesce against that
+> marker instead of being suppressed by the record: the same silence through a different counter.
+> `commands.rs`'s `a_conflict_against_this_apps_own_committed_bytes_is_suppressed` asserted the old
+> verdict and is renamed `…_is_marked_rather_than_suppressed`, with its four assertions replaced.
+>
+> The **second** is the round-4 block's closing sentence above: *"both still reach the same `decide`,
+> with the same suppression, the same supersession, the same coalescing and the same sequence
+> allocator."* Since §13 the sequence allocator is not shared, and since §14 the suppression is not
+> either. What **is** shared is one `decide`, one supersession step and one coalescing comparison —
+> which is still the whole of what this section argues, because *external rather than self* being one
+> rule and not two that agree today is a claim about where the rule lives, not about how many of its
+> steps every caller is asked. The harm the wording did is the reason it is corrected rather than
+> left: a shared step that means three different things is exactly what round 8 found.
+>
+> **Why the record removal is right even where the record names the bytes just read**, which is the
+> half no earlier round had to argue: on both serialized doors the entry met is an **earlier** save's
+> and never the running transaction's — `conflict_after_the_lock` runs where the transaction was
+> refused and recorded nothing, and `after_a_save` reaches its door only where the refresh disagrees
+> with the revision its transaction last saw. What clearing gives up is stated in §14.1 rather than
+> smoothed over.
+
 ### 2.7 D7 — the backup session and the ledger travel together, because neither is a planner's to choose
 
 `with_open` now lends a `SaveRecords { backups, ledger }` rather than a bare `&BackupSession`.
@@ -685,7 +739,8 @@ trees.
 | `committed: false` records none | `a_save_that_commits_nothing_records_no_app_write` — and its refresh agrees, so nothing is published either |
 | a refusal records none | `a_refused_save_records_no_app_write` — a raw save the parser rejects; the file is untouched and the whole tally is zero, because the refusal arm returns before either refresh |
 | a conflict records none, and its refresh is external | `a_conflict_records_no_app_write_and_marks_its_refresh_for_coalescing` — no entry, the disk state announced for this path, **no sequence spent on it since §13**, and a second hint at that same state answering `Duplicate` |
-| …and the one case where a conflict's refresh is *self* | `a_conflict_against_this_apps_own_committed_bytes_is_suppressed` — reachable only through the raw save (§2.6); the record survives and nothing is published |
+| …and the case where a conflict's refresh finds this application's **own** committed bytes | `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed` — reachable only through the raw save (§2.6); **since §14 it is marked, not suppressed**: the record goes, consult Q5's coalescing entry is installed, no sequence is spent, and a native hint at those bytes then answers `Duplicate` rather than `SelfWrite` — the same silence through a different counter |
+| **a stale record never suppresses a serialized reading of its own bytes** | `ledger.rs`'s `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes` — §14, and the case the row above cannot reach: the record is `A`, the workspace has moved on without telling the ledger, and a save tail reads `A` back. Both serialized doors answer `Marked`/`Withheld` and clear the record; after the withholding one the owed **stamped** reading of `A` is `Admitted`, which is consult Q2's *queued as external* met at last. Its third leg is the discrimination — the same record and the same bytes through the **stamped** door are still `SelfWrite`, with the record retained |
 | an uncertain write records none | `only_a_committed_outcome_licenses_an_app_write_record` — over a commit, a skipped commit, a `RevisionMismatch` and a `WriteError::VerificationFailed`, the last asserting **its own premise** (`may_have_written()` is true) so it cannot pass holding an error of the wrong kind |
 | post-commit external replacement is not suppressed | `a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours` — the tail driven directly, since no command can produce the interleaving: the answer stays `committed` and still names what this application wrote, the external revision is never recorded as ours, and the differing state supersedes the record rather than being suppressed by it (`suppressed: 0`) — **and since §13 announces nothing at all, the ask being what queues it** — **and, since §7.2, `ledger.rs`'s `a_committed_record_invalidates_the_announced_state_and_supersedes_itself`, which is the case the row above did not cover** |
 | a stabilized observation equal to the entry is suppressed, and the entry survives duplicate hints | `ledger.rs`'s `the_recorded_revision_is_suppressed_and_survives_duplicate_hints` — three hints, three suppressions, the entry unchanged and nothing published |
@@ -736,7 +791,8 @@ fail against a broken build is decoration (§7.5 adds four more, and §8.6 two m
 - with `record_app_write` removed from `run_one_save` (the call the fix round moved into
   `commit_and_record` — §7.1),
   `every_writing_command_records_only_the_revision_it_committed` and
-  `a_conflict_against_this_apps_own_committed_bytes_is_suppressed` both failed while the other 70
+  `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed` (named
+  `…_is_suppressed` when that run was taken) both failed while the other 70
   command tests passed.
 
 **The backup check was not neuter-run**, and the honest reason is that its claim is negative and
@@ -1130,26 +1186,58 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
       time any consumer has been told.
 
     **And the cases that cost nothing**, unchanged in kind and widened by §13 in one place: the
-    ledger answers `SelfWrite` when the state is the recorded one, and `Duplicate` when it is the
-    **announced** one — which since §13 includes a state `conflict_after_the_lock` marked without
-    publishing, so the whole successful-conflict path now costs nothing here where before §13 it
-    cost a sequence at the tail and coalesced afterwards.
+    ledger answers `SelfWrite` when a **stamped** reading's state is the recorded one (§14 narrowed
+    that to the stamped door), and `Duplicate` when it is the **announced** one — which since §13
+    includes a state `conflict_after_the_lock` marked without publishing, so the whole
+    successful-conflict path now costs nothing here where before §13 it cost a sequence at the tail
+    and coalesced afterwards.
+23. **Clearing an app-write record clears the chronology anchor with it, and a reading older than
+    that record then has nothing to refuse it** (§14.1). Step 1 of `decide` refuses a stamped
+    reading it cannot place at or after the record — and it can only do that while an entry stands,
+    so from the first accepted state that supersedes one, a reading stamped *before* that record is
+    publishable, describing bytes this application has since replaced. **This is not new and §14 did
+    not create it**: supersession has cleared the anchor on every accepted differing state since this
+    module was written, which is the ordinary external conflict, and §14 widened the inputs that
+    reach it by one class — a *serialized* reading of the recorded bytes — rather than adding a
+    class. It is stated here because no earlier round stated it, and because the round that widens a
+    hole is the round that owes the sentence. **Bounded by physics rather than by a mechanism**: such
+    a reading must have been produced by an engine pass that began before the record and be still
+    travelling when the later decision lands, which is one debounce plus one probe of window, and the
+    engine's own tracked state means no *fresh* reading of replaced bytes can be produced at all.
+    What would close it is an anchor that outlives the record — a second field, or a per-path *last
+    superseded at* instant — and that is a design change with its own review, not a fix round's to
+    slip in.
+24. **The announced-state map can go stale the same way the record could, and coalescing then
+    reports nothing where it should report** (§14.4). `LedgerState::announced` answers *does a
+    consumer already have this state*, and its only invalidations are `record_app_write` and
+    `begin_epoch`. Nothing else tells it what the frontend has taken: `reload_document` installs a
+    foreign revision in the workspace and touches the ledger not at all, exactly as it does for the
+    record. So a path announced at B, reloaded to C by the person, and then externally written back
+    to B answers `Duplicate` — a state the consumer does *not* have, coalesced into silence. **Found
+    by §14's own sweep for the shape and deliberately not closed here**, for the reason the root-cause
+    fix was rejected in §14.2: it needs a fourth mutation path into the ledger from a read-only
+    command, and *what a consumer has accepted* is the coordinator's fact rather than this module's —
+    consult Q3 and Q5 give 2d-5 a **per-document accepted sequence**, which is where the two views can
+    be reconciled by construction instead of by two maps agreeing. Until then the ledger's map is
+    honest about what it can see and blind to what a command answered.
 
 ---
 
 ## 6. The gates
 
-| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) | After round 6's fix (§12) | After round 7's fix (§13) |
-|---|---|---|---|---|---|---|---|---|---|
-| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) | **1261 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines, +5 for this round's five new tests; two green runs on a quiet host) | **1262 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +1 for this round's one new test) |
-| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) | **20 passed, 0 failed** twice (68.67 s, then 63.20 s — both on a quiet host, no timeout in either; this round added no `watch_check` test and its one new real-worker test lives in `watch.rs`, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (69.38 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) |
-| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) |
-| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) | **clean** (exit 0; no `cargo fmt` was needed) | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) |
-| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched one core file, `watch/engine.rs`, and what it added is ledger-agnostic — §12.1) | **empty** (no match; this round touched **no** core file at all) |
-| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** |
-| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** |
-| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** |
-| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** | **not re-run, same reason** | **not re-run, same reason** |
+| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) | After round 6's fix (§12) | After round 7's fix (§13) | After round 8's fix (§14) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) | **1261 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines, +5 for this round's five new tests; two green runs on a quiet host) | **1262 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +1 for this round's one new test) | **1263 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +1 for this round's one new test) — **on a quiet host, and the scar bit first**: an earlier run of the same tree, contended with an orphaned test binary left by a run this session had cancelled, came back **228 passed, 10 failed** in 456.55 s, every failure a `watch_check.rs:141` bounded-wait timeout and none of them a decision this round changed. The host was quieted, the focused serial gate re-run 20/20, and this figure is the quiet re-run —
+**taken twice**, the second time on the finished tree after the neuter runs were reverted, both
+1263/0 over 26 `test result` lines |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) | **20 passed, 0 failed** twice (68.67 s, then 63.20 s — both on a quiet host, no timeout in either; this round added no `watch_check` test and its one new real-worker test lives in `watch.rs`, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (69.38 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (81.03 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged). Run **first** after the contended workspace failure above, because it is the gate that discriminates a real regression from the host |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) |
+| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) | **clean** (exit 0; no `cargo fmt` was needed) | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) | **clean** (exit 0; no `cargo fmt` was needed) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched one core file, `watch/engine.rs`, and what it added is ledger-agnostic — §12.1) | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched **no** core file at all) |
+| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** |
+| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** |
+| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** |
+| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** | **not re-run, same reason** | **not re-run, same reason** | **not re-run, same reason** |
 
 **Round 3's fix moved the workspace count by 3, and every one is accounted for**: two in
 `src-tauri/src/ledger.rs` (14 → 16) — `a_reading_stamped_exactly_at_the_record_is_refused` and
@@ -1250,6 +1338,25 @@ record. **No core file, no `src/`, no i18n path, no corpus path, no `Cargo.toml`
 `Cargo.lock`** — so there is nothing a frontend gate could have moved, and `cargo tree` had nothing
 new to answer for. `docs/reviews/phase-2d-3-ledger.md` again shows as modified; that is the
 orchestrator's append of round 7's verbatim reply, made before this round began, and this round did
+not touch it. **The list is otherwise the warrant because this round ran no `git` command at all** —
+the brief forbade it — so the working-tree check is the committing session's to take.
+
+**Round 8's fix moved the workspace count by 1, and it is accounted for**: one in
+`src-tauri/src/ledger.rs` (20 → 21),
+`a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes`, which drives both
+serialized doors against a record naming the bytes they read and — as its third leg — the
+discrimination that the same input through the **stamped** door is still suppressed.
+`commands.rs` stays at **13**: the test that carried the old verdict is the one that carries the new
+one, with its assertions replaced rather than a second test asserting the opposite of a shipped
+pair. `watch_check` stays at 20 and **no test was removed**; **one was renamed**,
+`a_conflict_against_this_apps_own_committed_bytes_is_suppressed` →
+`…_is_marked_rather_than_suppressed`, because the claim in the name changed. The frontend figures in
+the last column are again **carried, not measured**, and the warrant is the exhaustive list of what
+this round edited: three files under `src-tauri/src/` (`ledger.rs`, `commands.rs`, `main.rs`) and
+this record. **No core file, no `src/`, no i18n path, no corpus path, no `Cargo.toml` and no
+`Cargo.lock`** — so there is nothing a frontend gate could have moved, and `cargo tree` had nothing
+new to answer for. `docs/reviews/phase-2d-3-ledger.md` again shows as modified; that is the
+orchestrator's append of round 8's verbatim reply, made before this round began, and this round did
 not touch it. **The list is otherwise the warrant because this round ran no `git` command at all** —
 the brief forbade it — so the working-tree check is the committing session's to take.
 
@@ -2389,7 +2496,7 @@ comment; `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
 |---|---|
 | **a deterministic equality regression for `after_a_save`** | `commands.rs`'s `a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record` — the shared tail driven directly, a record taken in its own commit window, an external write, and the assertion that the differing refresh is published and supersedes. **A test cannot make the host clock collide on demand**, and since the fix this caller reads no clock to collide with, so the collision is asked for from the **record's** side through the test-only `WriteLedger::stamp_the_record_at`: the record's instant is put an hour ahead, which is a collision and worse. That is `a_reading_stamped_exactly_at_the_record_is_refused`'s technique taken from the other end |
 | that the *door* decides it, not the ledger going soft | `ledger.rs`'s `a_serialized_door_reading_is_never_refused_by_the_records_own_instant` — one ledger, one path, one record stamped beyond every later clock read, asked through **both** entry points: the serialized one is `Admitted` and supersedes, and the stamped one, against a record stamped the same way, is still `PrecedesACommit` and still retains. **It proves the serialized door's implementation and not the premise that licenses it**, and the name said otherwise until §11.3: the test constructs a bare `WriteLedger`, owns no `WorkspaceSession` and locks nothing, so *the production callers of this door hold the session lock* rests on §10.1's call-graph audit **alone** and would stay green if a caller were moved outside `with_open` tomorrow |
-| that suppression, supersession, coalescing and sequence allocation stayed shared | unchanged and still passing: the whole of §3's table and §9.5's, over one `decide`. `a_conflict_against_this_apps_own_committed_bytes_is_suppressed` is the sharpest of them, because it is a save-path refresh that must still answer `SelfWrite` |
+| that suppression, supersession, coalescing and sequence allocation stayed shared | unchanged and still passing at the time: the whole of §3's table and §9.5's, over one `decide`. `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed` (named `…_is_suppressed` then) was the sharpest of them, because it is a save-path refresh that had to answer `SelfWrite`. **§13 unshared the sequence allocator and §14 unshared the suppression check, and that test's verdict is now `Marked`** — what stayed shared is one `decide`, one supersession step and one coalescing comparison |
 | the lock order and the leaf property | unchanged: `admit_under_the_session_lock` takes gate → state and returns a value, exactly as before; `the_downstream_sink_runs_outside_the_ledger_lock` and `no_admission_can_decide_between_a_commit_and_its_record` still pass |
 | that a caller of the serialized door holds the session lock | **nothing.** No test in this crate can fail it, and the row above says why the test that reads as though it did does not; §5 item 14's third half is the standing statement of it |
 
@@ -3475,6 +3582,21 @@ mistakes that matter: a stamped reading that only marks drops the watcher's own 
 single unstabilized read that publishes is this round's High. `decide` matches the door **twice**, so
 a fourth door is a compile error in both places.
 
+> **Correction (round-8 fix round, §14).** The three-door list above says each serialized door *runs
+> every check* and then does its own thing, and round 8's High is that it did — the check above the
+> door was the one that should not have been asked. Read the two bullets as they now stand: each
+> door runs the checks it **is** asked, which are supersession and coalescing, and neither retaining
+> check is among them. The prediction the bullets make — `Marked` for a state the marking door sees,
+> `Withheld` for the withholding door's, and the record cleared in both — was **false wherever the
+> app-write record named the state just read**, because `decide` answered `SelfWrite` first and
+> returned. §14.1 is the whole of it. The last sentence of this subsection is also amended by
+> arithmetic rather than by argument: `decide` now matches the door **three** times, not twice.
+>
+> Two further sentences of §13.1 that the correction does not touch, said so that the next round does
+> not re-find them: *no owed-origin override was needed* stands, and *the discrimination lives in
+> which door the reading came through* stands — §14 is that sentence applied one step higher rather
+> than a retreat from it.
+
 ### 13.2 The two Lows
 
 **Low 1 — a module headline that counted five while composing with six, and omitted the one whose
@@ -3652,6 +3774,26 @@ same call; and neither door reads a value it then acts on outside the state guar
 does **not** claim is that a fourth door could not be added wrongly — `AdmissionDoor` makes it a
 compile error to add one silently, and nothing makes its author choose the right arm.
 
+> **Correction (round-8 fix round, §14).** Two of this subsection's claims were false, and one of
+> them is why round 8's High survived a sweep that was looking one step too low.
+>
+> The arm list says `after_a_save`'s **disagreeing** refresh *"withholds and asks. Clears the record;
+> announces nothing"* and that `conflict_after_the_lock`'s success *"marks and asks"*. Both were
+> conditional on something the list does not mention: that the app-write record did not already name
+> the state being read. Where it did, `decide` returned `SelfWrite` above the door, retaining the
+> record and doing neither — so the withholding arm's *whole* effect was skipped, and the owed
+> reading it asks for in the same breath met the same record and was suppressed too. §14 makes the
+> two lines true unconditionally.
+>
+> The paragraph beginning *"the refusal arms of both doors were re-checked and are untouched by this
+> round"* is the second, and its last sentence is the miss: *"the chronology comparison, the
+> suppression predicate and the supersession step were not changed at all, so the three §9.3
+> candidates … stand unchanged again."* That is true as a statement about **edits** and was read as
+> one about **correctness** — the suppression predicate was unchanged and had, that round, silently
+> acquired two new callers whose door made it wrong. The rule §14 takes from it: when a round splits
+> one caller into three, every *shared* step below the split is a new question about each of them,
+> and *"not changed at all"* is the answer to a different one.
+
 ### 13.5 The evidence and the neuter runs
 
 | Owed | Where |
@@ -3741,6 +3883,20 @@ it, so the dependence §12.6 listed under *not guaranteed* is gone rather than s
 `save_document`, and nothing new that serializes. **No core file was touched at all**, and
 `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
 
+> **Correction (round-8 fix round, §14).** One sentence in the *guaranteed* paragraph was false as
+> written: *"consult Q2's `the differing post-save observation is queued as external` is met by a
+> reading the engine stabilized, and the withholding door exists so that nothing pre-coalesces it
+> away."* Nothing **pre-coalesced** it, and something else swallowed it: the app-write record the
+> withholding door failed to clear when the reading matched it went on to suppress that stabilized
+> reading through `decide`'s step 2. The guarantee holds as written only since §14. The
+> `conflict_after_the_lock` sentence beside it — Q5's duplicate coalescing holding because the disk
+> side is announced — had the same conditional hole, and for the same reason: no marker was
+> installed on the path where `SelfWrite` was answered.
+>
+> The *not guaranteed* paragraph gains nothing and loses nothing, and §5's two new items (23 and 24)
+> are additions to that list rather than corrections of it: the chronology anchor a supersession
+> clears, and the announced-state map's own staleness.
+
 ### 13.7 The two sweeps
 
 **For the shape** — *a value settled, installed, spent, published or consumed before the decision
@@ -3819,3 +3975,399 @@ than from round 6's list**. Every count below is derived by counting what the do
 The rule applied throughout is §10.7's, unchanged: **a present-tense claim about how the code works
 now is amended in place or blocked; a past-tense record of what a round built is left alone** — with
 the identifier clause above as the one thing that crosses the line in both directions.
+
+> **Correction (round-8 fix round, §14).** The second bullet above — the `published` → `announced`
+> rename, *"every present-tense mention swept"* — was **not** complete, and it is the **eighth
+> consecutive round** in which a name position outlived the sweep that claimed it. What the sweep
+> took was the two identifiers and the two doc headings it names; what it left was every place the
+> map is described in prose rather than named, and those are the places a maintainer reads a
+> contract off: `ledger.rs`'s `WriteLedger` type headline (*"the published-state map"*) and its
+> `LedgerTally::coalesced` field (*"the state already published for their path"*); `commands.rs`'s
+> `WorkspaceSession::ledger` field, its `observing` constructor and its `open` documentation, plus
+> one inline comment in `open`'s body. **A marker occupies that map with no sequence spent**, so each
+> of those told a reader that every coalesced entry is sequence-backed, or — reading `open`'s
+> and `record_app_write`'s wording together — that only publications are invalidated. All are
+> amended, and so are the **assertion messages** that carried the same claim: five in `ledger.rs`
+> (*"nothing was published"* twice, *"the state already published"*, *"the published states are
+> discarded"*, *"invalidates what was last published"*) and three in `commands.rs` (two *"nothing is
+> published"* and one test's doc headline). Where a sequence really was spent — `Admission::Admitted`,
+> `SequenceSpaceExhausted`, `record_app_write`'s *nothing was published for this write*, the
+> `AdmissionDoor` variants and every past-tense sentence about what round 7 removed — *published* is
+> **kept**, which is the discrimination the rename exists to make.
+>
+> §14's own name sweep is §14.5, and the position the eighth round adds is a different one: every
+> sentence anywhere saying that suppression is asked of every reading, or that step 2 proves the
+> bytes differ.
+
+---
+
+## 14. The round-8 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 8 returned **NOT READY** with one High and two Lows, and
+it is the eighth consecutive round whose finding was produced by the previous round's fix. All three
+are closed here. What round 8 inspected and settled in the fix's favour before finding anything is
+not re-argued below: the marker/withholding asymmetry itself, `Duplicate` reaching the withholding
+arm first where an earlier announcement genuinely exists, a marker overwriting a newer publication as
+over-reporting rather than silence, marker invalidation on commit, the explicitly recorded no-watcher
+trade, and the absence of any core, wire, queue, event, command or frontend scope creep.
+
+**This is the first round since round 6 whose High is a defect in behaviour rather than a sentence in
+this record**, and it was found one step *above* where the brief pointed. The brief asked whether
+`decide`'s shared steps 1–4 still mean the same thing for a door that will not announce, and named
+step 4's `Duplicate` as the candidate; the reviewer cleared `Duplicate` and found the same shape in
+step 2. The rule this round adds to the ones the previous seven left: **when a round splits one
+caller into three, every step below the split that is still shared is a new question about each of
+them, and *"that step was not changed at all"* answers a different one.** §13.4 wrote exactly that
+sentence about the suppression predicate and read it as a clearance.
+
+The corrections this round owes the record itself, counted by listing them: a block under the §1
+headline and one amendment to the headline paragraph's own sentence about what the two tails go
+through; a block under §2.6; two amended rows in §3's evidence table, one of them new; **two** new
+§5 items, 23 and 24, neither of them a defect this round made; the round-8 column in §6's table with
+its own count paragraph; blocks under §13.1, §13.4, §13.6 and §13.7; and two identifier amendments
+in past-tense paragraphs (§3's neuter-run bullet and §10.6's evidence row), for §13.7's reason —
+an identifier is a pointer and a dangling one helps nobody. **No correction is owed outside this
+record**: `docs/decisions/2d-1-notes.md` §2.1's round-4 block says **two** of 2d-3's **three** ledger
+callers place their reads without a stamp, and both numbers survive this round unchanged — they were
+re-derived by naming the three callers, not read off. `main.rs`'s **six** facts survive too, and were
+re-derived the same way: this round narrowed one existing check rather than adding a seventh
+mechanism.
+
+### 14.1 The High — suppression is the stamped door's question, because only a publication can misreport
+
+**What the finding was.** Round 7 gave each save tail a door of its own and left `decide`'s steps 1–4
+shared. Step 2 — `self_write_suppresses` against the app-write record — therefore ran **before the
+door was consulted**, so a record that had gone stale could answer `SelfWrite` to a serialized
+save-tail reading: retaining the record, announcing nothing, marking nothing, and returning above the
+only two things that door exists to do.
+
+**The reachable path needs no race, and the two premises were confirmed in the code rather than
+assumed.** `committed_revision` (`commands.rs`) answers `Some` only for `Ok(SavedDocument {
+committed: true, .. })`, so a save that commits nothing records nothing and the **previous** entry
+stands; and `reload_document` is `session.reload(id)`, which touches the ledger **not at all**, so the
+workspace can accept a foreign revision while the record still names an older app write. The
+reviewer's sequence: the app commits A and records A → the watcher misses an external B →
+`reload_document` accepts B into the workspace → an unchanged save of B returns `committed: false`,
+so no new record replaces A → an external writer restores A before `after_a_save` refreshes → the
+refresh observes A ≠ the saved B and enters the withholding door → `decide` answers `SelfWrite`,
+retains A, and the **owed stabilized reading of A that the same tail asks for on the next line meets
+the same record and is suppressed in its turn**. Consult Q2's *the differing post-save observation is
+queued as external* is met by nothing at all — round 3's swallowed change, reached through the check
+above the door rather than through the door.
+
+**What it cost on each door.** On the withholding door, everything: that door's *only* effect is the
+record removal, so a `SelfWrite` answer is no effect at all, and the suppression then propagates to
+the owed reading. On the marking door, consult Q5's coalescing entry — the thing that stops a native
+duplicate at the same document and revision raising a **second** conflict at 2d-5 — plus the same
+record removal.
+
+**The fix is the reviewer's, and the argument for it is narrower than *the record might be stale*.**
+Suppression exists for one purpose, and consult Q2 states it in the same breath as the rule: *keep a
+matching entry long enough to absorb the several native notifications one atomic replacement may
+generate*. A **native notification** arrives through exactly one door. A serialized caller brings a
+read it performed itself, under the session lock, after the record, through a door that since §13
+cannot publish — and the mistake suppression prevents is *reporting this application's own write as
+somebody else's*, which is something only a **publication** can do. So the check has no work to do on
+those two doors and only harm to do, and that is true whether or not the record is stale. `decide`'s
+step 2 is now a `match door` structurally identical to step 1's, and the enum is matched three times
+rather than twice, so a fourth door cannot be added without answering this question for itself.
+
+**This is Q2 followed more exactly rather than a deviation from it**, and the consult's own two
+sentences are the reason. Its ruling is scoped to *a **stable** observation*, and a single save-tail
+read is precisely what this record has said since §12 is **not** one; and the truthful sentence §3
+quotes verbatim — *"this application ignores a **filesystem hint** when the bytes now on disk hash to
+the latest revision it recorded"* — describes what suppression now does and only that. Where §14
+does go beyond Q2's letter is the **clearing** rule, which names three events (a different stabilized
+revision accepted, the next committed app save, workspace replacement) and not this one; §13 already
+crossed that line, since a `Withheld` reading is neither stabilized nor a commit and its whole effect
+is the removal. §14 extends it to a serialized reading that finds the recorded bytes, and §14.1's
+*what clearing gives up* is the price paid for it, stated rather than assumed away.
+
+**Where a serialized reading equals the entry it meets, that entry was never taken by the running
+transaction** — the fact that makes the narrowing safe rather than merely useful, and it was derived
+from the two call sites rather than assumed: `conflict_after_the_lock` runs on the
+`RevisionMismatch` arm, where `committed_revision` is `None` and nothing was recorded; `after_a_save`
+reaches its door only where the refresh **disagrees** with the revision its transaction last saw,
+which no record of that transaction can equal. So the entry a `SelfWrite` used to protect on these
+doors was always an **earlier** save's. **The narrower sentence is deliberate**: `after_a_save` on a
+committed save is decided against its own transaction's record, and it always was — that reading
+simply differs from it, which is why the fix changes nothing there.
+
+**What clearing that entry gives up, stated rather than smoothed over.** Two things, and they are
+different on the two doors:
+
+- **the suppression of that earlier write's own pending native hints.** On the **marking** door the
+  marker takes the job over **while it stands**: the state goes into `announced`, so a hint
+  stabilizing at it answers `Duplicate` instead of `SelfWrite` — a different counter, the same
+  silence, and nothing reaches a consumer. The new `commands.rs` test asserts exactly that
+  `Duplicate` rather than leaving it to be reasoned about. **What *"while it stands"* excludes was
+  walked rather than waved at**: a later committed save removes the marker with `record_app_write`
+  and puts its own record there, and a hint of the older bytes then meets the chronology check —
+  refused as older if its reads preceded that record, and if they did not, then its reads saw the
+  disk at or after the newer rename, so bytes equal to the marker's mean somebody wrote them back
+  and announcing them is correct. A differing publication in between replaces the marker, which is
+  §5 item 3's third residue unchanged. On the **withholding** door nothing takes it over, and such a hint is
+  **published**. That is deliberate: the door is reached only where an external write landed between
+  a save's locked read and its read-back, so the bytes announced are bytes somebody else wrote, and
+  announcing a state the disk demonstrably holds is over-reporting where the alternative is silence
+  about an external change. The review asks for precisely this behaviour — its prescribed regression
+  requires that a **stamped** admission of A after a withholding be *admitted*;
+- **the chronology anchor for readings older than that record**, which is §5's new item 23. Step 1
+  refuses only while an entry stands. This is **not new**: supersession has cleared the anchor on
+  every accepted differing state since this module was written, which is the ordinary external
+  conflict. §14 widens the inputs that reach it by one class rather than adding a class, and the
+  round that widens a hole is the round that owes the sentence.
+
+### 14.2 The three questions the brief required answered in writing
+
+**1. Step 3's own justification becomes false, and here is the true one.** `decide`'s step 3 —
+supersession, unconditional — justified needing *"no condition of its own"* on the ground that *"a
+`Content` state reaching here was already proved by step 2 not to be the recorded bytes."* With step
+2 door-scoped, a serialized `Content` state can reach step 3 and **be** the recorded bytes. The
+restated argument is two arguments, one per class of door, and the doc comment now carries both: for
+a *stamped* reading, step 2's proof, unchanged; for a *serialized* one, that the reading was taken
+under the session lock after the record in program order, by a tail that has already classified it,
+against an entry no running transaction of this session took — so the entry's licence has outlived
+the last reading that could spend it, and spending it is what stops it suppressing the owed
+stabilized reading. Step 3 still needs no condition; what changed is that the sentence justifying
+that is no longer one sentence.
+
+**2. Can clearing on a serialized door let this application's own write be announced as an external
+change?** Worked through for both doors, and the answer is *no* on one and *over-reporting* on the
+other — never silence, and never a false claim of authorship, which the predicate is forbidden to
+make in either direction. Marking door: an app write of A leaves a record and pending native hints; a
+later conflict tail reads A, clears the record and **marks** A; the hints then stabilize to A and
+meet the marker, answering `Duplicate` — coalesced, no sequence, nothing downstream. Withholding
+door: the same chain minus the marker, so such a hint is published. That is the standing judgement of
+this record applied to a new input — the same one §5 item 3's third residue takes for a marker
+overwriting a newer publication — and it is bounded by what the withholding door requires to be
+reached at all: the file must have moved away from the transaction's own last read and back to the
+recorded bytes, so what is announced is a state an external writer put there.
+
+**3. Was the root-cause fix better?** It was weighed and **rejected**, and this is the round's one
+deviation-shaped decision, offered for the next round to judge first. The root-cause candidate is to
+clear the record where it actually goes stale — when the workspace accepts a foreign revision through
+`reload_document`, or when a save commits nothing. Four reasons against, in the order they decided it:
+
+- **it does not fix the door.** The staleness is not caused by `reload_document`; it is caused by the
+  record's suppression licence outliving the last reading that could spend it. Every other read path
+  that does not go through the ledger — `WorkspaceSession::document`, `text`, and whatever 2d-4 and
+  2d-5 add — re-creates the same gap, and the *next* one would be found by round 9. The door-scoped
+  fix is a statement about which readings the check is **for**, which no new read path can falsify;
+- **the obvious version of it is wrong in the dangerous direction.** Clearing on a reload whose read
+  *equals* the record would unsuppress that write's own pending native hints with nothing announced
+  to absorb them — a false external change, which is the one outcome this module may not produce.
+  Clearing only when it differs is defensible, but it is a different fix from the one that closes
+  this finding, and it closes none of this finding;
+- **it needs a fourth mutation path into the ledger, from a read-only command.** `record_app_write`
+  is the ledger's only producer and `begin_epoch` its only bulk eraser; the exhaustively matched
+  `AdmissionDoor` exists so that a new way in is a compile error rather than a skipped case. Making
+  `reload_document` mutate the ledger also changes what that command *is*, which is a widening of the
+  command surface this step's scope bound forbids;
+- **the fact it wants to record belongs to a layer that does not exist yet.** *What has the consumer
+  accepted* is the coordinator's fact: consult Q3 and Q5 give 2d-5 a **per-document accepted
+  sequence**, and that is where a reload and an observation can be reconciled by construction rather
+  than by two maps agreeing. §5 item 24 records the same gap in the announced-state map and defers it
+  the same way, deliberately and in writing rather than by omission.
+
+### 14.3 The two Lows
+
+**Low 1 — the record predicted what the code did not do.** §13 says the serialized doors answer
+`Marked`/`Withheld`, that a disagreeing post-save read clears its record, and that withholding
+ensures the stabilized reading is queued; in the stale-record case the code answered `SelfWrite`,
+retained the record and suppressed the owed observation. The behaviour was fixed first and the record
+made true of it second, which is the only order that works: §2.6's *"that is correct and is the
+predicate's own limit"* paragraph and its round-4 block's *"the same suppression"* clause, §13.1's
+two door bullets, §13.4's arm list and its *"not changed at all"* clearance, §13.6's Q2 and Q5
+guarantees, and §3's evidence rows all carry blocks or amendments naming which checks are actually
+door-specific. The stale-record case is **added to the evidence** as its own row, and §5 items 23 and
+24 record what the fix leaves open.
+
+**Low 2 — the eighth consecutive name-position miss.** §13.7 claimed the `published` → `announced`
+sweep complete; it had swept the two **identifiers** and left the map's description in **prose**, in
+six present-tense positions plus their assertion messages. The correction block under §13.7 lists
+every position and, as importantly, every place where *published* is **kept** because a sequence
+really was spent. The shape rather than the words: the sweep looked for the old identifier, and the
+false contracts were the ones that never named it.
+
+### 14.4 The sweep for the shape, not for the words
+
+The question, asked of this round's own change: *is there any other place where a rule shared by
+several callers is applied to a value whose caller has already answered it, or where a map or record
+this ledger keeps can be made stale by something outside the ledger?*
+
+**`decide`'s five steps were re-enumerated one at a time against the three doors**, which is the
+enumeration round 8's High shows this record had never actually made:
+
+1. **chronology** — door-scoped since §10. Asked of the stamped door only, correctly;
+2. **suppression** — door-scoped by this round. The finding;
+3. **supersession** — shared, and it is a *mutation* rather than a check, so the shape does not
+   apply; its justification is restated per door in §14.2 item 1 rather than left resting on step 2;
+4. **coalescing** — shared, and it means the same thing for all three doors: *does a consumer already
+   have this state*. Round 8 cleared it and the re-check agrees — a serialized reading that finds its
+   own state already announced has nothing to add, and the record has been cleared above it either
+   way. **But the map it consults can go stale exactly as the record could**, which is §5's new item
+   24, found here and deferred with its reasons rather than closed;
+5. **what the door may do** — three sibling arms of one match, each performing its own and only its
+   own, unchanged.
+
+**Every production path into the ledger was re-enumerated with `rg` rather than recalled** — the same
+search §13.4 used — and there are still exactly **five**: `open` → `begin_epoch`, `commit_and_record`
+→ `record_app_write`, `conflict_after_the_lock` → `mark_under_the_session_lock`, `after_a_save` →
+`withhold_under_the_session_lock`, and `admitting_sink` → `admit`. This round added none and removed
+none; what it changed is which checks the third and fourth are asked.
+
+**`admitting_sink`'s exhaustive match was re-checked** and is untouched: `SelfWrite` is still
+reachable from its own door, and its comment — *"`SelfWrite` and `Duplicate` are answers about these
+exact bytes, and re-reading them yields the same answer"* — is still true of the door that sink calls.
+
+**This round's own new code was asked the same question.** The new step 2 returns early, exactly as
+before, and returning early above step 3 is a licence only the two retaining checks have — the
+narrowing removes uses of that licence and adds none. It reads no value it then acts on outside the
+state guard, spends nothing, and consumes nothing; there is no check-and-spend shape in it, because
+there is nothing to spend. And the `match state` inside it is exhaustive rather than an `if let`, so a
+fourth `ObservedState` is now a compile error here too, where before it silently fell through to
+*not a self-write*.
+
+**One thing this round does not claim**: that a fourth door could not be added wrongly. The enum makes
+adding one silently a compile error in three places; nothing makes its author choose the right arm in
+any of them.
+
+### 14.5 The sweep for name positions
+
+Distinct from the prose sweep, and this round has **two** positions to sweep rather than one.
+
+- **The one round 8's Low names** — every present-tense description of `LedgerState::announced` as a
+  *published* state, in prose that never uses the identifier. Listed exhaustively in the correction
+  block under §13.7, with the places *published* is deliberately kept listed beside them;
+- **the one this round's own change creates** — every sentence anywhere saying that suppression is
+  asked of **every** reading, or that step 2 proves the bytes differ. Swept and amended: `ledger.rs`'s
+  `AdmissionDoor` headline (*decides **two** things* → **three**, and *survives every check* →
+  *survives the checks its door is asked*, in the headline and in two of the three variants — the
+  stamped variant keeps *every check* and says it is the one door asked all of them),
+  `Admission::SelfWrite`, `Admission::Marked`, `Admission::Duplicate`, `Admission::Withheld`,
+  `LedgerTally::suppressed`, `decide`'s step list and its *step 1 sits above step 2* paragraph, its
+  *no public sequence can reach step 4 with a record standing* argument, the `recorded` lookup's own
+  comment, both serialized entry points' doc comments; `commands.rs`'s module header, `run_one_save`'s
+  *both refreshes* paragraph (*two things differ* → **three**, with the count re-derived by counting
+  the list), `conflict_after_the_lock`'s *the refresh is external* section, `after_a_save`'s
+  *a refresh that disagrees* section, and both inline call-site comments; and `main.rs`'s phase
+  paragraph.
+
+**One test name changed**, because the claim in the name changed:
+`a_conflict_against_this_apps_own_committed_bytes_is_suppressed` →
+`…_is_marked_rather_than_suppressed`. Every mention of it in this record is amended in place,
+including the two inside past-tense round records, per §13.7's identifier rule; what each round *did*
+is left as written.
+
+**Searched and found current or deliberately left**: `watch_check.rs`'s two suppression tests and its
+module header, which are about the **stamped** door throughout and are untouched by this round —
+their positive wait on `tally().suppressed` still bites, and still bites for the same reason;
+`ledger.rs`'s *a self-write hint stamped before its own record is counted as `preceded_a_commit`*,
+which is a statement about the stamped door and stays true; `commands.rs`'s round-1 narrative of
+*"self-write suppression having already failed"*, a past-tense description of a defect's shape; and
+`PROGRESS.md`'s two present-tense *"published-state map"* descriptions (lines 110 and 9187),
+**left standing and named here** because that file is the orchestrator's — its round-8 checkpoint is
+where this round's names, the renamed test and the announced-state map alike, are next written.
+
+### 14.6 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — `decide`'s step 2 becomes a `match door` producing
+  `suppressed_as_a_self_write`, with the predicate reached only through
+  `AdmissionDoor::StampedPublication` and the state match inside it made exhaustive. `decide`'s
+  contract documentation gains the door restriction in step 2 and a two-bullet restatement of step
+  3's justification; `AdmissionDoor` says it decides **three** things and is matched **three** times;
+  `Admission::SelfWrite` and `LedgerTally::suppressed` say which door can produce them; both
+  serialized entry points say which two steps they are not asked and what the exemption costs; and
+  the module gains a section, *suppression is the stamped door's question, because only a publication
+  can misreport*. **One test added**, `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes`,
+  which drives both serialized doors against a record naming the bytes they read, the owed stamped
+  reading after the withholding, and — as its third leg — the discrimination that the same record and
+  the same bytes through the **stamped** door are still `SelfWrite`. Five assertion messages amended
+  for the name sweep;
+- **`src-tauri/src/commands.rs`** — no behaviour of its own changed: both tails call the same two
+  doors on the same arms. Its documentation is what moved — the module header, `run_one_save`'s
+  *both refreshes* paragraph, `conflict_after_the_lock`'s *the refresh is external, and the ledger is
+  told so rather than fed* section (whose *exactly one case answers self-write* paragraph was the
+  sharpest false sentence this round found in the code's own documentation), `after_a_save`'s
+  *a refresh that disagrees* section, and both inline call-site comments. **No test added; one
+  renamed and its four assertions replaced** — `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed`
+  now asserts the record gone, the marker installed, `suppressed: 0, marked: 1, admitted: 0`, and a
+  following native hint answering `Duplicate`. Four name-position amendments and three assertion
+  messages;
+- **`src-tauri/src/main.rs`** — the phase paragraph's *go through the same checks a native hint
+  meets* becomes the two shared steps plus the two retaining checks neither door is asked. Its count
+  of **six** facts is unchanged and was re-derived by counting them;
+- **no core file, and no `src/` path.**
+
+### 14.7 The evidence and the neuter runs
+
+| Owed | Where |
+|---|---|
+| that a stale record cannot suppress a serialized reading of its own bytes | `ledger.rs`'s `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes` — both doors, `Marked` and `Withheld`, the record gone in both, and the whole tally asserted `(suppressed: 1, marked: 1, withheld: 1, coalesced: 1, admitted: 1)` |
+| that the withheld state's owed stabilized reading is then **queued as external** (consult Q2) | the same test's fifth assertion: after the withholding, a **stamped** admission of exactly those bytes answers `Admitted { sequence: 1 }`. This is the half the review named, and no test before this round could reach it |
+| that consult Q5's coalescing entry is installed where a `SelfWrite` used to withhold it | the same test's third assertion, and `commands.rs`'s `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed` driving it through a **real** `save_raw_document` conflict against this session's own committed bytes |
+| that the marker takes over the suppression of that write's own pending hints | both tests' final assertion — a **stamped** hint at the marked bytes answering `Duplicate`, which is the same silence through a different counter |
+| **that the check was narrowed and not removed** | the same ledger test's third leg: the same record and the same bytes through the **stamped** door still answer `SelfWrite` and still retain the record. Also `the_recorded_revision_is_suppressed_and_survives_duplicate_hints`, unchanged, and `watch_check`'s production-path positive wait on `tally().suppressed`, unchanged and still green |
+| that nothing else about the ledger's decisions moved | `decide`'s chronology comparison, supersession step and coalescing comparison were not edited; §3's table, §9.5's, §10.6's, §11.6's, §12.7's and §13.5's all still pass |
+| that a record made stale by `reload_document` is repaired | **nothing, and deliberately** — §5 item 24 and §14.2 item 3 are the standing statement. What this round guarantees is that a save tail's own reading can always spend the licence; a path with no save tail and no watcher hint still cannot |
+
+**The gates were run on the finished tree**, and the scar in §6's table paragraph bit before they
+were: `cargo test --workspace` **1263 passed, 0 failed** (exit 0, 26 `test result` lines summed,
+twice on a quiet host — the second run after the neuters were reverted, so the figure describes the
+tree as it stands);
+focused serial `watch_check::` **20 passed, 0 failed** (81.03 s); `cargo clippy --workspace
+--all-targets -- -D warnings` clean (exit 0); `cargo fmt --check` clean (exit 0, nothing to format);
+`cargo tree -p espansoconfig-core | rg tauri` empty. The frontend three are **carried, not
+measured**, on the warrant of the file list in §14.6 — no `src/` path was opened.
+
+**Three neuter runs**, each disabling exactly one thing and then restored, with the suites re-run
+green before the next was made:
+
+- **the whole fix** (both serialized doors routed back through the predicate, which is the code
+  exactly as round 7 shipped it) — `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes`
+  failed at *"a serialized reading is not one of the native hints suppression absorbs"*, **left
+  `SelfWrite`, right `Marked`**; **20 passed, 1 failed** of the 21 ledger tests. And in `commands.rs`,
+  `a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed` failed at *"the
+  marking door supersedes the record it was decided against"*, **left `Some(AppWrite { epoch: 1,
+  revision: … })`, right `None`** — **77 passed, 1 failed** of 78. This is round 8's High as a
+  measurement on the production path, not only in the ledger. **Both figures were re-measured by
+  running each whole suite under the neuter**, because the first pass ran the single test by name and
+  the round's own review caught the suite totals being *inferred* from that — the one defect class no
+  test can fail;
+- **the withholding door's half alone** (the marking door left exempt, the withholding door routed
+  back through the predicate) — the same ledger test failed at *"the same exemption, on the door
+  whose only effect is the record"*, **left `SelfWrite`, right `Withheld`**; **20 passed, 1 failed**
+  of 21, and `commands.rs` stayed green. That is what makes the test a check on **each** door rather
+  than on the pair;
+- **the marking door's half alone** is the first neuter's `commands.rs` failure, which is why it is
+  not run a third time as its own: the `commands.rs` test drives only the marking door, so its
+  failure above already isolates that half on the production path.
+
+**One thing is deliberately not neutered**: nothing was removed to test that the owed re-observation
+reaches the engine, because that is §11's and §12's mechanism and this round did not touch it.
+
+### 14.8 What is guaranteed now, and what is not
+
+**Guaranteed.** Everything §10.5, §11.5, §12.6 and §13.6 guaranteed, less the two sentences §13.6's
+correction block names as conditional. Added, and it is this round's whole claim: **no reading a save
+tail took itself is ever answered *self-write*, so neither serialized door can be prevented from
+doing the one thing its door exists to do.** In particular consult Q5's coalescing entry is installed
+whenever `conflict_after_the_lock`'s refresh succeeds, and consult Q2's *the differing post-save
+observation is queued as external* is met by the owed stabilized reading **unconditionally** rather
+than only where the app-write record happened not to name the same bytes.
+
+**Not guaranteed, and stated as such.** Everything §13.6 lists, unchanged — a watcher running to hear
+the ask (§5 item 19) above all — plus the two items this round adds. **§5 item 23**: clearing a record
+clears the chronology anchor with it, so a reading stamped before that record has nothing to refuse
+it; pre-existing, widened by one input class here, and closable only by a design change that gives
+the anchor a life of its own. **§5 item 24**: the announced-state map can go stale exactly as the
+record could, because `reload_document` tells it nothing either, so a revert to a state the person
+has already navigated away from can coalesce into silence; deferred to 2d-5's per-document accepted
+sequence with its reasons written down. And, unchanged and now doubly relevant: nothing here may
+claim an ignored event *was ours* — byte identity, never authorship.
+
+**Nothing from 2d-4 or later was added**: no Tauri event, no queue, no `drain_external_changes`, no
+`#[tauri::command]`, no TypeScript, Svelte or i18n file, no writer, no force flag, no route around
+`save_document`, and nothing new that serializes. **No core file was touched at all**, and
+`cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
