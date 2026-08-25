@@ -54,7 +54,7 @@
 //! `commands::commit_and_record`, the window `run_one_save` runs its
 //! transaction in, for a committed save and for nothing else — and the two
 //! refreshes on the save path (`after_a_save`'s and `conflict_after_the_lock`'s)
-//! go through the same gate a native hint does. **Five** things together make a
+//! go through the same gate a native hint does. **Six** things together make a
 //! save's own rename un-reportable as somebody else's without losing anybody
 //! else's write: a **commit gate** distinct from the ledger's state, which makes
 //! the transaction and its record one window no admission can *decide* inside; a
@@ -66,8 +66,13 @@
 //! before the ledger ever sees it, so a refusal that is not answered leaves that
 //! state coalescing to nothing forever; the **session lock** the two save-path
 //! refreshes already hold, which orders their reads against every record with no
-//! clock in between; and a **re-observation** asked of the running watcher when a
-//! save could not read the file at all. A *watcher* reading the session cannot
+//! clock in between; a **re-observation** asked of the running watcher when a
+//! save could not read the file at all, or read it once where the engine reads
+//! twice; and the fact that such a request is an **owed** observation the engine
+//! must answer — retained across a failing baseline, emitted even when the state
+//! it settles on is one the engine established but never announced, and re-owed
+//! when a refusal takes its settlement back — rather than a hint the engine may
+//! coalesce into silence. A *watcher* reading the session cannot
 //! place strictly after its own last commit to that path is discarded rather
 //! than published, it does not clear the record, and the engine is told to
 //! un-conclude it and observe the path again. **The two save-path refreshes are
@@ -80,7 +85,11 @@
 //! the read that did not happen**: the path is handed back to the watcher
 //! (`watch::ReObserver`), whose ordinary two reads produce the state and whose
 //! stamp places it — this step's round-5 High, which was round 4's exposure
-//! reached through an error arm. What the gate admits still reaches
+//! reached through an error arm. **Where such a refresh *succeeds*, what it
+//! publishes is kept and a stabilized reading is asked for beside it**: one read
+//! can be an intermediate state of somebody else's non-atomic write, so the
+//! state the engine settles on lands at a later sequence and supersedes it —
+//! this step's round-6 second High. What the gate admits still reaches
 //! a sink that discards it, until 2d-4.
 
 #![deny(missing_docs)]

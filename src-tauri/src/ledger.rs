@@ -234,26 +234,44 @@
 //! thread, into a comparison that accepts only a strictly later value, with
 //! nothing to answer the refusal.
 //!
-//! # A read the save path could not use is re-observed, never published
+//! # A read the save path could not use — or could not prove stable — is
+//! re-observed
 //!
-//! This step's **round-5 High**, and it is about the arms where a save-path
-//! caller has **no** reading to bring: `Workspace::refresh` raised, or the
-//! transaction's own outcome is an uncertain write that read nothing back. Such
-//! a caller must not admit anything — a single failed read proves no state, and
-//! publishing an `Absent` from it would clear the app-write record and make the
-//! save's own hints foreign — and until round 5 it therefore did nothing at all,
-//! leaving the disk state to a native hint `docs/decisions/2d-2-notes.md` §2.3
-//! expressly declines to guarantee. That is round 4's exposure reached through
-//! an `Err`.
+//! This step's **round-5 High** and its **round-6 second** one, which are the
+//! same sentence about two different arms.
 //!
-//! What closes it is not in this module and deliberately so: the caller asks the
-//! running watcher to observe that path again
+//! Round 5's arms are the ones where a save-path caller has **no** reading to
+//! bring: `Workspace::refresh` raised, or the transaction's own outcome is an
+//! uncertain write that read nothing back. Such a caller must not admit
+//! anything — a single failed read proves no state, and publishing an `Absent`
+//! from it would clear the app-write record and make the save's own hints
+//! foreign — and until round 5 it therefore did nothing at all, leaving the disk
+//! state to a native hint `docs/decisions/2d-2-notes.md` §2.3 expressly declines
+//! to guarantee. That is round 4's exposure reached through an `Err`.
+//!
+//! Round 6's arms are the ones where such a caller **does** admit, through
+//! [`WriteLedger::admit_under_the_session_lock`], on a reading it cannot prove
+//! stable. `Workspace::refresh` is **one** read where the engine takes two, so a
+//! foreign non-atomic write in progress can present a parseable intermediate
+//! state that never stably existed — and publishing it spends a sequence on a
+//! phantom and leaves it in the coalescing map as the last word on that path.
+//! Because the refresh *succeeded*, nothing asked for anything further, so the
+//! writer's final state entered the sequence only through a hint nobody
+//! promised. The publication itself is **kept**: the consult requires a
+//! differing post-save observation to be queued as external and a conflict's
+//! disk side to be published so a later hint at it coalesces
+//! (`docs/reviews/phase-2d-design.md` Q2 and Q5), and it is the state the person
+//! is being shown.
+//!
+//! What closes both is not in this module and deliberately so: the caller asks
+//! the running watcher to observe that path again
 //! (`crate::watch::ReObserver::re_observe`), and the state that eventually
 //! reaches this ledger is one the engine read **twice**, carrying a stamp, going
-//! through [`WriteLedger::admit`] like any other observation. So the two doors
-//! are unchanged and no third proof of chronology exists: what changed is that a
-//! reading nobody could use is replaced by one somebody can, rather than being
-//! forced through a door it cannot honestly enter.
+//! through [`WriteLedger::admit`] like any other observation — at a **later**
+//! sequence, which is what supersedes a phantom rather than arguing with it. So
+//! the two doors are unchanged and no third proof of chronology exists: what
+//! changed is that a reading nobody could use, or nobody could prove, is
+//! followed by one somebody can.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -777,12 +795,27 @@ impl WriteLedger {
     /// smoothed over**: a save-path refresh is a *single* read, where the
     /// engine's observations are two equal consecutive ones, so the consult's
     /// word — *a different **stabilized** revision* — is met by the watcher's
-    /// callers and not by these two. A torn read would therefore publish a
-    /// state that never stably existed and could coalesce a later real
-    /// observation of the same bytes away. That is accepted because the same
-    /// single read already builds the conflict payload the person is shown, so
-    /// it is a property of `Workspace::refresh` rather than a new one this
-    /// function introduces.
+    /// callers and not by these two. A torn or intermediate read therefore
+    /// publishes a state that never stably existed, spends a sequence on it, and
+    /// leaves it in the coalescing map as the last word on that path.
+    ///
+    /// **That is not accepted as a property of `Workspace::refresh` any more,
+    /// and saying it was is what round 6's second High corrected.** It is true
+    /// that the same single read builds the conflict payload the person is
+    /// shown, and that is why this publication stays — the consult requires it
+    /// (Q2, Q5) and a payload the observation sequence contradicts would be
+    /// worse. What was false is the *conclusion* drawn from it: a payload is
+    /// shown once and replaced by the person's next action, while a published
+    /// state persists in this map and in the sequence, so the exposure was new
+    /// after all. Both callers therefore ask the running watcher to observe the
+    /// path again (`crate::watch::ReObserver::re_observe`) in the same breath as
+    /// admitting, and whatever the engine's two reads settle on is admitted at a
+    /// **later** sequence — superseding a phantom, or coalescing into a
+    /// publication that was right all along. Consult Q3's rule that a consumer
+    /// acts only on the highest sequence it has accepted for a document is what
+    /// makes the earlier value harmless; `docs/decisions/2d-3-notes.md` §5
+    /// item 3 is what remains, including the case where **no watcher is
+    /// running** to be asked (§5 item 19).
     ///
     /// **It takes the commit gate, so it must not be called from inside a
     /// commit window**: a `std::sync::Mutex` is not reentrant, and a second
@@ -2209,8 +2242,9 @@ mod tests {
         // re-reads it; `Workspace::refresh` raises, so **the save path publishes
         // nothing and clears nothing** — `commands.rs`'s
         // `a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing`
-        // is that half. What it does instead is ask the watcher, and the hint
-        // below is exactly what `WatchWorker::hint_paths` makes of that request.
+        // is that half. What it does instead is ask the watcher, and the owed
+        // request below is exactly what `WatchWorker::schedule_paths` makes of
+        // that request.
         // This is the other half: the removal is stabilized by **two** reads,
         // admitted through the **stamped** door, and only then does the record
         // go — because the file no longer holds what this application committed,
@@ -2244,10 +2278,13 @@ mod tests {
         record(&ledger, document, &path, committed);
 
         // 2. The external removal, and the refresh that could not read it. The
-        //    save path admits nothing here; all it does is hint the path, which
-        //    is the one line `WorkerMessage::ReObserve` becomes.
+        //    save path admits nothing here; all it does is ask the watcher, and
+        //    the owed request below is the one line `WorkerMessage::ReObserve`
+        //    becomes (`WatchWorker::schedule_paths`, since the round-6 fix round
+        //    — it was a plain hint before, and this path was tracked, so this
+        //    particular scenario settles the same either way).
         std::fs::remove_file(&path).expect("an external removal");
-        engine.hint(&path, Millis(0));
+        engine.observe_owed(&path, Millis(0));
         assert_eq!(
             ledger.recorded_write(document),
             Some(AppWrite {
@@ -2291,6 +2328,128 @@ mod tests {
         );
         assert_eq!(ledger.tally().preceded_a_commit, 0);
     } // End of function a_removal_the_save_path_could_not_read_is_stabilized_and_admitted()
+
+    #[test]
+    fn a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes() {
+        // **Round 6's second High**, as the engine-plus-ledger sequence it needs,
+        // and deterministic: one real temp tree, one real engine whose clock is
+        // an argument, the real `admitting_sink` and the real
+        // `crate::watch::deliver`. No thread and no sleep.
+        //
+        // The scenario is the sharpest ordering of the finding's. A save-path
+        // refresh is a **single** read, so a foreign non-atomic write in
+        // progress can hand it an intermediate state that never stably existed —
+        // and the commit gate serializes *decisions*, not reads, so that
+        // publication can land **after** the engine has already admitted the
+        // writer's final state. The phantom is then the last word on the path:
+        // it is what `published` holds and what a consumer acting on the highest
+        // sequence would take. Nothing corrected it, because the refresh
+        // succeeded and therefore asked for nothing.
+        //
+        // **The owed request is what corrects it, and an ordinary hint could
+        // not**: the engine already tracks the final state, so a hint stabilizes
+        // to it and coalesces to nothing inside the engine, leaving the phantom
+        // published forever.
+        use espansoconfig_core::watch::engine::{
+            EngineConfig, FsWatchSource, Millis, ObservationEngine,
+        };
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().join("tree");
+        std::fs::create_dir_all(root.join("match")).expect("the watched root");
+        let path = root.join("match/base.yml");
+        let ours = "matches:\n  - trigger: ':ours'\n    replace: ours\n";
+        let theirs = "matches:\n  - trigger: ':theirs'\n    replace: theirs\n";
+        std::fs::write(&path, ours).expect("the committed file");
+
+        let mut source = FsWatchSource;
+        let mut engine = ObservationEngine::start(&root, EngineConfig::default(), &mut source)
+            .expect("a baseline scan");
+
+        let ledger = Arc::new(ledger_at_epoch(1));
+        let (sender, received) = std::sync::mpsc::channel::<AdmittedObservation>();
+        let downstream: AdmittedSink = Arc::new(move |admitted| {
+            let _ = sender.send(admitted);
+        });
+        let sink = admitting_sink(Arc::clone(&ledger), downstream);
+        let document = DocumentId(131);
+        let committed = ContentRevision::of_bytes(ours.as_bytes());
+        let final_state = ContentRevision::of_bytes(theirs.as_bytes());
+        // The intermediate: bytes the writer had put down when the save's single
+        // read happened, and that never stably existed.
+        let phantom = ContentRevision::of_bytes(b"matches:\n  - trigger: ':theirs'\n");
+
+        // 1. The commit and its record.
+        record(&ledger, document, &path, committed);
+
+        // 2. The writer finishes, and the watcher settles on the final state
+        //    through its ordinary two reads. The ledger admits it: sequence 1.
+        std::fs::write(&path, theirs).expect("the foreign writer finishing");
+        engine.hint(&path, Millis(0));
+        assert!(engine.tick(Millis(200), &mut source).is_empty());
+        let read_after = later_than_now();
+        let settled = engine.tick(Millis(240), &mut source);
+        crate::watch::deliver(&mut engine, &sink, 1, read_after, Millis(240), settled);
+        assert_eq!(
+            received
+                .try_recv()
+                .expect("the stabilized final state reaches the consumer")
+                .sequence,
+            FIRST_OBSERVATION_SEQUENCE
+        );
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Content(final_state))
+        );
+
+        // 3. Only now does the save tail decide, on the intermediate it read
+        //    earlier. It publishes at sequence 2, so the **phantom is the last
+        //    word** — this is what the finding is about, and the publication is
+        //    kept because consult Q2 and Q5 require the state the person is
+        //    shown to be queued and to coalesce a later duplicate.
+        assert_eq!(
+            ledger.admit_under_the_session_lock(&path, ObservedState::Content(phantom)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE + 1
+            }
+        );
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Content(phantom)),
+            "the premise: a state that never stably existed is what the path now holds here"
+        );
+
+        // 4. The save tail asked for a stabilized reading in the same breath.
+        //    The engine already tracks the final state, so this is exactly the
+        //    case a plain hint answers with silence.
+        engine.observe_owed(&path, Millis(400));
+        assert!(engine.tick(Millis(600), &mut source).is_empty());
+        let read_after = later_than_now();
+        let answered = engine.tick(Millis(640), &mut source);
+        assert_eq!(
+            answered.len(),
+            1,
+            "the debt is answered even though nothing changed: {answered:?}"
+        );
+        crate::watch::deliver(&mut engine, &sink, 1, read_after, Millis(640), answered);
+        let admitted = received
+            .try_recv()
+            .expect("and the stabilized state reaches the consumer again");
+        assert_eq!(
+            admitted.sequence,
+            FIRST_OBSERVATION_SEQUENCE + 2,
+            "at a later sequence than the phantom, which is what supersedes it"
+        );
+        assert_eq!(
+            observed_state(&admitted.observation),
+            ObservedState::Content(final_state)
+        );
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Content(final_state)),
+            "so the last word on this path is a state the engine read twice"
+        );
+    } // End of function a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes()
 
     #[test]
     fn a_reading_of_an_absence_taken_before_a_commit_is_refused_too() {

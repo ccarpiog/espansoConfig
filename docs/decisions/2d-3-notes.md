@@ -1,18 +1,23 @@
 # Phase 2d-3 — save composition and the suppression ledger
 
 **A save this application commits no longer comes back through its own watcher as a foreign
-external change, and no external change is lost to that suppression, because five facts hold
+external change, and no external change is lost to that suppression, because six facts hold
 together: the commit and the record that describes it are one window no admission can *decide*
 inside; every **watcher** observation carries a stamp taken before its reads, so a reading already
 in hand when that window opened cannot clear the record either; a refused reading is **answered** —
 the engine takes its settlement back and observes the path again, rather than keeping a state it
 never really announced; the two save-path refreshes carry **no** stamp, because they run under
 the session lock that every producer of a record holds, so their reads follow any record in program
-order and no clock decides whether they are heard; and where this application has **no** reading to
+order and no clock decides whether they are heard; where this application has **no** reading to
 bring at all — a refresh that raised, or a write that may have landed without saying what it
 wrote — it publishes nothing from the read that did not happen and asks the running watcher to
-observe that path again, so the state that finally enters the sequence is one the engine read twice
-and stamped. That record is one entry per document, written
+observe that path again, and where it has one it acted on but cannot prove **stable** — either
+save-path refresh, which is one read where the engine takes two — it keeps what it published and
+asks for a stabilized reading beside it, so a state that never stably existed is superseded rather
+than left as the last word; and every one of those requests is an **owed** observation the engine
+must answer rather than a hint it may coalesce into silence — retained across a failing baseline,
+emitted even against a state the engine established but never announced, and re-owed when a refusal
+takes its settlement back. That record is one entry per document, written
 in exactly one place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
 consult's `last_app_write[DocumentId] = { workspace_epoch, revision }` beside the open Tauri
 session, together with the per-epoch observation sequence allocator and the published-state map
@@ -96,6 +101,29 @@ hint is admitted.
 > 2, item 16 at round 4, item 18 now).** `SaveRecords` is renamed `SessionSideOfASave`, because the
 > value now carries something that is not a record.
 
+> **Correction (round-6 fix round, §12).** The headline as §11 left it said *five facts*, and the
+> review found the sixth consecutive narrower instance — **twice, and both times inside an item §5
+> had already judged and dismissed.** §11's mechanism was right; two of its claims about the shape of
+> it were not, and one arm it never touched carried the same defect. First: *asks the running
+> watcher* was a request the worker could **accept and then discard**, because a worker whose
+> baseline is still failing has no engine to hint — and §5 item 20 called that loss bounded by an
+> epoch reset, which it is not, since the workspace stays open and the ledger's record stays with it.
+> Second, one layer deeper: even delivered, the request was an ordinary **hint**, which asks *has
+> anything changed since I last told you* — and `ObservationEngine::start` **establishes** the
+> tracked table without telling anybody anything, so a hint could be answered by silence for a state
+> the asking caller had never heard. Third, on the arms §11 did not touch at all: a save-path refresh
+> that **succeeds** publishes a **single** read into the ledger, and §5 item 3 called that *not new
+> exposure*; it is, because a foreign non-atomic write can present a parseable intermediate that
+> never stably existed, and nothing asked for anything further precisely because the read succeeded.
+> §12 closes all three with the **sixth** fact: the request is an
+> `ObservationEngine::observe_owed` **debt** — retained across a failing baseline, answered even
+> against an established-but-unannounced state, re-owed when a refusal takes its settlement back —
+> and both admitting refreshes now ask for one beside publishing what the consult requires them to
+> publish. **§5 items 20 and 3 are replaced rather than left standing, and that makes five of that
+> section's items found to be real defects after being written as honestly bounded** (10, 16, 18, 20,
+> 3). This round is the **second** to change `crates/espansoconfig-core`, and the paragraph below
+> that names the round-3 change as the only one is corrected there.
+
 The consult is `docs/reviews/phase-2d-design.md`; **Q7 item 3** is this step's specification,
 **Q2** is the ruling on the predicate, the ledger's location and lifetime, where the update
 belongs and what `conflict_after_the_lock` must do instead, **Q1** rules the lifecycle owner
@@ -109,13 +137,17 @@ obligation were written down with 2d-3 named as the owner of the ledger that dis
 no Tauri event exists, no queue and no `drain_external_changes`, no Svelte or i18n file moved,
 and no user-facing string was added. **The core crate was untouched through round 2 and is not
 untouched now**: the round-3 fix round added `ObservationEngine::revert_settlement` and
-`Observation::path()` to `crates/espansoconfig-core/src/watch/engine.rs`, and §9.1 is why that
-could not be done a layer out. The architecture rule is unchanged and re-checked — `cargo tree -p
-espansoconfig-core | rg tauri` still finds nothing, and the engine learns nothing about saves,
-ledgers or application sessions. The new Rust types (`ObservedState`,
+`Observation::path()` to `crates/espansoconfig-core/src/watch/engine.rs` (§9.1 is why that
+could not be done a layer out), and the round-6 fix round added
+`ObservationEngine::observe_owed` there (§12.1). **Both are ledger-agnostic and neither carries a
+Tauri or a save dependency**: one says *the caller could not use that conclusion*, the other says
+*the caller could not use what it read; tell it what this path holds*, and no save, ledger or
+application session enters that module through either. The architecture rule is unchanged and
+re-checked — `cargo tree -p espansoconfig-core | rg tauri` still finds nothing, and the engine
+learns nothing about saves, ledgers or application sessions. The new Rust types (`ObservedState`,
 `Admission`, `AppWrite`, `LedgerTally`, `AdmittedObservation`, `SessionSideOfASave` — `SaveRecords`
-until §11 renamed it — and, since §11, `ObservationSide`, `ReObserver` and `ReObserveOutcome`)
-serialize nothing
+until §11 renamed it — since §11, `ObservationSide`, `ReObserver` and `ReObserveOutcome`, and since
+§12, `crate::watch::HintOrigin`) serialize nothing
 and cross no boundary, so the dictionary contract's serializable-enum sweep has nothing new to
 account for. Admitted observations still end at a **discarding** downstream sink in production:
 they are produced, decided and dropped, and a value that sink drops is gone.
@@ -150,12 +182,23 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   the round's High — so eighteen module tests; it also renamed
   `a_session_locked_reading_is_never_refused_by_the_records_own_instant` to
   `a_serialized_door_reading_…` (§11.3) and corrected the *what the types do not force* paragraph,
-  which still described a save-path stamp that has not existed since §10.
+  which still described a save-path stamp that has not existed since §10. The round-6 fix round
+  (§12) added **no production code here either** — the *what is weaker here* paragraph on
+  `admit_under_the_session_lock` and the module's *a read the save path could not use* section are
+  rewritten around round 6's second High, and one test is added,
+  `a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes`, so nineteen module
+  tests.
 - **`crates/espansoconfig-core/src/watch/engine.rs`** — **the only core file any round of this step
-  touched**, and only in the round-3 fix round (§9.1): `ObservationEngine::revert_settlement`, the
+  touched**, in the round-3 fix round (§9.1): `ObservationEngine::revert_settlement`, the
   private one-pass `undo` map and the private `Settled` value that fills it, `Observation::path()`,
   and `Clone` on the private `Tracked`/`LastContent` for the single settlement that needs it. One
-  test added.
+  test added. The round-6 fix round (§12.1) added `ObservationEngine::observe_owed` and the private
+  `owed` set it fills; the private `Undone` value the `undo` map now holds, which carries the debt
+  beside the replaced state so a refusal re-owes it; an `owed` operand on `settle` and its three
+  settlements, with the re-insertion that makes *a debt is spent only by a settlement that emitted*
+  structural rather than an agreement between them; and the doc corrections on `Observation::Changed`,
+  `Observation::Removed` and `ObservationEngine::start` that the two new emitted shapes owe. One test
+  added.
 - **`src-tauri/src/commands.rs`** — `WorkspaceSession` gained the session-lifetime
   `ledger: Arc<WriteLedger>` and `observing` now **wraps** the injected sink in the gate;
   `unwatched()` does too; `open` calls `begin_epoch` under the session lock, before the
@@ -170,7 +213,12 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   all. The round-5 fix round (§11) renamed `SaveRecords` to **`SessionSideOfASave`** and gave it a
   third field — the open watcher's `ReObserver` — added the narrower `ObservationSide` the two tails
   take in place of a bare `&WriteLedger`, and added `after_an_uncertain_write`, the third arm that
-  asks. Three new tests, so eleven.
+  asks. Three new tests, so eleven. The round-6 fix round (§12.2) added the **fourth and fifth**
+  arms that ask — `conflict_after_the_lock`'s *successful* refresh and `after_a_save`'s
+  *disagreeing* one, both of which publish a single read and now ask for a stabilized reading
+  beside it — and rewrote the module header's count of what this module composes with, both tails'
+  documentation and `SessionSideOfASave::watcher`'s *three arms* sentence. Two new tests, so
+  thirteen.
 - **`src-tauri/src/watch.rs`** — `discarding_sink` removed (it is the *downstream* sink and now
   lives with the gate); `EpochObservation` gained `read_after` and the worker gained
   `WatchWorker::observe`, the two-line function that takes it (§8.1); the round-3 fix round added
@@ -182,14 +230,21 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   fix round (§11) added the re-observation path here: `WorkerMessage::ReObserve(PathBuf)`,
   `ReObserver` and `ReObserveOutcome`, `WatcherLifecycle::re_observer`, the extracted
   `WatchWorker::hint_paths` both a native hint and a re-observation go through, and the test-only
-  `WatcherLifecycle::listening`/`HintInbox` seam. One test added.
+  `WatcherLifecycle::listening`/`HintInbox` seam. One test added. The round-6 fix round (§12.1)
+  renamed `hint_paths` to **`WatchWorker::schedule_paths`** and gave it the new `HintOrigin`, because
+  the two origins no longer ask the same question — a native hint stays a hint and an
+  application-originated request becomes an owed observation — while the re-spelling and the clock
+  stay one rule; and it made `WatchWorker::baseline` **retain** application-originated requests
+  across a failing enumeration and hand them to the engine it finally opens. One test added, on a
+  real spawned worker with no FSEvents stream at all.
 - **`src-tauri/src/watch_check.rs`** — retyped onto `AdmittedSink`/`AdmittedObservation` (the
   seam moved one layer out, §2.3), `observed_path` delegates to the ledger's rather than
   keeping a second copy, and two new real-filesystem checks over synthetic temp trees (§3).
 - **`src-tauri/src/main.rs`** — the module declaration and the phase paragraph. The round-4 fix
   round scoped the stamp to *watcher* observations there; the round-5 fix round corrected the count
   the same paragraph still gave as **three**, which was already four before this round's own fifth
-  fact (§11.3, round 5's first Low).
+  fact (§11.3, round 5's first Low); the round-6 fix round takes it to **six** and describes both
+  halves of the sixth — the owed observation, and the two admitting refreshes that now ask.
 
 ---
 
@@ -431,6 +486,21 @@ it is a property of `Workspace::refresh` rather than one this step introduces.
 > unchanged, and no third proof of chronology exists; what §11 adds is a way to *get* a reading
 > where this section's callers have none.
 
+> **Correction (round-6 fix round, §12).** The paragraph two above — *where this is weaker than the
+> watcher's own admissions* — states the weakness correctly and then draws a **false conclusion**
+> from it, which was round 6's second High. *"That is accepted because the same single read already
+> builds the conflict payload the person is shown, so it is a property of `Workspace::refresh`
+> rather than one this step introduces"* is wrong in its second clause: a payload is shown once and
+> replaced by the person's next action, while a state published here persists in the coalescing map
+> and spends a sequence, so publishing a torn or intermediate read **is** an exposure this step
+> introduced. The publication itself stays — consult Q2 requires a differing post-save observation
+> to be queued as external and Q5 requires a conflict's disk side to be published so a later hint at
+> it coalesces — and what §12 adds is the other half: **both admitting arms ask the watcher for a
+> stabilized reading in the same breath**, so what the engine's two reads settle on is admitted at a
+> **later** sequence and supersedes the phantom, or coalesces into a publication that was right all
+> along. *One rule, two callers* is untouched; the two doors are untouched; what changed is that
+> neither door is any longer the last word on a path. §5 item 3 is replaced with what remains.
+
 ### 2.7 D7 — the backup session and the ledger travel together, because neither is a planner's to choose
 
 `with_open` now lends a `SaveRecords { backups, ledger }` rather than a bare `&BackupSession`.
@@ -453,6 +523,14 @@ write. `WorkspaceSession::with_open` is its only producer.
 > tails take a narrower `ObservationSide { ledger, watcher }` rather than the whole value, because a
 > `BackupSession` in the reach of a function that runs *after* the transaction would be a pre-save
 > copy taken after the save.
+
+> **Correction (round-6 fix round, §12.2).** *"on the three arms where it has no reading of its
+> own"* is a count and a condition, and round 6 changed both. It is **five** arms, and two of them
+> do have a reading: `after_a_save`'s disagreeing refresh and `conflict_after_the_lock`'s successful
+> one publish a **single** read, which is not the engine's two, so each asks for a stabilized
+> reading beside admitting. The condition is therefore *no reading of its own, or one it cannot
+> prove stable*. Everything else this section argues is unchanged, and the field's own documentation
+> at `SessionSideOfASave::watcher` carries the same correction rather than only this block.
 
 ### 2.8 D8 — coalescing is state equality, which reproduces the engine's own two exceptions rather than fighting them
 
@@ -622,7 +700,18 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
   call;
 - **no open-write-surface registry, no automatic reload, no watcher-origin conflict** — Q4, Q5
   and Q6, all frontend, all 2d-5 and 2d-6;
-- **no widening of the watch scope** and no change to the core crate at all.
+- **no widening of the watch scope**, and **no Tauri, save or ledger dependency in the core
+  crate** — which is not the same as *no change to the core crate*, and this bullet said the
+  second until the round-6 fix round (round 6's second Low). Two rounds of this step have added a
+  primitive to `crates/espansoconfig-core/src/watch/engine.rs`, and both are things the engine can
+  say about a **directory** with no application session in them:
+  `ObservationEngine::revert_settlement` plus `Observation::path()` (round 3, §9.1) and
+  `ObservationEngine::observe_owed` (round 6, §12.1). The scope claim the bullet is for still
+  holds — `cargo tree -p espansoconfig-core | rg tauri` finds nothing and the engine learns
+  nothing about saves or ledgers — and stating it as *no change at all* invited the opposite
+  failure: a maintainer reading it as a binding invariant would remove the rollback that ledger
+  refusal recovery depends on, or the debt that a re-observation depends on, and the observation
+  each was built to save would go back to being lost.
 
 ---
 
@@ -637,10 +726,37 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
    2d-4's queue exists, those two call sites are where a save-origin observation must be enqueued,
    and consult Q5's ruling — a save-origin conflict wins over a native duplicate at the same
    document and revision — is the rule that lands there.
-3. **The two save-path refreshes are single reads, not stabilized observations** (§2.6). A torn
-   read would publish a state that never stably existed and could coalesce a later real
-   observation of the same bytes away. It is the same read that builds the conflict payload, so
-   the exposure is not new — but it is not the engine's two-read discipline either.
+3. **~~The two save-path refreshes are single reads, and the exposure is not new~~ — the premise
+   stands, the ruling was false, and §12 closes the half that made it false.** The premise was
+   always right: a `Workspace::refresh` is one read where the engine takes two, so a foreign
+   non-atomic write in progress can hand it a **parseable intermediate** state that never stably
+   existed, which `admit_under_the_session_lock` then publishes — spending a sequence on a phantom
+   and leaving it in the coalescing map as the last word on that path. The ruling *"it is the same
+   read that builds the conflict payload, so the exposure is not new"* was wrong, and that was round
+   6's second High: a payload is shown once and replaced by the person's next action, while a
+   published state persists in the ledger and in the sequence. And because the refresh **succeeded**,
+   nothing asked for anything further — so the writer's final state entered the sequence only through
+   a native hint `2d-2-notes.md` §2.3 declines to guarantee, which is rounds 4 and 5's shape reached
+   through a *success*.
+
+   **What §12 changed**: both admitting arms keep the publication — consult Q2 requires a differing
+   post-save observation to be queued as external, and Q5 requires a conflict's disk side to be
+   published so a later hint at it coalesces rather than raising a second conflict — and both now ask
+   the watcher for an **owed** observation beside it, so what the engine's two reads settle on is
+   admitted at a **later** sequence and supersedes the phantom, or coalesces into a publication that
+   was right after all.
+
+   **What remains, stated as what it is**: the phantom still *enters* the sequence and still spends
+   a sequence. Consult Q3's rule — a consumer acts only on the highest sequence it has accepted for
+   a document — is what makes that harmless, and it is a rule 2d-4 and 2d-5 must keep rather than one
+   this step enforces. The correction also depends on a **running watcher** (item 19); with none, a
+   phantom is exactly as uncorrected as it was before. And the ordering between the worker's own
+   admissions and a save tail's is decided by the commit gate rather than by real time, so a
+   stabilized state admitted just *before* the tail publishes still leaves the phantom last until the
+   owed re-observation corrects it — which is the sequence `ledger.rs`'s
+   `a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes` drives. The same single
+   read also installs a fresh parse in the workspace cache, which is unconditional cache coherence
+   and is corrected by the next read of that document rather than by anything here.
 4. **An admitted observation still names a path, not a `DocumentId`.** The gate is deliberately
    leaf-only (§2.1), so it does not resolve one; a consumer that needs the identity will have to
    take the session lock or reach the core's identity table, and that decision is 2d-4's.
@@ -650,7 +766,13 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
 6. **The path agreement is inherited, not closed** (§2.2). The ledger keys on the workspace's own
    spelling and the gate looks up the watcher's; `HintSpelling` reconciles root-prefix aliases only
    (2d-2 §5 item 6), and a case-only difference or a post-start symlinked ancestor still misses —
-   in the engine first, so such a hint never reaches the ledger at all.
+   in the engine first, so such a hint never reaches the ledger at all. **Since §12 the same miss
+   applies to a *request*, and that is worth saying separately**: `ObservationEngine::observe_owed`
+   drops a path it does not watch and records no debt, exactly as `hint` drops it — deliberately,
+   because a debt no settlement could ever reach would sit there for the life of the engine — so a
+   save asking about a path this engine's roots do not match is answered by silence rather than by a
+   refusal. The save path's spelling is the workspace root's and the engine's root is that same
+   value, which is why this is the inherited residue rather than a new one.
 7. **Rotation is covered by construction, not by execution** (§2.9). Forcing a real rotation needs
    eleven batches, hence eleven sessions with sortable-by-second batch names; what the test drives
    instead is the scope claim rotation depends on, with a `.yml` file under the backup root as the
@@ -658,6 +780,12 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
 8. **The `watch_check` pair says nothing about native delivery.** Both ride the polling fallback so
    that no FSEvents delivery decides a verdict; the eight-cell matrix is where native delivery is
    claimed, and 2d-2's measured scar still binds — these suites are evidence on a quiet host.
+   **§12's spawned-worker test says nothing about it either, and by a stronger construction**: it
+   starts its watcher over a root that does not exist, so the backend can watch **neither** root,
+   no stream is ever created, and nothing in it can be carried by a native event even in principle.
+   It is a real worker thread, a real engine and a real filesystem, run in the ordinary
+   `cargo test --workspace` suite rather than in `watch_check`, precisely because it adds no
+   FSEvents session to that suite's budget.
 9. **Nothing prevents a future `WriteLedger` method from calling caller code under the guard**
    (§2.1). The leaf property is kept by `decide`'s signature and one bounded test, not by a type.
 10. **~~An observation stabilized *before* a save and decided *after* its record supersedes that
@@ -711,7 +839,10 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     reverts before it ticks again (one loop, one call site, no type), and that the refusing
     condition eventually stops holding — each re-observation costs one debounce plus one probe, so
     a save committing to the same path faster than 240 ms without pause would keep refusing. Both
-    are bounded by real user action rather than by anything this code guarantees.
+    are bounded by real user action rather than by anything this code guarantees. **Since §12 the
+    revert also restores an owed *debt***, so a refused observation that was answering one is still
+    owed and the retry can answer it; without that the retry would coalesce against the tracked
+    state and the debt would be spent on silence, which is this item's own shape one layer down.
 14. **Nothing in the type system ties a stamp to the reads it claims to bound** (§8.2). Every
     `Instant` type-checks in that parameter, and a producer that took its stamp *after* its reads
     would compile, forward, compare, and silently restore round 2's High. What holds it is that
@@ -733,7 +864,16 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     that door from the watcher's worker thread would compile, skip the chronology check it could
     not justify skipping, and silently restore round 2's High. Two callers and one paragraph in
     that method's own documentation are what keep it — the same shape as the two above, and the
-    same asymmetry: the mistake is invisible to every test in this crate.
+    same asymmetry: the mistake is invisible to every test in this crate. **Round 6 adds a fourth
+    half**: nothing ties an owed observation to the caller that asked for one. The debt
+    `ObservationEngine::observe_owed` records is per **path** and carries no identity, so two
+    requests before one settlement are one debt, one settlement discharges both, and a caller
+    cannot tell whether the observation it eventually sees is the answer to *its* request or to
+    somebody else's. That is harmless as long as the only thing a caller does with the answer is
+    put it through the ledger — which is all any caller does — and it would stop being harmless the
+    moment a caller waited for *its own* answer. What the engine does force, in the same sentence, is
+    that a debt is spent only by a settlement that emitted: `settle` puts a debt back when its
+    settlement answers nothing.
 15. **The revision a save records is the file's post-rename read-back, not necessarily the bytes
     it wrote** — inherited from the core, not introduced here. `SavedDocument::revision` is
     documented in `crates/espansoconfig-core/src/persist/save.rs` as what the file held when the
@@ -765,6 +905,9 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     the engine can settle entered through a `watches` check, so the two halves cannot come apart
     today. If they ever did, the rollback would still happen and the re-read would wait for the next
     hint or rescan rather than being scheduled — degraded, not lost, and stated rather than assumed.
+    **Since §12 the same is true of the debt it restores**: a restored debt goes back through
+    `observe_owed`, which drops an unwatched path, so the same unreachable case would drop the debt
+    with the hint rather than leave one nothing could answer.
 18. **~~A post-save refresh that *fails* tells the ledger nothing at all~~ — CLOSED by §11, and this
     item was wrong about the choice it presented.** Its premise was right — `after_a_save` evicted
     and answered `moved: None`, `conflict_after_the_lock` returned the read's error, and neither
@@ -780,8 +923,11 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     *the engine's two-read stability is what that state needs, and the engine is where it is
     produced.* This is the **third** time this record has stated a hole as bounded and been wrong
     (item 10 at round 2, item 16 at round 4, this at round 5); §11.4 draws the conclusion. The
-    residues that replace it are items 19 and 20 below, both narrower and both about a watcher that
-    is not there rather than about a reading that is thrown away.
+    residues that replaced it were items 19 and 20 below, both narrower and both about a watcher that
+    is not there rather than about a reading that is thrown away — and **item 20 was itself a real
+    defect**, closed at round 6, which makes this the fourth item of this section to be replaced and
+    round 6's first High the fourth instance of the pattern this paragraph names. What stands in its
+    place is item 21, plus item 19 unchanged.
 19. **A re-observation reaches nothing when the workspace has no running watcher** (§11.1). A
     worker that could not be spawned, an exhausted epoch space
     (`WatcherLifecycle::without_epoch`), a `WorkspaceSession::unwatched` test session, or a worker
@@ -790,32 +936,63 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     a workspace already had — a watcher-less session observes nothing at all — and it is answered
     rather than raised, because a committed write is never afterwards reported as an error. What is
     **not** claimed is that the production path always has one: `WatcherLifecycle::start` absorbs a
-    thread-spawn failure by design (2d-2), and nothing checks afterwards.
-20. **A re-observation issued while the worker's baseline is still failing is dropped, and one
-    issued just before a workspace replacement may be** (§11.4). The first is written as its own
-    arm in `WatchWorker::baseline` and inherits 2d-2's contract exactly: there is no engine to hint
-    yet, and the baseline that eventually starts one reads every path — but a baseline **establishes**
-    state rather than observing it, so nothing is emitted for what it finds. The second follows from
-    the session lock: a save holds it, so a replacement cannot interleave, but a message absorbed by
-    a worker that then receives `Stop` is a hint no tick will serve, and the successor's baseline is
-    likewise an establishment. Both are bounded by the same fact — `begin_epoch` discards the whole
-    ledger on replacement — and both are stated rather than measured.
+    thread-spawn failure by design (2d-2), and nothing checks afterwards. **§12 makes this item
+    sharper rather than narrower**: it is now the only thing standing between a save-path *single
+    read* and its stabilized correction as well (item 3), so a workspace with no watcher can be left
+    with a published state that never stably existed, where before §12 it was left with no
+    publication at all on the failing arms. Both are the coverage that workspace had; the second is
+    worse to look at, and saying so is the point of writing it down here.
+20. **~~A re-observation issued while the worker's baseline is still failing is dropped~~ — CLOSED
+    by §12, and this item was wrong about what bounded the loss.** Its premise was right — the arm
+    existed and dropped the message — and both of the reasons it gave were false. *There is no
+    engine to hint yet* is true and is not a reason to drop the **request**: a request can be held
+    until there is one, which is what §12 does. *The baseline that eventually starts one reads every
+    path* is true and answers nothing, because a baseline **establishes** rather than observes — so
+    a path removed before it runs is a path it cannot even enumerate, and a path it does enumerate is
+    established without being announced to anybody. And the sentence that made both look survivable —
+    *bounded by the same fact, `begin_epoch` discards the whole ledger on replacement* — is simply
+    **not true of this half**: no replacement happens, the workspace stays open, and the app-write
+    record stays with it, so a record naming bytes the file no longer holds goes on suppressing a
+    genuine recreation of exactly those bytes. That was round 6's first High. §12 retains the
+    requests across the failing baseline and hands them to the engine it finally opens, as **debts**,
+    which is the one form an establishing baseline cannot swallow. The residue that replaces this
+    half is item 21.
+21. **A re-observation absorbed by a worker that stops before its next tick is still dropped**, and
+    this is item 20's *second* half, kept because it is the half whose bounding argument is true.
+    A workspace replacement cannot interleave with a save — both hold the session lock — but a
+    message absorbed by a worker that then receives `Stop`, and a debt held by an engine that is
+    dropped with its worker, are both requests no tick will serve. `begin_epoch` discards the whole
+    ledger on replacement, so no record survives to suppress anything, and the successor's baseline
+    reads the same tree; that is the coverage a replaced workspace already had. **Stated rather than
+    measured**, and the distinction from item 20 is exactly which fact does the bounding: here a
+    replacement really is happening, there it was not.
+22. **An owed observation of a path whose stable state is one the engine already tracks is emitted
+    anyway, and the ledger publishes it when nothing was published for that path.** That is the
+    price of the mechanism rather than a defect in it: *nothing changed since I last told you* and
+    *I have never told you anything* are different answers, and only the engine's ledger-free view
+    can tell them apart — it cannot, so it answers both. The observation carries the equality on its
+    face (`previous_revision == content.revision()` on a `Changed`), so a consumer can see that
+    nothing changed; what this step does **not** do is decide what 2d-5 should do with it, and a
+    consumer that treated it as an external change would put a false sentence on screen. The common
+    case costs nothing at all — the ledger answers `SelfWrite` when the state is the recorded one and
+    `Duplicate` when it is the published one — and the case that costs a sequence is a path this
+    session has committed to but never published a state for.
 
 ---
 
 ## 6. The gates
 
-| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) |
-|---|---|---|---|---|---|---|---|
-| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) |
-| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) |
-| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) |
-| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) |
-| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) |
-| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** |
-| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** |
-| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** |
-| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** |
+| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) | After round 6's fix (§12) |
+|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) | **1261 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines, +5 for this round's five new tests; two green runs on a quiet host) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) | **20 passed, 0 failed** twice (68.67 s, then 63.20 s — both on a quiet host, no timeout in either; this round added no `watch_check` test and its one new real-worker test lives in `watch.rs`, so this suite's FSEvents budget is unchanged) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) | **clean** (exit 0) |
+| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) | **clean** (exit 0; no `cargo fmt` was needed) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched one core file, `watch/engine.rs`, and what it added is ledger-agnostic — §12.1) |
+| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** |
+| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** |
+| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** |
+| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** | **not re-run, same reason** |
 
 **Round 3's fix moved the workspace count by 3, and every one is accounted for**: two in
 `src-tauri/src/ledger.rs` (14 → 16) — `a_reading_stamped_exactly_at_the_record_is_refused` and
@@ -856,6 +1033,30 @@ round edited: four files under `src-tauri/src/` (`watch.rs`, `commands.rs`, `led
 `Cargo.toml` and no `Cargo.lock`** — so there is nothing a frontend gate could have moved. As at
 round 4, **the list is the warrant because this round ran no `git` command**; the working-tree
 check earlier rounds quoted is the committing session's to take.
+
+**Round 6's fix moved the workspace count by 5, and every one is accounted for**: two in
+`src-tauri/src/commands.rs` (11 → 13) —
+`a_disagreeing_post_save_refresh_publishes_and_still_asks_for_a_stabilized_reading` and
+`a_conflict_refresh_publishes_its_disk_side_and_still_asks_for_a_stabilized_reading`, one per
+admitting arm — one in `src-tauri/src/ledger.rs` (18 → 19),
+`a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes`; one in
+`src-tauri/src/watch.rs` (5 → 6),
+`a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts`; and one in
+`crates/espansoconfig-core/src/watch/engine.rs`,
+`an_owed_observation_is_answered_where_a_hint_coalesces_to_silence`, the second test any round of
+this step has added to the core. `watch_check` stays at 20 and **no test was removed**; one was
+**renamed** — `WatchWorker::hint_paths` to `schedule_paths` is a production rename, not a test one,
+and no test name changed this round. The frontend figures in the last column are again **carried,
+not measured**, and the warrant is the exhaustive list of what this round edited: four files under
+`src-tauri/src/` (`watch.rs`, `commands.rs`, `ledger.rs`, `main.rs`), one core file
+(`crates/espansoconfig-core/src/watch/engine.rs`), this record and
+`docs/decisions/2d-1-notes.md`. **No `src/`, no i18n path, no corpus path, no `Cargo.toml` and no
+`Cargo.lock`** — so there is nothing a frontend gate could have moved.
+`docs/reviews/phase-2d-3-ledger.md` also shows as modified in the working tree; that is the
+orchestrator's append of round 6's verbatim reply, made before this round began, and this round did
+not touch it. As at rounds 4 and 5, **the list is otherwise the warrant because this round ran no
+`git` command that changes anything**; the working-tree check earlier rounds quoted is the
+committing session's to take.
 
 **The test count moved by 19 over 2d-2's 1223, and every one is accounted for**: 10 module tests
 in `src-tauri/src/ledger.rs`, 7 in `src-tauri/src/commands.rs` and 2 in
@@ -2095,6 +2296,16 @@ adds no caller of either door and removes none, so the block's count and its cla
 `docs/decisions/2d-2-notes.md` §2.3's residue is likewise untouched, and §11.1 says why the fix does
 not depend on it.
 
+> **Correction (round-6 fix round, §12.3).** The last sentence of the paragraph above is false in
+> one word, and it is round 6's first Low. *The block's count and its claim both stand* was
+> **checked and wrong**: `2d-1-notes.md` §2.1's round-4 block said **one** of 2d-3's three callers
+> could place its reads another way while naming **two** in the same sentence — the two save-path
+> refreshes — so the count did not stand and this round's check of it recorded that it did. Round 5
+> was right that its own change added no caller and removed none; what it got wrong was reading the
+> block rather than counting it. The block is corrected in place at `2d-1-notes.md` §2.1, and the
+> lesson is §12.5's: *a count in a document one is checking must be re-derived from what the
+> document names, not read off the number the document gives.*
+
 ### 11.1 High — a read this application could not use is replaced, not published
 
 **What the finding was.** The app commits revision A and records it; an external process removes the
@@ -2329,6 +2540,18 @@ everything §5's other items already carried, unchanged by this round.
 `save_document`, and nothing new that serializes. **No core file was touched at all**;
 `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
 
+> **Correction (round-6 fix round, §12.6).** Two lines of this section are out of date, and the
+> first is what round 6 turned into its first High. *That a re-observation survives a failing
+> baseline or an imminent workspace replacement (§5 item 20)* is two claims, and only the second is
+> still ungiven: a re-observation **does** survive a failing baseline now, retained by
+> `WatchWorker::baseline` and handed to the engine it finally opens as an owed observation (§12.1);
+> the replacement half is kept and is §5 item 21. And the *guaranteed* paragraph's last sentence —
+> *the state that then enters the observation sequence for that path is one the engine read twice*
+> — was true of the three arms this round gave, and false of the two arms it did not touch, where a
+> **single** save-path read was published and nothing asked for anything more (§12.2, round 6's
+> second High). Both admitting arms ask now, so that sentence is true of all five, at the cost of
+> the phantom's own sequence, which §5 item 3 carries. Everything else in this section stands.
+
 ### 11.6 The evidence and the neuter runs
 
 | Owed | Where |
@@ -2415,3 +2638,454 @@ rather than from round 4's list**, because both of round 5's Lows are misses by 
   §8-era stamping paragraph, whose round-4 block already says *neither caller stamps now*. The rule
   applied is §10.7's, unchanged: **a present-tense claim about how the code works now is amended in
   place or blocked; a past-tense record of what a round built is left alone.**
+
+---
+
+## 12. The round-6 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 6 returned **NOT READY** with two Highs and two Lows, and
+it is the sixth consecutive round whose finding was produced by the previous round's fix. All four
+are closed here. Three things the review settled in the fix's favour before finding anything, and
+they are not re-argued below: the unbounded-channel and channel-lock arguments, `NoWatcher`
+behaviour and shutdown/epoch serialization all hold; `after_an_uncertain_write` and the three
+round-5 call sites are sound; and the private, exhaustive chronology proofs, the gate table and the
+absence of any 2d-4 wire or frontend scope creep were confirmed again.
+
+**Both Highs live inside items of §5 this record had already judged and dismissed** — item 20
+("bounded by an epoch reset") and item 3 ("not new exposure"). That makes **five** of that section's
+items found to be real defects after being written as honestly bounded: 10 (round 2), 16 (round 4),
+18 (round 5), and 20 and 3 now. §11's opening rule — *a hole is bounded only if the enumeration of
+alternatives in it is complete, and an enumeration written by the person who wants the hole to be
+bounded is not evidence that it is* — was right and was not enough, because neither of this round's
+Highs is an incomplete enumeration. Item 20 gave a **reason** that is simply false of the case it
+covers (`begin_epoch` discards nothing when no replacement happens), and item 3 gave a **ruling**
+that does not follow from its own true premise (a payload is shown once; a published state
+persists). So the rule this round adds, and applies to items 19, 21 and 22 below: *check the
+sentence that makes a hole look bounded against the code that would have to make it true, in the
+same pass that writes it.* Both of these would have failed that check on the day they were written.
+
+The corrections this round owes the record itself are the sixth block under the headline (§1), five
+amendments to §1's built list and one to its wire-types sentence, a correction of §1's core-crate
+paragraph, a block under §2.6, the **replacement** of §5 items 3 and 20, amendments to §5 items 6,
+8, 13, 14, 17, 18 and 19, two new items 21 and 22, the round-6 column in §6's table with a new count
+paragraph, a block under §11's *no correction is owed outside this record* paragraph, and a block
+under §11.5, whose *not guaranteed* list named a failing baseline in the same breath as a workspace
+replacement and whose *guaranteed* paragraph was true of three arms and false of two. **One
+correction is owed outside this record and is taken**: `docs/decisions/2d-1-notes.md` §2.1's round-4
+block said **one** where it named two (§12.3), and a second block there records the sixth caller
+obligation the engine's new primitive discharges.
+
+### 12.1 High 1 — a request the worker could take and drop, and a hint that could be answered by silence
+
+**What the finding was.** A worker whose baseline enumeration is failing accepts a `ReObserve` as
+`Asked` and then deliberately discards it. The application commits revision A and records it; an
+external process removes the document before the save's refresh; the refresh fails and asks the
+watcher — and the baseline retry arm consumes the message and drops it. The baseline later succeeds,
+but it cannot enumerate a path that is not there, so `ObservationEngine::start` establishes nothing
+for it and emits nothing; the permitted native-hint miss (`2d-2-notes.md` §2.3) leaves the removal
+unsequenced; and record A goes on suppressing a genuine later recreation of exactly those bytes.
+
+**Why the record's own sentences were false, said plainly.** §5 item 20 gave two reasons and a
+bound, and all three fail:
+
+- *"there is no engine to hint yet"* — true, and not a reason to drop the **request**. A request can
+  be held until there is one. Nothing about the arm required the drop; §11 wrote it as its own arm
+  precisely so the choice would be visible, and the choice was wrong;
+- *"the baseline that eventually starts one reads every path"* — true, and it answers nothing,
+  because a baseline **establishes** rather than observes. `ObservationEngine::start`'s own
+  documentation says so in the first line of its contract: *the baseline is the caller's opening
+  state, not an observation*;
+- *"both are bounded by the same fact — `begin_epoch` discards the whole ledger on replacement"* —
+  **false of this half.** No replacement happens. The workspace stays open, the epoch does not
+  change, and the record stays exactly where the save left it. The bound belonged to the item's
+  *other* half, where a replacement really is under way, and it was carried across a sentence to a
+  case it does not cover. That is the whole defect, and it is one sentence long.
+
+**The mechanism was checked for scope and for sufficiency before anything was built on it**, because
+round 2's fix produced round 3's finding by inheriting a premise:
+
+1. **Retention alone is not sufficient, and this was the round's own find.** The review asks for the
+   requests to be retained and then "forced through a path capable of emitting an owed
+   removal/unreadable state". Replaying them as ordinary **hints** is not such a path, and it is not
+   only the absence case: a hint at a path the baseline has just *established* stabilizes to that
+   established state and coalesces to nothing, so a request about a file whose bytes an external
+   writer had already replaced would also be answered by silence, with the app-write record left
+   standing over bytes the file no longer holds. Ordinary coalescing answers *has anything changed
+   since I last told you*, and every caller of `re_observe` has been told nothing.
+2. **It is therefore the engine's to fix, and the fix is ledger-free.**
+   `ObservationEngine::observe_owed(path, now)` records a **debt** beside the hint: the next
+   settlement of that path emits the state it stabilized to even when that state is the one the
+   engine already tracks and even when it tracks none. No save, no ledger and no application session
+   enters the module — the call says *the caller could not use what it read; tell it what this path
+   holds*, which is a fact about a directory in exactly the way `revert_settlement`'s *the caller
+   could not use that conclusion* is.
+3. **The two new emitted shapes are honest and are documented as such.** An absence with nothing
+   tracked is `Removed { previous_revision: None }` — the same field saying the same thing it always
+   says, *no content was ever stably read here* — and an unchanged present state is a `Changed`
+   whose `previous_revision` equals the new revision, which the variant already sanctioned for the
+   unreadable-recovery case and now sanctions for this one. Both put the equality on the value's
+   face, so a consumer can see that nothing changed rather than being told that something did.
+4. **It is 2d-3's and not 2d-4's**, on §11.1 item 4's reasoning unchanged: no event, no queue, no
+   command, no wire type and nothing serializable; a path goes *into* the engine and every value
+   that comes back out is the engine's own.
+5. **Every application-origin request is owed, not only the retained ones.** A rule with an
+   exception is a rule that drifts, and this particular exception would have been wrong anyway: a
+   request that reaches the loop rather than the baseline arm meets exactly the same
+   established-but-unannounced state, because a *successful* baseline establishes too. The narrower
+   fix would have closed the arm the review named and left its twin one line away.
+
+**What it cannot do, said beside what it does.** It cannot reach a workspace with no running watcher
+(§5 item 19), and it cannot survive a worker that stops before its next tick or an engine dropped
+with it (§5 item 21) — that half of the old item 20 is kept, because its bounding argument is the
+true one. It answers nothing for a path that never stabilizes, and nothing for a path this engine
+does not watch (§5 item 6). And it claims nothing about *which* caller an answer belongs to: a debt
+is per path (§5 item 14's fourth half).
+
+### 12.2 High 2 — a single read is published, and a stabilized one is asked for beside it
+
+**What the finding was.** Both *successful* save-tail refreshes publish and coalesce a **one-read**
+state into the ledger. The application commits A; a foreign non-atomic write toward Q is in
+progress; the single refresh reads a parseable intermediate P; `admit_under_the_session_lock` clears
+A and publishes P; the writer finishes Q; the healthy backend permissibly misses that hint; and **no
+re-observation is requested because the refresh succeeded**, so the phantom P remains as the last
+word on that path and Q never enters the sequence. §5 item 3's *not new exposure* ruling is what
+licensed it.
+
+**Why the record's own sentence was false, said plainly.** Item 3's premise was always right — a
+`Workspace::refresh` is one read where the engine takes two. Its ruling — *"it is the same read that
+builds the conflict payload, so the exposure is not new"* — does not follow from it. A payload is
+shown once and is replaced by the person's next action; a **published state** persists in the
+coalescing map, spends a sequence, and is what a consumer acting on the highest sequence takes. Those
+are different lifetimes, and the item compared them as if they were one.
+
+**Where this round deviates from the review's suggested fix, and why.** The review's minimal fix is
+*"keep the immediate read only for cache/conflict payload construction, and route any ledger
+mutation/publication through the engine's two-read stabilization path."* The first half is adopted
+in substance and **the second half is not**, deliberately and with the reason stated rather than
+silently:
+
+- consult **Q2** rules that `conflict_after_the_lock` *publishes/coalesces that external observation
+  under the same sequence allocator*, and that a differing post-save refresh *is queued as
+  external*. Both are explicit instructions to publish from the save path;
+- consult **Q5** rules that *a save-origin conflict registered by `conflict_after_the_lock` wins over
+  a native duplicate at the same document/revision because it has the locked refusal fact and
+  operation-specific reapply evidence; the duplicate is coalesced.* Removing the publication removes
+  exactly the entry that makes that duplicate coalesce, so the native hint at the state the person is
+  already looking at would be admitted as a **second** report of it — at 2d-5, a watcher-origin
+  conflict raised on top of the save-origin conflict already on screen;
+- and the brief's own constraint binds: the record must be *cleared or retained correctly in the
+  window before the engine's stabilized observation arrives*. Withholding the publication would
+  leave the window with neither the phantom nor the truth, which is round 3's swallowed-change
+  defect reached from the other side.
+
+**So the fix is publish *and* ask**, which takes the finding's true half and leaves the consult's
+rulings intact. Both admitting arms keep their publication and then call
+`crate::watch::ReObserver::re_observe` for the same path, as an owed observation. What the engine's
+two reads settle on is admitted at a **later** sequence and supersedes the phantom, or coalesces
+into a publication that was right all along. Consult **Q3**'s rule — *for each document the frontend
+acts only on the highest sequence it has accepted* — is what makes the earlier value harmless, and it
+is a rule 2d-4 and 2d-5 must keep rather than one this step can enforce; §5 item 3's replacement says
+so.
+
+**The owed half is load-bearing here too, and the sharpest ordering shows why.** The commit gate
+serializes *decisions*, not reads, so the worker can admit the writer's final state Q **before** the
+save tail publishes its earlier reading P. The engine then tracks Q while the ledger's last word is
+P, and an ordinary re-hint would stabilize to Q, coalesce inside the engine, and emit nothing — the
+phantom published forever. `ledger.rs`'s
+`a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes` drives exactly that
+sequence.
+
+**The one arm that deliberately does not ask** is `after_a_save`'s *agreeing* refresh. It publishes
+nothing, clears nothing, and read exactly the revision the transaction established: there is no
+reading it could not act on and no state it put anywhere, so what it leaves is the ordinary coverage
+of a file after any write, which is the watcher's. §12.5 enumerates that with the rest.
+
+### 12.3 The two Lows
+
+**Low 1 — a count that named more than it counted, and a check that read the number instead of
+counting it.** `docs/decisions/2d-1-notes.md` §2.1's round-4 correction block said **one** of 2d-3's
+three ledger callers could place its reads without a stamp, and named **two** in the same sentence:
+the two save-path refreshes. It is two — the third caller is the watcher's worker thread, which
+holds no session lock and is the one that stamps. The concrete cost of leaving it is round 4 again:
+a maintainer following the count preserves serialization for one tail and restores a stamped
+chronology to the other, where an equal-instant collision refuses an external observation with
+nothing to answer the refusal. The block is corrected **in place**, because it is a present-tense
+claim about how the code works now (§10.7's rule).
+
+The second half is this record's own: §11's *no correction is owed outside this record, and that was
+checked rather than assumed* paragraph asserted that the block's count stood. It did not, and the
+check that said so read the number the block gave rather than counting the callers the block named.
+A correction block under that paragraph says so, and the rule §12's opening paragraph draws from it
+is the general form: **a count in a document one is checking must be re-derived from what the
+document names.**
+
+**Low 2 — a present-tense scope record that had been false for three rounds.** §4's last bullet said
+*"no widening of the watch scope and no change to the core crate at all."* The first half is true
+and is what the bullet is for; the second stopped being true at round 3, which added
+`ObservationEngine::revert_settlement` and `Observation::path()`, and is further from true now that
+round 6 has added `ObservationEngine::observe_owed`. The failure it invites is concrete and
+symmetrical with Low 1's: read as a binding scope invariant, it licenses removing the rollback that
+ledger refusal recovery depends on, or the debt that a re-observation depends on, and the
+observation each was built to save goes back to being lost. The bullet now states what is actually
+invariant — **no Tauri, save or ledger dependency in the core crate** — names both primitives, and
+says why each is a fact about a directory rather than about an application session. §1's *no wire,
+no window* paragraph, which already carried the round-3 half correctly, gains the round-6 half.
+
+### 12.4 What changed, file by file
+
+- **`crates/espansoconfig-core/src/watch/engine.rs`** — `ObservationEngine::observe_owed(path, now)`
+  and the private `owed: BTreeSet<PathBuf>` it fills; the private `Undone` value the one-pass `undo`
+  map now holds, carrying the debt beside the replaced tracked state so `revert_settlement` restores
+  both; an `owed` operand on `settle` and on all three settlements — `settle_present` skips its
+  coalescing check, `settle_missing` emits with `previous_revision: None` where nothing was tracked,
+  `settle_failed` skips its coalesce; and the re-insertion in `settle` that makes *a debt is spent
+  only by a settlement that emitted* structural rather than an agreement between three functions.
+  The module docs gain an *owed* section; `Observation::Changed` and `Observation::Removed` document
+  the two shapes an owed settlement can produce; `ObservationEngine::start` says in its own contract
+  that establishing is not announcing and names the request that pays for the difference. One test;
+- **`src-tauri/src/watch.rs`** — `WatchWorker::hint_paths` renamed **`WatchWorker::schedule_paths`**
+  and given the new private `HintOrigin`, because the two origins no longer ask the same question
+  while the re-spelling and the clock stay one rule; `WatchWorker::baseline` retains
+  application-origin requests in a `BTreeSet` across a failing enumeration and hands them to the
+  engine it finally opens, as debts, and takes the `HintSpelling` it needs to do so; both loop arms
+  route `WorkerMessage::ReObserve` through the application origin. The module's *a save may ask*
+  section, `WorkerMessage::ReObserve`, `ReObserveOutcome`, `ReObserver::re_observe`,
+  `WatchWorker::baseline` and `WatchWorker::run` are documented for all of it. One test, on a real
+  spawned worker;
+- **`src-tauri/src/commands.rs`** — `conflict_after_the_lock` and `after_a_save` each call
+  `side.watcher.re_observe(path)` **after** their `admit_under_the_session_lock`, on the arms where
+  they publish. The module header's *composes with four other things* becomes five and names the
+  owed observation; its *where this application has no reading to bring* paragraph becomes *no
+  reading, or one it cannot prove stable* and counts five arms; `run_one_save`'s section is
+  rewritten around the same five and names the one arm that deliberately does not ask; both tails'
+  own sections carry the new half; and `SessionSideOfASave::watcher`'s *exactly three arms* becomes
+  five. Two tests;
+- **`src-tauri/src/ledger.rs`** — **no production code.** `admit_under_the_session_lock`'s *what is
+  weaker here* paragraph carried item 3's false ruling as a doc comment and is rewritten around what
+  the code now does; the module's *a read the save path could not use* section becomes *could not
+  use — or could not prove stable*; the round-5 engine-plus-gate test's hint becomes the
+  `observe_owed` the worker really performs. One test;
+- **`src-tauri/src/main.rs`** — the phase paragraph's **five** things become six, the sixth is
+  described in both its halves, and the sentence about a failing refresh gains its successful twin.
+
+### 12.5 The sweep for the shape, not for the words
+
+The question, asked of this round's own change as every round before it has: *is there anywhere else
+a value is settled, installed, spent, published or consumed before the decision that could reject
+it, or any place a single unstabilized read reaches the ledger?*
+
+**Every production path into the ledger was enumerated with `rg`, not recalled.** There are exactly
+four: `admitting_sink`'s `admit` (the watcher's, two reads, stamped), `after_a_save`'s
+`admit_under_the_session_lock`, `conflict_after_the_lock`'s, and `commit_and_record`'s
+`record_app_write`. The two middle ones are the single reads, and both now ask. There is no fifth.
+
+**One narrower instance was found in this round's own new code, and it is closed rather than
+recorded.** `settle` removes a path's debt before running the settlement that is supposed to answer
+it — a check and a spend in two places, which is precisely the shape `CLAUDE.md` names as this
+project's recurring defect. All three settlements do emit whenever a debt is owed, so the gap is
+unreachable today; a fourth settlement kind that coalesced despite a debt would have consumed the
+request and answered it with silence, which is the whole defect the mechanism exists to close. The
+debt is now put **back** when a settlement answers `None`, so *a debt is spent only by a settlement
+that emitted* is a property of one function rather than an agreement between three.
+
+**A second candidate was found and is written down as a residue rather than closed** — §5 item 22.
+An owed observation whose stable state equals the tracked one is emitted anyway, and the ledger
+publishes it when nothing was published for that path. That is the price of the mechanism and not a
+defect in it: *nothing changed* and *I have never told you anything* are different answers, and only
+a ledger-free engine forced to answer both can be sure of answering the second. The common case
+costs nothing — the ledger answers `SelfWrite` or `Duplicate` — and the observation carries the
+equality on its face for the case that does not.
+
+**Every arm of the save path was re-enumerated against the new code rather than inherited from
+§11.4**, and what each costs:
+
+- `run_one_save`'s `workspace.document_context(document)?` — before the transaction, nothing written
+  and nothing read of the file's content. **Costs nothing**, unchanged;
+- `Err(SaveError::Refused(_))`, and every `Err` whose `may_have_written()` is false — nothing
+  written, no reading held. **Costs nothing**, unchanged;
+- `Err(_) if may_have_written()` — asks, unchanged since §11, and the request is now a debt;
+- `after_a_save`'s `Err` from `refresh` — asks; publishes nothing; does not clear the record.
+  Unchanged since §11, and the request is now a debt, which is what makes it answerable when the
+  worker's baseline was failing or has just established the path;
+- `after_a_save`'s `Ok` arm where the revision **agrees** — **re-judged rather than inherited, and
+  it still does not ask.** It publishes nothing and clears nothing, so unlike the arm below it puts
+  no state anywhere that a stabilized reading would have to correct. Its record, if it took one,
+  correctly describes what it read. What it cannot rule out is an external write landing after its
+  read whose hint the backend misses — and that is the ordinary coverage of every file this
+  application does not save, inherited from `2d-2-notes.md` §2.3 and not made worse here;
+- `after_a_save`'s `Ok` arm where it **disagrees** — publishes, as consult Q2 requires, **and now
+  asks**;
+- `conflict_after_the_lock`'s `Err` from `refresh` — asks; returns the read's own error; publishes
+  nothing and invents no record. Unchanged since §11, and now a debt;
+- `conflict_after_the_lock`'s success — publishes, as consult Q2 and Q5 require, **and now asks**.
+
+**The refusal arms of both doors were re-checked and are untouched by this round**: `PrecedesACommit`
+is still unreachable from the serialized door, `SelfWrite` and `Duplicate` are still answers about
+these exact bytes, `StaleEpoch` is still unreachable there, and `SequenceSpaceExhausted` is still the
+same inherited shape. `decide` was not changed at all, so the three §9.3 candidates §10.4 and §11.4
+re-checked stand unchanged again.
+
+**The new code was asked the same question.** `observe_owed` consumes nothing and spends nothing: it
+records a debt and schedules a read, and its only failure mode is a path the engine does not watch,
+where it records nothing rather than a debt nothing could answer. `schedule_paths` moves its paths in
+and drops nothing but an unwatched one. `baseline`'s retained set is moved into the engine on
+success and dropped on `Stop` — the second is §5 item 21, and it is bounded by the replacement that
+must be what stopped the worker. The two new `re_observe` calls are placed **after** their
+admissions, which is where both ledger guards are already dropped, so no send happens under a lock;
+and the answer is bound and ignored on all five arms, which is a report rather than a permit
+(§11.4's argument, unchanged).
+
+**One candidate outside the save path was re-considered and again not taken.**
+`WorkspaceSession::reload`, `document` and `text` also read a file and can discover bytes this
+session had not seen. §11.4's reason stands and round 6 does not weaken it: those callers take no
+record, disturb no file and put **nothing into the ledger**, so they hold no reading that decided
+anything. Round 6's second High is about a read that *decides* — it publishes and it clears — and
+that is exactly what separates the two.
+
+### 12.6 What is guaranteed now, and what is not
+
+**Guaranteed.** Everything §10.5 and §11.5 guaranteed, unchanged — this round altered no decision the
+ledger takes and did not touch `decide`. Added: a re-observation this application asks for is a
+**debt** the engine must answer rather than a hint it may coalesce into silence; it is retained
+across a failing baseline and handed to the engine that finally opens; it is answered even when the
+state the path stabilizes to is one the engine established but never announced, and even when the
+engine tracks nothing for that path at all; and it is re-owed when a refusal takes its settlement
+back. Added: both save-path refreshes that publish a single read now ask for a stabilized reading in
+the same breath, so the last word on a path this application wrote to is a state the engine read
+twice — at a later sequence than the single read, never in place of it — **and that last clause is
+conditional on there being a watcher to ask, which nothing here forces** (§5 item 19). Every one of
+these is a claim about a running watcher plus a running engine; with neither, what is guaranteed is
+exactly what §10.5 and §11.5 guaranteed and no more.
+
+**Not guaranteed, and stated as such.** That a watcher is running to hear the ask (§5 item 19) —
+which now also decides whether a published single read is ever corrected. That a re-observation
+survives a worker stopping before its next tick or an imminent workspace replacement (§5 item 21).
+That a consumer acts only on the highest sequence per document — consult Q3's rule, which this step
+relies on and 2d-4 must keep (§5 item 3). That an owed observation of an unchanged state costs no
+sequence (§5 item 22). That a debt belongs to the caller that asked for it (§5 item 14, fourth
+half). That a caller of `admit_under_the_session_lock` holds the session lock (§5 item 14, third
+half). That a producer's stamp precedes its reads, and that a sink's answer is acted on (§5 item 14,
+first two halves). And everything §5's other items already carried, unchanged by this round.
+
+**Nothing from 2d-4 or later was added**: no Tauri event, no queue, no `drain_external_changes`, no
+`#[tauri::command]`, no TypeScript, Svelte or i18n file, no writer, no force flag, no route around
+`save_document`, and nothing new that serializes. One core file was touched and the primitive it
+gained is ledger-agnostic; `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
+
+### 12.7 The evidence and the neuter runs
+
+| Owed | Where |
+|---|---|
+| **a deterministic spawned-worker/baseline-failure test that does not require FSEvents** | `watch.rs`'s `a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts` — a real `WatcherLifecycle` over a root that **does not exist**, so the backend can watch neither root, no stream is ever created and nothing in the test can be carried by a native event even in principle. The request is made after the polling fallback engages (which proves the worker is past `establish_native`) and while `ready` is false (which proves the baseline has not succeeded); the tree is then created without the document, and the sink receives `Removed { previous_revision: None }` for the path that was never there |
+| …and what that test does **not** force | which of two arms absorbed the request. The worker is inside `baseline`'s retry loop when the request is sent, and `ObservationEngine::start` fails in microseconds over an absent root, so it is in `recv_timeout` essentially all of that time — the neuter run below confirms the retention arm is the one that runs. But if a slow worker reached its first attempt only after the tree appeared, the request would be drained by the loop arm instead, and **the test would still pass**, because that arm is owed too. Both are the fix; only one is forced |
+| that the engine answers a debt where a hint is silent | `engine.rs`'s `an_owed_observation_is_answered_where_a_hint_coalesces_to_silence` — five steps over one real temp tree: a baseline-established state hinted (silent) then owed (a `Changed` carrying `previous_revision == content.revision()`); an untracked absence hinted (silent) then owed (`Removed { previous_revision: None }`); a debt discharged once; a debt restored by `revert_settlement`; and an unwatched path recording none |
+| that a single-read publication is superseded by a stabilized state | `ledger.rs`'s `a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes` — the sharpest ordering of round 6's second High, with the worker admitting the final state **first** and the save tail publishing its earlier reading **second**, so the phantom is genuinely the last word; the owed request then answers with the state the engine tracks, at sequence 3 |
+| that both admitting arms publish **and** ask | `commands.rs`'s `a_disagreeing_post_save_refresh_publishes_and_still_asks_for_a_stabilized_reading` and `a_conflict_refresh_publishes_its_disk_side_and_still_asks_for_a_stabilized_reading` — each asserts the publication (which consult Q2 and Q5 require) and the ask (which round 6 adds) in the same test, because either alone would be the wrong fix |
+| that the ledger's decisions are unchanged | nothing new was needed and nothing was weakened: §3's table, §9.5's, §10.6's, §11.6's and the whole of `ledger::` still pass over one `decide`, which this round did not touch |
+| that the retained requests survive a **real** worker's baseline | driven, by the first row |
+| that the production save path always has a watcher to ask | **nothing**, and §5 item 19 is the standing statement of it — sharper now than before, because it also decides whether a published single read is corrected |
+| that a consumer acts on the highest sequence per document | **nothing here can drive it**: there is no consumer until 2d-4. §5 item 3 carries it as an obligation on that step rather than as something this one proves |
+
+**Seven neuter runs**, each disabling exactly one thing and then restored, and each reverted with
+its suite re-run green before the next was made:
+
+- **the retention arm** (`baseline` consuming `ReObserve` and dropping it, as before this round) —
+  `a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts` failed as a clean
+  bounded timeout at the sink wait (20.4 s). It also proves which arm runs: the loop arm was
+  untouched by this edit, so a request reaching it would still have been answered;
+- **the owed origin** (`baseline` replaying its retained paths as `HintOrigin::Native`) — the same
+  test failed the same way. That is the round's own find as a measurement: retention **alone** is
+  not the fix, because a hint at a path a baseline has just established, or cannot enumerate, is
+  answered by silence;
+- **the owed coalescing bypass** (`settle_present` coalescing unconditionally) — `ledger.rs`'s
+  `a_one_read_publication_is_superseded_by_the_state_the_engine_stabilizes` failed at *"the debt is
+  answered even though nothing changed"*, **left 0, right 1**. **18 passed, 1 failed** of the 19
+  ledger tests, so the check is narrow;
+- **the owed absence** (`settle_missing` returning `None` whenever nothing was tracked) — two
+  suites, which is the two halves of the removal case: `engine.rs`'s
+  `an_owed_observation_is_answered_where_a_hint_coalesces_to_silence` failed at *"the debt is
+  answered: []"*, and `watch.rs`'s spawned-worker test failed as a bounded timeout (20.4 s);
+- **the debt restore in `revert_settlement`** (reverting as a plain hint) — the engine test failed
+  at *"a refused owed observation is still owed"*, **6 passed, 1 failed** of the 7 engine tests, so
+  the check is narrow;
+- and for the second High, **each of the two new asks removed in turn** —
+  `a_disagreeing_post_save_refresh_publishes_and_still_asks_for_a_stabilized_reading` and
+  `a_conflict_refresh_publishes_its_disk_side_and_still_asks_for_a_stabilized_reading` each failed at
+  its inbox assertion, **`left: []`, `right: ["…/match/base.yml"]`**, **77 passed, 1 failed** of the
+  78 command tests in each run. Neither failure disturbed the other, which is what makes them checks
+  rather than couplings.
+
+**One thing is deliberately not neutered**, and saying so is the point: nothing was removed to test
+`ObservationEngine::start`'s establishing behaviour, because that is 2d-1's and this round did not
+change it. What the tests above drive is the **consequence** of it — that a caller which has been
+told nothing cannot use *nothing changed* — and the consequence is what the fix is about.
+
+### 12.8 The two sweeps
+
+**For the shape** — *a value settled, installed, spent, published or consumed before the decision
+that could reject it, or a single unstabilized read reaching the ledger* — is §12.5, including the
+`rg`-derived enumeration of all four production paths into the ledger, the one narrower instance
+found in this round's own new code and closed, the one written down as §5 item 22, and the full
+re-enumeration of the save path's arms with what each costs.
+
+**For name positions**, as a pass distinct from the prose, and **redone from the current code rather
+than from round 5's list**, because both of round 6's Lows are misses by that kind of list:
+
+- **`WatchWorker::hint_paths` — the name itself was a name position.** It said *hint*, and half of
+  what it now does is record a debt. Renamed `schedule_paths`, with the origin named rather than
+  passed as a boolean, and every mention of the old name swept: `watch.rs`'s module *a save may ask*
+  section, `WorkerMessage::ReObserve`'s doc, `WatchWorker::run`'s doc, and `ledger.rs`'s round-5 test
+  comment, which described the request as *what `WatchWorker::hint_paths` makes of it* and now
+  performs the `observe_owed` the worker really performs;
+- `src-tauri/src/main.rs`'s phase paragraph — **Five** where this round makes it six, with both
+  halves of the sixth described;
+- `src-tauri/src/commands.rs`'s module header — *composes with **four** other things*, now five;
+  and its *three arms* paragraph, now five, with the two new arms named and the one that does not
+  ask named as well, so the count and the enumeration cannot drift apart;
+- `ReObserver::re_observe`'s doc — *"because of what the **three** production callers are"*, and it
+  then enumerated all three. Now five, enumerated, with the two new ones described by what each was
+  already returning when it asked, because the point of the enumeration is that no caller's outcome
+  may depend on a watcher's availability;
+- `ReObserveOutcome`'s doc — it explained itself by saying a path whose bytes have not changed
+  *"coalesces to nothing"*, which is exactly what an owed request no longer does. Rewritten to say
+  what `Asked` really promises: that the request reached the inbox of a worker that had not exited,
+  and nothing about what will be observed;
+- `SessionSideOfASave::watcher`'s doc — *asked on exactly **three** arms and no others*, now five.
+  A count in a doc comment that a later round adds to is the exact shape of round 5's second Low;
+  and **§2.7's own round-5 correction block carried the same count** (*"a handle a save asks through
+  on the three arms where it has no reading of its own"*), which is both a count and a condition
+  round 6 changed — blocked there rather than left, because it is a present-tense description of the
+  value `with_open` lends;
+- `docs/decisions/2d-3-notes.md` line 3 — the headline said *five facts*; six, with a sixth
+  correction block beneath it;
+- **§11.5's *not guaranteed* list** — it named a failing baseline and a workspace replacement in one
+  breath, and the first half is now given. A block under it says which half moved and which did
+  not, exactly as §11.5 itself had to block §10.5. Its *guaranteed* paragraph's closing sentence was
+  true of three arms and false of the two this round reached, and the block says that too;
+- **§5 items 3 and 20 are replaced, not annotated**, because one's ruling and one's bound were
+  wrong — the same treatment §8 gave item 10, §10 gave item 16 and §11 gave item 18, and the fourth
+  and fifth times this step has had to give it. Item 18's closing sentence, which named items 19 and
+  20 as its residues, is amended rather than left pointing at a replaced item;
+- `docs/decisions/2d-1-notes.md` §2.1's round-4 block — **one** where it named two (round 6's first
+  Low), corrected in place, with a block recording why; and a second block there for the sixth
+  caller obligation the engine's new primitive discharges;
+- `docs/decisions/2d-3-notes.md` §4's last bullet and §1's *no wire, no window* paragraph — *no
+  change to the core crate at all* (round 6's second Low), replaced by what is actually invariant
+  and by the two primitives that are not;
+- `ledger.rs`'s `admit_under_the_session_lock` — its *what is weaker here* paragraph was §5 item 3's
+  false ruling written as a doc comment, in the one place a reader of the door would meet it.
+  Rewritten around what the code now does, and it names the two consult rulings that keep the
+  publication;
+- **searched and found current**, so the next round does not re-find them as misses: *"the two
+  save-path refreshes"* wherever it appears (§1, §2.6's heading, `main.rs`, `commands.rs`,
+  `ledger.rs`) — there are still exactly two refreshes and this round added no third, so the phrase
+  is not stale anywhere; `admit_at_current_epoch` in §1's built list, §7.1, §8.1, §9.6 and §5 item
+  12, each a past-tense record of what a named round did; §8.1's *"…so every observation carries a
+  stamp"* heading and §2.6's §8-era stamping paragraph, both already carrying round-4 blocks; and
+  **three places that name `hint_paths` and are deliberately left standing** — §11.1's option (d),
+  §11.2's `watch.rs` entry, and §11.6's row saying no test drives `WorkerMessage::ReObserve` through
+  a spawned worker. Each is a record of what **round 5** built and each was true then; the first two
+  are named again in §12.4's `watch.rs` entry with the rename, and the third **has** gone stale,
+  with §12.7's first row as the answer. The rule applied is §10.7's, unchanged: **a present-tense
+  claim about how the code works now is amended in place or blocked; a past-tense record of what a
+  round built is left alone.**

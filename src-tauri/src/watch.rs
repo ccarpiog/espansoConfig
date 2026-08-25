@@ -58,22 +58,46 @@
 //!
 //! # A save may ask for one path to be observed again
 //!
-//! This step's **round-5 High**. A save's own post-transaction refresh is a
-//! read this application performs itself, and when that read *fails* — an
-//! external process removed or locked the file between the rename and the
-//! re-read — the save has no state to admit and must not invent one: a single
-//! failed read is not the engine's two-read stability, and publishing `Absent`
-//! from it would clear the app-write record and make the save's own hints
-//! foreign. What it can do is ask this watcher to put that path back through
-//! the **ordinary** pipeline, and that is [`ReObserver::re_observe`]: one
-//! message on the running worker's inbox, absorbed by exactly the code a native
-//! hint is absorbed by ([`WatchWorker::hint_paths`]), stabilized by two equal
-//! reads, and admitted through the stamped door like any other observation.
+//! This step's **round-5 High**, widened by its **round-6** pair. A save's own
+//! post-transaction refresh is a read this application performs itself, and
+//! there are two ways it can be a reading the save cannot act on: it *fails* —
+//! an external process removed or locked the file between the rename and the
+//! re-read — or it *succeeds* and is a single read where the engine takes two,
+//! so what it saw may be an intermediate state of somebody else's non-atomic
+//! write. Neither may be turned into a state the ledger acts on by itself: a
+//! failed read proves nothing at all, and publishing a one-read state that never
+//! stably existed puts a phantom into the observation sequence. What the save
+//! can do in both cases is ask this watcher to put that path through the
+//! **ordinary** pipeline, and that is [`ReObserver::re_observe`]: one message on
+//! the running worker's inbox, absorbed by the same code a native hint is
+//! absorbed by ([`WatchWorker::schedule_paths`]), stabilized by two equal reads,
+//! and admitted through the stamped door like any other observation.
+//!
+//! **It is an *owed* observation, not an ordinary hint**, and that is round 6's
+//! correction to round 5's mechanism.
+//! `espansoconfig_core::watch::engine::ObservationEngine::observe_owed` records
+//! a debt beside the hint, so the next settlement of that path emits what it
+//! stabilized to **even if that is the state the engine already held, and even
+//! if it held none**. An ordinary hint answers *has anything changed since I
+//! last told you*, and the two callers here have been told nothing: a baseline
+//! establishes the tracked table without announcing it, so a plain hint could
+//! coalesce a request to silence and leave the app-write record standing over a
+//! file that no longer holds those bytes. The re-spelling and the clock are
+//! still shared with the native path — one function, [`WatchWorker::schedule_paths`],
+//! decides both — because *which path this is about* must not have two spellings.
 //!
 //! **It is a hint and never an observation**, which is why it is not the 2d
 //! design consult Q3's forbidden wire — no event, no queue, no command, nothing
 //! serialized, and nothing a consumer can drain. It carries a path *into* the
 //! engine; every value that comes back out is the engine's own.
+//!
+//! **A request is retained across a failing baseline.** A worker whose first
+//! enumeration fails has no engine to hint, and until round 6 it consumed such a
+//! request and dropped it — the loss its own residue claimed was bounded by an
+//! epoch reset, which it is not: the workspace stays open and the ledger's record
+//! stays with it. The requests are held instead and handed to the engine the
+//! moment one starts, as debts, which is the one form that survives a baseline
+//! that establishes rather than observes ([`WatchWorker::baseline`]).
 //!
 //! **It cannot make a save wait and cannot make one fail.** The worker's inbox
 //! is an **unbounded** `std::sync::mpsc` channel, so a send never waits for the
@@ -111,6 +135,7 @@
 //! before anything consumes them, exactly as `persist::save_document` existed
 //! at 2a with no command behind it.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -494,10 +519,11 @@ enum WorkerMessage {
     ///
     /// A path, and nothing else: it carries no state, no revision and no
     /// reason, because the answer is whatever two equal reads then find. The
-    /// worker absorbs it through the same [`WatchWorker::hint_paths`] a native
-    /// hint goes through, so an application-originated re-observation is
-    /// indistinguishable downstream from a hint the backend delivered — which
-    /// is the point, not an economy.
+    /// worker absorbs it through the same [`WatchWorker::schedule_paths`] a
+    /// native hint goes through, so the re-spelling and the clock are one rule
+    /// rather than two — but it enters the engine as an **owed** observation
+    /// rather than as a hint, because a caller that has been told nothing about
+    /// a path cannot use *nothing changed* as an answer (round 6's first High).
     ReObserve(PathBuf),
     /// The lifecycle handle is shutting this worker down.
     Stop,
@@ -507,9 +533,11 @@ enum WorkerMessage {
 ///
 /// **Neither variant claims anything about what will be observed.** The
 /// engine's ordinary pipeline decides that, one debounce and one probe later,
-/// and a path whose bytes have not changed since the engine last settled it
-/// coalesces to nothing. What this reports is only whether there was a running
-/// watcher to ask.
+/// and a path that never stabilizes — one being written continuously — is never
+/// answered at all. What this reports is only whether there was a running
+/// watcher to ask. In particular [`ReObserveOutcome::Asked`] is **not** a
+/// promise that an observation will arrive: it is a promise that the request
+/// reached the inbox of a worker that had not yet exited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReObserveOutcome {
     /// The request reached this watcher's inbox.
@@ -547,12 +575,24 @@ impl ReObserver<'_> {
     /// what makes this safe to call under the session lock, the lock the worker
     /// is allowed to take inside its own sink callback. A send that cannot be
     /// delivered answers [`ReObserveOutcome::NoWatcher`] rather than producing an
-    /// error, because of what the three production callers are: one is a save
-    /// that has already **committed**, where *a committed write is never
-    /// afterwards reported as an error*; one is a conflict already returning the
-    /// refusal its failed read produced; and one is a save whose write may have
-    /// landed, already returning the transaction's own typed failure. Not one of
-    /// them has an outcome a watcher's availability may enter.
+    /// error, because of what the five production callers are: two are a save
+    /// that has already **committed** — one whose re-read failed and one whose
+    /// re-read disagreed — where *a committed write is never afterwards reported
+    /// as an error*; two are a conflict already returning either the refusal its
+    /// failed read produced or the payload its successful one built; and one is a
+    /// save whose write may have landed, already returning the transaction's own
+    /// typed failure. Not one of them has an outcome a watcher's availability may
+    /// enter.
+    ///
+    /// **What it asks for is an *owed* observation**, since the round-6 fix
+    /// round: the worker turns this message into
+    /// `ObservationEngine::observe_owed`, so the next settlement of the path
+    /// emits the state it stabilized to even when that state is one the engine
+    /// already tracked and even when it tracked none. A plain hint would answer
+    /// *nothing changed since I last told you*, and every caller of this method
+    /// is one that either has been told nothing or has told the ledger something
+    /// it could not prove — see this module's *a save may ask*
+    /// section.
     ///
     /// **What it does not do**, said beside what it does: it neither publishes
     /// nor suppresses nor clears anything in `crate::ledger`. It schedules a
@@ -568,6 +608,23 @@ impl ReObserver<'_> {
             Err(_) => ReObserveOutcome::NoWatcher,
         }
     } // End of function re_observe()
+}
+
+/// Where a path fed into the engine came from, and therefore which question it
+/// asks — see [`WatchWorker::schedule_paths`].
+///
+/// Two origins rather than a `bool`, because the difference is a *question* and
+/// not a flag: a native hint asks whether anything changed, and an
+/// application-originated request asks what the path holds. Naming them is what
+/// makes a third origin — should one ever exist — have to answer that question
+/// for itself rather than inherit whichever default a boolean happened to have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintOrigin {
+    /// The native backend reported that this path may have changed.
+    Native,
+    /// **This application** asked for the path to be observed again, because it
+    /// took a reading of that path it could not act on, or none at all.
+    Application,
 }
 
 /// Re-spells backend-reported paths onto the workspace's own root spelling.
@@ -1113,33 +1170,63 @@ impl WatchWorker {
     } // End of function establish_native()
 
     /// Runs the baseline scan, retrying on the poll cadence until it succeeds
-    /// or the worker is stopped.
+    /// or the worker is stopped, and hands the engine it opens every
+    /// application-originated re-observation that arrived while it was failing.
     ///
     /// A failing enumeration is a typed refusal, and retrying it is the only
     /// honest response: the engine cannot open over a tree it cannot list.
-    /// Hints that arrive while the baseline is failing are consumed and
-    /// dropped — the baseline that eventually succeeds reads the tree as it
-    /// is then, so nothing a dropped hint pointed at is missed by it.
-    /// **An application-originated re-observation is dropped here on exactly
-    /// the same terms and for exactly the same reason**, and it is written as
-    /// its own arm rather than folded into the native one so that the choice is
-    /// visible: there is no engine yet to hint, the baseline that eventually
-    /// starts one reads every path including that one, and a state established
-    /// by a baseline is this session's starting point rather than an
-    /// observation — which is 2d-2's contract for a worker whose first
-    /// enumeration fails, inherited unchanged.
-    fn baseline(&mut self, inbox: &Receiver<WorkerMessage>) -> Option<ObservationEngine> {
+    /// **Native** hints that arrive meanwhile are consumed and dropped — the
+    /// baseline that eventually succeeds reads the tree as it is then, so
+    /// nothing a dropped hint pointed at is missed by it, and a hint is a guess
+    /// that a path *may* have changed rather than a request anybody is waiting
+    /// on.
+    ///
+    /// **An application-originated re-observation is retained instead**, which
+    /// is this step's **round-6 first High**. Until that round it was dropped
+    /// here on the native hint's terms, and the residue that licensed the drop
+    /// claimed the loss was bounded by an epoch reset. It is not: the workspace
+    /// stays open, so the app-write record that asked for the reading stays with
+    /// it, and a baseline **establishes** the tree rather than observing it — so
+    /// a document removed before the baseline succeeds is a document the baseline
+    /// cannot even enumerate, and nothing is emitted for it ever. The record then
+    /// suppresses a genuine later recreation of exactly those bytes.
+    ///
+    /// The retained paths go in as
+    /// `ObservationEngine::observe_owed` requests rather than as hints, for the
+    /// same reason: a hint at a path this baseline has just established
+    /// coalesces to silence, and a hint at a path it could not enumerate settles
+    /// as an absence nothing was tracked for, which is silence too. A debt is
+    /// the one form a settlement must answer.
+    ///
+    /// They are held in a [`BTreeSet`], so a path asked for twice is one debt
+    /// and the order they are handed over in is the path order the engine emits
+    /// in anyway.
+    fn baseline(
+        &mut self,
+        inbox: &Receiver<WorkerMessage>,
+        spelling: &HintSpelling,
+    ) -> Option<ObservationEngine> {
+        let mut owed: BTreeSet<PathBuf> = BTreeSet::new();
         loop {
             match ObservationEngine::start(&self.root, self.config.engine, &mut self.source) {
-                Ok(engine) => return Some(engine),
+                Ok(mut engine) => {
+                    self.schedule_paths(
+                        &mut engine,
+                        spelling,
+                        owed.into_iter().collect(),
+                        HintOrigin::Application,
+                    );
+                    return Some(engine);
+                }
                 Err(_) => match inbox.recv_timeout(Duration::from_millis(self.config.poll_ms)) {
                     Ok(WorkerMessage::Stop) | Err(RecvTimeoutError::Disconnected) => return None,
-                    Ok(WorkerMessage::Native(_))
-                    | Ok(WorkerMessage::ReObserve(_))
-                    | Err(RecvTimeoutError::Timeout) => {}
+                    Ok(WorkerMessage::ReObserve(path)) => {
+                        owed.insert(path);
+                    }
+                    Ok(WorkerMessage::Native(_)) | Err(RecvTimeoutError::Timeout) => {}
                 },
-            }
-        }
+            } // End of the match over one baseline attempt
+        } // End of the baseline retry loop
     } // End of function baseline()
 
     /// Feeds one native signal into the engine.
@@ -1150,7 +1237,9 @@ impl WatchWorker {
         signal: NativeSignal,
     ) {
         match signal {
-            NativeSignal::Hints(paths) => self.hint_paths(engine, spelling, paths),
+            NativeSignal::Hints(paths) => {
+                self.schedule_paths(engine, spelling, paths, HintOrigin::Native)
+            }
             NativeSignal::Degraded(_reason) => {
                 // What a caller acts on is the *fact* of degradation
                 // (`watch/native.rs`): from here on the rescan cadence is the
@@ -1162,14 +1251,27 @@ impl WatchWorker {
         }
     } // End of function absorb()
 
-    /// Feeds paths into the engine as hints at this turn's clock.
+    /// Feeds paths into the engine at this turn's clock — as ordinary hints, or
+    /// as **owed** observations, depending on where they came from.
     ///
     /// **The one half of [`WatchWorker::absorb`] an application-originated
     /// re-observation shares with a native hint**, and it is a function rather
-    /// than two copies for exactly that reason: what
-    /// [`ReObserver::re_observe`] asks for must be indistinguishable from what
-    /// the backend delivers by the time the engine sees it, and two spellings
-    /// of *turn a path into a hint* is where the two would drift apart.
+    /// than two copies for exactly that reason: *which path this is about* and
+    /// *what clock this turn runs on* must have one spelling each, and two
+    /// copies of them is where the two origins would drift apart.
+    ///
+    /// **What the two origins do not share is the question they ask**, and
+    /// round 6's first High is why the difference is here rather than nowhere.
+    /// A native hint says *this path may have changed*, and the engine answers
+    /// it against its own tracked state — silence when nothing changed. An
+    /// application-originated request says *I read this path and could not use
+    /// what I read; tell me what it holds*, and silence is not an answer to
+    /// that: the engine's tracked state may be one it **established** rather
+    /// than announced, and a caller that was never told cannot act on *nothing
+    /// changed*. So the second becomes
+    /// `ObservationEngine::observe_owed`, which the module docs' *owed* section
+    /// defines. It was named `hint_paths` and hinted both until round 6; the
+    /// name went with the behaviour it no longer had.
     ///
     /// The re-spelling is applied to both, and for an application-originated
     /// path it is provably the identity: the save path spells a file through
@@ -1178,17 +1280,22 @@ impl WatchWorker {
     /// applied anyway rather than branched on — a branch would be a second rule
     /// about spelling, in the module whose §5 item 3 residue is that the two
     /// spellings are only reconciled at the root.
-    fn hint_paths(
+    fn schedule_paths(
         &mut self,
         engine: &mut ObservationEngine,
         spelling: &HintSpelling,
         paths: Vec<PathBuf>,
+        origin: HintOrigin,
     ) {
         let now = self.now();
         for path in paths {
-            engine.hint(&spelling.respell(path), now);
-        }
-    } // End of function hint_paths()
+            let path = spelling.respell(path);
+            match origin {
+                HintOrigin::Native => engine.hint(&path, now),
+                HintOrigin::Application => engine.observe_owed(&path, now),
+            } // End of the match over which question this path is asking
+        } // End of the loop over the paths this turn feeds in
+    } // End of function schedule_paths()
 
     /// One engine pass: the stamp first, then the reads it bounds.
     ///
@@ -1269,9 +1376,9 @@ impl WatchWorker {
     /// The loop's shape is the engine's contract read literally: sleep until
     /// the next deadline or the next rescan (a message wakes it early), absorb
     /// whatever arrived — a native signal, or **this application asking for one
-    /// path to be observed again**, which becomes an ordinary hint through the
-    /// same [`WatchWorker::hint_paths`] a native hint goes through — rescan if
-    /// the fallback cadence is due, take the pass's
+    /// path to be observed again**, which becomes an *owed* observation through
+    /// the same [`WatchWorker::schedule_paths`] a native hint goes through —
+    /// rescan if the fallback cadence is due, take the pass's
     /// stamp and tick ([`WatchWorker::observe`], which is the two of those in
     /// one function), and hand every stabilized observation to the sink tagged
     /// with this watcher's epoch and that stamp — **taking the engine's
@@ -1284,7 +1391,7 @@ impl WatchWorker {
     fn run(mut self, inbox: Receiver<WorkerMessage>, hints: Sender<WorkerMessage>) {
         let _native = self.establish_native(hints);
         let spelling = HintSpelling::of(&self.root);
-        let Some(mut engine) = self.baseline(&inbox) else {
+        let Some(mut engine) = self.baseline(&inbox, &spelling) else {
             return;
         };
         self.status.ready.store(true, Ordering::SeqCst);
@@ -1293,7 +1400,7 @@ impl WatchWorker {
                 Ok(WorkerMessage::Stop) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(WorkerMessage::Native(signal)) => self.absorb(&mut engine, &spelling, signal),
                 Ok(WorkerMessage::ReObserve(path)) => {
-                    self.hint_paths(&mut engine, &spelling, vec![path])
+                    self.schedule_paths(&mut engine, &spelling, vec![path], HintOrigin::Application)
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -1305,9 +1412,12 @@ impl WatchWorker {
                     Ok(WorkerMessage::Native(signal)) => {
                         self.absorb(&mut engine, &spelling, signal)
                     }
-                    Ok(WorkerMessage::ReObserve(path)) => {
-                        self.hint_paths(&mut engine, &spelling, vec![path])
-                    }
+                    Ok(WorkerMessage::ReObserve(path)) => self.schedule_paths(
+                        &mut engine,
+                        &spelling,
+                        vec![path],
+                        HintOrigin::Application,
+                    ),
                     Err(TryRecvError::Empty) => break,
                 }
             } // End of the drain loop over already queued messages
@@ -1359,6 +1469,22 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    /// Polls `check` until it answers `true`, or fails the test.
+    ///
+    /// Bounded rather than unbounded so a regression fails as a timeout instead
+    /// of hanging the suite, and generous rather than tight because the only
+    /// thing a short bound would measure is the host.
+    fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if check() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        } // End of the bounded polling loop
+        panic!("timed out waiting for {what}");
+    } // End of function wait_until()
 
     #[test]
     fn a_poll_interval_that_would_starve_the_debounce_is_refused() {
@@ -1480,4 +1606,86 @@ mod tests {
             );
         } // End of the loop over the two stationary shapes
     } // End of function a_re_observation_reaches_a_listening_watcher_and_degrades_without_one()
+
+    #[test]
+    fn a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts() {
+        // **Round 6's first High**, on a **real spawned worker** and with no
+        // FSEvents delivery of any kind: the tree this watcher is started over
+        // does not exist, so the native backend can watch neither root, no
+        // stream is ever created, and the polling fallback is what runs. Nothing
+        // below waits for a native event, which is what the review asked for —
+        // a deterministic baseline-failure test that does not require FSEvents.
+        //
+        // The scenario is the finding's: the application commits and records a
+        // revision, an external process removes the document before the
+        // post-save refresh, the refresh fails and asks the watcher — and the
+        // watcher's baseline is still failing. Before the fix that request was
+        // consumed and dropped, and the baseline that eventually succeeded could
+        // not enumerate a file that is not there, so **nothing was ever emitted
+        // for it** and the app-write record stood over a path that no longer
+        // held those bytes. The ledger half is `crate::ledger`'s
+        // `a_removal_the_save_path_could_not_read_is_stabilized_and_admitted`.
+        let dir = TempDir::new().expect("temp dir");
+        // Deliberately absent: `discovery::enumerate` refuses a root that is not
+        // a directory, which is what makes the baseline fail and retry.
+        let root = dir.path().join("tree");
+        // Never created, at any point in this test.
+        let document = root.join("match/base.yml");
+
+        let (sender, observed) = std::sync::mpsc::channel::<EpochObservation>();
+        let sink: ObservationSink = Arc::new(move |observation| {
+            let _ = sender.send(observation);
+            ObservationOutcome::Decided
+        });
+        let config = LifecycleConfig::new(
+            EngineConfig::new(150, 25).expect("a valid engine timing"),
+            350,
+        )
+        .expect("a poll interval above the starvation floor");
+        let lifecycle = WatcherLifecycle::start(&root, 7, config, sink);
+
+        // The fallback engaging proves the worker is past `establish_native`
+        // and therefore inside its baseline retry loop.
+        wait_until("the polling fallback to engage", || {
+            lifecycle.status().polling
+        });
+        assert_eq!(
+            lifecycle.re_observer().re_observe(&document),
+            ReObserveOutcome::Asked,
+            "the save path can ask a watcher whose baseline is still failing"
+        );
+        assert!(
+            !lifecycle.status().ready,
+            "the premise: the baseline had not succeeded when the request was made"
+        );
+
+        // Let the baseline succeed — over a tree that does **not** hold the
+        // document. It therefore establishes nothing for that path and
+        // announces nothing, which is exactly why a retained *hint* would be
+        // answered by silence and only a debt can be answered at all.
+        fs::create_dir_all(root.join("match")).expect("the watched root");
+        wait_until("the baseline to succeed", || lifecycle.status().ready);
+
+        let answered = observed
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the owed observation the failing baseline retained");
+        assert_eq!(answered.epoch, 7, "tagged with this watcher's epoch");
+        assert!(
+            matches!(
+                &answered.observation,
+                Observation::Removed {
+                    path,
+                    previous_revision: None,
+                } if path == &document
+            ),
+            "the state the save path could not read is answered as a stabilized \
+             absence with no previous revision: {:?}",
+            answered.observation
+        );
+        assert!(
+            observed.recv_timeout(Duration::from_millis(400)).is_err(),
+            "and the debt is discharged once: the rescan cadence adds nothing"
+        );
+        lifecycle.shut_down();
+    } // End of function a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts()
 }

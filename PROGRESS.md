@@ -8717,6 +8717,163 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, but the step review stands at round 6, and round 6 found the two sharpest defects of the whole step. THE NEXT ACTION IS ROUND 7 OF THE 2d-3 REVIEW, against the round-6 fix.**
+
+**Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–6 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 7's brief is
+written from round 6's fix, exactly as rounds 2–6 were written from theirs.
+
+**Six rounds, six narrower instances, and the pattern has now been stated as a rule rather than
+observed as a coincidence.** Round 6's two Highs were **both items of `2d-3-notes.md` §5 that the
+record had already judged and dismissed** — item 20 ("bounded by an epoch reset") and item 3 ("not
+new exposure"). That makes **five** §5 items written as honestly bounded and later found to be real
+defects: **item 10** (round 2), **item 16** (round 4), **item 18** (round 5), and **items 20 and 3**
+(round 6). §5 is not a residue to inherit; it is where the defects live. Round 7's default posture
+toward every remaining open item of it is **suspicion**, and that is not optional.
+
+**The round-6 fix round found and closed a seventh instance in its own change before any reviewer
+saw it**: `settle` removed a path's debt *before* the settlement that answers it — a check-and-spend,
+this project's named recurring shape. The debt is now put back when a settlement emits nothing, which
+makes *a debt is spent only by a settlement that emitted* structural rather than an agreement between
+three functions. **Do not treat that self-catch as credit.** Judge the new arm as harshly as one you
+found yourself; that instruction is what produced round 6's High 1.
+
+#### What the round-6 fix built — re-derive these, do not inherit them
+
+- **`ObservationEngine::observe_owed(path, now)`** and the private `owed: BTreeSet<PathBuf>` it
+  fills: a re-observation this application asks for is now a **debt the engine must answer**, not a
+  hint it may coalesce into silence. It is answered even against a state the baseline **established
+  but never announced**, and even when the engine tracks nothing for that path
+  (`Removed { previous_revision: None }`). The private `Undone` value the one-pass `undo` map holds
+  carries the debt beside the replaced tracked state, so `revert_settlement` restores **both**.
+- **`WatchWorker::hint_paths` → `schedule_paths`**, with a private `HintOrigin`, because the two
+  origins no longer ask the same question while the re-spelling and the clock stay one rule.
+  `WatchWorker::baseline` now **retains application-origin requests across a failing enumeration**
+  and hands them to the engine it finally opens, as debts.
+- **Both save tails publish *and* ask.** `conflict_after_the_lock` and `after_a_save` call
+  `side.watcher.re_observe(path)` **after** their `admit_under_the_session_lock`, on the arms where
+  they publish. `after_a_save`'s *agreeing* refresh deliberately does not ask — it publishes nothing,
+  clears nothing, and read exactly the revision the transaction established.
+- **`ledger.rs` and `main.rs` gained no production code** — doc corrections and counts only.
+
+#### The deviation round 7 must judge first
+
+Round 6's High 2 proposed *"route any ledger mutation/publication through the engine's two-read
+stabilization path."* **The fix round adopted the first half and rejected the second, deliberately**,
+and argued it in `2d-3-notes.md` §12.2 from three places: consult **Q2** explicitly instructs
+`conflict_after_the_lock` to publish/coalesce under the same sequence allocator; consult **Q5** makes
+that published entry the very thing that coalesces a native duplicate, so removing it would raise a
+**second** conflict on top of the one already on screen at 2d-5; and withholding the publication
+would leave the window with neither the phantom nor the truth, which is **round 3's swallowed-change
+defect reached from the other side**. The fix is therefore *publish **and** ask*: the phantom is
+superseded at a **later** sequence, never prevented.
+
+**Round 7 must decide whether that deviation is right**, because it rests on a rule this step cannot
+enforce: consult **Q3**'s *for each document the frontend acts only on the highest sequence it has
+accepted*, which **2d-4 and 2d-5 must keep**. If that rule is not kept, the phantom P is not
+harmless — it is published. §5 item 3's replacement says so, and item 3 has already been wrong once.
+
+#### What round 7 must attack
+
+- **The deviation above**, first and hardest.
+- **The debt machinery** — `observe_owed`, `owed`, `Undone`, and the re-insertion in `settle`. Is
+  there any path where a debt is spent by a settlement that emitted nothing, or survives when it
+  should not, or is owed to a path the engine will never settle? What happens across `begin_epoch`,
+  a worker that stops between the ask and its next tick, and a `revert_settlement` that restores a
+  debt already re-owed?
+- **`schedule_paths` and `HintOrigin`** — the rename plus a behaviour split. Does a **native** hint
+  behave exactly as it did before the split? The two origins now ask different questions through one
+  function, which is precisely the shape that hid round 6's High 1.
+- **The three new residues, judged as §5 items are now judged**: **item 21** (a request dropped by a
+  worker that stops before its next tick, claimed bounded by `begin_epoch` — item 20 made exactly
+  this kind of claim and was false), **item 22** (an owed observation of an unchanged state still
+  costs a sequence), and **item 3's remainder** (the phantom still *enters* the sequence). Also
+  **item 19** — that a watcher is running to hear the ask — which now decides whether a published
+  single read is **ever** corrected.
+- **The one thing not forced** (`2d-3-notes.md` §12.7): the new spawned-worker test does **not** force
+  *which* of the two arms absorbed the request; both are the fix and both fail before it. Judge that
+  as honestly bounded or as the next instance.
+- **The record against the code** — `2d-3-notes.md` §1, §4, §5, §6's gate table and §7–§12, plus the
+  correction blocks in `2d-1-notes.md` §2.1 (round 6's Low 1 changed "one" to "two" there). **Every
+  one of the six rounds so far found a false claim in this record.** Check the notes against the
+  code, never the code against the notes.
+
+**Keep the two standing rules:** sweep for the **shape**, never for the words of the closed finding;
+and sweep **name positions** — headlines, section headings, bold ruling lines, first sentences, doc
+comments, module headers, test names, every mention of a renamed item — as a pass **distinct** from
+the prose sweep. Round 6's two Lows were both that class, and this round renamed `hint_paths` to
+`schedule_paths` and moved several counts (three→five→six in `main.rs`, "exactly three arms"→five in
+`commands.rs`).
+
+**Brief the review the way rounds 1–6 were briefed, and this is not optional:** the Codex sandbox
+**blocks FSEvents delivery**, so a delivery-dependent test times out there while the supported host
+passes it repeatedly. Tell the reviewer to work **statically**, never to run `cargo test` or anything
+matching `watch_check::`, and supply the host-measured numbers in the brief. 2d-2's round-1 High was
+sandbox-confounded evidence, and that precedent binds every FSEvents-adjacent review.
+
+#### An operational trap this session hit — it will recur
+
+**`codex-wait.sh` reports STALLED on a healthy Codex `task` job.** The companion runtime stamps
+`updatedAt` once, ~10 s after launch, and never advances it, so the watchdog's stall predicate fires
+at the threshold on a job that is demonstrably working. **Confirm against the job's `logFile` before
+cancelling anything** — a genuine hang shows a repeating `Searching:` loop; a healthy job shows
+advancing tool calls with log timestamps far past the frozen `updatedAt`. The working signal is the
+**log file's mtime**. A drop-in replacement that polls on it is at
+`/private/tmp/claude-501/-Users-ccarpio-Developer-espansoConfig/4a29b83e-b1bc-44b7-81cc-cc61b6a5f2dd/scratchpad/wait-on-log.sh`
+(scratchpad — recreate it from this description if the path is gone; it is ~60 lines). Also note the
+`codex:codex-rescue` subagent returns a "running in background" wrapper **immediately** and does not
+deliver the result; drive `codex-companion.mjs` directly with `status` / `result`.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-3-ledger.md          — rounds 1–6 verbatim. THE work list for round 7.
+# docs/decisions/2d-3-notes.md               — the record: §1, §4, §5's holes stated open, §6's gate
+#   table, and §7–§12, one section per fix round (§12 is round 6's, the one under review)
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q2 is the suppression ruling,
+#   Q3 is the highest-sequence rule the deviation rests on, Q5 is the coalescing rule, Q7 item 3 is
+#   this step's spec, Q1 (with its round-4 correction block) binds it
+# docs/decisions/2d-1-notes.md               — the engine's contract, plus the correction blocks
+#   this step added to §2.1 (round 6's Low 1 is there)
+# docs/decisions/2d-2-notes.md               — §2.1, the lock and join argument; §2.3, which
+#   expressly permits a healthy native backend to miss a hint
+```
+
+#### The gate baseline — all measured on this tree by the orchestrator, not by the author
+
+- **`1261 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The Rust ladder across this step's review: 1249 at round 4's brief, 1251
+  after the round-4 fix, 1256 after the round-5 fix, **1261** after the round-6 fix. Focused serial
+  `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` is **20/20**
+  (68.03 s) and belongs to every future Rust gate run. Clippy `-D warnings` and `cargo fmt --check`
+  clean; `cargo tree -p espansoconfig-core | rg tauri` empty. **The frontend has never been touched
+  across the whole step** — verified against both commits' file lists — so its three numbers are
+  carried, not re-measured.
+- **The scar still binds.** The workspace suite is evidence on a **quiet host only**: two *contended*
+  runs on a byte-identical tree failed with 9 and 10 `watch_check` bounded-wait timeouts (389 s vs
+  85.8 s) while the machine was saturated — and the serial gate passed 20/20 through the same
+  weather. Re-run quietly before concluding anything from a timeout.
+
+#### Open items 2d-3 still carries into 2d-4 (stated, not discharged)
+
+- The production `ObservationSink` discards, so a sequence and a publication are spent on a value no
+  present code recovers; those save-path publications are where consult Q5's *save-origin conflict
+  wins over a native duplicate* must land.
+- **Consult Q3's highest-sequence rule is now load-bearing for correctness, not only for tidiness** —
+  the round-6 fix's publish-and-ask depends on it. 2d-4 must keep it.
+- `SavedDocument::revision` is a **post-rename read-back**, so a foreign process writing between the
+  rename and that read makes this session record *their* revision as its own (§5 item 15, inherited).
+- A stamp taken too **late** has no test that can fail, and neither has a dropped sink answer.
+- A re-observation may not survive a worker stopping before its next tick (§5 item 21); an owed
+  observation of an unchanged state still costs a sequence (§5 item 22); and nothing forces a watcher
+  to exist to hear the ask (§5 item 19).
+
+---
+
+### ⚠️ HISTORICAL — the round-5→round-6 handoff, superseded by the round-7 status above. Round 6 is executed, it returned NOT READY with 2 High and 2 Low, and its fix is in the tree and green.
+
 ### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, but the step review stands at round 5, and the "expected five" is spent. THE NEXT ACTION IS ROUND 6 OF THE 2d-3 REVIEW, against the round-5 fix.**
 
 **Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–5 are in it
@@ -16190,6 +16347,7 @@ _Updated at each phase boundary._
 | **2c-5 step 5b** | **`4177097`** | ✅ pushed to `origin/main` (`1065317..4177097`; this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a commit was. The commit holds **three** files and no harness path: `docs/decisions/2c-5-5b-instrument-cases.md` (§§1–8), the captured review `docs/reviews/phase-2c-5-5b-instrument.md` and this checkpoint. **The same four harness paths were left in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else** — no real-config path, no launch artifact. **`git commit -a` from here would commit the instrument.** The commit holds **no tracked source file and no test** — 5b's code lives in the two untracked probe paths and the scratch tree, which is the point. **Step 5b IS closed by it**: the scratch tree was rebuilt after its second loss and proved on its own binaries (P49, N09, C11–C15), the four restore cases ran first-try (P50–P53, `failed-lines=0` on all), the gates were re-derived twice at `1153 / 432 / 2124 / 185`, and the single review round returned **READY with no findings** — the first READY of any instrument step. The next step is **2c-5-6**, the bilingual window reading, and **2c-5-7 still deletes the instrument** (tree, four probe paths, decoys C11–C14, C14-plant artifacts) and re-derives the harness-free gate counts |
 | **2c-5 step 6a** | **`856a8b3`** | ✅ pushed to `origin/main` (`2b7fb07..856a8b3`; this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a/5b commit was. The commit holds **four** files and no harness path: `docs/decisions/2c-5-6a-instrument-extension.md` (§§1–10.1), the two captured reviews `docs/reviews/phase-2c-5-6a-instrument.md` (round 1, NOT READY: one Medium, one Low — both prose) and `…-round2.md` (READY, no findings), and this checkpoint. **The same four harness paths were left in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else** — no real-config path, no launch artifact. **`git commit -a` from here would commit the instrument.** The commit holds **no tracked source file and no test** — 6a's code lives in the untracked `src/probe.ts` and the scratch tree, which is the point; the fix round's two `src/probe.ts` comment corrections travel with the untracked file. **Step 6a IS closed by it**: seven new cases proven first-try on binary `c4f2ae02…` (P55, P56, P58–P62; P54 and P57 retained superseded), four demanded states argued unreachable with review-verified arguments, the gates re-derived three times at `1153 / 432 / 2124 / 185`, round 2 READY. The next step is **2c-5-6b**, the bilingual reading itself, and **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
 | **2d-3 (rounds 4–5, NOT closed)** | **`6ca343d`** | ✅ pushed to `origin/main` (`052dd38..6ca343d`; this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` after the commit is empty — no real-config path, no launch artifact, no untracked file. The commit holds **nine** files: four sources (`src-tauri/src/{commands,ledger,main,watch}.rs`), one core file changed in a doc comment only (`crates/espansoconfig-core/src/watch/engine.rs`), three documents (`docs/decisions/2d-{1,3}-notes.md`, `docs/reviews/phase-2d-3-ledger.md`) and this checkpoint. **No frontend file and no `src/` path**, across the whole step. **The step is NOT closed by it** — rounds 4 and 5 both returned NOT READY, both fixes are in the tree and green, and **round 6 is owed against the round-5 fix**. The tail has not converged: five rounds, five narrower instances, plus a sixth the round-5 fix round found in its own change. A fresh session resumes from "Next action" |
+| **2d-3 (round 6 + its fix, NOT closed)** | **`PENDING`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` after the commit is empty — no real-config path, no launch artifact, no untracked file. The commit holds **eight** files: four sources (`src-tauri/src/{commands,ledger,main,watch}.rs`), one core file (`crates/espansoconfig-core/src/watch/engine.rs` — `observe_owed`, the `owed` debt set and the `Undone` value; **ledger-agnostic, and `cargo tree -p espansoconfig-core \| rg tauri` still finds nothing**), three documents (`docs/decisions/2d-{1,3}-notes.md`, `docs/reviews/phase-2d-3-ledger.md`) and this checkpoint. **No frontend file and no `src/` path**, across the whole step. **The step is NOT closed by it** — round 6 returned NOT READY with **2 High and 2 Low**, its fix is in the tree and green at `1261 / 0` with serial `watch_check` 20/20, and **round 7 is owed against the round-6 fix**. Round 6's two Highs were **both §5 items the record had already judged and dismissed** (items 20 and 3), bringing to **five** the §5 items written as honestly bounded and later found to be real defects. The round-6 fix round found and closed a **seventh** narrower instance in its own change (a check-and-spend in `settle`). It also **deliberately deviated** from round 6's suggested fix for High 2 — *publish **and** ask* rather than routing publication through the engine — argued in `2d-3-notes.md` §12.2 from consult Q2/Q5/Q3; **judging that deviation is round 7's first job**. A fresh session resumes from "Next action" |
 | **2c-5 step 6b (partial)** | **`ee40a29`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a/5b/6a commit was. The commit holds **five** files staged **by path**: `src/lib/components/RestorePane.svelte` and `src/lib/components/RestorePane.test.ts` (the fix round — the reading's Medium made this a source-carrying step, as 2c-4c-5b-1/5b-2 was), `docs/decisions/2c-5-6-window-reading.md` (§§1–12), the captured review `docs/reviews/phase-2c-5-6b-reading.md` (round 1, **NOT READY**: one Medium — the occlusion derivation, §12's disposition; one Low — fixed) and this checkpoint. **The same four harness paths stay in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else**. **`git commit -a` from here would commit the instrument.** **Step 6b is NOT closed by it**: twelve re-takes (P87+, `visibility=visible` required) are owed and were blocked on a locked console; the round-2 review and the manifest follow them. **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
 
 `e83bc31` is Phase 2c-4c **step 6**, the harness's removal, **including its review fix round** — the

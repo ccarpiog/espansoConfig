@@ -187,3 +187,65 @@ No tests were run; these findings are static.
 
 Codex session ID: 01a038df-b2f6-7503-be64-7f989d960bd0
 Resume in Codex: codex resume 01a038df-b2f6-7503-be64-7f989d960bd0
+
+---
+
+## Round 6 — NOT READY (2 High, 2 Low)
+
+Scoped to round 5's fix. **Six rounds, six narrower instances**, and this round is the sharpest
+statement yet of the pattern the brief was written around: **both Highs are items of
+`2d-3-notes.md` §5 that the record had already judged and dismissed** — item 20 ("bounded by an
+epoch reset") and item 3 ("not new exposure"). That makes **five** §5 items now found to be real
+defects after being written as honestly bounded: item 10 (round 2), item 16 (round 4), item 18
+(round 5), and items 20 and 3 (this round). The section's stated-open items are not a residue to be
+inherited; they are where the defects live.
+
+Both Highs are the **same shape as rounds 4 and 5** — a genuinely external change that never enters
+the observation sequence — reached through two new doors. High 1 is the `ReObserve` that the
+**baseline-retry arm consumes and discards**, which is the round-5 fix's own new machinery failing
+in the one state its §5 item said bounded it. High 2 is a **one-read transient published and
+coalesced** by a *successful* save-tail refresh: because the refresh succeeded, no re-observation is
+asked for, so the round-5 fix's recovery path never engages and a phantom intermediate state
+outlives the write that replaced it.
+
+The two Lows are both **name-position and count misses**, the same class round 5 found twice in the
+round-4 fix round's sweep: a correction block that says "one" of three ledger callers is serialized
+while naming two in the same sentence, and a present-tense scope record still claiming "no change to
+the core crate at all" after this step added the rollback primitive that ledger refusal recovery
+depends on.
+
+What round 6 inspected and **cleared**: the unbounded-channel and channel-lock arguments,
+`NoWatcher` behaviour, shutdown/epoch serialization, the three new save-path call sites,
+`after_an_uncertain_write`, native-hint behaviour preserved by `hint_paths`, the private and
+exhaustive chronology proofs, the remaining §5 items, the gate table, and the absence of any
+phase-2d-4 wire or frontend scope creep or a core-to-Tauri dependency.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`b9650a9`: `cargo test --workspace` 1256/0; focused serial `watch_check::` 20/20 (62.70 s); clippy
+`-D warnings` clean; `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri` empty;
+neither 2d-3 commit touches a `src/` path, so 431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- [watch.rs:1131](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/watch.rs:1131), [commands.rs:2443](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2443), [engine.rs:589](/Users/ccarpio/Developer/espansoConfig/crates/espansoconfig-core/src/watch/engine.rs:589), [2d-3-notes.md:794](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:794) — a worker whose baseline is failing accepts `ReObserve` as `Asked` and then deliberately discards it, contradicting §5 item 20’s claim that this loss is bounded by an epoch reset. Concrete scenario: watcher starts but baseline enumeration fails → app commits revision A → an external process removes the document before the save refresh → refresh fails and sends `ReObserve` → the baseline retry arm consumes and drops it → baseline later succeeds but cannot enumerate the now-missing path, so `ObservationEngine::start` emits nothing → the permitted native-hint miss leaves the removal unsequenced and record A can later suppress a genuine recreation of A. This violates Q2’s rule that a differing post-save observation is admitted as external and the step’s “no external change is lost” guarantee ([phase-2d-design.md:29](/Users/ccarpio/Developer/espansoConfig/docs/reviews/phase-2d-design.md:29), [2d-3-notes.md:3](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3)). Minimal fix: retain application-origin re-observations across baseline failures and, after baseline establishment, force them through a path capable of emitting an owed removal/unreadable state; add a deterministic spawned-worker/baseline-failure test that does not require FSEvents.
+
+- [workspace/mod.rs:530](/Users/ccarpio/Developer/espansoConfig/crates/espansoconfig-core/src/workspace/mod.rs:530), [commands.rs:2430](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2430), [ledger.rs:1121](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1121), [2d-3-notes.md:640](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:640) — §5 item 3’s “not new exposure” ruling is false because both successful save-tail refreshes can publish and coalesce a one-read transient state into the new ledger. Concrete scenario: app commits A → a foreign non-atomic write toward Q is in progress → the single refresh reads a parseable intermediate P → `admit_under_the_session_lock` clears A and publishes P → the writer finishes Q → the healthy backend permissibly misses that hint → no re-observation is requested because the refresh succeeded, so phantom P remains while final Q never enters the sequence. This violates Q2’s requirement to suppress or admit a **stable** observation ([phase-2d-design.md:29](/Users/ccarpio/Developer/espansoConfig/docs/reviews/phase-2d-design.md:29)). Minimal fix: keep the immediate read only for cache/conflict payload construction, and route any ledger mutation/publication through the engine’s two-read stabilization path.
+
+## Medium
+
+None.
+
+## Low
+
+- [2d-1-notes.md:113](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-1-notes.md:113), [2d-3-notes.md:2091](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:2091) — the correction block says “one” of three ledger callers is serialized while immediately naming the two serialized save-tail callers, and §11 incorrectly says that count was checked and stands. Concrete scenario: a future change follows the recorded count → preserves serialization for only one tail → restores a stamped chronology to the other → an equal-instant collision can suppress an external observation. Minimal fix: change “one” to “two” and correct §11’s assertion.
+
+- [2d-3-notes.md:625](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:625) — the present-tense scope record still claims “no change to the core crate at all,” although the reviewed step added the generic rollback/path support on which ledger refusal recovery depends. Concrete scenario: the statement is treated as a binding scope invariant → `revert_settlement` is removed as out of scope → a refused pre-save settlement remains coalesced → the observation is lost. Minimal fix: state that core gained ledger-agnostic rollback/path primitives but no Tauri or ledger dependency.
+
+I cleared the unbounded-channel and channel-lock arguments, `NoWatcher` behavior, shutdown/epoch serialization, the three new save-path call sites, `after_an_uncertain_write`, native-hint behavior preserved by `hint_paths`, private/exhaustive chronology proofs, the remaining §5 items, the gate table, and the absence of phase-2d-4 wire/frontend scope or a core-to-Tauri dependency. No tests or builds were run; these findings are entirely static.
+
+NOT READY
+
+Codex session ID: 01a0393a-6baf-7731-b98e-1fc80671c6f8
+Resume in Codex: codex resume 01a0393a-6baf-7731-b98e-1fc80671c6f8

@@ -66,6 +66,40 @@
 //! pass is discarded when the next pass begins. A caller that ticks first has an
 //! observation it cannot take back, and nothing in the type system says so.
 //!
+//! # An observation can be *owed*, and coalescing does not discharge a debt
+//!
+//! Ordinary coalescing answers one question: *has anything changed since I last
+//! told you about this path?* A caller that was **never told** cannot use that
+//! answer, and a caller that read the path itself and could not use its own
+//! reading needs a different one: *what does this path hold now, whatever it
+//! held before?*
+//!
+//! [`ObservationEngine::observe_owed`] records that debt beside the hint. The
+//! next settlement of that path discharges it by emitting the stabilized state
+//! **even when that state is the one this engine already tracks, and even when
+//! it tracks nothing at all** — so an absence emits
+//! [`Observation::Removed`] with `previous_revision: None`, and unchanged
+//! content emits an [`Observation::Changed`] whose `previous_revision` equals
+//! the new revision. Both shapes carry the equality on their face, so a consumer
+//! can see that nothing changed rather than being told that something did.
+//!
+//! Why a debt rather than a hint: a hint asks a question this engine answers
+//! against its own tracked state, and that state is not always something the
+//! caller has heard. [`ObservationEngine::start`] **establishes** the tracked
+//! table without emitting anything — a baseline is a starting point, not an
+//! observation — so a path established there and then hinted coalesces to
+//! silence for a caller that has been told nothing about it. That is 2d-3's
+//! round-6 first High one layer out.
+//!
+//! A debt survives a [`ObservationEngine::revert_settlement`] of the settlement
+//! that discharged it, because a conclusion the caller could not use is a
+//! conclusion the caller was not told. **What the types do not force**, beside
+//! what they do: a debt is per *path* and carries no identity of who asked, so
+//! two requests before one settlement are one debt and one settlement discharges
+//! both; and a request for a path this engine does not watch is dropped exactly
+//! as a hint is, recording no debt, so a caller whose spelling of a path differs
+//! from this engine's root spelling is answered by silence.
+//!
 //! # What TypeScript-style discipline cannot do here, stated plainly
 //!
 //! Rust forces the clock and the reader to be arguments, so no code path in
@@ -76,7 +110,7 @@
 //! [`ObservationEngine::next_deadline`] is `None`; a caller that stops ticking
 //! has pending paths and no observations, not wrong ones.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -350,8 +384,17 @@ pub enum Observation {
     /// and a previous `Unreadable`: a file that recovers from a stable read
     /// error is `Changed` **even when its bytes equal the pre-error content**,
     /// because the observation it supersedes is the `Unreadable`, not that
-    /// content. That is the one case where `previous_revision` can equal the
-    /// new content's revision, and it means *readable again, bytes as before*.
+    /// content. That is one of the **two** cases where `previous_revision` can
+    /// equal the new content's revision, and it means *readable again, bytes as
+    /// before*.
+    ///
+    /// The second is an **owed** observation
+    /// ([`ObservationEngine::observe_owed`]): a caller that could not use a
+    /// reading of its own is answered with what the path stably holds, and when
+    /// that is exactly what this engine already tracked the equality is on the
+    /// value's face rather than hidden by silence. *Nothing changed* and *I have
+    /// never told you anything about this path* are different answers, and only
+    /// the first is a reason to say nothing.
     Changed {
         /// The path that changed.
         path: PathBuf,
@@ -382,6 +425,13 @@ pub enum Observation {
     /// A tracked path is stably gone. The engine forgets it; its
     /// [`crate::DocumentId`] is never re-pointed, and a recreation at the same
     /// path receives the same identity from the session table.
+    ///
+    /// **Also what an *owed* observation of a path this engine tracks nothing
+    /// for answers** ([`ObservationEngine::observe_owed`]): the caller asked
+    /// what the path holds and the stable answer is *nothing*.
+    /// `previous_revision` is then `None`, which is the same field saying the
+    /// same thing it always says — no content was ever stably read here — and
+    /// the value claims no membership change this engine ever announced.
     Removed {
         /// The path that is gone.
         path: PathBuf,
@@ -533,7 +583,16 @@ pub struct ObservationEngine {
     /// Only a path that actually produced an observation has an entry: a
     /// coalescing settlement — the same revision again, the same failure kind
     /// again — changes nothing a caller could refuse.
-    undo: BTreeMap<PathBuf, Option<Tracked>>,
+    undo: BTreeMap<PathBuf, Undone>,
+    /// Every path an observation is **owed** for — see
+    /// [`ObservationEngine::observe_owed`] and the module docs' *owed* section.
+    ///
+    /// Deliberately **not** cleared by [`ObservationEngine::tick`], unlike
+    /// [`ObservationEngine::undo`]: a debt is discharged by the settlement that
+    /// answers it and by nothing else, so a path that never stabilizes — one
+    /// being written continuously — stays owed rather than quietly losing its
+    /// request.
+    owed: BTreeSet<PathBuf>,
 }
 
 /// One settlement: the observation it produced, and the tracked state it
@@ -547,6 +606,22 @@ struct Settled {
     observation: Observation,
     /// What the settlement replaced; `None` where nothing was tracked.
     replaced: Option<Tracked>,
+}
+
+/// What one pass's settlement of one path can be taken back to.
+///
+/// The tracked state it replaced **and whether that settlement discharged an
+/// owed observation**. The second half is not bookkeeping: a caller that
+/// refuses a conclusion has not been told it, so a debt the refused settlement
+/// discharged is still owed — and without this field the retry would coalesce
+/// against the tracked state and answer the debt with silence, which is the
+/// exact shape [`ObservationEngine::observe_owed`] exists to close.
+#[derive(Debug)]
+struct Undone {
+    /// What the settlement replaced; `None` where nothing was tracked.
+    replaced: Option<Tracked>,
+    /// Whether the settlement discharged a debt.
+    owed: bool,
 }
 
 impl ObservationEngine {
@@ -571,6 +646,14 @@ impl ObservationEngine {
     /// native delivery is expressly not guaranteed ([`crate::watch::native`]),
     /// so such a baseline can persist until one actually occurs.
     ///
+    /// **Establishing is not announcing, and that difference has a cost a
+    /// caller can pay off.** Nothing here is emitted, so a caller that needs an
+    /// answer about one particular path — because it read that path itself and
+    /// could not use the reading — cannot get one from a plain
+    /// [`ObservationEngine::hint`]: the hint would stabilize to the state this
+    /// scan established and coalesce to silence. [`ObservationEngine::observe_owed`]
+    /// is the request that says so, and the module docs' *owed* section is why.
+    ///
     /// # Errors
     ///
     /// The enumeration's own [`DiscoveryError`], untouched.
@@ -585,6 +668,7 @@ impl ObservationEngine {
             tracked: BTreeMap::new(),
             pending: BTreeMap::new(),
             undo: BTreeMap::new(),
+            owed: BTreeSet::new(),
         };
         for file in source.enumerate(root)? {
             if !engine.watches(&file.path) {
@@ -652,6 +736,39 @@ impl ObservationEngine {
             },
         );
     } // End of function hint()
+
+    /// Hints `path` **and records that an observation is owed for it**: the next
+    /// settlement of that path emits the stabilized state even when it equals
+    /// the state this engine already tracks, and even when it tracks nothing.
+    ///
+    /// The request a caller makes when it has read the path itself and cannot
+    /// use its own reading — the read raised, or it was one read where two are
+    /// needed. Such a caller does not want *has anything changed since I last
+    /// told you*, which is what a plain [`ObservationEngine::hint`] asks; it
+    /// wants *what does this path hold now*. The module docs' *owed* section
+    /// carries the argument, and [`ObservationEngine::start`]'s establishing
+    /// baseline is the case that makes the two questions come apart.
+    ///
+    /// **A debt is per path.** Two requests before one settlement are one debt,
+    /// and the settlement that answers it discharges it for every caller that
+    /// asked. A path this engine does not watch is dropped exactly as
+    /// [`ObservationEngine::hint`] drops it, and records no debt — otherwise a
+    /// caller spelling a path this engine's roots do not match would leave a
+    /// debt no settlement could ever reach.
+    ///
+    /// **What this does not do**, said beside what it does: it emits nothing
+    /// itself, it schedules a read like any hint, it says nothing about *what*
+    /// will be observed, and it restarts the debounce of a path already probing
+    /// exactly as a hint does. It also promises no answer at all for a path that
+    /// never stabilizes: a file written continuously stays pending, and the debt
+    /// waits with it.
+    pub fn observe_owed(&mut self, path: &Path, now: Millis) {
+        if !self.watches(path) {
+            return;
+        }
+        self.owed.insert(path.to_path_buf());
+        self.hint(path, now);
+    } // End of function observe_owed()
 
     /// Advances every pending path whose deadline has passed, by exactly one
     /// read each, and returns the observations that stabilized.
@@ -783,20 +900,36 @@ impl ObservationEngine {
     ///   back out of a later [`ObservationEngine::tick`], with whatever the file
     ///   holds **then** — which may no longer be the state that was refused, and
     ///   that is the honest answer rather than a replay of a stale reading.
+    ///
+    /// **A debt is restored with the state.** If the settlement being taken back
+    /// discharged an [`ObservationEngine::observe_owed`] request, the path is
+    /// owed again: a conclusion the caller could not use is a conclusion the
+    /// caller was not told, so the retry must be able to answer the debt rather
+    /// than coalescing against a tracked state nobody heard about.
     pub fn revert_settlement(&mut self, path: &Path, now: Millis) {
-        match self.undo.remove(path) {
-            Some(Some(replaced)) => {
-                self.tracked.insert(path.to_path_buf(), replaced);
+        let owed = match self.undo.remove(path) {
+            Some(Undone { replaced, owed }) => {
+                match replaced {
+                    Some(replaced) => {
+                        self.tracked.insert(path.to_path_buf(), replaced);
+                    }
+                    None => {
+                        // Nothing was tracked before the settlement, so
+                        // restoring it means removing what the settlement
+                        // installed — an `Added` taken back leaves the path
+                        // untracked, exactly as it was.
+                        self.tracked.remove(path);
+                    }
+                } // End of the match over what the settlement replaced
+                owed
             }
-            Some(None) => {
-                // Nothing was tracked before the settlement, so restoring it
-                // means removing what the settlement installed — an `Added`
-                // taken back leaves the path untracked, exactly as it was.
-                self.tracked.remove(path);
-            }
-            None => {}
-        } // End of the match over what there was to take back
-        self.hint(path, now);
+            None => false,
+        }; // End of the match over what there was to take back
+        if owed {
+            self.observe_owed(path, now);
+        } else {
+            self.hint(path, now);
+        }
     } // End of function revert_settlement()
 
     /// The next instant at which [`ObservationEngine::tick`] has work, or
@@ -877,26 +1010,68 @@ impl ObservationEngine {
     /// *every* emitted observation is revertible by construction: a fourth
     /// settlement kind added below would have to answer [`Settled`] to compile,
     /// and answering it is what files the undo.
+    ///
+    /// **The debt is taken here too, and for the same reason.** Each settlement
+    /// is told whether one is owed rather than asking the engine itself, so a
+    /// fourth kind cannot silently ignore one; and the debt is removed before
+    /// the settlement runs, so an owed observation that is then refused is
+    /// re-owed by [`ObservationEngine::revert_settlement`] rather than by being
+    /// left in place here — a debt that outlived its own answer would re-observe
+    /// the path forever.
+    ///
+    /// **A debt is spent only by a settlement that emitted**, and that is
+    /// enforced here rather than by the three settlements agreeing to it: one
+    /// that answers `None` while a debt was owed puts the debt back. All three
+    /// below emit whenever one is owed, so the arm is unreachable today — but
+    /// *removed above, honoured below* is a check and a spend in two places, and
+    /// this crate has shipped that shape before.
     fn settle(&mut self, path: &Path, outcome: ReadOutcome) -> Option<Observation> {
+        let owed = self.owed.remove(path);
         let settled = match outcome {
-            ReadOutcome::Present(bytes) => self.settle_present(path, bytes),
-            ReadOutcome::Missing => self.settle_missing(path),
-            ReadOutcome::Failed(kind) => self.settle_failed(path, kind),
-        }?;
-        self.undo.insert(path.to_path_buf(), settled.replaced);
+            ReadOutcome::Present(bytes) => self.settle_present(path, bytes, owed),
+            ReadOutcome::Missing => self.settle_missing(path, owed),
+            ReadOutcome::Failed(kind) => self.settle_failed(path, kind, owed),
+        };
+        let Some(settled) = settled else {
+            if owed {
+                // **A debt is spent only by the settlement that answers it.**
+                // Unreachable with the three settlements below — each of them
+                // emits whenever one is owed — and written rather than hoped
+                // away, because *removed above, honoured below* is a check and a
+                // spend in two places: a fourth settlement kind that coalesced
+                // despite a debt would consume the request and answer it with
+                // silence, which is the whole defect this mechanism exists to
+                // close.
+                self.owed.insert(path.to_path_buf());
+            }
+            return None;
+        };
+        self.undo.insert(
+            path.to_path_buf(),
+            Undone {
+                replaced: settled.replaced,
+                owed,
+            },
+        );
         Some(settled.observation)
     } // End of function settle()
 
     /// A path stably holds `bytes`.
-    fn settle_present(&mut self, path: &Path, bytes: Vec<u8>) -> Option<Settled> {
+    fn settle_present(&mut self, path: &Path, bytes: Vec<u8>, owed: bool) -> Option<Settled> {
         let revision = ContentRevision::of_bytes(&bytes);
         // Coalesce against the tracked *content* state: a byte-identical
         // rewrite is not a content observation. An unreadable state never
-        // coalesces here — recovering is a difference even at equal bytes.
-        match self.tracked.get(path) {
-            Some(Tracked::Projected { snapshot }) if snapshot.revision == revision => return None,
-            Some(Tracked::NotUtf8 { revision: held }) if *held == revision => return None,
-            _ => {}
+        // coalesces here — recovering is a difference even at equal bytes — and
+        // an **owed** observation never coalesces either, because the caller
+        // that asked for it has not been told what this engine tracks.
+        if !owed {
+            match self.tracked.get(path) {
+                Some(Tracked::Projected { snapshot }) if snapshot.revision == revision => {
+                    return None
+                }
+                Some(Tracked::NotUtf8 { revision: held }) if *held == revision => return None,
+                _ => {}
+            }
         }
         let content = self.project_bytes(path, bytes);
         // Removed, read by reference, and then handed to the undo store by
@@ -932,22 +1107,31 @@ impl ObservationEngine {
     } // End of function settle_present()
 
     /// A path is stably absent.
-    fn settle_missing(&mut self, path: &Path) -> Option<Settled> {
-        let replaced = self.tracked.remove(path)?;
+    ///
+    /// **An owed observation of a path nothing was tracked for still emits**,
+    /// with `previous_revision: None`: the caller asked what the path holds and
+    /// the stable answer is *nothing*. Without a debt this settlement is silent
+    /// there, which is correct — a path this engine never announced and that
+    /// holds nothing is not a removal anybody was told about.
+    fn settle_missing(&mut self, path: &Path, owed: bool) -> Option<Settled> {
+        let replaced = self.tracked.remove(path);
+        if replaced.is_none() && !owed {
+            return None;
+        }
         Some(Settled {
             observation: Observation::Removed {
                 path: path.to_path_buf(),
-                previous_revision: replaced.revision(),
+                previous_revision: replaced.as_ref().and_then(Tracked::revision),
             },
-            replaced: Some(replaced),
+            replaced,
         })
-    }
+    } // End of function settle_missing()
 
     /// A path stably fails to read with `kind`.
-    fn settle_failed(&mut self, path: &Path, kind: io::ErrorKind) -> Option<Settled> {
+    fn settle_failed(&mut self, path: &Path, kind: io::ErrorKind, owed: bool) -> Option<Settled> {
         let prior = self.tracked.remove(path);
-        let coalesce =
-            matches!(&prior, Some(Tracked::Unreadable { kind: held, .. }) if *held == kind);
+        let coalesce = !owed
+            && matches!(&prior, Some(Tracked::Unreadable { kind: held, .. }) if *held == kind);
         // **The one settlement that clones**, and only on the arm that emits.
         // It carries part of the state it replaces (`before`) into the state it
         // installs, so unlike the other two it cannot hand the replaced value
@@ -1191,6 +1375,117 @@ mod tests {
         );
         assert!(drain_real(&mut engine, &mut source).is_empty());
     } // End of function a_reverted_settlement_is_observed_again_instead_of_coalescing_away()
+
+    #[test]
+    fn an_owed_observation_is_answered_where_a_hint_coalesces_to_silence() {
+        // 2d-3's **round-6 first High**, as the engine-side half of it. A
+        // baseline *establishes* the tracked table without emitting anything, so
+        // a caller that has been told nothing about a path gets silence from an
+        // ordinary hint — whether the path holds what the baseline established
+        // or holds nothing at all. Each half below drives the hint first, to
+        // show the silence, and then the debt.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().join("tree");
+        std::fs::create_dir_all(root.join("match")).expect("the watched root");
+        let established = root.join("match/base.yml");
+        let gone = root.join("match/gone.yml");
+        let bytes = "matches: []\n";
+        std::fs::write(&established, bytes).expect("the file the baseline sees");
+
+        let mut source = FsWatchSource;
+        let mut engine = ObservationEngine::start(&root, EngineConfig::default(), &mut source)
+            .expect("a baseline scan");
+        assert_eq!(
+            engine.revision_of(&established),
+            Some(ContentRevision::of_bytes(bytes.as_bytes())),
+            "the premise: the baseline established this state and announced nothing"
+        );
+
+        // 1. A path that holds what the baseline established. The hint
+        //    coalesces; the debt is answered, and the answer carries the
+        //    equality on its face.
+        engine.hint(&established, Millis(0));
+        assert!(
+            drain_real(&mut engine, &mut source).is_empty(),
+            "an ordinary hint at an unchanged established state observes nothing"
+        );
+        engine.observe_owed(&established, Millis(1000));
+        let owed = drain_real(&mut engine, &mut source);
+        assert_eq!(owed.len(), 1, "the debt is answered: {owed:?}");
+        match &owed[0] {
+            Observation::Changed {
+                path,
+                previous_revision,
+                content,
+                ..
+            } => {
+                assert_eq!(path, &established);
+                assert_eq!(
+                    *previous_revision,
+                    Some(ContentRevision::of_bytes(bytes.as_bytes()))
+                );
+                assert_eq!(
+                    content.revision(),
+                    ContentRevision::of_bytes(bytes.as_bytes()),
+                    "and `previous_revision == content.revision()` says nothing changed"
+                );
+            }
+            other => panic!("expected a `Changed` carrying the equality, got {other:?}"),
+        } // End of the match over the answered debt
+
+        // 2. A path nothing was ever tracked for, holding nothing. The hint is
+        //    silent because there is no removal anybody was told about; the debt
+        //    is answered with `Removed { previous_revision: None }`.
+        engine.hint(&gone, Millis(2000));
+        assert!(
+            drain_real(&mut engine, &mut source).is_empty(),
+            "an ordinary hint at an untracked absence observes nothing"
+        );
+        engine.observe_owed(&gone, Millis(3000));
+        let owed = drain_real(&mut engine, &mut source);
+        assert_eq!(owed.len(), 1, "the debt is answered: {owed:?}");
+        assert!(
+            matches!(
+                &owed[0],
+                Observation::Removed {
+                    path,
+                    previous_revision: None
+                } if path == &gone
+            ),
+            "an owed absence is a removal with no previous revision: {owed:?}"
+        );
+
+        // 3. A debt is discharged once. The same path asked nothing further
+        //    answers nothing further.
+        engine.hint(&gone, Millis(4000));
+        assert!(drain_real(&mut engine, &mut source).is_empty());
+
+        // 4. A refused settlement leaves the debt owed, because a conclusion the
+        //    caller could not use is a conclusion it was not told. Without the
+        //    restore, the retry coalesces and the debt is answered by silence —
+        //    which is the defect this whole mechanism exists to close, reached
+        //    one layer down.
+        engine.observe_owed(&established, Millis(5000));
+        let refused = drain_real(&mut engine, &mut source);
+        assert_eq!(refused.len(), 1, "the debt is answered: {refused:?}");
+        engine.revert_settlement(&established, Millis(6000));
+        let again = drain_real(&mut engine, &mut source);
+        assert_eq!(
+            again.len(),
+            1,
+            "and a refused owed observation is still owed: {again:?}"
+        );
+        assert!(matches!(&again[0], Observation::Changed { path, .. } if path == &established));
+
+        // 5. A path this engine does not watch records no debt, so nothing is
+        //    left owed for a settlement that can never come.
+        let outside = dir.path().join("outside.yml");
+        engine.observe_owed(&outside, Millis(7000));
+        assert!(
+            engine.next_deadline().is_none(),
+            "an unwatched path is dropped exactly as a hint is"
+        );
+    } // End of function an_owed_observation_is_answered_where_a_hint_coalesces_to_silence()
 
     #[cfg(unix)]
     #[test]

@@ -110,8 +110,8 @@ is a fact about a directory.
 > — *place the observation's reads relative to the recorded write* — and names **one** way to
 > discharge it, an instant stamped before the reads against an instant stamped after the rename.
 > That reads as though the stamp were the obligation; it is not, and treating it as one is what
-> round 4 found. A caller that can prove the ordering **some other way** owes no stamp, and one of
-> 2d-3's three callers can: the two save-path refreshes run under the session lock that every
+> round 4 found. A caller that can prove the ordering **some other way** owes no stamp, and **two**
+> of 2d-3's three callers can: the two save-path refreshes run under the session lock that every
 > producer of a ledger record holds, so the record precedes their read in program order. Stamping
 > them anyway put a strict comparison of two adjacent clock reads on a path where a collision
 > refused the observation outright, with no settlement to take back and no retry — a lost external
@@ -122,6 +122,37 @@ is a fact about a directory.
 > `ObservationEngine::revert_settlement`'s doc comment promised *the same observation again* where
 > the code deliberately re-reads and may report a different current state.
 > `docs/decisions/2d-3-notes.md` §10 is the record.
+
+> **Correction (2d-3 round-6 fix round), on the block above.** It said **one** of 2d-3's three
+> callers could prove the ordering another way, and named **two** in the same sentence — round 6's
+> first Low. It is two: `after_a_save`'s refresh and `conflict_after_the_lock`'s, both under the
+> session lock; the third caller is the watcher's worker thread, which holds no lock and is the one
+> that stamps. The count is corrected **in place** above rather than left standing, because a
+> maintainer following it would preserve serialization for one tail and restore a stamped chronology
+> to the other, and an equal-instant collision there suppresses an external observation with nothing
+> to answer the refusal — round 4 again. `docs/decisions/2d-3-notes.md` §12.3 is the record, and its
+> §11 assertion that this count had been checked and stood is corrected there.
+
+> **Correction (2d-3 round-6 fix round), on the round-3 block above.** It says this engine gained
+> `revert_settlement` and `Observation::path()` and learns **nothing** about saves, ledgers or
+> application sessions. Both halves still hold, and the engine has gained a third
+> ledger-agnostic primitive on the same terms: `ObservationEngine::observe_owed(path, now)`, a hint
+> plus a **debt** the next settlement of that path must answer — emitting the state it stabilized
+> to even when that state is the one this engine already tracked, and even when it tracked none.
+>
+> The obligation it discharges is a **sixth** beside §2.1's five, and it is the one the engine
+> alone can meet: *answer a caller that has been told nothing about a path*. Ordinary coalescing
+> answers `has anything changed since I last told you`, and `ObservationEngine::start`
+> **establishes** the tracked table without telling anybody anything — so a caller whose own read
+> of a path failed, and who hints that path, is answered by silence for a state it never heard.
+> 2d-3's round 6 found that as a live defect: a re-observation issued while a worker's baseline was
+> still failing was dropped, and the baseline that eventually succeeded could not enumerate a
+> document an external process had removed, so nothing was ever emitted for it and the app-write
+> record stood over bytes the file no longer held.
+>
+> The call still says only *the caller could not use what it read; tell it what this path holds* —
+> no save, no ledger and no application session enters this module — and §2.1's D1 boundary is
+> unchanged: step 4 is still not here. `docs/decisions/2d-3-notes.md` §12 is the record.
 
 ### 2.2 D2 — determinism in shape by injection: the clock and the reader are arguments, one tick takes one read per path, and identity values come from the process-wide session table
 
