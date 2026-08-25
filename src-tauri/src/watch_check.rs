@@ -1212,23 +1212,32 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // a test can make; a stamp taken too *late* is invisible to every test and
     // is stated as a hole instead.
     //
-    // **Zero is asserted because of this test's construction, not because zero
-    // is a general health invariant** — round 10's Low, read here. Since the
-    // round-9 fix round a path's commit anchor lives as long as the epoch, so a
-    // settlement completed *before* a commit and delivered after it increments
-    // that counter with nothing wrong (`crate::ledger::LedgerTally::preceded_a_commit`).
-    // None can exist here: `wait_until_ready` has already absorbed the tree into
-    // the engine's tracked state, the save below is the first write after it,
-    // and a settlement needs two equal reads, so the earliest stamp that could
-    // see the saved bytes twice is one probe after the rename while the anchor
-    // follows the rename by one function return. **That is an ordering of two
-    // durations and nothing enforces it**: a host slow enough between the rename
-    // and `record_app_write` could fail this line without a defect.
-    assert_eq!(
-        session.ledger().tally().preceded_a_commit,
-        0,
-        "the save's own hint was read after its record, so no reading was refused as older"
-    );
+    // **`preceded_a_commit` is deliberately NOT asserted here — round 11's
+    // Medium, and the wait above is the reason.** Through round 10 this test
+    // asserted that counter was exactly zero, justified by the construction: no
+    // pre-commit settlement can exist because `wait_until_ready` has already
+    // absorbed the tree, the save below is the first write after it, a
+    // settlement needs two equal reads, and so the earliest stamp that could see
+    // the saved bytes twice is one probe after the rename while the anchor
+    // follows the rename by one function return.
+    //
+    // **That was an ordering of two durations, and nothing enforces it**: a save
+    // thread stalled between the rename and `record_app_write` lets the worker
+    // stamp and settle the saved bytes first, this application's own hint is then
+    // refused once as `PrecedesACommit`, the engine takes the settlement back, the
+    // re-reading is stamped after the anchor and *is* suppressed — correct
+    // behaviour throughout, and the old line failed on it. The round-10 record
+    // kept the assertion on the ground that weakening it would remove the only
+    // production-path check on the stamp; **that ground was false**, and
+    // `docs/decisions/2d-3-notes.md` §16.6 item 30 carries the correction.
+    //
+    // The check it was credited with is the **bounded positive wait** twenty
+    // lines above: a worker whose stamp were taken too early *permanently* — at
+    // its start rather than immediately before each engine pass — refuses this
+    // hint as `PrecedesACommit` on every re-reading, so it is never suppressed
+    // and that wait times out. Removing the assertion costs nothing it detected
+    // and removes a line that could fail with no defect present. A stamp taken
+    // too *late* stays invisible to every test in this crate, as it always was.
 
     // Different bytes, written by something else: admitted, numbered, and the
     // record it superseded is gone.

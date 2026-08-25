@@ -531,3 +531,71 @@ NOT READY
 
 Codex session ID: 01a03a64-7871-7052-b70b-b9c2b5ccc5f6
 Resume in Codex: codex resume 01a03a64-7871-7052-b70b-b9c2b5ccc5f6
+
+---
+
+## Round 11 — NOT READY (2 High, 1 Medium, 1 Low)
+
+Scoped to round 10's fix. **Round 10's clean sheet lasted exactly one round**, and the shape of what
+broke it is the point: round 10 corrected a *conclusion* and left its *premise* standing. Its Low was
+the tally doc's *on a healthy production path this stays zero*; the rewrite that closed it kept, in
+the very next clause, *the hints one commit generates are decided after that commit's anchor and
+**never** reach this arm* — the same unenforced timing argument, one level down, in the same
+paragraph.
+
+That is the **eleventh consecutive** round with a name-position finding and the **third consecutive**
+where the finding is a *premise* rather than a word. **Both Highs are this project's declared worst
+defect class**: a record claiming a guarantee the code does not give.
+
+**High 1 — the doc said *never* while §16.6 item 30 said nothing enforces it**, and the two were
+written in the same fix round. The reviewer's scenario needs no defect: the save renames to `A`, its
+hint starts stabilizing, the save thread stalls between the rename and `record_app_write` for longer
+than one debounce plus one probe, the worker stamps and settles `A` first, the anchor is only then
+recorded, and admission correctly answers `PrecedesACommit`. The doc said that could not happen.
+
+**High 2 — the record claimed the same-sentence rule was satisfied, and it was not.** §16.1's last
+bullet asserted in as many words that the tally doc *says in the same sentence* that no threshold is
+enforced; in the doc the concession began a new sentence. The bullet asserting compliance is what made
+the non-compliance invisible, which is why it is a High.
+
+**The Medium — an assertion credited with a check its neighbour performs.** `watch_check`'s
+`preceded_a_commit == 0` was kept at round 10 on the ground that weakening it removes the only
+production-path check on the stamp. That ground was false: the check is the bounded positive wait for
+`suppressed >= 1` twenty lines above, as the comment directly over the assertion already said. The
+assertion is removed.
+
+**The Low** is the new test's four-tuple message denying a decision the test itself takes — step 3
+asserts `Admission::Withheld`, which increments `withheld`; the tuple merely omitted the field.
+
+The reviewer **cleared**, with reasons: the 14/18 identifier counts and the 19 pre-edit `debounce`
+hits of §16.2, all six named tests, equality being on the refusing side of `decide()`, both neuter
+outcomes, consuming-result handling, and the gate totals and frontend carry.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`3075c60`: `cargo test --workspace` 1268 passed / 0 failed across 26 result lines, exit 0; focused
+serial `watch_check::` 20/20, 223 filtered out, 64.77 s, exit 0; clippy `-D warnings` exit 0;
+`cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` empty. `git diff
+--name-only 052dd38~1 HEAD | rg '^src/'` is empty, so 431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- src-tauri/src/ledger.rs:823, docs/decisions/2d-3-notes.md:4848 — The fix still falsely claims an ordinary save-generated hint is always decided after its commit anchor and “never” reaches `PrecedesACommit`; §16.6 and `watch_check.rs` concede the opposite. Scenario: save renames to A → its hint starts stabilization → the save thread stalls longer than debounce plus probe before `record_app_write` → the worker stamps and settles A → the anchor is finally recorded → admission correctly returns `PrecedesACommit`. Minimal fix: describe zero as the usual timing outcome, remove “never,” and make §16.1 consistent with item 30.
+
+- docs/decisions/2d-3-notes.md:4857, src-tauri/src/ledger.rs:852 — The record falsely says the “no threshold is enforced” concession is in the same sentence as the sustained-growth diagnosis; it is a separate sentence, violating the standing rule the record expressly claims to satisfy. A maintainer can read “a correctly stamped pipeline cannot produce” disproportionate growth as an enforced diagnostic despite the ledger having neither per-path counts nor a threshold. Minimal fix: combine the claim and limitation into one sentence, explicitly saying sustained growth is only diagnostic suspicion and no code enforces or identifies it.
+
+## Medium
+
+- src-tauri/src/watch_check.rs:1220 — The exact-zero assertion is genuinely timing-sensitive, not construction-guaranteed. With the rename-to-record stall above, the save is eventually suppressed and the behavior is correct, but line 1228 fails. The nearby paragraph documents this accurately, but retaining an assertion known to reject a healthy execution is a real test weakness. Minimal fix: remove or weaken the exact-zero assertion; the preceding positive wait for `suppressed` already detects a stamp permanently taken too early, or replace it with a deterministic production-stamping seam.
+
+## Low
+
+- src-tauri/src/ledger.rs:3946 — The new test’s assertion message says “no other decision was taken,” although step 3 explicitly took and asserted `Admission::Withheld`, incrementing `withheld`; the tuple merely omits that field. Minimal fix: say no publication, suppression, coalescing, or stale-epoch decision was taken, and optionally assert `withheld == 1`.
+
+I statically inspected the round-10 diff, all specified rulings and records, `decide()` ordering, `WatchWorker::observe`, engine stabilization and rollback, save/reload paths, the new test and both neuters, name positions, sweep counts, and supplied gates. I cleared the 14/18 identifier counts, 19 pre-edit `debounce` hits, all six named tests, equality being on the refusing side, both neuter outcomes, consuming-result handling, and the gate totals and frontend carry. No tests, builds, watcher checks, npm commands, or network access were used.
+
+NOT READY
+
+Codex session ID: 01a03af4-c86c-7f33-aae1-ff0cf045f19b
+Resume in Codex: codex resume 01a03af4-c86c-7f33-aae1-ff0cf045f19b

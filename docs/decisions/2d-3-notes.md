@@ -4848,6 +4848,17 @@ not.
 - **zero is what an ordinary save-generated hint produces** — unchanged, and for the unchanged
   reason: one debounce plus one probe separates a save's hint from the pass that settles it, while
   the anchor follows the rename by one read-back;
+
+  > **Correction (round-11 fix round, §17.1).** This bullet is round 11's **first** High, seen at
+  > the record's own name position. It gives the timing as *the unchanged reason* and concedes
+  > nothing, while the doc comment it describes went further and said the hints one commit generates
+  > *never* reach this arm. **Nothing enforces that ordering** — it compares a probe interval
+  > against a rename-to-record window, which is exactly what §16.6 item 30 was written to concede,
+  > so this bullet and item 30 **contradicted each other from the moment both were written**. A save
+  > thread stalled between the rename and `record_app_write` for longer than one debounce plus one
+  > probe lets the worker stamp and settle the saved bytes first, and the arm then refuses them with
+  > nothing wrong. The doc now says **usually** and states the stall in the same breath; zero remains
+  > the usual outcome and is no longer offered as a guarantee.
 - **a non-zero value can equally be a healthy observation whose production spanned a commit**, since
   the anchor's life is the epoch;
 - what is left to diagnose bad stamping is **sustained growth out of proportion to this session's
@@ -4857,6 +4868,17 @@ not.
 - and it says **in the same sentence** that no threshold is enforced anywhere: nothing in the type
   system and no test distinguishes proportionate growth from disproportionate. That half is a thing
   to read, not a thing that fails, and §16.6 item 31 states what it would cost to make it a check.
+
+> **Correction (round-11 fix round, §17.2).** The last bullet was **false as written for the whole of
+> round 10**, and it is round 11's second High. The doc comment it describes carried the
+> sustained-growth claim and the *no threshold is enforced anywhere* concession as **two sentences**,
+> the second beginning at a sentence boundary — so this record claimed compliance with this project's
+> standing rule (*where TypeScript, or the type system, cannot force something, say so in the same
+> sentence that describes what it does force*) that the code it describes did not give. That is this
+> project's worst defect class, and the bullet asserting the rule was satisfied is exactly what made
+> it invisible. The round-11 fix round rewrote the doc so the claim and the concession really are one
+> sentence, and widened the concession to name what is missing: no per-path count to read growth
+> from, and nothing that fails when the counter climbs.
 
 **It does not overclaim in the other direction.** The counter is not meaningless: it still counts
 refusals and never losses, the *first* half of the old paragraph is intact, and the one production
@@ -4967,6 +4989,22 @@ evidence that the pattern has ended.
     line with no defect present. It was deliberately **not** weakened — weakening it removes the only
     production-path check on the stamp — so the cost is a line that can fail for two different
     reasons and says only one of them.
+
+    > **Correction (round-11 fix round, §17.3).** The clause *"weakening it removes the only
+    > production-path check on the stamp"* was **false**, and it is round 11's Medium. The check on
+    > the stamp is the **bounded positive wait** for `suppressed >= 1` twenty lines above the
+    > assertion, not the assertion: a stamp taken too early *permanently* refuses the hint as
+    > `PrecedesACommit` on every re-reading, so the hint is never suppressed and that wait times out.
+    > The comment sitting directly above the assertion said so — *"the positive wait above would time
+    > out, and this line names why"* — so the record credited the assertion with a detection its own
+    > neighbouring comment assigned to the wait. **The assertion is removed at round 11.** It
+    > detected nothing the wait does not, and it could fail with no defect present: a save thread
+    > stalled between the rename and `record_app_write` for longer than one debounce plus one probe
+    > lets the worker stamp and settle the saved bytes first, this application's own hint is refused
+    > once as `PrecedesACommit`, the engine takes the settlement back, the re-reading is stamped
+    > after the anchor and *is* suppressed — correct behaviour throughout, and the old line failed on
+    > it. Item 30 is therefore **closed as a defect and survives only as its unchanged residue**: no
+    > test exercises the rename-to-record window, and a stamp taken too *late* remains invisible.
 31. **"Sustained growth" is prose, not a check.** `LedgerTally` keeps one cumulative `u64` per
     decision for the whole session; it counts no refusals per path and holds nothing to compare a
     count against, so the very data a growth reading needs is not kept. Nothing fails when the counter
@@ -4979,3 +5017,167 @@ evidence that the pattern has ended.
     against a hand-passed `Instant`, and nothing ties that hand-passed stamp to the one
     `WatchWorker::observe` takes. §5 item 14's third half applies unchanged: a stamp taken too **late**
     on the production path is still invisible to every test in this crate.
+
+## 17. The round-11 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 11 returned **NOT READY** with **two Highs, one Medium and
+one Low**. Round 10's clean sheet lasted exactly one round, and the shape of what broke it is the
+point: **round 10 corrected a conclusion and left its premise standing.** Round 10's Low was the
+tally doc's *on a healthy production path this stays zero*; the rewrite that closed it kept, in the
+very next clause, *the hints one commit generates are decided after that commit's anchor and **never**
+reach this arm* — the same unenforced timing argument, one level down, in the same paragraph.
+
+**That makes eleven consecutive rounds with a name-position finding, and three consecutive rounds
+where the finding was a *premise* rather than a word.** It also makes **both** of this round's Highs
+instances of this project's declared worst defect class: a record claiming a guarantee the code does
+not give, which no test can fail.
+
+### 17.1 High 1 — the doc said *never*, and §16.6 item 30 said nothing enforces it
+
+The two positions were written **in the same fix round** and contradicted each other from the moment
+both existed. `LedgerTally::preceded_a_commit`'s doc argued that one debounce plus one probe (240 ms
+at the default timing) separates a save's own hint from the pass that settles it, while the anchor
+follows the rename by one read-back, and concluded that a save's own hints **never** reach the
+refusing arm. Item 30 of §16.6 had already conceded, for `watch_check`'s assertion, that this is *a
+comparison of a probe interval against a rename-to-record window*, **reasoned and never measured**.
+
+The reviewer's scenario, and it needs no defect anywhere: the save renames to `A` → the native hint
+starts stabilizing → **the save thread stalls between the rename and `record_app_write` for longer
+than one debounce plus one probe** → the worker stamps and settles `A` first → the anchor is only
+then recorded → admission correctly answers `PrecedesACommit`. Nothing malfunctioned; the refusal is
+right; the counter moves; and the doc said it could not.
+
+**The fix.** The doc now says zero is the **usual** outcome and says *usually is all it is* in the
+same breath, naming the stall, naming the two durations being compared, and pointing at both item 30
+and `watch_check`'s own concession. The record's §16.1 first bullet — which carried the same premise
+one level weaker, giving the timing as *the unchanged reason* and conceding nothing — carries a
+correction block saying so.
+
+### 17.2 High 2 — the record claimed the same-sentence rule was satisfied, and it was not
+
+`CLAUDE.md`'s standing rule is that where the type system cannot force something, the code says so
+**in the same sentence** that describes what it does force. §16.1's last bullet asserted, in as many
+words, that the tally doc *says in the same sentence that no threshold is enforced anywhere*. It did
+not: the sustained-growth claim ended in a full stop, and **No threshold is enforced anywhere** began
+a new sentence.
+
+**The bullet asserting compliance is what made the non-compliance invisible** — a reader checking the
+rule reads the record, finds it claimed, and stops. That is why this is a High and not a Low.
+
+**The fix.** The doc's bullet is now one sentence carrying claim and concession together, and the
+concession is **widened** rather than merely relocated: it now names that the tally keeps no per-path
+count to read growth from and that nothing fails when the counter climbs, so sustained growth is
+*a suspicion to read and never a diagnosis this crate can make*. §16.1's bullet carries a correction
+block.
+
+### 17.3 The Medium — an assertion credited with a check its neighbour performs
+
+`watch_check.rs`'s `preceded_a_commit == 0` was kept at round 10 on the stated ground that *weakening
+it removes the only production-path check on the stamp*. **That ground was false.** The check is the
+**bounded positive wait** for `suppressed >= 1` twenty lines above it: a stamp taken too early
+*permanently* — at the worker's start rather than immediately before each engine pass — refuses this
+hint as `PrecedesACommit` on every re-reading, so it is never suppressed and the wait times out. The
+comment directly above the assertion said exactly that (*"the positive wait above would time out, and
+this line names why"*), so the record credited the assertion with a detection its own neighbouring
+comment assigned to the wait.
+
+**The assertion is removed.** It detected nothing the wait does not, and under §17.1's stall it fails
+with correct behaviour throughout: the hint is refused once as `PrecedesACommit`, the engine takes the
+settlement back, the re-reading is stamped after the anchor and *is* suppressed. §16.6 item 30 carries
+the correction and is **closed as a defect**, surviving only as its unchanged residue — no test
+exercises the rename-to-record window, and a stamp taken too *late* is still invisible.
+
+### 17.4 The Low — the test's message denied a decision the test itself took
+
+`a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading` asserted the
+four-tuple `(admitted, suppressed, coalesced, stale_epoch)` was `(0, 0, 0, 0)` under the message *"no
+other decision was taken"*. Step 3 of that same test **takes and asserts `Admission::Withheld`**,
+which increments `withheld`; the tuple merely omitted the field. The message is now the accurate
+*"no publication, suppression, coalescing or stale-epoch decision was taken"*, and the withhold is
+**asserted at 1** rather than left to the reader.
+
+### 17.5 The sweeps
+
+**For the shape, not the words.** The premise swept for was *the save-path ordering is guaranteed*,
+in every name position:
+
+- `never reach`, `cannot reach`, `never reaches`, `decided after that commit`, `after its record`,
+  `no reading was refused` over `src-tauri/src`, `docs/decisions/2d-3-notes.md` and
+  `docs/reviews/phase-2d-design.md`. **One hit needed judging and was cleared**: `ledger.rs:607` says
+  the two serialized doors *prove the ordering by construction instead of by a clock, and never reach
+  this arm*. That `never` is sound and is the correct use of the word — `mark` and `withhold` do not
+  call `admit`, so they are structurally incapable of reaching the arm. It is a claim about control
+  flow, not about a clock. Every other hit is a different subject (the gate, the walk, the menu, the
+  wire);
+- `same sentence` over the same three files plus `ledger.rs`, `watch_check.rs` and `commands.rs`:
+  **14 hits on the tree the sweep was run against** (`ledger.rs` 6, this record 8; `watch_check.rs`,
+  `commands.rs` and `phase-2d-design.md` none). Only §16.1's, the one High 2 names, claimed
+  compliance the described text did not give. The others describe their own adjacent sentences and
+  were checked one by one. This round's own three correction blocks add three more, so the count on
+  the finished tree is **17** — stated because a later round re-running the sweep will get that
+  number and must not read it as a discrepancy;
+- the identifier `preceded_a_commit` after this round's edits: `ledger.rs` **15**, `watch_check.rs`
+  **1** (the assertion's removal took one, the surviving reference is the cross-link in the rewritten
+  paragraph), `commands.rs` **1**.
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule): this round adds no operation and
+consumes nothing. It removes one assertion, rewrites two doc comments and one test message, and adds
+one assertion. No result is discarded.
+
+### 17.6 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — `LedgerTally::preceded_a_commit`'s doc rewritten twice over
+  (§17.1 and §17.2); the new test's four-tuple message corrected and one `withheld` assertion added
+  (§17.4). **No behaviour, no signature, no control flow.**
+- **`src-tauri/src/watch_check.rs`** — the `preceded_a_commit == 0` assertion **removed** and its
+  paragraph rewritten to say what the positive wait detects and why the assertion did not (§17.3).
+  No test added or removed; the file's test count is unchanged.
+- **`docs/decisions/2d-3-notes.md`** — three correction blocks (§16.1 first bullet, §16.1 last
+  bullet, §16.6 item 30) and this §17.
+- **no core file, no `src/` path, and no command, wire type, event, queue or user-visible string.**
+
+### 17.6b The neuter that justifies the removal, and the gates
+
+**§17.3's claim is proved, not inherited.** Removing an assertion on the argument that a neighbouring
+wait already carries its detection is exactly the shape this review keeps finding unproved, so the
+argument was driven rather than accepted. The neuter: `WatchWorker::observe`'s per-pass
+`Instant::now()` replaced by a `OnceLock` initialized at first use — the stamp taken **once at worker
+start** rather than immediately before each engine pass, which is the *permanently* early stamp in
+its exact production shape.
+
+Under it, `a_committed_save_is_suppressed_while_a_later_external_write_is_not` failed with
+
+> `timed out waiting for the save's own bytes to be suppressed` (`watch_check.rs:141`, 128.06 s)
+
+— **the bounded positive wait, not the removed assertion.** The detection §16.6 item 30 credited to
+the exact-zero line is carried by the wait, and the line's removal costs nothing. `watch.rs` was
+restored from a byte-identical copy immediately afterwards and is absent from this round's diff.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1268 passed, 0 failed** (exit 0, summed over **26** `test result` lines — unchanged, because this round removed an assertion and added one, and neither is a test) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, 64.85 s, **223** filtered out, quiet host, no timeout) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched no core file) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §17.6's file list and of `git diff --name-only 052dd38~1 HEAD \| rg '^src/'` being empty |
+
+All six measured by the orchestrator on this tree, before and after the fix.
+
+### 17.7 What this round's own change leaves open
+
+Written with the expectation §15 states: **seven** §5 items recorded as bounded residues have since
+been found to be real defects, and item 25 surviving two rounds is still not evidence the pattern has
+ended. Round 11 closed item 30 as a *defect* while leaving its residue; it added no new §5 item,
+because its three changes are all removals of false claims rather than new mechanism. What it leaves:
+
+33. **The stall of §17.1 has no test.** It is a real interleaving, argued from the same unenforced
+    ordering that item 30 concedes, and nothing in this crate exercises the window between the rename
+    and `record_app_write`. The doc now *describes* it; no test *drives* it. Driving it needs a
+    deterministic production-stamping seam, which is the reviewer's own alternative remedy and is
+    2d-4's shape, not this step's.
+34. **`watch_check` now asserts strictly less than it did**, and that is the intended trade: the
+    removed line detected nothing the surviving positive wait does not, but the surviving wait proves
+    a *permanent* early stamp only. An early stamp that is intermittent still passes, exactly as it
+    did before. §5 item 14's third half is unchanged — a stamp taken too **late** is invisible to
+    every test in this crate.

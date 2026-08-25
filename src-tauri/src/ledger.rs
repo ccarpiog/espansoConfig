@@ -820,15 +820,24 @@ pub struct LedgerTally {
     /// after this application's latest committed write to their path — see
     /// [`Admission::PrecedesACommit`].
     ///
-    /// **Zero is what an ordinary save-generated hint produces, and a non-zero
+    /// **Zero is the usual outcome for a save-generated hint, and a non-zero
     /// value is not by itself a fault** — the second half is round 10's single
     /// Low, and until that round this paragraph said instead that on a healthy
-    /// production path this stays zero. The first half is unchanged and is worth
-    /// knowing rather than assuming: the engine's debounce puts at least one
-    /// debounce plus one probe (240 ms at the default timing) between a save's
-    /// own hint and the pass that settles it, while the anchor follows the rename
-    /// by one read-back, so the hints one commit generates are decided after that
-    /// commit's anchor and never reach this arm.
+    /// production path this stays zero. **The first half is round 11's first
+    /// High, and until that round it said *never*:** the engine's debounce puts
+    /// at least one debounce plus one probe (240 ms at the default timing)
+    /// between a save's own hint and the pass that settles it, while the anchor
+    /// follows the rename by one read-back, so a save's own hints are **usually**
+    /// decided after that commit's anchor — and usually is all it is, because
+    /// that is a comparison of a probe interval against a rename-to-record
+    /// window, it is reasoned and never measured, and **nothing enforces it**.
+    /// A save thread stalled between the rename and
+    /// [`WriteLedger::record_app_write`] for longer than one debounce plus one
+    /// probe lets the worker stamp and settle the saved bytes first, and this arm
+    /// then refuses them — correctly, and with nothing wrong. §16.6 item 30 of
+    /// `docs/decisions/2d-3-notes.md` is that residue, and `crate::watch_check`'s
+    /// `a_committed_save_is_suppressed_while_a_later_external_write_is_not`
+    /// carries the same concession beside the wait that does the detecting.
     ///
     /// **But since the round-9 fix round the anchor's life is the epoch**, so a
     /// perfectly healthy observation can move this counter too: a watcher
@@ -849,18 +858,25 @@ pub struct LedgerTally {
     /// single non-zero reading, and both halves of it are stated as what they
     /// are rather than as what they enforce:
     ///
-    /// - **sustained growth out of proportion to this session's commits**, and
+    /// - **sustained growth out of proportion to this session's commits** —
     ///   especially growth for a path this session has stopped committing to,
-    ///   which a correctly stamped pipeline cannot produce: a refusal here is
-    ///   answered, and the re-observation's own stamp is taken after the anchor,
-    ///   so one commit refuses one reading once.
-    ///   **No threshold is enforced anywhere** — nothing in the type system and
-    ///   no test distinguishes proportionate growth from disproportionate, so
-    ///   this is a thing to read, not a thing that fails;
+    ///   which a correctly stamped pipeline cannot produce, because a refusal
+    ///   here is answered and the re-observation's own stamp is taken after the
+    ///   anchor, so one commit refuses one reading once — **and no threshold is
+    ///   enforced anywhere for it**: nothing in the type system and no test
+    ///   distinguishes proportionate growth from disproportionate, the tally
+    ///   keeps no per-path count to read one from, and nothing fails when the
+    ///   counter climbs, so this is a suspicion to read and never a diagnosis
+    ///   this crate can make. That whole sentence is round 11's second High: the
+    ///   claim and its concession stood as two sentences while §16.1 of the
+    ///   record said, in as many words, that they were one;
     /// - `crate::watch_check`'s
     ///   `a_committed_save_is_suppressed_while_a_later_external_write_is_not`,
-    ///   which asserts zero **in a construction where no pre-commit settlement
-    ///   can exist** rather than because zero is a general health invariant.
+    ///   whose **bounded positive wait** for a suppression is what detects a
+    ///   stamp permanently taken too early. It asserted an exact zero beside that
+    ///   wait through round 10; round 11 removed the assertion, because the stall
+    ///   above makes it a line that can fail with no defect present while the
+    ///   wait already carries the detection the assertion was credited with.
     ///
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
@@ -3943,7 +3959,14 @@ mod tests {
                 spanning.stale_epoch
             ),
             (0, 0, 0, 0),
-            "and no other decision was taken, so the increment is not a misfiled one: {spanning:?}"
+            "no publication, suppression, coalescing or stale-epoch decision was taken, \
+             so the increment is not a misfiled one: {spanning:?}"
+        );
+        assert_eq!(
+            spanning.withheld, 1,
+            "step 3's withhold is the one other decision this test takes, and it is counted \
+             where it belongs rather than here — round 11's Low was this message claiming \
+             no other decision at all: {spanning:?}"
         );
         assert_eq!(
             ledger.announced_state(path),

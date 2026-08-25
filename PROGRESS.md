@@ -8776,6 +8776,182 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
+### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, and round 11 broke round 10's clean sheet immediately with **two Highs, one Medium and one Low**, all fixed. THE NEXT ACTION IS ROUND 12 OF THE 2d-3 REVIEW, against the round-11 fix.**
+
+**Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–11 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 12's brief is
+written from round 11's fix, exactly as rounds 2–11 were written from theirs.
+
+**Round 11's lesson is the one to carry into round 12: round 10 corrected a *conclusion* and left its
+*premise* standing, in the same paragraph.** Round 10's Low was the tally doc's *on a healthy
+production path this stays zero*; the rewrite that closed it kept, in the very next clause, *the hints
+one commit generates are decided after that commit's anchor and **never** reach this arm* — the same
+unenforced timing argument, one level down. **When a round fixes a claim, read the sentence the claim
+rested on.**
+
+That is the **eleventh consecutive** round with a name-position finding and the **third consecutive**
+where it was a *premise* rather than a word. **Both Highs were this project's declared worst defect
+class**: a record claiming a guarantee the code does not give.
+
+#### What the round-11 fix built — re-derive these, do not inherit them
+
+- **High 1 — the doc said *never* while §16.6 item 30 said nothing enforces it**, and both were
+  written in the same fix round. The scenario needs no defect anywhere: the save renames to `A` → its
+  hint starts stabilizing → **the save thread stalls between the rename and `record_app_write` for
+  longer than one debounce plus one probe** → the worker stamps and settles `A` first → the anchor is
+  only then recorded → admission correctly answers `PrecedesACommit`. The doc now says zero is the
+  **usual** outcome, says *usually is all it is* in the same breath, names the stall, and points at
+  item 30. §16.1's **first** bullet carried the same premise one level weaker and carries a
+  correction block.
+- **High 2 — the record claimed the same-sentence rule was satisfied, and it was not.** §16.1's last
+  bullet asserted in as many words that the tally doc *says in the same sentence* that no threshold is
+  enforced; in the doc the concession began a new sentence. **The bullet asserting compliance is what
+  made the non-compliance invisible.** The doc's bullet is now one sentence, and the concession is
+  **widened**, not merely relocated: it now names that the tally keeps no per-path count to read
+  growth from and that nothing fails when the counter climbs.
+- **The Medium — an assertion credited with a check its neighbour performs.** `watch_check`'s
+  `preceded_a_commit == 0` was kept at round 10 because *weakening it removes the only production-path
+  check on the stamp*. **That ground was false**: the check is the bounded positive wait for
+  `suppressed >= 1` twenty lines above, as the comment directly over the assertion already said.
+  **The assertion is removed**, and §16.6 item 30 is closed as a defect while its residue stands.
+- **The removal is proved, not inherited** (§17.6b). Neuter: `WatchWorker::observe`'s per-pass
+  `Instant::now()` replaced by a `OnceLock` initialized at first use — the *permanently* early stamp
+  in its production shape. Under it the test failed at **`timed out waiting for the save's own bytes
+  to be suppressed`** (`watch_check.rs:141`, 128.06 s) — the **wait**, not the removed line.
+  `watch.rs` was restored byte-identically and is absent from the round's diff.
+- **The Low** — the new test's four-tuple message said *no other decision was taken* while step 3
+  takes and asserts `Admission::Withheld`. The message is corrected and `withheld == 1` is now
+  asserted.
+- **No behaviour change, no core file, no `src/` path**, no command, wire type, event or queue. Four
+  files: `ledger.rs`, `watch_check.rs`, `2d-3-notes.md`, `phase-2d-3-ledger.md`.
+
+#### What round 12 must attack
+
+- **The fix is a change, and the round that reviews it is not optional.** Round 12's scope is the
+  round-11 fix: the twice-rewritten `LedgerTally::preceded_a_commit` doc, `watch_check`'s rewritten
+  paragraph **and its now-absent assertion**, the three correction blocks (§16.1 first bullet, §16.1
+  last bullet, §16.6 item 30), the test's corrected message and new assertion, and **§17, which is the
+  section under review**.
+- **Apply round 11's own lesson to round 11.** It corrected two premises — does a third stand in the
+  same paragraph? The rewritten doc still argues from *one debounce plus one probe* and from *the
+  anchor follows the rename by one read-back*; check every clause that rests on either.
+- **The two new residues.** §17.7 records: **(33)** the stall of §17.1 **has no test** — it is a real
+  interleaving argued from the same unenforced ordering, and nothing exercises the window between the
+  rename and `record_app_write`; driving it needs a deterministic production-stamping seam, which is
+  2d-4's shape. **(34)** `watch_check` now asserts strictly **less** than it did: the surviving wait
+  proves a *permanent* early stamp only, so an **intermittent** early stamp still passes, exactly as
+  before.
+- **Residue 34 is the sharpest**, because round 11 removed a check and the round that reviews it must
+  decide whether the trade was right rather than accept the argument that removed it.
+- **Whether §17's own claims are true of the code** — especially §17.5's sweep counts (14 `same
+  sentence` hits on the swept tree, **17** on the finished one; `preceded_a_commit` at `ledger.rs` 15,
+  `watch_check.rs` 1, `commands.rs` 1) and §17.6's file list.
+- **The record against the code** — `2d-3-notes.md` §1, §4, §5 (items 25–34), §6's gate table and
+  §7–§17. **Every one of the eleven rounds so far found a false claim in this record.**
+
+**Keep the two standing rules:** sweep for the **shape**, never for the words of the closed finding;
+and sweep **name positions** — headlines, section headings, bold ruling lines, first sentences, doc
+comments, module headers, test names, assertion messages — as a pass **distinct** from the prose
+sweep.
+
+**Brief the review the way rounds 1–11 were briefed, and this is not optional:** the Codex sandbox
+**blocks FSEvents delivery**, so a delivery-dependent test times out there while the supported host
+passes it repeatedly. Tell the reviewer to work **statically**, never to run `cargo test` or anything
+matching `watch_check::`, and supply the host-measured numbers in the brief. 2d-2's round-1 High was
+sandbox-confounded evidence, and that precedent binds every FSEvents-adjacent review.
+
+#### An operational trap — it recurs every round
+
+**`codex-wait.sh` reports STALLED on a healthy Codex `task` job.** The companion runtime stamps
+`updatedAt` once, ~10 s after launch, and never advances it, so the watchdog's stall predicate fires on
+a job that is demonstrably working. **The working signal is the log file's mtime.** A drop-in
+replacement that polls on it is `wait-on-log.sh` (~110 lines, usage
+`wait-on-log.sh <job-id> [max_wait_s] [stall_s] [interval_s]`, exit `0` terminal / `2` deadline /
+`3` genuinely stalled / `4` bad args); it lives in a session scratchpad, so **recreate it from this
+description if the path is gone** — it was gone at rounds 10 and 11 and was rebuilt both times. The
+`codex:codex-rescue` subagent returns a "running in background" wrapper **immediately** and does not
+deliver the result; resolve the companion with
+`CC=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)` and drive
+`node "$CC" task --background --effort medium "$PROMPT" --json`, then `node "$CC" result <job-id>`,
+directly. **Do not run `node "$CC" status <job-id> --json`** — it echoes the entire brief back into
+the transcript. Round 11 took well under round 10's 282 s at `--effort medium`.
+
+**One more measured trap, new at round 11.** `cargo test --workspace 2>&1 | tail -40` **discards the
+totals** — the run's 26 `test result` lines do not survive the pipe, and the suite has to be run
+again to count them. Redirect the whole run to a file and sum it:
+`cargo test --workspace > <file> 2>&1`, then
+`rg -o 'test result: ok\. (\d+) passed; (\d+) failed' -r '$1 $2' <file> | awk '{p+=$1; f+=$2; n++} END {print n, p, f}'`.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-3-ledger.md          — rounds 1–11 verbatim. THE work list for round 12.
+# docs/decisions/2d-3-notes.md               — the record: §1, §4, §5 (items 33–34 are new, and
+#   item 30 now carries a correction block closing it as a defect), §6's gate table, and §7–§17
+#   (§17 is round 11's, the one under review), plus the two correction blocks under §16.1
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q2 is the suppression ruling and
+#   its clearing rule, Q3 the highest-sequence rule, Q5 the coalescing rule scoped to
+#   conflict_after_the_lock, Q7 item 3 this step's spec, Q1 (with its round-4 correction block)
+# src-tauri/src/ledger.rs                    — decide()'s five steps; CommitAnchor and
+#   latest_commit_at; the twice-rewritten preceded_a_commit doc at ~823; the test at ~3880
+# src-tauri/src/watch_check.rs               — the rewritten paragraph at ~1205 and the assertion
+#   that is NO LONGER THERE; the bounded positive wait ~20 lines above it
+# src-tauri/src/commands.rs                  — reload() at ~836; with_workspace at ~1228;
+#   the two save tails; run_one_save; commit_and_record
+```
+
+#### The gate baseline — all measured on this tree by the orchestrator, not by the author
+
+- **`1268 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). **Unchanged by round 11**, which removed one assertion and added one and so
+  added no test. The Rust ladder across this step's review: 1249 at round 4's brief, 1251 after the
+  round-4 fix, 1256 after round 5, 1261 after round 6, 1262 after round 7, 1263 after round 8, 1267
+  after round 9, 1268 after round 10, **1268** after round 11. 26 result lines, all `ok`, exit 0 —
+  measured **twice**, before the fix and after it. Focused serial
+  `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` is **20/20**
+  (64.77 s before the fix, 64.85 s after, **223** filtered out both times) and belongs to every future
+  Rust gate run. Clippy `-D warnings` clean; `cargo fmt --check` clean;
+  `cargo tree -p espansoconfig-core | rg tauri` empty. **The frontend has never been touched across
+  the whole step** — re-verified at round 11 with `git diff --name-only 052dd38~1 HEAD | rg '^src/'`,
+  which is empty — so its three numbers are carried, not re-measured.
+- **The scar still binds.** The workspace suite is evidence on a **quiet host only**: contended runs on
+  a byte-identical tree have failed with 9 and 10 `watch_check` bounded-wait timeouts while the focused
+  serial gate passed 20/20 through the same weather. Kill orphaned test binaries and re-run quietly
+  before concluding anything from a timeout.
+
+#### Open items 2d-3 still carries into 2d-4 (stated, not discharged)
+
+- The production `ObservationSink` discards, so a sequence and a publication are spent on a value no
+  present code recovers.
+- Consult Q3's highest-sequence rule is no longer load-bearing for the phantom — round 7 removed the
+  dependency by never publishing an unstabilized read. 2d-4 should still keep the rule, but a
+  correctness argument no longer rests on it.
+- `SavedDocument::revision` is a **post-rename read-back**, so a foreign process writing between the
+  rename and that read makes this session record *their* revision as its own (§5 item 15, inherited).
+- A stamp taken too **late** has no test that can fail, and neither has a dropped sink answer
+  (§5 item 32, and §17.7 item 34's second half).
+- A re-observation may not survive a worker stopping before its next tick (§5 item 21); an owed
+  observation of an unchanged state still costs a sequence (§5 item 22); and nothing forces a watcher
+  to exist to hear the ask (§5 item 19).
+- **Items 23 and 24 are closed** (round 9). Item 25 is downgraded (round 10) to a maintenance risk.
+  Item 26: the third consumer of the workspace/watcher path-spelling agreement. Item 27:
+  `latest_commit_at` is never pruned within an epoch. Item 28: a non-zero `preceded_a_commit` supports
+  a weaker diagnosis. Item 29: a failed reload of a removed file reports nothing. **Item 30 is closed
+  as a defect by round 11** — the assertion it was written about is gone — and survives only as its
+  residue: no test exercises the rename-to-record window. Item 31: *"sustained growth"* is prose, not
+  a check, with no per-path counts and no wire surface until 2d-4. Item 32: the ledger-only test
+  proves its claims against a hand-passed `Instant`.
+- **New at round 11.** Item 33: the save-thread stall of §17.1 is a real interleaving with **no test**;
+  driving it needs a deterministic production-stamping seam, which is 2d-4's shape. Item 34:
+  `watch_check` now asserts strictly less — the surviving positive wait proves a **permanent** early
+  stamp only, so an intermittent one still passes.
+
+---
+
+### ⚠️ HISTORICAL — the round-10→round-11 handoff, superseded by the round-12 status above. Round 11 is executed, it returned NOT READY with 2 High, 1 Medium and 1 Low, and its fix is in the tree and green.
+
 ### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, and round 10 is the first round in ten to return **no High and no Medium**. It returned one Low, which is fixed. THE NEXT ACTION IS ROUND 11 OF THE 2d-3 REVIEW, against the round-10 fix.**
 
 **Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–10 are in it
