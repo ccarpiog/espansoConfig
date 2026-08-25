@@ -1211,6 +1211,19 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // line names why. It is the one production-path claim about the stamp that
     // a test can make; a stamp taken too *late* is invisible to every test and
     // is stated as a hole instead.
+    //
+    // **Zero is asserted because of this test's construction, not because zero
+    // is a general health invariant** — round 10's Low, read here. Since the
+    // round-9 fix round a path's commit anchor lives as long as the epoch, so a
+    // settlement completed *before* a commit and delivered after it increments
+    // that counter with nothing wrong (`crate::ledger::LedgerTally::preceded_a_commit`).
+    // None can exist here: `wait_until_ready` has already absorbed the tree into
+    // the engine's tracked state, the save below is the first write after it,
+    // and a settlement needs two equal reads, so the earliest stamp that could
+    // see the saved bytes twice is one probe after the rename while the anchor
+    // follows the rename by one function return. **That is an ordering of two
+    // durations and nothing enforces it**: a host slow enough between the rename
+    // and `record_app_write` could fail this line without a defect.
     assert_eq!(
         session.ledger().tally().preceded_a_commit,
         0,

@@ -460,3 +460,74 @@ NOT READY
 
 Codex session ID: 01a039fb-5e62-7480-a167-153f4a61b6e0
 Resume in Codex: codex resume 01a039fb-5e62-7480-a167-153f4a61b6e0
+
+---
+
+## Round 10 — NOT READY (1 Low)
+
+Scoped to round 9's fix. **The first round in ten that returned no High and no Medium.** Nine
+consecutive rounds had each returned at least one High; this one returned a single Low, and it is
+documentation.
+
+The brief's first instruction was different from rounds 8 and 9. The round-9 fix had taken the
+reviewer's remedy on **all three** Highs with **no deviation**, which is unusual in this review, so
+there was no deviating argument to attack first. The instruction was instead to judge whether taking
+all three remedies **literally** was right, and in particular whether the **combination** is
+coherent — High 1 and High 3 clear two maps from one new entry point while High 2 makes a third map
+outlive both, leaving three maps with three lifetimes and only one of them cleared by `decide`.
+
+**The combination was cleared, and the clearing is reasoned rather than bare:** suppression records
+end when their licence becomes stale, announced entries track what a consumer was shown, and commit
+anchors correctly remain chronology-only until the epoch ends. Three different lifetimes are the
+right answer because the three maps answer three different questions.
+
+**The orchestrator's named suspect was cleared, and the reason is worth keeping.** The brief asked
+whether High 3's remedy had been applied at one of two sites: `conflict_after_the_lock`
+(`commands.rs:2474`) and `after_a_save` (`commands.rs:2730`) also call `workspace.refresh` and so
+also accept a foreign revision into the workspace cache, while the withholding door announces
+nothing and `after_a_save`'s agreeing arm calls the ledger not at all — which looked like High 3's
+exact shape surviving at a second site. It is not: **the withholding door's refreshed state is
+deliberately shown to nobody**, so an older announced `B` remains valid and a later return to `B`
+may correctly coalesce. The asymmetry between the reload and the save tails is the design, not an
+omission.
+
+**§5 item 25 — the implementer's own prediction for this round's High — was judged and downgraded.**
+The arm-scoped refresh audit is **currently exact**, and the rejected one-caller chokepoint would not
+have enforced future use anyway, so item 25 is a **maintenance risk rather than a present
+behavioural defect**. That is the first time in this step that a §5 item predicted to become a High
+survived the round it was written for. Items 26, 27 and 29 were cleared, as were both `differs`
+conditions, failed reloads, removed files and already-held revisions.
+
+**The one Low is §5 item 28 reaching its own documentation.** The round-9 fix round wrote item 28
+correctly — a non-zero `preceded_a_commit` now supports a weaker diagnosis — but left the tally's own
+doc claiming *on a healthy production path this stays zero*, which the anchor's new epoch-long life
+makes false. It is the **tenth consecutive** name-position finding, and like round 9's it is a
+**premise** rather than a word.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`eaa38ee`: `cargo test --workspace` 1267 passed / 0 failed across 26 result lines, exit 0; focused
+serial `watch_check::` 20/20, 222 filtered out, 71.73 s, exit 0; clippy `-D warnings` exit 0;
+`cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` empty. `git diff
+--name-only 052dd38~1 HEAD` shows no `src/` path across the whole step, so 431 / 2125 / 184 stand as
+carried.
+
+### Verbatim reply
+
+## High
+
+None.
+
+## Medium
+
+None.
+
+## Low
+
+- src-tauri/src/ledger.rs:823, docs/decisions/2d-3-notes.md:4771 — Documentation: the claim that `preceded_a_commit` remains zero on every healthy production path is false now that commit anchors survive for the epoch. Concrete scenario: the watcher completes a stable reading P → its worker is descheduled → the application commits A and records its anchor → a serialized decision clears A’s suppression record → the delayed P reaches stamped admission and correctly increments `preceded_a_commit`; no component malfunctioned, and debounce cannot prevent this already-completed settlement. Minimal fix: say zero is expected for ordinary save-generated hints but a non-zero value can also represent a healthy observation spanning a commit, so only sustained growth or the focused save test diagnoses bad stamping; add a deterministic tally regression using the existing `stabilize P → commit A → clear record → admit P` construction.
+
+I statically inspected all prior rounds, the design rulings, decision-record §§1, 4–15, all three refresh sites, save orchestration, lock order, ledger decisions and tests, path respelling, and name positions. I cleared the three-map combination: suppression records end when their licence becomes stale, announced entries track what a consumer was shown, and commit anchors correctly remain chronology-only until the epoch ends. I also cleared the withholding suspect: its refreshed state is deliberately shown to nobody, so an older announced B can remain valid and a return to B may correctly coalesce. The arm-scoped refresh audit is currently exact; the proposed one-caller helper would not enforce future use, so §5 item 25 is a maintenance risk rather than a present behavioural defect. Items 26, 27 and 29, both `differs` conditions, failed reloads, removed files, and already-held revisions were also cleared. No tests, builds, watcher checks, or network access were used.
+
+NOT READY
+
+Codex session ID: 01a03a64-7871-7052-b70b-b9c2b5ccc5f6
+Resume in Codex: codex resume 01a03a64-7871-7052-b70b-b9c2b5ccc5f6

@@ -4768,12 +4768,214 @@ Highs rather than as reassurances.
     because the size is interesting.
 28. **A non-zero `preceded_a_commit` no longer implies a recent save.** The anchor stands for the
     whole epoch, so the counter can move for an observation produced before a commit that happened
-    long ago. Its own doc still says *on a healthy production path this stays zero*, which is true
-    for the same reason it always was — the engine's debounce — but the diagnosis a non-zero count
-    supports is now weaker: it says *some reading was produced before this session's last commit to
-    that path*, not *a commit happened just now*.
+    long ago. The diagnosis a non-zero count supports is therefore weaker: it says *some reading was
+    produced before this session's last commit to that path*, not *a commit happened just now* — and
+    not *something malfunctioned*, because a settlement completed before a commit and delivered after
+    it is an ordinary interleaving no debounce can prevent.
+
+    > **Correction (round-10 fix round, §16.1).** As written, this item ended *"Its own doc still says
+    > on a healthy production path this stays zero, which is true for the same reason it always was —
+    > the engine's debounce"*. That clause was **false**, and it is round 10's single Low. Debounce
+    > separates a save's own hint from the pass that settles it; it can do nothing about a settlement
+    > that was **already complete** when the commit happened, and the anchor's new epoch-long life is
+    > exactly what lets such a settlement still be refused. `LedgerTally::preceded_a_commit`'s doc
+    > comment carried the same premise in its own name position, so this item and that doc
+    > **contradicted each other** from the round-9 fix round until round 10. Both now say that zero is
+    > what ordinary save-generated hints produce and that a non-zero value can equally be a healthy
+    > observation spanning a commit.
 29. **`ObservedState::Absent` and `Unreadable` cannot be reported by a reload**, so a file removed
     externally and confirmed by a failed reload invalidates nothing. That is correct — a read that
     did not complete proves no state — but it means the person seeing "this file could not be read"
     has told the ledger nothing, and the record for that path is still spending its licence until a
     watcher stabilizes the absence. `§5` item 19's no-watcher trade applies unchanged.
+
+## 16. The round-10 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 10 returned **NOT READY** with **no High, no Medium and
+exactly one Low** — the first round in ten that found no defect in behaviour. Nine consecutive rounds
+had each returned at least one High; this one returned a single documentation finding, and it is
+closed here.
+
+The brief given to the reviewer was different from rounds 8 and 9. The round-9 fix had taken the
+reviewer's remedy on all three Highs with **no deviation**, so there was no deviating argument to
+attack; the instruction was instead to judge whether taking all three remedies *literally* was right,
+and in particular whether their **combination** is coherent — High 1 and High 3 clear two maps from
+one new entry point while High 2 makes a third map outlive both, leaving three maps with three
+lifetimes and only one of them cleared by `decide`.
+
+**What the round cleared**, recorded here so round 11 does not re-do it:
+
+- **the three-map combination**, and the clearing is reasoned rather than bare: suppression records
+  end when their licence becomes stale, announced entries track what a consumer was shown, and commit
+  anchors correctly remain chronology-only until the epoch ends. Three different lifetimes are the
+  right answer because the three maps answer three different questions;
+- **the withholding suspect** the orchestrator named. `conflict_after_the_lock` and `after_a_save`
+  also call `Workspace::refresh` and so also accept a foreign revision, while the withholding door
+  announces nothing and `after_a_save`'s agreeing arm calls the ledger not at all — which looked like
+  High 3's shape surviving at a second site. It is not: **the withholding door's refreshed state is
+  deliberately shown to nobody**, so an older announced `B` remains valid and a later return to `B`
+  may correctly coalesce. The asymmetry between the reload and the save tails is the design;
+- **§5 items 26, 27 and 29**, **both `differs` conditions**, **failed reloads**, **removed files** and
+  **already-held revisions**.
+
+**§5 item 25 — the implementer's own prediction for this round's High — was judged and downgraded.**
+The arm-scoped refresh audit is **currently exact**, and the rejected one-caller chokepoint would not
+have enforced future use anyway, so item 25 is a **maintenance risk rather than a present behavioural
+defect**. That is the first time in this step that a §5 item written as a candidate for the next
+round's High **survived** the round it was written for. It is downgraded, **not closed**: nothing was
+changed for it, the audit is still an audit, and the judgement is about today's code — 2d-4's drain
+and 2d-5's coordinator can still add a fourth `refresh` site with the compiler silent, which is the
+item as originally written.
+
+### 16.1 The Low — the tally's own doc contradicted the item that corrected it
+
+The finding, in the reviewer's own construction: the watcher completes a stable reading P → its worker
+is descheduled → this application commits A and records its anchor → a serialized decision clears A's
+suppression record → the delayed P reaches stamped admission and correctly increments
+`preceded_a_commit`. **No component malfunctioned, and debounce cannot prevent it** — debounce
+separates a save's own hint from the pass that settles it, and P's settlement was already complete
+when the commit happened.
+
+The round-9 fix round had written §5 item 28 for exactly this weakening, and item 28 is right in
+substance. What it did not do is fix the counter's **own doc comment**, which went on saying *on a
+healthy production path this stays zero* — so from the round-9 fix round until this one, the record
+and the code **contradicted each other**, and item 28 even asserted the doc's premise was still true.
+Both positions now say the same thing, and the correction block under item 28 records that they did
+not.
+
+**`LedgerTally::preceded_a_commit`'s doc now claims three things and disclaims a fourth**:
+
+- **zero is what an ordinary save-generated hint produces** — unchanged, and for the unchanged
+  reason: one debounce plus one probe separates a save's hint from the pass that settles it, while
+  the anchor follows the rename by one read-back;
+- **a non-zero value can equally be a healthy observation whose production spanned a commit**, since
+  the anchor's life is the epoch;
+- what is left to diagnose bad stamping is **sustained growth out of proportion to this session's
+  commits** — which a correctly stamped pipeline cannot produce, because a refusal is answered and
+  the re-observation's stamp is taken after the anchor — or a failure of `crate::watch_check`'s
+  `a_committed_save_is_suppressed_while_a_later_external_write_is_not`;
+- and it says **in the same sentence** that no threshold is enforced anywhere: nothing in the type
+  system and no test distinguishes proportionate growth from disproportionate. That half is a thing
+  to read, not a thing that fails, and §16.6 item 31 states what it would cost to make it a check.
+
+**It does not overclaim in the other direction.** The counter is not meaningless: it still counts
+refusals and never losses, the *first* half of the old paragraph is intact, and the one production
+assertion of zero is kept rather than weakened — see §16.6 item 30 for what keeping it costs.
+
+### 16.2 The sweeps
+
+**For the shape, not the words.** The premise swept for was *a non-zero `preceded_a_commit` means
+something malfunctioned*, in every position where a name carries a claim: headlines, section
+headings, bold ruling lines, first sentences, doc comments, module headers, test names and assertion
+messages.
+
+- every occurrence of the identifier, read one by one on the tree as it stood before this round's
+  edits: **14 code positions** (`ledger.rs` 12, `watch_check.rs` 1, `commands.rs` 1) and **18 record
+  positions** in `2d-3-notes.md` and `PROGRESS.md`. The only false premise was the one the Low names,
+  `ledger.rs:823`. The record positions are per-round evidence tables, left as written per this
+  project's convention, and each was checked to be a claim about **its own round's construction**
+  rather than a general invariant;
+- the premise without the identifier — `stays zero`, `remains zero`, `always zero`, `never moves`,
+  `only moves`, `means a bug`, `indicates a bug`, `bad stamping`, `wrong place`, `malfunction` —
+  over `src-tauri/src`, `docs/decisions` and `PROGRESS.md`. **Found nothing further.** The one
+  `never moves` hit is `WriteLedger::gate_waiters`' doc, about the gate acquisition and not about
+  this counter;
+- `debounce` over `src-tauri/src`, on that same pre-edit tree: **19 hits**. Two were the false bound,
+  both already corrected —
+  `ledger.rs`'s *the anchor outlives the record* section says in as many words that *nothing bounds
+  that delay* and that *the record used to say the exposure was one debounce plus one probe wide, and
+  that was false* (round 9's third Low), and `commands.rs`'s `commit_and_record` says the same about
+  the gate. Neither claims debounce prevents a pre-commit settlement from being admitted;
+- **test names**: `a_reading_stamped_exactly_at_the_commit_anchor_is_refused`,
+  `a_serialized_door_reading_is_never_refused_by_a_commit_anchor`,
+  `a_commit_anchor_outlives_the_record_it_was_taken_with`,
+  `a_reading_taken_before_a_commit_never_supersedes_its_record`,
+  `a_reading_of_an_absence_taken_before_a_commit_is_refused_too` and
+  `a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_commit`. **Every one
+  names a construction rather than a health invariant**, and none needed a word changed;
+- **the two assertions of zero**, which are the positions where the premise could hide as an
+  expectation rather than as prose. `commands.rs:8166` asserts it of a scenario in which the
+  chronology check is unreachable by construction — a serialized door — and its message says so.
+  `watch_check.rs:1214` is the one the brief asked about, and it is **the code written against the
+  stronger diagnosis**: it is kept, and a paragraph beside it now says the zero is a property of
+  *that test's construction* and names the ordering of two durations it rests on. §16.6 item 30 is
+  the residue.
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule, and the defect this phase has
+shipped twice): this round adds no operation, consumes nothing and spends nothing. The new test calls
+`admit`, `withhold_under_the_session_lock` and `record_app_write`, all of which already exist and are
+already reviewed, and it discards no result — every call's answer is asserted.
+
+### 16.3 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — `LedgerTally::preceded_a_commit`'s doc comment rewritten (§16.1);
+  **one test added**,
+  `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading`. No
+  behaviour, no signature and no other doc changed;
+- **`src-tauri/src/watch_check.rs`** — one comment paragraph added beside the `preceded_a_commit == 0`
+  assertion, scoping it to that test's construction. The assertion itself is untouched;
+- **`docs/decisions/2d-3-notes.md`** — §5 item 28 amended with a correction block, and this §16;
+- **no core file, no `src/` path, and no command, wire type or user-visible string.**
+
+### 16.4 The evidence and the neuter runs
+
+| Owed | Where |
+|---|---|
+| that a settlement spanning a commit increments the tally, and that the interleaving is healthy | `ledger.rs`'s `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading` — the reviewer's own construction (`stabilize P → commit A → clear A's record → admit P`), at the ledger alone, with no engine, no filesystem and no thread |
+| that the increment is one and not a symptom | the same test's steps 4 and 5: `admitted`, `suppressed`, `coalesced` and `stale_epoch` are all still zero at the refusal, nothing is announced, the same state read again **after** the commit is `Admitted { sequence: 1 }`, and the counter does not move a second time |
+| determinism | the stamp is a value taken before `record_app_write`'s, and `Instant` is monotonic and nondecreasing, so `read_after <= anchor` holds whatever the host clock's resolution — and equality is on the refusing side. No sleep, no wait, no FSEvents |
+| that the production interleaving really reaches this | unchanged: `a_commit_anchor_outlives_the_record_it_was_taken_with`, which drives the same sequence through the real engine, the real `admitting_sink` and the real `deliver` |
+
+**Two neuter runs**, each restored afterwards with the suite re-run green:
+
+- **the anchor coupled back to the record** (`clear_the_record_at` made to remove the
+  `latest_commit_at` entry too, which is the shape round 9 fixed) — the ledger suite came back
+  **23 passed, 2 failed** of 25. The new test failed at *"a reading produced before the commit may not
+  report bytes the commit could have replaced"*, **left `Admitted { sequence: 1 }`, right
+  `PrecedesACommit`**, and `a_commit_anchor_outlives_the_record_it_was_taken_with` failed beside it;
+- **an anchor that refuses unconditionally** (the stamped arm's comparison replaced by
+  `anchor.is_some()`) — the new test failed at *"the refusal deferred the reading rather than dropping
+  it"*, **left `PrecedesACommit`, right `Admitted { sequence: 1 }`**. This is the neuter that isolates
+  the half the first one does not: the tally's *health* claim, that one commit refuses one reading
+  **once**. It is a blunt instrument — 16 of the 25 ledger tests fail under it — so what it proves is
+  that the assertion is load-bearing, not that it is uniquely so.
+
+### 16.5 The gates
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1268 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all **26** of them, **+1** on round 9's 1267 for this round's one new test) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, 69.41 s on the finished tree and 74.74 s on the run before this round's last doc edits, quiet host, no timeout in either; this round added no `watch_check` test and changed only a comment there) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0, no reformatting needed) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched **no** core file at all) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §16.3's file list |
+
+### 16.6 What this round's own change leaves open
+
+Written with the expectation §15 states and this round does not weaken: **seven** §5 items recorded as
+bounded residues have since been found to be real defects, and item 25 surviving one round is not
+evidence that the pattern has ended.
+
+30. **`watch_check`'s `preceded_a_commit == 0` is an exact-zero assertion whose soundness rests on an
+    ordering of two durations that nothing enforces.** No pre-commit settlement can exist in that test
+    *because* a settlement needs two equal reads, so the earliest stamp that could see the saved bytes
+    twice is one probe after the rename, while the anchor follows the rename by one function return
+    (`commit_and_record` records immediately after `save_document` returns). That is a comparison of a
+    probe interval against a rename-to-record window, and **it is reasoned, never measured**: no test
+    exercises that window, and a host slow enough between the rename and the record could fail the
+    line with no defect present. It was deliberately **not** weakened — weakening it removes the only
+    production-path check on the stamp — so the cost is a line that can fail for two different
+    reasons and says only one of them.
+31. **"Sustained growth" is prose, not a check.** `LedgerTally` keeps one cumulative `u64` per
+    decision for the whole session; it counts no refusals per path and holds nothing to compare a
+    count against, so the very data a growth reading needs is not kept. Nothing fails when the counter
+    climbs. And the tally has **no wire surface at all** until 2d-4, so in the shipped application the
+    diagnosis this round wrote into the doc is available to a person reading a debugger and to nobody
+    else.
+32. **The new test drives the ledger alone, so what it pins about the *production* interleaving is
+    what `a_commit_anchor_outlives_the_record_it_was_taken_with` already pinned.** Its own
+    contribution — one increment, and the reading admitted on its next stabilization — is proved
+    against a hand-passed `Instant`, and nothing ties that hand-passed stamp to the one
+    `WatchWorker::observe` takes. §5 item 14's third half applies unchanged: a stamp taken too **late**
+    on the production path is still invisible to every test in this crate.

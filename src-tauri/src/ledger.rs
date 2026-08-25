@@ -820,17 +820,47 @@ pub struct LedgerTally {
     /// after this application's latest committed write to their path — see
     /// [`Admission::PrecedesACommit`].
     ///
-    /// **On a healthy production path this stays zero**, and that is worth
+    /// **Zero is what an ordinary save-generated hint produces, and a non-zero
+    /// value is not by itself a fault** — the second half is round 10's single
+    /// Low, and until that round this paragraph said instead that on a healthy
+    /// production path this stays zero. The first half is unchanged and is worth
     /// knowing rather than assuming: the engine's debounce puts at least one
     /// debounce plus one probe (240 ms at the default timing) between a save's
-    /// own hint and the pass that settles it, while the anchor follows the
-    /// rename by one read-back. A non-zero count means an observation was
-    /// genuinely in flight across a commit — or that some caller's stamp is
-    /// taken in the wrong place. **It is not bounded by that window**, and
-    /// saying it was is round 9's third Low: only the *production* of such an
-    /// observation is pre-commit, and nothing bounds how long a completed
-    /// settlement waits at the gate or on a descheduled worker before it is
-    /// admitted.
+    /// own hint and the pass that settles it, while the anchor follows the rename
+    /// by one read-back, so the hints one commit generates are decided after that
+    /// commit's anchor and never reach this arm.
+    ///
+    /// **But since the round-9 fix round the anchor's life is the epoch**, so a
+    /// perfectly healthy observation can move this counter too: a watcher
+    /// completes a stable reading, its worker is descheduled, this application
+    /// commits and records, a serialized decision clears that record, and the
+    /// completed reading is only then decided — refused, correctly, against an
+    /// anchor that may name a commit made long ago. **Nothing malfunctioned in
+    /// that story and debounce cannot prevent it**, because the reading was
+    /// already produced when the commit happened. That interleaving is driven by
+    /// `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading`.
+    ///
+    /// **It is not bounded by any window**, and saying it was is round 9's third
+    /// Low: only the *production* of such an observation is pre-commit, and
+    /// nothing bounds how long a completed settlement waits at the gate or on a
+    /// descheduled worker before it is admitted.
+    ///
+    /// What is left to diagnose bad stamping is therefore narrower than any
+    /// single non-zero reading, and both halves of it are stated as what they
+    /// are rather than as what they enforce:
+    ///
+    /// - **sustained growth out of proportion to this session's commits**, and
+    ///   especially growth for a path this session has stopped committing to,
+    ///   which a correctly stamped pipeline cannot produce: a refusal here is
+    ///   answered, and the re-observation's own stamp is taken after the anchor,
+    ///   so one commit refuses one reading once.
+    ///   **No threshold is enforced anywhere** — nothing in the type system and
+    ///   no test distinguishes proportionate growth from disproportionate, so
+    ///   this is a thing to read, not a thing that fails;
+    /// - `crate::watch_check`'s
+    ///   `a_committed_save_is_suppressed_while_a_later_external_write_is_not`,
+    ///   which asserts zero **in a construction where no pre-commit settlement
+    ///   can exist** rather than because zero is a general health invariant.
     ///
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
@@ -3840,4 +3870,103 @@ mod tests {
             "and it carries the external writer's bytes"
         );
     } // End of function a_commit_anchor_outlives_the_record_it_was_taken_with()
+
+    #[test]
+    fn a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading() {
+        // **Round 10's Low, driven.** [`LedgerTally::preceded_a_commit`] used to
+        // say that on a healthy production path it stays zero. Since the round-9
+        // fix round the anchor's life is the epoch, so it does not: nothing in
+        // the interleaving below malfunctioned — a stable reading completes, the
+        // worker that carries it is descheduled, this application commits and
+        // records, a serialized decision clears that record, and only then is the
+        // completed reading decided — and the counter moves. Debounce cannot
+        // prevent it, because the reading was already produced when the commit
+        // happened.
+        //
+        // **The ledger alone, with no engine and no filesystem**, because this
+        // test is about *what the counter means*.
+        // `a_commit_anchor_outlives_the_record_it_was_taken_with` drives the same
+        // interleaving through the real engine and the real `deliver`, and what
+        // it proves there is the anchor's lifetime and the settlement's revert.
+        // The two assertions this one exists for are the ones that make a single
+        // increment a healthy reading rather than a fault: nothing was lost, and
+        // the counter does not move again.
+        let ledger = ledger_at_epoch(1);
+        let path = Path::new("/tree/match/base.yml");
+        let document = DocumentId(211);
+        let ours = revision("the bytes this application committed");
+        let theirs = revision("what the watcher had already settled on");
+
+        // 1. The stable reading, completed before anything else. `Instant` is
+        //    monotonic and nondecreasing, so this value cannot be strictly
+        //    greater than the anchor taken below whatever the host clock's
+        //    resolution — and equality is on the refusing side anyway.
+        let stamped_before_the_commit = Instant::now();
+
+        // 2. The commit and its record, taken while that reading waited.
+        record(&ledger, document, path, ours);
+
+        // 3. A serialized decision clears the record — the round-8 clearing
+        //    extension, here through the withholding door because that one
+        //    announces nothing, so nothing below can coalesce against it.
+        assert_eq!(
+            ledger.withhold_under_the_session_lock(path, ObservedState::Content(ours)),
+            Admission::Withheld
+        );
+        assert_eq!(
+            ledger.recorded_write(document),
+            None,
+            "the premise: the record is gone, so the anchor is all that is left"
+        );
+
+        // 4. Only now is the completed reading decided.
+        assert_eq!(
+            ledger.admit(
+                1,
+                path,
+                ObservedState::Content(theirs),
+                stamped_before_the_commit
+            ),
+            Admission::PrecedesACommit,
+            "a reading produced before the commit may not report bytes the commit could have replaced"
+        );
+        let spanning = ledger.tally();
+        assert_eq!(
+            spanning.preceded_a_commit, 1,
+            "the counter moves, and no component in this story misbehaved: {spanning:?}"
+        );
+        assert_eq!(
+            (
+                spanning.admitted,
+                spanning.suppressed,
+                spanning.coalesced,
+                spanning.stale_epoch
+            ),
+            (0, 0, 0, 0),
+            "and no other decision was taken, so the increment is not a misfiled one: {spanning:?}"
+        );
+        assert_eq!(
+            ledger.announced_state(path),
+            None,
+            "the refusal published nothing, which is why it costs a re-reading rather than a change"
+        );
+
+        // 5. **What makes the increment healthy rather than a fault**: the same
+        //    state, read again after the commit, is admitted, and the counter
+        //    does not move a second time. A stamp taken in the wrong place would
+        //    keep refusing this path — sustained growth is the diagnosis, and a
+        //    single non-zero value cannot support it.
+        assert_eq!(
+            admit_now(&ledger, 1, path, ObservedState::Content(theirs)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE
+            },
+            "the refusal deferred the reading rather than dropping it"
+        );
+        assert_eq!(
+            ledger.tally().preceded_a_commit,
+            1,
+            "one increment for one commit spanned: the anchor refuses the re-reading no second time"
+        );
+    } // End of function a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading()
 }
