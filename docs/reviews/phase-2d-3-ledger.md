@@ -96,3 +96,94 @@ Static review only; watcher behavior remains unverified in this sandbox as requi
 
 Codex session ID: 01a0383e-28af-7092-8e7b-5161c04c263b
 Resume in Codex: codex resume 01a0383e-28af-7092-8e7b-5161c04c263b
+
+---
+
+## Round 4 — NOT READY (1 High, 1 Low)
+
+Scoped to round 3's fix. The High is the **fourth consecutive narrower instance**, and this time it
+lives in the hole the round-3 fix round wrote down as honestly bounded: `2d-3-notes.md` §5 item 16
+said a clock-collision refusal on the save path "costs one *publication*" and that the external
+replacement "is reported by the watcher's own hints instead". Round 4 shows the second half is false
+— 2d-2's own record retains the possibility of a missed native hint — so the cost is a **lost
+external observation**, not a lost publication. The Low is a doc-comment guarantee the code does not
+give. Everything else the round-3 fix built was inspected and cleared: the one-pass `undo` lifetime,
+rescan ordering, exclusive engine ownership, the exhaustive sink answer, the strict `Instant` proof,
+the lock order, post-guard rollback, no weakened test, and no 2d-4 scope creep.
+
+Host-measured evidence supplied: `cargo test --workspace` 1249/0; focused serial `watch_check::`
+20/20 (68 s); clippy `-D warnings` clean; `cargo fmt --check` clean; `cargo tree -p
+espansoconfig-core | rg tauri` empty; frontend untouched, so 431 / 2125 / 184 stand.
+
+### Verbatim reply
+
+## High
+
+- [commands.rs:2259](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2259), [commands.rs:2293](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2293), [ledger.rs:706](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:706), [ledger.rs:919](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:919), [2d-3-notes.md:636](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:636) — A clock-equality refusal can permanently lose the differing post-save external observation because `admit_at_current_epoch` has neither an engine settlement to revert nor an independent retry. Concrete scenario: the app commits A and records it at instant T → an external process writes B before `after_a_save` refreshes → line 2268’s `Instant::now()` also returns T → the refresh installs B in the cache → `decide` returns `PrecedesACommit`, retaining A’s record and publishing nothing → the healthy native backend silently misses B’s hint, a possibility explicitly retained by [2d-2-notes.md:204](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-2-notes.md:204) → B never enters the phase-2d observation sequence or future queue. This violates the design requirement that a differing post-save refresh be queued as external ([phase-2d-design.md:32](/Users/ccarpio/Developer/espansoConfig/docs/reviews/phase-2d-design.md:32)) and falsifies both the headline’s “no external change is lost” claim ([2d-3-notes.md:3](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3)) and item 16’s sentence that the replacement “is reported by the watcher’s own hints.” Minimal fix: give the session-locked refresh entry point a caller-proven chronology mode that skips `PrecedesACommit`; any existing record necessarily predates these reads because saves and refreshes are serialized by the session lock. Keep suppression, supersession, coalescing, and sequence allocation shared with `decide`, and add a deterministic equality regression for `after_a_save`.
+
+## Medium
+
+None.
+
+## Low
+
+- [engine.rs:749](/Users/ccarpio/Developer/espansoConfig/crates/espansoconfig-core/src/watch/engine.rs:749), [engine.rs:774](/Users/ccarpio/Developer/espansoConfig/crates/espansoconfig-core/src/watch/engine.rs:774), [2d-3-notes.md:1332](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1332), [2d-3-notes.md:1470](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1470) — The documentation claims rollback produces “the same observation again,” although the implementation deliberately re-reads and can produce a different current state. Concrete scenario: P settles and is refused → `revert_settlement` restores base B and re-hints → another process writes Q before the two retry reads → the engine correctly emits `Changed { B → Q }`, not the refused `Changed { B → P }`. The method’s later paragraph accurately says it reports whatever the file holds then, contradicting the earlier guarantee and §9.1/§9.5’s unqualified evidence claim. Minimal fix: qualify “same observation” with “if the disk remains unchanged”; otherwise promise only a fresh observation of the state that stabilizes during the retry.
+
+The one-pass undo lifetime, rescan ordering, exclusive engine ownership, exhaustive sink answer, strict `Instant` proof, lock order, and post-guard rollback are sound on static inspection. No test capability appears weakened by the round’s changes. I found no 2d-4 command, event, queue, wire, or frontend scope creep; the core changes remain Tauri-independent.
+
+No tests were run; these findings are static.
+
+**NOT READY**
+
+Codex session ID: 01a03894-97bc-72a2-ae35-3096fd2e06ba
+Resume in Codex: codex resume 01a03894-97bc-72a2-ae35-3096fd2e06ba
+
+---
+
+## Round 5 — NOT READY (1 High, 2 Low)
+
+Scoped to round 4's fix. **Five rounds, five narrower instances.** Two things this round settled in
+the fix's favour before finding anything: the chronology premise was **re-derived independently and
+holds** — the production call graph does serialize saves and refreshes, `conflict_after_the_lock`
+included — and `ReadChronology` is genuinely private with no production caller able to select a
+variant. Lock order, leaf mutexes, Tauri-freedom and the absence of 2d-4 scope creep were all
+confirmed.
+
+The High is **§5 item 18 judged quietly optimistic**, which is the third time a hole this record
+stated as honestly bounded turned out to be a real defect (item 10 at round 2, item 16 at round 4,
+item 18 now). It is round 4's exposure reached through `Err` rather than through `PrecedesACommit`,
+and the round-4 fix round's stated reason for leaving it open — that the only alternative was
+publishing a single unstabilized read — is rejected: the existing engine can be asked to re-observe
+the path instead. The two Lows are both **name-position misses by the round-4 fix round's own
+sweep**: documentation that still describes save-path stamping that no longer happens and a "three
+things" count that is now four, and a test named for a premise it does not exercise.
+
+Host-measured evidence supplied: `cargo test --workspace` 1251/0; focused serial `watch_check::`
+20/20 (62 s); clippy `-D warnings` clean; `cargo fmt --check` clean; `cargo tree -p
+espansoconfig-core | rg tauri` empty; 7 files changed, no `src/` path and no frontend file, so
+431 / 2125 / 184 stand.
+
+### Verbatim reply
+
+## High
+
+- [commands.rs:2283](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2283), [commands.rs:2296](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2296), [commands.rs:2318](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:2318), [2d-3-notes.md:706](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:706), [2d-3-notes.md:1804](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1804) — A failed post-save refresh is the same lost-observation defect as round 4 on an error path; the record’s claim that closing it “would be worse” presents immediate single-read publication as the only alternative, but the existing engine can instead be explicitly asked to stabilize the path without clearing the record first. Concrete scenario: the app commits revision A and records it → an external process removes the file before `after_a_save` reads it → `Workspace::refresh` returns `NotFound` → `after_a_save` evicts the cache, admits nothing, and returns `Saved` → the healthy-looking native backend silently misses the removal hint, as §2.3 expressly permits → the persistent removal never enters the observation sequence. This is the same exposure round 4 classified High, merely reached through `Err` rather than `PrecedesACommit`, and it contradicts the headline’s “no external change is lost” claim at [2d-3-notes.md:3](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:3). Minimal fix: when either post-save refresh fails, send an application-originated re-observe hint to that workspace’s existing watcher/engine; let its normal two-read pipeline stabilize `Absent`, `Unreadable`, or content and then use ordinary stamped admission. Do not publish or clear the record from the failed single read itself.
+
+## Medium
+
+None.
+
+## Low
+
+- [ledger.rs:223](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:223), [2d-3-notes.md:657](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:657), [main.rs:57](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/main.rs:57) — Current documentation still says “the two save path callers take [their stamps] on the line above their `Workspace::refresh`” and that “Three things together” prevent loss, although neither save-path caller stamps now and the round-4 fix establishes a fourth required fact: session-lock serialization. Concrete failure scenario: a maintainer follows the module contract and restores stamped save-path admission → A is recorded at T → an external B is read after A but its adjacent stamp also equals T → B is refused with no settlement or retry, recreating round 4. Minimal fix: remove the stale save-path-stamp sentence from `ledger.rs` and §5 item 14, and change `main.rs` to say four facts or explicitly scope its three mechanisms to watcher-produced observations.
+
+- [ledger.rs:1982](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1982), [ledger.rs:1999](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1999), [2d-3-notes.md:1873](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1873) — The test and evidence call the reading “session-locked,” but the test constructs a bare `WriteLedger` and never owns or locks a `WorkspaceSession`; it proves only the serialized door’s implementation. Concrete failure scenario: a production caller is moved outside `with_open` → an old reading P is followed by commit/record A → that caller uses the serialized door and admits P, clearing A’s record → both new tests still pass because neither exercises the session-lock premise. Minimal fix: rename the test and evidence to say “serialized-door reading,” and state explicitly that the production lock premise remains established only by the call-graph audit unless a session-level witness/test is added.
+
+The production call graph currently supports the chronology premise, including `conflict_after_the_lock`; `ReadChronology` is private and production callers cannot choose a variant. The lock order remains session → gate → state, ledger locks remain leaves, and no 2d-4 command, event, observation queue, wire type, serialization, or frontend change was introduced. The core change is save-unaware and Tauri-free on static inspection and the supplied dependency evidence.
+
+No tests were run; these findings are static.
+
+**NOT READY**
+
+Codex session ID: 01a038df-b2f6-7503-be64-7f989d960bd0
+Resume in Codex: codex resume 01a038df-b2f6-7503-be64-7f989d960bd0

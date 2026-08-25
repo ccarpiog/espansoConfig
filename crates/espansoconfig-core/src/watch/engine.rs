@@ -754,10 +754,18 @@ impl ObservationEngine {
     /// and all it is told — no reason travels with the call, because the reasons
     /// are facts about an application session and this is a fact about a
     /// directory (module docs). The state the caller could not act on is
-    /// therefore un-announced as far as the engine is concerned, so the re-hint
-    /// stabilizes to it again and produces **the same observation again**,
-    /// rather than coalescing to nothing against a tracked state that was never
-    /// really reported.
+    /// therefore un-announced as far as the engine is concerned, so the path is
+    /// observed **again** rather than coalescing to nothing against a tracked
+    /// state that was never really reported.
+    ///
+    /// **What comes back is a fresh observation of whatever stabilizes during the
+    /// retry, and only *if the disk is unchanged* is it the same observation
+    /// again.** The retry re-reads: if another process replaced the file with `Q`
+    /// in the meantime, the base `B` this call restored is compared against `Q`,
+    /// and `Changed { B → Q }` is the correct answer rather than a replay of the
+    /// refused `Changed { B → P }`. Round 4 of the 2d-3 review found the earlier
+    /// wording of this paragraph promising the replay unconditionally, which the
+    /// third bullet below already contradicted.
     ///
     /// # What it does not do, said beside what it does
     ///

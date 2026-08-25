@@ -54,19 +54,33 @@
 //! `commands::commit_and_record`, the window `run_one_save` runs its
 //! transaction in, for a committed save and for nothing else — and the two
 //! refreshes on the save path (`after_a_save`'s and `conflict_after_the_lock`'s)
-//! go through the same gate a native hint does. **Three** things together make a
+//! go through the same gate a native hint does. **Five** things together make a
 //! save's own rename un-reportable as somebody else's without losing anybody
 //! else's write: a **commit gate** distinct from the ledger's state, which makes
 //! the transaction and its record one window no admission can *decide* inside; a
-//! **stamp** on every observation, taken before the reads that produced it,
+//! **stamp** on every observation a *watcher* produces, taken before the reads
+//! that produced it,
 //! which is what places a reading that was already in hand when that window
-//! opened — the gate cannot reach a read that already happened; and a **taken
+//! opened — the gate cannot reach a read that already happened; a **taken
 //! back settlement**, because the engine installs a stabilized state as tracked
 //! before the ledger ever sees it, so a refusal that is not answered leaves that
-//! state coalescing to nothing forever. A reading the session cannot place
-//! strictly after its own last commit to that path is discarded rather than
-//! published, it does not clear the record, and the engine is told to
-//! un-conclude it and observe the path again. What the gate admits still reaches
+//! state coalescing to nothing forever; the **session lock** the two save-path
+//! refreshes already hold, which orders their reads against every record with no
+//! clock in between; and a **re-observation** asked of the running watcher when a
+//! save could not read the file at all. A *watcher* reading the session cannot
+//! place strictly after its own last commit to that path is discarded rather
+//! than published, it does not clear the record, and the engine is told to
+//! un-conclude it and observe the path again. **The two save-path refreshes are
+//! not stamped and cannot be discarded that way**: they run under the session
+//! lock, which is the lock every producer of a record holds, so their reads
+//! follow any record in program order and no clock decides it — a refusal there
+//! had nothing to answer it and lost the external change outright, which was
+//! this step's round-4 High. **And where such a refresh *fails*, or a save's own
+//! write may have landed without saying what it wrote, nothing is published from
+//! the read that did not happen**: the path is handed back to the watcher
+//! (`watch::ReObserver`), whose ordinary two reads produce the state and whose
+//! stamp places it — this step's round-5 High, which was round 4's exposure
+//! reached through an error arm. What the gate admits still reaches
 //! a sink that discards it, until 2d-4.
 
 #![deny(missing_docs)]

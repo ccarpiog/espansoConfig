@@ -106,6 +106,23 @@ is a fact about a directory.
 > force** is that a caller reverts before ticking again. `docs/decisions/2d-3-notes.md` §9 is the
 > record.
 
+> **Correction (2d-3 round-4 fix round).** The round-2 block above names the fifth caller obligation
+> — *place the observation's reads relative to the recorded write* — and names **one** way to
+> discharge it, an instant stamped before the reads against an instant stamped after the rename.
+> That reads as though the stamp were the obligation; it is not, and treating it as one is what
+> round 4 found. A caller that can prove the ordering **some other way** owes no stamp, and one of
+> 2d-3's three callers can: the two save-path refreshes run under the session lock that every
+> producer of a ledger record holds, so the record precedes their read in program order. Stamping
+> them anyway put a strict comparison of two adjacent clock reads on a path where a collision
+> refused the observation outright, with no settlement to take back and no retry — a lost external
+> change rather than a delayed one. The obligation is therefore *place the reads*, and the stamp is
+> the discharge available to a caller that holds no such lock, which is the watcher's worker thread
+> exactly. **Nothing in this engine changed for it** — the ordering is still a fact about a session
+> and the engine is still a fact about a directory. One thing here did change, and only in prose:
+> `ObservationEngine::revert_settlement`'s doc comment promised *the same observation again* where
+> the code deliberately re-reads and may report a different current state.
+> `docs/decisions/2d-3-notes.md` §10 is the record.
+
 ### 2.2 D2 — determinism in shape by injection: the clock and the reader are arguments, one tick takes one read per path, and identity values come from the process-wide session table
 
 `hint(path, now)` records and never reads. Every hint-driven read happens inside

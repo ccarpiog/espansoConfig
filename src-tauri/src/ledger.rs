@@ -49,7 +49,7 @@
 //!   exhaustive `committed_revision` decided there was nothing to record, since
 //!   the guard is an RAII value dropped by the block's end and not a call some
 //!   arm can miss;
-//! - [`WriteLedger::admit`], [`WriteLedger::admit_at_current_epoch`] and
+//! - [`WriteLedger::admit`], [`WriteLedger::admit_under_the_session_lock`] and
 //!   [`WriteLedger::begin_epoch`] take it briefly before touching the state.
 //!
 //! The lock order is therefore always **session → gate → state**, never the
@@ -101,10 +101,15 @@
 //! write as somebody else's, which the consult's Q8 calls the sharpest failure
 //! mode there is.
 //!
-//! Every observation therefore carries [`crate::watch::EpochObservation`]'s
+//! Every **watcher** observation therefore carries
+//! [`crate::watch::EpochObservation`]'s
 //! `read_after`: an [`Instant`] taken **before** the reads that produced it,
 //! and [`WriteLedger::record_app_write`] takes one **after** the rename
-//! `save_document` performed. Comparing the two is the whole rule. **The
+//! `save_document` performed. Comparing the two is the whole rule for a reading
+//! this session cannot otherwise place — and *cannot otherwise place* is the
+//! condition, not a universal: the save path's own two refreshes prove the same
+//! ordering by construction and carry no stamp at all, which is the *two proofs*
+//! section below. **The
 //! accepted condition is the strict one — `read_after > recorded_at` — and
 //! equality is refused**, which was this step's round-3 second High: `Instant`
 //! is documented monotonic and *not* documented strictly increasing, so two
@@ -165,18 +170,90 @@
 //! its own hint — and what it does depend on is stated as a hole rather than
 //! smoothed over (`docs/decisions/2d-3-notes.md` §5 items 13 and 14).
 //!
-//! The one path where a refusal is **not** answered that way is
-//! [`WriteLedger::admit_at_current_epoch`], whose two callers settle nothing in
-//! any engine and so have nothing to take back; see that method for what a
-//! refusal costs there.
+//! # Two proofs of chronology, because one of the two callers needs no stamp
+//!
+//! This step's **round-4 High**. A stamp is a proof about a reading whose
+//! ordering against this session's own writes is otherwise unknown — which is
+//! the watcher's worker thread exactly, since it holds no session lock and its
+//! reads happen in an engine pass of their own. The save path's two refreshes
+//! are not in that position, and treating them as if they were is what the
+//! round-4 finding was:
+//!
+//! - a refusal of a *watcher* observation is **answered** —
+//!   [`admitting_sink`] returns
+//!   [`crate::watch::ObservationOutcome::Undecided`] and the engine's settlement
+//!   is taken back, so the path is re-observed;
+//! - a refusal of a *save-path* refresh was answered by nothing. Those two
+//!   callers settle nothing in any engine, so there was nothing to take back,
+//!   and they run once per save rather than in a loop, so nothing retried them.
+//!   A clock-resolution collision between the record's instant and the refresh's
+//!   — two adjacent [`Instant::now`] calls on one thread — therefore did not
+//!   cost *one publication*, as this module and the record both said: it cost
+//!   the **external observation itself**, because the native hint that would
+//!   otherwise carry that state is not guaranteed to arrive:
+//!   `docs/decisions/2d-2-notes.md` §2.3 expressly declines to cover *a backend
+//!   that stops delivering without reporting anything*. The consult requires a
+//!   disagreeing post-save refresh to be *queued as external*
+//!   (`docs/reviews/phase-2d-design.md` Q2), and a lost one is not.
+//!
+//! What closes it is the second proof, and it is stronger than the stamp rather
+//! than a relaxation of it. **A record can only be inserted by a thread holding
+//! the session lock**: [`WriteLedger::record_app_write`] is the one producer, its
+//! one production caller is `crate::commands::commit_and_record`, that is reached
+//! only from `run_one_save`, and every route to `run_one_save` passes through
+//! `WorkspaceSession::with_open`, which holds the session mutex across the whole
+//! closure. `crate::commands`'s `after_a_save` and `conflict_after_the_lock` run
+//! **inside that same closure**, holding that same lock. So every record they can
+//! observe was inserted either by this thread earlier in this call, or by a
+//! previous holder that released the lock before this one took it — both of which
+//! order the record before the refresh's read in program order, with no clock
+//! consulted and therefore no resolution to collide. That is what
+//! [`WriteLedger::admit_under_the_session_lock`] is named for, and it is why that
+//! entry point takes no `Instant`: there is nothing left for one to prove.
+//!
+//! **Neither entry point lets its caller choose.** The mode is the private
+//! `ReadChronology`, built by the two methods and by nothing else, so the worker
+//! thread cannot ask to skip a check it could not justify skipping — there is no
+//! parameter to ask through. **What that does not force**, in the same sentence:
+//! that a future caller of `admit_under_the_session_lock` really holds the session
+//! lock. Nothing in the type system carries a lock this module does not own, and
+//! a caller that does not hold it silently restores the round-2 High. The two
+//! callers and this paragraph are what keep it.
 //!
 //! **What the types do not force, in the same sentence as what they do.** The
 //! parameter is an `Instant` and every `Instant` type-checks: nothing makes a
 //! caller take it before its read rather than after, and a stamp taken after the
-//! read silently restores the defect. `crate::watch::WatchWorker::observe` is
-//! one function taking the stamp and running the engine pass, and the two save
-//! path callers take theirs on the line above their `Workspace::refresh` — that,
-//! and this paragraph, are what keep it.
+//! read silently restores the defect. What keeps it is that there is exactly
+//! **one** producer of a stamp — `crate::watch::WatchWorker::observe`, one
+//! two-line function with one caller, taking the stamp and then running the
+//! engine pass — and this paragraph. **Neither save-path caller stamps at all**,
+//! since the round-4 fix round: they come through
+//! [`WriteLedger::admit_under_the_session_lock`], which takes no `Instant`, so
+//! there is no second producer here to keep honest. Restoring a stamp on that
+//! path would restore round 4's High with it — two adjacent clock reads on one
+//! thread, into a comparison that accepts only a strictly later value, with
+//! nothing to answer the refusal.
+//!
+//! # A read the save path could not use is re-observed, never published
+//!
+//! This step's **round-5 High**, and it is about the arms where a save-path
+//! caller has **no** reading to bring: `Workspace::refresh` raised, or the
+//! transaction's own outcome is an uncertain write that read nothing back. Such
+//! a caller must not admit anything — a single failed read proves no state, and
+//! publishing an `Absent` from it would clear the app-write record and make the
+//! save's own hints foreign — and until round 5 it therefore did nothing at all,
+//! leaving the disk state to a native hint `docs/decisions/2d-2-notes.md` §2.3
+//! expressly declines to guarantee. That is round 4's exposure reached through
+//! an `Err`.
+//!
+//! What closes it is not in this module and deliberately so: the caller asks the
+//! running watcher to observe that path again
+//! (`crate::watch::ReObserver::re_observe`), and the state that eventually
+//! reaches this ledger is one the engine read **twice**, carrying a stamp, going
+//! through [`WriteLedger::admit`] like any other observation. So the two doors
+//! are unchanged and no third proof of chronology exists: what changed is that a
+//! reading nobody could use is replaced by one somebody can, rather than being
+//! forced through a door it cannot honestly enter.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -291,6 +368,13 @@ pub enum Admission {
     /// settlement back. **A refusal whose answer re-reading cannot change must
     /// not join it**: reverting one of those would re-observe the same path
     /// forever.
+    ///
+    /// **Only [`WriteLedger::admit`] can answer it**, since the round-4 fix
+    /// round. A save-path refresh has no settlement to take back and no loop to
+    /// retry it, so a refusal there was a lost external observation rather than
+    /// a delayed one; [`WriteLedger::admit_under_the_session_lock`] proves the
+    /// ordering by construction instead of by a clock, and never reaches this
+    /// arm. See this module's *two proofs* section.
     PrecedesACommit,
     /// Suppressed: the bytes hash to the latest revision this application
     /// recorded after committing that file. **Byte identity, never
@@ -407,11 +491,15 @@ pub struct LedgerTally {
     /// genuinely in flight across a commit — or that some caller's stamp is
     /// taken in the wrong place.
     ///
-    /// It counts **refusals, never losses**: every refusal of a watcher
-    /// observation is answered by taking the engine's settlement back, so the
+    /// It counts **refusals, never losses**, and since the round-4 fix round
+    /// that sentence is true of everything it can count: only
+    /// [`WriteLedger::admit`] reaches the arm, every refusal of a watcher
+    /// observation is answered by taking the engine's settlement back, and the
     /// path is re-observed (see [`Admission::PrecedesACommit`]). A count that
     /// climbs steadily for one path is therefore a pipeline re-running, not a
-    /// change disappearing.
+    /// change disappearing. Before round 4 the same sentence stood over a
+    /// counter that could also count a save-path refresh, which **was** a loss —
+    /// see this module's *two proofs* section.
     pub preceded_a_commit: u64,
 }
 
@@ -646,6 +734,13 @@ impl WriteLedger {
     /// read that already happened, so this is what places one; see the *stamp*
     /// section of this module for the implication, and for the fact that
     /// **nothing in the type system makes a caller take it before its read**.
+    ///
+    /// **This is the entry point that can answer
+    /// [`Admission::PrecedesACommit`], and it is the only one.** A caller here
+    /// holds no session lock and its reads happened in an engine pass of their
+    /// own, so a stamp is the only ordering it can offer — which is why the mode
+    /// is built here rather than taken as an argument: a worker thread must not
+    /// be able to ask for the proof it cannot give.
     pub fn admit(
         &self,
         epoch: u64,
@@ -659,7 +754,12 @@ impl WriteLedger {
             ledger.tally.stale_epoch += 1;
             return Admission::StaleEpoch;
         }
-        decide(&mut ledger, path, state, read_after)
+        decide(
+            &mut ledger,
+            path,
+            state,
+            ReadChronology::StampedBeforeTheRead(read_after),
+        )
     } // End of function admit()
 
     /// The decision for one observation taken by this session itself, under
@@ -693,37 +793,43 @@ impl WriteLedger {
     /// Nothing in the type system forces that ordering; the block scope of that
     /// one function is what keeps it.
     ///
-    /// **`read_after` is the caller's own single read, stamped before it.** Both
-    /// callers take `Instant::now()` on the line above their
-    /// `Workspace::refresh` and hand it here, so the decision is the same
-    /// decision a native hint gets in this respect too. No *concurrent* commit
-    /// can refuse them — both run under the session lock, which is the lock a
-    /// save holds — and the parameter exists anyway, because *one rule with two
-    /// callers* is the whole of §2.6 and an internally stamped `Instant::now()`
-    /// would be taken **after** the read it is meant to bound, which is the
-    /// shape of the defect this parameter closes.
+    /// **It carries no stamp, and the name says why**, since the round-4 fix
+    /// round. A record can only be *inserted* by a thread holding the session
+    /// lock — [`WriteLedger::record_app_write`] is the one producer,
+    /// `crate::commands::commit_and_record` its one production caller,
+    /// `run_one_save` the only route to that, and
+    /// `WorkspaceSession::with_open` the only route to *that*, holding the
+    /// session mutex across its whole closure. These two callers run inside that
+    /// same closure. So every record they can observe was inserted either by
+    /// this thread earlier in this call or by a previous holder that released
+    /// the lock before this one took it, and in both cases the record precedes
+    /// the read in program order. There is nothing left for an `Instant` to
+    /// prove, and [`Admission::PrecedesACommit`] is therefore unreachable from
+    /// here — see this module's *two proofs* section for the whole argument.
     ///
-    /// **One refusal is reachable here, and it is stated rather than denied**
-    /// (round 3's second High corrected the claim that none was). `after_a_save`
-    /// stamps microseconds after its *own* save recorded, on the same thread,
-    /// and [`decide`] accepts only a strictly later stamp — so a clock-resolution
-    /// collision between two adjacent `Instant::now()` calls refuses it. What
-    /// that costs is one publication not made: nothing is written, nothing is
-    /// cleared, and the external replacement that refresh saw is a filesystem
-    /// change with native hints of its own, which stabilize later and are
-    /// decided against the same retained record. Refusing here is the
-    /// over-refusing direction, and — unlike a watcher observation — there is no
-    /// settlement to take back, because these two callers run no engine.
-    pub fn admit_at_current_epoch(
-        &self,
-        path: &Path,
-        state: ObservedState,
-        read_after: Instant,
-    ) -> Admission {
+    /// **That is a fix and not an economy**, and round 4's High is what it
+    /// closes: the parameter used to exist, `after_a_save` stamped microseconds
+    /// after its own save recorded, and [`decide`] accepts only a strictly later
+    /// stamp — so a clock-resolution collision between two adjacent
+    /// `Instant::now()` calls on one thread refused the refresh. Unlike a
+    /// watcher observation there was no settlement to take back and no loop to
+    /// retry it, so what that cost was not one publication but the **external
+    /// observation itself**.
+    ///
+    /// **What the type cannot force**, beside what it does: that a caller really
+    /// holds the session lock. This module owns no such lock and can require no
+    /// witness of one, and a caller that skipped it would restore the round-2
+    /// High in silence. Two callers and this paragraph are what keep it.
+    pub fn admit_under_the_session_lock(&self, path: &Path, state: ObservedState) -> Admission {
         let _gate = self.enter_gate();
         let mut ledger = self.lock();
-        decide(&mut ledger, path, state, read_after)
-    }
+        decide(
+            &mut ledger,
+            path,
+            state,
+            ReadChronology::SerializedWithEveryRecord,
+        )
+    } // End of function admit_under_the_session_lock()
 
     /// The workspace epoch this ledger is observing under.
     // Read by this crate's tests today, and by 2d-4's wake payload when it
@@ -781,6 +887,29 @@ impl WriteLedger {
             .map(|entry| entry.recorded_at)
     }
 
+    /// Moves `document`'s recorded instant to `at` — the **test-only** seam that
+    /// makes a clock collision drivable on a path whose caller takes no stamp.
+    ///
+    /// [`WriteLedger::recorded_at`] makes the collision drivable where the stamp
+    /// is an *argument*, by handing the record's own instant back to
+    /// [`WriteLedger::admit`]. The save path has no such argument since the
+    /// round-4 fix round: `crate::commands::after_a_save` calls
+    /// [`WriteLedger::admit_under_the_session_lock`], which reads no clock at
+    /// all. So the collision is asked for from the **other** side — the record's
+    /// instant is put where no later `Instant::now()` can beat it, which is a
+    /// clock collision and worse. A build that still consulted a stamp on that
+    /// path refuses deterministically; the shipped one cannot notice.
+    ///
+    /// Test-only for [`WriteLedger::recorded_at`]'s reason, and it writes rather
+    /// than reads, so it is the one seam that could steer a production decision
+    /// if it ever stopped being `#[cfg(test)]`.
+    #[cfg(test)]
+    pub(crate) fn stamp_the_record_at(&self, document: DocumentId, at: Instant) {
+        if let Some(entry) = self.lock().writes.get_mut(&document) {
+            entry.recorded_at = at;
+        }
+    }
+
     /// How many threads have announced themselves at the commit gate and not
     /// yet acquired it — see [`WriteLedger::gate_waiters`].
     #[cfg(test)]
@@ -833,12 +962,49 @@ impl Default for WriteLedger {
     }
 }
 
+/// How the caller of [`decide`] can place its reads against the latest write
+/// this application committed to the same path.
+///
+/// **Private, and built by the two entry points rather than passed to them**,
+/// which is the whole of its design. A mode that a caller could choose would be
+/// a caller-supplied licence to skip a safety check; here *which proof of
+/// chronology an observation carries* is a property of the door it came through.
+/// [`WriteLedger::admit`] can build only the first variant and
+/// [`WriteLedger::admit_under_the_session_lock`] only the second, so the
+/// watcher's worker thread has no way to ask for a proof it could not give.
+///
+/// [`decide`] matches it exhaustively, so a third proof — a future caller that
+/// can place its reads some other way — is a compile error there rather than a
+/// silently skipped check.
+enum ReadChronology {
+    /// The producer took this [`Instant`] **before** the reads that stabilized
+    /// the state, and this session knows nothing else about when they happened.
+    ///
+    /// The watcher's case: its worker holds no session lock and its reads happen
+    /// inside an engine pass of their own, so the stamp is the only ordering it
+    /// can offer. See this module's *stamp* section for the implication the
+    /// accepted condition carries and for the direction it over-refuses in.
+    StampedBeforeTheRead(Instant),
+    /// The caller holds the lock that every producer of a record must hold, so
+    /// the record it is being compared against was written before this reading
+    /// was taken, in program order.
+    ///
+    /// The save path's case, and the round-4 fix round's mechanism: no clock is
+    /// consulted, so no clock resolution can collide, and
+    /// [`Admission::PrecedesACommit`] is unreachable. The obligation this
+    /// carries is the caller's and is stated at
+    /// [`WriteLedger::admit_under_the_session_lock`] — nothing in the type
+    /// system can carry a lock this module does not own.
+    SerializedWithEveryRecord,
+}
+
 /// The decision itself, with the epoch already agreed.
 ///
 /// A free function over the locked state rather than a method, so that it
 /// cannot be reached without the guard and cannot take the guard twice — a
 /// `std::sync::Mutex` is not reentrant, and the two public entry points differ
-/// only in whether they check the tag.
+/// only in whether they check the tag and in which [`ReadChronology`] they can
+/// build.
 ///
 /// The order of the checks is the contract:
 ///
@@ -847,7 +1013,10 @@ impl Default for WriteLedger {
 ///    this application has since replaced — the check proves only that the
 ///    session cannot rule that out — so it may neither publish nor supersede.
 ///    The round-2 High; see this module's *stamp* section for the implication
-///    and for the direction it over-refuses in;
+///    and for the direction it over-refuses in. A
+///    [`ReadChronology::SerializedWithEveryRecord`] caller has already placed
+///    its reads by construction, so this step asks it nothing — the round-4
+///    High, and this module's *two proofs* section;
 /// 2. **suppression**, which retains its record too — the several native hints
 ///    one atomic replacement generates must all meet the same entry;
 /// 3. **supersession**, which clears any app-write record for this path. It
@@ -870,8 +1039,9 @@ impl Default for WriteLedger {
 /// within its epoch and therefore cannot act on it.
 ///
 /// **Step 1 sits above step 2, and the order decides only which counter moves.**
-/// The two overlap on exactly one input — a reading of the recorded bytes,
-/// stamped before the record — and both answers are true of it, both retain the
+/// The two overlap on exactly one input — a *stamped* reading of the recorded
+/// bytes, stamped before the record — and both answers are true of it, both
+/// retain the
 /// record and both publish nothing. Chronology is asked first because it is a
 /// question about the *reading* rather than about the bytes, which is the same
 /// class as [`WriteLedger::admit`]'s epoch check; a consequence worth stating is
@@ -897,7 +1067,7 @@ fn decide(
     ledger: &mut LedgerState,
     path: &Path,
     state: ObservedState,
-    read_after: Instant,
+    chronology: ReadChronology,
 ) -> Admission {
     // One lookup, read by both retaining checks. Two lookups of the same entry
     // under one guard could not disagree today, but they are two statements of
@@ -907,19 +1077,29 @@ fn decide(
     let recorded = document
         .and_then(|document| ledger.writes.get(&document).copied())
         .filter(|entry| entry.write.epoch == ledger.epoch);
-    if let Some(entry) = recorded {
-        // **Strictly greater, and equality is a refusal.** `Instant` is
-        // monotonic but expressly *not* guaranteed strictly increasing, so two
-        // ordered clock reads may answer the same value — and at equality this
-        // comparison proves nothing about which of the two calls came first.
-        // Accepting there would let a reading taken before the rename clear the
-        // record and make the save's own hints foreign, which is round 2's High
-        // restored by a clock-resolution collision. See this module's *stamp*
-        // section for the implication the accepted condition carries.
-        if read_after <= entry.recorded_at {
-            ledger.tally.preceded_a_commit += 1;
-            return Admission::PrecedesACommit;
+    // **Strictly greater, and equality is a refusal.** `Instant` is monotonic
+    // but expressly *not* guaranteed strictly increasing, so two ordered clock
+    // reads may answer the same value — and at equality this comparison proves
+    // nothing about which of the two calls came first. Accepting there would let
+    // a reading taken before the rename clear the record and make the save's own
+    // hints foreign, which is round 2's High restored by a clock-resolution
+    // collision. See this module's *stamp* section for the implication the
+    // accepted condition carries.
+    //
+    // **A serialized caller is asked nothing**, which is round 4's High: it did
+    // not read a clock, so it cannot lose to one, and its record provably
+    // precedes its read in program order (this module's *two proofs* section).
+    // The match is over the mode rather than over the record, so a third mode
+    // cannot be added without answering this question for itself.
+    let precedes_a_commit = match chronology {
+        ReadChronology::StampedBeforeTheRead(read_after) => {
+            recorded.is_some_and(|entry| read_after <= entry.recorded_at)
         }
+        ReadChronology::SerializedWithEveryRecord => false,
+    };
+    if precedes_a_commit {
+        ledger.tally.preceded_a_commit += 1;
+        return Admission::PrecedesACommit;
     }
     if let ObservedState::Content(observed) = state {
         // Absence and unreadability are deliberately not routed through the
@@ -1129,6 +1309,19 @@ mod tests {
     /// asks for it explicitly, through [`WriteLedger::recorded_at`].
     fn later_than_now() -> Instant {
         Instant::now() + Duration::from_nanos(1)
+    }
+
+    /// An instant **no** later clock read in this test can be strictly greater
+    /// than, for the tests that want the refusing side by construction.
+    ///
+    /// [`later_than_now`]'s mirror image. Put on a record through
+    /// [`WriteLedger::stamp_the_record_at`], it is a clock collision and worse:
+    /// any comparison of a subsequently taken `Instant::now()` against it lands
+    /// on [`Admission::PrecedesACommit`], whatever the host clock's resolution.
+    /// That is what makes *this door consults no clock* a driven claim rather
+    /// than a reviewed one.
+    fn beyond_every_later_clock_read() -> Instant {
+        Instant::now() + Duration::from_secs(3600)
     }
 
     /// One committed app write, taken in a commit window of its own.
@@ -1813,6 +2006,77 @@ mod tests {
     } // End of function a_reading_stamped_exactly_at_the_record_is_refused()
 
     #[test]
+    fn a_serialized_door_reading_is_never_refused_by_the_records_own_instant() {
+        // **Round 4's High** at this layer, and the discrimination that makes it
+        // a property of the *door* rather than of the ledger going soft. The
+        // record's instant is put where no later clock read can beat it — a
+        // collision and worse — and then the same ledger, the same path and the
+        // same record are asked through both entry points.
+        //
+        // **What this proves is the serialized door's implementation, and not
+        // the premise that licenses it** — round 5's second Low, and the name is
+        // the half that was wrong. This test constructs a bare `WriteLedger`; it
+        // owns no `WorkspaceSession` and locks nothing, so *the production
+        // callers of this door hold the session lock* is established by the
+        // call-graph audit in `docs/decisions/2d-3-notes.md` §10.1 **alone**,
+        // and would stay green if a caller were moved outside `with_open`
+        // tomorrow. §5 item 14's third half is the standing statement of that.
+        let ledger = ledger_at_epoch(1);
+        let path = Path::new("/tree/match/base.yml");
+        let document = DocumentId(83);
+        let committed = revision("the bytes this application committed");
+        let theirs = revision("what somebody else wrote while the save ran");
+        record(&ledger, document, path, committed);
+        ledger.stamp_the_record_at(document, beyond_every_later_clock_read());
+
+        // The serialized door: it consults no instant, so no instant can refuse
+        // what comes through it.
+        assert_eq!(
+            ledger.admit_under_the_session_lock(path, ObservedState::Content(theirs)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE
+            },
+            "the serialized door reads no clock, so no clock can refuse a reading through it"
+        );
+        assert_eq!(
+            ledger.recorded_write(document),
+            None,
+            "and it supersedes the record, exactly as any accepted different state does"
+        );
+        assert_eq!(
+            ledger.published_state(path),
+            Some(ObservedState::Content(theirs)),
+            "the external state is published rather than lost"
+        );
+        assert_eq!(
+            ledger.tally().preceded_a_commit,
+            0,
+            "no clock decided anything on this path"
+        );
+
+        // The watcher path, against a record stamped exactly the same way: still
+        // refused, because a worker thread can prove nothing about when its
+        // reads happened beyond the stamp it carries.
+        let again = revision("a second external state");
+        record(&ledger, document, path, committed);
+        ledger.stamp_the_record_at(document, beyond_every_later_clock_read());
+        assert_eq!(
+            ledger.admit(1, path, ObservedState::Content(again), Instant::now()),
+            Admission::PrecedesACommit,
+            "the stamped door is unchanged: this reading cannot be placed after the record"
+        );
+        assert_eq!(
+            ledger.recorded_write(document),
+            Some(AppWrite {
+                epoch: 1,
+                revision: committed
+            }),
+            "so it retains the record, which is what keeps the save's own hints suppressible"
+        );
+        assert_eq!(ledger.tally().preceded_a_commit, 1);
+    } // End of function a_serialized_door_reading_is_never_refused_by_the_records_own_instant()
+
+    #[test]
     fn a_refused_stabilized_state_is_re_observed_rather_than_lost() {
         // **Round 3's first High**, as the engine-plus-ledger sequence it asked
         // for, and deterministic: one real temp tree, one real engine whose
@@ -1932,6 +2196,101 @@ mod tests {
             "an accepted external state supersedes the record, as it always did"
         );
     } // End of function a_refused_stabilized_state_is_re_observed_rather_than_lost()
+
+    #[test]
+    fn a_removal_the_save_path_could_not_read_is_stabilized_and_admitted() {
+        // **Round 5's High**, as the engine-plus-ledger sequence its closure
+        // rests on, and deterministic: one real temp tree, one real engine whose
+        // clock is an argument, the real `admitting_sink`, and the real
+        // `crate::watch::deliver` the worker loop calls. No thread and no sleep.
+        //
+        // The scenario is the finding's. This application commits revision A and
+        // records it; an external process removes the file before `after_a_save`
+        // re-reads it; `Workspace::refresh` raises, so **the save path publishes
+        // nothing and clears nothing** — `commands.rs`'s
+        // `a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing`
+        // is that half. What it does instead is ask the watcher, and the hint
+        // below is exactly what `WatchWorker::hint_paths` makes of that request.
+        // This is the other half: the removal is stabilized by **two** reads,
+        // admitted through the **stamped** door, and only then does the record
+        // go — because the file no longer holds what this application committed,
+        // so an entry naming A would from here on suppress somebody else's
+        // recreation of those exact bytes.
+        use espansoconfig_core::watch::engine::{
+            EngineConfig, FsWatchSource, Millis, ObservationEngine,
+        };
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().join("tree");
+        std::fs::create_dir_all(root.join("match")).expect("the watched root");
+        let path = root.join("match/base.yml");
+        let ours = "matches:\n  - trigger: ':ours'\n    replace: ours\n";
+        std::fs::write(&path, ours).expect("the committed file");
+
+        let mut source = FsWatchSource;
+        let mut engine = ObservationEngine::start(&root, EngineConfig::default(), &mut source)
+            .expect("a baseline scan");
+
+        let ledger = Arc::new(ledger_at_epoch(1));
+        let (sender, received) = std::sync::mpsc::channel::<AdmittedObservation>();
+        let downstream: AdmittedSink = Arc::new(move |admitted| {
+            let _ = sender.send(admitted);
+        });
+        let sink = admitting_sink(Arc::clone(&ledger), downstream);
+        let document = DocumentId(97);
+        let committed = ContentRevision::of_bytes(ours.as_bytes());
+
+        // 1. The commit and its record, exactly as `commit_and_record` takes it.
+        record(&ledger, document, &path, committed);
+
+        // 2. The external removal, and the refresh that could not read it. The
+        //    save path admits nothing here; all it does is hint the path, which
+        //    is the one line `WorkerMessage::ReObserve` becomes.
+        std::fs::remove_file(&path).expect("an external removal");
+        engine.hint(&path, Millis(0));
+        assert_eq!(
+            ledger.recorded_write(document),
+            Some(AppWrite {
+                epoch: 1,
+                revision: committed
+            }),
+            "the premise: the failed read left the record exactly as the save took it"
+        );
+
+        // 3. The ordinary two-read pipeline. One read is not enough — that is
+        //    the whole reason the failed refresh may not publish — so the first
+        //    pass settles nothing.
+        assert!(
+            engine.tick(Millis(200), &mut source).is_empty(),
+            "one read is not stability"
+        );
+        let read_after = later_than_now();
+        let settled = engine.tick(Millis(240), &mut source);
+        assert_eq!(settled.len(), 1, "one stabilized observation: {settled:?}");
+
+        crate::watch::deliver(&mut engine, &sink, 1, read_after, Millis(240), settled);
+        let admitted = received
+            .try_recv()
+            .expect("the stabilized removal reaches the consumer");
+        assert_eq!(
+            observed_state(&admitted.observation),
+            ObservedState::Absent,
+            "and it is the removal, stabilized rather than guessed"
+        );
+        assert_eq!(observed_path(&admitted.observation), path);
+        assert_eq!(admitted.sequence, FIRST_OBSERVATION_SEQUENCE);
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Absent),
+            "the state enters the sequence through the stamped door, once"
+        );
+        assert_eq!(
+            ledger.recorded_write(document),
+            None,
+            "and only an accepted stabilized state supersedes the record"
+        );
+        assert_eq!(ledger.tally().preceded_a_commit, 0);
+    } // End of function a_removal_the_save_path_could_not_read_is_stabilized_and_admitted()
 
     #[test]
     fn a_reading_of_an_absence_taken_before_a_commit_is_refused_too() {

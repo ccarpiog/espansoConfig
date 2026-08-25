@@ -106,7 +106,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | 2c-5 | **Restore from backup**: a whole-document replacement through the normal save path, with the full identity invalidation. Fails as a **destructive** mistake. Seven steps, per the consult's Q7 | ✅ **complete — all seven steps, and with it PHASE 2c IS COMPLETE: 2c-5 is the last of the split's ten sub-phases** (`docs/decisions/2c-split-notes.md` §2). Step 5 was split into 5a and 5b, step 6 into 6a (the instrument extended) and 6b (the bilingual reading: 36 launches across three rounds — P63–P86, then twelve re-takes P87–P98 after the round-1 review found the occlusion derivation unsound — one Medium closed by a fix round, round-2 READY with no findings, record `docs/decisions/2c-5-6-window-reading.md` §§1–13). Step 7 removed the instrument and re-derived the harness-free baseline **`1153 / 431 / 2125 / 184`**, closing after three review rounds; its round 1 also forced on-file closure for steps 1–3, whose fix rounds had lived only in this file. The six items the closure review names for the next phase to inherit explicitly are listed in `docs/reviews/phase-2c-5-7-removal.md` round 1 |
 | **2d design consult** | **Phase 2d put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2d-design.md` (140 lines, written by the consultant itself into the working tree; the sandbox was writable this time). Like every consult since 2c-4a it **changed the phase rather than confirming it**, in four places. It rules the brief's "no dirty draft → reload automatically" **wrong as stated**: this application can prove only that *no write surface capable of targeting the document is open* (R36), so the reload predicate is that narrower conservative sentence and **a pristine open surface takes the conflict path too**. It rules the `notify`-backed watcher and the whole debounce/stability/read/hash/project/validate engine **into the Tauri-free core** with `src-tauri` owning only lifecycle, the app-write revision ledger, an ordered/coalesced queue and a wake-up event — and the **event is an expendable hint**: the frontend drains a `drain_external_changes(afterSequence)` command whose answer is authoritative, because a push may be missed. Automatic reload is **not an adoption** — a distinct guarded installation over the two selection counters, never `adoptDiskVersion`, which stays the only *confirmed-install* door; a watcher-origin conflict is a **distinct discriminant inside the one shared conflict model** (there was no failed save), with `conflictChoicesFor` still the only choice-list producer. All five plan-§6.5 offers ship by reuse — but only Keep/Reload/Copy as controls: *Compare* is the always-visible read-only panel and *Save-as-new* is the staged manual-resolution recovery, never called a duplicate. Eight dependency-ordered steps (Q7); Q8 names the sharpest green-suite failure: **an incomplete or stale open-write-surface registry classifying a live surface as clean**, so an external hint auto-reloads over the only in-memory copy of a draft — which is why step 7's rebuilt instrument owes a **command counter**, closing the inherited no-command-counter limitation for the reading |
 | **2d-1** | **The core observation engine, with no caller** — consult Q7 item 1. `watch::engine::ObservationEngine` (`start`/`hint`/`tick`/`rescan`/`next_deadline`) over an injected `Millis` clock and `WatchSource` reader: validated 150–300 ms trailing-edge debounce, two-equal-reads stability on **every** route including the baseline scan, exact hashing, projection/validation through the workspace's own path, typed `Changed`/`Added`/`Removed`/`Unreadable`. `watch::correspond` binds one table per base match to both snapshots' revisions; `watch::native` confines `notify` 8.2.0 to hints-and-degradation over exactly `watched_roots()`. `watch::self_write_suppresses` is Q2's predicate **shape** — the ledger, sequences and epochs are deliberately absent (2d-3/2d-4). **Admission and discovery's acceptance are one predicate**: `WatchSource::read` takes the engine's root and applies the walk's whole rule (plain-name components, every intermediate a real directory by `symlink_metadata`, final a regular file), so no route — baseline, hint or rescan — reads what the walk cannot reach | ✅ complete — after **five review rounds**, and the tail of them is this project's named failure mode in miniature. Round 1 NOT READY (2 High: one-read baselines a truncate/write race can tear; a `.yml` symlink reading outside the watched roots — 2 Medium, 1 Low). Round 2 NOT READY: **a narrower instance of all five** — sharpest the rescan route through a newly **symlinked ancestor**, past round 1's final-component-only check. Round 3 NOT READY on one Medium: the module headline still said "deterministic" **as a name** — the concept sweep had matched the site and misread it. Round 4 NOT READY on the same shape twice more: the notes' own D2 **heading** and the consult's Q1 **ruling line** — closed by qualifying the heading in place and a correction block under the ruling, never a rewrite. Round 5 READY, no findings. Three pinning tests verified failing without their fixes; §6–§9 of `2d-1-notes.md` record each round's closure with correction blocks preserving what was false when written |
-| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult and 2d-1 done, 2d-2 next |
+| **2d-2** | **The watcher lifecycle behind the workspace session, and the real-filesystem adapter** — consult Q7 item 2, the one step whose principal integration test belongs in `src-tauri`. The worker thread, its inbox, the epoch tag, cancellation and join, and `watch_check.rs`'s real-FSEvents evidence | ✅ complete — closed **READY at round 5** of its review. Round 1's High was **sandbox-confounded evidence** — the Codex sandbox blocks FSEvents delivery, so a delivery-dependent test times out there while the supported host passes it repeatedly. That precedent now binds every FSEvents-adjacent review in this project: they are briefed as **static**, with host-measured numbers supplied |
+| **2d-3** | **The write ledger and the admission gate** — consult Q7 item 3: `WriteLedger`'s record `last_app_write[DocumentId] = { workspace_epoch, revision, recorded_at }`, the per-epoch sequence allocator, the coalescing published-state map, and a **commit gate** (a second mutex, distinct from the state mutex, held across `save_document` *and* the record, by RAII). The intake is `WorkspaceSession::observing`; `run_one_save` delegates to `commit_and_record`; both save-path refreshes admit through the same `decide`. Lock order **session → gate → state**, everywhere. No command, no event, no queue, no wire, no frontend file — Q3 holds | 🔶 **implemented, every gate green, NOT closed** — the step review stands at **round 5 of an open-ended tail**, and **every one of the five rounds has found a narrower instance of the finding the round before had just closed**. The next action is round 6, against the round-5 fix. See the "Next action" section |
+| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult, 2d-1 and 2d-2 done; **2d-3 implemented and under review**, 2d-4 next after it closes |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -3656,6 +3658,79 @@ The third finding is the one worth remembering: the checkpoint had explicitly in
 than thin the sweep"*, and the phase thinned it anyway, which turned the plan's exit criterion into a
 weaker claim wearing the criterion's words. Memoising made the sweep **exhaustive and twice as fast**, so
 the instruction was not merely principled — it was cheaper.
+
+---
+
+## Verification — Phase 2d-3 review rounds 4 and 5 (IN PROGRESS — both NOT READY, both fixes in the tree, round 6 owed)
+
+Both rounds were commissioned as **static** reviews, by the precedent 2d-2's round-1 High set: the
+Codex sandbox blocks FSEvents delivery, so a delivery-dependent test times out there while the
+supported host passes it repeatedly. Each brief carried host-measured numbers instead, taken by the
+orchestrator on the tree under review rather than reported by the author.
+
+| Command | Round 4's brief | After the round-4 fix | After the round-5 fix |
+|---|---|---|---|
+| `cargo test --workspace` | 1249 / 0 | 1251 / 0 | **1256 / 0** |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 20 / 0 (68 s) | 20 / 0 (62 s) | **20 / 0 (63 s)** |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean |
+| `cargo fmt --check` | clean | clean | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty |
+
+The frontend was never touched across the whole step — `git diff --stat` names only
+`crates/espansoconfig-core/src/watch/engine.rs`, `src-tauri/src/{commands,ledger,main,watch}.rs` and
+three documents — so `npm run check` 431 files, `npm test` 2125 and `npm run build` 184 modules are
+carried, not re-measured.
+
+**Round 4 — NOT READY (1 High, 1 Low).** The High: a clock-equality refusal on the **save path**
+could permanently lose a differing post-save external observation, because that door had neither an
+engine settlement to revert nor a retry. It falsified `2d-3-notes.md` §5 item 16, which the round-3
+fix round had written as an honestly bounded hole claiming the cost was one *publication* and that
+the watcher's own hints would report the change — `2d-2-notes.md` §2.3 expressly permits a healthy
+native backend to miss a hint. The Low: `revert_settlement`'s doc promised "the same observation
+again" though it re-reads. Cleared without findings: the one-pass `undo` lifetime, rescan ordering,
+the exhaustive sink answer, the strict `Instant` proof, lock order, post-guard rollback, no weakened
+test, no 2d-4 scope creep.
+
+**The round-4 fix.** `decide`'s chronology operand became the **private** `ReadChronology`;
+`admit_at_current_epoch` was renamed `admit_under_the_session_lock`, lost its `Instant`, and can
+build only `SerializedWithEveryRecord`, which skips the chronology arm — so the save path consults
+no clock and `PrecedesACommit` is unreachable there. `decide` matches the enum exhaustively, making a
+future third proof a compile error. Its premise was re-derived from the call graph rather than
+inherited, and round 5 later confirmed it independently.
+
+**Round 5 — NOT READY (1 High, 2 Low).** The High is **§5 item 18 judged quietly optimistic**: a
+post-save refresh that *fails* evicted the cache, admitted nothing and returned `Saved`, losing the
+same external change round 4 called High, reached through `Err` instead. Both Lows were
+**name-position misses by the round-4 fix round's own sweep** — documentation still describing
+save-path stamping that no longer happens, `main.rs` saying "three things" where there are now four,
+and a test named for a session-lock premise it does not exercise. Round 5 also **confirmed** the
+chronology premise independently, `ReadChronology`'s privacy, the lock order, the leaf mutexes and
+the absence of 2d-4 scope creep.
+
+**The round-5 fix.** `ReObserver::re_observe(path)` puts one `WorkerMessage::ReObserve` on the
+running watcher's existing inbox; the worker absorbs it through the **extracted**
+`WatchWorker::hint_paths`, so a re-observation and a native hint are one code path; the engine's
+ordinary two reads settle and the stamped door admits. Nothing publishes from the failed single read
+and nothing clears the record. Three properties were verified in code before it was built, and the
+orchestrator re-verified the first two: the inbox is `std::sync::mpsc::channel()` — **unbounded**, so
+the send cannot block under the session lock, which is the whole lock-order argument (no
+`sync_channel` exists in the file); a workspace with no watcher answers `ReObserveOutcome::NoWatcher`
+rather than panicking or erroring a save; and the path adds no event, queue, command, wire type or
+serialization.
+
+**A sixth narrower instance, found by the round-5 fix round in its own change before any reviewer saw
+it**: `run_one_save`'s `may_have_written()` arm evicted the cache and returned having read nothing —
+the same lost-observation shape through a third arm. Closed by `after_an_uncertain_write`.
+
+**Ten neuter runs across the two fix rounds**, each disabling exactly one thing the fix added and
+each restored: the round-4 pair failed `left: PrecedesACommit, right: Admitted { sequence: 1 }`
+(16/1) and `left: None, right: Some(Content(…))` (72/1); the round-5 four failed with the
+re-observation missing (75/1, three times) and `left: NoWatcher, right: Asked` (4/1).
+
+**Not driven, and stated rather than hoped about** (`2d-3-notes.md` §11.6): no test pushes a
+`WorkerMessage::ReObserve` through a *spawned* worker, because that would put a second real FSEvents
+session into `watch_check` and move its 20/20. The ask, the message's arrival and the
+engine-plus-gate stabilization are each driven separately.
 
 ---
 
@@ -8641,6 +8716,136 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, but the step review stands at round 5, and the "expected five" is spent. THE NEXT ACTION IS ROUND 6 OF THE 2d-3 REVIEW, against the round-5 fix.**
+
+**Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–5 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 6's brief is
+written from round 5's fix, exactly as rounds 2–5 were written from theirs.
+
+**The tail is the story of this step, and it has not converged.** Five rounds, and **every single one
+found a narrower instance of the finding the round before had just closed** — rounds 3, 4 and 5 each
+found one inside the previous fix round's own new code or its own new prose. The round-5 fix round
+then found a **sixth** in its own change before any reviewer saw it. Do not brief round 6 as a
+formality; brief it as the next instance hunt.
+
+**A three-instance pattern the record now carries explicitly, and the reason round 6 must attack §5
+directly.** `2d-3-notes.md` §5 is *Holes, stated rather than hoped about* — and three of its items
+have now been written as honestly bounded and then found to be real defects: **item 10** (round 2),
+**item 16** (round 4) and **item 18** (round 5). Each time the record was not merely incomplete but
+**wrong on both of its claims about the cost**. Round 6 must judge every remaining open item of §5
+the way rounds 2, 4 and 5 judged those three, and the default posture is suspicion, not deference.
+
+**Where things stand after the round-5 fix.** The chronology operand of `decide` is the private
+`ReadChronology`: `WriteLedger::admit` can build only `StampedBeforeTheRead(Instant)`,
+`admit_under_the_session_lock` only `SerializedWithEveryRecord`, and `decide` matches it
+exhaustively, so a third proof is a compile error rather than a skipped check. **The save path
+consults no clock at all**, so no clock resolution can collide on it. A refresh that *fails* no
+longer drops the external change: `ReObserver::re_observe(path)` puts one `WorkerMessage::ReObserve`
+on the running watcher's existing inbox, the worker absorbs it through the **extracted**
+`WatchWorker::hint_paths` so a re-observation and a native hint are one code path, and the engine's
+ordinary two reads then settle and the stamped door admits. **Nothing publishes from a failed single
+read and nothing clears the record from one.**
+
+#### The three facts the round-5 fix rests on, all verified in code — re-derive them, do not inherit them
+
+1. **The inbox is `std::sync::mpsc::channel()` — unbounded.** This is the whole lock-order argument
+   for the new call: the save holds the session lock when it sends, and the worker may take the
+   session lock in its sink callback, so a **bounded** channel or any blocking send would be exactly
+   the deadlock this module's one-sentence argument rules out. Verified: no `sync_channel` anywhere
+   in `src-tauri/src/watch.rs`, and the channel's internal lock is never held across a sink call.
+2. **A workspace with no watcher degrades to `ReObserveOutcome::NoWatcher`** — never a panic, never
+   an error, and never anything that reaches a save's result. A committed write is never afterwards
+   reported as an error, and that binds this path too.
+3. **The chronology premise itself** — that the production call graph serializes saves and refreshes —
+   was re-derived by round 5 independently of the fix round that claimed it, and **holds**, including
+   for `conflict_after_the_lock`. `ReadChronology` is private and no production caller can select a
+   variant.
+
+#### What round 6 must attack
+
+Keep the two standing rules, and note that **round 5 caught the round-4 fix round failing the second
+one twice**, so treat the previous sweep as known-unreliable and redo it from the current code:
+**sweep for the shape, never for the words of the closed finding**, and **sweep name positions —
+headlines, section headings, bold ruling lines, first sentences, doc comments, module headers, test
+names, and every mention of a renamed item — as a pass distinct from the prose sweep.** Two renames
+landed in the round-5 fix and both are name-position risk: `SaveRecords` → `SessionSideOfASave` (it
+gained a non-record third field) and the new narrower `ObservationSide` its two tails take.
+
+Specific surfaces:
+
+- **`ReObserver` and the extracted `hint_paths`** — the fix's new machinery, and the first time the
+  save path reaches the watcher at all. Can a re-observation and a native hint diverge now that they
+  are one code path? What happens to a `ReObserve` for a path the engine does not watch, or one
+  arriving after the worker has begun shutdown, or during an epoch change? Does the extraction
+  change any existing hint's behaviour?
+- **`after_an_uncertain_write`** — the *sixth* narrower instance, found by the round-5 fix round in
+  `run_one_save`'s `may_have_written()` arm, which had evicted the cache and returned having read
+  nothing. Judge the new arm as harshly as a reviewer would judge one it found itself.
+- **The one thing deliberately not driven** (`2d-3-notes.md` §11.6): **no test pushes
+  `WorkerMessage::ReObserve` through a *spawned* worker.** The three halves that are driven are the
+  ask, the message's arrival, and the engine-plus-gate stabilization. The stated reason is that a
+  spawned worker would put another real FSEvents session into `watch_check` and move its 20/20.
+  Judge that as honestly bounded or as the seventh instance.
+- **Every remaining open item of §5**, per the three-instance pattern above.
+- **The record against the code** — `docs/decisions/2d-3-notes.md` (§1's headline and correction
+  blocks, §5, §6's gate table, and §7–§11, one per fix round) and the correction blocks in
+  `docs/decisions/2d-1-notes.md` §2.1. **Every one of the five rounds so far found a false claim in
+  this record.** Check the notes against the code, not the code against the notes.
+
+**Brief the review the way rounds 1–5 were briefed, and this is not optional:** the Codex sandbox
+**blocks FSEvents delivery**, so a delivery-dependent test times out there while the supported host
+passes it repeatedly. Tell the reviewer to work **statically**, never to run `cargo test` or anything
+matching `watch_check::`, and supply the host-measured numbers in the brief. 2d-2's round-1 High was
+sandbox-confounded evidence, and that precedent binds every FSEvents-adjacent review.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-3-ledger.md          — rounds 1–5 verbatim. THE work list for round 6.
+# docs/decisions/2d-3-notes.md               — the record: the decisions, §5's holes stated open,
+#   §6's gate table, and §7–§11, one section per fix round
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q2 is the suppression ruling
+#   and carries the truthful sentence; Q7 item 3 is this step's spec; Q1 (with its round-4
+#   correction block) and Q3 (nothing of the wire yet) bind it
+# docs/decisions/2d-1-notes.md               — the engine's contract, plus the correction blocks
+#   this step added to §2.1
+# docs/decisions/2d-2-notes.md               — §2.1, the lock and join argument this composes with;
+#   §2.3, which expressly permits a healthy native backend to miss a hint
+```
+
+#### The gate baseline — all measured on this tree by the orchestrator, not by the author
+
+- **`1256 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The Rust ladder across this step's review: 1249 at round 4's brief,
+  1251 after the round-4 fix, **1256** after the round-5 fix. Focused serial
+  `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` is **20/20**
+  (63 s) and belongs to every future Rust gate run. Clippy `-D warnings` and `cargo fmt --check`
+  clean; `cargo tree -p espansoconfig-core | rg tauri` empty. **The frontend was never touched**
+  across the whole step, so its three numbers are carried, not re-measured.
+- **The scar still binds, and this step produced its sharpest measurement.** The workspace suite is
+  evidence on a **quiet host only**: two *contended* runs on a byte-identical tree failed with 9 and
+  10 `watch_check` bounded-wait timeouts (389 s vs 85.8 s) while `spindump`, a Virtualization VM and
+  `corespotlightd` saturated the machine — and the serial gate passed 20/20 through the same
+  weather. Re-run quietly before concluding anything from a timeout. Recorded in `2d-3-notes.md` §6.
+
+#### Open items 2d-3 still carries into 2d-4 (stated, not discharged)
+
+- The production `ObservationSink` discards, so a sequence and a publication are spent on a value no
+  present code recovers; those save-path publications are where consult Q5's *save-origin conflict
+  wins over a native duplicate* must land.
+- `SavedDocument::revision` is a **post-rename read-back**, so a foreign process writing between the
+  rename and that read makes this session record *their* revision as its own (§5 item 15, inherited,
+  not introduced here). The chronology stamp does not touch it: it orders *events*, and this is a
+  question of *whose bytes*.
+- A stamp taken too **late** has no test that can fail, and neither has a dropped sink answer.
+- No test pushes a `ReObserve` through a spawned worker (§11.6).
+
+---
+
+### ⚠️ HISTORICAL — the round-3→round-4 handoff, superseded by the round-5 status above. Rounds 4 and 5 are executed and their fixes are in the tree; both returned NOT READY, and the tail is still open.
 
 ### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — the write ledger and the admission gate are built and every gate is green, but the step review stands at round 3 of an expected five. THE NEXT ACTION IS ROUND 4 OF THE 2d-3 REVIEW, against the round-3 fix.**
 

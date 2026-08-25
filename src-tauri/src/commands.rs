@@ -88,13 +88,28 @@
 //! rule here is: six copies drift, and this one drifts **silently**.
 //!
 //! **The record alone does not give that property, and this module composes
-//! with two other things that do.** [`commit_and_record`] holds `crate::ledger`'s
+//! with four other things that do** — the commit gate, the watcher's stamp, the
+//! session lock, and, since the round-5 fix round, a re-observation asked of the
+//! watcher. [`commit_and_record`] holds `crate::ledger`'s
 //! commit gate across the transaction, so no admission can decide between the
-//! rename and the record; and every observation carries an instant its reads
-//! follow, which is what places a reading the engine had already stabilized
-//! before this save began — a gate serializes decisions and cannot reach a read
-//! that already happened. The two save-path refreshes below take that instant on
-//! the line above their own `Workspace::refresh`, for the same reason.
+//! rename and the record; and every **watcher** observation carries an instant
+//! its reads follow, which is what places a reading the engine had already
+//! stabilized before this save began — a gate serializes decisions and cannot
+//! reach a read that already happened. The two save-path refreshes below carry
+//! **no** such instant, since the round-4 fix round: they run under the session
+//! lock, which is the lock every producer of a record holds, so their ordering
+//! is program order rather than a clock comparison two adjacent reads could lose
+//! ([`WriteLedger::admit_under_the_session_lock`]).
+//!
+//! **And where this application has no reading to bring at all**, since the
+//! round-5 fix round, it asks for one rather than inventing one or leaving the
+//! file to a hint nobody promised. Three arms are in that position — a refresh
+//! that raised in [`after_a_save`] or in [`conflict_after_the_lock`], and
+//! [`after_an_uncertain_write`], whose transaction may have renamed without
+//! saying what it wrote — and each hands the path to
+//! [`crate::watch::ReObserver::re_observe`]. Nothing is published from a read
+//! that did not complete and no record is cleared by one; the state that reaches
+//! the ledger is the engine's, read twice and stamped.
 //!
 //! What it licenses is narrower than authorship and is written on
 //! `crate::ledger`: the bytes on disk hash to what this application last
@@ -142,7 +157,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -169,8 +183,8 @@ use crate::error::CommandError;
 use crate::ledger::{admitting_sink, discarding_sink, AdmittedSink, ObservedState, WriteLedger};
 use crate::save::SaveResult;
 use crate::watch::{
-    EpochSpaceExhausted, LifecycleConfig, ObservationSink, WatchStatusView, WatcherLifecycle,
-    WorkspaceEpochs, NO_EPOCH,
+    EpochSpaceExhausted, LifecycleConfig, ObservationSink, ReObserver, WatchStatusView,
+    WatcherLifecycle, WorkspaceEpochs, NO_EPOCH,
 };
 
 /// The one key a match list lives under, in the document's root mapping.
@@ -732,10 +746,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
+        self.with_open(|workspace, session_side| {
             move_one_match(
                 workspace,
-                records,
+                session_side,
                 id,
                 after,
                 base_revision,
@@ -789,10 +803,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
+        self.with_open(|workspace, session_side| {
             save_one_match(
                 workspace,
-                records,
+                session_side,
                 id,
                 draft,
                 base_revision,
@@ -846,10 +860,10 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
+        self.with_open(|workspace, session_side| {
             create_one_match(
                 workspace,
-                records,
+                session_side,
                 document,
                 new_match,
                 position,
@@ -892,8 +906,8 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
-            delete_one_match(workspace, records, id, base_revision, acknowledgement)
+        self.with_open(|workspace, session_side| {
+            delete_one_match(workspace, session_side, id, base_revision, acknowledgement)
         })
     } // End of function delete_match()
 
@@ -951,10 +965,10 @@ impl WorkspaceSession {
         text: &str,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
+        self.with_open(|workspace, session_side| {
             save_one_raw_document(
                 workspace,
-                records,
+                session_side,
                 document,
                 base_revision,
                 text,
@@ -1016,8 +1030,8 @@ impl WorkspaceSession {
         base_revision: ContentRevision,
         acknowledgement: &Acknowledgement,
     ) -> Result<SaveResult, CommandError> {
-        self.with_open(|workspace, records| {
-            duplicate_one_match(workspace, records, id, base_revision, acknowledgement)
+        self.with_open(|workspace, session_side| {
+            duplicate_one_match(workspace, session_side, id, base_revision, acknowledgement)
         })
     } // End of function duplicate_match()
 
@@ -1085,7 +1099,7 @@ impl WorkspaceSession {
     /// write. It exists for the same reason that one does — the refusal for *no
     /// workspace is open* is written once — and it hands out the borrows
     /// separately, which is what lets the planning free functions take a
-    /// `&mut Workspace` and a [`SaveRecords`] at the same time.
+    /// `&mut Workspace` and a [`SessionSideOfASave`] at the same time.
     ///
     /// **A writing method uses this one and not [`WorkspaceSession::with_workspace`]**,
     /// because a save with no [`BackupSession`] is a save with no safety net:
@@ -1093,28 +1107,40 @@ impl WorkspaceSession {
     /// `None` means *no backup at all*, and a method that could not reach the
     /// session's would have nothing to pass but that.
     ///
-    /// Since Phase 2d-3 the second borrow is a [`SaveRecords`] rather than a
-    /// bare [`BackupSession`], because a save now writes to **two** session-owned
-    /// records and they travel together for the same reason: a planner that
-    /// could reach one without the other could write with no safety net, or
-    /// commit bytes this session cannot afterwards tell from an external write.
+    /// Since Phase 2d-3 the second borrow is a [`SessionSideOfASave`] rather than a
+    /// bare [`BackupSession`], because a save now reaches **three** things this
+    /// session owns and they travel together for the same reason: a planner that
+    /// could reach one without the others could write with no safety net, commit
+    /// bytes this session cannot afterwards tell from an external write, or drop
+    /// a reading it could not use.
     /// The ledger comes from the session rather than from [`Open`] because a
     /// replacement empties it rather than replacing it, and because the
-    /// watcher's own admission gate holds the same one.
+    /// watcher's own admission gate holds the same one; the re-observation
+    /// handle comes from [`Open`] because a watcher's lifetime is exactly one
+    /// open workspace's.
+    ///
+    /// **The three borrows are handed out separately and disjointly**, which is
+    /// what lets the planning free functions hold a `&mut Workspace` while
+    /// holding the other two. Nothing here runs under a ledger guard — the
+    /// session mutex is the only lock held across the closure — so the lock
+    /// order stays session → gate → state.
     fn with_open<T>(
         &self,
-        action: impl FnOnce(&mut Workspace, SaveRecords<'_>) -> Result<T, CommandError>,
+        action: impl FnOnce(&mut Workspace, SessionSideOfASave<'_>) -> Result<T, CommandError>,
     ) -> Result<T, CommandError> {
         let mut guard = self.lock();
         match guard.as_mut() {
             None => Err(CommandError::NoWorkspaceOpen),
             Some(Open {
-                workspace, backups, ..
+                workspace,
+                backups,
+                watcher,
             }) => action(
                 workspace,
-                SaveRecords {
+                SessionSideOfASave {
                     backups,
                     ledger: &self.ledger,
+                    watcher: watcher.re_observer(),
                 },
             ),
         }
@@ -1275,22 +1301,74 @@ fn document_at(
     Ok(snapshot)
 } // End of function document_at()
 
-/// The two session-owned records a save writes to, lent together.
+/// Everything of the open session a save reaches, beside the workspace itself,
+/// lent together.
 ///
-/// One value rather than two parameters, because neither is a planner's to
-/// choose and the six of them pass both straight through: a
+/// One value rather than three parameters, because not one of them is a
+/// planner's to choose and the six of them pass all three straight through: a
 /// [`BackupSession`] is *where this session's pre-save copies go*, a
-/// [`WriteLedger`] is *what this session committed last, per document*, and a
-/// save that reached one without the other could write with no safety net or
-/// commit bytes it can never afterwards tell from an external write.
+/// [`WriteLedger`] is *what this session committed last, per document*, a
+/// [`ReObserver`] is *the watcher to ask when this save could not read the file
+/// it just wrote*, and a save that reached one without the others could write
+/// with no safety net, commit bytes it can never afterwards tell from an
+/// external write, or drop a reading nothing else will take.
 /// [`WorkspaceSession::with_open`] is the only producer.
+///
+/// **It was named `SaveRecords` until the round-5 fix round, and the name went
+/// with the third field.** Two of these are records a save *writes to*; the
+/// third is a handle it *asks through* and writes nothing at all. A struct
+/// whose name covers two of its three fields is the shape two of round 5's
+/// findings had, so the name says what the value is instead.
 #[derive(Clone, Copy)]
-struct SaveRecords<'a> {
+struct SessionSideOfASave<'a> {
     /// Plan section 6.6 step 13's pre-save copy — never `None`, see
     /// [`WorkspaceSession::open`].
     backups: &'a BackupSession,
     /// Phase 2d-3's app-write record, written only by [`run_one_save`].
     ledger: &'a WriteLedger,
+    /// The open workspace's watcher, narrowed to the one thing a save may ask
+    /// of it — *observe this path again* (`crate::watch`'s *a save may ask*
+    /// section, and this step's round-5 High).
+    ///
+    /// Every save carries it — the two tails receive it inside an
+    /// [`ObservationSide`] — but it is **asked** on exactly three arms and no
+    /// others, all of them arms on which this application either performed a
+    /// read it could not use or performed a write it could not describe:
+    /// [`after_a_save`]'s failed refresh, [`conflict_after_the_lock`]'s failed
+    /// refresh, and [`after_an_uncertain_write`]. Nothing it can answer changes
+    /// what was written to disk or what a save returns.
+    watcher: ReObserver<'a>,
+}
+
+impl<'a> SessionSideOfASave<'a> {
+    /// The two of these three that a save's **tail** may reach — see
+    /// [`ObservationSide`].
+    fn observation_side(self) -> ObservationSide<'a> {
+        ObservationSide {
+            ledger: self.ledger,
+            watcher: self.watcher,
+        }
+    }
+}
+
+/// The observation side of one save: what this session last committed, and the
+/// watcher it can ask for a reading it could not take itself.
+///
+/// **Narrower than [`SessionSideOfASave`] on purpose, and not to satisfy an
+/// argument count.** [`after_a_save`] and [`conflict_after_the_lock`] run after
+/// the transaction has returned, so a [`BackupSession`] in their reach would be
+/// a pre-save copy taken after the save — which is either useless or a write
+/// outside `espansoconfig_core::persist::save_document`, the one entry point
+/// allowed to write a user's file. The type is what says they cannot; the
+/// argument count is only what made the question arise.
+#[derive(Clone, Copy)]
+struct ObservationSide<'a> {
+    /// Phase 2d-3's app-write record. A tail **reads** it through an admission
+    /// and never writes one: [`run_one_save`] took the only record this save
+    /// takes, before either tail ran.
+    ledger: &'a WriteLedger,
+    /// The open workspace's watcher, narrowed to *observe this path again*.
+    watcher: ReObserver<'a>,
 }
 
 /// One save's own inputs, beside the session it runs against.
@@ -1379,10 +1457,14 @@ struct OneSave<'a> {
 /// last committed, which proves the text is identical and not who wrote it.
 ///
 /// Both refreshes below are themselves observations of the disk, and both go
-/// through the ledger's **same** admission a native hint does — same decision,
-/// same four operands, their own `read_after` stamped before their own read — so
-/// a later hint at the state they saw is a duplicate rather than a second
-/// report. Both run
+/// through the ledger's **same** decision a native hint does — the same
+/// suppression, supersession, coalescing and sequence allocation — so a later
+/// hint at the state they saw is a duplicate rather than a second report. What
+/// differs is only how each proves *when* its reads happened: a native hint
+/// carries a stamp taken before them, while these two prove it by construction,
+/// because this whole function runs under the session lock and that is the lock
+/// every producer of an app-write record holds
+/// ([`WriteLedger::admit_under_the_session_lock`]). Both run
 /// **after** [`commit_and_record`] has returned and released the commit gate,
 /// which is not an incidental ordering: an admission takes that gate, and a
 /// `std::sync::Mutex` is not reentrant.
@@ -1396,10 +1478,32 @@ struct OneSave<'a> {
 /// - **the semantic gate declined** — [`SaveResult::Refused`], carrying the
 ///   findings a caller hands back to make the same save proceed;
 /// - **anything else** — [`CommandError::SaveFailed`], and if the failure
-///   [`SaveError::may_have_written`] the cached parse is **evicted**: the rename
-///   may have completed, so the parse may describe bytes that are gone. Dropping
-///   it costs one reparse and stops the window showing a file that no longer
-///   exists in that form.
+///   [`SaveError::may_have_written`] the cached parse is **evicted** and the
+///   watcher is asked for a second look ([`after_an_uncertain_write`]): the
+///   rename may have completed, so the parse may describe bytes that are gone.
+///   Dropping it costs one reparse and stops the window showing a file that no
+///   longer exists in that form.
+///
+/// # A read this application could not use is handed to the watcher, never
+/// published
+///
+/// This step's **round-5 High**, and it applies to three arms of this function:
+/// the two refreshes that can fail and the uncertain write that reads nothing at
+/// all. On each of them this application has disturbed the file and cannot say
+/// what it now holds — the refresh raised, or the rename's outcome is unknown —
+/// and until the round-5 fix each simply returned, leaving the state on disk to
+/// be discovered by a native hint that
+/// `docs/decisions/2d-2-notes.md` §2.3 expressly declines to guarantee.
+///
+/// **The failed read is not published and the app-write record is not cleared**,
+/// because a single failed read is not a stabilized observation: it would put an
+/// `Absent` or `Unreadable` state into the sequence that never stably existed
+/// and, by clearing the record, make this save's own hints foreign. What happens
+/// instead is [`ReObserver::re_observe`]: the path goes back through the
+/// watcher's ordinary two-read pipeline and is admitted, suppressed or coalesced
+/// through the **stamped** door like any other observation. Asking cannot fail a
+/// save — see that method — and a workspace with no watcher degrades to the
+/// coverage it had before.
 ///
 /// # Errors
 ///
@@ -1407,7 +1511,7 @@ struct OneSave<'a> {
 /// workspace's own for a document context that cannot be read.
 fn run_one_save(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     save: OneSave<'_>,
 ) -> Result<SaveResult, CommandError> {
     let OneSave {
@@ -1427,16 +1531,16 @@ fn run_one_save(
         content,
         acknowledgement,
         // Never `None`. See `WorkspaceSession::open`.
-        backups: Some(records.backups),
+        backups: Some(session_side.backups),
     };
     // The transaction and its record are one window at the ledger's commit
     // gate, and the gate is released before either refresh below — see
     // `commit_and_record`.
-    let outcome = commit_and_record(records.ledger, document, &context.path, request);
+    let outcome = commit_and_record(session_side.ledger, document, &context.path, request);
     match outcome {
         Ok(saved) => Ok(after_a_save(
             workspace,
-            records.ledger,
+            session_side.observation_side(),
             document,
             &context.path,
             at,
@@ -1446,7 +1550,7 @@ fn run_one_save(
             expected, found, ..
         }) => conflict_after_the_lock(
             workspace,
-            records.ledger,
+            session_side.observation_side(),
             document,
             &context.path,
             expected,
@@ -1459,7 +1563,7 @@ fn run_one_save(
         }),
         Err(error) => {
             if error.may_have_written() {
-                let _ = workspace.evict(document);
+                after_an_uncertain_write(workspace, session_side.watcher, document, &context.path);
             }
             Err(CommandError::SaveFailed { error })
         }
@@ -1563,7 +1667,7 @@ fn committed_revision(outcome: &Result<SavedDocument, SaveError>) -> Option<Cont
 /// arrive here as two independent borrows.
 fn move_one_match(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     id: MatchId,
     after: Option<MatchId>,
     base_revision: ContentRevision,
@@ -1606,7 +1710,7 @@ fn move_one_match(
     let edits = [DocumentEdit::MoveItem(edit)];
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document: id.document,
             base_revision,
@@ -1659,7 +1763,7 @@ fn move_one_match(
 /// [`SaveResult::Conflict`] rather than a wrong write.
 fn save_one_match(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     id: MatchId,
     draft: &MatchDraft,
     base_revision: ContentRevision,
@@ -1691,7 +1795,7 @@ fn save_one_match(
         plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document: id.document,
             base_revision,
@@ -1786,7 +1890,7 @@ fn placement_of<'a>(
 /// document names a match list at all.
 fn create_one_match(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     document: DocumentId,
     new_match: &NewMatch,
     position: &NewMatchPosition,
@@ -1847,7 +1951,7 @@ fn create_one_match(
     ))];
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document,
             base_revision,
@@ -1882,7 +1986,7 @@ fn create_one_match(
 /// instead.
 fn delete_one_match(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     id: MatchId,
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
@@ -1905,7 +2009,7 @@ fn delete_one_match(
     ))];
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document: id.document,
             base_revision,
@@ -1946,7 +2050,7 @@ fn delete_one_match(
 /// unchanged, because the identity codes mean the same thing for every command.
 fn duplicate_one_match(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     id: MatchId,
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
@@ -1976,7 +2080,7 @@ fn duplicate_one_match(
     let edits = [DocumentEdit::DuplicateItem(edit)];
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document: id.document,
             base_revision,
@@ -2024,7 +2128,7 @@ fn duplicate_one_match(
 /// which is design-consult Q3's ruling and is permanent by construction.
 fn save_one_raw_document(
     workspace: &mut Workspace,
-    records: SaveRecords<'_>,
+    session_side: SessionSideOfASave<'_>,
     document: DocumentId,
     base_revision: ContentRevision,
     text: &str,
@@ -2032,7 +2136,7 @@ fn save_one_raw_document(
 ) -> Result<SaveResult, CommandError> {
     run_one_save(
         workspace,
-        records,
+        session_side,
         OneSave {
             document,
             base_revision,
@@ -2126,27 +2230,49 @@ fn save_one_raw_document(
 /// earlier and the caller's base was older still. Suppressing there is correct
 /// and is the predicate's own limit — byte identity, never authorship.
 ///
+/// The door is [`WriteLedger::admit_under_the_session_lock`], and it takes no
+/// chronology stamp: this function runs under the session lock, which is the
+/// lock every producer of an app-write record holds, so any record it is decided
+/// against provably precedes the refresh. That is round 4's fix, and what it
+/// removes is the one refusal this path had no way to answer.
+///
+/// # A refresh that *fails* asks the watcher instead of guessing
+///
+/// This step's **round-5 High**, on this function's one error path. A refresh
+/// that raises has no state to admit: it is a single read that did not
+/// complete, so publishing `Absent` or `Unreadable` from it would put a state
+/// into the sequence that was never proved stable **and clear the app-write
+/// record**. The path is therefore handed to
+/// [`ReObserver::re_observe`], which puts it back through the watcher's
+/// ordinary two-read pipeline; whatever stabilizes is decided by the stamped
+/// door like any other observation. The refusal this function returns is
+/// unchanged, and the ask cannot change it: nothing about a conflict payload
+/// depends on whether a watcher was listening.
+///
 /// # Errors
 ///
 /// The refresh's own failure, unchanged: a file that cannot be re-read has no
 /// disk side to describe, and inventing one would be worse than refusing.
 fn conflict_after_the_lock(
     workspace: &mut Workspace,
-    ledger: &WriteLedger,
+    side: ObservationSide<'_>,
     document: DocumentId,
     path: &Path,
     expected: ContentRevision,
     found: ContentRevision,
     reapply: &ReapplyRequest,
 ) -> Result<SaveResult, CommandError> {
-    // Stamped **before** the read it bounds, which is the whole of its
-    // contribution: `crate::ledger::WriteLedger::admit_at_current_epoch` uses it
-    // to place this reading against this application's own last committed write
-    // to the path, and a stamp taken after the refresh would place it wrongly in
-    // the one direction that matters. Nothing in the type system pairs the two
-    // lines; their adjacency does.
-    let read_after = Instant::now();
-    let fresh = workspace.refresh(document)?;
+    let fresh = match workspace.refresh(document) {
+        Ok(fresh) => fresh,
+        Err(error) => {
+            // Nothing is admitted from a read that did not complete, and the
+            // record is left exactly as the transaction left it — which on this
+            // path is *untouched*, because a conflict records nothing. The
+            // watcher is asked to observe the path properly instead.
+            let _asked = side.watcher.re_observe(path);
+            return Err(CommandError::from(error));
+        }
+    }; // End of the match over a refresh that may not complete
     let disk_text = fresh.source.clone();
     // The fourth operand out of the same snapshot, and the reason it is computed
     // here rather than anywhere else: `reapply` carries anchors made *before*
@@ -2167,7 +2293,16 @@ fn conflict_after_the_lock(
     // `Admission::Admitted` into a value a window can drain, and until it
     // exists the publication *is* the effect — one sequence spent, one state
     // published.
-    let _ = ledger.admit_at_current_epoch(path, ObservedState::Content(disk.revision), read_after);
+    //
+    // **No stamp, and that is the round-4 fix**: this call runs under the
+    // session lock, which is the lock every producer of an app-write record
+    // holds, so the record it is decided against provably precedes the refresh
+    // above in program order. A stamp would put a clock between two events this
+    // session has already ordered, and a clock that collides refuses a reading
+    // nothing here could retry.
+    let _ = side
+        .ledger
+        .admit_under_the_session_lock(path, ObservedState::Content(disk.revision));
     Ok(SaveResult::Conflict {
         expected,
         found,
@@ -2190,7 +2325,9 @@ fn conflict_after_the_lock(
 /// The re-read is [`Workspace::refresh`], which reparses only when the bytes
 /// changed. A read that fails leaves the entry **evicted** rather than stale: a
 /// missing parse costs the next caller a read, and a stale one is this
-/// application showing a file it no longer has.
+/// application showing a file it no longer has. **Since the round-5 fix round it
+/// also asks the watcher to observe that path again** — see the last section
+/// below, which is this step's round-5 High.
 ///
 /// # `at` is where the match is *afterwards*, and the two callers compute it
 /// differently
@@ -2242,9 +2379,43 @@ fn conflict_after_the_lock(
 /// bytes this save committed — already recorded, and suppressed by that record
 /// rather than published — or a skipped commit, where the file holds what the
 /// caller already had and there is no observation to make.
+///
+/// **A disagreeing refresh cannot be refused, since the round-4 fix round**, and
+/// that is the point of it rather than a detail. It used to hand the ledger an
+/// `Instant` taken microseconds after its own save's record, on one thread, into
+/// a comparison that accepts only a strictly later value — so a coarse clock
+/// answering both calls equally refused the admission, and nothing here could
+/// answer that refusal: no engine settlement to take back, no loop to retry, and
+/// no promise from the native backend that it would report the same replacement
+/// (`docs/decisions/2d-2-notes.md` §2.3). The consult requires this observation
+/// to be queued as external, so losing it was losing an external change.
+/// [`WriteLedger::admit_under_the_session_lock`] proves the same ordering from
+/// the session lock this function is already inside, and consults no clock.
+///
+/// # A refresh that *fails* is handed to the watcher, and admits nothing
+///
+/// This step's **round-5 High**, and it is round 4's exposure reached through
+/// the `Err` arm rather than through a refusal. An external process that
+/// removes or locks the file between this save's rename and this re-read makes
+/// `Workspace::refresh` raise: until the round-5 fix this function evicted the
+/// cache, admitted nothing, and answered `Saved` — so the removal reached the
+/// observation sequence only if the native backend delivered a hint for it,
+/// which `docs/decisions/2d-2-notes.md` §2.3 expressly declines to guarantee.
+///
+/// **Nothing is published from the failed read and nothing is cleared.** That is
+/// not caution, it is the same rule the rest of this module keeps: the read did
+/// not complete, so it proves no state; a single read proves no *stability*
+/// even when it does complete (`docs/decisions/2d-3-notes.md` §5 item 3); and
+/// clearing this save's own record on the strength of it is exactly what makes
+/// a save's own hints come back as somebody else's. The path is instead handed
+/// to [`ReObserver::re_observe`], and the state that eventually enters the
+/// sequence is one the engine read **twice** and the stamped door admitted.
+/// What that still depends on is a watcher being installed and running, which
+/// is stated rather than smoothed over: a workspace with no watcher is exactly
+/// as covered as it was before.
 fn after_a_save(
     workspace: &mut Workspace,
-    ledger: &WriteLedger,
+    side: ObservationSide<'_>,
     document: DocumentId,
     path: &Path,
     at: Option<&DocumentPath>,
@@ -2256,16 +2427,6 @@ fn after_a_save(
     // body of the file.
     let mut lost = false;
     let mut observed = None;
-    // Stamped before the read, for `conflict_after_the_lock`'s reason. No
-    // *concurrent* commit can refuse it — the record this save took, if it took
-    // one, was taken before this line ran — but **one refusal is reachable and
-    // is not denied here**: the ledger accepts only a strictly later stamp, and
-    // these are two adjacent `Instant::now()` calls on one thread, which a
-    // coarse clock may answer equally. What that costs is one publication not
-    // made; nothing is written and the record stands, and the external write
-    // this refresh saw has native hints of its own. See
-    // `crate::ledger::WriteLedger::admit_at_current_epoch`.
-    let read_after = Instant::now();
     let moved = match workspace.refresh(document) {
         Ok(fresh) => {
             observed = Some(fresh.view.revision);
@@ -2286,12 +2447,35 @@ fn after_a_save(
     }; // End of the match over the re-read that follows every save
     if lost {
         let _ = workspace.evict(document);
+        // **Round 5's High.** This read did not complete, so there is no state
+        // to admit and none is invented: publishing an `Absent` or an
+        // `Unreadable` from one failed read would put a state into the sequence
+        // that was never proved stable, and clearing this save's own record on
+        // the way would make its own hints foreign. The watcher is asked to
+        // observe the path through its ordinary two reads instead, and whatever
+        // stabilizes is decided by the stamped door. The answer is deliberately
+        // not acted on: this save has already committed, and *a committed write
+        // is never afterwards reported as an error*.
+        let _asked = side.watcher.re_observe(path);
     }
     // See this function's own note: only a refresh that disagrees with the
     // transaction's last read is an observation, and nothing consumes the
     // decision until 2d-4's queue exists to.
+    //
+    // **No stamp, and that is the round-4 fix.** This save's own record, if it
+    // took one, was written a few lines earlier on this thread, and any older
+    // one was written by a previous holder of the session lock this call is
+    // still inside — so the record precedes the refresh above in program order,
+    // with no clock consulted. Stamping instead put two adjacent
+    // `Instant::now()` calls in a strict comparison, and a coarse clock that
+    // answered them equally refused the observation outright: no settlement to
+    // revert, no loop to retry it, and no guarantee the native backend would
+    // report the same replacement (`2d-2-notes.md` §2.3). That was round 4's
+    // High. See `crate::ledger::WriteLedger::admit_under_the_session_lock`.
     if let Some(revision) = observed.filter(|revision| *revision != saved.revision) {
-        let _ = ledger.admit_at_current_epoch(path, ObservedState::Content(revision), read_after);
+        let _ = side
+            .ledger
+            .admit_under_the_session_lock(path, ObservedState::Content(revision));
     }
     SaveResult::Saved {
         revision: saved.revision,
@@ -2301,6 +2485,47 @@ fn after_a_save(
         moved,
     }
 } // End of function after_a_save()
+
+/// Drops the cached parse of a document whose save **may** have written, and
+/// asks the watcher to observe that path again.
+///
+/// The third arm of [`run_one_save`] the round-5 fix round reached, and a
+/// function rather than two lines inside the match for the reason every other
+/// rule in that tail is one: it is a policy with a name, and a test can drive
+/// it. [`SaveError::may_have_written`] means the rename may have landed and the
+/// revision it landed is **unknown** — [`committed_revision`] therefore records
+/// nothing, deliberately, because recording a guess would suppress a real
+/// observation.
+///
+/// Recording nothing is the safe direction only if something eventually
+/// *observes* what the file now holds, and until this round nothing on this arm
+/// did: the cache was evicted and the call returned, leaving the disk state to
+/// a native hint `docs/decisions/2d-2-notes.md` §2.3 declines to guarantee.
+/// This is the same shape as the two failed refreshes and it is closed the same
+/// way — a hint into the watcher's ordinary pipeline, never a published guess.
+/// Whatever stabilizes is admitted as **external**, which is exactly what the
+/// absent record says it should be.
+///
+/// The eviction is unchanged and still first: a parse that may describe bytes
+/// that are gone is worse than no parse. The answer to the ask is deliberately
+/// not acted on and this function returns nothing — the caller is already
+/// returning [`CommandError::SaveFailed`] with the transaction's own typed
+/// failure, and no answer from a watcher may add to it or take from it.
+///
+/// **It takes the watcher alone and not an [`ObservationSide`]**, unlike the two
+/// tails beside it, and the narrowing is the claim: there is nothing this arm
+/// may say to the ledger. It may not record — the committed revision is
+/// unknown — and it may not admit, because it holds no reading of any kind. A
+/// parameter it does not need would be a parameter a later edit could use.
+fn after_an_uncertain_write(
+    workspace: &mut Workspace,
+    watcher: ReObserver<'_>,
+    document: DocumentId,
+    path: &Path,
+) {
+    let _ = workspace.evict(document);
+    let _asked = watcher.re_observe(path);
+} // End of function after_an_uncertain_write()
 
 /// Opens an espanso configuration directory (plan section 6.4).
 ///
@@ -2774,6 +2999,7 @@ mod tests {
     use super::{NewMatchPosition, WorkspaceSession};
     use crate::ledger::{Admission, AppWrite, LedgerTally, ObservedState, WriteLedger};
     use crate::save::SaveResult;
+    use crate::watch::WatcherLifecycle;
 
     /// A match file with two snippets and one unrecognised key.
     ///
@@ -2823,6 +3049,25 @@ mod tests {
     fn base_bytes(dir: &TempDir) -> String {
         fs::read_to_string(dir.path().join("match").join("base.yml")).expect("the file reads back")
     }
+
+    /// The observation side of a save, assembled for a tail driven directly.
+    ///
+    /// `run_one_save` builds one out of the `SessionSideOfASave` that
+    /// `with_open` lends it; a test that drives `after_a_save` or
+    /// `conflict_after_the_lock` on its own has no such value, and this is that
+    /// one line rather than seven copies of it. The lifecycle a caller pairs
+    /// with the ledger decides what the tail's ask can be observed to do:
+    /// `WatcherLifecycle::listening` keeps the inbox, so the tests whose subject
+    /// is the ask read it back.
+    fn observation_side<'a>(
+        ledger: &'a WriteLedger,
+        watcher: &'a WatcherLifecycle,
+    ) -> super::ObservationSide<'a> {
+        super::ObservationSide {
+            ledger,
+            watcher: watcher.re_observer(),
+        }
+    } // End of function observation_side()
 
     /// A session with the synthetic tree open.
     ///
@@ -3991,11 +4236,16 @@ mod tests {
         );
 
         let at = path_of(&session, id);
+        // The tail is driven directly, so the watcher handle its production
+        // caller takes out of `Open` is built here. This refresh succeeds, so
+        // nothing is asked of it; `a_failed_conflict_refresh_asks_for_a_re_observation`
+        // is where the inbox is the subject.
+        let (watcher, _inbox) = WatcherLifecycle::listening(1);
         let payload = session
             .with_workspace(|workspace| {
                 super::conflict_after_the_lock(
                     workspace,
-                    session.ledger(),
+                    observation_side(session.ledger(), &watcher),
                     id,
                     &at,
                     expected,
@@ -4173,11 +4423,14 @@ mod tests {
         assert_ne!(found, later, "the fixture must move the file twice");
 
         let at = path_of(&session, id);
+        // Built here for the reason the sibling conflict test gives: the tail
+        // is driven directly, and this refresh succeeds so nothing is asked.
+        let (watcher, _inbox) = WatcherLifecycle::listening(1);
         let payload = session
             .with_workspace(|workspace| {
                 super::conflict_after_the_lock(
                     workspace,
-                    session.ledger(),
+                    observation_side(session.ledger(), &watcher),
                     id,
                     &at,
                     expected,
@@ -6196,8 +6449,16 @@ mod tests {
             .with_index(1);
         let ledger = crate::ledger::WriteLedger::new();
         ledger.begin_epoch(1);
+        let (watcher, _inbox) = WatcherLifecycle::listening(1);
         let path = dir.path().join("match").join("base.yml");
-        match super::after_a_save(&mut workspace, &ledger, id, &path, Some(&landed), saved) {
+        match super::after_a_save(
+            &mut workspace,
+            observation_side(&ledger, &watcher),
+            id,
+            &path,
+            Some(&landed),
+            saved,
+        ) {
             SaveResult::Saved {
                 committed, moved, ..
             } => {
@@ -7250,7 +7511,15 @@ mod tests {
         let landed = espansoconfig_core::patch::DocumentPath::root(0)
             .with_key("matches")
             .with_index(0);
-        match super::after_a_save(&mut workspace, &ledger, id, &path, Some(&landed), saved) {
+        let (watcher, _inbox) = WatcherLifecycle::listening(1);
+        match super::after_a_save(
+            &mut workspace,
+            observation_side(&ledger, &watcher),
+            id,
+            &path,
+            Some(&landed),
+            saved,
+        ) {
             SaveResult::Saved {
                 committed,
                 revision,
@@ -7296,4 +7565,307 @@ mod tests {
             "and the accepted external state supersedes the record of ours"
         );
     } // End of function a_post_commit_external_replacement_is_admitted_and_never_recorded_as_ours()
+
+    /// **A disagreeing post-save refresh is admitted even when no clock could
+    /// place it after the record.**
+    ///
+    /// Round 4's High, driven rather than reviewed. Until the round-4 fix,
+    /// `after_a_save` stamped `Instant::now()` a few lines after its own save had
+    /// recorded, on one thread, into a comparison that accepts only a *strictly*
+    /// later value — so a coarse clock answering both calls equally refused the
+    /// admission. Nothing here could answer that refusal: this path settles
+    /// nothing in an engine, so there is no settlement to take back, and it runs
+    /// once per save rather than in a loop, so nothing retries it. What was lost
+    /// was therefore the external observation itself, not one publication.
+    ///
+    /// **A test cannot make the host clock collide on demand**, and since the fix
+    /// this caller reads no clock to collide with — so the collision is asked for
+    /// from the record's side, through the test-only
+    /// `WriteLedger::stamp_the_record_at`, which is the same technique
+    /// `ledger.rs`'s `a_reading_stamped_exactly_at_the_record_is_refused` uses
+    /// through `WriteLedger::recorded_at`, taken from the other end. The instant
+    /// is put an hour ahead: any build that still consulted a stamp here refuses
+    /// deterministically, and the shipped one cannot notice.
+    #[test]
+    fn a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record() {
+        use espansoconfig_core::persist::SavedDocument;
+        use espansoconfig_core::workspace::Workspace;
+        use std::time::Duration;
+
+        const EXTERNAL: &str = "matches:\n  - trigger: ':theirs'\n    replace: theirs\n";
+        let dir = tree_holding(TWO_SNIPPETS);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the file reads");
+        let path = workspace
+            .document_context(id)
+            .expect("the document is known")
+            .path
+            .clone();
+
+        let ledger = WriteLedger::new();
+        ledger.begin_epoch(1);
+        let ours = ContentRevision::of_bytes(b"the bytes this application committed");
+        {
+            let gate = ledger.begin_commit();
+            ledger.record_app_write(&gate, id, &path, ours);
+        }
+        // The collision, asked for rather than waited for: no `Instant::now()`
+        // taken from here on can be strictly greater than this.
+        ledger.stamp_the_record_at(id, Instant::now() + Duration::from_secs(3600));
+
+        fs::write(&path, EXTERNAL).unwrap();
+        let saved = SavedDocument {
+            revision: ours,
+            text: String::new(),
+            replacements: Vec::new(),
+            notes: Vec::new(),
+            findings: Vec::new(),
+            committed: true,
+            backup: None,
+        };
+        let (watcher, _inbox) = WatcherLifecycle::listening(1);
+        match super::after_a_save(
+            &mut workspace,
+            observation_side(&ledger, &watcher),
+            id,
+            &path,
+            None,
+            saved,
+        ) {
+            SaveResult::Saved { committed, .. } => {
+                assert!(committed, "the premise: the transaction committed")
+            }
+            other => panic!("a committed save is answered as Saved, got {other:?}"),
+        } // End of the match over the tail's answer
+
+        let external = ContentRevision::of_bytes(EXTERNAL.as_bytes());
+        assert_eq!(
+            ledger.published_state(&path),
+            Some(ObservedState::Content(external)),
+            "the differing refresh is queued as external whatever the clock says"
+        );
+        let tally = ledger.tally();
+        assert_eq!(tally.admitted, 1, "one sequence was spent, {tally:?}");
+        assert_eq!(
+            tally.preceded_a_commit, 0,
+            "and no chronology refusal was reachable here, {tally:?}"
+        );
+        assert_eq!(
+            ledger.recorded_write(id),
+            None,
+            "the accepted external state supersedes the record of ours"
+        );
+    } // End of function a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record()
+
+    /// **A post-save refresh that fails asks the watcher for a second look, and
+    /// publishes nothing from the read that failed.**
+    ///
+    /// Round 5's High, driven rather than reviewed, and its concrete scenario
+    /// exactly: the application commits and records revision A, an external
+    /// process removes the file before `after_a_save` re-reads it, and the
+    /// refresh raises. Until the round-5 fix this evicted the cache, admitted
+    /// nothing and answered `Saved`, so the removal reached the observation
+    /// sequence only if the native backend happened to deliver a hint for
+    /// it — which `docs/decisions/2d-2-notes.md` §2.3 declines to guarantee.
+    ///
+    /// **Three claims, and the first two are what stop the fix from being
+    /// worse than the hole.** Nothing is published from the failed single read,
+    /// because one read that did not complete proves no state; the app-write
+    /// record still stands, because clearing it is what makes this save's own
+    /// hints come back as somebody else's; and the path was handed to the
+    /// watcher, whose two-read pipeline is where an `Absent` is allowed to come
+    /// from. `ledger.rs`'s
+    /// `a_removal_the_save_path_could_not_read_is_stabilized_and_admitted` is the
+    /// other half — what that pipeline then does with it.
+    #[test]
+    fn a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing() {
+        use espansoconfig_core::persist::SavedDocument;
+        use espansoconfig_core::workspace::Workspace;
+
+        let dir = tree_holding(TWO_SNIPPETS);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the file reads");
+        let path = workspace
+            .document_context(id)
+            .expect("the document is known")
+            .path
+            .clone();
+
+        let ledger = WriteLedger::new();
+        ledger.begin_epoch(1);
+        let ours = ContentRevision::of_bytes(b"the bytes this application committed");
+        {
+            let gate = ledger.begin_commit();
+            ledger.record_app_write(&gate, id, &path, ours);
+        }
+
+        // The external removal, in the window between the rename and the
+        // re-read. No command can produce it, so the tail is driven directly.
+        fs::remove_file(&path).unwrap();
+        let saved = SavedDocument {
+            revision: ours,
+            text: String::new(),
+            replacements: Vec::new(),
+            notes: Vec::new(),
+            findings: Vec::new(),
+            committed: true,
+            backup: None,
+        };
+        let (watcher, inbox) = WatcherLifecycle::listening(1);
+        match super::after_a_save(
+            &mut workspace,
+            observation_side(&ledger, &watcher),
+            id,
+            &path,
+            None,
+            saved,
+        ) {
+            SaveResult::Saved { committed, .. } => {
+                assert!(committed, "a failed re-read never takes the commit back")
+            }
+            other => panic!("a committed save is answered as Saved, got {other:?}"),
+        } // End of the match over the tail's answer
+
+        assert_eq!(
+            inbox.re_observations(),
+            vec![path.clone()],
+            "the path this application could not read is handed to the watcher"
+        );
+        assert_eq!(
+            ledger.published_state(&path),
+            None,
+            "and nothing is published from the read that failed"
+        );
+        assert_eq!(
+            ledger.recorded_write(id),
+            Some(AppWrite {
+                epoch: 1,
+                revision: ours
+            }),
+            "nor is the record cleared, which is what would make this save's own hints foreign"
+        );
+        assert_eq!(
+            ledger.tally(),
+            LedgerTally::default(),
+            "a failed read decides nothing at all, so no counter moves"
+        );
+    } // End of function a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing()
+
+    /// **A conflict refresh that fails asks the watcher too, and still refuses.**
+    ///
+    /// Round 5's High on its second arm. `conflict_after_the_lock` has no disk
+    /// side to describe when its read raises, so it still returns the read's own
+    /// error — inventing one would be worse than refusing — but the path no
+    /// longer leaves the session unobserved. Nothing is published and no record
+    /// is invented: a conflict records no app write in the first place, so what
+    /// this pins is that the failure arm does not start.
+    #[test]
+    fn a_failed_conflict_refresh_asks_for_a_re_observation_and_still_refuses() {
+        use espansoconfig_core::workspace::Workspace;
+
+        let dir = tree_holding(TWO_SNIPPETS);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the file reads");
+        let path = workspace
+            .document_context(id)
+            .expect("the document is known")
+            .path
+            .clone();
+
+        let ledger = WriteLedger::new();
+        ledger.begin_epoch(1);
+        fs::remove_file(&path).unwrap();
+
+        let (watcher, inbox) = WatcherLifecycle::listening(1);
+        let expected = ContentRevision::of_bytes(b"what the caller drafted against");
+        let found = ContentRevision::of_bytes(b"what the locked read saw");
+        let refusal = super::conflict_after_the_lock(
+            &mut workspace,
+            observation_side(&ledger, &watcher),
+            id,
+            &path,
+            expected,
+            found,
+            &anchorless_request(),
+        )
+        .expect_err("a file that cannot be re-read has no disk side to describe");
+        assert_eq!(
+            refusal.code(),
+            "io",
+            "the refusal is the read's own, unchanged by the ask: {refusal:?}"
+        );
+
+        assert_eq!(
+            inbox.re_observations(),
+            vec![path.clone()],
+            "and the path is handed to the watcher rather than left to a hint nobody promised"
+        );
+        assert_eq!(ledger.published_state(&path), None, "nothing is published");
+        assert_eq!(
+            ledger.recorded_write(id),
+            None,
+            "and a conflict still records no app write"
+        );
+    } // End of function a_failed_conflict_refresh_asks_for_a_re_observation_and_still_refuses()
+
+    /// **A write that may have landed evicts the parse and asks the watcher.**
+    ///
+    /// The third arm round 5's shape sweep found, and the one the review did not
+    /// name. `SaveError::may_have_written` means the rename may have completed
+    /// and the revision it committed is **unknown**, so `committed_revision`
+    /// records nothing — deliberately, because a guess would suppress a real
+    /// observation. Recording nothing is only the safe direction if something
+    /// eventually observes what the file holds, and until this round nothing on
+    /// this arm did: it evicted and returned.
+    #[test]
+    fn an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation() {
+        use espansoconfig_core::workspace::Workspace;
+
+        let dir = tree_holding(TWO_SNIPPETS);
+        let mut workspace = Workspace::discover(Some(dir.path())).expect("a directory");
+        let id = workspace
+            .list_documents()
+            .iter()
+            .find(|summary| summary.relative_path == Path::new("match/base.yml"))
+            .expect("the file is listed")
+            .id;
+        workspace.document_view(id).expect("the parse is cached");
+        let path = workspace
+            .document_context(id)
+            .expect("the document is known")
+            .path
+            .clone();
+
+        let (watcher, inbox) = WatcherLifecycle::listening(1);
+        super::after_an_uncertain_write(&mut workspace, watcher.re_observer(), id, &path);
+        assert_eq!(
+            inbox.re_observations(),
+            vec![path],
+            "the file this save may have written is observed again rather than assumed"
+        );
+        // The eviction is the arm's older half and is unchanged; what makes it
+        // observable is that the entry reloads on the next ask rather than
+        // answering out of the parse taken before the transaction.
+        workspace
+            .document_view(id)
+            .expect("the evicted entry reparses on the next read");
+    } // End of function an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation()
 }

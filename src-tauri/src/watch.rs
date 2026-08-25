@@ -56,6 +56,35 @@
 //! and claims nothing with it; the comparison, and everything it licenses,
 //! is `crate::ledger`'s.
 //!
+//! # A save may ask for one path to be observed again
+//!
+//! This step's **round-5 High**. A save's own post-transaction refresh is a
+//! read this application performs itself, and when that read *fails* — an
+//! external process removed or locked the file between the rename and the
+//! re-read — the save has no state to admit and must not invent one: a single
+//! failed read is not the engine's two-read stability, and publishing `Absent`
+//! from it would clear the app-write record and make the save's own hints
+//! foreign. What it can do is ask this watcher to put that path back through
+//! the **ordinary** pipeline, and that is [`ReObserver::re_observe`]: one
+//! message on the running worker's inbox, absorbed by exactly the code a native
+//! hint is absorbed by ([`WatchWorker::hint_paths`]), stabilized by two equal
+//! reads, and admitted through the stamped door like any other observation.
+//!
+//! **It is a hint and never an observation**, which is why it is not the 2d
+//! design consult Q3's forbidden wire — no event, no queue, no command, nothing
+//! serialized, and nothing a consumer can drain. It carries a path *into* the
+//! engine; every value that comes back out is the engine's own.
+//!
+//! **It cannot make a save wait and cannot make one fail.** The worker's inbox
+//! is an **unbounded** `std::sync::mpsc` channel, so a send never waits for the
+//! worker to consume anything, and the send's failure — no worker was ever
+//! spawned, this lifecycle is stationary, or the worker has already exited — is
+//! answered as [`ReObserveOutcome::NoWatcher`] rather than raised. That is what
+//! keeps the lock order intact at the one place this is called from: the save
+//! path holds the **session** lock, and a bounded channel or a blocking send
+//! would be a wait on a worker that is allowed to take that same lock inside
+//! its sink callback.
+//!
 //! # The polling fallback is a fallback
 //!
 //! Consult Q1: polling is for an **unavailable native backend, never the
@@ -459,8 +488,86 @@ struct SharedStatus {
 enum WorkerMessage {
     /// A signal forwarded by the native backend's callback.
     Native(NativeSignal),
+    /// **This application** asking for one path to go back through the
+    /// ordinary pipeline — see [`ReObserver::re_observe`] and this module's
+    /// *a save may ask* section.
+    ///
+    /// A path, and nothing else: it carries no state, no revision and no
+    /// reason, because the answer is whatever two equal reads then find. The
+    /// worker absorbs it through the same [`WatchWorker::hint_paths`] a native
+    /// hint goes through, so an application-originated re-observation is
+    /// indistinguishable downstream from a hint the backend delivered — which
+    /// is the point, not an economy.
+    ReObserve(PathBuf),
     /// The lifecycle handle is shutting this worker down.
     Stop,
+}
+
+/// What a request to observe one path again did — [`ReObserver::re_observe`].
+///
+/// **Neither variant claims anything about what will be observed.** The
+/// engine's ordinary pipeline decides that, one debounce and one probe later,
+/// and a path whose bytes have not changed since the engine last settled it
+/// coalesces to nothing. What this reports is only whether there was a running
+/// watcher to ask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReObserveOutcome {
+    /// The request reached this watcher's inbox.
+    Asked,
+    /// There is no worker listening: none was ever spawned, this lifecycle is
+    /// stationary ([`WatcherLifecycle::without_epoch`]), or the worker has
+    /// already exited. Nothing was asked, and nothing is observed **by this
+    /// watcher** because of the call — which is the coverage a workspace whose
+    /// watcher is not running already had, and nothing narrower is claimed: a
+    /// lifecycle whose worker has exited because a replacement is under way has
+    /// a successor whose baseline reads the same tree.
+    NoWatcher,
+}
+
+/// The one thing a caller that is not this watcher's own worker may ask of it:
+/// *observe this path again*.
+///
+/// A handle onto the worker's inbox and nothing else, deliberately narrower
+/// than [`WatcherLifecycle`]: a caller holding one cannot shut the watcher
+/// down, read its status or join it, so *the save path cannot steer the
+/// watcher* is a property of the type rather than of review. It borrows the
+/// lifecycle rather than cloning its sender, so a handle can never outlive the
+/// watcher it names.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReObserver<'a> {
+    /// The worker's inbox.
+    inbox: &'a Sender<WorkerMessage>,
+}
+
+impl ReObserver<'_> {
+    /// Asks this watcher to put `path` back through the ordinary pipeline.
+    ///
+    /// **Never blocks, and never raises.** The inbox is an unbounded channel, so
+    /// the send does not wait for the worker to consume anything — which is
+    /// what makes this safe to call under the session lock, the lock the worker
+    /// is allowed to take inside its own sink callback. A send that cannot be
+    /// delivered answers [`ReObserveOutcome::NoWatcher`] rather than producing an
+    /// error, because of what the three production callers are: one is a save
+    /// that has already **committed**, where *a committed write is never
+    /// afterwards reported as an error*; one is a conflict already returning the
+    /// refusal its failed read produced; and one is a save whose write may have
+    /// landed, already returning the transaction's own typed failure. Not one of
+    /// them has an outcome a watcher's availability may enter.
+    ///
+    /// **What it does not do**, said beside what it does: it neither publishes
+    /// nor suppresses nor clears anything in `crate::ledger`. It schedules a
+    /// read. Everything the resulting observation is worth is decided where
+    /// every other observation is decided.
+    #[must_use]
+    pub(crate) fn re_observe(&self, path: &Path) -> ReObserveOutcome {
+        match self
+            .inbox
+            .send(WorkerMessage::ReObserve(path.to_path_buf()))
+        {
+            Ok(()) => ReObserveOutcome::Asked,
+            Err(_) => ReObserveOutcome::NoWatcher,
+        }
+    } // End of function re_observe()
 }
 
 /// Re-spells backend-reported paths onto the workspace's own root spelling.
@@ -650,6 +757,44 @@ impl WatcherLifecycle {
         WatcherLifecycle::stationary(epoch)
     }
 
+    /// A worker-less lifecycle whose inbox is **kept alive and handed back** —
+    /// the test seam that makes *this caller asked the watcher for a second
+    /// look* observable (`PROGRESS.md` R24).
+    ///
+    /// [`WatcherLifecycle::inert`] drops the receiver, so every request to it
+    /// answers [`ReObserveOutcome::NoWatcher`] and nothing records that one was
+    /// made. This one keeps the receiver, so a test can read the messages a
+    /// production path put there — without spawning a worker thread or
+    /// establishing an FSEvents stream, which is what makes the save-path
+    /// evidence deterministic and free. It is otherwise exactly
+    /// [`WatcherLifecycle::inert`]: no worker, `ready: false` forever, and
+    /// nothing consumes what the inbox holds.
+    #[cfg(test)]
+    pub(crate) fn listening(epoch: u64) -> (WatcherLifecycle, HintInbox) {
+        let (control, inbox) = std::sync::mpsc::channel();
+        (
+            WatcherLifecycle {
+                epoch,
+                control,
+                worker: None,
+                status: Arc::new(SharedStatus::default()),
+                joined: Arc::new(AtomicBool::new(false)),
+            },
+            HintInbox(inbox),
+        )
+    } // End of function listening()
+
+    /// This watcher's re-observation handle — see [`ReObserver`].
+    ///
+    /// Handed out by `crate::commands`'s `with_open` beside the two records a
+    /// save writes to, because the save path is the one caller that can hold a
+    /// reading it could not use.
+    pub(crate) fn re_observer(&self) -> ReObserver<'_> {
+        ReObserver {
+            inbox: &self.control,
+        }
+    }
+
     /// This watcher's state, observed. See [`WatchStatusView`].
     // Reached through `WorkspaceSession::watch_status`, whose consumers are
     // `crate::watch_check`'s tests today, and directly by this module's own
@@ -701,6 +846,34 @@ impl JoinProbe {
     pub(crate) fn completed(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
+}
+
+/// The inbox of a [`WatcherLifecycle::listening`] lifecycle, read by a test
+/// instead of by a worker.
+///
+/// It answers **what was asked**, never what was observed: nothing behind it
+/// runs an engine, so a path here is a request that reached the channel and
+/// nothing more. The stop message a teardown sends is ignored rather than
+/// reported, because a test that reads this before dropping its lifecycle and
+/// one that reads it after must get the same answer.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct HintInbox(Receiver<WorkerMessage>);
+
+#[cfg(test)]
+impl HintInbox {
+    /// Every path this watcher has been asked to observe again, in order.
+    ///
+    /// Drains: a second call answers only what arrived since the first.
+    pub(crate) fn re_observations(&self) -> Vec<PathBuf> {
+        let mut asked = Vec::new();
+        while let Ok(message) = self.0.try_recv() {
+            if let WorkerMessage::ReObserve(path) = message {
+                asked.push(path);
+            }
+        }
+        asked
+    } // End of function re_observations()
 }
 
 /// One worker's teardown, shipped to the reaper because it was initiated on
@@ -947,13 +1120,23 @@ impl WatchWorker {
     /// Hints that arrive while the baseline is failing are consumed and
     /// dropped — the baseline that eventually succeeds reads the tree as it
     /// is then, so nothing a dropped hint pointed at is missed by it.
+    /// **An application-originated re-observation is dropped here on exactly
+    /// the same terms and for exactly the same reason**, and it is written as
+    /// its own arm rather than folded into the native one so that the choice is
+    /// visible: there is no engine yet to hint, the baseline that eventually
+    /// starts one reads every path including that one, and a state established
+    /// by a baseline is this session's starting point rather than an
+    /// observation — which is 2d-2's contract for a worker whose first
+    /// enumeration fails, inherited unchanged.
     fn baseline(&mut self, inbox: &Receiver<WorkerMessage>) -> Option<ObservationEngine> {
         loop {
             match ObservationEngine::start(&self.root, self.config.engine, &mut self.source) {
                 Ok(engine) => return Some(engine),
                 Err(_) => match inbox.recv_timeout(Duration::from_millis(self.config.poll_ms)) {
                     Ok(WorkerMessage::Stop) | Err(RecvTimeoutError::Disconnected) => return None,
-                    Ok(WorkerMessage::Native(_)) | Err(RecvTimeoutError::Timeout) => {}
+                    Ok(WorkerMessage::Native(_))
+                    | Ok(WorkerMessage::ReObserve(_))
+                    | Err(RecvTimeoutError::Timeout) => {}
                 },
             }
         }
@@ -967,12 +1150,7 @@ impl WatchWorker {
         signal: NativeSignal,
     ) {
         match signal {
-            NativeSignal::Hints(paths) => {
-                let now = self.now();
-                for path in paths {
-                    engine.hint(&spelling.respell(path), now);
-                }
-            }
+            NativeSignal::Hints(paths) => self.hint_paths(engine, spelling, paths),
             NativeSignal::Degraded(_reason) => {
                 // What a caller acts on is the *fact* of degradation
                 // (`watch/native.rs`): from here on the rescan cadence is the
@@ -983,6 +1161,34 @@ impl WatchWorker {
             }
         }
     } // End of function absorb()
+
+    /// Feeds paths into the engine as hints at this turn's clock.
+    ///
+    /// **The one half of [`WatchWorker::absorb`] an application-originated
+    /// re-observation shares with a native hint**, and it is a function rather
+    /// than two copies for exactly that reason: what
+    /// [`ReObserver::re_observe`] asks for must be indistinguishable from what
+    /// the backend delivers by the time the engine sees it, and two spellings
+    /// of *turn a path into a hint* is where the two would drift apart.
+    ///
+    /// The re-spelling is applied to both, and for an application-originated
+    /// path it is provably the identity: the save path spells a file through
+    /// the workspace root discovery gave it, which is the same root this worker
+    /// handed [`ObservationEngine::start`], so no alias can match. It is
+    /// applied anyway rather than branched on — a branch would be a second rule
+    /// about spelling, in the module whose §5 item 3 residue is that the two
+    /// spellings are only reconciled at the root.
+    fn hint_paths(
+        &mut self,
+        engine: &mut ObservationEngine,
+        spelling: &HintSpelling,
+        paths: Vec<PathBuf>,
+    ) {
+        let now = self.now();
+        for path in paths {
+            engine.hint(&spelling.respell(path), now);
+        }
+    } // End of function hint_paths()
 
     /// One engine pass: the stamp first, then the reads it bounds.
     ///
@@ -1062,7 +1268,10 @@ impl WatchWorker {
     ///
     /// The loop's shape is the engine's contract read literally: sleep until
     /// the next deadline or the next rescan (a message wakes it early), absorb
-    /// whatever arrived, rescan if the fallback cadence is due, take the pass's
+    /// whatever arrived — a native signal, or **this application asking for one
+    /// path to be observed again**, which becomes an ordinary hint through the
+    /// same [`WatchWorker::hint_paths`] a native hint goes through — rescan if
+    /// the fallback cadence is due, take the pass's
     /// stamp and tick ([`WatchWorker::observe`], which is the two of those in
     /// one function), and hand every stabilized observation to the sink tagged
     /// with this watcher's epoch and that stamp — **taking the engine's
@@ -1083,6 +1292,9 @@ impl WatchWorker {
             match inbox.recv_timeout(self.wake_after(&engine)) {
                 Ok(WorkerMessage::Stop) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(WorkerMessage::Native(signal)) => self.absorb(&mut engine, &spelling, signal),
+                Ok(WorkerMessage::ReObserve(path)) => {
+                    self.hint_paths(&mut engine, &spelling, vec![path])
+                }
                 Err(RecvTimeoutError::Timeout) => {}
             }
             // Drain whatever else already arrived, so a burst of native
@@ -1092,6 +1304,9 @@ impl WatchWorker {
                     Ok(WorkerMessage::Stop) | Err(TryRecvError::Disconnected) => return,
                     Ok(WorkerMessage::Native(signal)) => {
                         self.absorb(&mut engine, &spelling, signal)
+                    }
+                    Ok(WorkerMessage::ReObserve(path)) => {
+                        self.hint_paths(&mut engine, &spelling, vec![path])
                     }
                     Err(TryRecvError::Empty) => break,
                 }
@@ -1131,6 +1346,9 @@ impl fmt::Debug for WorkerMessage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WorkerMessage::Native(signal) => formatter.debug_tuple("Native").field(signal).finish(),
+            WorkerMessage::ReObserve(path) => {
+                formatter.debug_tuple("ReObserve").field(path).finish()
+            }
             WorkerMessage::Stop => formatter.write_str("Stop"),
         }
     }
@@ -1220,4 +1438,46 @@ mod tests {
             "consuming the lifecycle completes teardown"
         );
     } // End of function a_lifecycle_without_an_epoch_watches_nothing_and_reports_the_unset_epoch()
+
+    #[test]
+    fn a_re_observation_reaches_a_listening_watcher_and_degrades_without_one() {
+        // **Round 5's High**, at this layer: the save path can ask, the ask
+        // arrives as a path and nothing else, and a workspace with no watcher
+        // answers rather than panicking or erroring.
+        let first = PathBuf::from("/tree/match/base.yml");
+        let second = PathBuf::from("/tree/config/default.yml");
+
+        let (listening, inbox) = WatcherLifecycle::listening(1);
+        assert_eq!(
+            listening.re_observer().re_observe(&first),
+            ReObserveOutcome::Asked
+        );
+        assert_eq!(
+            listening.re_observer().re_observe(&second),
+            ReObserveOutcome::Asked
+        );
+        assert_eq!(
+            inbox.re_observations(),
+            vec![first.clone(), second],
+            "both requests reached the inbox, in order, as paths and nothing else"
+        );
+        assert!(
+            inbox.re_observations().is_empty(),
+            "and the inbox is drained by reading it, so nothing is counted twice"
+        );
+
+        // No worker to hear it: a stationary lifecycle drops its receiver at
+        // construction, which is exactly the shape of a worker that could not
+        // be spawned and of one that has already exited.
+        for stationary in [
+            WatcherLifecycle::inert(1),
+            WatcherLifecycle::without_epoch(),
+        ] {
+            assert_eq!(
+                stationary.re_observer().re_observe(&first),
+                ReObserveOutcome::NoWatcher,
+                "a workspace with no watcher degrades to an answer, never to a failure"
+            );
+        } // End of the loop over the two stationary shapes
+    } // End of function a_re_observation_reaches_a_listening_watcher_and_degrades_without_one()
 }

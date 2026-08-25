@@ -1,13 +1,19 @@
 # Phase 2d-3 — save composition and the suppression ledger
 
 **A save this application commits no longer comes back through its own watcher as a foreign
-external change, and no external change is lost to that suppression, because three facts hold
+external change, and no external change is lost to that suppression, because five facts hold
 together: the commit and the record that describes it are one window no admission can *decide*
-inside; every observation carries a stamp taken before its reads, so a reading already in hand
-when that window opened cannot clear the record either; and a refused reading is **answered** —
+inside; every **watcher** observation carries a stamp taken before its reads, so a reading already
+in hand when that window opened cannot clear the record either; a refused reading is **answered** —
 the engine takes its settlement back and observes the path again, rather than keeping a state it
-never really announced. That record is one entry per document, written in exactly one
-place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
+never really announced; the two save-path refreshes carry **no** stamp, because they run under
+the session lock that every producer of a record holds, so their reads follow any record in program
+order and no clock decides whether they are heard; and where this application has **no** reading to
+bring at all — a refresh that raised, or a write that may have landed without saying what it
+wrote — it publishes nothing from the read that did not happen and asks the running watcher to
+observe that path again, so the state that finally enters the sequence is one the engine read twice
+and stamped. That record is one entry per document, written
+in exactly one place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
 consult's `last_app_write[DocumentId] = { workspace_epoch, revision }` beside the open Tauri
 session, together with the per-epoch observation sequence allocator and the published-state map
 that coalescing compares against; `admitting_sink` is the **admission gate**, an
@@ -59,6 +65,37 @@ hint is admitted.
 > `crates/espansoconfig-core`** — the paragraph below that says the core was not touched is
 > corrected there.
 
+> **Correction (round-4 fix round, §10).** The headline as §9 left it said *every* observation
+> carries a stamp, and treated the stamp as the mechanism that makes a reading safe. Both halves
+> were wrong about the **save path**, and that is the fourth consecutive narrower instance. Its two
+> refreshes stamp `Instant::now()` microseconds after their own save's record, on one thread, into a
+> comparison that accepts only a strictly later value — so a clock-resolution collision refused
+> them. Unlike a watcher observation there was no settlement to take back and no loop to retry, so
+> the cost was not *one publication* (§5 item 16's claim) but **the external observation itself**:
+> nothing guarantees the native backend reports the same replacement (`2d-2-notes.md` §2.3), and the
+> consult requires a disagreeing post-save refresh to be *queued as external*
+> (`phase-2d-design.md` Q2). §10 closes it with the **fourth** fact, and it is a proof rather than a
+> mechanism: a record can only be inserted by a thread holding the session lock, and these two
+> callers hold it, so their reads follow any record in program order with no clock in between.
+> `WriteLedger::admit_at_current_epoch` is renamed `admit_under_the_session_lock` and drops its
+> `Instant`. **§5 item 16 said the cost was one publication and that the replacement "is reported
+> by the watcher's own hints"; both were false, and the item is replaced rather than left
+> standing.**
+
+> **Correction (round-5 fix round, §11).** The headline as §10 left it said *four facts*, and the
+> review found the fifth consecutive narrower instance: **the same loss, reached through an `Err`.**
+> A post-save refresh that *fails* — an external process removes or locks the file between the
+> rename and the re-read — admitted nothing, and §5 item 18 called that acceptable because the only
+> alternative it could see was publishing an unstabilized single read. That is a false choice. The
+> engine can be **asked** to observe the path, and its ordinary two reads then produce a state the
+> stamped door admits. §11 closes it with the **fifth** fact: `crate::watch::ReObserver::re_observe`,
+> a path into the running watcher's inbox, on three arms — both failed refreshes and the uncertain
+> write, which the review did not name and this round's shape sweep did. **§5 item 18 said closing
+> it "would be worse"; that was wrong, and the item is replaced rather than left standing — the
+> third time a hole this record stated as bounded turned out to be a real defect (item 10 at round
+> 2, item 16 at round 4, item 18 now).** `SaveRecords` is renamed `SessionSideOfASave`, because the
+> value now carries something that is not a record.
+
 The consult is `docs/reviews/phase-2d-design.md`; **Q7 item 3** is this step's specification,
 **Q2** is the ruling on the predicate, the ledger's location and lifetime, where the update
 belongs and what `conflict_after_the_lock` must do instead, **Q1** rules the lifecycle owner
@@ -76,7 +113,9 @@ untouched now**: the round-3 fix round added `ObservationEngine::revert_settleme
 could not be done a layer out. The architecture rule is unchanged and re-checked — `cargo tree -p
 espansoconfig-core | rg tauri` still finds nothing, and the engine learns nothing about saves,
 ledgers or application sessions. The new Rust types (`ObservedState`,
-`Admission`, `AppWrite`, `LedgerTally`, `AdmittedObservation`, `SaveRecords`) serialize nothing
+`Admission`, `AppWrite`, `LedgerTally`, `AdmittedObservation`, `SessionSideOfASave` — `SaveRecords`
+until §11 renamed it — and, since §11, `ObservationSide`, `ReObserver` and `ReObserveOutcome`)
+serialize nothing
 and cross no boundary, so the dictionary contract's serializable-enum sweep has nothing new to
 account for. Admitted observations still end at a **discarding** downstream sink in production:
 they are produced, decided and dropped, and a value that sink drops is gone.
@@ -102,7 +141,16 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   made `admitting_sink` answer `crate::watch::ObservationOutcome` from the **same** match that
   decides whether an observation reaches `downstream`, turned `observed_path` into a delegation to
   the core's new `Observation::path()`, and added the test-only `recorded_at` accessor — two tests
-  added, so sixteen module tests.
+  added, so sixteen module tests. The round-4 fix round (§10) added the private `ReadChronology`,
+  the two-variant mode `decide` now takes in place of a bare `Instant`; renamed
+  `admit_at_current_epoch` to **`admit_under_the_session_lock`** and removed its `read_after`
+  operand; and added the test-only `stamp_the_record_at` seam — one test added, so seventeen module
+  tests. The round-5 fix round (§11) added **no** production code here and one test —
+  `a_removal_the_save_path_could_not_read_is_stabilized_and_admitted`, the engine-plus-gate half of
+  the round's High — so eighteen module tests; it also renamed
+  `a_session_locked_reading_is_never_refused_by_the_records_own_instant` to
+  `a_serialized_door_reading_…` (§11.3) and corrected the *what the types do not force* paragraph,
+  which still described a save-path stamp that has not existed since §10.
 - **`crates/espansoconfig-core/src/watch/engine.rs`** — **the only core file any round of this step
   touched**, and only in the round-3 fix round (§9.1): `ObservationEngine::revert_settlement`, the
   private one-pass `undo` map and the private `Settled` value that fills it, `Observation::path()`,
@@ -116,7 +164,13 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   through; `run_one_save` delegates its transaction to `commit_and_record` (§7.1), which takes the
   one record through the new exhaustive `committed_revision` inside the ledger's commit window;
   `after_a_save` and `conflict_after_the_lock` take the ledger and the document's path and
-  admit what their refreshes saw. Seven new tests (§3).
+  admit what their refreshes saw. Seven new tests (§3), and one more from the round-4 fix round
+  (§10), which also took the `Instant::now()` line off both refreshes: they now call
+  `admit_under_the_session_lock`, and `std::time::Instant` is no longer imported by the module at
+  all. The round-5 fix round (§11) renamed `SaveRecords` to **`SessionSideOfASave`** and gave it a
+  third field — the open watcher's `ReObserver` — added the narrower `ObservationSide` the two tails
+  take in place of a bare `&WriteLedger`, and added `after_an_uncertain_write`, the third arm that
+  asks. Three new tests, so eleven.
 - **`src-tauri/src/watch.rs`** — `discarding_sink` removed (it is the *downstream* sink and now
   lives with the gate); `EpochObservation` gained `read_after` and the worker gained
   `WatchWorker::observe`, the two-line function that takes it (§8.1); the round-3 fix round added
@@ -124,11 +178,18 @@ they are produced, decided and dropped, and a value that sink drops is gone.
   answer is read, calling `revert_settlement` for the one arm that means *this decided nothing*
   (§9.1); `EpochObservation` lost its scoped dead-code allowance, because the gate
   reads its fields in production — 2d-2 §5 item 9's intended end state for that allowance;
-  `ObservationSink`'s contract now names the gate as the session's one instance of it.
+  `ObservationSink`'s contract now names the gate as the session's one instance of it. The round-5
+  fix round (§11) added the re-observation path here: `WorkerMessage::ReObserve(PathBuf)`,
+  `ReObserver` and `ReObserveOutcome`, `WatcherLifecycle::re_observer`, the extracted
+  `WatchWorker::hint_paths` both a native hint and a re-observation go through, and the test-only
+  `WatcherLifecycle::listening`/`HintInbox` seam. One test added.
 - **`src-tauri/src/watch_check.rs`** — retyped onto `AdmittedSink`/`AdmittedObservation` (the
   seam moved one layer out, §2.3), `observed_path` delegates to the ledger's rather than
   keeping a second copy, and two new real-filesystem checks over synthetic temp trees (§3).
-- **`src-tauri/src/main.rs`** — the module declaration and the phase paragraph.
+- **`src-tauri/src/main.rs`** — the module declaration and the phase paragraph. The round-4 fix
+  round scoped the stamp to *watcher* observations there; the round-5 fix round corrected the count
+  the same paragraph still gave as **three**, which was already four before this round's own fifth
+  fact (§11.3, round 5's first Low).
 
 ---
 
@@ -149,7 +210,8 @@ gate holds the same `Arc`. The concurrency shape is the load-bearing part, and i
 a sink may call back into the session. So:
 
 - **the ledger's state mutex is a leaf, exactly as `WorkspaceEpochs`'s is.** `admit`,
-  `admit_at_current_epoch`, `record_app_write` and `begin_epoch` run **no caller-supplied
+  `admit_under_the_session_lock` (`admit_at_current_epoch` until §10 renamed it),
+  `record_app_write` and `begin_epoch` run **no caller-supplied
   code** — there is no closure and no callback under the guard — so it cannot be one
   side of a lock cycle. Since §8 there is exactly one call under it that leaves the module,
   `Instant::now()` in `record_app_write`, and it is named rather than left inside a blanket
@@ -308,7 +370,8 @@ its own disagreeing refresh:
 - **`conflict_after_the_lock` records nothing, and that is the load-bearing half.** Were it to
   record the disk's revision as an app write, the very external change the watcher exists to
   report would be suppressed the moment it stabilized. Its refresh instead goes through
-  `admit_at_current_epoch`, so the disk state the conflict payload was built from is published
+  `admit_under_the_session_lock` (`admit_at_current_epoch` until §10 renamed it), so the disk state
+  the conflict payload was built from is published
   once and a later native hint at it is a `Duplicate` rather than a second conflict. The Rust-side
   refresh itself **stays**: it is cache coherency and the two-observation truth, not watcher UI
   adoption;
@@ -336,12 +399,37 @@ parameter exists anyway, for this section's own reason: an internally taken `Ins
 be stamped **after** the read it is meant to bound, which is the exact shape of the defect §8
 closes, and a second rule that agrees today is what §2.6 exists to refuse.
 
+> **Correction (round-4 fix round, §10).** The paragraph above is **wrong in its middle sentence**,
+> and that sentence was round 4's High. *"Neither can currently be refused by that comparison"* is
+> false: no **concurrent** commit can land between the stamp and the decision, but `after_a_save`'s
+> own save recorded a few lines earlier on the same thread, and `decide` accepts only a *strictly*
+> later stamp — so a clock-resolution collision between two adjacent `Instant::now()` calls refuses
+> it, with no settlement to take back and no loop to retry. §9.2's last paragraph and §5 item 16
+> already knew this and got the cost wrong; §10 gets both right. **Neither caller stamps now.**
+> `admit_under_the_session_lock` takes no `Instant`, because the session lock these two already
+> hold is the lock every producer of a record holds, so the record precedes the read in program
+> order and there is nothing for a clock to prove. *One rule with two callers* is unchanged and is
+> what this section is about: both still reach the same `decide`, with the same suppression, the
+> same supersession, the same coalescing and the same sequence allocator. What differs is only
+> which **proof of chronology** each door can build, and neither door lets its caller choose
+> (§10.1).
+
 **Where this is weaker than the watcher's own admissions, said in the same place as what it
 does**: a save-path refresh is a *single* read, where an engine observation is two equal
 consecutive ones, so the consult's *a different **stabilized** revision* is met by the watcher's
 callers and not by these two. A torn read would publish a state that never stably existed. That is
 accepted because the same single read already builds the conflict payload the person is shown, so
 it is a property of `Workspace::refresh` rather than one this step introduces.
+
+> **Addition (round-5 fix round, §11).** Nothing above is falsified, and one case it does not cover
+> is the round's High: a refresh that **raises** is not a weaker observation, it is **no**
+> observation, and this section's *one rule, two callers* says nothing about what a caller with no
+> reading should do. The answer is that it admits nothing — the paragraph directly above is the
+> reason, taken to its limit: if a single *successful* read is weaker than the engine's two, a
+> single failed one proves nothing at all — and hands the path to the watcher instead
+> (`crate::watch::ReObserver::re_observe`). So the two callers are unchanged, the two doors are
+> unchanged, and no third proof of chronology exists; what §11 adds is a way to *get* a reading
+> where this section's callers have none.
 
 ### 2.7 D7 — the backup session and the ledger travel together, because neither is a planner's to choose
 
@@ -352,6 +440,19 @@ The immediate cause was arithmetic — `create_one_match` reached eight paramete
 pass both straight through unchanged, and a planner that could reach one without the other could
 write with no safety net or commit bytes this session can never afterwards tell from an external
 write. `WorkspaceSession::with_open` is its only producer.
+
+> **Correction (round-5 fix round, §11).** The first sentence above is out of date and the name in
+> it was **wrong for its contents**, which is why the correction is a rename rather than a note.
+> `with_open` lends a **`SessionSideOfASave { backups, ledger, watcher }`**: the third field is the
+> open watcher's `ReObserver`, and it is not a record a save writes to — it is a handle a save
+> *asks* through on the three arms where it has no reading of its own (§11.1). Everything else this
+> section argues is unchanged and now covers three values rather than two: none of them is a
+> planner's to choose, all six planners pass them straight through, and a planner that could reach
+> one without the others could write with no safety net, commit bytes this session can never
+> afterwards tell from an external write, **or drop a reading nothing else will take**. The two
+> tails take a narrower `ObservationSide { ledger, watcher }` rather than the whole value, because a
+> `BackupSession` in the reach of a function that runs *after* the transaction would be a pre-save
+> copy taken after the save.
 
 ### 2.8 D8 — coalescing is state equality, which reproduces the engine's own two exceptions rather than fighting them
 
@@ -578,7 +679,8 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     delayed observation, never a lost one. What is *not* measured is how long that is on a large
     file on a slow volume.
 12. **The commit gate is not reentrant and nothing but review keeps a caller out of it twice**
-    (§7.1). `admit_at_current_epoch` takes it, `after_a_save` and `conflict_after_the_lock` call
+    (§7.1). `admit_under_the_session_lock` takes it (`admit_at_current_epoch` until §10 renamed
+    it), `after_a_save` and `conflict_after_the_lock` call
     that, and both run after `commit_and_record`'s guard has been dropped — a property of one
     function's block scope, not of any type. The one spelling of the mistake a tool catches is
     `let _ = ledger.enter_gate()`, which rustc's deny-by-default `let_underscore_lock` rejects
@@ -612,16 +714,26 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     are bounded by real user action rather than by anything this code guarantees.
 14. **Nothing in the type system ties a stamp to the reads it claims to bound** (§8.2). Every
     `Instant` type-checks in that parameter, and a producer that took its stamp *after* its reads
-    would compile, forward, compare, and silently restore round 2's High. What holds it is
-    `WatchWorker::observe`, one two-line function with one caller, and the two save-path callers
-    stamping on the line above their `Workspace::refresh`. A stamp taken too **early** is caught
+    would compile, forward, compare, and silently restore round 2's High. What holds it is that
+    there is exactly **one** producer of a stamp — `WatchWorker::observe`, one two-line function
+    with one caller. **Neither save-path caller stamps, and this clause used to say they did**: it
+    read *"and the two save-path callers stamping on the line above their `Workspace::refresh`"*,
+    which stopped being true at §10 and stood through round 4's own name sweep — round 5's first
+    Low, and its concrete cost is that a maintainer following it would restore stamped save-path
+    admission and with it round 4's High. A stamp taken too **early** is caught
     by `watch_check`'s `preceded_a_commit == 0` (§8.3); a stamp taken too **late** is invisible to
     every test in this crate, and that asymmetry is the honest statement of what the evidence
     covers. **Round 3 adds a second half to this item**: nothing in the type system ties the
     *answer* a sink returns to what the producer then does with it either. `ObservationSink` now
     returns `ObservationOutcome`, and a caller that drops it compiles and silently restores round
     3's first High. `crate::watch::deliver` is the one call site, and it is one function with one
-    caller for exactly this reason.
+    caller for exactly this reason. **Round 4 adds a third half**: nothing in the type system ties
+    `WriteLedger::admit_under_the_session_lock` to a caller that really holds the session lock.
+    This module owns no such lock and can require no witness of one, so a future caller reaching
+    that door from the watcher's worker thread would compile, skip the chronology check it could
+    not justify skipping, and silently restore round 2's High. Two callers and one paragraph in
+    that method's own documentation are what keep it — the same shape as the two above, and the
+    same asymmetry: the mistake is invisible to every test in this crate.
 15. **The revision a save records is the file's post-rename read-back, not necessarily the bytes
     it wrote** — inherited from the core, not introduced here. `SavedDocument::revision` is
     documented in `crates/espansoconfig-core/src/persist/save.rs` as what the file held when the
@@ -633,34 +745,77 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     narrows it, and the chronology stamp does not address it: it orders *events*, and this is a
     question of *whose bytes*. **Re-checked in round 3 and it stands unchanged**: the strict
     comparison and the settlement revert both order events too, so neither touches it.
-16. **A save-path refresh can now be refused by a clock collision, and it has no settlement to take
-    back** (§9.2). `after_a_save` stamps microseconds after its own save recorded, on one thread,
-    and `decide` accepts only a strictly later stamp — so two adjacent `Instant::now()` calls that
-    a coarse clock answers equally refuse it. It is the over-refusing direction and nothing is
-    written or cleared, but unlike a watcher observation there is no engine settlement to revert:
-    what is lost is one *publication*, so the external replacement that refresh saw is reported by
-    the watcher's own hints instead of pre-published here. The record this round corrected said the
-    save path *could never* be refused; that is why this item exists.
+16. **~~A save-path refresh can now be refused by a clock collision, and it has no settlement to
+    take back~~ — CLOSED by §10, and this item was wrong on both of its claims about the cost.**
+    The premise was right and the accounting was not, exactly as item 10's was before §8 replaced
+    it. It said the refusal was *the over-refusing direction* and that what was lost was **one
+    publication**, the external replacement being *"reported by the watcher's own hints instead"*.
+    Neither holds. What is lost is the **external observation itself**: no engine settlement exists
+    to take back on that path, no loop retries it, and the native hint the sentence relies on is
+    exactly what `docs/decisions/2d-2-notes.md` §2.3 declines to guarantee — *a backend that stops
+    delivering without reporting anything looks like a healthy quiet stream, and no API
+    distinguishes them*. The consult requires a disagreeing post-save refresh to be **queued as
+    external** (`phase-2d-design.md` Q2), so a refresh nobody hears is a violation of the spec and
+    of §1's own headline, not an acceptable over-refusal. §10 is the closure: neither save-path
+    caller stamps any more, because the session lock they already hold orders their reads against
+    every record in program order, so there is no clock left to collide. The residue that replaces
+    this item is **§5 item 14's third half** — nothing in the type system says a caller of
+    `admit_under_the_session_lock` holds that lock.
 17. **`revert_settlement` restores unconditionally and re-hints only a watched path.** Every path
     the engine can settle entered through a `watches` check, so the two halves cannot come apart
     today. If they ever did, the rollback would still happen and the re-read would wait for the next
     hint or rescan rather than being scheduled — degraded, not lost, and stated rather than assumed.
+18. **~~A post-save refresh that *fails* tells the ledger nothing at all~~ — CLOSED by §11, and this
+    item was wrong about the choice it presented.** Its premise was right — `after_a_save` evicted
+    and answered `moved: None`, `conflict_after_the_lock` returned the read's error, and neither
+    admitted anything, so a removal immediately after a commit was heard only through a native hint
+    `2d-2-notes.md` §2.3 declines to guarantee. Its **conclusion** was wrong: it said closing the
+    hole *"would be worse"*, and offered exactly one alternative — publishing an `Absent` or
+    `Unreadable` from the single read that failed, which would indeed have published a state that
+    never stably existed and cleared the app-write record. There is a third option and the item did
+    not look for it: **ask the engine**. The path goes back to the running watcher
+    (`crate::watch::ReObserver::re_observe`), its ordinary two reads produce the state, and the
+    stamped door admits it — nothing is published from the failed read and no record is cleared by
+    it. That is §11, and the item's own last sentence names the mechanism it then failed to use:
+    *the engine's two-read stability is what that state needs, and the engine is where it is
+    produced.* This is the **third** time this record has stated a hole as bounded and been wrong
+    (item 10 at round 2, item 16 at round 4, this at round 5); §11.4 draws the conclusion. The
+    residues that replace it are items 19 and 20 below, both narrower and both about a watcher that
+    is not there rather than about a reading that is thrown away.
+19. **A re-observation reaches nothing when the workspace has no running watcher** (§11.1). A
+    worker that could not be spawned, an exhausted epoch space
+    (`WatcherLifecycle::without_epoch`), a `WorkspaceSession::unwatched` test session, or a worker
+    already stopped all answer `ReObserveOutcome::NoWatcher`, and the state the failed read could
+    not describe is then not observed by anything. That is degradation to exactly the coverage such
+    a workspace already had — a watcher-less session observes nothing at all — and it is answered
+    rather than raised, because a committed write is never afterwards reported as an error. What is
+    **not** claimed is that the production path always has one: `WatcherLifecycle::start` absorbs a
+    thread-spawn failure by design (2d-2), and nothing checks afterwards.
+20. **A re-observation issued while the worker's baseline is still failing is dropped, and one
+    issued just before a workspace replacement may be** (§11.4). The first is written as its own
+    arm in `WatchWorker::baseline` and inherits 2d-2's contract exactly: there is no engine to hint
+    yet, and the baseline that eventually starts one reads every path — but a baseline **establishes**
+    state rather than observing it, so nothing is emitted for what it finds. The second follows from
+    the session lock: a save holds it, so a replacement cannot interleave, but a message absorbed by
+    a worker that then receives `Stop` is a hint no tick will serve, and the successor's baseline is
+    likewise an establishment. Both are bounded by the same fact — `begin_epoch` discards the whole
+    ledger on replacement — and both are stated rather than measured.
 
 ---
 
 ## 6. The gates
 
-| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) |
-|---|---|---|---|---|---|
-| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | **1249 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines) |
-| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | **20 passed, 0 failed** (69.6 s, quiet host) |
-| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | **clean** (exit 0) |
-| `cargo fmt --check` | clean | clean | clean | clean | **clean** (exit 0, after one `cargo fmt`) |
-| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | **empty** (no match — and this is the round that touched a core file, so it is the run that matters) |
-| `npm run check` files | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** |
-| `npm test` | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** |
-| `npm run build` modules | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** |
-| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | **not re-run, same reason** |
+| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) |
+|---|---|---|---|---|---|---|---|
+| `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) |
+| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) |
+| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** |
+| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** |
+| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** |
+| bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** |
 
 **Round 3's fix moved the workspace count by 3, and every one is accounted for**: two in
 `src-tauri/src/ledger.rs` (14 → 16) — `a_reading_stamped_exactly_at_the_record_is_refused` and
@@ -668,6 +823,39 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
 `crates/espansoconfig-core/src/watch/engine.rs`,
 `a_reverted_settlement_is_observed_again_instead_of_coalescing_away`, which is the first test any
 round of this step added to the core. `watch_check` stays at 20.
+
+**Round 4's fix moved the workspace count by 2, and both are accounted for**: one in
+`src-tauri/src/ledger.rs` (16 → 17),
+`a_session_locked_reading_is_never_refused_by_the_records_own_instant` (renamed
+`a_serialized_door_reading_…` at §11.3), and one in
+`src-tauri/src/commands.rs` (7 → 8),
+`a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record`. `watch_check`
+stays at 20 and no test was removed. The frontend figures in the last column are again **carried,
+not measured**, and the warrant is the exhaustive list of what this round edited: three files under
+`src-tauri/src/` (`ledger.rs`, `commands.rs`, `main.rs`), one core file
+(`crates/espansoconfig-core/src/watch/engine.rs`, a doc comment only), this record and
+`docs/decisions/2d-1-notes.md`. No `src/`, no i18n path, no corpus path, no `Cargo.toml` and no
+`Cargo.lock` — so there is nothing a frontend gate could have moved. **The list is the warrant
+because this round ran no `git` command**; the working-tree check the previous rounds quoted is the
+committing session's to take.
+
+**Round 5's fix moved the workspace count by 5, and every one is accounted for**: three in
+`src-tauri/src/commands.rs` (8 → 11) —
+`a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing`,
+`a_failed_conflict_refresh_asks_for_a_re_observation_and_still_refuses` and
+`an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation`, one per arm that asks — one in
+`src-tauri/src/ledger.rs` (17 → 18),
+`a_removal_the_save_path_could_not_read_is_stabilized_and_admitted`, and one in
+`src-tauri/src/watch.rs` (4 → 5),
+`a_re_observation_reaches_a_listening_watcher_and_degrades_without_one`. `watch_check` stays at 20
+and **no test was removed**; one was **renamed** (§11.3), which moves no count and is the shape a
+net figure hides, so it is spelled out here as well as there. The frontend figures in the last
+column are again **carried, not measured**, and the warrant is the exhaustive list of what this
+round edited: four files under `src-tauri/src/` (`watch.rs`, `commands.rs`, `ledger.rs`,
+`main.rs`) and this record. **No core file, no `src/`, no i18n path, no corpus path, no
+`Cargo.toml` and no `Cargo.lock`** — so there is nothing a frontend gate could have moved. As at
+round 4, **the list is the warrant because this round ran no `git` command**; the working-tree
+check earlier rounds quoted is the committing session's to take.
 
 **The test count moved by 19 over 2d-2's 1223, and every one is accounted for**: 10 module tests
 in `src-tauri/src/ledger.rs`, 7 in `src-tauri/src/commands.rs` and 2 in
@@ -710,7 +898,36 @@ that budget — both on match-only trees, so neither establishes an FSEvents str
 fix round's two serial `watch_check` runs were taken quiet as well, and neither produced a timeout,
 so no contended re-run was owed. **The round-2 fix round's two were also taken quiet, with the same
 result** — and its second neuter run is the one deliberate `watch_check` timeout in this step's
-history, produced by a build with the fix removed rather than by contention (§8.6).
+history, produced by a build with the fix removed rather than by contention (§8.6). **Round 4 hit
+the scar twice and is the sharpest evidence this project has for it**, so both episodes are
+recorded:
+
+- a first `cargo test --workspace` overlapped a stray background run of the same command and
+  returned two `watch_check` failures (`a_real_edit_under_config_reaches_the_sink` and
+  `a_real_atomic_rename_under_config_reaches_the_sink`, exit 101). The stray process was killed and
+  the identical command re-run: **1251 passed, 0 failed**, twice, that binary's target taking 85.8 s;
+- later, with the tree **byte-identical** and only Markdown edited since those two green runs, two
+  further workspace runs failed with **nine and then ten** `watch_check` timeouts, all at
+  `watch_check.rs:141`'s bounded `wait_for`, the failing target taking 389 s against 85.8 s. Nothing
+  of this session's was running; `ps -Ao pid,pcpu,comm -r` showed `spindump` at 97 %, then a
+  `Virtualization.framework` VM at 111 % and `corespotlightd` at 106 %. The **serial** gate passed
+  20/20 in 68.7 s through the same weather, which locates the failure in the parallel workspace run
+  rather than in the watcher: `cargo test` runs the eight-cell matrix concurrently, and FSEvents
+  delivery is what the host was starving. A later workspace run on the same tree was green again —
+  **1251 passed, 0 failed**.
+
+That is the whole warning in one measurement: *the same tree produced 1251/0 and 217/10 within the
+hour, and only the host differed.* A `watch_check` timeout is evidence about the host until a quiet
+re-run says otherwise.
+
+**Round 5 met the scar's other face — slow but green — and it is recorded because a duration is
+evidence too.** The serial gate was first run immediately after two consecutive
+`cargo test --workspace` runs and took **182.0 s** against round 4's 68.5 s, with **no** failure and
+**no** timeout: 20 passed, 0 failed. Run again on a quiet host it took **70.8 s**, back in the range
+every earlier round measured. Nothing in the tree changed between the two, and this round added no
+`watch_check` test — so the ratio is the host, exactly as the failures above were, and a slow green
+run needs a quiet re-run before its *duration* is quoted as this step's, just as a timeout needs one
+before its verdict is.
 
 ---
 
@@ -1275,6 +1492,15 @@ espansoconfig-core | rg tauri` still finds nothing, and no core file was touched
 > rule was re-checked on the round that broke the streak. §9.5 is the current statement of what is
 > guaranteed.
 
+> **Correction (round-4 fix round, §10).** *"`admit` and `admit_at_current_epoch` reach the same
+> `decide` with the same four operands"* is no longer the shape, and the sentence it was defending
+> is stronger than ever. The method is `admit_under_the_session_lock` and the fourth operand is a
+> private `ReadChronology` rather than an `Instant`, so the two doors reach the same `decide` with
+> the same suppression, supersession, coalescing and sequence allocation, differing only in which
+> **proof of chronology** each can build — and neither lets its caller build the other's. That is
+> still one rule with two callers; it is now one rule with two *proofs*, which is what §10.1 is
+> about. §10.5 is the current statement of what is guaranteed.
+
 ---
 
 ## 9. The round-3 fix round
@@ -1334,7 +1560,19 @@ than softened.
   observation it then emits is a lie about its own shape — `Changed { previous_revision: P,
   content: P }`, which this engine documents as meaning *readable again, bytes as before*, or a
   `Removed { previous_revision: None }` that has forgotten what it removed. Rolling back produces
-  **the same observation again**, which is the honest answer.
+  **the same observation again if the disk still holds that state when the retry reads it**, and
+  otherwise a correct fresh observation of whatever does stabilize — which is the honest answer
+  either way, and is the difference from (c): the shape is right in both cases.
+
+  > **Correction (round-4 fix round, §10).** The sentence above read *"Rolling back produces the
+  > same observation again, which is the honest answer"*, with no condition on it, and round 4's
+  > Low is that the implementation deliberately does not promise that. `revert_settlement` restores
+  > the base and **re-hints**; the retry re-reads, so if another process writes Q in between the
+  > engine emits `Changed { B → Q }` and not the refused `Changed { B → P }` — correctly.
+  > `revert_settlement`'s own third bullet always said so, contradicting the guarantee its first
+  > paragraph gave; the doc comment and this sentence are both qualified now. What (c) is rejected
+  > for is unchanged and does not depend on the replay: a requeue without a rollback emits an
+  > observation whose *shape* is a lie, whatever the disk then holds.
 
 **What changed.**
 
@@ -1467,7 +1705,7 @@ new code rather than inherited.
 | Owed | Where |
 |---|---|
 | an engine-plus-ledger regression proving a refused stabilized state cannot disappear after subsequent hints | `ledger.rs`'s `a_refused_stabilized_state_is_re_observed_rather_than_lost` — one real temp tree, one real `ObservationEngine` whose clock is an argument, the real `admitting_sink` and the real `crate::watch::deliver`. **No thread and no sleep**: the stamp is a value, so taking the record after it is the whole interleaving |
-| …and that the recovery is the *same* observation rather than a new shape | the same test's step 4, plus the core's `a_reverted_settlement_is_observed_again_instead_of_coalescing_away`, which asserts the re-observed `Changed` carries the same `previous_revision` |
+| …and that the recovery is the *same* observation rather than a new shape — **on a disk nothing else writes to**, which is a property of these two tests and not a guarantee of the method (corrected in the round-4 fix round, §10.3) | the same test's step 4, plus the core's `a_reverted_settlement_is_observed_again_instead_of_coalescing_away`, which asserts the re-observed `Changed` carries the same `previous_revision`. Both hold the tree still across the retry, so what they drive is *the settlement was taken back*; a retry that reads a state some other process has since written correctly reports **that** state instead |
 | that a revert is one pass deep | the core test's tail: a tick with nothing due makes the settlement final, and the next revert restores nothing and is a plain hint |
 | the equality case | `ledger.rs`'s `a_reading_stamped_exactly_at_the_record_is_refused`. A test cannot make the host clock collide on demand, so it asks for the collision directly through the test-only `WriteLedger::recorded_at` — the record's own instant, handed straight to `admit`, which is exactly what a coarse clock would have produced |
 | the production stamp is still not taken too early | unchanged: `watch_check.rs`'s `a_committed_save_is_suppressed_while_a_later_external_write_is_not` still asserts `preceded_a_commit == 0`, and it still passes |
@@ -1521,3 +1759,659 @@ it* — is §9.3, and the `Instant`-comparison sweep is §9.2's last paragraph.
   both now name the answer and the one call site that reads it;
 - `crates/espansoconfig-core/src/watch/engine.rs`'s module header gained *A settlement is
   provisional until the next tick*, beside its existing *A hint is not truth*.
+
+---
+
+## 10. The round-4 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 4 returned **NOT READY** with one High and one Low, and
+it is the fourth consecutive round whose finding was produced by the previous round's fix. Both are
+closed here. The High lives in exactly the hole the round-3 fix round wrote down as honestly
+bounded — §5 item 16 — which is what item 10 did to §7 and item 13 did to §8: **this step's holes
+have twice now been the next round's High, so a hole is a place to look first rather than a place
+already accounted for.**
+
+The corrections this round owes the record itself are the fourth block under the headline (§1), two
+additions to §1's built list, a block under §2.6, the **replacement** of §5 item 16 and a third half
+of item 14, the name in item 12, the new item 18, the round-4 column in §6's table together with a
+new count paragraph and a rewritten quiet-host scar paragraph beneath it, the names in §2.1's
+leaf-mutex bullet and §2.6's first bullet, a
+block inside §8.7, a block inside §9.1's option (c) and an amended row of §9.5. **One correction is
+owed outside this record and is taken**: `docs/decisions/2d-1-notes.md` §2.1's fifth caller
+obligation can now be discharged two ways, and a block beneath the round-3 one says so.
+
+### 10.1 High — the premise was verified before anything was built on it
+
+**What the finding was.** `after_a_save` takes `Instant::now()` a few lines after its own save
+recorded, on one thread, and `decide` accepts only a *strictly* later stamp. Two adjacent clock
+reads that a coarse clock answers equally therefore produced `Admission::PrecedesACommit`: the
+record was retained, nothing was published, and — unlike a watcher observation — nothing answered
+the refusal. There is no engine settlement on that path to take back and no loop to retry it. So a
+post-save refresh that found an **external** replacement could be refused and never heard again.
+
+**Why the record's own sentences were false, said plainly.** §5 item 16 said the cost was *one
+publication*, and that the external replacement "is reported by the watcher's own hints instead".
+The second half is what makes the first half wrong, and it is not true: `docs/decisions/2d-2-notes.md`
+§2.3 expressly declines to cover a backend that stops delivering **without reporting anything** —
+*a sandbox that blocks FSEvents delivery looks exactly like a healthy quiet stream, and no API
+distinguishes them*. An observation whose only remaining carrier is a hint nobody guarantees is not
+a delayed publication; it is a lost external change. That falsifies §1's headline in its own words,
+and it violates the consult's Q2, which requires the differing post-save observation to be **queued
+as external**. §2.6's *"neither can currently be refused by that comparison"* was the same error one
+layer up: no *concurrent* commit can refuse them, and their own does.
+
+**The premise was checked in the code, not inherited from the review.** The review's minimal fix
+rests on *saves and refreshes are serialized by the session lock*. Round 2's fix produced round 3's
+finding by inheriting a premise, so this one was re-derived from the call graph, and it is stated as
+the chain it is:
+
+1. `WriteLedger::record_app_write` is the **only** producer of a record. Its one production caller
+   is `commands::commit_and_record` (`ledger.rs`'s module docs already claimed this; it was
+   re-checked with `rg`, which finds that call and one test's);
+2. `commit_and_record` has one caller, `run_one_save`;
+3. every route to `run_one_save` is one of the six writing planners, and each is reached only from
+   the six `WorkspaceSession` methods that call `with_open`;
+4. `with_open` takes the session mutex and holds the guard across its **whole** closure, which is
+   where `run_one_save` — and therefore `after_a_save` and `conflict_after_the_lock` — runs.
+
+So a record can only be *inserted* by a thread holding the session lock, and both refresh callers
+hold it. Every record they can observe was written either by this thread earlier in this same call,
+or by a previous holder that released the lock before this one acquired it; both give a
+happens-before edge, so the record precedes the read in program order with no clock consulted.
+
+**Two things the premise deliberately does not say**, because getting either wrong is how a premise
+becomes the next round's finding:
+
+- it is about **insertion**, not about mutation. `decide` *removes* records (supersession) from the
+  watcher's worker thread, holding no session lock. That does not weaken the argument — a removal
+  cannot make a record appear that was written later — and the two are serialized against each other
+  by the commit gate regardless;
+- it holds for **both** callers and was checked separately for each. `conflict_after_the_lock` runs
+  in the same `with_open` closure after a `RevisionMismatch`; its transaction recorded nothing, so
+  any record it meets belongs to an earlier save under an earlier acquisition of the same lock. Had
+  the premise held for only one of the two, the fix would have applied to only one.
+
+**The mechanism, and why it is this one.**
+
+- **(a) Keep the stamp and accept equality on that path** (`read_after < recorded_at` refuses).
+  Rejected. Under the premise, `recorded_at <= read_after` always holds, so the refusing arm is
+  unreachable — a check whose predicate can never be true, dressed as a safety net. It would also
+  still be a *value comparison* described as a proof, which is the exact class of sentence this
+  record keeps having to correct.
+- **(b) A caller-proven chronology mode, shared with `decide`. Adopted.** `decide`'s fourth operand
+  becomes a private `ReadChronology` with two variants: `StampedBeforeTheRead(Instant)`, which
+  compares, and `SerializedWithEveryRecord`, which does not. Everything else `decide` does is
+  untouched and shared: the merged lookup, suppression, supersession, coalescing, sequence
+  allocation and the tally.
+- **(c) A second decision function for the save path.** Rejected on §2.6's own ground: *external
+  rather than self* must not become two rules that agree today. This is also what the review asked
+  for explicitly.
+- **(d) Give the save path a retry of its own.** Rejected as the wrong layer and the wrong shape: a
+  retry would re-read the file a second time to answer a question the session lock has already
+  answered, and a second read is exactly the torn-read exposure §5 item 3 records.
+
+**Why the mode is private, and why neither door takes it as an argument.** This is the round's own
+design decision rather than the review's. A public mode parameter would be a caller-supplied licence
+to skip a safety check, and the caller most able to skip it wrongly is the watcher's worker thread —
+the one caller that can prove nothing. So `ReadChronology` is private, `WriteLedger::admit` can build
+only the stamped variant, and `WriteLedger::admit_under_the_session_lock` only the serialized one:
+*which proof of chronology an observation carries* is a property of the door it came through, and
+there is no parameter through which to ask for the other. `decide` matches the mode exhaustively, so
+a third proof is a compile error there rather than a silently skipped check.
+
+**What the types still do not force**, said beside what they do: that a caller of
+`admit_under_the_session_lock` really holds the session lock. This module owns no such lock and can
+require no witness of one — `CommitGate` works because the gate is the ledger's own, and the session
+mutex is not. Two callers and one paragraph in that method's documentation are what keep it, and §5
+item 14 now carries it as its third half.
+
+### 10.2 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — the private `ReadChronology` and its two variants; `decide` takes
+  it instead of a bare `Instant` and matches it exhaustively before consulting the record;
+  `admit_at_current_epoch` is renamed **`admit_under_the_session_lock`**, drops its `read_after`
+  parameter and builds the serialized variant; `admit` is unchanged in signature and builds the
+  stamped one. The module's *stamp* section gains a **two proofs** section that states the
+  call-graph premise, and `Admission::PrecedesACommit`, `LedgerTally::preceded_a_commit` and the two
+  entry points' docs are corrected to say that only the stamped door can reach that arm. The
+  test-only `stamp_the_record_at` seam is new, and one module test with it;
+- **`src-tauri/src/commands.rs`** — both `Instant::now()` lines are gone, both refreshes call
+  `admit_under_the_session_lock`, and `std::time::Instant` is no longer imported by the module (it
+  survives inside the test module, which still drives `admit`). The module header, `run_one_save`'s
+  *the app-write record is taken here* section, `conflict_after_the_lock`'s *the refresh is
+  external* section and `after_a_save`'s *a refresh that disagrees* section all name the new door
+  and say why it takes no stamp. One new test;
+- **`src-tauri/src/main.rs`** — the phase paragraph said a stamp rides **every** observation; it now
+  says every *watcher* observation, and names the save path's proof and what a refusal there used to
+  cost;
+- **`crates/espansoconfig-core/src/watch/engine.rs`** — the Low, and a **doc comment only**. No core
+  behaviour changed in this round.
+
+### 10.3 Low — a rollback promises a fresh observation, not a replay
+
+**What the finding was.** `revert_settlement`'s first paragraph said the re-hint *"produces the same
+observation again"*, unconditionally, while its own third bullet said the observation comes back
+*"with whatever the file holds then — which may no longer be the state that was refused"*. The
+second is what the code does: the rollback restores the base and schedules a **read**. If another
+process writes Q before the two retry reads, the engine emits `Changed { B → Q }`, which is correct
+and is not the refused `Changed { B → P }`.
+
+**Why it matters even though it is a Low.** It is this project's worst defect class in miniature — a
+doc comment claiming a guarantee the code does not give — and no test can fail it: both tests that
+cover the rollback hold the tree still across the retry, so they drive *the settlement was taken
+back* and would pass under either reading of the sentence.
+
+**What changed.** The guarantee is qualified in all three places the claim appeared: the
+`revert_settlement` doc comment (which now says a fresh observation of whatever stabilizes, *and the
+same one again only if the disk is unchanged*, with a note that the third bullet already said so),
+§9.1's option (c) paragraph, and §9.5's evidence row, which now states that *nothing else writes to
+this disk* is a property of those two tests rather than of the method. Option (c) stays rejected and
+its reason is untouched: a requeue without a rollback emits an observation whose **shape** is a lie,
+whatever the disk then holds.
+
+### 10.4 The sweep for the shape, not for the words
+
+Every round of this step has found a narrower instance of the previous round's finding, and rounds 3
+and 4 each found one in the fix round's **own new code**. So this round asked its own change the
+same question: *is there anywhere else a value is settled, installed, spent or consumed before the
+decision that could reject it, or any other refusal arm with no recovery path?*
+
+**One new candidate was found, and it is stated as a hole rather than closed** — §5 item 18. A
+post-save refresh that **fails** admits nothing at all: `after_a_save` evicts the cache and answers
+`moved: None`, `conflict_after_the_lock` returns the error. That is the same dependency on an
+unguaranteed native hint that item 16 was just closed for, reached through an error arm instead of a
+refusal arm. It is deliberately left open, because closing it is worse than leaving it: a
+`Workspace::refresh` failure is **one** read, so publishing `Absent` or `Unreadable` from it would
+publish a state that never stably existed **and clear the app-write record**, which is precisely
+what makes a save's own hints foreign. The two-read stability that state needs is the engine's, and
+the engine is where it should be produced.
+
+The refusal arms reachable from the new door were enumerated rather than assumed:
+
+- `PrecedesACommit` — now unreachable from it, which is the fix;
+- `SelfWrite` and `Duplicate` — answers about these exact bytes; re-reading gives the same answer,
+  and neither loses anything, because nothing changed relative to what was already published;
+- `StaleEpoch` — not reachable here at all: there is no epoch check, because the session lock is the
+  lock a workspace replacement takes to change the epoch;
+- `SequenceSpaceExhausted` — **the same shape as the High and inherited, not closed.** It clears the
+  record, publishes nothing, and the caller discards the answer, with no recovery on either door. It
+  is terminal within its epoch by policy and unreachable in any physical execution (it needs `u64`
+  sequences spent), §9.3's second bullet already licenses it, and skipping the chronology check
+  neither widens nor narrows it.
+
+Three candidates from §9.3 were re-checked against the new code rather than inherited, and all three
+stand unchanged: `decide` still spends a sequence and publishes before any consumer exists (2d-4's);
+`decide` still clears the record above the coalescing and exhaustion arms; and both refreshes still
+install a fresh parse in the workspace cache before the admission decides — unconditional cache
+coherence, not a consequence of the decision, so a refusal leaves nothing installed that should not
+be.
+
+**The `Instant` sweep, again, because the change removed two clock reads.** `rg 'Instant::now\(\)'
+src-tauri/src` was re-run and every hit read. Production holds **three** clock reads and exactly
+**two** of them are chronology stamps: `record_app_write`'s, on the line that inserts a record, and
+`WatchWorker::observe`'s, on the line before the engine pass. The third is
+`WatcherLifecycle`'s `origin`, the worker's monotonic base for the engine's `Millis` — it is never
+compared against a record and is named here rather than left for the *exactly two* above to be
+wrong about. `commands.rs` has **none**: the module-level `use std::time::Instant` was removed,
+which is the compiler confirming the call sites are gone rather than a reviewer's claim that they
+are. The rest are `watch_check`'s bounded-wait deadlines and the test helpers, plus the two new
+tests, which ask for their collision from the record's side rather than racing the host clock.
+
+### 10.5 What is guaranteed now, and what is not
+
+**Guaranteed.** A *watcher* reading this session cannot place strictly after its own last committed
+write to a path neither publishes nor clears that path's record, and is answered so the engine
+re-observes it. A *save-path* refresh is never refused for chronology at all, because the session
+lock it already holds orders it against every record that can exist; a disagreeing one is therefore
+published, spends a sequence, and supersedes the record, whatever the host clock's resolution. Both
+doors reach one `decide`, so suppression, supersession, coalescing and sequence allocation are one
+rule with two callers. Only one door can build the stamped mode and only the other can build the
+serialized one, and no caller of either can choose.
+
+**Not guaranteed, and stated as such.** That a caller of `admit_under_the_session_lock` holds the
+session lock (§5 item 14, third half). That a producer's stamp precedes its reads, and that a sink's
+answer is acted on (§5 item 14, first two halves). That a *failed* post-save refresh is heard at all
+(§5 item 18). That a rollback replays the state that was refused rather than reporting what the disk
+then holds (§10.3 — and that is correct behaviour, not a gap). And everything §5's other items
+already carried, unchanged by this round.
+
+**Nothing from 2d-4 or later was added**: no Tauri event, no queue, no `drain_external_changes`, no
+`#[tauri::command]`, no TypeScript, Svelte or i18n file, no writer, no force flag, no route around
+`save_document`, and nothing new that serializes. One core file was touched and only in a doc
+comment; `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
+
+> **Correction (round-5 fix round, §11.5).** One line of the *not guaranteed* list above is out of
+> date, and it is the one round 5 turned into its High: *that a failed post-save refresh is heard at
+> all (§5 item 18)*. It **is** heard now — the path is handed to the running watcher and the state
+> the engine stabilizes is admitted through the stamped door (§11.1) — subject to the two narrower
+> residues that replace item 18, §5 items 19 and 20. Everything else in this section stands
+> unchanged; this round altered no decision the ledger takes.
+
+### 10.6 The evidence and the neuter runs
+
+| Owed | Where |
+|---|---|
+| **a deterministic equality regression for `after_a_save`** | `commands.rs`'s `a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record` — the shared tail driven directly, a record taken in its own commit window, an external write, and the assertion that the differing refresh is published and supersedes. **A test cannot make the host clock collide on demand**, and since the fix this caller reads no clock to collide with, so the collision is asked for from the **record's** side through the test-only `WriteLedger::stamp_the_record_at`: the record's instant is put an hour ahead, which is a collision and worse. That is `a_reading_stamped_exactly_at_the_record_is_refused`'s technique taken from the other end |
+| that the *door* decides it, not the ledger going soft | `ledger.rs`'s `a_serialized_door_reading_is_never_refused_by_the_records_own_instant` — one ledger, one path, one record stamped beyond every later clock read, asked through **both** entry points: the serialized one is `Admitted` and supersedes, and the stamped one, against a record stamped the same way, is still `PrecedesACommit` and still retains. **It proves the serialized door's implementation and not the premise that licenses it**, and the name said otherwise until §11.3: the test constructs a bare `WriteLedger`, owns no `WorkspaceSession` and locks nothing, so *the production callers of this door hold the session lock* rests on §10.1's call-graph audit **alone** and would stay green if a caller were moved outside `with_open` tomorrow |
+| that suppression, supersession, coalescing and sequence allocation stayed shared | unchanged and still passing: the whole of §3's table and §9.5's, over one `decide`. `a_conflict_against_this_apps_own_committed_bytes_is_suppressed` is the sharpest of them, because it is a save-path refresh that must still answer `SelfWrite` |
+| the lock order and the leaf property | unchanged: `admit_under_the_session_lock` takes gate → state and returns a value, exactly as before; `the_downstream_sink_runs_outside_the_ledger_lock` and `no_admission_can_decide_between_a_commit_and_its_record` still pass |
+| that a caller of the serialized door holds the session lock | **nothing.** No test in this crate can fail it, and the row above says why the test that reads as though it did does not; §5 item 14's third half is the standing statement of it |
+
+**Two neuter runs**, one per new guarantee, each disabling exactly one thing this round added and
+then restored. Both were driven by the *same* single edit — `admit_under_the_session_lock` building
+`ReadChronology::StampedBeforeTheRead(Instant::now())` instead of the serialized variant, which is
+precisely the pre-fix behaviour:
+
+- `ledger.rs`'s `a_serialized_door_reading_is_never_refused_by_the_records_own_instant` (named
+  `a_session_locked_reading_…` when this run was taken; §11.3 renamed it, and its first assertion's
+  message with it) failed at that first assertion — **`left: PrecedesACommit`,
+  `right: Admitted { sequence: 1 }`**. **16 passed, 1 failed** of the 17 ledger tests,
+  so the check is narrow;
+- `commands.rs`'s `a_post_save_refresh_is_admitted_when_no_clock_could_place_it_after_the_record`
+  failed at the published-state assertion — **`left: None`, `right: Some(Content(…))`**, *"the
+  differing refresh is queued as external whatever the clock says"* — which is round 4's High
+  reproduced exactly: the external state gone, with the file written and the refresh performed.
+  **72 passed, 1 failed** of the 73 command tests.
+
+The edit was reverted and both suites re-run green before anything else was measured.
+
+### 10.7 The two sweeps
+
+**For the shape** — *a value settled, installed, spent or consumed before the decision that could
+reject it, or a refusal arm with no recovery* — is §10.4, including the one new hole it found (§5
+item 18) and the four refusal arms of the new door, enumerated.
+
+**For name positions**, as a pass distinct from the prose:
+
+- `docs/decisions/2d-3-notes.md` line 3 — the headline said *every observation carries a stamp* and
+  claimed the whole property on three mechanisms; rewritten to four, with a fourth correction block
+  beneath it;
+- **§5 item 16 is replaced, not annotated**, because both of its claims about the cost were wrong —
+  the same treatment §8 gave item 10 and §9 gave item 13, and the third time this step has had to
+  give it;
+- `WriteLedger::admit_at_current_epoch` — the **name itself** was a name position: it described what
+  the door skips (the epoch tag) while the precondition that licenses the skip is the session lock,
+  which now licenses a second one. It is `admit_under_the_session_lock`;
+- `src-tauri/src/main.rs`'s phase paragraph claimed a **stamp** on every observation; it now says
+  every *watcher* observation and names the other proof;
+- `crate::ledger`'s module header listed `admit_at_current_epoch` in the lock-order bullet and, in
+  its *stamp* section, said *every observation therefore carries `read_after`*; both corrected, and
+  the *two proofs* section is new;
+- `Admission::PrecedesACommit`'s doc did not say which door can answer it; it does now, and says why
+  the other cannot;
+- `LedgerTally::preceded_a_commit`'s doc said it *counts refusals, never losses* — true of what it
+  can count today and **false when written**, because a save-path refusal was a loss and was counted
+  here. The doc now says both;
+- `commands.rs`'s module header and the two refresh functions' docs each carried the *stamped before
+  their own read* sentence; all three corrected, which is the narrower-instance pattern the previous
+  rounds predicted;
+- `crates/espansoconfig-core/src/watch/engine.rs`'s `revert_settlement` promised *the same
+  observation again*; qualified (§10.3);
+- `docs/decisions/2d-1-notes.md` §2.1's round-2 correction block enumerated the fifth caller
+  obligation as *place the observation's reads relative to the recorded write* and named one way to
+  discharge it; a round-4 block beneath it names the second;
+- **inspected and deliberately left standing**, so the next round does not rediscover them as
+  misses: §8.1's heading *"…so every observation carries a stamp"*, and the historical descriptions
+  in §1's built list, §7.1, §8.1 and §9.6 that name `admit_at_current_epoch`. Each is a record of
+  what a **named earlier round** did, and each was true then; this file's convention is that such
+  sections are corrected by a block rather than rewritten, and §8.1 already carries two of round 3's
+  plus §8.7's round-4 one. The rule this round applied to decide between the two treatments: **a
+  present-tense claim about how the code works now is amended in place or blocked; a past-tense
+  record of what a round built is left alone.** That is why §2.1's leaf-mutex bullet, §2.6's first
+  bullet and §5 item 12 were amended and these were not.
+
+---
+
+## 11. The round-5 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 5 returned **NOT READY** with one High and two Lows, and
+it is the fifth consecutive round whose finding was produced by the previous round's fix. All three
+are closed here. Two things the review settled in the fix's favour before finding anything, and they
+are not re-argued below: the chronology premise was **re-derived independently and holds** — the
+production call graph does serialize saves and refreshes, `conflict_after_the_lock` included — and
+`ReadChronology` is genuinely private with no production caller able to select a variant. Lock
+order, leaf mutexes, Tauri-freedom and the absence of 2d-4 scope creep were confirmed too.
+
+The High lives in exactly the hole the round-4 fix round wrote down as honestly bounded — §5 item
+18 — which is what item 10 did to §7 and item 16 did to §10. **That is now three, and three is a
+pattern rather than a coincidence: every hole this record has stated as bounded and left open has
+turned out to be a real defect, and in each case the item's own text named the reason it looked
+bounded — an alternative it had considered and rejected.** The rule this round draws from it, and
+applies to items 19 and 20 below: *a hole is bounded only if the enumeration of alternatives in it
+is complete, and an enumeration written by the person who wants the hole to be bounded is not
+evidence that it is.* Item 18 offered exactly one alternative, called it worse, and was right about
+that one alternative and wrong about the hole.
+
+The corrections this round owes the record itself are the fifth block under the headline (§1), four
+additions to §1's built list and one to its wire-types sentence, an addition under §2.6, a
+correction block under §2.7, the amendment of §5 item 14, the **replacement** of §5 item 18 by two
+narrower items, the round-5 column in §6's table with a new count paragraph and a new scar
+paragraph, a correction block under §10.5, and three amendments inside §10.6 — its renamed test's
+evidence row, that row's neighbour naming the same door, and the neuter bullet that quotes the
+assertion message the rename changed. **No correction is owed outside this record, and that
+was checked rather than assumed**: `docs/decisions/2d-1-notes.md` §2.1's round-4 block says a caller
+that can place its reads some other way owes no stamp, and names *2d-3's three callers* — this round
+adds no caller of either door and removes none, so the block's count and its claim both stand.
+`docs/decisions/2d-2-notes.md` §2.3's residue is likewise untouched, and §11.1 says why the fix does
+not depend on it.
+
+### 11.1 High — a read this application could not use is replaced, not published
+
+**What the finding was.** The app commits revision A and records it; an external process removes the
+file before `after_a_save` reads it; `Workspace::refresh` answers `NotFound`; `after_a_save` evicts
+the cache, admits nothing, and returns `Saved`. The removal then enters the observation sequence only
+if the native backend delivers a hint for it — and `docs/decisions/2d-2-notes.md` §2.3 expressly
+declines to cover *a backend that stops delivering without reporting anything*. That is round 4's
+exposure exactly, reached through an `Err` arm instead of through `PrecedesACommit`, and it
+falsifies §1's *no external change is lost*.
+
+**Why the record's own sentence was false, said plainly.** §5 item 18 said closing the hole *"would
+be worse"*, and the sentence after it shows what it had in mind: publishing an `Absent` or
+`Unreadable` from the single read that failed, which would put a state into the sequence that was
+never proved stable **and clear the app-write record** — making the save's own hints foreign. Every
+word of that is true, and none of it is an argument for leaving the hole open: it rules out **one**
+alternative. The item's last sentence names the one it did not consider — *the engine's two-read
+stability is what that state needs, and the engine is where it is produced* — and stops one step
+short of asking the engine for it.
+
+**The mechanism was checked for availability, lock safety and scope before anything was built on
+it**, because round 2's fix produced round 3's finding by inheriting a premise:
+
+1. **It exists and is reachable.** `WatcherLifecycle` already owns `control: Sender<WorkerMessage>`,
+   the inbox the native callback forwards into. `Open` owns the `WatcherLifecycle`, and
+   `WorkspaceSession::with_open` destructures `Open` — so the save path can be handed a borrow of it
+   beside the two records it already gets, disjointly from the `&mut Workspace`.
+2. **It cannot violate the lock order.** The inbox is `std::sync::mpsc::channel()` — **unbounded**,
+   never `sync_channel` — so `Sender::send` allocates and links a node and returns; it never waits
+   for the receiver to consume anything. That was the hazard to check, because the save path holds
+   the **session** lock and the worker is allowed to take that same lock inside its sink callback: a
+   bounded channel or a blocking send would have been precisely session → (wait for worker) →
+   (worker waits for session). The channel's own internal lock is never held by the worker across a
+   sink call — the worker holds it only inside `recv_timeout`/`try_recv` — so there is no cycle
+   through it either. Lock order stays **session → gate → state**, and nothing new is taken under a
+   ledger guard.
+3. **A workspace with no watcher degrades cleanly.** `WatcherLifecycle::stationary` drops its
+   receiver at construction, and a worker that could not be spawned or has already exited has none
+   either, so the send fails and is answered `ReObserveOutcome::NoWatcher` — never a panic, never an
+   error, and never something a save's result depends on. `WorkspaceSession::unwatched`'s test
+   sessions take exactly that arm.
+4. **It is 2d-3's and not 2d-4's.** Consult Q3's wire is `workspace://reconciliation-ready` plus
+   `drain_external_changes`; this adds no event, no queue, no command, no wire type and nothing
+   serializable, and carries a path **into** the engine rather than an observation out of it. It is
+   the same reasoning `hand_to_reaper`'s channel already carries in `crate::watch`. What it closes
+   is Q7 item 3's own subject — *post-commit external replacement is not suppressed* — so leaving it
+   for 2d-4 would ship this step with its headline false.
+
+**The mechanism, and why it is this one.**
+
+- **(a) Publish the failed read directly.** Rejected, and it is what §5 item 18 rejected: one read
+  that did not complete proves no state, publishing `Absent` from it would clear the record, and the
+  next hint at the real state would coalesce against a state that never existed.
+- **(b) Retry the read here.** Rejected on §10.1 option (d)'s ground and one more: a second single
+  read is still a single read, and the torn-read exposure §5 item 3 records is exactly what two
+  reads exist to close.
+- **(c) A third `ReadChronology` — *"no reading, take my word"*.** Rejected as the shape this whole
+  step keeps correcting: a door that admits a state nobody read.
+- **(d) Ask the running watcher to observe the path again. Adopted.**
+  `crate::watch::ReObserver::re_observe(path)` puts one `WorkerMessage::ReObserve(path)` on the
+  worker's inbox; the worker absorbs it through `WatchWorker::hint_paths`, which is the code a
+  native hint already goes through; the engine debounces, reads twice, and settles; and `deliver`
+  hands the result to the same `admitting_sink` through the same **stamped** door. Nothing about the
+  ledger, the two doors or `decide` changes at all.
+
+**Three arms take it, and the third is the one the review did not name** — §11.4 is the sweep that
+found it. `after_a_save`'s failed refresh and `conflict_after_the_lock`'s failed refresh are the
+review's two; `after_an_uncertain_write` is the third, reached when
+`SaveError::may_have_written()` is true. That arm reads nothing at all: the rename may have landed
+and the revision it landed is unknown, so `committed_revision` records nothing — deliberately,
+because a guess would suppress a real observation. *Recording nothing is the safe direction* is only
+true if something eventually observes what the file holds, and until this round nothing on that arm
+did; it evicted the cache and returned.
+
+**Why this does not depend on the residue it closes.** A re-observation is a hint into the
+**engine's** pending table, not a request to the native backend, so it reaches the two-read pipeline
+whether or not FSEvents is delivering anything. That is the whole reason it answers §2.3 where item
+18's *"the watcher's own hints"* did not.
+
+**What it cannot do, said beside what it does.** It cannot make a save wait, and it cannot make one
+fail: the send does not block, and all three call sites bind the answer and act on none of it,
+because *a committed write is never afterwards reported as an error*. It cannot reach a workspace
+with no running watcher (§5 item 19), and it is dropped while a worker's baseline is still failing
+or if the worker stops before its next tick (§5 item 20). And it claims nothing about **what** will
+be observed: a path whose bytes have not changed since the engine last settled it coalesces to
+nothing inside the engine, which is correct — there is no external change to report.
+
+### 11.2 What changed, file by file
+
+- **`src-tauri/src/watch.rs`** — `WorkerMessage::ReObserve(PathBuf)` and its `Debug` arm;
+  `ReObserveOutcome` (`Asked` / `NoWatcher`) and `ReObserver`, a `Copy` handle holding
+  `&Sender<WorkerMessage>` and exposing one method, deliberately narrower than `WatcherLifecycle`
+  so a save cannot shut a watcher down or read its status; `WatcherLifecycle::re_observer`;
+  `WatchWorker::hint_paths`, **extracted** from `absorb` so that a re-observation and a native hint
+  are one code path rather than two spellings; the two loop arms and the `baseline` arm that absorb
+  the new message; a module section, *a save may ask for one path to be observed again*, carrying
+  the unbounded-channel argument; and the test-only `WatcherLifecycle::listening`/`HintInbox` seam.
+  One test;
+- **`src-tauri/src/commands.rs`** — `SaveRecords` renamed **`SessionSideOfASave`** and given a third
+  field, `watcher: ReObserver<'a>`, which `with_open` fills from `Open`'s own lifecycle; the new
+  `ObservationSide { ledger, watcher }` that the two tails take in place of a bare `&WriteLedger`,
+  narrower than the whole value because a `BackupSession` in the reach of a post-transaction
+  function would be a pre-save copy taken after the save; `after_an_uncertain_write`, which takes
+  the watcher **alone** because there is nothing that arm may say to the ledger; the ask on all
+  three arms; and the module header, `run_one_save`, `after_a_save` and `conflict_after_the_lock`
+  documented for it. Three tests;
+- **`src-tauri/src/ledger.rs`** — **no production code**. The *what the types do not force*
+  paragraph is corrected (round 5's first Low), a new section says a read the save path could not
+  use is re-observed rather than published, and
+  `a_session_locked_reading_is_never_refused_by_the_records_own_instant` is renamed
+  `a_serialized_door_reading_…` and now states what it does **not** prove (round 5's second Low).
+  One test;
+- **`src-tauri/src/main.rs`** — the phase paragraph's **three** things became five, and the fifth is
+  described (round 5's first Low, second half);
+- **`crates/espansoconfig-core/`** — **untouched.** The engine learns nothing about saves, ledgers or
+  application sessions from this round, and the mechanism is deliberately in `crate::watch` for that
+  reason: *ask this path to be read again* is a fact about a running watcher, and the engine already
+  has the verb for it.
+
+### 11.3 The two Lows
+
+**Low 1 — documentation describing a save-path stamp that has not existed since §10.**
+`ledger.rs`'s module header still said *"the two save path callers take theirs on the line above
+their `Workspace::refresh`"*, §5 item 14 said the same, and `main.rs` still counted **three**
+mechanisms where §10 had made four. The failure it invites is concrete and is round 4 again: a
+maintainer following the module contract restores stamped save-path admission, an external write is
+read after a record whose adjacent stamp collides with it, and the reading is refused with nothing
+to answer the refusal. All three are corrected — the module header now says there is exactly **one**
+producer of a stamp and that neither save-path caller stamps; item 14 quotes its own wrong clause
+rather than quietly deleting it; and `main.rs` says **five**, because this round's own fact makes
+four into five.
+
+**Low 2 — a test named for a premise it does not exercise.**
+`a_session_locked_reading_is_never_refused_by_the_records_own_instant` constructs a bare
+`WriteLedger` and never owns or locks a `WorkspaceSession`, so what it proves is the **serialized
+door's implementation**: that this door consults no clock. It is renamed
+`a_serialized_door_reading_is_never_refused_by_the_records_own_instant`, its first assertion's
+message no longer says *"placed by the lock it already holds"*, and both the test and §10.6's
+evidence row now say in the same sentence as what they do prove that **the production lock premise
+rests on §10.1's call-graph audit alone** and would survive a caller being moved outside
+`with_open`. §5 item 14's third half is unchanged and is the standing statement of it; a
+session-level witness is what would close it, and none was added.
+
+### 11.4 The sweep for the shape, not for the words
+
+The question, asked of this round's own change as every round before it has: *is there anywhere else
+a value is settled, installed, spent or consumed before the decision that could reject it, or any
+other path where an external change can be observed and then dropped with no recovery?*
+
+**Every early return and every `Err` arm of the save path was enumerated, and what each costs:**
+
+- `run_one_save`'s `workspace.document_context(document)?` — before the transaction. Nothing was
+  written and nothing was read of the file's content, so there is no reading to drop and no
+  disturbance to observe. **Costs nothing;**
+- `Err(SaveError::Refused(_))` — the semantic gate declined and nothing was written. Same answer,
+  and the same for every `Err` whose `may_have_written()` is false. **Costs nothing** — and note
+  what makes that different from the arms below: this application neither disturbed the file nor
+  holds a reading of it, so the watcher's coverage of it is exactly the coverage of a file nobody
+  saved;
+- `Err(_) if may_have_written()` — **the one the review did not name, and this sweep's find.** The
+  rename may have landed, nothing is recorded, and until this round nothing observed the result.
+  Now `after_an_uncertain_write` asks. It publishes nothing and records nothing, which is unchanged
+  and required: the committed revision is unknown, and a guess would suppress a real observation;
+- `after_a_save`'s `Err` from `refresh` — the review's first arm. Asks; publishes nothing; **does
+  not clear the record**, which the test asserts directly, because clearing it is what would make
+  this save's own hints foreign;
+- `after_a_save`'s `Ok` arm where the revision **agrees** with the transaction's — either this
+  save's own bytes, already recorded and suppressed by that record, or a skipped commit where the
+  file holds what the caller already had. **Costs nothing**, and asking here would be noise: the
+  state is known;
+- `after_a_save`'s `Ok` arm where it **disagrees** — admitted, unchanged since §10;
+- `conflict_after_the_lock`'s `Err` from `refresh` — the review's second arm. Asks; returns the
+  read's own error, unchanged, because a file that cannot be re-read has no disk side to describe;
+  publishes nothing and invents no record, and a conflict records none in the first place;
+- `conflict_after_the_lock`'s success — admitted, unchanged since §10.
+
+**The refusal arms of both doors were re-checked against the new code rather than inherited**, and
+§10.4's four still stand exactly as it left them: `PrecedesACommit` unreachable from the serialized
+door, `SelfWrite` and `Duplicate` answers about these exact bytes, `StaleEpoch` unreachable there,
+and `SequenceSpaceExhausted` the same inherited shape. This round adds no arm to either door. The
+three §9.3 candidates §10.4 re-checked were re-checked again and stand: `decide` still spends a
+sequence and publishes before any consumer exists (2d-4's), still clears the record above the
+coalescing and exhaustion arms, and both refreshes still install a fresh parse in the workspace
+cache before the admission decides — unconditional cache coherence, so a refusal, and now a
+failure, leaves nothing installed that should not be.
+
+**The new code was asked the same question.** `re_observe` consumes nothing and spends nothing: the
+send either reaches the inbox or does not, and its answer is a report rather than a permit, so the
+three call sites binding and ignoring it are not a check-and-spend. The re-hint cannot race a
+settlement, because **only the worker thread touches the engine** — a message sits in the channel
+until the top of the next loop turn, so it can neither land between `tick` and `deliver` nor
+interleave inside a pass. It *can* restart the debounce of a path already probing, discarding that
+path's first read; that is `ObservationEngine::hint`'s documented behaviour for every hint, the path
+stays pending, and a starvation would need re-observations faster than one debounce plus one probe
+forever, where each one costs a user a save. `HintInbox::re_observations` drains, which the
+`watch.rs` test pins by reading it twice.
+
+**One candidate outside the save path was considered and deliberately not taken.**
+`WorkspaceSession::reload` — and `document`, and `text` — also reads the file and can discover bytes
+this session had not seen, and tells the ledger nothing. It is **not** the same shape, and the
+difference is the one §2.6 draws: those callers reach `with_workspace`, hold no `SaveRecords`
+successor, take no record and disturb no file, so they have no reading they *could not* use and no
+write of their own to place. Nothing about them is suppressed by a record either, so the watcher's
+ordinary coverage of those paths is exactly what it is for a file nobody saved. Extending the ask to
+every read command would make every projection a watcher request and would decide, here, questions
+consult Q4 and Q5 place in 2d-5. Written down so the next round does not have to rediscover the
+reasoning.
+
+**Two new residues came out of it and are written down as §5 items 19 and 20** rather than smoothed
+over: a workspace with no running watcher hears nothing, and a re-observation can be dropped by a
+worker still failing its baseline or stopping before its next tick. Per this section's opening rule,
+neither is claimed to be bounded by an enumeration of alternatives; both are claimed to be *the
+coverage that workspace already had*, which is a different and checkable statement.
+
+### 11.5 What is guaranteed now, and what is not
+
+**Guaranteed.** Everything §10.5 guaranteed, unchanged — this round altered no decision the ledger
+takes. Added: a save-path read that **fails**, and a write whose outcome is unknown, publish nothing
+and clear nothing; each hands its path to the running watcher; and the state that then enters the
+observation sequence for that path is one the engine read **twice** and admitted through the stamped
+door. The ask cannot fail a save, cannot make one wait, and cannot change what any of the three arms
+returns.
+
+**Not guaranteed, and stated as such.** That a watcher is running to hear the ask (§5 item 19). That
+a re-observation survives a failing baseline or an imminent workspace replacement (§5 item 20). That
+a caller of `admit_under_the_session_lock` holds the session lock (§5 item 14, third half) — and
+now, explicitly, that the test named for it does not prove it (§11.3). That a producer's stamp
+precedes its reads, and that a sink's answer is acted on (§5 item 14, first two halves). And
+everything §5's other items already carried, unchanged by this round.
+
+**Nothing from 2d-4 or later was added**: no Tauri event, no queue, no `drain_external_changes`, no
+`#[tauri::command]`, no TypeScript, Svelte or i18n file, no writer, no force flag, no route around
+`save_document`, and nothing new that serializes. **No core file was touched at all**;
+`cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
+
+### 11.6 The evidence and the neuter runs
+
+| Owed | Where |
+|---|---|
+| that a failed post-save refresh **asks**, and publishes and clears nothing | `commands.rs`'s `a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing` — the review's scenario driven directly: a record taken in its own commit window, the file removed, the tail run, and then four assertions — the inbox holds that one path, `published_state` is `None`, the record still names the committed revision, and the whole `LedgerTally` is still zero |
+| that a failed conflict refresh asks, and still refuses | `commands.rs`'s `a_failed_conflict_refresh_asks_for_a_re_observation_and_still_refuses` — the error comes back unchanged (`io`), the inbox holds the path, nothing is published, and no record is invented |
+| that an uncertain write asks | `commands.rs`'s `an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation` — the arm the review did not name, driven through the extracted `after_an_uncertain_write` |
+| that the ask **reaches** a running watcher, and degrades where there is none | `watch.rs`'s `a_re_observation_reaches_a_listening_watcher_and_degrades_without_one` — two requests arrive in order as paths and nothing else, the inbox drains, and both stationary shapes (`inert`, `without_epoch`) answer `NoWatcher` without panicking |
+| that what the ask produces is **stabilized** and then admitted | `ledger.rs`'s `a_removal_the_save_path_could_not_read_is_stabilized_and_admitted` — one real temp tree, one real engine with an injected clock, the real `admitting_sink` and the real `crate::watch::deliver`: the record stands after the failed read, **one** read settles nothing, the second settles `Absent`, the stamped door admits it, and only then is the record superseded |
+| that the ledger's decisions are unchanged | nothing new was needed and nothing was weakened: §3's table, §9.5's, §10.6's and the whole of `ledger::` still pass over one `decide`, which this round did not touch |
+| that a **running worker** turns the message into a hint | **partly.** `hint_paths` is shared with the native-hint arm that `watch_check`'s eight-cell matrix exercises on a real filesystem, and the loop arm that calls it is one line — but no test drives `WorkerMessage::ReObserve` through a spawned worker. Adding one would put a real FSEvents session in `watch_check`; it is stated here instead of claimed |
+| that the production save path always has a watcher to ask | **nothing**, and §5 item 19 is the standing statement of it |
+
+**Four neuter runs**, one per call site the round added plus one for the mechanism itself, each
+disabling exactly one thing and then restored:
+
+- `after_a_save`'s ask removed —
+  `a_failed_post_save_refresh_asks_for_a_re_observation_and_publishes_nothing` failed at the inbox
+  assertion, **`left: []`, `right: ["…/match/base.yml"]`**, *"the path this application could not
+  read is handed to the watcher"*. **75 passed, 1 failed** of the 76 command tests;
+- `conflict_after_the_lock`'s ask removed —
+  `a_failed_conflict_refresh_asks_for_a_re_observation_and_still_refuses` failed at the same
+  assertion, **`left: []`, `right: ["…/match/base.yml"]`**, *"and the path is handed to the watcher
+  rather than left to a hint nobody promised"*. **75 passed, 1 failed** of 76;
+- `after_an_uncertain_write`'s ask removed —
+  `an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation` failed at
+  **`left: []`, `right: ["…/match/base.yml"]`**, *"the file this save may have written is observed
+  again rather than assumed"*. **75 passed, 1 failed** of 76 — and note that all three failures are
+  narrow: no other test in the module notices, which is what makes them checks rather than
+  couplings;
+- the send inside `ReObserver::re_observe` removed, so the method answers `NoWatcher`
+  unconditionally — `a_re_observation_reaches_a_listening_watcher_and_degrades_without_one` failed
+  at its first assertion, **`left: NoWatcher`, `right: Asked`**. **4 passed, 1 failed** of the 5
+  `watch` module tests.
+
+Each edit was reverted and the affected suite re-run green before the next was made, and both suites
+were green again before the gates in §6 were taken.
+
+**One guarantee is deliberately **not** neutered**, and saying so is the point: `ledger.rs`'s
+`a_removal_the_save_path_could_not_read_is_stabilized_and_admitted` drives machinery this round did
+not build — the engine's two reads, `deliver`, and the stamped door — so there is nothing new in it
+to disable. It is evidence that the mechanism this round chose lands where it claims, not evidence
+of a new guarantee.
+
+### 11.7 The two sweeps
+
+**For the shape** — *a value settled, installed, spent or consumed before the decision that could
+reject it, or a refusal arm with no recovery* — is §11.4, including the third arm it found that the
+review did not name, the full enumeration of both refreshes' early returns and `Err` arms with what
+each costs, and the two new residues (§5 items 19 and 20).
+
+**For name positions**, as a pass distinct from the prose — and **redone from the current code
+rather than from round 4's list**, because both of round 5's Lows are misses by that list:
+
+- `src-tauri/src/ledger.rs`'s module header — *"the two save path callers take theirs on the line
+  above their `Workspace::refresh`"*, describing a stamp removed at §10. Corrected, and the
+  corrected sentence names the single producer rather than counting callers, so a future caller
+  cannot make it stale by arriving;
+- `src-tauri/src/main.rs`'s phase paragraph — **Three** where §10 had made it four. Now five;
+- `docs/decisions/2d-3-notes.md` §5 item 14 — the same stale clause, quoted rather than deleted so
+  the correction is visible;
+- **`SaveRecords` — the name itself was a name position.** It said *records*, and the round's fix
+  gives it a third field that is a handle, not a record. Renamed `SessionSideOfASave`, with §2.7's
+  present-tense sentence blocked rather than left standing;
+- `ledger.rs`'s `a_session_locked_reading_is_never_refused_by_the_records_own_instant` — a **test
+  name** as a name position, claiming a premise the test does not exercise. Renamed, its assertion
+  message corrected, and §10.6's evidence row and neuter bullet updated with it;
+- `docs/decisions/2d-3-notes.md` line 3 — the headline said *four facts*; five, with a fifth
+  correction block beneath it;
+- **§5 item 18 is replaced, not annotated**, because its conclusion was wrong — the same treatment
+  §8 gave item 10 and §10 gave item 16, and the third time this step has had to give it;
+- `src-tauri/src/commands.rs`'s module header — *"this module composes with two other things that
+  do"*, which enumerated the commit gate and the stamp while a third, the session lock, sat in the
+  same paragraph as a qualification of the stamp rather than as a mechanism of its own. With this
+  round's fourth it now says **four** and names all four in the same sentence, so the count and the
+  enumeration cannot drift apart again;
+- **searched and found current**, so the next round does not re-find them as misses: *"the two
+  save-path refreshes"* wherever it appears (§1, §2.6's heading, §5 item 3, `main.rs`,
+  `commands.rs`, `ledger.rs`) — there are still exactly **two** refreshes, and the third arm this
+  round added performs none, so the phrase is not stale anywhere; `admit_at_current_epoch` in §1's
+  built list, §7.1, §8.1, §9.6 and §5 item 12, each a past-tense record of what a named round did;
+  §8.1's *"…so every observation carries a stamp"* heading and its `Instant::now()`-on-the-line-above
+  bullet, both inside a *what changed* section §8.7's round-4 block already corrects; and §2.6's
+  §8-era stamping paragraph, whose round-4 block already says *neither caller stamps now*. The rule
+  applied is §10.7's, unchanged: **a present-tense claim about how the code works now is amended in
+  place or blocked; a past-tense record of what a round built is left alone.**
