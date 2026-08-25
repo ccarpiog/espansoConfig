@@ -106,12 +106,13 @@
 //! [`crate::watch::EpochObservation`]'s
 //! `read_after`: an [`Instant`] taken **before** the reads that produced it,
 //! and [`WriteLedger::record_app_write`] takes one **after** the rename
-//! `save_document` performed. Comparing the two is the whole rule for a reading
+//! `save_document` performed — the path's [`CommitAnchor`]. Comparing the two is
+//! the whole rule for a reading
 //! this session cannot otherwise place — and *cannot otherwise place* is the
 //! condition, not a universal: the save path's own two refreshes prove the same
 //! ordering by construction and carry no stamp at all, which is the *two proofs*
 //! section below. **The
-//! accepted condition is the strict one — `read_after > recorded_at` — and
+//! accepted condition is the strict one — `read_after > anchor` — and
 //! equality is refused**, which was this step's round-3 second High: `Instant`
 //! is documented monotonic and *not* documented strictly increasing, so two
 //! ordered calls may answer the same value and equality orders nothing.
@@ -119,13 +120,13 @@
 //! The implication the accepted condition carries, in one direction only, and
 //! in two steps because the two steps are about different things:
 //!
-//! > **On the values:** `read_after > recorded_at`.
+//! > **On the values:** `read_after > anchor`.
 //! >
 //! > **On real time:** a monotonic, nondecreasing clock cannot answer a
 //! > *strictly greater* value to a call made earlier, so the `Instant::now()`
-//! > that produced `read_after` was made at or after the one that produced
-//! > `recorded_at`. With the stamp taken before its reads and the record taken
-//! > after its rename, that gives `read >= stamp >= record >= rename`: the read
+//! > that produced `read_after` was made at or after the one that produced the
+//! > anchor. With the stamp taken before its reads and the anchor taken
+//! > after its rename, that gives `read >= stamp >= anchor >= rename`: the read
 //! > observed the disk at or after the commit landed, so what it read is a state
 //! > that commit did not undo.
 //!
@@ -140,14 +141,17 @@
 //! [`Admission::StaleEpoch`], and for the same kind of reason: a reading this
 //! session cannot place after its own last write to that path may not decide
 //! anything about that path. It may not publish, because the bytes it describes
-//! are bytes this application has since replaced; and it may not clear the
-//! record, because that record describes a write made **after** this reading was
-//! taken, and clearing it is what makes the save's own hints foreign. Neither
-//! sentence claims the record describes what is on disk *now* — an external
+//! are bytes this application has since replaced; and it may not clear any
+//! app-write record, because such a record describes a write made **after** this
+//! reading was taken, and clearing it is what makes the save's own hints foreign.
+//! Neither sentence claims a record describes what is on disk *now* — an external
 //! writer may have replaced those bytes too, and the observation that says so
-//! will be a later reading with a later stamp.
+//! will be a later reading with a later stamp. **And neither sentence needs a
+//! record to exist at all**, which is round 9's second High: the refusal stands
+//! on the anchor, so a commit whose record has since been cleared still refuses a
+//! reading older than it. See *the anchor outlives the record* below.
 //!
-//! **The converse is deliberately not claimed**: `read_after <= recorded_at`
+//! **The converse is deliberately not claimed**: `read_after <= anchor`
 //! does *not* prove the read preceded the rename, only that this session cannot
 //! prove it did not. The stamp is a lower bound on the read, so the check
 //! over-refuses across the window between the stamp and the read — microseconds,
@@ -187,7 +191,8 @@
 //! - a refusal of a *save-path* refresh was answered by nothing. Those two
 //!   callers settle nothing in any engine, so there was nothing to take back,
 //!   and they run once per save rather than in a loop, so nothing retried them.
-//!   A clock-resolution collision between the record's instant and the refresh's
+//!   A clock-resolution collision between the commit anchor's instant and the
+//!   refresh's
 //!   — two adjacent [`Instant::now`] calls on one thread — therefore did not
 //!   cost *one publication*, as this module and the record both said: it cost
 //!   the **external observation itself**, because the native hint that would
@@ -215,11 +220,16 @@
 //! neither entry point takes an `Instant`: there is nothing left for one to
 //! prove.
 //!
-//! **No entry point lets its caller choose.** The mode is the private
-//! [`AdmissionDoor`], built by the three methods and by nothing else, so the
+//! **No entry point that brings a reading lets its caller choose.** The mode is
+//! the private [`AdmissionDoor`], built by the three deciding methods and by
+//! nothing else, so the
 //! worker thread cannot ask to skip a check it could not justify skipping and
 //! neither save-path caller can ask to spend a sequence — there is no parameter
-//! to ask through. **What that does not force**, in the same sentence: that a
+//! to ask through. **Three, and the fourth entry point added by the round-9 fix
+//! round is not a door**:
+//! [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`] brings no
+//! reading, so there is no decision for a door to steer — it removes what a
+//! reload made untrue and answers nothing. **What that does not force**, in the same sentence: that a
 //! future caller of either serialized door really holds the session lock.
 //! Nothing in the type system carries a lock this module does not own, and a
 //! caller that does not hold it silently restores the round-2 High. The two
@@ -326,10 +336,17 @@
 //!
 //! **The harm is a stale record, and it needs no race to reach.** The record
 //! says *the last revision this application committed for this path*, and
-//! nothing outside this ledger keeps it describing what the session now
-//! believes: `crate::commands::reload_document` accepts a foreign revision into
-//! the workspace and touches the ledger not at all, and a save returning
-//! `committed: false` records nothing, so the previous entry stands. A save tail
+//! before the round-9 fix round nothing outside this ledger kept it describing
+//! what the session now believes: `crate::commands::reload_document` accepted a
+//! foreign revision into the workspace and touched the ledger not at all, and a
+//! save returning `committed: false` records nothing, so the previous entry
+//! stands. **Round 9 closed the first of those two routes and not the second**,
+//! which is why this section's argument is unchanged rather than superseded: a
+//! reload now reports what the workspace accepted (see *a reload accepts a
+//! foreign revision* below), while a `committed: false` save still leaves an
+//! earlier commit's entry standing, and door-scoping is what makes the check
+//! right about *which readings it is for* whatever put the entry there. The two
+//! fixes are complementary and neither is the other's alternative. A save tail
 //! that then reads exactly those recorded bytes answered `SelfWrite` — retaining
 //! the record, announcing nothing, marking nothing — although that tail had
 //! independently established that its reading differs from the transaction it
@@ -368,18 +385,100 @@
 //!   places an older hint: refused if its reads preceded the newer record, and
 //!   otherwise describing a disk somebody wrote those bytes back to. On the
 //!   withholding door nothing takes it over, and such a hint is **published**.
-//!   That is deliberate and is the direction this module takes everywhere:
-//!   announcing a state the disk demonstrably holds is over-reporting, where the
-//!   alternative is silence about an external change. The withholding door is
-//!   reached only where an external write landed between a save's locked read
-//!   and its read-back, so the state announced is one somebody else wrote;
-//! - **the chronology anchor for readings older than that record.** Step 1
-//!   refuses only while an entry stands, so once any step-3 clearing happens a
-//!   reading stamped before the record is publishable. That is **not new** —
-//!   supersession has cleared the anchor on every accepted differing state since
-//!   this module was written, which is the ordinary conflict — and round 8
-//!   widens the inputs that reach it by one class rather than adding a class.
-//!   `docs/decisions/2d-3-notes.md` §5 item 23 is the standing statement of it.
+//!   That is deliberate, and **it is not over-reporting** — which is what this
+//!   paragraph called it until the round-9 fix round, and round 9's second Low.
+//!   The withholding door is reached only where the file no longer holds the
+//!   revision its transaction last saw, so a real post-read disk transition is
+//!   its premise; a later hint at bytes equal to an earlier app write is a
+//!   **genuine external change whose bytes happen to equal an earlier app
+//!   revision**, and byte equality with something this application once wrote
+//!   does not make that transition false. What stays forbidden is unchanged and
+//!   is the whole of what suppression ever licensed: **byte identity, never
+//!   authorship** — nothing here may claim the write was ours;
+//! - **nothing else**, and specifically not the chronology anchor. That bullet
+//!   said the opposite until the round-9 fix round, and it was round 9's second
+//!   High: see *the anchor outlives the record* below, and [`CommitAnchor`].
+//!
+//! # A reload accepts a foreign revision, and the ledger is told
+//!
+//! This step's **round-9 first and third Highs**, which are one root cause:
+//! *nothing told the ledger when the workspace accepted a foreign revision.*
+//! Two of this ledger's per-path facts describe what the session believes about
+//! a file, and both could be left describing a state the session had moved past:
+//!
+//! - the **app-write record**, whose licence is suppression. A record naming A
+//!   met by an external return to A after the workspace had accepted B answered
+//!   [`Admission::SelfWrite`] at the one door still allowed to suppress, and that
+//!   B→A change never entered the sequence;
+//! - the **announced state**, which answers *does a consumer already have this*.
+//!   An entry naming B met by an external return to B after the workspace had
+//!   accepted C answered [`Admission::Duplicate`] — round 3's swallowed change
+//!   reached through coalescing rather than through suppression. **Leaving that
+//!   to 2d-5's per-document accepted sequence cannot work**, which is the
+//!   argument that decided it: a `Duplicate` sends that layer no value to
+//!   arbitrate.
+//!
+//! `crate::commands::reload_document` is the **only** command that can *leave*
+//! either of those describing a state the session has moved past, and that was
+//! established rather than assumed. `rg '\.refresh\('` over this crate finds
+//! exactly three `Workspace::refresh` call sites: `WorkspaceSession::reload`, and
+//! the two save tails, which have told this ledger through doors of their own
+//! since round 7. Every other read path — `WorkspaceSession::document` and
+//! `text` — is served from the parse cache (`Workspace::document_view`,
+//! `Workspace::document_text`) and installs nothing. So the fix
+//! is one call at that one command —
+//! [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`] — taken under
+//! the session lock the command already holds, and it invalidates each of the two
+//! **only where it differs**.
+//!
+//! **The *differs* condition is the whole safety of it.** Clearing a record whose
+//! bytes the reload just read would unsuppress that write's own pending native
+//! hints with nothing announced to absorb them, and this application would report
+//! its own commit as somebody else's. Clearing an announced state the reload just
+//! confirmed would take consult Q5's coalescing entry away from the person who
+//! chose *Reload disk version* on a save conflict, so the native duplicate Q5
+//! rules is coalesced would become a second conflict.
+//!
+//! **This is not a seventh door and not a writer.** It brings no reading, takes
+//! no [`AdmissionDoor`], answers no [`Admission`], spends no sequence, moves no
+//! tally and announces nothing; it removes two entries, and only where they have
+//! stopped being true of the path.
+//!
+//! # The anchor outlives the record, because they answer different questions
+//!
+//! This step's **round-9 second High**, and it is the price the round-8 clearing
+//! extension turned out to carry. Until round 9 the instant a record was taken
+//! was a **field of that record**, so every clearing took the chronology anchor
+//! with it — supersession, and since round 8 a serialized reading of the recorded
+//! bytes too. A settlement produced *before* a commit and delivered *after* the
+//! clearing then found no instant to be compared against, was admitted, and
+//! published bytes the commit had since replaced.
+//!
+//! **Nothing bounds that delay.** Only the settlement's *production* is
+//! pre-commit; its delivery waits on thread scheduling and on the commit gate,
+//! and neither places any bound on it. The record used to say the exposure was
+//! one debounce plus one probe wide, and that was false.
+//!
+//! So the instant lives in [`LedgerState::latest_commit_at`], keyed by **path**,
+//! and the two lifetimes are stated where each value is defined:
+//!
+//! - the **record** lives as long as its suppression licence is honest, and four
+//!   things end that: supersession, a serialized reading, a reload onto other
+//!   bytes, and a workspace replacement;
+//! - the **anchor** lives as long as the **epoch**. It is written by
+//!   [`WriteLedger::record_app_write`] under the same state guard as the record,
+//!   so no decision can see one without the other, and removed by
+//!   [`WriteLedger::begin_epoch`] alone.
+//!
+//! Keyed by path rather than by [`DocumentId`] because [`decide`]'s step 3
+//! removes the `documents_by_path` entry a path-to-record lookup goes through: an
+//! anchor behind that index would become unreachable at exactly the moment it has
+//! to keep answering. And **widening the refusal is safe in the direction that
+//! matters**: a refusal at the stamped door is *answered* — [`admitting_sink`]
+//! returns [`crate::watch::ObservationOutcome::Undecided`], the engine's
+//! settlement is taken back and the path is observed again — and the
+//! re-observation's own stamp is taken after the anchor, so it cannot be refused
+//! by it a second time.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -480,10 +579,16 @@ pub enum Admission {
     /// on and for the direction it deliberately over-refuses in. Like
     /// [`Admission::StaleEpoch`] it mutates nothing but the tally: it publishes
     /// nothing, and it **retains** any app-write record for the path, because
-    /// that record describes a write made after this reading was taken, and
+    /// such a record describes a write made after this reading was taken, and
     /// clearing it is what makes that write's own hints foreign. Neither half
-    /// claims the record describes what the file holds *now* — see the *stamp*
+    /// claims a record describes what the file holds *now* — see the *stamp*
     /// section for what is and is not claimed.
+    ///
+    /// **It does not need a record to exist**, since the round-9 fix round: the
+    /// value it is refused by is the path's [`CommitAnchor`], whose life is the
+    /// epoch, so a commit whose record has since been cleared still refuses a
+    /// reading older than it. Before that round the anchor was a field of the
+    /// record, and clearing one cleared the other — round 9's second High.
     ///
     /// **It is the one arm a producer must answer**, and the round-3 fix round
     /// is why: it says *this reading decided nothing*, so the state it described
@@ -584,9 +689,12 @@ pub enum Admission {
     /// recorded anywhere.
     ///
     /// [`WriteLedger::withhold_under_the_session_lock`]'s answer and no other
-    /// door's. `crate::commands`'s `after_a_save` reads the disk once after a
-    /// commit and may find a revision its transaction never saw. Nobody is shown
-    /// that state — the answer to a committed save carries no disk side — so
+    /// door's. `crate::commands`'s `after_a_save` reads the disk once after its
+    /// **transaction returned** — which is not the same as after a commit, and
+    /// saying *after a commit* was round 9's fourth Low: that tail also runs for
+    /// `committed: false`, where nothing was renamed at all — and it may find a
+    /// revision its transaction never saw. Nobody is shown
+    /// that state — the answer that tail returns carries no disk side — so
     /// marking it would make the engine's later stabilized reading of the same
     /// state a `Duplicate` and consult Q2's *the differing post-save observation
     /// is queued as external* would be met by nothing at all. What this reading
@@ -606,9 +714,13 @@ pub enum Admission {
 /// `last_app_write[DocumentId] = { workspace_epoch, revision }`.
 ///
 /// **Exactly the consult's two fields and no third one.** The instant at which
-/// the record was taken is a fact about this session's chronology rather than
-/// about the write, so it lives beside this value in [`RecordedWrite`], where
-/// the state guard makes the pair impossible to observe apart.
+/// the record was taken is a fact about this session's **chronology** rather
+/// than about the write, and since the round-9 fix round it lives in a map of
+/// its own ([`LedgerState::latest_commit_at`]) rather than beside this value.
+/// That separation is the fix: this record's life is *how long suppression is
+/// licensed*, and the chronology fact's life is *the epoch*, so pairing them in
+/// one struct made clearing the first clear the second — see the module's
+/// *the anchor outlives the record* section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppWrite {
     /// The workspace epoch this save committed under.
@@ -624,16 +736,35 @@ pub struct AppWrite {
     pub revision: ContentRevision,
 }
 
-/// One [`AppWrite`] and the instant this session took it.
+/// The instant of the latest committed app write to one **path**, in one epoch.
 ///
-/// Private, and one struct rather than two maps, so that a record and the
-/// chronology stamp that decides which observations may act on it cannot be
-/// observed apart or updated apart — the same reason `documents_by_path` is
-/// written in the same two statements as `writes` (§2.2 of the record).
+/// This step's **round-9 second High**, and the whole of it is *which value this
+/// lives in*. Until that round the instant was a field of the app-write record,
+/// so every clearing of that record — supersession, and since the round-8 fix
+/// round a serialized reading of the recorded bytes — took the chronology anchor
+/// with it, and an arbitrarily delayed pre-commit settlement then found nothing
+/// to be refused by and published bytes the commit had since replaced.
+///
+/// **Its life is the epoch and nothing shorter.** Written by
+/// [`WriteLedger::record_app_write`], read by [`decide`]'s step 1, and removed
+/// by [`WriteLedger::begin_epoch`] alone — not by supersession, not by a
+/// serialized door, and not by the reload invalidation, none of which say
+/// anything about *when* this session last wrote to that path.
+///
+/// **Keyed by path rather than by document**, which is not an economy: step 3
+/// removes the `documents_by_path` entry a path-to-record lookup goes through,
+/// so an anchor keyed by [`DocumentId`] would become unreachable at exactly the
+/// moment it has to keep answering.
 #[derive(Debug, Clone, Copy)]
-struct RecordedWrite {
-    /// The consult's record.
-    write: AppWrite,
+struct CommitAnchor {
+    /// The workspace epoch the commit happened under.
+    ///
+    /// Redundant with [`WriteLedger::begin_epoch`]'s discard **today**, and
+    /// stored and checked anyway, for [`AppWrite::epoch`]'s reason and no other:
+    /// the two statements of *this belongs to this epoch* are checked separately
+    /// so a future path that discards late cannot silently start refusing
+    /// observations of a workspace this anchor knows nothing about.
+    epoch: u64,
     /// When [`WriteLedger::record_app_write`] took it, which is **after** the
     /// rename `espansoconfig_core::persist::save_document` performed — the
     /// transaction had already returned. That inequality is the load-bearing
@@ -643,7 +774,7 @@ struct RecordedWrite {
     /// acquisition, say — would break the implication in the direction that
     /// silently restores the round-2 High, and nothing in the type system
     /// prevents that: this field is private and has one writer.
-    recorded_at: Instant,
+    at: Instant,
 }
 
 /// Every decision this ledger has taken, counted for the life of the session.
@@ -692,10 +823,14 @@ pub struct LedgerTally {
     /// **On a healthy production path this stays zero**, and that is worth
     /// knowing rather than assuming: the engine's debounce puts at least one
     /// debounce plus one probe (240 ms at the default timing) between a save's
-    /// own hint and the pass that settles it, while the record follows the
+    /// own hint and the pass that settles it, while the anchor follows the
     /// rename by one read-back. A non-zero count means an observation was
     /// genuinely in flight across a commit — or that some caller's stamp is
-    /// taken in the wrong place.
+    /// taken in the wrong place. **It is not bounded by that window**, and
+    /// saying it was is round 9's third Low: only the *production* of such an
+    /// observation is pre-commit, and nothing bounds how long a completed
+    /// settlement waits at the gate or on a descheduled worker before it is
+    /// admitted.
     ///
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
@@ -719,9 +854,16 @@ pub struct LedgerTally {
     ///
     /// Only `crate::commands`'s `after_a_save` can move it, and only on the arm
     /// where its refresh found a revision the transaction never saw. A non-zero
-    /// count is therefore a count of external writes that landed between a
-    /// commit and its read-back, each of which is owed a stabilized reading from
-    /// the watcher rather than a publication from here.
+    /// count is therefore a count of external writes that landed between a save
+    /// transaction's **last locked read** and its **tail refresh**, each of which
+    /// is owed a stabilized reading from the watcher rather than a publication
+    /// from here.
+    ///
+    /// **Not *between a commit and its read-back***, which is what this
+    /// paragraph said until the round-9 fix round and is round 9's fourth Low:
+    /// `after_a_save` runs for `Ok(SavedDocument { committed: false, .. })` too,
+    /// where no rename happened, and an external write landing before that
+    /// refresh increments this counter with no commit anywhere in the story.
     pub withheld: u64,
 }
 
@@ -787,9 +929,14 @@ struct LedgerState {
     /// [`NO_EPOCH`] before the first open, and after an open whose epoch space
     /// was exhausted.
     epoch: u64,
-    /// The consult's `last_app_write`, keyed exactly as it specifies, each
-    /// entry paired with the instant it was taken ([`RecordedWrite`]).
-    writes: BTreeMap<DocumentId, RecordedWrite>,
+    /// The consult's `last_app_write`, keyed exactly as it specifies.
+    ///
+    /// **What an entry licenses is suppression, and nothing about chronology.**
+    /// Until the round-9 fix round each entry carried the instant it was taken,
+    /// which meant the two lifetimes were one; the instant now lives in
+    /// [`LedgerState::latest_commit_at`], whose life is the epoch. See
+    /// [`CommitAnchor`].
+    writes: BTreeMap<DocumentId, AppWrite>,
     /// The path each recorded write is at, because an observation names a path
     /// and never an identity.
     ///
@@ -821,6 +968,13 @@ struct LedgerState {
     /// stabilized reading of the same state into silence — round 3's
     /// swallowed-change defect reached from the other side.
     announced: BTreeMap<PathBuf, ObservedState>,
+    /// When this session last **committed** a write to each path, for the life
+    /// of the epoch — the chronology anchor [`decide`]'s step 1 refuses against.
+    ///
+    /// Separate from `writes` on purpose, and the separation is round 9's second
+    /// High: see [`CommitAnchor`] for what each of the two lifetimes is and why
+    /// one value could not carry both.
+    latest_commit_at: BTreeMap<PathBuf, CommitAnchor>,
     /// The next sequence to hand out; `None` once this epoch's space is spent.
     next_sequence: Option<u64>,
     /// See [`LedgerTally`].
@@ -839,6 +993,7 @@ impl WriteLedger {
                 writes: BTreeMap::new(),
                 documents_by_path: BTreeMap::new(),
                 announced: BTreeMap::new(),
+                latest_commit_at: BTreeMap::new(),
                 next_sequence: Some(FIRST_OBSERVATION_SEQUENCE),
                 tally: LedgerTally::default(),
             }),
@@ -861,7 +1016,8 @@ impl WriteLedger {
 
     /// Adopts `epoch` and **discards everything the previous workspace
     /// recorded** — the app writes, their path index, the announced states
-    /// (publications and markers alike) and the sequence allocator.
+    /// (publications and markers alike), the per-path commit anchors and the
+    /// sequence allocator.
     ///
     /// Consult Q2's *discard the whole map on workspace replacement*, and the
     /// reason is not tidiness: a document identity survives a replacement (the
@@ -885,6 +1041,12 @@ impl WriteLedger {
         ledger.writes.clear();
         ledger.documents_by_path.clear();
         ledger.announced.clear();
+        // **The one place a commit anchor is removed**, and that is the whole of
+        // its lifetime rule: the anchor is a fact about *this* epoch's
+        // chronology, so it is discarded with the epoch and by nothing shorter.
+        // See [`CommitAnchor`] and this module's *the anchor outlives the
+        // record* section.
+        ledger.latest_commit_at.clear();
         ledger.next_sequence = Some(FIRST_OBSERVATION_SEQUENCE);
     } // End of function begin_epoch()
 
@@ -903,12 +1065,18 @@ impl WriteLedger {
     /// for nothing, and holding it is the whole of its contribution. See
     /// [`CommitGate`] for what that forces and what it does not.
     ///
-    /// **The instant is taken here**, on the line that inserts the record, and
+    /// **The instant is taken here**, on the line that inserts the anchor, and
     /// therefore after `save_document` returned and after the rename inside it.
     /// It is what lets [`decide`] refuse an observation whose reads it cannot
     /// place at or after that rename ([`Admission::PrecedesACommit`]); see
-    /// [`RecordedWrite::recorded_at`] for why *after the rename* rather than
-    /// before it is the half that matters.
+    /// [`CommitAnchor::at`] for why *after the rename* rather than before it is
+    /// the half that matters.
+    ///
+    /// **The record and the anchor are written together and cleared apart**,
+    /// which is round 9's second High: they are inserted under this one state
+    /// guard, so no decision can see one without the other, and from then on the
+    /// record's life is *how long suppression is licensed* while the anchor's is
+    /// the epoch. Anything that clears the record leaves the anchor standing.
     ///
     /// Replaces any earlier record for the same document, which is the consult's
     /// *replace it on the next committed app save*. It replaces the path index
@@ -949,19 +1117,29 @@ impl WriteLedger {
         let _ = gate;
         let mut ledger = self.lock();
         let epoch = ledger.epoch;
-        ledger.writes.insert(
-            document,
-            RecordedWrite {
-                write: AppWrite { epoch, revision },
-                recorded_at: Instant::now(),
-            },
-        );
+        ledger.writes.insert(document, AppWrite { epoch, revision });
         ledger
             .documents_by_path
             .retain(|_, recorded| *recorded != document);
         ledger
             .documents_by_path
             .insert(path.to_path_buf(), document);
+        // The anchor, taken on the same line group and under the same guard as
+        // the record. It replaces any earlier anchor for this path, because
+        // *latest* is what it claims. **A path this document has moved away
+        // from keeps its own anchor**, which nothing removes before the epoch
+        // ends: the identity table is keyed by path for the life of the process
+        // (`docs/decisions/2d-1-notes.md` D7), so this cannot happen today, and
+        // if it ever does the residue is one path over-refusing readings older
+        // than a commit this session really made — a refusal that is answered
+        // and re-observed, never a lost change.
+        ledger.latest_commit_at.insert(
+            path.to_path_buf(),
+            CommitAnchor {
+                epoch,
+                at: Instant::now(),
+            },
+        );
         ledger.announced.remove(path);
     } // End of function record_app_write()
 
@@ -1129,16 +1307,18 @@ impl WriteLedger {
     /// in its turn, so the differing post-save observation consult Q2 requires
     /// to be queued as external reached the sequence not at all. Nothing takes
     /// the suppression job over here, which is deliberate: this door is reached
-    /// only where an external write landed between a save's locked read and its
-    /// read-back, so a later hint at those bytes is announced rather than
-    /// absorbed, and announcing a state the disk demonstrably holds is the
-    /// direction this module takes over silence.
+    /// only where an external write landed between a save transaction's last
+    /// locked read and this tail refresh, so a later hint at those bytes is a
+    /// **genuine external change** — announced rather than absorbed, whatever its
+    /// bytes happen to equal — and announcing a state the disk demonstrably holds
+    /// is the direction this module takes over silence.
     ///
     /// `crate::commands::after_a_save`'s disagreeing refresh, and it has no
-    /// other caller. That function re-reads the file after a commit and may find
-    /// a revision its transaction never saw; the answer it returns is a
-    /// `SaveResult::Saved`, which carries no disk side, so nothing about that
-    /// state reaches anybody.
+    /// other caller. That function re-reads the file **after its transaction
+    /// returned** — not after a commit, since it runs for `committed: false`
+    /// too — and may find a revision its transaction never saw; the answer it
+    /// returns is a `SaveResult::Saved`, which carries no disk side, so nothing
+    /// about that state reaches anybody.
     ///
     /// **It cannot publish, for round 7's reason** — one read is not stability,
     /// and the phantom it might be must not spend a sequence; see
@@ -1149,7 +1329,8 @@ impl WriteLedger {
     /// engine's later stabilized reading of the same state coalesces. Here
     /// nobody has it. A marker would therefore convert round 7's
     /// over-publication into a **swallowed change**: the external write that
-    /// landed between this save's rename and its read-back would be announced by
+    /// landed between this transaction's last locked read and this refresh would
+    /// be announced by
     /// the marker to nobody and by the sequence never, and consult Q2's ruling
     /// that *the differing post-save observation is queued as external* would be
     /// met by nothing at all. Q5's coalescing rule is expressly about a conflict
@@ -1192,6 +1373,126 @@ impl WriteLedger {
         )
     } // End of function withhold_under_the_session_lock()
 
+    /// Tells this ledger that the **workspace accepted `revision` for `path`**
+    /// from an explicit re-read of disk, and invalidates whatever it holds for
+    /// that path that describes a different state.
+    ///
+    /// This step's **round-9 first and third Highs**, which are one root cause:
+    /// until this method existed *nothing told the ledger when the workspace
+    /// accepted a foreign revision*. `crate::commands::reload_document` re-reads
+    /// the file and installs the result in the session's cache; every other read
+    /// path — `WorkspaceSession::document` and `text` — is served from that same
+    /// cache and cannot accept anything, so this is the one command that can
+    /// make what this ledger holds stop describing what the session believes.
+    ///
+    /// **It is not a door.** It brings no observation, takes no [`AdmissionDoor`],
+    /// answers no [`Admission`], spends no sequence, moves no tally and announces
+    /// nothing. It removes, and only removes:
+    ///
+    /// - **the app-write record, when it names different bytes.** The record
+    ///   licenses [`Admission::SelfWrite`], and the licence says *the bytes now
+    ///   on disk are the ones this application committed*. A reload that
+    ///   installed different bytes is this session establishing the opposite, so
+    ///   the licence has outlived the last reading that could honestly spend it —
+    ///   and the one door still allowed to suppress would otherwise answer
+    ///   `SelfWrite` to a genuine external return to the recorded bytes, which is
+    ///   round 9's first High;
+    /// - **the announced state, when it is not this state.**
+    ///   [`LedgerState::announced`] answers *does a consumer already have this
+    ///   state*, and after a reload the answer for the old entry is no. Leaving
+    ///   it makes a genuine external return to the announced bytes an
+    ///   [`Admission::Duplicate`] — round 3's swallowed change reached through
+    ///   coalescing, and round 9's third High. **Deferring it to 2d-5 cannot
+    ///   work**: a `Duplicate` sends that layer no value to arbitrate.
+    ///
+    /// # Why both conditions are *differs*, and why the equal case must not clear
+    ///
+    /// **This is the direction that would be wrong**, and it is the one part of
+    /// `docs/decisions/2d-3-notes.md` §14.2's rejection that survives round 9.
+    /// Clearing a record whose bytes the reload just read would unsuppress that
+    /// write's own pending native hints with nothing announced to absorb them,
+    /// and this application would report its own commit as somebody else's — the
+    /// one outcome this module may not produce. Clearing an announced state the
+    /// reload just confirmed would do the same to consult Q5's coalescing entry:
+    /// *Reload disk version* is exactly what a person does with a save conflict,
+    /// and the marker `crate::commands::conflict_after_the_lock` installed must
+    /// survive it, or the native duplicate Q5 rules is coalesced becomes a second
+    /// conflict.
+    ///
+    /// So the equal cases are **kept deliberately**, and the two comparisons are
+    /// independent: a reload can leave the record standing and drop the
+    /// announcement, or the reverse.
+    ///
+    /// # What it does not touch, said in the same sentence
+    ///
+    /// **The commit anchor**, which is why round 9's second High is a separate
+    /// fix rather than this one's consequence. A reload says nothing about *when*
+    /// this session last wrote to that path, and an anchor removed here would
+    /// leave a pre-commit settlement nothing to be refused by. See
+    /// [`CommitAnchor`].
+    ///
+    /// # Lock order and what the caller owes
+    ///
+    /// Gate then state, briefly, exactly like every other mutation — so the
+    /// order stays **session → gate → state** for a caller that already holds the
+    /// session lock, which `crate::commands::reload_document` does
+    /// (`WorkspaceSession::with_workspace` holds it across the whole closure).
+    /// **It must therefore not be called from inside a commit window**, for
+    /// [`WriteLedger::mark_under_the_session_lock`]'s reason: a
+    /// `std::sync::Mutex` is not reentrant. Its caller runs no save, so it is
+    /// outside one by construction.
+    ///
+    /// **The suffix is an obligation and not decoration, and here is what it
+    /// buys.** The two serialized *doors* hold the session lock so that their
+    /// reads provably follow every record in program order (this module's *two
+    /// proofs* section). This entry point needs it for the mirror of that: the
+    /// read and this report must be one window **no record can land inside**.
+    /// Were the ledger told after the session lock had been released, a save
+    /// could commit C and record C in between, and this call would then compare
+    /// C against the revision the reload read, find them different, and clear the
+    /// record a commit had just taken — which is precisely what makes that save's
+    /// own hints foreign, round 2's High reached through a read-only command.
+    /// `crate::commands::reload_document` keeps the window because
+    /// `WorkspaceSession::with_workspace` holds the session mutex across the
+    /// whole closure and the refresh and this call are both inside it.
+    ///
+    /// **What the type cannot force**, beside what it does: that the caller
+    /// really holds the session lock, and that `revision` is what the workspace
+    /// actually installed rather than some revision the caller had lying about.
+    /// The first is this module's standing obligation on every
+    /// `…_under_the_session_lock` entry point; the second is kept by the one
+    /// caller taking it out of the value `Workspace::refresh` just returned.
+    ///
+    /// **Both invalidations happen under one state guard**, taken once here, so
+    /// no decision can observe the record cleared and the announcement still
+    /// standing, or the reverse.
+    ///
+    /// # Why a [`ContentRevision`] rather than an [`ObservedState`]
+    ///
+    /// Because a successful reload can only ever have read content. An absence
+    /// or an unreadable state is an `Err` from `Workspace::refresh` and never
+    /// reaches this call, and a parameter that could express one would be a
+    /// parameter a later edit could use to report a state nobody observed.
+    pub fn adopt_reloaded_revision_under_the_session_lock(
+        &self,
+        path: &Path,
+        revision: ContentRevision,
+    ) {
+        let _gate = self.enter_gate();
+        let mut ledger = self.lock();
+        if record_at(&ledger, path).is_some_and(|recorded| recorded.revision != revision) {
+            clear_the_record_at(&mut ledger, path);
+        }
+        let observed = ObservedState::Content(revision);
+        if ledger
+            .announced
+            .get(path)
+            .is_some_and(|announced| *announced != observed)
+        {
+            ledger.announced.remove(path);
+        }
+    } // End of function adopt_reloaded_revision_under_the_session_lock()
+
     /// The workspace epoch this ledger is observing under.
     // Read by this crate's tests today, and by 2d-4's wake payload when it
     // exists; the allow is scoped to non-test builds so the accessor stays
@@ -1206,7 +1507,7 @@ impl WriteLedger {
     // control surface — nothing can steer suppression through it.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn recorded_write(&self, document: DocumentId) -> Option<AppWrite> {
-        self.lock().writes.get(&document).map(|entry| entry.write)
+        self.lock().writes.get(&document).copied()
     }
 
     /// The state last announced for `path`, if any — by a publication or by a
@@ -1237,44 +1538,46 @@ impl WriteLedger {
         self.lock().next_sequence = Some(next);
     }
 
-    /// The instant [`WriteLedger::record_app_write`] took for `document` — the
+    /// The commit anchor [`WriteLedger::record_app_write`] took for `path` — the
     /// **test-only** seam that makes the equality case drivable.
     ///
-    /// [`RecordedWrite::recorded_at`] is private and its writer reads the clock
-    /// itself, so no test can inject a colliding stamp; reading the recorded one
-    /// back and handing it straight to [`WriteLedger::admit`] is what turns *two
-    /// ordered `Instant` calls may answer the same value* from a reviewed
-    /// argument into a driven one. Test-only because it is a chronology fact
-    /// about this session and nothing in production may decide on it outside
-    /// [`decide`].
+    /// [`CommitAnchor::at`] is private and its writer reads the clock itself, so
+    /// no test can inject a colliding stamp; reading the recorded one back and
+    /// handing it straight to [`WriteLedger::admit`] is what turns *two ordered
+    /// `Instant` calls may answer the same value* from a reviewed argument into a
+    /// driven one. Test-only because it is a chronology fact about this session
+    /// and nothing in production may decide on it outside [`decide`].
+    ///
+    /// **Keyed by path since the round-9 fix round**, because the anchor is —
+    /// see [`CommitAnchor`].
     #[cfg(test)]
-    pub(crate) fn recorded_at(&self, document: DocumentId) -> Option<Instant> {
+    pub(crate) fn commit_anchor(&self, path: &Path) -> Option<Instant> {
         self.lock()
-            .writes
-            .get(&document)
-            .map(|entry| entry.recorded_at)
+            .latest_commit_at
+            .get(path)
+            .map(|anchor| anchor.at)
     }
 
-    /// Moves `document`'s recorded instant to `at` — the **test-only** seam that
-    /// makes a clock collision drivable on a path whose caller takes no stamp.
+    /// Moves `path`'s commit anchor to `at` — the **test-only** seam that makes
+    /// a clock collision drivable on a path whose caller takes no stamp.
     ///
-    /// [`WriteLedger::recorded_at`] makes the collision drivable where the stamp
-    /// is an *argument*, by handing the record's own instant back to
+    /// [`WriteLedger::commit_anchor`] makes the collision drivable where the
+    /// stamp is an *argument*, by handing the anchor's own instant back to
     /// [`WriteLedger::admit`]. The save path has no such argument since the
     /// round-4 fix round: `crate::commands::after_a_save` calls
     /// [`WriteLedger::withhold_under_the_session_lock`], which reads no clock at
-    /// all. So the collision is asked for from the **other** side — the record's
-    /// instant is put where no later `Instant::now()` can beat it, which is a
-    /// clock collision and worse. A build that still consulted a stamp on that
-    /// path refuses deterministically; the shipped one cannot notice.
+    /// all. So the collision is asked for from the **other** side — the anchor is
+    /// put where no later `Instant::now()` can beat it, which is a clock
+    /// collision and worse. A build that still consulted a stamp on that path
+    /// refuses deterministically; the shipped one cannot notice.
     ///
-    /// Test-only for [`WriteLedger::recorded_at`]'s reason, and it writes rather
-    /// than reads, so it is the one seam that could steer a production decision
-    /// if it ever stopped being `#[cfg(test)]`.
+    /// Test-only for [`WriteLedger::commit_anchor`]'s reason, and it writes
+    /// rather than reads, so it is the one seam that could steer a production
+    /// decision if it ever stopped being `#[cfg(test)]`.
     #[cfg(test)]
-    pub(crate) fn stamp_the_record_at(&self, document: DocumentId, at: Instant) {
-        if let Some(entry) = self.lock().writes.get_mut(&document) {
-            entry.recorded_at = at;
+    pub(crate) fn stamp_the_anchor_at(&self, path: &Path, at: Instant) {
+        if let Some(anchor) = self.lock().latest_commit_at.get_mut(path) {
+            anchor.at = at;
         }
     }
 
@@ -1337,7 +1640,8 @@ impl Default for WriteLedger {
 /// checks this door **is** asked. The count is re-derived by counting
 /// [`decide`]'s matches over this enum.
 ///
-/// **Private, and built by the three entry points rather than passed to them**,
+/// **Private, and built by the three *deciding* entry points rather than passed
+/// to them**,
 /// which is the whole of its design. A mode that a caller could choose would be
 /// a caller-supplied licence to skip a safety check or to spend a sequence it
 /// has not earned; here both are properties of the door. [`WriteLedger::admit`]
@@ -1356,8 +1660,9 @@ impl Default for WriteLedger {
 /// [`decide`] matches it exhaustively **three times** — since the round-8 fix
 /// round, which made suppression the third — so a fourth door is a compile error
 /// in every one of them rather than a silently skipped check or a silently spent
-/// sequence. The three questions are *can this reading be placed after the
-/// record*, *is this reading one of the hints a commit generates*, and *what may
+/// sequence. The three questions are *can this reading be placed after this
+/// session's latest commit to that path*, *is this reading one of the hints a
+/// commit generates*, and *what may
 /// a state that survives do*; a future caller that can place its reads some
 /// other way, that is not a native hint, or that may do something else with what
 /// it read has to answer each of them for itself.
@@ -1378,7 +1683,8 @@ enum AdmissionDoor {
     /// stabilized revision* asks for.
     StampedPublication(Instant),
     /// The caller holds the lock that every producer of a record must hold, so
-    /// the record it is being compared against was written before this reading
+    /// every record and every commit anchor it could meet was written before
+    /// this reading
     /// was taken, in program order; a state that survives the checks it is asked
     /// is **marked** for coalescing and published nowhere. **It is asked neither
     /// the chronology question nor the suppression one**, the first because it
@@ -1407,21 +1713,76 @@ enum AdmissionDoor {
     SerializedWithholding,
 }
 
+/// The app write recorded for `path` **in this epoch**, if there is one.
+///
+/// One statement of *which record this path has*, for the two readers that ask:
+/// [`decide`]'s suppression step and
+/// [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`]. Written as a
+/// function rather than repeated, because two copies of a two-map traversal are
+/// two places for a future change of key to be applied to one of them — the
+/// shape this step has already shipped twice.
+///
+/// The epoch filter is [`AppWrite::epoch`]'s second statement of the discard on
+/// workspace replacement, unchanged.
+fn record_at(ledger: &LedgerState, path: &Path) -> Option<AppWrite> {
+    let document = ledger.documents_by_path.get(path).copied()?;
+    let recorded = ledger.writes.get(&document).copied()?;
+    (recorded.epoch == ledger.epoch).then_some(recorded)
+} // End of function record_at()
+
+/// When this session last **committed** a write to `path` in this epoch, if it
+/// did — the chronology anchor, and never the record's own life.
+///
+/// See [`CommitAnchor`] for the whole of why this is a second map rather than a
+/// field, and [`decide`]'s step 1 for what it answers.
+fn commit_anchor_at(ledger: &LedgerState, path: &Path) -> Option<Instant> {
+    ledger
+        .latest_commit_at
+        .get(path)
+        .filter(|anchor| anchor.epoch == ledger.epoch)
+        .map(|anchor| anchor.at)
+} // End of function commit_anchor_at()
+
+/// Removes `path`'s app-write record **and** its path-index entry, which are one
+/// fact written in two maps.
+///
+/// The two callers are [`decide`]'s supersession step and
+/// [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`]. It is a
+/// function so that *the record and its index are erased together* stays one
+/// statement, exactly as [`WriteLedger::record_app_write`] writes them together
+/// (§2.2 of the record).
+///
+/// **It does not touch [`LedgerState::latest_commit_at`]**, and that is the
+/// point rather than an omission: see [`CommitAnchor`].
+fn clear_the_record_at(ledger: &mut LedgerState, path: &Path) {
+    if let Some(document) = ledger.documents_by_path.remove(path) {
+        ledger.writes.remove(&document);
+    }
+} // End of function clear_the_record_at()
+
 /// The decision itself, with the epoch already agreed.
 ///
 /// A free function over the locked state rather than a method, so that it
 /// cannot be reached without the guard and cannot take the guard twice — a
-/// `std::sync::Mutex` is not reentrant, and the three public entry points differ
+/// `std::sync::Mutex` is not reentrant, and the three public entry points that
+/// reach it differ
 /// only in whether they check the tag and in which [`AdmissionDoor`] they can
-/// build.
+/// build. (The fourth public entry point,
+/// [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`], brings no
+/// reading and does not come here at all.)
 ///
 /// The order of the checks is the contract:
 ///
 /// 1. **chronology**, which retains its record: an observation whose reads
-///    cannot be placed at or after the record was taken **may** describe bytes
-///    this application has since replaced — the check proves only that the
-///    session cannot rule that out — so it may neither publish nor supersede.
-///    The round-2 High; see this module's *stamp* section for the implication
+///    cannot be placed at or after this session's latest **commit** to that path
+///    — the path's [`CommitAnchor`], **not** the app-write record, since the
+///    round-9 fix round — **may** describe bytes
+///    this application has since replaced, so it may neither publish nor
+///    supersede. The check proves only that the session cannot rule that out.
+///    The round-2 High, and its round-9 second one: the anchor's life is the
+///    epoch, so a commit whose record has since been cleared still refuses a
+///    reading older than it. See this module's *stamp* and *the anchor outlives
+///    the record* sections for the implication
 ///    and for the direction it over-refuses in. A serialized caller
 ///    ([`AdmissionDoor::SerializedMarker`],
 ///    [`AdmissionDoor::SerializedWithholding`]) has already placed its reads by
@@ -1481,16 +1842,20 @@ enum AdmissionDoor {
 ///
 /// **Step 1 sits above step 2, and the order decides only which counter moves.**
 /// The two overlap on exactly one input — a *stamped* reading of the recorded
-/// bytes, stamped before the record — and both answers are true of it, both
+/// bytes, stamped before the anchor — and both answers are true of it, both
 /// retain the
-/// record and both publish nothing. **They overlap only there**, and since the
+/// record and both publish nothing. **They no longer overlap only there**, and
+/// that is round 9's second High rather than a widening of step 2: since the
+/// anchor outlives the record, step 1 also refuses readings step 2 could not
+/// have seen at all, because the record they would have been decided against is
+/// gone. Which door asks which is unchanged, and since the
 /// round-8 fix round that is a property of the doors as well as of the states:
 /// the serialized doors are asked neither question, one because they read no
 /// clock and one because they are not native hints. Chronology is asked first
 /// because it is a
 /// question about the *reading* rather than about the bytes, which is the same
 /// class as [`WriteLedger::admit`]'s epoch check; a consequence worth stating is
-/// that a self-write hint stamped before its own record is counted as
+/// that a self-write hint stamped before its own commit is counted as
 /// `preceded_a_commit` rather than as `suppressed`, which is what makes
 /// `crate::watch_check`'s positive wait on the suppression tally bite against a
 /// stamp taken too early on the production path.
@@ -1509,6 +1874,11 @@ enum AdmissionDoor {
 /// been cleared. Round 8's door-scoping does not weaken it either, and in the
 /// one direction worth naming it strengthens it: narrowing step 2 sends *more*
 /// readings through step 3, which clears, and none through a new early return.
+/// **Round 9's reload invalidation does not weaken it either**, and the reason
+/// is the shape of that method rather than its conditions:
+/// [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`] only
+/// **removes**, so it can neither write a record nor announce a state and
+/// therefore cannot put a path into a shape no other path can reach.
 /// Step 3's position is therefore reviewed rather than driven — the second
 /// statement of one rule, exactly as [`AppWrite::epoch`] is for the discard on
 /// workspace replacement.
@@ -1518,16 +1888,19 @@ fn decide(
     state: ObservedState,
     door: AdmissionDoor,
 ) -> Admission {
-    // One lookup, read by both retaining checks — neither of which is asked of
-    // a serialized door, which is why the lookup sits above them rather than
-    // inside either. Two lookups of the same entry
-    // under one guard could not disagree today, but they are two statements of
-    // *which entry this path has* and only one of them would be updated by a
-    // future change to the key — the shape this step has already shipped twice.
-    let document = ledger.documents_by_path.get(path).copied();
-    let recorded = document
-        .and_then(|document| ledger.writes.get(&document).copied())
-        .filter(|entry| entry.write.epoch == ledger.epoch);
+    // **The two retaining checks read two different values, and that is round
+    // 9's second High.** Step 1 asks *when did this session last commit to this
+    // path*, which is [`CommitAnchor`] and lives as long as the epoch; step 2
+    // asks *what does the app-write record license*, which lives exactly as long
+    // as the licence. Until round 9 both came out of one struct, so clearing the
+    // record cleared the anchor and an arbitrarily delayed pre-commit settlement
+    // published bytes the commit had replaced.
+    //
+    // Both lookups go through a helper each, so *which entry this path has* is
+    // one statement rather than one per reader — the shape this step has already
+    // shipped twice.
+    let anchor = commit_anchor_at(ledger, path);
+    let recorded = record_at(ledger, path);
     // **Strictly greater, and equality is a refusal.** `Instant` is monotonic
     // but expressly *not* guaranteed strictly increasing, so two ordered clock
     // reads may answer the same value — and at equality this comparison proves
@@ -1538,14 +1911,13 @@ fn decide(
     // accepted condition carries.
     //
     // **A serialized caller is asked nothing**, which is round 4's High: it did
-    // not read a clock, so it cannot lose to one, and its record provably
-    // precedes its read in program order (this module's *two proofs* section).
-    // The match is over the door rather than over the record, so a fourth door
-    // cannot be added without answering this question for itself.
+    // not read a clock, so it cannot lose to one, and every record and every
+    // anchor it could meet provably precedes its read in program order (this
+    // module's *two proofs* section). The match is over the door rather than
+    // over the anchor, so a fourth door cannot be added without answering this
+    // question for itself.
     let precedes_a_commit = match door {
-        AdmissionDoor::StampedPublication(read_after) => {
-            recorded.is_some_and(|entry| read_after <= entry.recorded_at)
-        }
+        AdmissionDoor::StampedPublication(read_after) => anchor.is_some_and(|at| read_after <= at),
         AdmissionDoor::SerializedMarker | AdmissionDoor::SerializedWithholding => false,
     };
     if precedes_a_commit {
@@ -1580,7 +1952,7 @@ fn decide(
         // written, which is the round-2 High with a different state in it.
         AdmissionDoor::StampedPublication(_) => match state {
             ObservedState::Content(observed) => {
-                self_write_suppresses(recorded.map(|entry| entry.write.revision), observed)
+                self_write_suppresses(recorded.map(|entry| entry.revision), observed)
             }
             ObservedState::Absent | ObservedState::Unreadable(_) => false,
         },
@@ -1590,9 +1962,10 @@ fn decide(
         ledger.tally.suppressed += 1;
         return Admission::SelfWrite;
     }
-    if let Some(document) = ledger.documents_by_path.remove(path) {
-        ledger.writes.remove(&document);
-    }
+    // Step 3, and it clears the **record** alone: the anchor above it is not a
+    // licence to suppress and this step has no reason to touch one. See
+    // [`CommitAnchor`].
+    clear_the_record_at(ledger, path);
     if ledger.announced.get(path) == Some(&state) {
         ledger.tally.coalesced += 1;
         return Admission::Duplicate;
@@ -1813,7 +2186,7 @@ mod tests {
     /// design. The offset makes these helpers' claim (*a reading later than
     /// everything this test has already done*) true by construction rather than
     /// by the host clock's resolution. The one test that wants the collision
-    /// asks for it explicitly, through [`WriteLedger::recorded_at`].
+    /// asks for it explicitly, through [`WriteLedger::commit_anchor`].
     fn later_than_now() -> Instant {
         Instant::now() + Duration::from_nanos(1)
     }
@@ -1821,8 +2194,9 @@ mod tests {
     /// An instant **no** later clock read in this test can be strictly greater
     /// than, for the tests that want the refusing side by construction.
     ///
-    /// [`later_than_now`]'s mirror image. Put on a record through
-    /// [`WriteLedger::stamp_the_record_at`], it is a clock collision and worse:
+    /// [`later_than_now`]'s mirror image. Put on a path's **commit anchor**
+    /// through [`WriteLedger::stamp_the_anchor_at`], it is a clock collision and
+    /// worse:
     /// any comparison of a subsequently taken `Instant::now()` against it lands
     /// on [`Admission::PrecedesACommit`], whatever the host clock's resolution.
     /// That is what makes *this door consults no clock* a driven claim rather
@@ -2163,7 +2537,7 @@ mod tests {
                 suppressed: 1,
                 coalesced: 1,
                 stale_epoch: 1,
-                // Every hint here is stamped after the record, so the
+                // Every hint here is stamped after the commit anchor, so the
                 // chronology arm is not on this test's path at all — the
                 // literal says so rather than leaving it to be inferred.
                 preceded_a_commit: 0,
@@ -2469,21 +2843,25 @@ mod tests {
     } // End of function a_reading_taken_before_a_commit_never_supersedes_its_record()
 
     #[test]
-    fn a_reading_stamped_exactly_at_the_record_is_refused() {
+    fn a_reading_stamped_exactly_at_the_commit_anchor_is_refused() {
         // **Round 3's second High**, driven rather than reviewed. `Instant` is
         // documented monotonic and *not* documented strictly increasing, so two
         // ordered calls may answer the same value — and an equal stamp orders
         // nothing at all. A test cannot make the host clock collide on demand,
-        // so it asks for the collision directly: the record's own instant, read
-        // back and handed straight to `admit`, is exactly what a coarse clock
-        // would have produced by itself.
+        // so it asks for the collision directly: the commit anchor's own
+        // instant, read back and handed straight to `admit`, is exactly what a
+        // coarse clock would have produced by itself.
+        //
+        // **The name says *anchor* since the round-9 fix round**, because the
+        // value the comparison reads moved: it was a field of the record until
+        // that round, and the record is now cleared without it.
         let ledger = ledger_at_epoch(1);
         let path = Path::new("/tree/match/base.yml");
         let document = DocumentId(51);
         let committed = revision("the bytes this application committed");
         let theirs = revision("what somebody else wrote");
         record(&ledger, document, path, committed);
-        let collided = ledger.recorded_at(document).expect("the record was taken");
+        let collided = ledger.commit_anchor(path).expect("the anchor was taken");
 
         assert_eq!(
             ledger.admit(1, path, ObservedState::Content(theirs), collided),
@@ -2519,15 +2897,20 @@ mod tests {
             }
         );
         assert_eq!(ledger.tally().preceded_a_commit, 1);
-    } // End of function a_reading_stamped_exactly_at_the_record_is_refused()
+    } // End of function a_reading_stamped_exactly_at_the_commit_anchor_is_refused()
 
     #[test]
-    fn a_serialized_door_reading_is_never_refused_by_the_records_own_instant() {
+    fn a_serialized_door_reading_is_never_refused_by_a_commit_anchor() {
         // **Round 4's High** at this layer, and the discrimination that makes it
         // a property of the *door* rather than of the ledger going soft. The
-        // record's instant is put where no later clock read can beat it — a
+        // path's commit anchor is put where no later clock read can beat it — a
         // collision and worse — and then the same ledger, the same path and the
         // same record are asked through both entry points.
+        //
+        // **The name says *anchor* since the round-9 fix round**: the instant
+        // step 1 compares against moved out of the record and into a map whose
+        // life is the epoch, and the name has to say which value cannot refuse
+        // these doors.
         //
         // **What this proves is the serialized door's implementation, and not
         // the premise that licenses it** — round 5's second Low, and the name is
@@ -2547,7 +2930,7 @@ mod tests {
         let committed = revision("the bytes this application committed");
         let theirs = revision("what somebody else wrote while the save ran");
         record(&ledger, document, path, committed);
-        ledger.stamp_the_record_at(document, beyond_every_later_clock_read());
+        ledger.stamp_the_anchor_at(path, beyond_every_later_clock_read());
 
         // The marking door: it consults no instant, so no instant can refuse
         // what comes through it.
@@ -2577,7 +2960,7 @@ mod tests {
         let other = Path::new("/tree/match/other.yml");
         let another = DocumentId(84);
         record(&ledger, another, other, committed);
-        ledger.stamp_the_record_at(another, beyond_every_later_clock_read());
+        ledger.stamp_the_anchor_at(other, beyond_every_later_clock_read());
         assert_eq!(
             ledger.withhold_under_the_session_lock(other, ObservedState::Content(theirs)),
             Admission::Withheld,
@@ -2604,11 +2987,11 @@ mod tests {
         // reads happened beyond the stamp it carries.
         let again = revision("a second external state");
         record(&ledger, document, path, committed);
-        ledger.stamp_the_record_at(document, beyond_every_later_clock_read());
+        ledger.stamp_the_anchor_at(path, beyond_every_later_clock_read());
         assert_eq!(
             ledger.admit(1, path, ObservedState::Content(again), Instant::now()),
             Admission::PrecedesACommit,
-            "the stamped door is unchanged: this reading cannot be placed after the record"
+            "the stamped door is unchanged: this reading cannot be placed after the commit"
         );
         assert_eq!(
             ledger.recorded_write(document),
@@ -2619,7 +3002,7 @@ mod tests {
             "so it retains the record, which is what keeps the save's own hints suppressible"
         );
         assert_eq!(ledger.tally().preceded_a_commit, 1);
-    } // End of function a_serialized_door_reading_is_never_refused_by_the_records_own_instant()
+    } // End of function a_serialized_door_reading_is_never_refused_by_a_commit_anchor()
 
     #[test]
     fn a_refused_stabilized_state_is_re_observed_rather_than_lost() {
@@ -2675,7 +3058,7 @@ mod tests {
         //    is a value, and taking the record after it is the whole scenario.
         record(&ledger, document, &path, ours);
 
-        // 3. Deliver the pass. The reading cannot be placed after the record,
+        // 3. Deliver the pass. The reading cannot be placed after the commit,
         //    so it decides nothing — and the settlement it produced is taken
         //    back rather than left standing.
         crate::watch::deliver(
@@ -3204,4 +3587,257 @@ mod tests {
         );
         assert_eq!(ledger.recorded_write(document), None);
     } // End of function a_reading_of_an_absence_taken_before_a_commit_is_refused_too()
+
+    #[test]
+    fn a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence() {
+        // **Round 9's first High**, as the reviewer's own regression: record A,
+        // reload B, and the owed stabilized reading of A must be **admitted**
+        // rather than suppressed. Nothing outside this module kept the record
+        // describing what the session believed, so the one door still allowed to
+        // suppress met an entry a reload had made stale and answered `SelfWrite`
+        // to a genuine external return to those bytes.
+        //
+        // **The second half is the discrimination**, and it is the one part of
+        // §14.2's rejection round 9 leaves standing: a reload that read exactly
+        // the recorded bytes must **keep** the record, because that write's own
+        // pending native hints have nothing else to absorb them and unsuppressing
+        // them would report this application's own commit as somebody else's.
+        let ledger = ledger_at_epoch(1);
+        let moved_on = Path::new("/tree/match/moved-on.yml");
+        let unchanged = Path::new("/tree/match/unchanged.yml");
+        let reloaded_away = DocumentId(140);
+        let reloaded_onto = DocumentId(141);
+        let ours = revision("the bytes an earlier save of this session committed");
+        let theirs = revision("the bytes the person reloaded into the workspace");
+
+        record(&ledger, reloaded_away, moved_on, ours);
+        ledger.adopt_reloaded_revision_under_the_session_lock(moved_on, theirs);
+        assert_eq!(
+            ledger.recorded_write(reloaded_away),
+            None,
+            "the licence has outlived the last reading that could honestly spend it"
+        );
+        assert_eq!(
+            admit_now(&ledger, 1, moved_on, ObservedState::Content(ours)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE
+            },
+            "the external return to the recorded bytes enters the sequence"
+        );
+
+        record(&ledger, reloaded_onto, unchanged, ours);
+        ledger.adopt_reloaded_revision_under_the_session_lock(unchanged, ours);
+        assert_eq!(
+            ledger.recorded_write(reloaded_onto),
+            Some(AppWrite {
+                epoch: 1,
+                revision: ours
+            }),
+            "a reload that read the recorded bytes leaves the licence exactly where it was"
+        );
+        assert_eq!(
+            admit_now(&ledger, 1, unchanged, ObservedState::Content(ours)),
+            Admission::SelfWrite,
+            "so this application's own commit is still not reported as somebody else's"
+        );
+
+        let tally = ledger.tally();
+        assert_eq!(
+            (tally.admitted, tally.suppressed, tally.coalesced),
+            (1, 1, 0),
+            "one admission and one suppression, and the reload decided which is which, {tally:?}"
+        );
+    } // End of function a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence()
+
+    #[test]
+    fn a_reload_that_accepts_other_bytes_invalidates_the_announced_state() {
+        // **Round 9's third High**, as the reviewer's own regression: announce B,
+        // reload C, and the disk returning to B must be a **new admission**
+        // rather than a `Duplicate`. The coalescing map answers *does a consumer
+        // already have this state*, and after a reload the answer for the old
+        // entry is no — while `Duplicate` sends 2d-5 no value to arbitrate, which
+        // is why deferring this to that layer could not work.
+        //
+        // **The second half is consult Q5's**, and it is why the condition is
+        // *differs* rather than *any reload*: choosing *Reload disk version* on a
+        // save conflict is exactly a reload onto the marked state, and the marker
+        // `crate::commands::conflict_after_the_lock` installed has to survive it
+        // or the native duplicate Q5 rules is coalesced becomes a second
+        // conflict.
+        let ledger = ledger_at_epoch(1);
+        let navigated_away = Path::new("/tree/match/navigated.yml");
+        let reloaded_onto = Path::new("/tree/match/confirmed.yml");
+        let told = revision("the state a consumer was told about");
+        let elsewhere = revision("what the person then reloaded");
+
+        assert_eq!(
+            admit_now(&ledger, 1, navigated_away, ObservedState::Content(told)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE
+            },
+            "the premise: a publication announced this state"
+        );
+        ledger.adopt_reloaded_revision_under_the_session_lock(navigated_away, elsewhere);
+        assert_eq!(
+            ledger.announced_state(navigated_away),
+            None,
+            "the entry stopped answering its own question when the workspace moved past it"
+        );
+        assert_eq!(
+            admit_now(&ledger, 1, navigated_away, ObservedState::Content(told)),
+            Admission::Admitted {
+                sequence: FIRST_OBSERVATION_SEQUENCE + 1
+            },
+            "so the disk returning to those bytes is news and is numbered"
+        );
+
+        assert_eq!(
+            ledger.mark_under_the_session_lock(reloaded_onto, ObservedState::Content(told)),
+            Admission::Marked,
+            "the premise: a save conflict's disk side is marked for coalescing"
+        );
+        ledger.adopt_reloaded_revision_under_the_session_lock(reloaded_onto, told);
+        assert_eq!(
+            ledger.announced_state(reloaded_onto),
+            Some(ObservedState::Content(told)),
+            "a reload onto the marked state confirms it rather than invalidating it"
+        );
+        assert_eq!(
+            admit_now(&ledger, 1, reloaded_onto, ObservedState::Content(told)),
+            Admission::Duplicate,
+            "consult Q5: the native duplicate at that revision is still coalesced"
+        );
+
+        let tally = ledger.tally();
+        assert_eq!(
+            (tally.admitted, tally.coalesced, tally.marked),
+            (2, 1, 1),
+            "two admissions of the same bytes, one of them because of the reload, {tally:?}"
+        );
+    } // End of function a_reload_that_accepts_other_bytes_invalidates_the_announced_state()
+
+    #[test]
+    fn a_commit_anchor_outlives_the_record_it_was_taken_with() {
+        // **Round 9's second High**, as the engine-plus-ledger sequence it needs,
+        // and deterministic: one real temp tree, one real engine whose clock is
+        // an argument, the real `admitting_sink` and the real
+        // `crate::watch::deliver`. No thread and no sleep.
+        //
+        // The scenario is the finding's. A settlement is produced **before** a
+        // commit and delivered **after** a serialized reading has cleared that
+        // commit's record — the clearing extension the round-8 fix round added.
+        // Until round 9 the chronology anchor was a field of that record, so
+        // clearing it left the delayed settlement nothing to be refused by, and
+        // bytes the commit had since replaced were published. Nothing bounds the
+        // delay: only the settlement's *production* is pre-commit, and its
+        // delivery waits on thread scheduling and gate contention.
+        //
+        // The anchor now lives as long as the epoch, so the refusal still
+        // happens — and, being a refusal, it is **answered**: the engine's
+        // settlement is taken back and the path is observed again.
+        use espansoconfig_core::watch::engine::{
+            EngineConfig, FsWatchSource, Millis, ObservationEngine,
+        };
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = dir.path().join("tree");
+        std::fs::create_dir_all(root.join("match")).expect("the watched root");
+        let path = root.join("match/base.yml");
+        let before = "matches: []\n";
+        let theirs = "matches:\n  - trigger: ':theirs'\n    replace: theirs\n";
+        std::fs::write(&path, before).expect("the tracked file");
+
+        let mut source = FsWatchSource;
+        let mut engine = ObservationEngine::start(&root, EngineConfig::default(), &mut source)
+            .expect("a baseline scan");
+
+        let ledger = Arc::new(ledger_at_epoch(1));
+        let (sender, received) = std::sync::mpsc::channel::<AdmittedObservation>();
+        let downstream: AdmittedSink = Arc::new(move |admitted| {
+            let _ = sender.send(admitted);
+        });
+        let sink = admitting_sink(Arc::clone(&ledger), downstream);
+        let document = DocumentId(142);
+        let ours = revision("the bytes this application committed");
+
+        // 1. The settlement, produced before anything else: two reads, and the
+        //    stamp a worker takes before the pass that produced them.
+        std::fs::write(&path, theirs).expect("an external replacement");
+        engine.hint(&path, Millis(0));
+        assert!(engine.tick(Millis(200), &mut source).is_empty());
+        let stamped_before_the_commit = Instant::now();
+        let settled = engine.tick(Millis(240), &mut source);
+        assert_eq!(settled.len(), 1, "one stabilized observation: {settled:?}");
+
+        // 2. The commit and its record, taken after that stamp.
+        record(&ledger, document, &path, ours);
+
+        // 3. **The serialized clearing**, which is the round-8 extension: a save
+        //    tail reads exactly the recorded bytes and the withholding door
+        //    clears the record without announcing anything.
+        assert_eq!(
+            ledger.withhold_under_the_session_lock(&path, ObservedState::Content(ours)),
+            Admission::Withheld
+        );
+        assert_eq!(
+            ledger.recorded_write(document),
+            None,
+            "the premise: the record is gone, so the anchor is all that is left"
+        );
+
+        // 4. Only now is the delayed settlement delivered. Its reads preceded the
+        //    commit, so it may not publish bytes the commit replaced.
+        crate::watch::deliver(
+            &mut engine,
+            &sink,
+            1,
+            stamped_before_the_commit,
+            Millis(240),
+            settled,
+        );
+        assert!(
+            received.try_recv().is_err(),
+            "a pre-commit reading reaches no consumer, record or no record"
+        );
+        assert_eq!(ledger.tally().preceded_a_commit, 1);
+        assert_eq!(
+            ledger.announced_state(&path),
+            None,
+            "and it announces nothing, so nothing coalesces the correction away"
+        );
+        assert_eq!(
+            engine.revision_of(&path),
+            Some(ContentRevision::of_bytes(before.as_bytes())),
+            "the refusal was answered: the engine no longer believes it announced that state"
+        );
+
+        // 5. The correction, which is what makes the refusal a deferral: the same
+        //    bytes stabilize again, now stamped after the commit, and are
+        //    admitted.
+        assert!(engine.tick(Millis(440), &mut source).is_empty());
+        let stamped_after_the_commit = later_than_now();
+        let again = engine.tick(Millis(480), &mut source);
+        assert_eq!(
+            again.len(),
+            1,
+            "the refused state is observed again: {again:?}"
+        );
+        crate::watch::deliver(
+            &mut engine,
+            &sink,
+            1,
+            stamped_after_the_commit,
+            Millis(480),
+            again,
+        );
+        let admitted = received
+            .try_recv()
+            .expect("the second stabilization is admitted");
+        assert_eq!(admitted.sequence, FIRST_OBSERVATION_SEQUENCE);
+        assert_eq!(
+            observed_state(&admitted.observation),
+            ObservedState::Content(ContentRevision::of_bytes(theirs.as_bytes())),
+            "and it carries the external writer's bytes"
+        );
+    } // End of function a_commit_anchor_outlives_the_record_it_was_taken_with()
 }

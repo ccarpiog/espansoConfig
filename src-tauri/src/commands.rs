@@ -10,6 +10,15 @@
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
 //!
+//! **`reload_document` writes no user file and is still one of the readers, and
+//! since the round-9 fix round of Phase 2d-3 it is the one reader that also
+//! mutates private session state.** It always re-read the file into the
+//! workspace cache; what it now does as well is tell `crate::ledger` which
+//! revision that cache accepted, so the app-write record and the announced state
+//! for that path stop describing bytes the session has moved past. No command was
+//! added, no signature changed and nothing crosses the wire that did not before —
+//! see [`WorkspaceSession::reload`].
+//!
 //! `document_text` is the newest, added at Phase 1c-2b-2a, and it is the only
 //! one that puts a file's **own text** on the wire rather than a projection of
 //! it. Its contract is **exact preservation of valid UTF-8, and a typed refusal
@@ -151,6 +160,23 @@
 //! taking away the marker consult Q5 needs and leaving the record to suppress
 //! the owed stabilized reading as well. See `crate::ledger`'s *suppression is
 //! the stamped door's* section.
+//!
+//! **And since the round-9 fix round a reload no longer leaves such a record
+//! behind it**, which is the other half of the same problem rather than an
+//! alternative to door-scoping. [`WorkspaceSession::reload`] is the one read path
+//! that can install a revision this session did not already hold —
+//! [`WorkspaceSession::document`] and [`WorkspaceSession::text`] are served from
+//! the parse cache — so it reports what the workspace accepted, and the ledger
+//! drops the app-write record and the announced state for that path **where each
+//! differs from it**. Left standing, the first made the stamped door suppress a
+//! genuine external return to the recorded bytes and the second made a genuine
+//! external return to the announced bytes a `Duplicate`. The *differs* condition
+//! is not caution: clearing on a reload that read the recorded bytes would
+//! unsuppress that write's own pending native hints, and clearing an announced
+//! state a reload confirmed would take away consult Q5's coalescing entry from
+//! the person who chose *Reload disk version*. A `committed: false` save still
+//! leaves an earlier entry standing, which is why the paragraph above is
+//! unchanged.
 //!
 //! What it licenses is narrower than authorship and is written on
 //! `crate::ledger`: the bytes on disk hash to what this application last
@@ -744,10 +770,78 @@ impl WorkspaceSession {
         self.with_workspace(|workspace| Ok(workspace.document_text(id)?.to_owned()))
     }
 
-    /// Re-reads one document from disk, reparsing only if its bytes changed.
+    /// Re-reads one document from disk, reparsing only if its bytes changed —
+    /// **and tells the app-write ledger what this session just accepted**.
+    ///
+    /// # The one read path that can accept a foreign revision
+    ///
+    /// This step's **round-9 first and third Highs**, and the root cause both
+    /// share. [`WorkspaceSession::document`] and [`WorkspaceSession::text`] are
+    /// served from the parse cache (`Workspace::document_view`,
+    /// `Workspace::document_text`) and cannot install anything the session did
+    /// not already hold; the only other callers of `Workspace::refresh` in this
+    /// crate are [`conflict_after_the_lock`] and [`after_a_save`], which have
+    /// told the ledger through doors of their own since Phase 2d-3's round-7 fix
+    /// round. This method calls `Workspace::refresh` too — so it is the **only**
+    /// command that can leave the ledger's two
+    /// per-path facts describing a state this session has moved past:
+    ///
+    /// - the **app-write record**, which licenses suppression. Left standing
+    ///   after a reload installed different bytes, it made the one door still
+    ///   allowed to suppress answer `SelfWrite` to a genuine external return to
+    ///   the recorded bytes, and that change never entered the sequence;
+    /// - the **announced state**, which answers *does a consumer already have
+    ///   this*. Left standing after a reload, a genuine external return to it
+    ///   answered [`crate::ledger::Admission::Duplicate`] — and *deferring that
+    ///   to 2d-5 cannot work*, because a `Duplicate` sends that layer no value to
+    ///   arbitrate.
+    ///
+    /// [`WriteLedger::adopt_reloaded_revision_under_the_session_lock`] invalidates
+    /// each **only where it differs**, and that condition is the load-bearing
+    /// half: clearing a record whose bytes the reload just read would unsuppress
+    /// that write's own pending native hints with nothing to absorb them, and
+    /// clearing an announced state the reload just confirmed would take away
+    /// consult Q5's coalescing entry from the person who chose *Reload disk
+    /// version* on a save conflict. See that method for both.
+    ///
+    /// # What this does not do
+    ///
+    /// It is **not a sixth writing command and not a seventh admission door**:
+    /// it publishes nothing, spends no sequence, announces nothing, moves no
+    /// tally and writes no user file. It removes two entries this ledger keeps
+    /// about a path, and only where they have stopped being true of it.
+    ///
+    /// **A failed reload tells the ledger nothing**, which is the same rule the
+    /// two save tails keep: `Workspace::refresh` leaves the cache exactly as it
+    /// was on an `Err`, so this session accepted nothing and there is nothing to
+    /// invalidate. A read that did not complete proves no state.
+    ///
+    /// # Lock order
+    ///
+    /// The ledger call happens **inside** [`WorkspaceSession::with_workspace`]'s
+    /// closure, which holds the session mutex, and takes the commit gate and then
+    /// the ledger state below it — so the order is **session → gate → state**,
+    /// the same one a save takes ([`commit_and_record`]) and the reverse of
+    /// nothing: the watcher's worker takes gate → state holding no session lock
+    /// at all. Nothing that holds a ledger lock ever waits for the session lock,
+    /// this call included, so it is a leaf.
+    ///
+    /// # Errors
+    ///
+    /// The path is resolved **before** the re-read, deliberately: both
+    /// `Workspace::document_context` and `Workspace::refresh` begin with the same
+    /// identity lookup, so an unknown [`DocumentId`] fails here with exactly the
+    /// error it failed with before, and no arm can reach a **successful** reload
+    /// that then skips the invalidation.
     pub fn reload(&self, id: DocumentId) -> Result<DocumentView, CommandError> {
-        self.with_workspace(|workspace| Ok(workspace.refresh(id)?.view.clone()))
-    }
+        self.with_workspace(|workspace| {
+            let path = workspace.document_context(id)?.path.clone();
+            let view = workspace.refresh(id)?.view.clone();
+            self.ledger
+                .adopt_reloaded_revision_under_the_session_lock(&path, view.revision);
+            Ok(view)
+        })
+    } // End of function reload()
 
     /// Moves one match within its own sequence and saves the file.
     ///
@@ -1124,6 +1218,13 @@ impl WorkspaceSession {
 
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
+    ///
+    /// **The session mutex is held across the whole closure**, which is what
+    /// [`WorkspaceSession::reload`] relies on since Phase 2d-3's round-9 fix
+    /// round: its ledger call is taken inside here, so it takes the commit gate
+    /// and then the ledger state **below** the session lock, and the order stays
+    /// session → gate → state. Nothing here runs under a ledger guard, and
+    /// nothing that holds a ledger guard waits for this lock.
     fn with_workspace<T>(
         &self,
         action: impl FnOnce(&mut Workspace) -> Result<T, CommandError>,
@@ -2510,14 +2611,21 @@ fn conflict_after_the_lock(
 /// committed** — that record was taken in [`run_one_save`] before this function
 /// ran and is not amended here — and the differing state is put through the
 /// ledger's decision, at the door [`conflict_after_the_lock`]'s refresh has a
-/// sibling of. So a post-commit external replacement is **not** suppressed, and
-/// the record naming this application's own bytes is cleared, because the file
+/// sibling of. So an external replacement landing after this transaction's last
+/// locked read is **not** suppressed, and any record naming this application's
+/// own bytes is cleared, because the file
 /// no longer holds them. A committed write is never relabelled a failure by any
 /// of this. **Not suppressed for two reasons since the round-8 fix round**, and
 /// they are worth keeping apart: the state differs from what this transaction
 /// committed, *and* this door is not asked the suppression question at all —
 /// which is what makes the sentence true of a record left by an **earlier** save
 /// as well.
+///
+/// **The premise is the transaction's return and not a commit**, which is round
+/// 9's fourth Low: this function runs for `Ok(SavedDocument { committed: false,
+/// .. })` too, where no rename happened, and the arm below is reached whenever
+/// the refresh disagrees with the revision the transaction last saw — commit or
+/// no commit.
 ///
 /// **What that decision does *not* do, since the round-7 fix round, is announce
 /// anything.** It spends no sequence — one read is not stability, and round 7's
@@ -2801,6 +2909,13 @@ pub fn document_text(
 }
 
 /// Re-reads one document from disk (plan section 6.4).
+///
+/// **Still a reader on the wire, and since Phase 2d-3's round-9 fix round the
+/// one reader that also mutates private session state**: it tells
+/// `crate::ledger` which revision the workspace accepted, so a record or an
+/// announced state describing bytes the session has moved past stops deciding
+/// anything. No argument, no answer and no error of this command changed — see
+/// [`WorkspaceSession::reload`].
 #[tauri::command]
 pub fn reload_document(
     session: State<'_, WorkspaceSession>,
@@ -3303,6 +3418,20 @@ mod tests {
             .open(Some(dir.path()))
             .expect("the synthetic tree is a directory");
         session
+    }
+
+    /// An instant strictly later than every clock read taken before this call —
+    /// `crate::ledger`'s test helper of the same name, for the same reason.
+    ///
+    /// **`Instant::now()` alone would not be.** The clock is monotonic and *not*
+    /// guaranteed strictly increasing, and `crate::ledger::decide` refuses at
+    /// equality by design, so a hand-written `Instant::now()` compared against a
+    /// commit anchor this test itself took is a comparison whose answer the host
+    /// clock's resolution decides. Since the round-9 fix round that anchor
+    /// outlives the record, so every stamp a test hands to
+    /// `WriteLedger::admit` after a commit needs this rather than the bare call.
+    fn later_than_now() -> Instant {
+        Instant::now() + std::time::Duration::from_nanos(1)
     }
 
     /// The absolute path an open session resolved for `document`.
@@ -7542,10 +7671,11 @@ mod tests {
                 session.ledger().current_epoch(),
                 &path,
                 ObservedState::Content(disk_revision),
-                // A hint read now, which is after everything above it. No app
-                // write was recorded on this path at all, so the chronology
-                // check has nothing to compare against either way.
-                Instant::now(),
+                // A hint read after everything above it. No app write was
+                // recorded on this path at all, so no commit anchor exists and
+                // the chronology check has nothing to compare against either
+                // way — the offset is the convention rather than a dependency.
+                later_than_now(),
             ),
             Admission::Duplicate
         );
@@ -7625,12 +7755,120 @@ mod tests {
                 session.ledger().current_epoch(),
                 &path,
                 ObservedState::Content(committed),
-                Instant::now()
+                // Strictly after this session's own commit anchor for this
+                // path, which the first raw save took and which outlives the
+                // record the conflict cleared (the round-9 fix round).
+                later_than_now()
             ),
             Admission::Duplicate,
             "a native hint at the bytes this application committed is announced to nobody"
         );
     } // End of function a_conflict_against_this_apps_own_committed_bytes_is_marked_rather_than_suppressed()
+
+    /// **A reload tells the ledger which revision the workspace accepted, and
+    /// only a reload that accepted *different* bytes spends the record.**
+    ///
+    /// Round 9's first High on the production path, where the ledger tests can
+    /// only reach it through the entry point directly. Everything here is real: a
+    /// real session over a real tree, a real `save_document` transaction with its
+    /// real rename and its real record, a real external write, and the real
+    /// `reload_document` path (`WorkspaceSession::reload`).
+    ///
+    /// The two halves are one rule seen from both sides, and the second is the
+    /// one that must not be lost: a reload onto other bytes ends the record's
+    /// suppression licence, so an external return to the recorded bytes is
+    /// **admitted**; a reload that read the recorded bytes leaves it exactly
+    /// where it was, so that write's own pending native hints are still
+    /// **suppressed**. Getting the second wrong would make this application
+    /// report its own commit as somebody else's, which is the one outcome the
+    /// ledger may not produce.
+    #[test]
+    fn a_reload_tells_the_ledger_which_revision_the_workspace_accepted() {
+        const MINE: &str = "matches:\n  - trigger: ':mine'\n    replace: mine\n";
+        const THEIRS: &str = "matches:\n  - trigger: ':theirs'\n    replace: theirs\n";
+
+        // A reload that accepts different bytes.
+        let Opened {
+            dir: _moved_on,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let path = path_of(&session, id);
+        let committed = session
+            .save_raw_document(id, before.revision, MINE, &Acknowledgement::none())
+            .expect("the raw save runs");
+        let (mine, _) = expect_saved(committed, "raw replacement");
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            Some(AppWrite {
+                epoch: session.ledger().current_epoch(),
+                revision: mine
+            }),
+            "the premise: this session committed and recorded those bytes"
+        );
+
+        fs::write(&path, THEIRS).expect("an external write");
+        let reloaded = session.reload(id).expect("the reload reads the file");
+        assert_eq!(
+            reloaded.revision,
+            ContentRevision::of_bytes(THEIRS.as_bytes()),
+            "the premise: the workspace accepted a foreign revision"
+        );
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            None,
+            "and the record that licensed suppression of the bytes it moved past is gone"
+        );
+        assert_eq!(
+            session.ledger().admit(
+                session.ledger().current_epoch(),
+                &path,
+                ObservedState::Content(mine),
+                later_than_now(),
+            ),
+            Admission::Admitted {
+                sequence: crate::ledger::FIRST_OBSERVATION_SEQUENCE
+            },
+            "so an external writer restoring those bytes enters the observation sequence"
+        );
+
+        // A reload that accepts exactly the recorded bytes.
+        let Opened {
+            dir: _unchanged,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let path = path_of(&session, id);
+        let committed = session
+            .save_raw_document(id, before.revision, MINE, &Acknowledgement::none())
+            .expect("the raw save runs");
+        let (mine, _) = expect_saved(committed, "raw replacement");
+        let reloaded = session.reload(id).expect("the reload reads the file");
+        assert_eq!(
+            reloaded.revision, mine,
+            "the premise: this reload read exactly what the save committed"
+        );
+        assert_eq!(
+            session.ledger().recorded_write(id),
+            Some(AppWrite {
+                epoch: session.ledger().current_epoch(),
+                revision: mine
+            }),
+            "the licence is untouched, because nothing about the session moved past those bytes"
+        );
+        assert_eq!(
+            session.ledger().admit(
+                session.ledger().current_epoch(),
+                &path,
+                ObservedState::Content(mine),
+                later_than_now(),
+            ),
+            Admission::SelfWrite,
+            "so the save's own pending native hints are still absorbed by one entry"
+        );
+    } // End of function a_reload_tells_the_ledger_which_revision_the_workspace_accepted()
 
     /// **Only a committed outcome licenses an app-write record**, and the rule
     /// is one exhaustive expression rather than four branches a reader has to
@@ -7830,7 +8068,7 @@ mod tests {
     } // End of function a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours()
 
     /// **A disagreeing post-save refresh is never refused, even when no clock
-    /// could place it after the record.**
+    /// could place it after the commit.**
     ///
     /// Round 4's High, driven rather than reviewed. Until the round-4 fix,
     /// `after_a_save` stamped `Instant::now()` a few lines after its own save had
@@ -7843,10 +8081,12 @@ mod tests {
     ///
     /// **A test cannot make the host clock collide on demand**, and since the fix
     /// this caller reads no clock to collide with — so the collision is asked for
-    /// from the record's side, through the test-only
-    /// `WriteLedger::stamp_the_record_at`, which is the same technique
-    /// `ledger.rs`'s `a_reading_stamped_exactly_at_the_record_is_refused` uses
-    /// through `WriteLedger::recorded_at`, taken from the other end. The instant
+    /// from the **commit anchor's** side, through the test-only
+    /// `WriteLedger::stamp_the_anchor_at`, which is the same technique
+    /// `ledger.rs`'s `a_reading_stamped_exactly_at_the_commit_anchor_is_refused`
+    /// uses
+    /// through `WriteLedger::commit_anchor`, taken from the other end. The
+    /// instant
     /// is put an hour ahead: any build that still consulted a stamp here refuses
     /// deterministically, and the shipped one cannot notice.
     ///
@@ -7858,7 +8098,7 @@ mod tests {
     /// door — so the observable difference between refused and not refused is
     /// the record and the tally, and both are asserted.
     #[test]
-    fn a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record() {
+    fn a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_commit() {
         use espansoconfig_core::persist::SavedDocument;
         use espansoconfig_core::workspace::Workspace;
         use std::time::Duration;
@@ -7887,8 +8127,10 @@ mod tests {
             ledger.record_app_write(&gate, id, &path, ours);
         }
         // The collision, asked for rather than waited for: no `Instant::now()`
-        // taken from here on can be strictly greater than this.
-        ledger.stamp_the_record_at(id, Instant::now() + Duration::from_secs(3600));
+        // taken from here on can be strictly greater than this. **The value the
+        // chronology check reads is the path's commit anchor since the round-9
+        // fix round**, not a field of the record, so that is what is moved.
+        ledger.stamp_the_anchor_at(&path, Instant::now() + Duration::from_secs(3600));
 
         fs::write(&path, EXTERNAL).unwrap();
         let saved = SavedDocument {
@@ -7929,7 +8171,7 @@ mod tests {
             None,
             "the accepted external state supersedes the record of ours"
         );
-    } // End of function a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record()
+    } // End of function a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_commit()
 
     /// **A post-save refresh that fails asks the watcher for a second look, and
     /// publishes nothing from the read that failed.**
@@ -8240,7 +8482,9 @@ mod tests {
                 ledger.current_epoch(),
                 &path,
                 ObservedState::Content(ContentRevision::of_bytes(INTERMEDIATE.as_bytes())),
-                Instant::now(),
+                // Strictly after the commit anchor recorded above, which
+                // outlives the record the withholding door cleared.
+                later_than_now(),
             ),
             Admission::Admitted {
                 sequence: crate::ledger::FIRST_OBSERVATION_SEQUENCE

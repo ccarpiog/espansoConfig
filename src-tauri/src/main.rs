@@ -58,14 +58,19 @@
 //! through doors of their own that cannot spend a sequence and are asked
 //! **neither** retaining check: not the chronology one, because they read no
 //! clock, and not the suppression one, because a native hint is exactly what
-//! they are not. **Six** things together make a
+//! they are not. **Seven** things together make a
 //! save's own rename un-reportable as somebody else's without losing anybody
-//! else's write: a **commit gate** distinct from the ledger's state, which makes
+//! else's write, and the count is re-derived by counting the list: a **commit
+//! gate** distinct from the ledger's state, which makes
 //! the transaction and its record one window no admission can *decide* inside; a
 //! **stamp** on every observation a *watcher* produces, taken before the reads
 //! that produced it,
 //! which is what places a reading that was already in hand when that window
-//! opened — the gate cannot reach a read that already happened; a **taken
+//! opened — the gate cannot reach a read that already happened; a **commit
+//! anchor** per path, which is what that stamp is compared against and which
+//! **outlives the app-write record** it was taken with, since nothing bounds how
+//! long a completed settlement may wait to be delivered (this step's round-9
+//! second High); a **taken
 //! back settlement**, because the engine installs a stabilized state as tracked
 //! before the ledger ever sees it, so a refusal that is not answered leaves that
 //! state coalescing to nothing forever; the **session lock** the two save-path
@@ -76,7 +81,16 @@
 //! must answer — retained across a failing baseline, emitted even when the state
 //! it settles on is one the engine established but never announced, and re-owed
 //! when a refusal takes its settlement back — rather than a hint the engine may
-//! coalesce into silence. A *watcher* reading the session cannot
+//! coalesce into silence.
+//!
+//! **One more thing is about a different event entirely, and so is not in that
+//! list**: `commands::reload_document` is the only read path that can install a
+//! revision this session did not already hold, and since the round-9 fix round it
+//! tells the ledger, which drops that path's app-write record and its announced
+//! state **where each differs** from what the workspace accepted. Left standing,
+//! the first made the stamped door suppress a genuine external return to the
+//! recorded bytes and the second made a genuine external return to the announced
+//! bytes a duplicate — this step's round-9 first and third Highs. A *watcher* reading the session cannot
 //! place strictly after its own last commit to that path is discarded rather
 //! than published, it does not clear the record, and the engine is told to
 //! un-conclude it and observe the path again. **The two save-path refreshes are

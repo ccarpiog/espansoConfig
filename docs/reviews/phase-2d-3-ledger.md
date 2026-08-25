@@ -372,3 +372,91 @@ NOT READY
 
 Codex session ID: 01a039be-9574-71f3-8462-19378c31f064
 Resume in Codex: codex resume 01a039be-9574-71f3-8462-19378c31f064
+
+---
+
+## Round 9 — NOT READY (3 High, 4 Low)
+
+Scoped to round 8's fix. The brief's first instruction was to attack the **argument** rather than the
+remedy: the fix round had adopted the reviewer's remedy exactly but justified it on a wider claim than
+the finding required — that suppression has no work to do on the serialized doors *whether or not the
+record is stale*, because only a **publication** can commit the error suppression prevents.
+
+**That argument was cleared, in both halves.** A marker is a user-visible save-conflict fact rather
+than a sequence-backed external report; the serialized clearing extension is sound for both tails;
+marking coalesces pending matching hints while its entry stands; and withholding correctly permits the
+externally restored revision to publish. The three self-caught fixes of the round-8 fix round — the
+running-transaction qualification, *while it stands*, and the re-measured suite totals — were
+**cleared as well**.
+
+**And then the round returned three Highs, all defects in behaviour, all of one root cause: nothing
+tells the ledger when the workspace accepts a foreign revision.** `reload_document` invalidates
+neither the app-write record nor the announced-state entry, so:
+
+1. **the stamped door can still suppress a genuine external return to the recorded bytes** — the one
+   door still allowed to suppress, meeting a record made stale by a reload that never touched it;
+2. **clearing the record destroys the only chronology anchor with it**, so an arbitrarily delayed
+   pre-commit settlement finds no timestamp to be refused by and publishes bytes the commit has since
+   replaced;
+3. **a stale `announced` entry answers `Duplicate` to a genuine change** — and *deferring this to
+   2d-5 cannot work*, because `Duplicate` sends that layer **no value to arbitrate**. This is the
+   argument that breaks §14.2's fourth reason on its own terms.
+
+**Two of the three are §5 items 23 and 24 — written by the round-8 fix round, one round ago, as
+honestly bounded residues and deferred in writing.** That makes **seven** §5 items so recorded and
+later found to be real defects: item 10 (round 2), item 16 (round 4), item 18 (round 5), items 20 and
+3 (round 6), and now items 23 and 24 (round 9). The default posture toward every remaining open item
+of §5 is not suspicion but expectation.
+
+The Lows follow the Highs. **Low 1 is the reversal of §14.2's rejection of the root-cause fix, and it
+names two of its four reasons as factually false** — the orchestrator verified both independently in
+the code before briefing the fix round: `WorkspaceSession::document` and `text` serve the **cache**
+(`document_view`, `document_text`) and cannot accept a foreign disk revision, so the claim that they
+"re-create the same gap" is false; and `reload` already mutates the workspace cache
+(`workspace.refresh`), so adding private ledger invalidation widens no command signature and makes no
+writer of it. Of the remaining two reasons, the second concedes the qualified form the reviewer
+actually asks for ("clearing only when it differs is defensible") and the fourth is refuted by High 3.
+**Low 2** rejects "over-reporting" as the name for the withheld hint's later publication: the door's
+premise proves a real post-read disk transition, and byte equality with an earlier app write does not
+make that transition false. **Low 3** removes item 23's false physical-time bound — thread scheduling
+and gate contention place no bound on how long a completed settlement may remain unadmitted. **Low 4**
+is the **ninth consecutive** name-position miss, and it is a *premise* rather than a word: the
+`withheld` tally doc and the withholding door's first sentence still say the read follows a commit,
+although `after_a_save` also runs after `committed: false`.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`6eae792`: `cargo test --workspace` 1263/0 across 26 result lines; focused serial `watch_check::`
+20/20 (67.15 s); clippy `-D warnings` clean; `cargo fmt --check` clean;
+`cargo tree -p espansoconfig-core | rg tauri` empty; no frontend `src/` path in any 2d-3 commit, so
+431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- [commands.rs:748](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:748), [ledger.rs:1581](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1581) — Behaviour: `reload_document` can make an app-write record stale without invalidating it, so the stamped door can still suppress a genuine external return to those bytes. Concrete scenario: the app commits A and records A → an external B is missed by the watcher → the person reloads B, updating the workspace but not the ledger → a later save-tail failure or uncertain-write path requests an owed observation without clearing A → an external writer restores A → the owed engine settlement emits A even if A was already tracked → step 2 answers `SelfWrite`, and the B→A change never enters the sequence. Door-scoping fixes the serialized precursor but not the stale record at the only door still allowed to suppress. Minimal fix: after a successful explicit reload whose revision differs from the recorded revision, invalidate that path’s app-write record under session → gate → state; add `record A → reload B → owed stabilized A`, requiring admission rather than suppression.
+
+- [ledger.rs:1593](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1593), [2d-3-notes.md:1194](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1194) — Behaviour: clearing the record also destroys the only chronology anchor, allowing an arbitrarily delayed pre-commit settlement to publish bytes the commit replaced. Concrete scenario: the watcher stabilizes P and stamps it before commit A, then its thread is descheduled before admission → the app commits and records A → a serialized reading of A clears that record and marks or withholds → the delayed P reaches `decide`, finds no timestamp to compare against, and is admitted although disk now contains A; a 2d-5 consumer can act on P before any correction. Minimal fix: retain a separate per-path latest-commit timestamp for the epoch after suppression eligibility is cleared, and use it for step 1; a pre-anchor observation must still return `PrecedesACommit` and have its settlement reverted.
+
+- [commands.rs:748](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/commands.rs:748), [ledger.rs:1596](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1596), [2d-3-notes.md:1210](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1210) — Behaviour: the stale `announced` entry is round 3’s swallowed-change defect reached through coalescing, and deferring it to 2d-5 cannot work because `Duplicate` sends that layer no value to arbitrate. Concrete scenario: B is announced → an external C is accepted through `reload_document`, which leaves `announced[path] = B` → the disk returns to B → an owed stabilization emits B → step 4 answers `Duplicate`; the consumer currently holds C, but no B observation or sequence reaches it. Minimal fix: successful explicit reload must invalidate an unequal announced entry, atomically with the corresponding stale app-write invalidation; add `announce B → reload C → owed B`, requiring a new admission.
+
+## Medium
+
+None.
+
+## Low
+
+- [2d-3-notes.md:4152](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:4152), [2d-3-notes.md:4162](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:4162) — Record: the rejection of reload-time invalidation is based on two false claims: cached `document`/`text` reads do not accept a foreign disk revision, and updating private session ledger state does not widen the command signature or make the already cache-mutating reload command a writer. Concrete scenario: a maintainer follows §14.2 and waits for 2d-5 → the stale record/map return `SelfWrite`/`Duplicate` before 2d-5 receives anything, preserving both Highs above. Minimal fix: describe door-scoping and reload-time invalidation as complementary fixes, remove the alleged scope prohibition, and reserve accepted-sequence arbitration for observations that actually reach the coordinator.
+
+- [ledger.rs:370](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:370), [2d-3-notes.md:4110](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:4110), [2d-3-notes.md:4135](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:4135) — Record/documentation: the withheld hint’s later publication is called “over-reporting,” although the door’s premise proves a real post-read disk transition; byte equality with an earlier app write does not make that transition false. Concrete scenario: the workspace and transaction last read B → an external writer restores earlier app-authored bytes A before the tail refresh → the withheld reading clears A’s stale record → the stabilized A publication correctly reports B→A. Minimal fix: call this a genuine external change whose bytes happen to equal an earlier app revision, while retaining the prohibition on claiming authorship.
+
+- [2d-3-notes.md:1203](/Users/ccarpio/Developer/espansoConfig/docs/decisions/2d-3-notes.md:1203) — Record: item 23 falsely bounds the chronology-anchor exposure to one debounce-plus-probe window; thread scheduling and gate contention place no bound on how long a completed settlement can remain unadmitted. Concrete scenario: P completes its engine pass before record A, then its worker is descheduled across several commands before the record is cleared and P is admitted. Minimal fix: remove the physical-time bound and state that only the production of such an observation is pre-commit; its delivery latency is unbounded.
+
+- [ledger.rs:722](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:722), [ledger.rs:1137](/Users/ccarpio/Developer/espansoConfig/src-tauri/src/ledger.rs:1137) — Record/documentation and name-position sweep: the `withheld` tally doc and withholding-door first sentence still say the read follows a commit, although `after_a_save` also runs after `committed: false`. Concrete scenario: an unchanged save of B commits nothing, an external A lands before its refresh, and `withheld` increments despite no commit occurring. Minimal fix: replace “commit/read-back” with “save transaction’s last locked read/tail refresh” in these name-position contracts and sweep the remaining `after_a_save` descriptions for the same premise.
+
+I statically inspected all eight prior reviews, Q2/Q3/Q5/Q7, the three admission doors and five decision steps, the save and reload call paths, lock order, the new regression and renamed production-path test, §5 items 23–24, §§13–14 correction blocks, and headline/doc-comment/test/assertion names. I cleared the round-8 suppression split itself: a marker is a user-visible save-conflict fact rather than a sequence-backed external report, the serialized clearing extension is sound for both tails, marking coalesces pending matching hints while its entry stands, and withholding correctly permits the externally restored revision to publish. I also cleared the three self-caught fixes themselves—the running transaction qualification, “while it stands,” and the re-measured suite totals—but the adjacent committed-only name claims remain as reported. No tests, builds, watcher checks, or network access were used; I relied on the supplied host gates.
+
+NOT READY
+
+Codex session ID: 01a039fb-5e62-7480-a167-153f4a61b6e0
+Resume in Codex: codex resume 01a039fb-5e62-7480-a167-153f4a61b6e0

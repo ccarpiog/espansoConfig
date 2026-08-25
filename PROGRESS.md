@@ -107,7 +107,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2d design consult** | **Phase 2d put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2d-design.md` (140 lines, written by the consultant itself into the working tree; the sandbox was writable this time). Like every consult since 2c-4a it **changed the phase rather than confirming it**, in four places. It rules the brief's "no dirty draft → reload automatically" **wrong as stated**: this application can prove only that *no write surface capable of targeting the document is open* (R36), so the reload predicate is that narrower conservative sentence and **a pristine open surface takes the conflict path too**. It rules the `notify`-backed watcher and the whole debounce/stability/read/hash/project/validate engine **into the Tauri-free core** with `src-tauri` owning only lifecycle, the app-write revision ledger, an ordered/coalesced queue and a wake-up event — and the **event is an expendable hint**: the frontend drains a `drain_external_changes(afterSequence)` command whose answer is authoritative, because a push may be missed. Automatic reload is **not an adoption** — a distinct guarded installation over the two selection counters, never `adoptDiskVersion`, which stays the only *confirmed-install* door; a watcher-origin conflict is a **distinct discriminant inside the one shared conflict model** (there was no failed save), with `conflictChoicesFor` still the only choice-list producer. All five plan-§6.5 offers ship by reuse — but only Keep/Reload/Copy as controls: *Compare* is the always-visible read-only panel and *Save-as-new* is the staged manual-resolution recovery, never called a duplicate. Eight dependency-ordered steps (Q7); Q8 names the sharpest green-suite failure: **an incomplete or stale open-write-surface registry classifying a live surface as clean**, so an external hint auto-reloads over the only in-memory copy of a draft — which is why step 7's rebuilt instrument owes a **command counter**, closing the inherited no-command-counter limitation for the reading |
 | **2d-1** | **The core observation engine, with no caller** — consult Q7 item 1. `watch::engine::ObservationEngine` (`start`/`hint`/`tick`/`rescan`/`next_deadline`) over an injected `Millis` clock and `WatchSource` reader: validated 150–300 ms trailing-edge debounce, two-equal-reads stability on **every** route including the baseline scan, exact hashing, projection/validation through the workspace's own path, typed `Changed`/`Added`/`Removed`/`Unreadable`. `watch::correspond` binds one table per base match to both snapshots' revisions; `watch::native` confines `notify` 8.2.0 to hints-and-degradation over exactly `watched_roots()`. `watch::self_write_suppresses` is Q2's predicate **shape** — the ledger, sequences and epochs are deliberately absent (2d-3/2d-4). **Admission and discovery's acceptance are one predicate**: `WatchSource::read` takes the engine's root and applies the walk's whole rule (plain-name components, every intermediate a real directory by `symlink_metadata`, final a regular file), so no route — baseline, hint or rescan — reads what the walk cannot reach | ✅ complete — after **five review rounds**, and the tail of them is this project's named failure mode in miniature. Round 1 NOT READY (2 High: one-read baselines a truncate/write race can tear; a `.yml` symlink reading outside the watched roots — 2 Medium, 1 Low). Round 2 NOT READY: **a narrower instance of all five** — sharpest the rescan route through a newly **symlinked ancestor**, past round 1's final-component-only check. Round 3 NOT READY on one Medium: the module headline still said "deterministic" **as a name** — the concept sweep had matched the site and misread it. Round 4 NOT READY on the same shape twice more: the notes' own D2 **heading** and the consult's Q1 **ruling line** — closed by qualifying the heading in place and a correction block under the ruling, never a rewrite. Round 5 READY, no findings. Three pinning tests verified failing without their fixes; §6–§9 of `2d-1-notes.md` record each round's closure with correction blocks preserving what was false when written |
 | **2d-2** | **The watcher lifecycle behind the workspace session, and the real-filesystem adapter** — consult Q7 item 2, the one step whose principal integration test belongs in `src-tauri`. The worker thread, its inbox, the epoch tag, cancellation and join, and `watch_check.rs`'s real-FSEvents evidence | ✅ complete — closed **READY at round 5** of its review. Round 1's High was **sandbox-confounded evidence** — the Codex sandbox blocks FSEvents delivery, so a delivery-dependent test times out there while the supported host passes it repeatedly. That precedent now binds every FSEvents-adjacent review in this project: they are briefed as **static**, with host-measured numbers supplied |
-| **2d-3** | **The write ledger and the admission gate** — consult Q7 item 3: `WriteLedger`'s record `last_app_write[DocumentId] = { workspace_epoch, revision, recorded_at }`, the per-epoch sequence allocator, the coalescing published-state map, and a **commit gate** (a second mutex, distinct from the state mutex, held across `save_document` *and* the record, by RAII). The intake is `WorkspaceSession::observing`; `run_one_save` delegates to `commit_and_record`; both save-path refreshes admit through the same `decide`. Lock order **session → gate → state**, everywhere. No command, no event, no queue, no wire, no frontend file — Q3 holds | 🔶 **implemented, every gate green, NOT closed** — the step review stands at **round 8 of an open-ended tail**. Rounds 1–6 each found a narrower instance of the finding the round before had just closed; round 7 was the first whose High was not narrower but the *same* finding re-asserted, and by owner decision (2026-08-25) the remedy was adopted — the coalescing marker split from the sequence-spending publication, `decide` given **three private, exhaustively matched doors** of which only the watcher's two-read one may spend a sequence. **Round 8 cleared that split and found the shape one step *above* where the brief pointed**: `decide`'s steps 1–4 were left shared, so step 2's `self_write_suppresses` ran **before the door was consulted** and a **stale record could answer `SelfWrite` to a serialized save-tail reading** — retaining the record, marking nothing, announcing nothing, and returning above the only two things that door exists to do. It is the first High since round 6 that is a defect in **behaviour** rather than a sentence, and it needs no race: `reload_document` touches the ledger not at all and a `committed: false` save records nothing, so the previous entry stands while the workspace has moved on. The fix round took the reviewer's remedy — step 2 is now a `match door` structurally identical to step 1's — on a **narrower argument than *the record might be stale***: suppression exists to absorb the several native hints one atomic replacement generates, a native hint has exactly one door, and since round 7 neither serialized door can publish, so neither can commit the error suppression prevents. The next action is round 9, against the round-8 fix. See the "Next action" section |
+| **2d-3** | **The write ledger and the admission gate** — consult Q7 item 3: `WriteLedger`'s record `last_app_write[DocumentId] = { workspace_epoch, revision, recorded_at }`, the per-epoch sequence allocator, the coalescing published-state map, and a **commit gate** (a second mutex, distinct from the state mutex, held across `save_document` *and* the record, by RAII). The intake is `WorkspaceSession::observing`; `run_one_save` delegates to `commit_and_record`; both save-path refreshes admit through the same `decide`. Lock order **session → gate → state**, everywhere. No command, no event, no queue, no wire, no frontend file — Q3 holds | 🔶 **implemented, every gate green, NOT closed** — the step review stands at **round 8 of an open-ended tail**. Rounds 1–6 each found a narrower instance of the finding the round before had just closed; round 7 was the first whose High was not narrower but the *same* finding re-asserted, and by owner decision (2026-08-25) the remedy was adopted — the coalescing marker split from the sequence-spending publication, `decide` given **three private, exhaustively matched doors** of which only the watcher's two-read one may spend a sequence. **Round 8 cleared that split and found the shape one step *above* where the brief pointed**: `decide`'s steps 1–4 were left shared, so step 2's `self_write_suppresses` ran **before the door was consulted** and a **stale record could answer `SelfWrite` to a serialized save-tail reading** — retaining the record, marking nothing, announcing nothing, and returning above the only two things that door exists to do. It is the first High since round 6 that is a defect in **behaviour** rather than a sentence, and it needs no race: `reload_document` touches the ledger not at all and a `committed: false` save records nothing, so the previous entry stands while the workspace has moved on. The fix round took the reviewer's remedy — step 2 is now a `match door` structurally identical to step 1's — on a **narrower argument than *the record might be stale***: suppression exists to absorb the several native hints one atomic replacement generates, a native hint has exactly one door, and since round 7 neither serialized door can publish, so neither can commit the error suppression prevents. **Round 9 cleared that argument in both halves and then returned three Highs, all defects in behaviour, all of one root cause: nothing told the ledger when the workspace accepts a foreign revision.** `reload_document` re-read disk and updated the cache while touching the ledger not at all, so the stamped door could suppress a genuine external return to stale-recorded bytes; clearing the record destroyed the only chronology anchor with it, letting a settlement stamped before a commit publish bytes the commit had replaced; and a stale `announced` entry answered `Duplicate` to a real change — **which cannot be deferred to 2d-5, because `Duplicate` sends that layer no value to arbitrate**. **Two of the three were §5 items 23 and 24, written by the round-8 fix round one round earlier as bounded residues**, bringing to **seven** the §5 items so recorded and later found to be real defects. The round-9 fix reverses §14.2's rejection of reload-time invalidation — **two of its four grounds were verified false in the code** — and separates the commit anchor's lifetime from the record's suppression licence. The next action is round 10, against the round-9 fix. See the "Next action" section |
 | 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult, 2d-1 and 2d-2 done; **2d-3 implemented and under review**, 2d-4 next after it closes |
 | 3–5 | See plan §12 | ⬜️ not started |
 
@@ -8716,6 +8716,186 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, but the step review stands at round 9, which returned **three** Highs, all defects in behaviour. THE NEXT ACTION IS ROUND 10 OF THE 2d-3 REVIEW, against the round-9 fix.**
+
+**Read `docs/reviews/phase-2d-3-ledger.md` first — it is the work list.** Rounds 1–9 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 10's brief is
+written from round 9's fix, exactly as rounds 2–9 were written from theirs.
+
+**Round 9 is the sharpest round of this tail.** It **cleared** round 8's whole argument — a marker is
+a user-visible save-conflict fact rather than a sequence-backed external report, the serialized
+clearing extension is sound for both tails, marking coalesces pending matching hints while its entry
+stands, withholding correctly permits the externally restored revision to publish — and it cleared the
+three defects the round-8 fix round had self-caught. **Then it returned three Highs, all behaviour,
+all one root cause: nothing told the ledger when the workspace accepts a foreign revision.**
+`reload_document` re-read disk and updated the workspace cache while touching the ledger not at all.
+
+**Two of those three Highs were §5 items 23 and 24 — written by the round-8 fix round *one round
+earlier*, as honestly bounded residues, deferred in writing.** That makes **seven** §5 items so
+recorded and later found to be real defects: item 10 (round 2), item 16 (round 4), item 18 (round 5),
+items 20 and 3 (round 6), items 23 and 24 (round 9). **The posture toward every remaining open item of
+§5 is no longer suspicion but expectation** — and the round-9 fix round wrote **five more** (items
+25–29) while predicting item 25 will be round 10's High.
+
+#### What the round-9 fix built — re-derive these, do not inherit them
+
+- **`WriteLedger::adopt_reloaded_revision_under_the_session_lock(path, revision)`** — one new
+  **non-door** entry point, called from `WorkspaceSession::reload` **inside `with_workspace`'s
+  closure** (`commands.rs:836–844`). Under **one** state guard it drops the app-write record when it
+  names a **different** revision, and the announced state when it is **not** that state. Both are
+  scoped to *differs*, which honours §14.2's one surviving reason — clearing on a reload whose read
+  *equals* the record would unsuppress that write's own pending native hints with nothing announced to
+  absorb them, a **false external change**, the one outcome this module may not produce — and lets
+  Q5's marker survive *Reload disk version*.
+- **The path is resolved *before* the refresh**, so no successful reload can skip the invalidation.
+- **`RecordedWrite` is deleted.** The commit instant now lives in
+  `LedgerState::latest_commit_at: BTreeMap<PathBuf, CommitAnchor>`, written by `record_app_write` under
+  the record's own guard, read by `decide` step 1, and removed by **`begin_epoch` alone** — so the
+  anchor **outlives the record it was taken with**, which is High 2. It is keyed by **path**, because
+  step 3 removes the `documents_by_path` index a document-keyed anchor would hide behind.
+- **The lock-order argument, verified by the orchestrator rather than accepted:** `with_workspace`
+  takes the session mutex and holds it across the whole closure (`commands.rs:1228–1237`), and the new
+  method takes `enter_gate()` then `lock()` beneath it — **session → gate → state, no inversion**. The
+  session lock is **load-bearing rather than incidental**: releasing it between the refresh and the
+  report would let a commit land inside, and this call would then clear a record a save had just
+  taken, which is round 2's High reached through a read-only command.
+- **§14.2's rejection is reversed in place**, with both false grounds named: `WorkspaceSession::document`
+  and `text` are **cached** reads (`document_view`, `document_text`) that cannot accept a foreign disk
+  revision, so they never "re-created the same gap"; and `reload` **already** mutated the workspace
+  cache, so private ledger state widens no command signature and makes no writer of it.
+- **No core change at all**; no new command, event, queue, wire type or frontend file.
+
+#### The deviation round 10 must judge first — there is none, and that is itself the thing to check
+
+The round-9 fix took the reviewer's remedy on **all three** Highs with no deviation. **A fix round that
+deviates from nothing is unusual in this review**, and the two rounds that did deviate (7 and 8) had
+their arguments judged first and one was reversed. So round 10's first job is different: **judge
+whether taking all three remedies literally was right**, and in particular whether the *combination*
+is coherent — High 1 and High 3 clear two maps from one new entry point, while High 2 makes a third
+map outlive both. Three maps with three lifetimes, and only one of them is now cleared by `decide`.
+
+#### What round 10 must attack
+
+- **§5 item 25, first and hardest — the implementer's own prediction for this round's High.**
+  *Nothing forces a future read path to report.* The claim that every path accepting a foreign revision
+  tells the ledger is an **audit of today's call sites, not a property of a type**, and a shared
+  chokepoint was rejected as one-caller surface. The step has now shipped, twice, a rule expressed as
+  an enumeration that a later reader must re-derive; `AdmissionDoor`'s exhaustive match exists
+  precisely because that shape failed before. Is the audit true today, and is rejecting the chokepoint
+  right?
+- **The three lifetimes.** `writes` (cleared by step 3, by `record_app_write`, and now by a reload),
+  `announced` (cleared by `record_app_write` and now by a reload) and `latest_commit_at` (cleared by
+  `begin_epoch` **alone**, never pruned within an epoch — §5 item 27). Does any pair now disagree in a
+  way `decide` cannot see? An anchor that outlives every record for its path is by construction a
+  suppression-free but chronology-bearing state: what refuses what, and for how long?
+- **The *differs* scoping on both invalidations.** It is load-bearing in the dangerous direction
+  (equal → keep, or a false external change). Verify it against a reload that **fails**, a reload of a
+  **removed** file (§5 item 29 says it reports nothing), and the case where the workspace already held
+  the revision the reload returns.
+- **`preceded_a_commit`'s weakened diagnosis** (§5 item 28) — a non-zero tally no longer means what
+  `crate::watch_check`'s positive wait was written to assume. Round 3's precedent: a tally that stops
+  discriminating is how a stamp taken too early becomes untestable.
+- **The record against the code** — `2d-3-notes.md` §1, §4, §5 (items 23–29), §6's gate table and
+  §7–§15 (**§15 is the section under review**), plus the new correction blocks under §5 items 23/24,
+  §14.1, §14.2 and §14.8. **Every one of the nine rounds so far found a false claim in this record**,
+  and the round-9 fix round **found one in its own** before reporting: it had written that *every*
+  `Workspace::refresh` call site is followed by a ledger call, which is false — a failed refresh and
+  `after_a_save`'s agreeing arm call nothing — and corrected it in three places to the true claim.
+  **Do not treat that self-catch as credit**; judge the correction as harshly as a finding of your own.
+
+**Keep the two standing rules:** sweep for the **shape**, never for the words of the closed finding;
+and sweep **name positions** — headlines, section headings, bold ruling lines, first sentences, doc
+comments, module headers, test names, assertion messages — as a pass **distinct** from the prose
+sweep. Round 9's Low 4 was the **ninth consecutive** name-position miss and it was a **premise** rather
+than a word (*the read follows a commit*, false because `after_a_save` also runs after
+`committed: false`). This round deleted a type (`RecordedWrite`), added one (`CommitAnchor`), added a
+map and a non-door entry point, and changed what `reload` *is*.
+
+**Brief the review the way rounds 1–9 were briefed, and this is not optional:** the Codex sandbox
+**blocks FSEvents delivery**, so a delivery-dependent test times out there while the supported host
+passes it repeatedly. Tell the reviewer to work **statically**, never to run `cargo test` or anything
+matching `watch_check::`, and supply the host-measured numbers in the brief. 2d-2's round-1 High was
+sandbox-confounded evidence, and that precedent binds every FSEvents-adjacent review.
+
+#### An operational trap — it recurs every round
+
+**`codex-wait.sh` reports STALLED on a healthy Codex `task` job.** The companion runtime stamps
+`updatedAt` once, ~10 s after launch, and never advances it, so the watchdog's stall predicate fires on
+a job that is demonstrably working. **The working signal is the log file's mtime.** A drop-in
+replacement that polls on it is `wait-on-log.sh` (~60 lines, usage
+`wait-on-log.sh <job-id> [max_wait_s] [stall_s] [interval_s]`, exit `0` terminal / `2` deadline /
+`3` genuinely stalled / `4` bad args); it lives in a session scratchpad, so **recreate it from this
+description if the path is gone**. The `codex:codex-rescue` subagent returns a "running in background"
+wrapper **immediately** and does not deliver the result; resolve the companion with
+`CC=$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)` and drive
+`node "$CC" task --background --effort medium "$PROMPT" --json`, then `node "$CC" result <job-id>`,
+directly. Rounds 8 and 9 each took ~7 min of Codex wall clock at `--effort medium`.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-3-ledger.md          — rounds 1–9 verbatim. THE work list for round 10.
+# docs/decisions/2d-3-notes.md               — the record: §1, §4, §5 (items 25–29 are new), §6's
+#   gate table, and §7–§15 (§15 is round 9's, the one under review), plus the new correction blocks
+#   under §5 items 23/24, §14.1, §14.2 and §14.8
+# docs/reviews/phase-2d-design.md            — THE AUTHORITY for 2d. Q2 is the suppression ruling and
+#   its clearing rule, Q3 the highest-sequence rule, Q5 the coalescing rule scoped to
+#   conflict_after_the_lock, Q7 item 3 this step's spec, Q1 (with its round-4 correction block)
+# src-tauri/src/ledger.rs                    — decide()'s five steps; CommitAnchor and
+#   latest_commit_at; adopt_reloaded_revision_under_the_session_lock at ~1476
+# src-tauri/src/commands.rs                  — reload() at ~836; with_workspace at ~1228;
+#   the two save tails; run_one_save; commit_and_record
+# docs/decisions/2d-1-notes.md               — the engine's contract, plus §2.1's correction blocks
+# docs/decisions/2d-2-notes.md               — §2.1 the lock and join argument; §2.3, which expressly
+#   permits a healthy native backend to miss a hint
+```
+
+#### The gate baseline — all measured on this tree by the orchestrator, not by the author
+
+- **`1267 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The Rust ladder across this step's review: 1249 at round 4's brief, 1251
+  after the round-4 fix, 1256 after round 5, 1261 after round 6, 1262 after round 7, 1263 after round
+  8, **1267** after the round-9 fix (**+4**:
+  `a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence`,
+  `a_reload_that_accepts_other_bytes_invalidates_the_announced_state`,
+  `a_commit_anchor_outlives_the_record_it_was_taken_with`,
+  `a_reload_tells_the_ledger_which_revision_the_workspace_accepted`). 26 result lines, all `ok`.
+  Focused serial `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1`
+  is **20/20** (64.43 s) and belongs to every future Rust gate run. Clippy `-D warnings` clean;
+  `cargo fmt --check` clean; `cargo tree -p espansoconfig-core | rg tauri` empty. **The frontend has
+  never been touched across the whole step** — re-verified against all six commits' file lists — so
+  its three numbers are carried, not re-measured.
+- **The scar still binds.** The workspace suite is evidence on a **quiet host only**: contended runs on
+  a byte-identical tree have failed with 9 and 10 `watch_check` bounded-wait timeouts while the focused
+  serial gate passed 20/20 through the same weather. Kill orphaned test binaries and re-run quietly
+  before concluding anything from a timeout.
+
+#### Open items 2d-3 still carries into 2d-4 (stated, not discharged)
+
+- The production `ObservationSink` discards, so a sequence and a publication are spent on a value no
+  present code recovers.
+- Consult Q3's highest-sequence rule is no longer load-bearing for the phantom — round 7 removed the
+  dependency by never publishing an unstabilized read. 2d-4 should still keep the rule, but a
+  correctness argument no longer rests on it.
+- `SavedDocument::revision` is a **post-rename read-back**, so a foreign process writing between the
+  rename and that read makes this session record *their* revision as its own (§5 item 15, inherited).
+- A stamp taken too **late** has no test that can fail, and neither has a dropped sink answer.
+- A re-observation may not survive a worker stopping before its next tick (§5 item 21); an owed
+  observation of an unchanged state still costs a sequence (§5 item 22); and nothing forces a watcher
+  to exist to hear the ask (§5 item 19).
+- **New at round 9, and §5 items 23 and 24 are now *closed* rather than carried.** Item 25: nothing
+  forces a future read path to report — an audit, not a type, and the implementer's own prediction for
+  round 10's High. Item 26: the third consumer of the workspace/watcher path-spelling agreement. Item
+  27: `latest_commit_at` is never pruned within an epoch. Item 28: a non-zero `preceded_a_commit` now
+  supports a weaker diagnosis than `watch_check`'s positive wait assumes. Item 29: a failed reload of a
+  removed file reports nothing.
+
+---
+
+### ⚠️ HISTORICAL — the round-8→round-9 handoff, superseded by the round-10 status above. Round 9 is executed, it returned NOT READY with 3 High and 4 Low, and its fix is in the tree and green.
 
 ### **STEP 2d-3 IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, but the step review stands at round 8, and round 8 returned the first High since round 6 that is a defect in *behaviour*. THE NEXT ACTION IS ROUND 9 OF THE 2d-3 REVIEW, against the round-8 fix.**
 

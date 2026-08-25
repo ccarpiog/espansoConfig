@@ -1207,6 +1207,23 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     What would close it is an anchor that outlives the record — a second field, or a per-path *last
     superseded at* instant — and that is a design change with its own review, not a fix round's to
     slip in.
+
+    > **Correction and closure (round-9 fix round, §15; round 9's second High and its third Low).**
+    > This item was **wrong about the bound and right about the defect**, and it is now **closed in
+    > code**. Wrong about the bound: *"bounded by physics … one debounce plus one probe of window"*
+    > is false. Only the **production** of such a reading is pre-commit; its **delivery** waits on
+    > thread scheduling and on the commit gate, and neither places any bound on it — a completed
+    > settlement can sit on a descheduled worker across several commands. Right about the defect,
+    > and round 9 found it reachable exactly as this item describes: a settlement stamped before a
+    > commit and delivered after a serialized reading had cleared that commit's record was
+    > **admitted**, publishing bytes the commit had replaced, with a 2d-5 consumer free to act on
+    > them before any correction. Closed by the remedy this item itself named — a per-path
+    > `CommitAnchor` whose life is the **epoch**, written by `record_app_write` under the same state
+    > guard as the record and removed by `begin_epoch` alone. `decide`'s step 1 reads the anchor and
+    > no longer reads the record at all; the record's own `recorded_at` field is gone.
+    > `ledger.rs`'s `a_commit_anchor_outlives_the_record_it_was_taken_with` is the driven form,
+    > through a real engine and a real `deliver`, and it fails when the anchor is coupled back to the
+    > record.
 24. **The announced-state map can go stale the same way the record could, and coalescing then
     reports nothing where it should report** (§14.4). `LedgerState::announced` answers *does a
     consumer already have this state*, and its only invalidations are `record_app_write` and
@@ -1221,22 +1238,33 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
     be reconciled by construction instead of by two maps agreeing. Until then the ledger's map is
     honest about what it can see and blind to what a command answered.
 
+    > **Correction and closure (round-9 fix round, §15; round 9's third High).** The deferral in the
+    > last two sentences was **wrong on its own terms**, and round 9's argument is one sentence: a
+    > `Duplicate` sends 2d-5 **no value to arbitrate**, so a per-document accepted sequence cannot
+    > reconcile a state that never reaches the coordinator at all. The "fourth mutation path into the
+    > ledger from a read-only command" objection is answered under §14.2's correction block below.
+    > Closed in code: `reload_document` now reports the revision the workspace accepted, and the
+    > ledger drops the announced state for that path **where it differs from it** — and only where it
+    > differs, because a reload *onto* a marked state is what *Reload disk version* does to a save
+    > conflict, and consult Q5's coalescing entry has to survive it. `ledger.rs`'s
+    > `a_reload_that_accepts_other_bytes_invalidates_the_announced_state` drives both halves.
+
 ---
 
 ## 6. The gates
 
-| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) | After round 6's fix (§12) | After round 7's fix (§13) | After round 8's fix (§14) |
-|---|---|---|---|---|---|---|---|---|---|---|
+| Gate | Before 2d-3 (2d-2's closure) | After 2d-3 | After round 1's fix (§7) | After round 2's fix (§8) | After round 3's fix (§9) | After round 4's fix (§10) | After round 5's fix (§11) | After round 6's fix (§12) | After round 7's fix (§13) | After round 8's fix (§14) | After round 9's fix (§15) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 | `cargo test --workspace` | 1223 passed, 0 failed | 1242 passed, 0 failed | 1245 passed, 0 failed | 1246 passed, 0 failed | 1249 passed, 0 failed | 1251 passed, 0 failed (exit 0; three green runs, and two contended runs on the same tree that were not — see the scar paragraph below) | **1256 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines; two green runs) | **1261 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines, +5 for this round's five new tests; two green runs on a quiet host) | **1262 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +1 for this round's one new test) | **1263 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +1 for this round's one new test) — **on a quiet host, and the scar bit first**: an earlier run of the same tree, contended with an orphaned test binary left by a run this session had cancelled, came back **228 passed, 10 failed** in 456.55 s, every failure a `watch_check.rs:141` bounded-wait timeout and none of them a decision this round changed. The host was quieted, the focused serial gate re-run 20/20, and this figure is the quiet re-run —
 **taken twice**, the second time on the finished tree after the neuter runs were reverted, both
-1263/0 over 26 `test result` lines |
-| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) | **20 passed, 0 failed** twice (68.67 s, then 63.20 s — both on a quiet host, no timeout in either; this round added no `watch_check` test and its one new real-worker test lives in `watch.rs`, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (69.38 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (81.03 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged). Run **first** after the contended workspace failure above, because it is the gate that discriminates a real regression from the host |
-| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) |
-| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) | **clean** (exit 0; no `cargo fmt` was needed) | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) | **clean** (exit 0; no `cargo fmt` was needed) |
-| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched one core file, `watch/engine.rs`, and what it added is ledger-agnostic — §12.1) | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched **no** core file at all) |
-| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** |
-| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** |
-| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** |
+1263/0 over 26 `test result` lines | **1267 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all 26 of them, +4 for this round's four new tests) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | 18/18 twice | 20/20 twice (66.8 s, 59.2 s) | 20/20 twice (65.4 s, 60.3 s) | 20/20 twice (67.6 s, 63.6 s) | 20 passed, 0 failed (69.6 s, quiet host) | 20 passed, 0 failed twice (68.5 s, 68.7 s — the second through the contention the workspace run failed in) | **20 passed, 0 failed** twice (182.0 s, then 70.8 s quiet — no timeout in either; the first ran on the heels of two full workspace runs and is the scar's slow-but-green face) | **20 passed, 0 failed** twice (68.67 s, then 63.20 s — both on a quiet host, no timeout in either; this round added no `watch_check` test and its one new real-worker test lives in `watch.rs`, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (69.38 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) | **20 passed, 0 failed** (81.03 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged). Run **first** after the contended workspace failure above, because it is the gate that discriminates a real regression from the host | **20 passed, 0 failed** (73.27 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean | clean | clean | clean | clean | clean | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) | **clean** (exit 0) |
+| `cargo fmt --check` | clean | clean | clean | clean | clean | clean (no `cargo fmt` needed) | **clean** (exit 0, after one `cargo fmt` on `watch.rs`) | **clean** (exit 0; no `cargo fmt` was needed) | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) | **clean** (exit 0; no `cargo fmt` was needed) | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | empty | empty | empty | empty | empty | empty | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched one core file, `watch/engine.rs`, and what it added is ledger-agnostic — §12.1) | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched **no** core file at all) | **empty** (no match; this round touched **no** core file at all) |
+| `npm run check` files | 431 | 431 | 431 | 431 | 431 | 431 | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** | **431 — not re-run; the frontend was not touched** |
+| `npm test` | 2125 | 2125 | 2125 | 2125 | 2125 | 2125 | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** | **2125 — not re-run; the frontend was not touched** |
+| `npm run build` modules | 184 | 184 | 184 | 184 | 184 | 184 | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** | **184 — not re-run; the frontend was not touched** |
 | bundle oracle | server-only absent, client-only present (2) | same | not re-run | not re-run | not re-run | not re-run | **not re-run, same reason** | **not re-run, same reason** | **not re-run, same reason** | **not re-run, same reason** |
 
 **Round 3's fix moved the workspace count by 3, and every one is accounted for**: two in
@@ -4112,11 +4140,28 @@ different on the two doors:
   announcing a state the disk demonstrably holds is over-reporting where the alternative is silence
   about an external change. The review asks for precisely this behaviour — its prescribed regression
   requires that a **stamped** admission of A after a withholding be *admitted*;
+
+  > **Correction (round-9 fix round, §15; round 9's second Low).** *"Over-reporting"* is the wrong
+  > name for that publication, and calling it one understates what the code is right about. The
+  > withholding door's own premise is that the file no longer holds the revision its transaction last
+  > saw, so a **real post-read disk transition** is established before the door is reached; a later
+  > hint at bytes that happen to equal an earlier app write is therefore a **genuine external change
+  > whose bytes happen to equal an earlier app revision**, and byte equality with something this
+  > application once wrote does not make that transition false. The standing prohibition is
+  > unchanged and is the only thing suppression ever licensed: **byte identity, never authorship** —
+  > nothing here may claim the write was ours. `ledger.rs`'s module section and
+  > `WriteLedger::withhold_under_the_session_lock` carry the corrected wording;
 - **the chronology anchor for readings older than that record**, which is §5's new item 23. Step 1
   refuses only while an entry stands. This is **not new**: supersession has cleared the anchor on
   every accepted differing state since this module was written, which is the ordinary external
   conflict. §14 widens the inputs that reach it by one class rather than adding a class, and the
   round that widens a hole is the round that owes the sentence.
+
+  > **Correction (round-9 fix round, §15; round 9's second High).** This bullet is **no longer a
+  > cost**, because clearing a record no longer clears anything else. The instant moved out of the
+  > record and into a per-path `CommitAnchor` whose life is the epoch, so *step 1 refuses only while
+  > an entry stands* is false of the shipped code: it refuses while an **anchor** stands, and only
+  > `begin_epoch` removes one. See §5 item 23's closure block.
 
 ### 14.2 The three questions the brief required answered in writing
 
@@ -4169,6 +4214,50 @@ clear the record where it actually goes stale — when the workspace accepts a f
   sequence**, and that is where a reload and an observation can be reconciled by construction rather
   than by two maps agreeing. §5 item 24 records the same gap in the announced-state map and defers it
   the same way, deliberately and in writing rather than by omission.
+
+> **Correction — the rejection is REVERSED (round-9 fix round, §15; round 9's first Low, and the
+> Highs it left standing).** Reload-time invalidation is **built**, and this item's four reasons are
+> corrected one by one. **Two of them were factually false**, and both were re-checked in the code
+> rather than argued:
+>
+> - *"every other read path re-creates the same gap — `WorkspaceSession::document`, `text`."* **False.**
+>   `document` is `workspace.document_view(id)` and `text` is `workspace.document_text(id)`, both
+>   **cached** reads that install nothing this session did not already hold. Only `reload` calls
+>   `Workspace::refresh`, which re-reads the file. The enumeration is `rg '\.refresh\('` over
+>   `src-tauri/src/`, which finds exactly **three** call sites — `WorkspaceSession::reload`,
+>   `conflict_after_the_lock` and `after_a_save` — and on every arm where one of them **accepts a
+>   revision the session did not already hold** the ledger is told: the last two through their own
+>   doors since round 7, and `reload` since this round. (The arms that tell it nothing accepted
+>   nothing: an `Err` from `refresh` returns before it touches the cache, and `after_a_save`'s
+>   agreeing arm found the revision its transaction already had.) So the gap had one hole, not an
+>   open set;
+> - *"it needs a fourth mutation path into the ledger, from a read-only command … a widening of the
+>   command surface this step's scope bound forbids."* **False on the second half.** `reload` already
+>   mutates the workspace cache; mutating private session state adds **no command**, changes no
+>   command signature, puts nothing new on the wire and writes no user file, none of which the scope
+>   bound touches. The first half is true and is answered by shape rather than by refusal: the new
+>   entry point is **not a door** — it brings no reading, builds no `AdmissionDoor`, answers no
+>   `Admission`, spends no sequence and announces nothing. It only removes.
+>
+> **The second reason survives and is honoured**: *"the obvious version of it is wrong in the
+> dangerous direction — clearing on a reload whose read equals the record would unsuppress that
+> write's own pending native hints with nothing announced to absorb them."* Exactly so, which is why
+> both invalidations are conditioned on **differing**, and why the same rule protects consult Q5's
+> marker from *Reload disk version*. What this item got wrong about it is the next clause — *"it is a
+> different fix from the one that closes this finding, and it closes none of this finding"* — which
+> is true and is **not a reason against building it**: door-scoping and reload-time invalidation are
+> **complementary**, and round 8 needed both. Door-scoping is right about *which readings suppression
+> is for* whatever made the entry stale, and a `committed: false` save still leaves an earlier entry
+> standing, so §14.1's argument is unchanged rather than superseded.
+>
+> **The fourth reason is refuted on its own terms** by round 9's third High: `Duplicate` sends 2d-5
+> **no value to arbitrate**, so a per-document accepted sequence cannot reconcile a state the
+> coordinator never receives. Accepted-sequence arbitration is the right mechanism for observations
+> that actually reach the coordinator, and only for those.
+>
+> **And the first reason's own prediction came true against it**: it said *"the next one would be
+> found by round 9."* Round 9 did not find a new read path; it found that the one this item had
+> already named was still open, and that a second map had the same hole.
 
 ### 14.3 The two Lows
 
@@ -4371,3 +4460,320 @@ claim an ignored event *was ours* — byte identity, never authorship.
 `#[tauri::command]`, no TypeScript, Svelte or i18n file, no writer, no force flag, no route around
 `save_document`, and nothing new that serializes. **No core file was touched at all**, and
 `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
+
+> **Correction to §14.8 (round-9 fix round, §15).** Both items in the *not guaranteed* paragraph are
+> now **closed in code**, and both were real defects rather than acceptable residues: §5 item 23 was
+> round 9's second High and §5 item 24 was its third. Their closure blocks in §5 carry the detail.
+> §14.8's *guaranteed* paragraph survives unchanged — round 9 cleared round 8's whole argument.
+
+---
+
+## 15. The round-9 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 9 returned **NOT READY** with **three Highs — all defects
+in behaviour — and four Lows**, the largest round of this review's tail. All seven are closed here.
+What round 9 inspected and settled in round 8's favour before finding anything is not re-argued
+below: the door split itself, a marker as a user-visible save-conflict fact rather than a
+sequence-backed external report, the serialized clearing extension for both tails, a marker
+coalescing pending matching hints while its entry stands, withholding permitting the externally
+restored revision to publish, and the three defects the round-8 fix round self-caught.
+
+**The three Highs are one root cause: nothing told the ledger when the workspace accepted a foreign
+revision.** `reload_document` re-read the file into the session's cache and touched the ledger not at
+all, so the app-write record and the announced state could both go on describing a state the session
+had moved past — and clearing the record, which is what round 8 taught the serialized doors to do,
+took the chronology anchor with it.
+
+**Two of the three Highs are §5 items 23 and 24**, written by the round-8 fix round one round ago as
+honestly bounded residues and deferred in writing. That makes **seven** §5 items so recorded and
+later found to be real defects: item 10 (round 2), 16 (round 4), 18 (round 5), 20 and 3 (round 6),
+and now 23 and 24 (round 9). §15.7 writes this round's own residues with that expectation stated
+rather than implied.
+
+### 15.1 The reversal §14.2 owed, said plainly
+
+**§14.2's rejection of the root-cause fix is REVERSED**, and the correction block under it says so in
+place. Two of its four reasons were **factually false**, and both were re-checked in the code:
+
+- `WorkspaceSession::document` and `text` do **not** "re-create the same gap" — they are
+  `workspace.document_view(id)` and `workspace.document_text(id)`, cached reads that install nothing.
+  `rg '\.refresh\('` over `src-tauri/src/` finds exactly **three** `Workspace::refresh` call sites in
+  this crate — `WorkspaceSession::reload`, `conflict_after_the_lock` and `after_a_save` — and the
+  last two already tell the ledger through their own doors on every arm that accepted anything. The
+  gap had **one** hole;
+- making `reload` mutate private ledger state is **not** "a widening of the command surface this
+  step's scope bound forbids". It adds no command, changes no signature, puts nothing new on the
+  wire and writes no user file. `reload` already mutates the workspace cache.
+
+**One reason survives and is honoured, and it is the one that decides the shape of the fix**: the
+obvious version *is* wrong in the dangerous direction. Clearing a record whose bytes a reload just
+read would unsuppress that write's own pending native hints with nothing announced to absorb them —
+a false external change, the one outcome this module may not produce. So **both invalidations are
+conditioned on differing**, and the equal cases are kept deliberately.
+
+The fourth reason — defer to 2d-5's per-document accepted sequence — is refuted on its own terms by
+High 3: **`Duplicate` sends that layer no value to arbitrate.** Accepted-sequence arbitration is the
+right mechanism for observations that reach the coordinator, and only for those.
+
+**And the two fixes are complementary, not alternatives.** Door-scoping is right about *which
+readings suppression is for* whatever made an entry stale, and a `committed: false` save still leaves
+an earlier commit's entry standing with nothing outside the ledger to clear it. §14.1's argument is
+unchanged rather than superseded, and `ledger.rs`'s *suppression is the stamped door's* section now
+says which of its two example routes round 9 closed and which it did not.
+
+### 15.2 High 1 and High 3 — a reload reports what the workspace accepted
+
+**One new entry point**, `WriteLedger::adopt_reloaded_revision_under_the_session_lock(path,
+revision)`, called from `WorkspaceSession::reload` inside `with_workspace`'s closure. It takes the
+gate and then the state, once, and under that one guard:
+
+- removes the path's **app-write record** (and its path-index entry) when the record names a
+  **different** revision — High 1. Left standing, the stamped door — the one door still allowed to
+  suppress — answered `SelfWrite` to a genuine external return to the recorded bytes, and that change
+  never entered the sequence;
+- removes the path's **announced state** when it is **not** this state — High 3. Left standing, a
+  genuine external return to the announced bytes answered `Duplicate`, which is round 3's swallowed
+  change reached through coalescing.
+
+Both mutations are under the one state guard, so no decision can observe one without the other, which
+is the atomicity the review asked for.
+
+**It is not a door and not a writer.** It brings no reading, builds no `AdmissionDoor`, answers no
+`Admission`, spends no sequence, moves no tally and announces nothing. It only removes. That is why
+the `AdmissionDoor` enum is untouched and still matched three times: a door exists to decide what a
+*reading* may do, and there is no reading here.
+
+**Why a `ContentRevision` and not an `ObservedState`**: a successful reload can only ever have read
+content — an absence or an unreadable state is an `Err` from `Workspace::refresh` — and a parameter
+that could express one would be a parameter a later edit could use to report a state nobody observed.
+
+**A failed reload tells the ledger nothing, and that was checked rather than assumed.**
+`Workspace::refresh` does `read_utf8(&…path)?` **before** it touches `entries[position].loaded`, so an
+`Err` leaves the cache exactly as it was: the session accepted nothing, and there is nothing to
+invalidate. This is the same rule the two save tails keep for their own failed reads.
+
+**The path is resolved before the re-read, deliberately.** `document_context` and `refresh` both begin
+with the same `position_of(id)` lookup, so an unknown `DocumentId` fails at the first call with
+exactly the error it failed with before, and **no arm can reach a successful reload that then skips
+the invalidation**. Ordering them the other way would have made the ledger call depend on a second
+fallible lookup that cannot fail today.
+
+### 15.3 High 2 — the anchor outlives the record
+
+`RecordedWrite` is **gone**. `LedgerState::writes` now holds a bare `AppWrite`, and the instant lives
+in a new `LedgerState::latest_commit_at: BTreeMap<PathBuf, CommitAnchor>`, where
+`CommitAnchor { epoch, at }`.
+
+The fix is *which value the instant lives in*, and the reason is that the two facts have different
+lifetimes:
+
+- the **record** lives as long as its suppression licence is honest. Four things end it:
+  supersession, a serialized reading, a reload onto other bytes, and a workspace replacement;
+- the **anchor** lives as long as the **epoch**. `record_app_write` writes it under the same state
+  guard as the record, so no decision can see one without the other; `begin_epoch` is the only thing
+  that removes one.
+
+`decide`'s step 1 now reads `commit_anchor_at(ledger, path)` and does not read the record at all;
+step 2 reads `record_at(ledger, path)` and does not read a clock. Two helpers rather than two inline
+traversals, so *which entry this path has* is one statement per question rather than one per reader.
+
+**Keyed by path, not by `DocumentId`**, and that is structural rather than an economy: step 3 removes
+the `documents_by_path` entry that a path-to-record lookup goes through, so an anchor behind that
+index would become unreachable at exactly the moment it has to keep answering.
+
+**Widening the refusal is safe in the direction that matters.** A refusal at the stamped door is
+*answered*: `admitting_sink` returns `Undecided`, `deliver` takes the engine's settlement back, the
+path is re-hinted, and the re-observation's own stamp is taken after the anchor — so it cannot be
+refused by the same anchor twice, and no re-observation loop exists. In steady state the anchor is
+inert: every observation produced after this session's last commit to a path beats it.
+
+**Across a `begin_epoch`** the anchor is discarded with everything else, which is the whole of its
+lifetime rule and is why it carries no *clearing* logic of its own. **Across a failed reload** it is
+untouched, because a reload says nothing about when this session last wrote. And the `epoch` field is
+`AppWrite::epoch`'s second statement of the discard rule, checked separately for the same reason.
+
+### 15.4 The four Lows
+
+**Low 1 — §14.2's rejection.** §15.1 above, and the correction block under §14.2 itself.
+
+**Low 2 — "over-reporting" is the wrong name.** The withheld hint's later publication is a **genuine
+external change whose bytes happen to equal an earlier app revision**. The door's premise already
+establishes a real post-read disk transition — the file no longer holds the revision its transaction
+last saw — and byte equality with something this application once wrote does not make that transition
+false. Corrected in `ledger.rs`'s module section, in
+`WriteLedger::withhold_under_the_session_lock`, and in §14.1's bullet. **The prohibition is kept
+verbatim in the same place**: byte identity, never authorship.
+
+**Low 3 — §5 item 23's false physical-time bound.** Removed. Only the **production** of such an
+observation is pre-commit; its delivery latency is unbounded — a completed settlement can sit on a
+descheduled worker or behind the commit gate across several commands. The same false bound stood in
+`LedgerTally::preceded_a_commit`'s doc comment and is corrected there too, which is a position the
+Low did not name.
+
+**Low 4 — the ninth consecutive name-position miss, and it is a *premise*.** `after_a_save` runs for
+`Ok(SavedDocument { committed: false, .. })` as well, so *"the read follows a commit"* is false of
+it. Corrected in `LedgerTally::withheld` (*"between a save transaction's last locked read and its
+tail refresh"*, with the false version named), in `Admission::Withheld`'s first sentence, in
+`WriteLedger::withhold_under_the_session_lock`'s caller paragraph and its marker-would-swallow
+paragraph, and — a position the Low did not name — in `commands.rs`'s `after_a_save` doc section *a
+refresh that disagrees is an external observation*, which said *"a post-commit external replacement
+is not suppressed"*. **Deliberately kept**: `a_post_commit_external_replacement_supersedes_the_record_and_is_never_ours`,
+whose scenario constructs `committed: true`, so *post-commit* is true of it.
+
+### 15.5 The sweeps
+
+**For the shape, not the words.** The question asked of this round's own change: *what other fact
+this ledger keeps can be made stale by something outside the ledger?* Enumerated field by field over
+`LedgerState`:
+
+- `writes` / `documents_by_path` — the workspace accepting a foreign revision, **closed here**; a
+  `committed: false` save leaving an earlier entry standing, **answered by round 8's door-scoping**;
+  an unobserved external write, which is the predicate's documented limit and not a defect;
+- `announced` — the same reload route, **closed here**. The frontend's `adoptDiskVersion` needs no
+  entry of its own: the backend's acceptance of that revision happened inside
+  `conflict_after_the_lock`, which already goes through the marking door;
+- `latest_commit_at` — **nothing outside this ledger can make it stale**, and that is why the
+  chronology fact belongs here rather than on the record: it asserts *this session committed to this
+  path at this instant*, which no other process can falsify;
+- `epoch`, `next_sequence`, `tally` — not per-path facts about a disk.
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule): the new method consumes nothing.
+`clear_the_record_at` returns `()`, and `announced.remove` is idempotent and carries no permit
+semantics; there is no check-and-spend pair, because there is nothing to spend. No caller-supplied
+code runs under either guard.
+
+**The `Workspace::refresh` enumeration** is written as a command rather than as a claim, so the next
+round can re-run it: `rg '\.refresh\(' src-tauri/src/` finds **three** call sites. **The claim is not
+that every one is followed by a ledger call — that would be false** — but that every arm on which one
+of them **accepts a revision the session did not already hold** tells the ledger. The arms that do not
+tell it accepted nothing, and each was checked rather than assumed: `Workspace::refresh` does
+`read_utf8(…)?` before it touches `entries[position].loaded`, so an `Err` leaves the cache exactly as
+it was; and `after_a_save`'s agreeing arm found the revision its transaction already had, which is
+what the record already names.
+
+**For name positions**, swept as a pass of its own. Every position that said the chronology check
+reads *the record*: the module's *stamp* section (`read_after > recorded_at` → `read_after > anchor`,
+and the two-step implication with it), `Admission::PrecedesACommit`, `LedgerTally::preceded_a_commit`,
+`decide`'s step-1 contract and its *step 1 sits above step 2* paragraph, `AdmissionDoor`'s three
+questions and its `SerializedMarker` variant, the `record_app_write` doc, `AppWrite`'s own header,
+`LedgerState::writes`, `begin_epoch`, and four assertion messages and inline comments in the tests.
+**Three test names changed, because the claim in each name changed** — the count re-derived by
+counting the arrows below, two in `ledger.rs` and one in `commands.rs`:
+`a_reading_stamped_exactly_at_the_record_is_refused` →
+`…_at_the_commit_anchor_is_refused`, and
+`a_serialized_door_reading_is_never_refused_by_the_records_own_instant` →
+`…_by_a_commit_anchor`; in `commands.rs`,
+`a_post_save_refresh_is_never_refused_when_no_clock_could_place_it_after_the_record` →
+`…_after_the_commit`. **Two test seams renamed and re-keyed**: `WriteLedger::recorded_at(DocumentId)`
+→ `commit_anchor(&Path)`, `stamp_the_record_at(DocumentId, Instant)` →
+`stamp_the_anchor_at(&Path, Instant)`.
+
+**`main.rs`'s count moved from six to seven**, re-derived by counting the list rather than by adding
+one: the **commit anchor** is now its own item beside the stamp, because round 9's second High was a
+defect in what the stamp is compared against rather than in the stamp. The reload invalidation is
+**not** in that list and has a paragraph of its own, because that list is about a save's own rename
+and a reload is a different event.
+
+### 15.6 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — `RecordedWrite` removed and `CommitAnchor` added, with
+  `LedgerState::latest_commit_at` beside it; `record_app_write` writes both under one guard and
+  `begin_epoch` clears the anchor map; three private helpers (`record_at`, `commit_anchor_at`,
+  `clear_the_record_at`) so each lookup and the record's erasure are one statement; `decide`'s step 1
+  reads the anchor and step 3 calls the helper; the new entry point
+  `adopt_reloaded_revision_under_the_session_lock`; two module sections added (*a reload accepts a
+  foreign revision*, *the anchor outlives the record*) and four amended. Two test seams renamed and
+  re-keyed. **Three tests added**:
+  `a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence`,
+  `a_reload_that_accepts_other_bytes_invalidates_the_announced_state` and
+  `a_commit_anchor_outlives_the_record_it_was_taken_with`; **two renamed**;
+- **`src-tauri/src/commands.rs`** — `WorkspaceSession::reload` resolves the path, refreshes, and tells
+  the ledger, with the whole contract on its doc comment; `with_workspace` gains the lock-order
+  paragraph its new customer relies on; the module header gains a round-9 paragraph and a sentence
+  saying `reload_document` is still a reader; the `reload_document` wrapper says the same; the Low-4
+  premise corrected in `after_a_save`'s doc. A `later_than_now()` test helper added and **three**
+  hand-written `Instant::now()` stamps moved onto it, because an anchor that outlives its record is a
+  value those comparisons now really meet. **One test added**,
+  `a_reload_tells_the_ledger_which_revision_the_workspace_accepted`; **one renamed**;
+- **`src-tauri/src/main.rs`** — the mechanism list moves from **six** to **seven** with the commit
+  anchor named, and a paragraph for the reload invalidation beside it;
+- **no core file, and no `src/` path.**
+
+### 15.7 The evidence, the neuter runs, and the gates
+
+| Owed | Where |
+|---|---|
+| `record A → reload B → owed stabilized A` is **admitted**, not suppressed | `ledger.rs`'s `a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence`, first half; and on the production path `commands.rs`'s `a_reload_tells_the_ledger_which_revision_the_workspace_accepted`, first half — a real save, a real external write, a real `session.reload` |
+| that the **equal** reload does **not** clear the record | both of those tests' second halves: the record survives and a hint at those bytes is still `SelfWrite`. This is §14.2's surviving reason, driven |
+| `announce B → reload C → owed B` is a **new admission**, not `Duplicate` | `ledger.rs`'s `a_reload_that_accepts_other_bytes_invalidates_the_announced_state`, first half, asserting `FIRST_OBSERVATION_SEQUENCE + 1` |
+| that a marker survives a reload **onto** it (consult Q5) | the same test's second half: `Marked` → reload at the marked revision → `announced_state` unchanged → the native twin still `Duplicate` |
+| a pre-anchor observation after a **serialized clearing** still answers `PrecedesACommit`, with its settlement reverted | `ledger.rs`'s `a_commit_anchor_outlives_the_record_it_was_taken_with` — a real temp tree, a real engine, the real `admitting_sink` and the real `deliver`; it asserts nothing reaches the consumer, `preceded_a_commit == 1`, `announced_state == None`, the engine's tracked state reverted, and the correction admitted on the next stabilization |
+| that nothing else about the ledger's decisions moved | the coalescing comparison, the suppression predicate and every door's step-5 arm were not edited; §3's table and §§9.5, 10.6, 11.6, 12.7, 13.5 and 14.7 all still pass |
+| that a record made stale by a `committed: false` save is still handled | **round 8's door-scoping, unchanged** — `a_stale_record_never_suppresses_a_serialized_reading_of_its_own_bytes`, still green |
+
+**Two neuter runs**, each disabling exactly one thing and then restored, with the suites re-run green
+afterwards:
+
+- **the reload invalidation** (the method's body replaced by `let _ = (path, revision);`) — the ledger
+  suite came back **22 passed, 1 failed → 2 failed** of 24:
+  `a_reload_that_accepts_other_bytes_ends_the_records_suppression_licence` failed at *"the licence has
+  outlived the last reading that could honestly spend it"*, **left `Some(AppWrite { epoch: 1, … })`,
+  right `None`**, and `a_reload_that_accepts_other_bytes_invalidates_the_announced_state` failed at
+  *"the entry stopped answering its own question when the workspace moved past it"*, **left
+  `Some(Content(…))`, right `None`**. On the production path the `commands.rs` suite came back
+  **78 passed, 1 failed** of 79:
+  `a_reload_tells_the_ledger_which_revision_the_workspace_accepted` failed at *"and the record that
+  licensed suppression of the bytes it moved past is gone"*. Both figures are whole-suite runs, not
+  single-test runs, for §14.7's reason;
+- **the anchor's independent life** (`clear_the_record_at` made to remove the anchor too, which is
+  the coupling as it stood before this round) —
+  `a_commit_anchor_outlives_the_record_it_was_taken_with` failed at *"a pre-commit reading reaches no
+  consumer, record or no record"*; **23 passed, 1 failed** of 24, and every other ledger test stayed
+  green, which is what makes that test a check on the **anchor's lifetime** rather than on the
+  chronology check in general.
+
+**The gates, on the finished tree**, each with its exit status:
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1267 passed, 0 failed** (exit 0; the sum of the run's own `test result` lines over all **26** of them, **+4** on round 8's 1263 for this round's four new tests) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, 73.27 s, quiet host, no timeout; this round added no `watch_check` test and touched no watcher code, so this suite's FSEvents budget is unchanged) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0, after one `cargo fmt` on `ledger.rs`) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched **no** core file at all) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §15.6's file list |
+
+### 15.8 What this round's own change leaves open
+
+Written with the expectation §15's opening states: **seven** §5 items recorded as bounded residues
+have since been found to be real defects, so these are written as candidates for the next round's
+Highs rather than as reassurances.
+
+25. **Nothing forces a future read path that accepts a foreign revision to report it.** Today the
+    enumeration is exact and re-runnable — `rg '\.refresh\(' src-tauri/src/` finds three call sites,
+    all three of which tell the ledger — but that is an audit, not a type. 2d-4's drain and 2d-5's
+    coordinator can add a fourth, and the compiler will say nothing. A chokepoint was considered and
+    rejected as surface with one user: the two save tails need *different* ledger treatment
+    (`Marked`, `Withheld`) from a reload's, so a shared `refresh_and_tell_the_ledger` helper would
+    have exactly one caller. **This is the residue most likely to become round 10's High**, and the
+    honest mitigation is that the search above is written into this record and into `ledger.rs`.
+26. **The reload invalidation uses the *workspace's* spelling of a path and `announced` is keyed by
+    the *watcher's*.** Inherited unchanged from 2d-1 §5 item 3 — `record_app_write` and both
+    serialized doors already depend on the same agreement — but this round adds a **third** consumer
+    of it, so a spelling divergence now costs one more thing: a reload that silently invalidates
+    nothing.
+27. **`latest_commit_at` is never pruned within an epoch.** One `PathBuf` and sixteen bytes per path
+    this session commits to, bounded by the config's file count and released at the next workspace
+    open. Stated because *never pruned* is a shape this project has been wrong about before, not
+    because the size is interesting.
+28. **A non-zero `preceded_a_commit` no longer implies a recent save.** The anchor stands for the
+    whole epoch, so the counter can move for an observation produced before a commit that happened
+    long ago. Its own doc still says *on a healthy production path this stays zero*, which is true
+    for the same reason it always was — the engine's debounce — but the diagnosis a non-zero count
+    supports is now weaker: it says *some reading was produced before this session's last commit to
+    that path*, not *a commit happened just now*.
+29. **`ObservedState::Absent` and `Unreadable` cannot be reported by a reload**, so a file removed
+    externally and confirmed by a failed reload invalidates nothing. That is correct — a read that
+    did not complete proves no state — but it means the person seeing "this file could not be read"
+    has told the ledger nothing, and the record for that path is still spending its licence until a
+    watcher stabilizes the absence. `§5` item 19's no-watcher trade applies unchanged.
