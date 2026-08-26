@@ -222,3 +222,68 @@ NOT READY — 0 High, 3 Medium, 2 Low findings.
 
 Codex session ID: 01a03ea0-a509-7e51-86ec-99e8b6790a85
 Resume in Codex: codex resume 01a03ea0-a509-7e51-86ec-99e8b6790a85
+
+---
+
+## Round 5 — verbatim
+
+Scope: **the round-4 fix**, not the original implementation and not the rounds 1–3 fixes. Commissioned
+under the rule that commissioned rounds 2, 3 and 4 — a fix is a change, and the round that reviews it
+is not optional. Round 4's own lesson was carried into this brief: *a replacement test can assert the
+shape of an answer instead of the property the test it replaced was holding*, so round 5 was asked
+whether the round-4 fix's own two tests assert properties or shapes, and what its own new code and its
+own new sentences now rest on. It was pointed at the three-arm `ObservedDocument` and its absent
+accessor, `address_of` / `address_of_minted`, `ChangedContent` and the operands outside its arms, the
+retention sweep's six positions, the liveness-inventory filing, the L2 downgrade, and §13's nine
+correction blocks — and at the residues R3, R9 and R10 against this project's precedent that seven
+items recorded as bounded residues in Phase 2d-3 were later found to be real defects.
+
+Gates when this round was commissioned, all measured on this clean tree at `657217a` by the
+orchestrator: `cargo test --workspace` **1308** passed / 0 failed over **26** result lines all `ok`,
+exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+`cargo doc --workspace --no-deps` exit 0 with **73** `private_intra_doc_links` warnings, the
+pre-existing count; `cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::` **20/20**
+with 263 filtered out in 69.44 s; `npm test` **2125** in 56 files; `npm run check` **431** files /
+0 errors; `npm run build` **184** modules with the server oracle absent and the client oracle present
+with 2 matches.
+
+## High
+
+None.
+
+## Medium
+
+1. The retention correction is still false: workspace replacement is a third way a stored entry leaves the queue. Exact sequence: epoch 1 stores sequence 1; no drain acknowledges it and capacity is not exceeded; a successful open allocates epoch 2 and calls `begin_epoch(2)`; `begin_epoch` replaces the entire `QueueState`, discarding the pending entry, watermark, and loss count (`src-tauri/src/reconciliation.rs:924`, `src-tauri/src/reconciliation.rs:934`, `src-tauri/src/reconciliation.rs:947`, `src-tauri/src/commands.rs:680`, `src-tauri/src/commands.rs:699`). This contradicts “a stored entry then leaves this queue in exactly two ways” and the decision record’s claim that every position now carries that exact boundary (`src-tauri/src/reconciliation.rs:78`, `src-tauri/src/reconciliation.rs:84`, `src-tauri/src/reconciliation.rs:1177`, `src-tauri/src/commands.rs:1324`, `docs/decisions/2d-4a-notes.md:49`). The existing replacement test even records that replacement empties pending state (`src-tauri/src/reconciliation.rs:1896`, `src-tauri/src/reconciliation.rs:1903`). The truthful boundary needs a third clause: a stored entry is acknowledged, evicted, or discarded wholesale when the queue adopts a replacement epoch; the third is not counted loss because the successful open itself replaces the authoritative workspace.
+
+## Low
+
+1. `address_of_minted` models an invariant violation as a valid `Named` value whose documented meaning would be false. Today `Workspace::from_tree` and the observation engine both mint through `identity_of`, so if the workspace contains the path its number must equal the snapshot’s (`crates/espansoconfig-core/src/workspace/mod.rs:469`, `crates/espansoconfig-core/src/workspace/mod.rs:473`, `crates/espansoconfig-core/src/watch/engine.rs:1004`). Nevertheless, the helper explicitly contemplates `workspace.document_id(path) == Some(other)` and returns `Named`, even though `Named` claims the open workspace does not hold the path (`src-tauri/src/reconciliation.rs:291`, `src-tauri/src/reconciliation.rs:1339`, `src-tauri/src/reconciliation.rs:1347`). That branch cannot be reproduced on this tree, but if a second identity source is introduced it silently converts a broken invariant into misleading wire data. Match `Some(resolved)` separately, assert that it equals the snapshot identity, and reserve `Named` for `None`. Filing “must answer” as a liveness false positive is honest—the sentence is unrelated to observation progress—but the inventory does not resolve this separate invariant problem (`src-tauri/src/liveness_contract.rs:488`).
+
+2. R9 remains an actual unbounded-retention residue; round 4 corrected the reassurance but did not correct the bound. Exact sequence: during one long process lifetime, create and stabilize distinct paths `P1…PN`, remove each, and drain regularly. Every projected path calls `identity_of`; every first sighting inserts its owned `PathBuf`; nothing removes it, while the reconciliation queue remains capped at 256 (`crates/espansoconfig-core/src/watch/engine.rs:1004`, `crates/espansoconfig-core/src/workspace/mod.rs:305`, `crates/espansoconfig-core/src/workspace/mod.rs:314`, `src-tauri/src/reconciliation.rs:186`, `src-tauri/src/reconciliation.rs:229`). The revised comment now describes that accurately and rejects unsafe identity reuse (`crates/espansoconfig-core/src/workspace/mod.rs:228`, `crates/espansoconfig-core/src/workspace/mod.rs:245`), but documentation and assignment to 2d-5/2d-7 are not a bound (`crates/espansoconfig-core/src/workspace/mod.rs:252`). Against the cited Phase 2d-3 precedent, this should remain an open Low until measured and either bounded safely or accepted with evidence.
+
+3. The strengthened uniform-wire test still checks only the projected variants of both nested content enums. Its two fixtures are a projected `Changed` and projected `Added`, and the loop consequently verifies only `ChangedContent::Projected` and `AddedContent::Projected` as one-key objects (`src-tauri/src/reconciliation.rs:2473`, `src-tauri/src/reconciliation.rs:2503`, `src-tauri/src/reconciliation.rs:2506`). The non-UTF-8 test asserts the Rust `ChangedContent::Unreadable` value but never serializes it (`src-tauri/src/reconciliation.rs:2266`, `src-tauri/src/reconciliation.rs:2285`). Thus the new test is property-oriented where it runs—wire shape is its property—but §13.2 overstates it as covering the nested enums generally (`docs/decisions/2d-4a-notes.md:1712`). Serialize at least the two unreadable content variants as well, so a future unit-variant or Serde-shape regression cannot retain this green test.
+
+## Verified without findings
+
+- The two principal round-4 tests protect behavior rather than merely spelling. The replacement test first proves the successor workspace neither contains the path nor accepts the old identity, then requires `Named` with both identity and path (`src-tauri/src/reconciliation.rs:2402`, `src-tauri/src/reconciliation.rs:2410`, `src-tauri/src/reconciliation.rs:2429`). The non-UTF-8 change test requires the outer observation to remain `Changed`, preserves both independently computed revisions, and requires an unreadable reason instead of projection text (`src-tauri/src/reconciliation.rs:2251`, `src-tauri/src/reconciliation.rs:2267`, `src-tauri/src/reconciliation.rs:2276`, `src-tauri/src/reconciliation.rs:2285`).
+
+- The two renamed round-3 tests also retain their underlying properties. One drives `Added → non-UTF-8 Changed → Removed` and requires both later observations to name the exact identity previously issued without claiming backend addressability (`src-tauri/src/reconciliation.rs:1765`, `src-tauri/src/reconciliation.rs:1778`, `src-tauri/src/reconciliation.rs:1810`). The other requires a first non-UTF-8 addition to carry a row, reason, and identity that its later removal names (`src-tauri/src/reconciliation.rs:1822`, `src-tauri/src/reconciliation.rs:1846`, `src-tauri/src/reconciliation.rs:1866`, `src-tauri/src/reconciliation.rs:1871`).
+
+- Merging the two origins of `Named` is usable by a correct 2d-5 consumer. It need not reconstruct the history: if its current model contains the identity, it can invalidate/update that model; if it does not, it must not treat the number as a backend address and can use the path for the unreadable/removal presentation. The variant explicitly says only that the backend workspace lacks the path and records both possible histories (`src-tauri/src/reconciliation.rs:291`, `src-tauri/src/reconciliation.rs:302`). The batch epoch separately rejects an entire stale generation (`src-tauri/src/reconciliation.rs:642`).
+
+- Rust cannot force future frontend behavior, but it can force an exact TypeScript mirror once 2d-4b exists by adding `ObservedDocument` to the existing variant and operand comparisons (`src-tauri/src/wire_contract.rs:1031`, `src-tauri/src/wire_contract.rs:1152`). That obligation is presently recorded as R6 and belongs to the explicitly separated TypeScript half (`docs/decisions/2d-4a-notes.md:1108`, `docs/decisions/2d-4-split-notes.md:31`). Renaming the two shared operands would add friction but would not prevent a consumer from deliberately normalizing and ignoring the tag.
+
+- R3 is substantively closed. Every `Changed` obtains `disk_revision` through the total `StableContent::revision`, preserves `previous_revision`, and selects only the projection/reason arm afterward (`crates/espansoconfig-core/src/watch/engine.rs:364`, `src-tauri/src/reconciliation.rs:1207`, `src-tauri/src/reconciliation.rs:1230`). A consumer can arbitrate the transition and invalidate an old projection from `Changed::Unreadable`; it cannot compare or display unavailable non-UTF-8 text, which is deliberate. Stable read failures correctly remain the separate `ExternalObservation::Unreadable`, where no bytes and therefore no revision exist (`src-tauri/src/reconciliation.rs:507`, `src-tauri/src/reconciliation.rs:515`).
+
+- The liveness inventory entry is not a dodge. “Must answer with the same number” concerns identity equality, whereas the canonical liveness contract concerns whether hints, debts, ticks, and settlements ever produce observations (`crates/espansoconfig-core/src/watch/liveness.rs:79`, `src-tauri/src/liveness_contract.rs:488`). Filing preserves evidence that the hit was judged; the invariant issue is reported separately above.
+
+- Queue concurrency and ordering remain correct. Enqueue performs the epoch and watermark checks, insertion, and eviction under one queue mutex; drain advances the watermark, removes acknowledged entries, folds, and projects under that same mutex (`src-tauri/src/reconciliation.rs:1006`, `src-tauri/src/reconciliation.rs:1015`, `src-tauri/src/reconciliation.rs:1093`). Wake emission occurs after releasing it (`src-tauri/src/reconciliation.rs:1165`). Workspace replacement holds the session lock while the ledger and queue adopt the successor epoch before starting its watcher (`src-tauri/src/commands.rs:684`, `src-tauri/src/commands.rs:699`, `src-tauri/src/commands.rs:705`).
+
+- The coalescing fold is a pure sequence-order fold and preserves `Removed → Added`; the eviction selector removes only the lowest sequence of the busiest path, preserving per-path suffixes and preventing repeat-heavy paths from evicting a singleton while they retain multiple entries (`src-tauri/src/reconciliation.rs:795`, `src-tauri/src/reconciliation.rs:801`, `src-tauri/src/reconciliation.rs:851`, `src-tauri/src/reconciliation.rs:861`). R10 is therefore conservative but genuinely bounded by `QUEUE_CAPACITY` (`src-tauri/src/reconciliation.rs:207`, `src-tauri/src/reconciliation.rs:229`).
+
+- The hard scope boundaries remain intact: 2d-4 draws nothing and makes no write-surface decision (`docs/reviews/phase-2d-design.md:124`); the core manifest contains no Tauri dependency (`crates/espansoconfig-core/Cargo.toml:15`); and the application shell has one call to `save_document`, in the shared save tail (`src-tauri/src/commands.rs:1931`).
+
+NOT READY — 0 High, 1 Medium, 3 Low findings.
+
+Codex session ID: 01a03faa-8450-7672-a78a-356908c41f8d
+Resume in Codex: codex resume 01a03faa-8450-7672-a78a-356908c41f8d

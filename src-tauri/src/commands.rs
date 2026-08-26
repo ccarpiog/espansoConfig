@@ -384,7 +384,10 @@ pub struct WorkspaceSession {
     /// [`WorkspaceSession::ledger`]'s reason: a replacement changes which
     /// directory is watched, never where its observations go, and the queue is
     /// *emptied* by a replacement rather than replaced by one
-    /// (`crate::reconciliation::ReconciliationQueue::begin_epoch`).
+    /// (`crate::reconciliation::ReconciliationQueue::begin_epoch`). **That
+    /// emptying is the third way a stored entry leaves that queue**, beside a
+    /// later drain acknowledging it and an overflow evicting it, and it is the
+    /// one counted in no `discarded`.
     ///
     /// Its two mutexes are **leaves**, exactly as the ledger's are:
     /// `crate::reconciliation` runs no caller-supplied code under either, and
@@ -701,7 +704,9 @@ impl WorkspaceSession {
             // and for the same reason (Phase 2d-4a): a sequence means nothing
             // across epochs, and an entry kept across a replacement could
             // describe a different directory's file, because the identity table
-            // is keyed by path for the life of the process.
+            // is keyed by path for the life of the process. This call is the
+            // third way a stored entry leaves that queue — the one that does
+            // not depend on the entry, and the one no `discarded` counts.
             self.reconciliation
                 .begin_epoch(allocated.unwrap_or(NO_EPOCH));
             let watcher = match allocated {
@@ -1320,13 +1325,19 @@ impl WorkspaceSession {
     /// path's sequence-adjacent entries asserting one state
     /// ([`crate::reconciliation::ReconciliationQueue::drain`]). So draining
     /// twice with the same value answers the same batch twice **when nothing
-    /// was enqueued between the two calls**, and an answer lost on the way to
-    /// the window costs no more than the drain that repeats it. **A stored
-    /// entry leaves this queue in exactly two ways — a later drain
-    /// acknowledges it, or an overflow evicts it**: past
+    /// was enqueued between the two calls and no replacement epoch was adopted
+    /// between them**, and an answer lost on the way to the window costs no
+    /// more than the drain that repeats it. **A stored entry leaves this queue
+    /// in exactly three ways — a later drain acknowledges it, an overflow
+    /// evicts it, or the queue adopts a replacement epoch and discards
+    /// everything the previous one held**: past
     /// [`crate::reconciliation::QUEUE_CAPACITY`] an undrained entry goes
     /// unacknowledged and is counted in the batch's `discarded`, whose
-    /// answer is a whole-workspace reload rather than a repeated drain. Zero
+    /// answer is a whole-workspace reload rather than a repeated drain, while a
+    /// replacement — [`WorkspaceSession::open`], in the same block that empties
+    /// the ledger — is counted nowhere, because the open that caused it has
+    /// already replaced the workspace a reload would fetch and the batch's own
+    /// epoch is what makes the discarded history stale. Zero
     /// asks for everything the current epoch still holds. The batch's
     /// `newest_sequence` is never below the highest watermark this session has
     /// been drained with, so a drain arriving out of order — which the consult's
@@ -3467,12 +3478,17 @@ pub fn read_backup_text(
 /// - `after_sequence` — the highest sequence the caller has already accepted,
 ///   or zero for everything. An **acknowledgement watermark and not a cursor**:
 ///   draining twice with the same value answers the same batch twice when
-///   nothing was enqueued between the two calls, so a lost answer costs no more
+///   nothing was enqueued between the two calls and no replacement epoch was
+///   adopted between them, so a lost answer costs no more
 ///   than the drain that repeats it — **short of an overflow**, which evicts
 ///   an undrained entry unacknowledged and reports it in the
-///   batch's `discarded`, whose answer is a whole-workspace reload. Those two
-///   are the whole of how a stored entry leaves the queue: **a later drain
-///   acknowledges it, or an overflow evicts it.** The
+///   batch's `discarded`, whose answer is a whole-workspace reload. Those are
+///   the whole of how a stored entry leaves the queue: **a later drain
+///   acknowledges it, an overflow evicts it, or the queue adopts a replacement
+///   epoch and discards everything the previous one held.** The third is
+///   counted in no `discarded`, because the open that causes it has already
+///   replaced the workspace a reload would fetch, and the batch's own epoch is
+///   what tells a caller its history belongs to another workspace. The
 ///   answer's `newest_sequence` never falls below a watermark this session has
 ///   already been drained with, so it is safe to store unconditionally even out
 ///   of order.
@@ -8789,7 +8805,18 @@ mod tests {
         let session = open_session(&dir);
         let path = dir.path().join("match").join("base.yml");
         let source = base_bytes(&dir);
-        let context = espansoconfig_core::model::DocumentContext::detached(DocumentId(1), "x.yml");
+        // The identity is the **core's**, minted from the same path the
+        // observation names — which is what `watch::engine` does when it
+        // projects stabilized bytes, and what `crate::reconciliation`'s own
+        // `snapshot` helper already did for the same reason. A literal fabricated
+        // a snapshot claiming a number the register never issued for this path,
+        // so the drain had to answer a document identity that contradicted the
+        // open workspace's; round 5's `debug_assert_eq!` in `address_of_minted`
+        // is what found this fixture doing it.
+        let context = espansoconfig_core::model::DocumentContext::detached(
+            espansoconfig_core::workspace::identity_of(&path),
+            "x.yml",
+        );
         for sequence in 1..=2u64 {
             session
                 .reconciliation()

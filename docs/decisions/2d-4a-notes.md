@@ -61,6 +61,38 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 > Wake` goes out … after every enqueue"* — a refused enqueue emits none, which the module has said
 > since round 1 and which this sentence did not. It now says *after every enqueue that stores*.
 
+> **Correction, round 5 (Medium). The two-way boundary is false, and it is the third consecutive
+> round in which the retention sentence was restated and was still wrong.** *"Held until a later
+> drain acknowledges it or an overflow evicts it"* omits a **third** way a stored entry leaves the
+> queue: `ReconciliationQueue::begin_epoch` replaces the whole `QueueState` — pending set, watermark
+> and loss count — when the session adopts a replacement workspace, and every entry the previous
+> epoch held is discarded there, acknowledged by nobody and evicted by nothing. The exact sequence
+> is round 5's: epoch 1 stores sequence 1; no drain acknowledges it and capacity is not exceeded; a
+> successful open allocates epoch 2 and calls `begin_epoch(2)`; the entry is gone.
+>
+> **The true boundary has three clauses**, and it is the wording every position now carries: an
+> admitted observation is **stored** unless it is one of the two arrivals no later drain could
+> return — a replaced epoch, or a sequence at or below the acknowledged watermark — and a **stored**
+> entry then leaves this queue in exactly three ways: **a later drain acknowledges it, an overflow
+> evicts it, or the queue adopts a replacement epoch and discards everything the previous one
+> held.** **The third is not counted in `discarded`**, and that is deliberate rather than an
+> omission: the successful open that causes it has already replaced the authoritative workspace, so
+> the discarded entries describe a directory nothing is showing, and every batch of their epoch is
+> already stale by `ReconciliationBatch::epoch`. Counting them would oblige a reload of a workspace
+> the open has just performed.
+>
+> The idempotence sentences carry a second condition with it: *draining twice with the same
+> watermark answers the same batch twice* now holds **when nothing was enqueued between the two
+> calls and no replacement epoch was adopted between them**. Rounds 1 and 2 added the first half of
+> that qualification and nobody added the second.
+>
+> Every earlier correction block in this file that states the boundary in two ways — round 2's and
+> round 3's above, §2.1's, §2's round-3 note, R10's — is **left as it was written**, per this file's
+> convention, and is corrected by this block. **No code changed for it and no guarantee was
+> weakened**: the third clause was always what `begin_epoch` did, and
+> `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` has asserted it since the
+> original round. §14 is the record, including what the sweep covered.
+
 ---
 
 ## 1. What this step built
@@ -374,6 +406,15 @@ watermark backwards.
 > boundary in one paragraph, in the wording every other position quotes. The four further positions
 > this round found are named in the header's round-4 correction and in §13.2. **No code changed**,
 > and no guarantee was weakened.
+
+> **Correction, round 5 (Medium). The unified two-way boundary was unified and still false**, in a
+> direction none of rounds 2, 3 or 4 looked in: it counts the ways an entry leaves *by its own
+> properties* — being acknowledged, being the eviction policy's victim — and misses the one that
+> depends on nothing about the entry at all. A workspace replacement calls
+> `ReconciliationQueue::begin_epoch`, which assigns a fresh `QueueState` and discards every pending
+> entry, the watermark and the loss count with it. The header's round-5 correction is the three-clause
+> boundary and why the third clause is counted in no `discarded`; the positions this round rewrote
+> are in §14.2. Everything above in this subsection is left as it was written.
 
 
 
@@ -1218,6 +1259,28 @@ the host scar `PROGRESS.md` records.
   > an assumption, not a plan; §13.4 carries it as thin, and this project's own precedent — seven
   > items recorded as bounded residues in Phase 2d-3 later found to be real defects — is why it is
   > written this way rather than reassuringly.
+
+  > **Correction, round 5 (Low 2). R9 is OPEN. It is not closed, not bounded and not discharged, and
+  > the round-4 block above opens with the word "Closed", which is the sentence this block
+  > corrects.** What round 4 closed is the **reassurance** — the core's comment no longer asserts as
+  > fact something nothing checks. It did not close the **bound**, because there is none:
+  > `espansoconfig_core::workspace`'s register still retains every distinct `PathBuf` this process
+  > has ever named, for the life of the process, fed by `Workspace::from_tree` at discovery and by
+  > `watch::engine` at every projection, while the queue downstream of it is capped at 256. Round 5's
+  > sequence: over one long process lifetime, create and stabilize distinct paths `P1…PN`, remove
+  > each, and drain regularly — the queue stays at or below `QUEUE_CAPACITY` and `by_path` retains
+  > all `N`.
+  >
+  > **Documentation and an assignment to 2d-5 or 2d-7 are not a bound.** They are the honest record
+  > of who could build one, which is a different thing, and this project's own precedent is the
+  > reason the distinction is worth a correction block: seven Phase 2d-3 items recorded as bounded
+  > residues were later found to be real defects, and two of this phase's five rounds found a defect
+  > in something recorded under R3 as a residue. R9 therefore stays an **open Low** until it is
+  > measured and then either bounded safely or accepted with evidence — neither of which any round of
+  > this phase has done. **No code changed for this**; what changed is that nothing in this file now
+  > reads as a closure. Round 4's own §13.4 already said it plainly — *"a residue, restated more
+  > accurately, not a fix"* — and the word "Closed" three paragraphs above it is what a reader finds
+  > first.
 - **R5. The epoch field is supplied and nothing enforces it.** §4. Q3's *installs nothing* is a rule
   2d-5 obeys; this step can only make the mismatch visible.
 - **R7. A drain clones what it returns, once per pending document per drain.** §3.4. Bounded by
@@ -1247,6 +1310,12 @@ the host scar `PROGRESS.md` records.
   > not exist. **What R10 still carries** is the plain fact that a folded repeat holds a pending slot
   > until a drain acknowledges it or an eviction removes it, so a repeat stream *does* consume
   > capacity; what it no longer carries is that the capacity it consumes is another document's.
+
+  > **Correction, round 5 (Medium).** The sentence directly above is one of the positions the
+  > retention finding covers: a folded repeat holds its pending slot until a drain acknowledges it,
+  > **an eviction removes it, or a replacement epoch discards it**. The third clause changes nothing
+  > about what R10 carries — a repeat stream still consumes capacity — and the header's round-5
+  > correction is the boundary.
 
 **Inherited from 2d-3 and still open:**
 
@@ -1719,6 +1788,19 @@ keeps, and the identity table was never bounded by anything.
   test's subject: the identity register is process-wide, so another test in the same binary may
   already have named one of its paths.
 
+  > **Correction, round 5 (Low 3). The sentence above overstates its own test.** The strengthened
+  > `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor` had two fixtures — a
+  > **projected** `Changed` and a **projected** `Added` — so its loop verified
+  > `ChangedContent::Projected` and `AddedContent::Projected` and **neither `Unreadable` arm**,
+  > while the test that builds a `ChangedContent::Unreadable` asserts the Rust value and never
+  > serializes it. *"The two nested content enums cross as one-key objects"* was therefore true of
+  > half of each of them, and a unit-variant or Serde-shape regression on either `Unreadable` arm
+  > would have kept this test green. **Round 5 closed it in code**: the test now enqueues a
+  > non-UTF-8 `Changed` and a non-UTF-8 `Added` beside the four it had, and walks **both arms of
+  > both** nested enums. D5 is about *every* wire enum, which is the reason the projected-only walk
+  > was not enough rather than a preference for a longer list. §14.1's row 3 has the probe that was
+  > watched failing.
+
   **Two round-3 test names are renamed for the same reason the type changed**, because a name is a
   sentence and both were claiming exactly what finding 1 refused:
   `an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot` →
@@ -1823,6 +1905,17 @@ this round's only frontend change is two keys in two JSON files, which adds no m
   register makes that impossible, which is why the branch exists at all — the alternative was to
   assume the agreement — but no test drives it, because no test can produce the disagreement without
   a second register.
+
+  > **Correction, round 5 (Low 1). That arm is gone, because calling it *conservative* was the
+  > mistake.** It answered `ObservedDocument::Named`, whose own doc says **the open workspace does
+  > not hold the path** — and in that branch the workspace had just resolved it, so the arm was false
+  > of the value it carried. A branch is not conservative when the answer it gives is untrue; it is a
+  > second defect wearing the first one's clothes. `address_of_minted` now matches `Some(resolved)`
+  > and answers `Addressable { document: resolved, … }`, which is exactly that arm's claim and is
+  > true whatever number `resolved` is, with the agreement carried by a `debug_assert_eq!`; `Named`
+  > is reserved for `None`. The rest of this bullet still holds: **nothing in this repository can
+  > reach the disagreement**, so this is still untested and the assertion still cannot fire in any
+  > test. §14.1's row 2 has the reasoning and the panic decision.
 - **The `ChangedContent` split is a wire change with no consumer**, exactly as `AddedContent` was one
   round ago. Nothing in this repository reads `previous_revision` or `disk_revision` off an
   unreadable change; what the round closed is that the two numbers now *exist* on the wire. Whether
@@ -1853,3 +1946,183 @@ this round's only frontend change is two keys in two JSON files, which adds no m
 - **R8 is unchanged, and this section is an instance of it.** Round 1's fix wrote three of round 2's
   findings, round 2's fix wrote at least one of round 3's, and round 3's fix wrote **four of round
   4's five**. There is no reason to think this round wrote none.
+
+## 14. Round 5 of the review, and the fix round that answered it
+
+`docs/reviews/phase-2d-4a-queue.md` holds round 5 verbatim: **NOT READY — 0 High, 1 Medium, 3 Low**,
+against gates that were green again. Its scope was **the round-4 fix**, not the original
+implementation and not rounds 1–3's, and it was commissioned under the rule that commissioned rounds
+2, 3 and 4: a fix is a change, and the round that reviews it is not optional. Round 4's own lesson
+was carried into the brief — *a replacement test can assert the shape of an answer instead of the
+property the test it replaced was holding* — so round 5 was asked whether the round-4 fix's own two
+tests assert properties or shapes, and what its own new code and its own new sentences rest on.
+
+**Three of the four findings are the round-4 fix's own code or its own sentences.**
+
+- **The Medium is the third consecutive round in which the retention boundary was restated and was
+  still false**, and this time it is false in a direction none of rounds 2, 3 or 4 looked in. Each of
+  those rounds counted the ways a stored entry leaves the queue *by its own properties* — being
+  acknowledged, being the eviction policy's victim — and none of them counted the one that depends on
+  nothing about the entry at all: a workspace replacement calls `ReconciliationQueue::begin_epoch`,
+  which assigns a fresh `QueueState` and discards the pending set, the watermark and the loss count
+  together. Round 4's sweep found four positions round 3 had missed and was, in this direction, no
+  more complete than round 3's.
+- **Low 3 is §13.2 overstating its own test.** Round 4 strengthened
+  `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor` to walk the two nested
+  content enums, wrote that it now covers them, and gave it two **projected** fixtures — so it
+  covered `ChangedContent::Projected` and `AddedContent::Projected` and neither `Unreadable` arm.
+- **Low 1 is round 4's own new helper modelling an invariant violation as a value whose documented
+  meaning is false.** `address_of_minted` branched on the open workspace resolving a path to a
+  *different* number than the snapshot minted and answered `ObservedDocument::Named` for it — an arm
+  whose own doc says the open workspace does not hold the path, in a branch reached only when it
+  demonstrably does. §13.4 called that arm *conservative*; a branch is not conservative when the
+  answer it gives is untrue.
+
+Only **Low 2** is not round 4's: it is R9, the core identity register's unbounded retention, which
+round 4 corrected the **reassurance** of without correcting the **bound**, because there is none.
+
+**One code defect, one no-change verdict and two false claims — and the code defect's fix found a
+second defect the review did not.** The `debug_assert_eq!` Low 1 asked for fired on its first full
+run of the workspace suite, on a `crate::commands` test fixture that built a projection through
+`DocumentContext::detached(DocumentId(1), "x.yml")` — a snapshot claiming an identity the register
+never issued for the path the observation named. So the branch round 5 said *"cannot be reproduced on
+this tree"* **was reproduced**, by a test, and the shipped code's answer for it was exactly the false
+`Named` the finding describes: `Named { document: 1 }` for a path the open workspace resolved to 157.
+The fixture now mints through `espansoconfig_core::workspace::identity_of`, which is what
+`crate::reconciliation`'s own `snapshot` helper had already been doing, and for the reason its doc
+comment already gave.
+
+**Nothing here was closed by weakening a guarantee.** The retention boundary gained a clause it
+always kept; `Named`'s doc is untouched and is the reason the branch that contradicted it was
+deleted; the wire test gained coverage; and R9 was neither narrowed nor declared closed.
+
+### 14.1 Finding by finding
+
+| # | Severity | What was wrong | What closes it | The test that fails without it |
+|---|---|---|---|---|
+| M1 | Medium | *"A stored entry leaves this queue in exactly two ways"* omits a third: `ReconciliationQueue::begin_epoch` replaces the whole `QueueState` when the session adopts a replacement workspace, discarding every pending entry, the watermark and the loss count. Epoch 1 stores sequence 1; no drain acknowledges it and capacity is not exceeded; a successful open allocates epoch 2 and the entry is gone. Every position stated the two-way boundary — the module doc's guarantee 4, `external_observation`, both `commands.rs` docs and this record's header — and §13.1 claimed every position now carried the true one | **Words.** The boundary now has three clauses everywhere: an admitted observation is **stored** unless it is one of the two arrivals no later drain could return, and a **stored** entry leaves in exactly three ways — a later drain acknowledges it, an overflow evicts it, or the queue adopts a replacement epoch and discards everything the previous one held. **The third is counted in no `discarded`**, because the open that causes it has already replaced the authoritative workspace and the batch's own epoch is what makes the discarded history stale. The idempotence sentences gained the matching second condition — *and no replacement epoch was adopted between them*. The header's, §2.1's and R10's round-5 corrections; §14.2 lists the positions | **None for the words, and no code changed.** No test can fail a false comment. `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` is the behaviour the third clause describes and it already asserted the pending set and the loss count; this round **strengthened** it — every assertion gained the sentence it is making, and the **watermark** half is new, which nothing had asserted. That half was watched failing: with `begin_epoch` carrying the acknowledged watermark across the replacement it failed on *"a replacement resets the watermark with everything else"*, `left: []` against a one-entry list holding the successor epoch's sequence 3 and its text, the batch printing `discarded: 1` |
+| L1 | Low | `address_of_minted` contemplated `workspace.document_id(path) == Some(other)` and answered `ObservedDocument::Named { document }`, whose doc claims **the open workspace does not hold the path** — false in exactly that branch. Modelling an invariant violation as a well-formed wire value converts a broken invariant into misleading data rather than into a failure | **Code.** It now matches `Some(resolved)` separately and answers `Addressable { document: resolved, … }`, which is that arm's own claim — *the open workspace resolves this path to this identity* — and is therefore true of `resolved` whatever number it is; `Named` is reserved for `None`, where it is equally true. The agreement of the two identity sources is a **`debug_assert_eq!`** rather than a branch, so a second register introduced later breaks a debug build at the site instead of putting an unstatable number on the wire. `Named`'s doc was **not** weakened to make the old branch true | **None, and none is possible on the shipped tree.** With the fixture below repaired, one register makes `resolved == document` for every reachable pair, so both the old and the new code answer `Addressable`; and a test driving the disagreement could only assert a `debug_assert_eq!`, which a release build compiles out, so it would pass and fail by profile. What *did* fail is the workspace suite itself: `the_drain_hands_back_what_the_queue_holds_above_the_watermark` panicked with `left: DocumentId(157)`, `right: DocumentId(1)` on the fabricating fixture, which is the branch reproduced |
+| L2 | Low | R9 is an actual unbounded-retention residue and round 4 corrected the reassurance, not the bound. The core retains every distinct `PathBuf` it has ever named for the process lifetime, fed by `Workspace::from_tree` and by `watch::engine`, while the queue is capped at 256; documentation and an assignment to 2d-5 or 2d-7 are not a bound | **No code change, and the verdict recorded.** R9 **remains an open Low** until it is measured and then either bounded safely or accepted with evidence. R9's round-5 correction says so in its own entry, and says that the round-4 block's opening word — *"Closed"* — is what a reader finds first and is what the correction corrects. Judged against this project's precedent: seven Phase 2d-3 items recorded as bounded residues were later found to be real defects, and two of this phase's five rounds found a defect in something recorded under R3 as one | **None, and none is possible.** The register is a process-wide static shared by every test in the binary, so a count read from a test is not a function of that test. That is also why no round has measured it |
+| L3 | Low | The uniform-wire test's two fixtures were a **projected** `Changed` and a **projected** `Added`, so its loop verified `ChangedContent::Projected` and `AddedContent::Projected` and neither `Unreadable` arm; the non-UTF-8 change test asserts the Rust `ChangedContent::Unreadable` value and never serializes it. A unit-variant or Serde-shape regression on either unreadable arm kept the test green, and §13.2 described it as covering the nested enums | **Code, and words.** The test now enqueues a non-UTF-8 `Changed` and a non-UTF-8 `Added` beside the four it had — six observations — and walks **both arms of both** nested content enums, by explicit index rather than by position. Both walks this round wrote look the tag up with `get` rather than with an index, so a missing tag fails with the test's own sentence instead of inside `serde_json`; the pre-existing walk over the six observation kinds is left as it was. §13.2's round-5 correction is the sentence. **Swept one level down as well**: `UnreadableReason` is a wire enum too, and nothing walked it — the three reasons this batch puts on the wire are now checked for the same one-key-object rule | `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor`, watched failing three ways. `#[serde(untagged)]` on `ChangedContent::Unreadable`: *"Changed's Unreadable content is tagged by its variant name and carries an object, never a bare string"*, the printed batch showing `"content":{"reason":{"NotUtf8":{"offset":0}}}` with the tag gone. The same on `AddedContent::Unreadable` alone: the identical sentence for `Added's Unreadable`. And `#[serde(rename = "NotText")]` on `UnreadableReason::NotUtf8`: *"the NotUtf8 reason is tagged by its variant name and carries an object, never a bare string"* |
+
+### 14.2 What this round changed, by file
+
+- **`src-tauri/src/reconciliation.rs`** — `address_of_minted` changed behaviour and its doc with it
+  (L1). Everything else is words and tests. The **retention boundary** is restated in three clauses
+  at every position the sweep found: the module doc's guarantee 3 (a folded entry's slot) and
+  guarantee 4 (the canonical paragraph, which also now says why the case that would be a *fourth* way
+  cannot arise), `ReconciliationBatch::discarded`, `QueueState::discarded`,
+  `ReconciliationQueue::begin_epoch` — which is the third clause and now names itself as such —
+  `ReconciliationQueue::drain`, `external_observation`, and one test comment in
+  `a_repeat_of_one_paths_state_coalesces_onto_the_newer_sequence`.
+  `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` is **strengthened**, and the
+  comment in `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` now says
+  that test exercises the emptying rather than asserting it, and where the assertion lives.
+  `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor` gained two fixtures and two
+  walks (L3). **No test was added or renamed**, so the suite's count is unmoved.
+- **`src-tauri/src/commands.rs`** — both `drain_external_changes` docs and the
+  `WorkspaceSession::reconciliation` field doc carry the three-clause boundary; the comment in
+  `WorkspaceSession::open` beside the `begin_epoch` call names it as the third way. **One test
+  fixture changed**: `the_drain_hands_back_what_the_queue_holds_above_the_watermark` mints its
+  projection's identity through `espansoconfig_core::workspace::identity_of` instead of a literal
+  `DocumentId(1)`, with a comment saying why and what found it.
+- **`src-tauri/src/liveness_contract.rs`** — one inventory entry's `reason`, which described
+  `address_of_minted`'s *must answer* sentence as an assertion the types do not force; it now says
+  the round turned it into a `debug_assert_eq!`. The phrase count is unchanged at 1.
+- **`docs/decisions/2d-4a-notes.md`** — **six** round-5 correction blocks (the header, §2.1, R9, R10,
+  §13.2 and §13.4's `address_of_minted` bullet) and this section.
+
+**`crates/espansoconfig-core` is untouched**, which is L2's whole content: `cargo tree -p
+espansoconfig-core | rg tauri` is still empty and no core file changed. **No Svelte component, no
+TypeScript and no i18n key changed** — this step still draws nothing and still decides nothing about
+whether a write surface is open (Q7 item 4). The three frontend gates were measured all the same.
+
+**One position was reworded rather than filed**, and it is recorded here because a rewording leaves
+no trace anywhere else: `address_of_minted`'s new doc first read *"Each arm **is answered** because
+it is true of the value it carries"*, and `is answered` is in `LIVENESS_SHAPES`, so
+`every_liveness_claim_is_judged` failed on it. It is a plain false positive — the sentence is about
+which arm a function returns, not about whether a path is ever observed again — and *chosen* says the
+same thing, so it was reworded. Round 4's own liveness hit at the same function is still filed rather
+than reworded, for the reason §13.4 gives.
+
+### 14.3 The gates after this round
+
+| Gate | Result |
+|---|---|
+| `pkill -f 'target/debug/deps/espansoconfig-'` | run before the workspace suite |
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | **1308** passed, 0 failed, **26** result lines all `ok`, exit 0 — unchanged, since this round added and renamed no test |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, clean |
+| `cargo fmt --check` | exit 0, clean |
+| `cargo doc --workspace --no-deps` | exit 0; **73** `private_intra_doc_links` warnings, the pre-existing count |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no match |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20/20**, 263 filtered out, 77.89 s, no timeout |
+| `npm test` | **2125** passed, 56 files — unchanged |
+| `npm run check` | **431** files, 0 errors, 0 warnings — unchanged |
+| `npm run build` | **184** modules — unchanged; the server oracle absent, the client oracle present with 2 matches |
+
+The workspace suite was run once on a quiet host after the `pkill`, with nothing else running
+concurrently. The frontend numbers were re-measured rather than carried forward, and no frontend file
+changed.
+
+### 14.4 What this round did not do, and where it is thin
+
+- **The retention sweep is still a human reading, and this is the second round in a row to say so
+  after the previous one's sweep proved incomplete.** Nothing mechanical checks that the boundary is
+  stated identically everywhere, the way `liveness_contract.rs` checks the liveness family. What this
+  round searched was the *shape* — any sentence stating how or how long an admitted or stored
+  observation is retained — over `src-tauri/src/`, `crates/espansoconfig-core/src/` and this file,
+  including test names, test comments and assertion messages, and each hit was read for falsity in
+  **both** directions. A ninth position written tomorrow is still invisible, and **claiming the sweep
+  is now complete is exactly what rounds 3 and 4 claimed and were wrong about**, so it is not claimed
+  here.
+- **"Exactly three ways" rests on a reading, not on a test.** It is true because `QueueState::pending`
+  is mutated in exactly four places — `insert` and `remove` in `enqueue`, `retain` in `drain`, and the
+  whole-state assignment in `begin_epoch` — which was established by reading every mutation of that
+  field, not by anything that fails when a fifth appears. The one case the types allow and the
+  allocator forbids, two observations at one sequence, is named at `enqueue` and pointed at from
+  guarantee 4.
+- **L1 introduces a `debug_assert_eq!` on a path a Tauri command reaches**, and that is a deliberate
+  trade rather than an oversight. In a release build it is compiled out and the answer is
+  `Addressable { document: resolved, … }`, which is true of what it carries. In a **debug** build a
+  disagreement between the open workspace and a snapshot's identity panics inside a command. That is
+  wanted: through the production pipeline the two cannot disagree, because `watch::engine` mints
+  through `identity_of` and so does `Workspace::from_tree`, so a disagreement means a caller
+  fabricated an identity — which is precisely what the assertion caught within one run. The
+  alternative, answering something and continuing, is what the finding is about.
+- **The release-build behaviour of that branch is asserted by nothing.** If a second identity source
+  ever exists, a release build will cross `Addressable` carrying the **workspace's** number while the
+  consumer's projection arrived under the snapshot's, and no test in this repository says what a
+  consumer should do about that. The arm is true of the value it carries; that is all it is.
+- **A test fixture was changed to make an assertion pass, which is the shape of fixing the test
+  instead of the code**, and it is said plainly here rather than left to be noticed. The reason it is
+  not that: the fixture fabricated a `DocumentId` the register never issued for the path its own
+  observation named, so the wire value it produced was false about the workspace whichever way
+  `address_of_minted` answered — the old code called that path *not held by the open workspace* while
+  the workspace held it. `crate::reconciliation`'s `snapshot` helper carries a doc comment saying a
+  helper that invents a number turns identity assertions into tests of the helper; this fixture was
+  the counterexample to that comment, one crate module away, and nothing had noticed.
+- **R9 is open, unmeasured and unbounded.** No count exists, no cap exists, no eviction rule exists,
+  and no step of the 2d split owns building one. This round changed nothing about it and recorded the
+  verdict; that is the least a round can do with a residue, and this project's precedent says
+  residues recorded and left are where defects are later found.
+- **`UnreadableReason` is now walked for three of its six variants.** `NotUtf8` and `PermissionDenied`
+  cross in the uniform-wire test's fixtures and `Other` is asserted as a Rust value elsewhere;
+  `InvalidData`, `TimedOut` and `Interrupted` are serialized by nothing. A seventh variant added
+  tomorrow is covered by nothing here either. The rule the walk checks is uniform across the enum,
+  which is the argument for not enumerating all six — and it is an argument, not a check.
+- **Nothing in the boundary is enforced against `crate::commands`.** Both `drain_external_changes`
+  docs now state the three clauses, and nothing fails if a future edit puts them back to two: the
+  wording lives in two source files and this record, and is kept identical by a reader.
+- **Nothing here observes a real filesystem**, unchanged from rounds 1 through 4. `crate::watch_check`
+  gained nothing this round and is still where real-filesystem evidence lives.
+- **The TypeScript half is still 2d-4b's**, and R6's note stands: no `wire_contract` table compares
+  `ObservedDocument` or either content enum against a frontend declaration, so a mirror that flattens
+  the three address arms or the two content arms would compile with every Rust gate green. This round
+  strengthened the **Rust** wire assertions, which is the half that can be strengthened here.
+- **R8 is unchanged, and this section is an instance of it.** Round 1's fix wrote three of round 2's
+  findings, round 2's wrote at least one of round 3's, round 3's wrote four of round 4's five, and
+  round 4's wrote three of round 5's four. There is no reason to think this round wrote none — and
+  the most likely place is the sentence directly above the one a future round quotes: this round
+  rewrote twelve retention positions and one helper, and every previous round that rewrote a
+  retention position left a narrower instance of the same claim standing somewhere else.

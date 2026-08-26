@@ -52,9 +52,9 @@
 //!    file genuinely held `B` in between and neither `A` is adjacent to the
 //!    other. And the fold happens at **drain**, over the complete set, rather
 //!    than at enqueue over the history so far; the price is that a folded entry
-//!    keeps its slot against [`QUEUE_CAPACITY`] until a drain acknowledges it
-//!    **or an eviction removes it**, since it is folded out of the batch and
-//!    not out of the queue.
+//!    keeps its slot against [`QUEUE_CAPACITY`] until a drain acknowledges it,
+//!    **an eviction removes it, or a replacement epoch discards it**, since it
+//!    is folded out of the batch and not out of the queue.
 //!
 //!    **The capacity bound is arrival-order independent too, and it has to be
 //!    or this guarantee would be conditional on it.** An overflow evicts
@@ -81,15 +81,34 @@
 //!    return — a replaced epoch, or a sequence at or below the acknowledged
 //!    watermark ([`ReconciliationQueue::enqueue`] refuses both before storing
 //!    anything, and counts the second in [`ReconciliationBatch::discarded`]).
-//!    A **stored** entry then leaves this queue in exactly two ways: **a later
-//!    drain acknowledges it, or an overflow evicts it.** The first is the
-//!    consumer saying it holds the observation; the second is a loss counted in
+//!    A **stored** entry then leaves this queue in exactly three ways: **a
+//!    later drain acknowledges it, an overflow evicts it, or the queue adopts
+//!    a replacement epoch and discards everything the previous one held**
+//!    ([`ReconciliationQueue::begin_epoch`]). The first is the consumer saying
+//!    it holds the observation; the second is a loss counted in
 //!    [`ReconciliationBatch::discarded`], and what it costs is the
 //!    whole-workspace reload a non-zero `discarded` obliges, never a repeated
-//!    drain. Short of an eviction, an answer lost on the way to the window
-//!    costs no more than the drain that repeats it, **when nothing is enqueued
-//!    between the two drains**. **What nothing in this step makes happen is
-//!    that later drain** — see [`ReconciliationQueue::wake`].
+//!    drain. **The third is not counted in [`ReconciliationBatch::discarded`]
+//!    at all**, and that is deliberate rather than an omission: the successful
+//!    open that causes it replaces the authoritative workspace outright, so the
+//!    discarded entries describe a directory nothing is showing any more, and
+//!    every batch of the epoch they belonged to is already stale by
+//!    [`ReconciliationBatch::epoch`] whatever it holds. Counting them would
+//!    oblige a reload of a workspace the open has just performed.
+//!
+//!    **Three, and the case that would be a fourth cannot arise**: two
+//!    observations at one sequence would make the later arrival replace the
+//!    earlier in the pending map, counted by nothing, and `crate::ledger`'s
+//!    allocator mints each sequence once within an epoch, so there is no such
+//!    pair. Nothing in the types forces that, which is why
+//!    [`ReconciliationQueue::enqueue`] says it where the insertion is rather
+//!    than leaving it to be inferred here.
+//!
+//!    So an answer lost on the way to the window costs no more than the drain
+//!    that repeats it **when nothing is enqueued between the two drains and no
+//!    replacement epoch is adopted between them**; short of those, the second
+//!    drain answers what the first did. **What nothing in this step makes
+//!    happen is that later drain** — see [`ReconciliationQueue::wake`].
 //!
 //! # What it does not do, stated because each one is a way to be wrong
 //!
@@ -686,6 +705,16 @@ pub struct ReconciliationBatch {
     /// naming only the first, which an earlier draft of this field did, was
     /// false about the second.
     ///
+    /// **What it deliberately does not count is the third way a stored entry
+    /// leaves the queue**: [`ReconciliationQueue::begin_epoch`] discards this
+    /// whole state — the pending set, the watermark and this counter with it —
+    /// when the session adopts a replacement workspace. Those entries describe a
+    /// directory nothing is showing any more, and every batch of the epoch they
+    /// belonged to is already stale by [`ReconciliationBatch::epoch`], so
+    /// counting them would oblige a reload of a workspace the open has just
+    /// performed. This counter is therefore **per epoch**, and reads zero on the
+    /// first drain after a replacement whatever the previous epoch lost.
+    ///
     /// **Cumulative within the epoch and monotonic**, so a non-zero value does
     /// not say the loss happened since the previous drain. What it does say is
     /// that this epoch's observation history has a hole in it, so a consumer
@@ -721,6 +750,10 @@ struct QueueState {
     /// How many entries this epoch dropped rather than held, for capacity or
     /// for arriving at or below the acknowledged watermark — the two causes
     /// [`ReconciliationBatch::discarded`] states.
+    ///
+    /// Reset with the rest of this state when the queue adopts a replacement
+    /// epoch, which is why the count is per epoch and why the third way a
+    /// stored entry leaves the queue is not in it.
     discarded: u64,
 }
 
@@ -936,6 +969,18 @@ impl ReconciliationQueue {
     /// three clears, which is what keeps a field added later from being the one
     /// nobody remembered to reset.
     ///
+    /// **This is the third way a stored entry leaves this queue**, beside a
+    /// later drain acknowledging it and an overflow evicting it — the module
+    /// doc's guarantee 4 states all three, and this one is the only one that
+    /// does not depend on what the entry is. An observation stored under the
+    /// previous epoch, acknowledged by nobody and evicted by nothing, is
+    /// discarded here. **It is not counted in
+    /// [`ReconciliationBatch::discarded`]**, which this call resets along with
+    /// the rest: what obliges a whole-workspace reload is a hole in *an epoch's*
+    /// history, and a replacement is not a hole in one — it is the successful
+    /// open that made the whole epoch's history irrelevant, having already
+    /// replaced the workspace the window would reload.
+    ///
     /// **What it does not reset is a path's identity**, and it never did in the
     /// place that matters: identity lives in the core's process-wide table, and
     /// a path keeps its number for the life of the process. This queue briefly
@@ -1068,17 +1113,24 @@ impl ReconciliationQueue {
     /// later overflow may evict that entry like any other, and then it is a
     /// counted loss obliging a whole-workspace reload rather than a fold —
     /// which is why the entries it holds a slot *against* are chosen by
-    /// [`evictable_sequence`] rather than by sequence alone.
+    /// [`evictable_sequence`] rather than by sequence alone. A replacement epoch
+    /// discards it like every other stored entry
+    /// ([`ReconciliationQueue::begin_epoch`]), and that one is counted nowhere.
     ///
     /// A caller that drains twice with the same watermark therefore receives
-    /// the same batch twice **when nothing was enqueued between the two
-    /// calls** — the answer is a function of the pending set and this call
-    /// consumes nothing from it — so an answer lost between Rust and the window
-    /// costs no more than the drain that repeats it. An enqueue in between adds
+    /// the same batch twice **when nothing was enqueued between the two calls
+    /// and no replacement epoch was adopted between them** — the answer is a
+    /// function of the pending set and this call consumes nothing from it — so
+    /// an answer lost between Rust and the window costs no more than the drain
+    /// that repeats it. An enqueue in between adds
     /// to the second batch, which is what a queue is for and not an exception
     /// to the rule — **and an enqueue is also what can evict**, which is the one
-    /// way a second batch can be *missing* something the first one carried. That
-    /// is a counted loss and a whole-workspace reload, not a repeated drain.
+    /// way a second batch can be *missing* something the first one carried
+    /// **within one epoch**. That is a counted loss and a whole-workspace
+    /// reload, not a repeated drain. A replacement between the two calls is the
+    /// other way, and it is visible as a different
+    /// [`ReconciliationBatch::epoch`] rather than as a `discarded` count: the
+    /// second batch is the successor workspace's, and the first one is stale.
     ///
     /// [`ReconciliationBatch::newest_sequence`] is never below the highest
     /// watermark this queue has been drained with, so a drain that arrives out
@@ -1175,11 +1227,14 @@ pub fn queueing_sink(queue: Arc<ReconciliationQueue>) -> AdmittedSink {
 /// The whole projection into wire form, in one place, so no consumer builds a
 /// second one. It clones out of the queued value rather than consuming it,
 /// because a drain consumes nothing: an entry survives its own drain, and leaves
-/// the queue in exactly two ways — a later drain **acknowledges** it, or an
-/// overflow **evicts** it ([`QUEUE_CAPACITY`]). Those two are not
-/// interchangeable: the first is the consumer saying it holds the observation,
-/// and the second is a loss counted in [`ReconciliationBatch::discarded`] and
-/// obliging a whole-workspace reload.
+/// the queue in exactly three ways — a later drain **acknowledges** it, an
+/// overflow **evicts** it ([`QUEUE_CAPACITY`]), or a replacement epoch
+/// **discards** it with everything else the previous epoch held
+/// ([`ReconciliationQueue::begin_epoch`]). The three are not interchangeable:
+/// the first is the consumer saying it holds the observation; the second is a
+/// loss counted in [`ReconciliationBatch::discarded`] and obliging a
+/// whole-workspace reload; and the third is counted nowhere, because the open
+/// that caused it has already replaced the workspace a reload would fetch.
 ///
 /// **Three ways to an address, and each arm takes the strongest one available
 /// to it.** An arm holding a projection has the identity already and asks
@@ -1336,26 +1391,49 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// asks the identity register nothing: the caller has the number, so there is
 /// nothing to look up and no second source to depend on agreeing.
 ///
+/// **Each arm is chosen because it is true of the value it carries**, which
+/// is what decided the shape of this function rather than something that
+/// followed from it. A `Some` is exactly [`ObservedDocument::Addressable`]'s
+/// claim — *the open workspace resolves this path to this identity* — and it is
+/// true of the number the **workspace** answered with, whatever number that is,
+/// so that is the number which crosses. A `None` is exactly
+/// [`ObservedDocument::Named`]'s claim, and the number which crosses is then the
+/// snapshot's, which is what the consumer received the projection under.
+///
 /// **The workspace must answer with the same number**, not merely with some
 /// number. One register makes that true today — a `Workspace` mints through
-/// `identity_of` and so does the engine — but nothing in the types forces it,
-/// and a disagreement would mean the open workspace resolves this path to a
-/// *different* document. The conservative answer is then
-/// [`ObservedDocument::Named`]: the snapshot's identity, which is what the
-/// consumer received the projection under, and no claim that a command will
-/// accept it.
+/// `identity_of` and so does the engine, so a path has one number in both or is
+/// in neither — but nothing in the types forces it, so the agreement is a
+/// `debug_assert_eq!` rather than an assumption: a second identity source
+/// introduced later breaks a debug build at this site instead of putting a
+/// number on the wire whose meaning nobody can state.
+///
+/// An earlier draft branched on that disagreement and answered
+/// [`ObservedDocument::Named`] for it, keeping the snapshot's number. That was
+/// the wrong trade in the one way this project refuses: `Named` claims the open
+/// workspace **does not hold the path**, and in that branch it demonstrably
+/// does. Round 5 of this phase's review is the finding, and
+/// `docs/decisions/2d-4a-notes.md` §14 is the record — including why nothing in
+/// this repository can reach the disagreement, and why the assertion is a
+/// `debug_assert_eq!` on a path a command reaches.
 fn address_of_minted(path: &Path, document: DocumentId, workspace: &Workspace) -> ObservedDocument {
     let relative_path = display_path(path, workspace);
-    if workspace.document_id(path) == Some(document) {
-        ObservedDocument::Addressable {
+    match workspace.document_id(path) {
+        Some(resolved) => {
+            debug_assert_eq!(
+                resolved, document,
+                "one register means one identity per path, so the open workspace resolving \
+                 {path:?} must resolve it to the number a snapshot of it minted"
+            );
+            ObservedDocument::Addressable {
+                document: resolved,
+                relative_path,
+            }
+        }
+        None => ObservedDocument::Named {
             document,
             relative_path,
-        }
-    } else {
-        ObservedDocument::Named {
-            document,
-            relative_path,
-        }
+        },
     }
 } // End of function address_of_minted()
 
@@ -1544,8 +1622,8 @@ mod tests {
         queue.enqueue(changed(1, 1, "match/a.yml", ONE));
         queue.enqueue(changed(2, 1, "match/a.yml", ONE));
         // Both are stored: the fold is a property of the batch and not of the
-        // queue, so a repeat holds its slot until a drain acknowledges it or an
-        // eviction removes it.
+        // queue, so a repeat holds its slot until a drain acknowledges it, an
+        // eviction removes it or a replacement epoch discards it.
         assert_eq!(queue.pending(), 2);
         let batch = queue.drain(0, &workspace);
         assert_eq!(
@@ -1607,15 +1685,51 @@ mod tests {
 
     #[test]
     fn adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses() {
+        // **The third way a stored entry leaves this queue**, which every
+        // position stating the retention boundary omitted until round 5 of this
+        // phase's review. Nothing acknowledges this entry and nothing evicts it
+        // — one entry against a capacity of 256 — and after the replacement it
+        // is gone all the same, counted in no `discarded`.
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
         queue.enqueue(changed(1, 1, "match/a.yml", ONE));
+        assert_eq!(queue.pending(), 1, "stored, and no drain has seen it");
         queue.begin_epoch(2);
-        assert_eq!(queue.pending(), 0);
+        assert_eq!(
+            queue.pending(),
+            0,
+            "a replacement discards what the previous epoch held, acknowledged or not"
+        );
         let batch = queue.drain(0, &workspace);
-        assert_eq!(batch.epoch, 2);
-        assert!(batch.observations.is_empty());
-        assert_eq!(batch.discarded, 0);
+        assert_eq!(batch.epoch, 2, "the batch is the successor workspace's");
+        assert!(
+            batch.observations.is_empty(),
+            "and no later drain can return what it discarded: {batch:?}"
+        );
+        assert_eq!(
+            batch.discarded, 0,
+            "the third way is counted nowhere: the open that caused it has already replaced the \
+             workspace a reload would fetch, so there is no hole in a history anyone is showing"
+        );
+        // The same clause from the other side, which is what "and its losses"
+        // in this name is about: the watermark goes with the pending set, so a
+        // sequence the *previous* epoch had already acknowledged is stored under
+        // the successor rather than refused and counted as a loss.
+        queue.enqueue(changed(9, 2, "match/a.yml", ONE));
+        let acknowledged = queue.drain(9, &workspace);
+        assert!(
+            acknowledged.observations.is_empty(),
+            "sequence 9 is acknowledged: {acknowledged:?}"
+        );
+        queue.begin_epoch(3);
+        queue.enqueue(changed(3, 3, "match/a.yml", TWO));
+        let after = queue.drain(0, &workspace);
+        assert_eq!(
+            sequences_and_text(&after),
+            vec![(3, TWO.to_string())],
+            "a replacement resets the watermark with everything else: {after:?}"
+        );
+        assert_eq!(after.discarded, 0, "and resets the loss count with it");
     } // End of function adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses()
 
     #[test]
@@ -1900,6 +2014,11 @@ mod tests {
         // here, on the ground that one path in two epochs is two files: the
         // core's own model says the opposite, a recreation at that path
         // included. What a replacement makes stale is the batch.
+        //
+        // This test *exercises* that emptying and does not assert it: the
+        // successor reuses sequence 1, so an insert at the same key would hide a
+        // `begin_epoch` that kept the pending set. The clause is asserted by
+        // `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses`.
         queue.begin_epoch(2);
         queue.enqueue(removed(1, 2, "match/epochs.yml"));
         let second = queue.drain(0, &workspace);
@@ -2481,15 +2600,56 @@ mod tests {
                 kind: io::ErrorKind::PermissionDenied,
             },
         });
+        // The other arm of each nested content enum, which is the whole reason
+        // these two are here: a `Changed` and an `Added` whose stabilized bytes
+        // are not UTF-8 carry `ChangedContent::Unreadable` and
+        // `AddedContent::Unreadable`, and those two crossed as nothing at all in
+        // this test until round 5 of this phase's review.
+        queue.enqueue(AdmittedObservation {
+            sequence: 5,
+            epoch: 1,
+            observation: Observation::Changed {
+                path: PathBuf::from("match/e.yml"),
+                previous_revision: Some(ContentRevision::of_bytes(ONE.as_bytes())),
+                content: StableContent::NotUtf8 {
+                    revision: ContentRevision::of_bytes(&[0xff, 0xfe]),
+                    offset: 0,
+                },
+                correspondences: None,
+            },
+        });
+        queue.enqueue(AdmittedObservation {
+            sequence: 6,
+            epoch: 1,
+            observation: Observation::Added {
+                file: DiscoveredFile {
+                    path: PathBuf::from("match/f.yml"),
+                    kind: FileKind::MatchFile,
+                    relative_path: PathBuf::from("match/f.yml"),
+                    disabled: false,
+                },
+                content: StableContent::NotUtf8 {
+                    revision: ContentRevision::of_bytes(&[0xff, 0xfe]),
+                    offset: 0,
+                },
+            },
+        });
         let batch = queue.drain(0, &workspace);
         let json = serde_json::to_value(&batch).expect("a batch serializes");
         let observations = json["observations"]
             .as_array()
             .expect("observations is an array");
-        assert_eq!(observations.len(), 4);
-        for (index, name) in ["Changed", "Added", "Removed", "Unreadable"]
-            .into_iter()
-            .enumerate()
+        assert_eq!(observations.len(), 6);
+        for (index, name) in [
+            "Changed",
+            "Added",
+            "Removed",
+            "Unreadable",
+            "Changed",
+            "Added",
+        ]
+        .into_iter()
+        .enumerate()
         {
             let tagged = observations[index]
                 .as_object()
@@ -2499,32 +2659,74 @@ mod tests {
                 tagged[name].is_object(),
                 "{name} carries an object, never a bare string"
             );
-        } // End of the loop over the four observation kinds
+        } // End of the loop over the six observation kinds
           // The two nested content enums follow the same rule, and D5 is about
           // every wire enum rather than about the outer one: a `Changed` and an
-          // `Added` each carry a one-key object under `content`.
-        for (index, kind) in [("Changed", "Projected"), ("Added", "Projected")]
-            .into_iter()
-            .enumerate()
-        {
-            let content = &observations[index][kind.0]["content"];
+          // `Added` each carry a one-key object under `content`. **Both arms of
+          // both of them**, which is the property and not a longer list: a unit
+          // variant, or a Serde shape that made one of these cross as a bare
+          // string, is exactly what this walk exists to catch, and a walk over
+          // the projected arms alone left the two unreadable ones free to
+          // regress under it.
+        for (index, outer, arm) in [
+            (0, "Changed", "Projected"),
+            (1, "Added", "Projected"),
+            (4, "Changed", "Unreadable"),
+            (5, "Added", "Unreadable"),
+        ] {
+            let content = &observations[index][outer]["content"];
             let tagged = content
                 .as_object()
-                .unwrap_or_else(|| panic!("{}'s content crosses as an object", kind.0));
+                .unwrap_or_else(|| panic!("{outer}'s content crosses as an object: {json}"));
+            assert_eq!(tagged.len(), 1, "one tag per value: {tagged:?}");
+            // `get` rather than an index, so a tag that is missing altogether —
+            // an untagged or renamed variant — fails with this sentence instead
+            // of panicking inside `serde_json`'s own index.
+            assert!(
+                tagged.get(arm).is_some_and(serde_json::Value::is_object),
+                "{outer}'s {arm} content is tagged by its variant name and carries an object, \
+                 never a bare string: {json}"
+            );
+        } // End of the loop over both arms of the two nested content enums
+          // And one level down again, because walking only the enums a finding
+          // named is how a narrower instance of that finding survives it.
+          // `UnreadableReason` is a wire enum as much as the two above, and its
+          // five operandless variants are written as struct variants for exactly
+          // this rule, so each must cross tagged and as an object rather than as
+          // a bare string.
+        for (reason, arm) in [
+            (&observations[3]["Unreadable"]["reason"], "PermissionDenied"),
+            (
+                &observations[4]["Changed"]["content"]["Unreadable"]["reason"],
+                "NotUtf8",
+            ),
+            (
+                &observations[5]["Added"]["content"]["Unreadable"]["reason"],
+                "NotUtf8",
+            ),
+        ] {
+            let tagged = reason
+                .as_object()
+                .unwrap_or_else(|| panic!("a reason crosses as an object: {json}"));
             assert_eq!(tagged.len(), 1, "one tag per value: {tagged:?}");
             assert!(
-                tagged[kind.1].is_object(),
-                "{}'s content carries an object, never a bare string",
-                kind.0
+                tagged.get(arm).is_some_and(serde_json::Value::is_object),
+                "the {arm} reason is tagged by its variant name and carries an object, never a \
+                 bare string: {json}"
             );
-        } // End of the loop over the two nested content enums
+        } // End of the loop over the three reasons this batch puts on the wire
           // **Every** arm of an address carries the display path, whichever arm
           // it is, so no consumer is ever handed a number as its only handle on
           // a file. Which arm each of these lands in is not this test's subject
           // and is not stable across a test binary either: the identity register
           // is process-wide, so another test in this process may already have
           // named one of these paths.
-        for (index, kind) in [(0, "Changed"), (2, "Removed"), (3, "Unreadable")] {
+        for (index, kind) in [
+            (0, "Changed"),
+            (2, "Removed"),
+            (3, "Unreadable"),
+            (4, "Changed"),
+        ] {
             let document = observations[index][kind]["document"]
                 .as_object()
                 .unwrap_or_else(|| panic!("{kind} carries an address object: {json}"));
@@ -2537,10 +2739,12 @@ mod tests {
                 operands["relative_path"].is_string(),
                 "{kind}'s {arm} arm carries the display path: {json}"
             );
-        } // End of the loop over the three arms that carry an address
+        } // End of the loop over the four arms that carry an address
           // An `Added` carries no `ObservedDocument` because its row already says
-          // both things one would say.
+          // both things one would say — including the one whose bytes are not
+          // text, which is why that arm mints an identity at all.
         assert!(observations[1]["Added"]["document_summary"]["relative_path"].is_string());
+        assert!(observations[5]["Added"]["document_summary"]["relative_path"].is_string());
         // The answer crosses; the question never does.
         assert!(!json.to_string().contains("owned_runs_digest"));
     } // End of function every_observation_crosses_as_a_uniform_object_and_carries_no_anchor()
