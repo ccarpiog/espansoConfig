@@ -3662,7 +3662,7 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
-## Verification — Phase 2d-4a review round 6 (NOT READY — 0 High, 1 Medium, 5 Low; the fix is in the tree, every gate green, and round 7 is owed)
+## Verification — Phase 2d-4a review round 6 (NOT READY — 0 High, 1 Medium, 5 Low; the fix is in the tree, every gate green, committed at `6be7231`, round 7 owed)
 
 **Round 6 was the round that could have ended the tail, and it did not.** The brief carried the
 owner's standing instruction explicitly: *if everything you find is a restatement of the
