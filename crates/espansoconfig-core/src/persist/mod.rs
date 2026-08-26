@@ -2,7 +2,7 @@
 //!
 //! **Phase 2a-1 scope:** the atomic file-replacement primitive — steps 1, 2 and
 //! 6 to 11 of the 13-step save transaction of `IMPLEMENTATION_PLAN.md`
-//! section 6.6. [`write`] holds it, and [`replace_file_atomically`] is the whole
+//! section 6.6. [`mod@write`] holds it, and [`replace_file_atomically`] is the whole
 //! of the entry point: **atomic replacement of an existing regular file, with
 //! optimistic conflict detection.**
 //!
@@ -29,13 +29,13 @@
 //! pathname operation provides one, so the revision is checked twice — once
 //! before the candidate is built and once immediately before the commit — and a
 //! window one `rename()` wide remains, in which a **non-cooperating** writer
-//! (vim, espanso, a sync agent) can be overwritten. [`write`]'s module
+//! (vim, espanso, a sync agent) can be overwritten. [`mod@write`]'s module
 //! documentation states the residual race in full; it is a property of the
 //! platform, not of this code, and backups (step 13) are its only mitigation: a
 //! copy of what the target held before this session's first change to it, which
 //! is not a promise that any particular state can later be recovered.
 //!
-//! **Phase 2a-3a scope:** plan section 7 row 11's unpaid half. [`write`]'s step 7
+//! **Phase 2a-3a scope:** plan section 7 row 11's unpaid half. [`mod@write`]'s step 7
 //! became two — the target's **access control list and extended attributes** are
 //! copied onto the temp file with macOS's `fcopyfile(3)` before its **mode bits**
 //! are applied — so the new inode the rename installs carries the protection the
@@ -82,7 +82,7 @@
 //! [`BackupSession::root`].
 //!
 //! Two details here are load-bearing and easy to get wrong, and both are now
-//! executed by [`write`] rather than only described:
+//! executed by [`mod@write`] rather than only described:
 //!
 //! - The temp file must live in the *same directory* as the target, because
 //!   `rename()` is only atomic within a filesystem. It is created in
@@ -121,7 +121,7 @@
 //!   directory's, because a new file inherits the directory's group.
 //!
 //! A new inode still drops **owner and group, creation time, BSD flags and
-//! hard-link relationships**. [`write`]'s module documentation states each, and
+//! hard-link relationships**. [`mod@write`]'s module documentation states each, and
 //! `docs/decisions/2a-3a-notes.md` is the decision record.
 //!
 //! **What this module still cannot do**, deliberately: create a file that does

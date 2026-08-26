@@ -8,6 +8,10 @@
 //! [`engine`]'s module docs state (`IMPLEMENTATION_PLAN.md` section 6.5; the
 //! Phase 2d design consult's Q1):
 //!
+//! - [`liveness`] — **the liveness contract of the observation pipeline, in one
+//!   place.** It declares nothing; its documentation *is* the contract, and
+//!   every passage in either crate that needs the guarantee points at it rather
+//!   than restating it. Phase 2d-3-C.
 //! - [`engine`] — the observation engine. Hints in, typed observations out,
 //!   with the **clock and the reader injected**: per-path debounce, two-read
 //!   stability, exact hashing, projection and validation, membership rescan
@@ -30,6 +34,7 @@
 
 pub mod correspond;
 pub mod engine;
+pub mod liveness;
 pub mod native;
 
 use serde::de::{Deserialize, Deserializer, Error as DeError, Unexpected, Visitor};

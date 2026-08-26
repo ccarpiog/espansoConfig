@@ -151,6 +151,12 @@
 //! backup step.
 
 #![deny(missing_docs)]
+// Phase 2d-3-C. [`watch::liveness`] is the one statement of the observation
+// pipeline's liveness contract, and roughly twenty positions in this workspace
+// point at it instead of restating it. A rename or a deletion must break the
+// build rather than silently orphan those pointers, which a markdown file could
+// never give and a compile-checked intra-doc link does.
+#![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod discovery;
 pub mod draft;

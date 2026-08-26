@@ -77,20 +77,16 @@
 //! refreshes already hold, which orders their reads against every record with no
 //! clock in between; a **re-observation** asked of the running watcher when a
 //! save could not read the file at all, or read it once where the engine reads
-//! twice; and the fact that such a request is an **owed** observation, which the
-//! engine may not discharge by coalescing it into silence and which stays owed
-//! until a settlement of that path emits — never a promise that a settlement
-//! will happen, because a path written continuously never stabilizes and the
-//! worker may take its `Stop` first (round 13's second High, whose twin stood
-//! here unfixed for a round because that round's sweep read
-//! `ledger.rs`, `watch.rs`, `watch_check.rs` and `commands.rs` and not this
-//! file — round 14's own sweep found it). It is retained across a failing
-//! baseline, emitted even when the state it settles on is one the engine
-//! established but never announced, and restored by a refusal that takes its
-//! settlement back **only where that settlement had discharged it** — an
-//! ordinary native hint's settlement discharges none, so what a refusal of one
-//! leaves behind is a re-**hinted** path rather than an owed one (round 14's
-//! second High).
+//! twice; and the fact that such a request is an **owed** observation rather
+//! than a hint. **What that debt guarantees, and what it expressly does not,
+//! is [`espansoconfig_core::watch::liveness`]** — the one statement of it in this
+//! workspace, which this header points at rather than paraphrasing. Two
+//! paraphrases stood at this position through Phase 2d-3, each a promise the
+//! engine refuses, and the second survived the round that corrected it
+//! everywhere else because that round's sweep read a list of four files and not
+//! this one. What is local to this crate is only where the request is made and
+//! what it is retained across: `watch::ReObserver` sends it, and
+//! `watch::WatchWorker::baseline` holds it until an engine exists to take it.
 //!
 //! **One more thing is about a different event entirely, and so is not in that
 //! list**: `commands::reload_document` is the only read path that can install a
@@ -102,12 +98,10 @@
 //! bytes a duplicate — this step's round-9 first and third Highs. A *watcher* reading the session cannot
 //! place strictly after its own last commit to that path is discarded rather
 //! than published, it does not clear the record, and the engine is told to
-//! un-conclude it — restoring the state that settlement replaced and re-hinting
-//! the path, and re-owing it only where that settlement had discharged a debt.
-//! **That is a rollback and not an observation**: whether one follows depends on
-//! the path stabilizing again and on the worker still ticking, and nothing here
-//! forces either (round 14's first High, whose twin stood here for the same
-//! reason the sentence above it did). **The two save-path refreshes are
+//! un-conclude it. **What that rollback restores, and what it does not promise,
+//! is [`espansoconfig_core::watch::liveness`]**; this header names the local fact
+//! — which door refuses, and that the refusal neither publishes nor clears —
+//! and points there for the rest. **The two save-path refreshes are
 //! not stamped and cannot be discarded that way**: they run under the session
 //! lock, which is the lock every producer of a record holds, so their reads
 //! follow any record in program order and no clock decides it — a refusal there
@@ -131,6 +125,12 @@
 //! admits still reaches a sink that discards it, until 2d-4.
 
 #![deny(missing_docs)]
+// Phase 2d-3-C. Every passage in this crate that needs the observation
+// pipeline's liveness guarantee links to
+// `espansoconfig_core::watch::liveness` instead of restating it, and a link
+// that stops resolving must break the build rather than silently orphan the
+// pointer.
+#![deny(rustdoc::broken_intra_doc_links)]
 // The app is macOS-only for now (plan section 10), so no Windows subsystem
 // attribute is set here. Add one before the first Windows build, not before.
 
@@ -143,6 +143,8 @@ mod dispatch_check;
 mod error;
 mod events;
 mod ledger;
+#[cfg(test)]
+mod liveness_contract;
 mod menu;
 #[cfg(test)]
 mod menu_contract;

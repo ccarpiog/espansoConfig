@@ -47,7 +47,7 @@ use crate::draft::MatchField;
 ///
 /// **The four added fields are optional, and `None` is not `Some(String::new())`.**
 /// An absent field is a key the new item is not born holding at all; a present
-/// empty one is `label: ''` written into the file. [`MatchDraft`]'s own
+/// empty one is `label: ''` written into the file. [`crate::draft::MatchDraft`]'s own
 /// `Unchanged`/`Set` distinction is the same one, learned in Phase 2c-2: a buffer
 /// left blank cannot tell those two cases apart, so the caller decides and this
 /// type carries the decision rather than inferring it.

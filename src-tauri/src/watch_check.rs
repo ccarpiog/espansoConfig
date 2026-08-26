@@ -1224,13 +1224,12 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // **That was an ordering of two durations, and nothing enforces it**: a save
     // thread stalled between the rename and `record_app_write` lets the worker
     // stamp and settle the saved bytes first, this application's own hint is then
-    // refused once as `PrecedesACommit`, the engine takes the settlement back —
-    // restoring the state it replaced and re-**hinting** the path, which is the
-    // arm that runs here because the settlement taken back is this application's
-    // own native hint and owes nothing (round 14's second High) —
-    // and a re-reading — *if* the path stabilizes again and this
-    // watcher's worker is still ticking, neither of which anything here forces
-    // (round 13's first High) — is stamped after the anchor and *is* suppressed:
+    // refused once as `PrecedesACommit`, the engine takes the settlement back on
+    // the terms `espansoconfig_core::watch::liveness` states — the local fact
+    // here being only *which* arm of it runs: the settlement taken back is this
+    // application's own native hint, which owes nothing —
+    // and a re-reading, *if* one comes at all, is
+    // stamped after the anchor and *is* suppressed:
     // usually, and only usually, because that stamp follows the anchor in program
     // order while
     // `Instant` is not guaranteed strictly increasing and `decide` refuses at

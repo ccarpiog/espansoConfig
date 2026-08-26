@@ -68,6 +68,10 @@
 //!
 //! # An observation can be *owed*, and coalescing does not discharge a debt
 //!
+//! **This section says what this engine does; what the pipeline as a whole
+//! guarantees and expressly does not guarantee is [`crate::watch::liveness`],
+//! and every consumer points there rather than paraphrasing either.**
+//!
 //! Ordinary coalescing answers one question: *has anything changed since I last
 //! told you about this path?* A caller that was **never told** cannot use that
 //! answer, and a caller that read the path itself and could not use its own
@@ -762,6 +766,10 @@ impl ObservationEngine {
     /// exactly as a hint does. It also promises no answer at all for a path that
     /// never stabilizes: a file written continuously stays pending, and the debt
     /// waits with it.
+    ///
+    /// This paragraph and the one above it are two of the clauses
+    /// [`crate::watch::liveness`] collects, and that module is where a consumer
+    /// points instead of paraphrasing them.
     pub fn observe_owed(&mut self, path: &Path, now: Millis) {
         if !self.watches(path) {
             return;
@@ -905,7 +913,13 @@ impl ObservationEngine {
     /// discharged an [`ObservationEngine::observe_owed`] request, the path is
     /// owed again: a conclusion the caller could not use is a conclusion the
     /// caller was not told, so the retry must be able to answer the debt rather
-    /// than coalescing against a tracked state nobody heard about.
+    /// than coalescing against a tracked state nobody heard about. Where it
+    /// discharged none — an ordinary [`ObservationEngine::hint`]'s settlement —
+    /// the `else` arm below re-hints the path and owes nothing.
+    ///
+    /// That conditional, and the fact that this call schedules rather than
+    /// emits, are two of the clauses [`crate::watch::liveness`] collects; a
+    /// consumer points there rather than paraphrasing this doc.
     pub fn revert_settlement(&mut self, path: &Path, now: Millis) {
         let owed = match self.undo.remove(path) {
             Some(Undone { replaced, owed }) => {

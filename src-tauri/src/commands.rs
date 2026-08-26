@@ -98,17 +98,17 @@
 //!
 //! **The record alone does not give that property, and this module composes
 //! with six other things that do** — the commit gate, the watcher's stamp, the
-//! **settlement rollback** (the round-3 fix round: a refused reading is answered
-//! by `ObservationEngine::revert_settlement`, without which the engine keeps
+//! **settlement rollback** (the round-3 fix round: a refused reading is handed
+//! to `ObservationEngine::revert_settlement`, without which the engine keeps
 //! believing it announced a state nobody heard and the same bytes re-read
 //! coalesce to nothing forever), the session lock, a re-observation asked of the
 //! watcher (the round-5 fix round) and, since the round-6 fix round, the fact
-//! that such a request is an **owed** observation, which the engine may not
-//! discharge by coalescing it into silence and which stays owed until a
-//! settlement of that path emits — never a promise that a settlement will
-//! happen, because a path written continuously never stabilizes and the worker
-//! may take its `Stop` first (round 13's second High, at this position because
-//! the same sentence stood in the record's §1 headline).
+//! that such a request is an **owed** observation rather than a hint. **What
+//! that rollback restores, what that debt promises and — just as load-bearing —
+//! what neither of them promises is
+//! [`espansoconfig_core::watch::liveness`]**, the one statement of it in this
+//! workspace. This header points there and restates none of it, because the
+//! paraphrase that stood at this position was a review finding.
 //! **The count and the list are re-derived by
 //! counting the list**, which round 7's first Low is: it said five while naming
 //! five and omitting the rollback, and a maintainer reading it as exhaustive
@@ -644,7 +644,7 @@ impl WorkspaceSession {
 
     /// The watcher an open workspace owns — real for every production
     /// session, inert for one built by the test-only
-    /// [`WorkspaceSession::unwatched`].
+    /// `WorkspaceSession::unwatched` (test-only, so no link resolves here).
     ///
     /// The `cfg` block is confined to this helper on purpose: `open` itself
     /// has one shape in both builds, and in a production build this function

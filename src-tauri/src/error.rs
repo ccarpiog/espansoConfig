@@ -44,8 +44,9 @@
 //! frontend needs a runtime list because `isCommandError` has to recognise
 //! untyped JSON; Rust does not, and a second list nothing reads would be one
 //! more thing to keep in step. The Rust-side enumeration lives in
-//! [`every_command_error`], is compiled only for tests, and is what
-//! `wire_contract.rs` compares against the TypeScript list.
+//! `every_command_error` below, is compiled only for tests — which is why this
+//! sentence names it rather than linking to it — and is what `wire_contract.rs`
+//! compares against the TypeScript list.
 
 use std::io;
 

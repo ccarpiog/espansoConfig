@@ -690,7 +690,7 @@ pub enum SaveError {
     /// Steps 1 and 2: the target could not be resolved, locked or read.
     ///
     /// Carries [`WriteError`] unflattened, so [`WriteError::path`] and the
-    /// [`WriteStep`] of an I/O failure survive.
+    /// [`crate::persist::WriteStep`] of an I/O failure survive.
     Target(WriteError),
     /// Step 2: the target's bytes are not valid UTF-8, so there is no text to
     /// patch.

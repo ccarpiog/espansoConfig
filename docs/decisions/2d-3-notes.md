@@ -5,9 +5,9 @@ external change, and no external change is lost to that suppression, because six
 together: the commit and the record that describes it are one window no admission can *decide*
 inside; every **watcher** observation carries a stamp taken before its reads, so a reading already
 in hand when that window opened cannot clear the record either; a refused reading is **answered** —
-the engine takes its settlement back, restoring the prior tracked state and **re-hinting** the path,
-rather than keeping a state it never really announced, and *answered* names that rollback and never
-an observation that arrives; the two save-path refreshes carry **no** stamp, because they run under
+the engine takes its settlement back, on the terms `espansoconfig_core::watch::liveness` states and
+this record no longer restates, and *answered* names that rollback; the two save-path refreshes carry
+**no** stamp, because they run under
 the session lock that every producer of a record holds, so their reads follow any record in program
 order and no clock decides whether they are heard; where this application has **no** reading to
 bring at all — a refresh that raised, or a write that may have landed without saying what it
@@ -17,11 +17,10 @@ save-path refresh, which is one read where the engine takes two — it publishes
 one either** and asks for a stabilized reading in its place, marking the state for coalescing where
 the person has been shown it and recording nothing where nobody has, so a state that never stably
 existed never enters the sequence at all; and every one of those requests is an **owed** observation
-the engine may not discharge by **coalescing** it into silence, which stays owed until a settlement of
-that path emits and which is never a promise that one will — retained across a failing baseline,
-emitted even against a state the engine established but never announced, and restored by a refusal
-that takes its settlement back **only where that settlement had discharged one** — a refused native
-hint's settlement had not, so it is re-hinted rather than re-owed. That record is one entry per
+rather than a hint — what a debt guarantees and what it expressly does not is
+`espansoconfig_core::watch::liveness`, the one place this workspace states it, and this headline
+points there rather than paraphrasing it — retained across a failing baseline, and emitted even
+against a state the engine established but never announced. That record is one entry per
 document, written
 in exactly one place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
 consult's `last_app_write[DocumentId] = { workspace_epoch, revision }` beside the open Tauri
@@ -38,6 +37,17 @@ refresh through those same two steps, **marking** the state it read so a later h
 Neither can publish; only the watcher's stamped door can (§13). **Neither is asked either retaining
 check** — not chronology, because neither reads a clock (§10), and not suppression, because neither
 is a native hint (§14).
+
+> **Correction (step 2d-3-C).** The two clauses above stated the liveness contract in full, and each
+> was rewritten by a fix round that the next round then had to correct: round 13's High 2 and round
+> 14's High 1 are both at this position, which is why the blocks below are stacked nine deep. Since
+> **2d-3-C** the contract is stated **once**, in
+> `crates/espansoconfig-core/src/watch/liveness.rs`, and twenty positions across the two source trees
+> point at it instead of restating it — this headline is now one of them, and
+> `src-tauri/src/liveness_contract.rs` fails the build on a liveness-shaped position its inventory
+> does not carry. **Nothing below is rewritten**: those blocks are the history of what this sentence
+> claimed, and each remains the record of the round that found it. The step is
+> `docs/decisions/2d-3-C-notes.md`, and what it does **not** close is that record's §5.
 
 > **Correction (round-1 fix round, §7).** The headline above stood, before §7's fix, as a claim
 > the code did not give: `save_document` performs its rename before returning and the watcher
@@ -921,6 +931,18 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
 > point into is a defect waiting to happen. **The numbering is one sequence across all of them**, so
 > *item 21* means the same thing wherever it is cited, and a search for an item number finds exactly
 > one definition. This note is navigational and corrects nothing.
+
+> **Note (step 2d-3-C): items 17, 19, 21 and 22 are among the sources of the liveness contract, and
+> the contract is now stated in one place.** `crates/espansoconfig-core/src/watch/liveness.rs` collects
+> what the pipeline guarantees and what it expressly does not, each clause named against the code item
+> it is derived from; item 19's *a re-observation reaches nothing when the workspace has no running
+> watcher*, item 21's *a request no tick will serve* and item 17's *`revert_settlement` restores
+> unconditionally and re-hints only a watched path* are three of them, and item 17 is the bold ruling
+> line §20.4 named for having been right since round 5 while thirteen positions contradicted it. **The
+> items are not rewritten** — they are this record's own residues and they stay as their rounds wrote
+> them. What is new is that a consumer of the pipeline now points at the contract instead of
+> paraphrasing these items, and `src-tauri/src/liveness_contract.rs` fails the build on a
+> liveness-shaped position no inventory entry covers. See `docs/decisions/2d-3-C-notes.md`.
 
 1. **Admitted observations are still discarded in production.** The gate decides, numbers, and
    hands the value to `discarding_sink`; a value it drops is gone, and no present code recovers

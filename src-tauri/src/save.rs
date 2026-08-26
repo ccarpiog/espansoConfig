@@ -22,12 +22,12 @@
 //! would make the ordinary path an exception. A **conflict** is the same shape:
 //! the file moved on, the caller reloads and tries again. Everything left —
 //! a read-only document, an unpatchable candidate, a filesystem that refused —
-//! is [`CommandError`], and the save's own typed failure travels inside
+//! is [`crate::error::CommandError`], and the save's own typed failure travels inside
 //! [`crate::error::CommandError::SaveFailed`] whole.
 //!
 //! # The wire convention, chosen rather than drifted into
 //!
-//! **Flat**, like [`CommandError`]: one `outcome` discriminant plus the operands
+//! **Flat**, like [`crate::error::CommandError`]: one `outcome` discriminant plus the operands
 //! that outcome declares. Not the core's externally tagged convention, and the
 //! reason is what this type *is*. Phase 2b-1 settled that the core writes its own
 //! errors externally tagged and that a frontend wanting flat top-level codes

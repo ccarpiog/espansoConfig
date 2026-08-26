@@ -162,18 +162,19 @@
 //! merely delayed: `espansoconfig_core::watch::engine::ObservationEngine::tick`
 //! has already installed the state it describes as the engine's tracked one, so
 //! the same bytes re-read afterwards stabilize to the tracked state and coalesce
-//! **inside the engine**, emitting nothing. Re-hinting the path therefore does
-//! not "produce a fresh observation" of a state the engine believes it has
-//! already announced, and a genuine external change refused once would never be
-//! reported again — with native delivery working perfectly. What makes the
-//! direction safe is that the refusal is **answered**:
+//! **inside the engine**, emitting nothing — and a genuine external change
+//! refused once would never be reported again, with native delivery working
+//! perfectly. What makes the direction safe is that this arm is **answered**
+//! rather than swallowed, and that is a fact about this module's own wiring:
 //! [`admitting_sink`] returns [`crate::watch::ObservationOutcome::Undecided`]
-//! for this arm and `crate::watch::deliver` takes the engine's settlement back
-//! (`revert_settlement`), so the path is un-concluded and re-hinted and the next
-//! stabilization carries a stamp later than the record. What that recovery still
-//! depends on is one *engine pass*, not native delivery — the revert schedules
-//! its own hint — and what it does depend on is stated as a hole rather than
-//! smoothed over (`docs/decisions/2d-3-notes.md` §5 items 13 and 14).
+//! for it and `crate::watch::deliver` takes the engine's settlement back
+//! (`revert_settlement`). **What that rollback restores, and what it promises
+//! about anything arriving afterwards, is
+//! [`espansoconfig_core::watch::liveness`]** — the one statement of it in this
+//! workspace, which this module points at and never paraphrases. What the
+//! recovery depends on is one *engine pass* and never native delivery, and the
+//! holes are stated rather than smoothed over
+//! (`docs/decisions/2d-3-notes.md` §5 items 13 and 14).
 //!
 //! # Two proofs of chronology, because one of the two callers needs no stamp
 //!
@@ -184,21 +185,13 @@
 //! are not in that position, and treating them as if they were is what the
 //! round-4 finding was:
 //!
-//! - a refusal of a *watcher* observation is **answered** —
-//!   [`admitting_sink`] returns
-//!   [`crate::watch::ObservationOutcome::Undecided`] and the engine's settlement
-//!   is taken back, so the state that settlement replaced is restored and the
-//!   path is put back on the engine's pending table as a fresh **hint**, which
-//!   is what a re-reading of it would have to come through. It is put back as an
-//!   **owed** observation only where the settlement taken back had itself
-//!   discharged a debt —
-//!   `espansoconfig_core::watch::engine::ObservationEngine::revert_settlement`
-//!   restores the debt with the state and otherwise takes its plain hint arm, so
-//!   an ordinary native-hint settlement, which owes nothing, is re-hinted and
-//!   never re-owed (round 14's second High). *Answered* therefore names that
-//!   rollback and not an arriving
-//!   observation, because nothing here makes the path stabilize or the worker
-//!   live to see it (round 13's first High);
+//! - a refusal of a *watcher* observation is **answered** — [`admitting_sink`]
+//!   returns [`crate::watch::ObservationOutcome::Undecided`] and
+//!   `crate::watch::deliver` calls
+//!   `espansoconfig_core::watch::engine::ObservationEngine::revert_settlement`.
+//!   That call is the whole of what *answered* names here, and **what it
+//!   restores, what it re-owes and what it does not promise is
+//!   [`espansoconfig_core::watch::liveness`]**;
 //! - a refusal of a *save-path* refresh was answered by nothing. Those two
 //!   callers settle nothing in any engine, so there was nothing to take back,
 //!   and they run once per save rather than in a loop, so nothing retried them.
@@ -287,12 +280,12 @@
 //! through [`WriteLedger::admit`] like any other observation. So no third proof
 //! of chronology exists: what changed is that a reading nobody could use, or
 //! nobody could prove, is **asked** to be followed by one somebody can — asked
-//! and not guaranteed, because there may be no running watcher to hear the ask
-//! (§5 item 19 of `docs/decisions/2d-3-notes.md`), the worker may take its `Stop`
-//! before the next tick (§5 item 21), and a path being written continuously never
-//! stabilizes, so the debt waits with it. **This heading's *re-observed* is the
-//! contrast with *published*, and never a promise of arrival** (round 13's first
-//! High).
+//! and not guaranteed. The reasons an ask may go unanswered are the *not
+//! guaranteed* half of [`espansoconfig_core::watch::liveness`], stated there
+//! once rather than here again (and §5 items 19 and 21 of
+//! `docs/decisions/2d-3-notes.md` are this step's own record of two of them).
+//! **This heading's *re-observed* is the contrast with *published*, and never a
+//! promise of arrival** (round 13's first High).
 //!
 //! # The marker and the publication are two jobs, and one map did both
 //!
@@ -492,10 +485,10 @@
 //! anchor behind that index would become unreachable at exactly the moment it has
 //! to keep answering. And **widening the refusal is safe in the direction that
 //! matters**: a refusal at the stamped door is *answered* — [`admitting_sink`]
-//! returns [`crate::watch::ObservationOutcome::Undecided`], the engine's
-//! settlement is taken back, the state it replaced is restored and the path is
-//! **re-hinted**, re-owed only where that settlement had discharged a debt
-//! (round 14's second High) — and *if* another
+//! returns [`crate::watch::ObservationOutcome::Undecided`] and the engine's
+//! settlement is taken back, on the terms
+//! [`espansoconfig_core::watch::liveness`] states and this module does not
+//! repeat — and *if* another
 //! settlement for that path is produced, its stamp is taken after the anchor
 //! **in program order only**, which makes one refusal per commit the usual
 //! outcome and not a guaranteed one, because [`std::time::Instant`] is monotonic
@@ -507,22 +500,16 @@
 //! **What the host clock advancing bounds is narrower than the retry, and
 //! saying it bounded the retry is round 13's first High.** It bounds the run of
 //! *repeated chronology refusals* once another settlement for that path is
-//! produced — and nothing here makes one be produced, so the clock may advance
-//! indefinitely with the retry never completing: this crate's own
-//! `crate::watch::ReObserveOutcome` says in as many words that a path being
-//! written continuously is never answered at all and that an `Asked` is a
-//! promise about a worker's inbox rather than about an observation,
-//! `espansoconfig_core::watch::engine::ObservationEngine::observe_owed` says a
-//! debt waits with a path that never stabilizes, and
-//! `crate::watch::WorkerMessage::Stop` can be consumed before the worker's next
-//! tick. **The safe direction is the half that holds without any of that**: a
-//! refusal here mutates nothing but the tally and publishes nothing, and the
-//! settlement is taken back rather than kept, so what a retry that never
-//! completes leaves behind is a state **un-concluded and re-hinted** — owed
-//! again only where the settlement taken back had discharged a debt, which an
-//! ordinary native hint's settlement had not (round 14's second High) — never
-//! a state reported wrongly, and never a record cleared by a reading older than
-//! the commit.
+//! produced — and **nothing here makes one be produced**, so the clock may
+//! advance indefinitely with the retry never completing. Why no settlement is
+//! promised is the *not guaranteed* half of
+//! [`espansoconfig_core::watch::liveness`], which is where this workspace states
+//! it; the three enumerations that used to stand in this paragraph were review
+//! findings twice over. **The safe direction is the half that holds without any
+//! of it**: a refusal here mutates nothing but the tally, publishes nothing and
+//! clears no record, so it is never a state reported wrongly and never a record
+//! cleared by a reading older than the commit — whatever does or does not arrive
+//! afterwards.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -640,9 +627,10 @@ pub enum Admission {
     /// recorded that state as tracked. [`admitting_sink`] therefore maps this
     /// arm — and only this arm — to
     /// [`crate::watch::ObservationOutcome::Undecided`], which takes the
-    /// settlement back. **A refusal whose answer re-reading cannot change must
-    /// not join it**: reverting one of those would re-observe the same path
-    /// forever.
+    /// settlement back; **what the rollback restores and what it does not
+    /// promise is [`espansoconfig_core::watch::liveness`]**. **A refusal whose
+    /// answer re-reading cannot change must not join it**: reverting one of
+    /// those would spin the pipeline over the same path forever.
     ///
     /// **Only [`WriteLedger::admit`] can answer it**, since the round-4 fix
     /// round. A save-path refresh has no settlement to take back and no loop to
@@ -905,9 +893,8 @@ pub struct LedgerTally {
     /// - **sustained growth out of proportion to this session's commits** —
     ///   especially growth for a path this session has stopped committing to,
     ///   which a correctly stamped pipeline cannot produce, because a refusal
-    ///   here is answered by taking the engine's settlement back — restoring the
-    ///   state it replaced and re-hinting the path, and re-owing it only where
-    ///   that settlement had discharged a debt (round 14's second High) —
+    ///   here takes the engine's settlement back on the terms
+    ///   [`espansoconfig_core::watch::liveness`] states —
     ///   and *any* settlement that then follows is stamped after the
     ///   anchor, so one commit **usually** refuses one reading once — usually
     ///   and not always, for two independent reasons stated here and not
@@ -915,10 +902,8 @@ pub struct LedgerTally {
     ///   only while [`std::time::Instant`] is not guaranteed strictly increasing
     ///   and [`decide`] refuses at equality, so a clock collision can make one
     ///   anchor refuse successive re-readings until one stamp *strictly* exceeds
-    ///   it, and **nothing makes a further settlement happen at all** — a path
-    ///   being written continuously never stabilizes and the debt waits with it,
-    ///   and the worker can take `crate::watch::WorkerMessage::Stop` before its
-    ///   next tick (round 13's first High) —
+    ///   it, and **nothing makes a further settlement happen at all**, which is
+    ///   that same contract's *not guaranteed* half (round 13's first High) —
     ///   **and no threshold is enforced anywhere for it**: nothing in the
     ///   type system and no test
     ///   distinguishes proportionate growth from disproportionate, the tally
@@ -945,15 +930,15 @@ pub struct LedgerTally {
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
     /// [`WriteLedger::admit`] reaches the arm, and every refusal of a watcher
-    /// observation is answered by taking the engine's settlement back —
-    /// restoring the state that settlement replaced and re-hinting the path, and
-    /// re-owing it only where that settlement had discharged a debt (round 14's
-    /// second High)
-    /// (see [`Admission::PrecedesACommit`]) — *answered* being
-    /// that rollback and **not** an arriving re-reading, because nothing here
-    /// makes the path stabilize or the worker outlive the debt (round 13's first
-    /// High). That is what makes this a refusal rather than a loss: the state is
-    /// left **un-concluded** instead of concluded, so nothing has consumed it.
+    /// observation takes the engine's settlement back
+    /// (see [`Admission::PrecedesACommit`]) — *answered* being that rollback and
+    /// **not** an arriving re-reading. **What the rollback restores, and what it
+    /// promises about a re-reading, is
+    /// [`espansoconfig_core::watch::liveness`]**, stated there and not restated
+    /// here: two paraphrases of it stood in this doc comment and each was a
+    /// review finding. What makes this a refusal rather than a loss needs
+    /// neither half of that contract — the state is left **un-concluded**
+    /// instead of concluded, so nothing has consumed it.
     /// A count
     /// that climbs steadily for one path is therefore a pipeline re-running, not
     /// a change disappearing. Before round 4 the same sentence stood over a
@@ -1249,12 +1234,10 @@ impl WriteLedger {
         // ends: the identity table is keyed by path for the life of the process
         // (`docs/decisions/2d-1-notes.md` D7), so this cannot happen today, and
         // if it ever does the residue is one path over-refusing readings older
-        // than a commit this session really made — a refusal that is answered by
-        // taking the settlement back, which restores the state it replaced and
-        // re-hints the path and re-owes it only where that settlement had
-        // discharged a debt (round 14's second High), never a lost change,
-        // and *answered* is that rollback rather than a re-reading that must
-        // arrive (round 13's first High).
+        // than a commit this session really made — a refusal that takes the
+        // settlement back, never a lost change, on the terms
+        // `espansoconfig_core::watch::liveness` states and this comment does not
+        // restate.
         ledger.latest_commit_at.insert(
             path.to_path_buf(),
             CommitAnchor {

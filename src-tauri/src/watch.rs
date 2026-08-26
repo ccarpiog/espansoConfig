@@ -76,9 +76,10 @@
 //! **It is an *owed* observation, not an ordinary hint**, and that is round 6's
 //! correction to round 5's mechanism.
 //! `espansoconfig_core::watch::engine::ObservationEngine::observe_owed` records
-//! a debt beside the hint, so the next settlement of that path emits what it
-//! stabilized to **even if that is the state the engine already held, and even
-//! if it held none**. An ordinary hint answers *has anything changed since I
+//! a debt beside the hint. **What that debt does and does not promise is
+//! [`espansoconfig_core::watch::liveness`]**, which is the one place this
+//! workspace states it; nothing in this module restates it.
+//! An ordinary hint answers *has anything changed since I
 //! last told you*, and the two callers here have been told nothing: a baseline
 //! establishes the tracked table without announcing it, so a plain hint could
 //! coalesce a request to silence and leave the app-write record standing over a
@@ -538,6 +539,10 @@ enum WorkerMessage {
 /// watcher to ask. In particular [`ReObserveOutcome::Asked`] is **not** a
 /// promise that an observation will arrive: it is a promise that the request
 /// reached the inbox of a worker that had not yet exited.
+///
+/// That last sentence is a fact about **this type**, and it is also the fifth
+/// *not guaranteed* clause of [`espansoconfig_core::watch::liveness`], which is
+/// where the whole contract is stated and where every consumer points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReObserveOutcome {
     /// The request reached this watcher's inbox.
@@ -586,13 +591,13 @@ impl ReObserver<'_> {
     ///
     /// **What it asks for is an *owed* observation**, since the round-6 fix
     /// round: the worker turns this message into
-    /// `ObservationEngine::observe_owed`, so the next settlement of the path
-    /// emits the state it stabilized to even when that state is one the engine
-    /// already tracked and even when it tracked none. A plain hint would answer
-    /// *nothing changed since I last told you*, and every caller of this method
-    /// is one that either has been told nothing or has told the ledger something
-    /// it could not prove — see this module's *a save may ask*
-    /// section.
+    /// `ObservationEngine::observe_owed`. **What that buys and what it does not
+    /// is [`espansoconfig_core::watch::liveness`]**, and this doc says no more
+    /// about it. What is local here is *why* an owed observation rather than a
+    /// hint: a plain hint would answer *nothing changed since I last told you*,
+    /// and every caller of this method is one that either has been told nothing
+    /// or has told the ledger something it could not prove — see this module's
+    /// *a save may ask* section.
     ///
     /// **What it does not do**, said beside what it does: it neither publishes
     /// nor suppresses nor clears anything in `crate::ledger`. It schedules a
@@ -1195,8 +1200,11 @@ impl WatchWorker {
     /// `ObservationEngine::observe_owed` requests rather than as hints, for the
     /// same reason: a hint at a path this baseline has just established
     /// coalesces to silence, and a hint at a path it could not enumerate settles
-    /// as an absence nothing was tracked for, which is silence too. A debt is
-    /// the one form a settlement must answer.
+    /// as an absence nothing was tracked for, which is silence too. **What a
+    /// debt changes about that, and what it leaves untouched, is
+    /// [`espansoconfig_core::watch::liveness`]** — this doc points there rather
+    /// than restating it, because the sentence that used to stand here obliged
+    /// a settlement to discharge a debt, and nothing makes a settlement happen.
     ///
     /// They are held in a [`BTreeSet`], so a path asked for twice is one debt
     /// and the order they are handed over in is the path order the engine emits
