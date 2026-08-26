@@ -1005,5 +1005,7 @@
   "code.unreadableReason.interrupted": "La lectura de este archivo se interrumpió, dos veces seguidas.",
   "code.unreadableReason.other": "Tu sistema se negó a leer este archivo por un motivo al que espansoConfig no da nombre.",
   "code.addedContent.projected": "espansoConfig ha leído este archivo nuevo y puede mostrarte lo que contiene.",
-  "code.addedContent.unreadable": "espansoConfig no puede leer este archivo nuevo, así que puede mostrarte su nombre pero no su texto."
+  "code.addedContent.unreadable": "espansoConfig no puede leer este archivo nuevo, así que puede mostrarte su nombre pero no su texto.",
+  "code.changedContent.projected": "espansoConfig ha vuelto a leer este archivo y puede mostrarte lo que contiene ahora.",
+  "code.changedContent.unreadable": "espansoConfig ya no puede leer este archivo, así que puede decirte que cambió pero no lo que dice ahora."
 }

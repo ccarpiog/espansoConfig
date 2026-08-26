@@ -1,11 +1,14 @@
 # Phase 2d-4a — the Rust half of the reconciliation wire
 
-**An observation this application admits is held, in sequence order, beside the open workspace
-session, until a later drain acknowledges it or an overflow evicts it — and a window can ask for
-it.** `src-tauri/src/reconciliation.rs`
+**An observation this application admits is *stored* beside the open workspace session — unless it
+carries a replaced epoch or a sequence a drain has already acknowledged, which are the two arrivals
+no later drain could ever return — and once stored it is held, in sequence order, until a later
+drain acknowledges it or an overflow evicts it, and a window can ask for it.**
+`src-tauri/src/reconciliation.rs`
 is the new module. `ReconciliationQueue` is the typed, ordered, coalescing queue; `queueing_sink` is
 the **production downstream sink** that replaced the sink which dropped its argument;
-`ReconciliationWake` goes out on `workspace://reconciliation-ready` after every enqueue; and
+`ReconciliationWake` goes out on `workspace://reconciliation-ready` after every enqueue that stores;
+and
 `drain_external_changes` — the sixteenth workspace command, the seventeenth registered command, and
 a reader — hands back a `ReconciliationBatch` of `ExternalObservation` values. **The event is a hint
 and the command answer is the authority** (the 2d design consult's Q3): nothing is installed from a
@@ -32,6 +35,31 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 > loss obliging a whole-workspace reload*. This is a false claim corrected to a true one, not a
 > guarantee narrowed to dodge a finding — nothing about what the code does changed for it, and every
 > position that states retention now states the same boundary (§12.1, finding 4).
+
+> **Correction, round 4 (finding 3). Round 3's replacement headline is *also* false, and it is false
+> in the way round 3's own correction block predicted three lines further down.** *"held until a
+> later drain acknowledges it or an overflow evicts it"* is the boundary of a **stored** entry, and
+> the block above states in as many words that an admitted observation is dropped for **three**
+> reasons — the third being the only one the headline named. An observation admitted under epoch 1
+> that pauses before the synchronous downstream call and resumes after the queue has adopted epoch 2
+> is refused by `enqueue` and never stored; so is a same-epoch sequence 5 arriving after `drain(10)`,
+> which is counted in `discarded` and dropped without acknowledgement or overflow. Both are
+> implemented by returning **before** the insertion.
+>
+> The headline now above states the boundary in two halves, which is what makes it true: **an
+> admitted observation is stored unless it is one of those two arrivals, and a stored entry leaves
+> the queue in exactly two ways — acknowledgement or eviction.** That is the identical wording every
+> other position now carries, and this round found **four** more positions of the same shape that
+> round 3's sweep did not reach because it was written from the wording of round 3's own finding:
+> two in `src-tauri/src/main.rs`'s module header (*"where what the gate admits stops being dropped"*
+> and *"puts every admitted observation in it"*), `WorkspaceSession::new`'s doc and
+> `queueing_sink`'s. §13.2 names all of them. **No code changed for any of it**, and nothing was
+> weakened: the two-way boundary of a stored entry is unchanged and is still exactly what the code
+> keeps.
+>
+> One neighbouring sentence of the same shape in this very paragraph went with it: *"`Reconciliation
+> Wake` goes out … after every enqueue"* — a refused enqueue emits none, which the module has said
+> since round 1 and which this sentence did not. It now says *after every enqueue that stores*.
 
 ---
 
@@ -99,6 +127,24 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 >   and `code.addedContent.unreadable` are round 3's.
 > - **`src-tauri/src/dictionary_contract.rs`** — `AddedContent` is a third namespace from this
 >   module, with its variant count.
+
+> **Correction, round 4 (findings 1 and 2).** Three of the bullets above changed shape and two counts
+> moved again:
+>
+> - **`ExternalObservation::Changed`** now carries `document: ObservedDocument`, `previous_revision`,
+>   `disk_revision` and `content: ChangedContent` — `Projected { disk_text, disk, findings,
+>   correspondences } | Unreadable { reason }`. Its `disk_text`, `disk`, `findings` and
+>   `correspondences` fields moved inside the projected arm; the two revisions stayed outside it,
+>   which is the point. §3.2's round-4 correction is why.
+> - **`ObservedDocument`** is `Addressable { document, relative_path } | Named { document,
+>   relative_path } | Unnamed { relative_path }` — three arms where there were two, and **every arm
+>   carries the display path**. §3.3's round-4 correction is why.
+> - **`ChangedContent`** is a sixth wire type and a fourth dictionary namespace from this module,
+>   with two sentences in each language.
+> - **`src/lib/i18n/{en,es}.json`** — **fourteen** new keys each, not twelve:
+>   `code.changedContent.projected` and `code.changedContent.unreadable` are round 4's.
+> - **`address_of`** asks the open `Workspace` before it asks the identity register, and
+>   `address_of_minted` and `display_path` are new beside it.
 
 ---
 
@@ -315,6 +361,20 @@ watermark backwards.
 >   pending sequence of the **busiest path**. Every sentence naming *oldest* was rewritten, including
 >   the two in `commands.rs`. §2.2's round-3 correction is the policy.
 
+> **Correction, round 4 (finding 3). *"Every position that states retention now states the identical
+> boundary"* was itself false when it was written, and one of the positions it had just rewritten
+> stated the boundary backwards.** Round 3 rewrote both `commands.rs` docs for the *oldest* wording
+> and left them saying an entry is **"kept only until an overflow evicts it"** — which omits removal
+> by acknowledgement, the ordinary case and the other half of the two-way boundary the same round
+> claimed to have unified. That is the round-3 correction above closing a false claim in one
+> direction and opening one in the other, at a position it had its hands on.
+>
+> Both `commands.rs` docs now say a **stored** entry leaves the queue in exactly two ways — a later
+> drain acknowledges it, or an overflow evicts it — and the module doc's guarantee 4 carries the
+> boundary in one paragraph, in the wording every other position quotes. The four further positions
+> this round found are named in the header's round-4 correction and in §13.2. **No code changed**,
+> and no guarantee was weakened.
+
 
 
 ### 2.2 The capacity bound, and what `discarded` claims
@@ -461,6 +521,38 @@ one inhabitant claims a state that cannot occur.
 > `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` fails without the
 > fix, and its failure message is the finding: `Unreadable { document: Unknown { relative_path } }`.
 
+> **Correction, round 4 (finding 2). The other half of the deviation is withdrawn too, and round 3's
+> own brief had asked whether it should move with the first.** *"What is still not closed"* above
+> hands the lost revisions on as a residue; round 4 says that is not a residue but a wire defect —
+> **`previous_revision` and `disk_revision` are both operands the consult's Q3 puts on `Changed`, and
+> the routing discarded both.** A known UTF-8 document at `R1` whose bytes stabilize to non-UTF-8 at
+> `R2` crossed as `Unreadable { sequence, document, reason }`, which carries no revision at all, so
+> nothing downstream could recover either number from the value it was handed. Assigning that
+> decision to the future consumer cannot close missing Rust wire data.
+>
+> **What changed, and it is round 3's own precedent applied symmetrically.**
+> `ExternalObservation::Changed` carries `content: ChangedContent` — `Projected { disk_text, disk,
+> findings, correspondences } | Unreadable { reason }` — with `previous_revision` and `disk_revision`
+> **outside** the content arm, where the arm cannot destroy them. `StableContent::revision()` answers
+> for both arms because the engine hashes the exact stabilized bytes whatever they decode to, so
+> `disk_revision` is total by construction rather than by a case. The symmetry with `AddedContent`
+> was preferred over putting the two revisions on `Unreadable`, and reading the code gave a second
+> reason to prefer it beyond symmetry: `ExternalObservation::Unreadable` also carries
+> `Observation::Unreadable`, a **stable read failure**, for which no bytes were obtained and there is
+> no revision to report — so revisions there would have been two `Option`s whose absence meant one
+> thing, which is the shape §3.2 refused in the first place.
+>
+> **What `Changed` being "total" now means, said exactly**, because the paragraph above this
+> correction uses the word for something narrower. It is total in its **two revisions** and
+> discriminated in its content; `disk_text` and `disk` are still paired out of one snapshot, and they
+> are paired *inside* `ChangedContent::Projected` rather than at the top level. The pairing argument
+> is untouched — an absent `disk_text` beside a present `disk` is still unrepresentable.
+>
+> `a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text` fails without the
+> fix, on *"a change stays a Changed whether or not its bytes are text"*. It replaces
+> `present_bytes_that_are_not_utf8_cross_as_unreadable_rather_than_as_content`, whose name asserted
+> the routing this closes.
+
 ### 3.3 `ObservedDocument`, and why `Removed` does not simply carry a `DocumentId`
 
 Q3 writes `Removed { sequence, document, previous_revision }` and
@@ -577,6 +669,59 @@ through the same process-wide table a `Workspace` uses.
 > because a helper that invents a number turns every identity assertion into a test of the helper.
 >
 > All three identity tests fail without the fix; §12.4 has the watched failures.
+
+> **Correction, round 4 (finding 1). Deleting the workspace question was one deletion too many: a
+> process-lifetime identity is not an address in the current workspace.** The correction above is
+> right that the register is the single source of a path's number and right that `begin_epoch` had no
+> business emptying a copy of it. What it also did was make `address_of` ask the register **and
+> nothing else** — and that register's own doc says, in the same words, that a `Some` "says nothing
+> about whether the file exists now, whether the caller ever saw the number, or which workspace
+> generation was open when it was minted".
+>
+> Round 4's interleaving: epoch 1 opens root `R` holding `match/a.yml` and mints `D`; the file is
+> removed and epoch 2 reopens `R` without it, so neither the epoch-2 workspace nor the frontend
+> summary contains `D`; an external process recreates the path but stable reads fail, so the
+> observation is `Unreadable`. `identity_already_issued` answers `D`, and the epoch-2 wire sent
+> `Known { document: D }` **and omitted the display path** — while `Workspace::document_context(D)`
+> answers `UnknownDocument`. The consumer was handed a number the open workspace rejects, and nothing
+> else.
+>
+> `an_identity_issued_in_one_epoch_addresses_nothing_in_the_next` was deleted for asserting a false
+> sentence, which it was; but it was carrying a **true distinction underneath the false one** —
+> *stable path identity may survive an epoch, current addressability does not* — and
+> `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` did not replace that
+> protection: it built an empty workspace that cannot resolve the identity and then declared the
+> resulting `Known` correct without asking the workspace anything.
+>
+> **What changed: `ObservedDocument` has three arms and every one of them carries the display path.**
+>
+> - `Addressable { document, relative_path }` — the **open workspace** resolves this path to this
+>   identity, so the number is an address every workspace command accepts today;
+> - `Named { document, relative_path }` — this process named the path and the open workspace does not
+>   hold it. Two ways here and this arm does not distinguish them, because this queue cannot: a file
+>   created after the workspace was opened, whose identity the consumer received from an `Added` of
+>   this epoch — **round 1's finding, and the identity is exactly what un-strands it** — or a path a
+>   replaced workspace discovered, under which the consumer may hold nothing at all;
+> - `Unnamed { relative_path }` — nothing in this process has ever named the path.
+>
+> **Round 1's finding 1 is not reopened**, and that was the constraint: the identity still crosses for
+> an added-then-changed file, because refusing to send it is what stranded the consumer. What changed
+> is that it is no longer *called* an address the current workspace resolves, and that a consumer
+> which cannot use it now has a name to act on instead of nothing.
+>
+> **`address_of` asks two questions in the order that makes the strongest true answer win** — the
+> open workspace first, the register second. `address_of_minted` is new beside it for the arms that
+> already hold an identity (a projected `Changed`): it asks the workspace whether it resolves the
+> path to the **same** number, and answers `Named` if not, so those arms never depend on the two
+> identity sources agreeing.
+>
+> **No accessor over the three arms is declared**, deliberately: one answering *the identity, where
+> there is one* would let a consumer collapse `Addressable` and `Named` with a `?`, which is the
+> distinction the type exists to force.
+>
+> `an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address` is round 4's exact
+> interleaving over two real workspaces, and it fails against the register-alone rule with
+> `Addressable` where `Named` belongs.
 
 ### 3.4 The projection happens at drain time, not at enqueue
 
@@ -986,6 +1131,17 @@ the host scar `PROGRESS.md` records.
   > `Unreadable` and loses its `previous_revision` and `disk_revision`, because Q3's `Unreadable`
   > carries neither. Closing that is a wire change on `Unreadable`, and 2d-5 is where the consumer
   > that would read those two fields is written.
+
+  > **Correction, round 4 (finding 2). R3 is closed, and the sentence above is why it should not have
+  > been left open.** *"2d-5 is where the consumer that would read those two fields is written"*
+  > assigns a **missing wire field** to the layer that would have consumed it, which is not an
+  > assignment a consumer can act on: there was nothing to read. The wire change the residue itself
+  > named was made — as `ChangedContent` rather than as revisions on `Unreadable`, for the reason in
+  > §3.2's round-4 correction — so a non-UTF-8 `Changed` now carries `previous_revision`,
+  > `disk_revision` and the reason there is no projection. **R3 has nothing left**, and what remains
+  > for 2d-5 is what was always its own: deciding what a change to unreadable bytes *means* on screen.
+  > This is the second time in this phase that a residue recorded under R3 was a defect; the first was
+  > round 3's finding 3.
 - **R4. `discarded` has no consumer.** A non-zero value means *reload the workspace, do not
   reconcile*, and nothing enforces that reading. It is inert on every ordinary run, which is exactly
   what makes it easy to leave unread. **Round 1 sharpened what it is carrying**: overflow is
@@ -1034,6 +1190,34 @@ the host scar `PROGRESS.md` records.
   > within an epoch and is never evicted from"*, in the present tense, of a field that no longer
   > exists. The paragraphs are left as they were written — they are the record of what round 2
   > decided — and the correction block directly above is the state.
+
+  > **Correction, round 4 (finding 2, Low). R9 is now a claim about the core register alone, and the
+  > code's own reassurance about it is deleted.** Round 3 closed the *duplication* and said so
+  > honestly — *"what is **not** closed is the core's own retention"* — but left
+  > `crates/espansoconfig-core/src/workspace/mod.rs` asserting, as a fact, that "a config tree is tens
+  > of files, so it never becomes a consideration". Nothing enforces that and nothing measures it, and
+  > since Phase 2d-1 the table is fed by the **watcher** as well as by a directory walk: one entry per
+  > distinct path stabilized under the two watched roots for as long as the process runs, which is a
+  > stream and not a tree. Create, stabilize and remove `N` distinct watched paths while draining
+  > regularly and the queue stays at or below 256 while `by_path` retains all `N`.
+  >
+  > **Closed by recording it honestly, and the comment now says what is true today**: the table is
+  > unbounded, nothing evicts from it, nothing caps it and nothing measures it; the tens-of-files
+  > sentence is named as a working assumption that was never enforced or measured; and the assumption
+  > it has to cover is stated in its wider form. **Eviction is refused rather than unconsidered** — a
+  > forgotten path gets a different number on its next mention, which is exactly the stranding round 1
+  > found and closed — and a cap that refused to mint would be worse, since `mint` already treats an
+  > ambiguous identity as unacceptable at any cost.
+  >
+  > **Which phase would bound it, and why not this one.** No step of the 2d split owns it. A
+  > *measurement* first becomes meaningful in **2d-7**, the first step that runs this process against a
+  > real filesystem long enough for a count to mean anything; an actual **bound** needs a rule for when
+  > an identity may be forgotten, and that rule needs to know no consumer still holds it — knowledge
+  > the frontend coordinator (**2d-5**) has and the core does not. Until one of those exists this is an
+  > unbounded structure with a workload assumption behind it. That is a downgrade of a reassurance to
+  > an assumption, not a plan; §13.4 carries it as thin, and this project's own precedent — seven
+  > items recorded as bounded residues in Phase 2d-3 later found to be real defects — is why it is
+  > written this way rather than reassuringly.
 - **R5. The epoch field is supplied and nothing enforces it.** §4. Q3's *installs nothing* is a rule
   2d-5 obeys; this step can only make the mismatch visible.
 - **R7. A drain clones what it returns, once per pending document per drain.** §3.4. Bounded by
@@ -1412,12 +1596,37 @@ which adds no module, no `svelte-check` file and no test.
   have reopened finding 1; the counterexample is in §2.2. A capacity rule that is a function of the
   set at the moment of the eviction can be safe, and one that is a function of *state equality* at
   that moment cannot, because a later arrival can un-fold what it folded.
+
+  > **Correction, round 4 (finding 1, Low). The refusal is right and the rule generalized from it is
+  > false.** Round 4 independently reproduced the counterexample and confirmed it: under the recorded
+  > preference — the lowest currently-folded entry, otherwise the lowest — one path at states
+  > `S, T, S, S, S` on sequences 1–5 with capacity 3 retains `{1, 2, 5}` for arrival `1,2,3,4,5` and
+  > `{2, 4, 5}` for `1,3,4,5,2`. **That policy is correctly refused, and nothing about the shipped
+  > `evictable_sequence` rests on the sentence above.**
+  >
+  > What is false is the last clause read as a universal: a capacity rule that *is a function of state
+  > equality* **can** be arrival-order independent. Retaining the top `K` under any fixed total key
+  > containing `(state discriminant, sequence)` is state-dependent and order-independent, because
+  > "keep the largest `K` of a set under a fixed key" cannot depend on insertion order at all — which
+  > is the same proof §2.2 already gives for the *lowest sequence* half of the shipped rule. What the
+  > refused policy actually depends on is not state equality but **redundancy at the moment of the
+  > eviction**, which is a property of the *set* and which a later arrival can change; that is the
+  > true and narrower sentence, and it is the one `evictable_sequence`'s own doc has always carried.
+  > **Words only, and no code changed**: the shipped policy does not look at `ObservedState` at all,
+  > so no test can fail this sentence.
 - **`identity_of` being public is a reversal of a recorded decision, and nothing enforces its one
   intended use.** Any code in `src-tauri` can now mint an identity for any path. What forced it is
   §3.2's addition; what would catch a misuse is a review, not a type.
 - **The core register's own retention is untouched and still unmeasured.** R9 is closed as a
   *duplicate*, not as a bound: `espansoconfig_core::workspace` still keeps every path it has ever
   named for the life of the process. This round removed the second copy and measures neither.
+
+  > **Correction, round 4 (finding 2, Low).** This bullet is accurate and it stopped one sentence
+  > short: the code at the other end of it was still asserting, as a fact, that the table "never
+  > becomes a consideration". A residue recorded honestly in the notes and reassured away in the
+  > source is the same defect with two audiences. R9's round-4 correction is the state; the comment on
+  > `session_identities` now says unbounded, unevicted, uncapped and unmeasured, and names which phase
+  > could measure it and which could bound it.
 - **The sweep fired on this round's own prose again, exactly as it did in round 2.** A new test
   comment read *"so a full queue answered by what arrived last"*, and `answered by` is in
   `LIVENESS_SHAPES`; `every_liveness_claim_is_judged` failed on it. It is a genuine false positive —
@@ -1440,3 +1649,207 @@ which adds no module, no `svelte-check` file and no test.
 - **R8 is unchanged, and this section is an instance of it.** Round 1's fix wrote three of round 2's
   findings and round 2's fix wrote at least one of round 3's; there is no reason to think this round
   wrote none.
+
+---
+
+## 13. Round 4 of the review, and the fix round that answered it
+
+`docs/reviews/phase-2d-4a-queue.md` holds round 4 verbatim: **NOT READY — 0 High, 3 Medium, 2 Low**,
+against gates that were green again. Its scope was **the round-3 fix**, not the original
+implementation and not round 1's or round 2's fixes, and it was commissioned under the rule that
+commissioned rounds 2 and 3: a fix is a change, and the round that reviews it is not optional. Round
+3's own lesson was carried into the brief — *moving a rule does not move the bound it depended on* —
+so round 4 was pointed at what the round-3 fix's own new code and new sentences rest on, the round-3
+fix having changed the eviction victim, the wire shape and the identity source in one round.
+
+**Four of the five findings are the round-3 fix's own code or its own sentences, and the honest way
+to say it is that round 3 traded one defect for another three times.**
+
+- **Finding 1** is round 3's deletion of the *workspace* question from `address_of`. It closed a real
+  duplicate-storage finding and, in the same edit, made a process-lifetime identity be offered as a
+  current address with no path beside it — and deleted the one test that was protecting the
+  distinction, replacing it with one that could not fail on it.
+- **Finding 3** is round 3's own retention correction, which claimed *every* position now states one
+  identical boundary. It did not: the headline it had just rewritten states the boundary of a
+  **stored** entry as though it were the boundary of an admitted observation, and the two
+  `commands.rs` docs it had just rewritten state the boundary backwards, omitting acknowledgement.
+- **Low 1** is a sentence round 3's §12.4 wrote: a valid counterexample generalized into a false
+  universal.
+- **Low 2** is a sentence round 3 *left standing* in the core while recording the same fact honestly
+  in these notes — a residue admitted to one audience and reassured away to the other.
+
+Only **finding 2** is not round 3's: it is R3, a residue this record has now carried for four rounds,
+and round 4 is the second time in this phase that something recorded under R3 turned out to be a wire
+defect. That is this project's stated precedent about bounded residues, and it applied again.
+
+**Two of the five were code defects, two were false claims and one was a false claim with its
+reassurance in the code.** Findings 1 and 2 changed the code; finding 3 and Low 1 changed words to
+what is true; Low 2 changed a code comment to what is true and named which phase could do better.
+**Nothing here was closed by weakening a guarantee the code keeps.** Two sentences were corrected
+downwards — the record's headline and the core's tens-of-files assertion — and both are false claims
+corrected to true ones: the two-way boundary of a *stored* entry is exactly what the code still
+keeps, and the identity table was never bounded by anything.
+
+### 13.1 Finding by finding
+
+| # | Severity | What was wrong | What closes it | The test that fails without it |
+|---|---|---|---|---|
+| 1 | Medium | `address_of` asked only the process-wide identity register, whose own doc says a `Some` claims nothing about the current workspace. Epoch 1 mints `D` for `match/a.yml`; epoch 2 reopens the root without it; the path is recreated and stably fails to read. The wire sent `Known { document: D }` **with no display path**, while the epoch-2 workspace answers `UnknownDocument` for `D`. The replacement test built an empty workspace and declared the resulting `Known` correct without testing current addressability, so the deleted `an_identity_issued_in_one_epoch_addresses_nothing_in_the_next`'s real protection — *stable path identity may survive an epoch, current addressability does not* — was carried by nothing | **Code.** `ObservedDocument` has three arms and **every one carries the display path**: `Addressable { document, relative_path }` (the open workspace resolves it), `Named { document, relative_path }` (this process named it and the open workspace does not hold it), `Unnamed { relative_path }`. `address_of` asks the workspace first and the register second; `address_of_minted` is new for the arms that already hold a snapshot's identity and asks the workspace whether it resolves the **same** number. Round 1's finding 1 is not reopened — the identity still crosses for an added-then-changed file, which is what un-strands it; what changed is that it is no longer called an address the current workspace resolves. §3.3's round-4 correction | `an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address` — round 4's interleaving over two real workspaces; it fails against the register-alone rule with `Addressable { document: DocumentId(0), … }` where `Named { … }` belongs. `an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot`, `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` and `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` fail with it |
+| 2 | Medium | A known UTF-8 document at `R1` whose bytes stabilize to non-UTF-8 at `R2` crossed as `ExternalObservation::Unreadable { sequence, document, reason }`, which carries no revision — so **both** `previous_revision = R1` and `disk_revision = R2`, the two operands Q3 puts on `Changed`, were discarded by the routing and 2d-5 could recover neither from the value supplied. R3 recorded it as a bounded residue for two rounds | **Code, on the wire.** `ExternalObservation::Changed` carries `content: ChangedContent` — `Projected { disk_text, disk, findings, correspondences } \| Unreadable { reason }` — with both revisions **outside** the content arm, where the arm cannot destroy them; `StableContent::revision()` answers for both arms, so `disk_revision` is total by construction. This is round 3's `AddedContent` precedent applied symmetrically, and reading the code gave a second reason to prefer it over revisions on `Unreadable`: that variant also carries a **stable read failure**, for which no bytes were obtained and no revision exists, so revisions there would have been two `Option`s whose absence meant one thing. `ChangedContent` is a new dictionary namespace with two sentences in each language. §3.2's round-4 correction | `a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text`, which fails against the old routing on *"a change stays a Changed whether or not its bytes are text"*. It replaces `present_bytes_that_are_not_utf8_cross_as_unreadable_rather_than_as_content`, whose name asserted the routing this closes |
+| 3 | Medium | The round-3 retention correction stated a false universal: the headline said every admitted observation is held until acknowledgement or overflow, while its own correction two lines down admits two further rejection causes — a replaced epoch and a sequence at or below the watermark, both implemented by returning **before** the insertion. And `commands.rs` said an entry is *"kept only until an overflow evicts it"*, which is false in the other direction: it omits removal by acknowledgement. The claimed identical boundary was not achieved | **Words.** The boundary is now stated in two halves everywhere: an admitted observation is **stored** unless it is one of those two arrivals, and a **stored** entry leaves the queue in exactly two ways — a later drain acknowledges it, or an overflow evicts it. The header, the module doc's guarantee 4 and both `commands.rs` docs say it; the sweep for the *shape* found four more positions round 3 did not reach — two in `main.rs`'s module header, `WorkspaceSession::new`'s doc and `queueing_sink`'s. **No guarantee was weakened**: the two-way boundary of a stored entry is unchanged | None. No code changed for it and no test can fail a false comment. `a_sequence_at_or_below_the_acknowledged_watermark_is_counted_as_a_loss`, `an_observation_from_another_epoch_is_stored_and_woken_for_by_nothing` and `a_full_queue_drops_its_oldest_entries_and_the_documents_they_were_the_only_state_of` are the four behaviours it now describes truthfully |
+| 4 | Low | §12.4 generalized a valid counterexample into a false rule: *a capacity rule that is a function of state equality **cannot** be arrival-order independent*. Retaining the top `K` under any fixed total key containing `(state discriminant, sequence)` is state-dependent and arrival-order independent, so the universal is false | **Words only.** The refusal of the specific policy stands — round 4 independently reproduced the `S,T,S,S,S` / capacity-3 counterexample retaining `{1,2,5}` versus `{2,4,5}` — and the true, narrower sentence is that the refused policy depends on **redundancy at the moment of the eviction**, a property of the set that a later arrival can change. §12.4's round-4 correction | None, and none is possible: the shipped `evictable_sequence` does not read `ObservedState` at all, so no behaviour turns on the sentence |
+| 5 | Low | The core keeps every distinct `PathBuf` it has ever named for the life of the process, and its own comment asserted as fact that "a config tree is tens of files, so it never becomes a consideration" — enforced by nothing and measured by nothing. Since 2d-1 the table is also fed by the watcher, one entry per distinct stabilized path, which is a stream and not a tree. Round 3 closed R9's *duplication* and recorded this honestly in the notes while leaving the reassurance in the source | **Words, in the code.** `session_identities`'s comment now says the table is unbounded, unevicted, uncapped and unmeasured; names the tens-of-files sentence as a working assumption rather than a fact; states the wider workload the assumption has to cover; records that **eviction is refused rather than unconsidered**, because a forgotten path gets a different number on its next mention — round 1's stranding; and names which phase could do better and why. R9's round-4 correction | None. Nothing here can be measured deterministically from a test: the register is a process-wide static shared by every test in the binary, so a count is not a function of the test that reads it |
+
+### 13.2 What this round changed, by file
+
+- **`src-tauri/src/reconciliation.rs`** — `ChangedContent` is new; `ObservedDocument` has three arms
+  where it had two, and every arm carries the display path; `ExternalObservation::Changed` changed
+  shape; `address_of` changed behaviour; `address_of_minted` and `display_path` are new;
+  `external_observation`'s `Changed` arm takes both revisions before choosing a content arm.
+  Reworded: the module doc's *where the identities come from* section and its guarantee 4 (the
+  retention boundary in its canonical two-half wording), `ObservedDocument` and all three arms,
+  `UnreadableReason` (now one type across three wire positions), `ExternalObservation`'s non-UTF-8
+  section, its `Added`, `Removed` and `Unreadable` variants, `ReconciliationQueue::drain`'s
+  `workspace` paragraph, `queueing_sink`, `external_observation`, and the `snapshot` test helper.
+  **One new test**, one test renamed and rewritten, six tests and one test helper updated for the new
+  shapes, and one test strengthened — `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor`
+  now asserts that the two nested content enums cross as one-key objects like every other wire enum
+  (D5 is about *every* wire enum, not the outer one) and that **every** arm of an address carries a
+  display path, whichever arm it is. Which arm each observation lands in is deliberately not that
+  test's subject: the identity register is process-wide, so another test in the same binary may
+  already have named one of its paths.
+
+  **Two round-3 test names are renamed for the same reason the type changed**, because a name is a
+  sentence and both were claiming exactly what finding 1 refused:
+  `an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot` →
+  `…_names_that_path_where_the_workspace_cannot`, and
+  `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` →
+  `…_and_an_identity`. §12.1's rows and §12.4 name the old spellings and are left as written. The
+  same word was corrected in three doc positions of the same shape: `ExternalObservation::Added`'s
+  `document_summary`, which said the identity is what makes that arm *addressable* when the open
+  workspace holds no addition by definition, and — in the core — `identity_of`'s *"hand its sidebar
+  row an address"* and `identity_already_issued`'s *"does anything in this process address this
+  file"*. Both core positions now say **identity** and **name**, and `identity_of` states in its own
+  paragraph that an identity it mints is not an address in any particular `Workspace`.
+- **`src-tauri/src/commands.rs`** — three reworded positions: both `drain_external_changes` docs
+  (the *kept only until an overflow evicts it* wording, false in the other direction) and
+  `WorkspaceSession::new`'s doc; plus the `observing` non-test comment.
+- **`src-tauri/src/main.rs`** — two reworded positions in the module header: *"where what the gate
+  admits stops being dropped"* and *"puts every admitted observation in it"*.
+- **`crates/espansoconfig-core/src/workspace/mod.rs`** — `session_identities`'s comment, rewritten
+  around the unbounded table it documents. **No code and no behaviour changed**, and
+  `cargo tree -p espansoconfig-core | rg tauri` is still empty.
+- **`src-tauri/src/dictionary_contract.rs`** — `ChangedContent` as a fourth namespace from
+  `reconciliation.rs`, with its variant count; and `ObservedDocument`'s `NOT_A_CODE` reason, which
+  said *both arms*.
+- **`src-tauri/src/liveness_contract.rs`** — one new inventory entry, judged a **false positive**;
+  §13.4 has the judgement and why it was filed rather than reworded.
+- **`src/lib/i18n/{en,es}.json`** — two new keys each, `code.changedContent.projected` and
+  `code.changedContent.unreadable`, EN and ES.
+- **`docs/decisions/2d-4a-notes.md`** — two header sentences (the retention headline and the wake
+  sentence beside it) and **nine** round-4 correction blocks (the header, §1, §2.1, §3.2, §3.3, R3,
+  R9, and §12.4 twice), and this section.
+
+No Svelte component changed and no TypeScript changed. The two dictionary files are data, and
+`npm run check`, `npm test` and `npm run build` are unmoved by them. Q7 item 4's two prohibitions
+hold — this step still draws nothing and still decides nothing about whether a write surface is open.
+
+**Two more rows of §7's evidence table are now out of date**, said here rather than by editing it:
+`present_bytes_that_are_not_utf8_cross_as_unreadable_rather_than_as_content` **no longer exists** and
+`a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text` replaced it, because
+the sentence its name asserted is the defect finding 2 closed; and
+`a_changed_carries_its_exact_text_beside_the_projection_of_the_same_bytes` now reads its text and its
+projection through `ChangedContent::Projected`. §12.2's three out-of-date rows are unchanged.
+
+**What 2d-4b inherits from this round.** `ChangedContent` is two more dictionary keys with **no
+accessor**, exactly as `AddedContent` is: `src/lib/i18n/codes.ts`'s `describe*` builders and the
+variant counts in `src/lib/i18n/codes.test.ts:379` are 2d-4b's, and R1 covers both namespaces
+identically. `ObservedDocument`'s third arm and `ExternalObservation::Changed`'s new shape are
+2d-4b's TypeScript mirrors to declare, under R6's still-open note that no `wire_contract` table
+compares them. `AWAITING_FRONTEND_DECLARATION` in `src-tauri/src/wire_contract.rs` is untouched and
+is still 2d-4b's to delete.
+
+### 13.3 The gates after this round
+
+| Gate | Result |
+|---|---|
+| `pkill -f 'target/debug/deps/espansoconfig-'` | exit 0, run before the workspace suite |
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | **1308** passed, 0 failed, 26 result lines all `ok`, exit 0 (1307 before the round, **+1** — the one new test; the second new assertion set is a rename, so it moves no count) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, clean |
+| `cargo fmt --check` | exit 0, clean |
+| `cargo doc --workspace --no-deps` | exit 0; **73** `private_intra_doc_links` warnings, the pre-existing count |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no match |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20/20**, 263 filtered out (was 262; +1), 68.74 s, no timeout |
+| `npm test` | **2125** passed, 56 files — unchanged |
+| `npm run check` | **431** files, 0 errors, 0 warnings — unchanged |
+| `npm run build` | **184** modules — unchanged; the server oracle is absent and the client oracle matches twice |
+
+The workspace suite was run once on a quiet host after the `pkill`, with nothing else running
+concurrently. The three frontend numbers are unchanged rather than re-measured, for §7.1's reason:
+this round's only frontend change is two keys in two JSON files, which adds no module, no
+`svelte-check` file and no test.
+
+### 13.4 What this round did not do, and where it is thin
+
+- **Both new tests were watched failing before their fix**, by applying the inverse edit and
+  restoring it, and the restored file was compared byte-for-byte against a copy taken before the
+  probe. With `address_of` asking the register alone and offering its answer as the current address —
+  round 3's rule, in the new arm names — `an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address`
+  failed with `Addressable { document: DocumentId(0), relative_path: WirePath("match/a.yml") }`
+  against an expected `Named { … }`, and
+  `an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot`,
+  `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` and
+  `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` failed with it —
+  four failures for one reverted rule. With the non-UTF-8 `Changed` routed back to
+  `ExternalObservation::Unreadable`,
+  `a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text` failed on *"a change
+  stays a Changed whether or not its bytes are text"*, printing the revision-less `Unreadable` value
+  that is the finding itself. Findings 3, 4 and 5 have no test that can fail: two are false sentences
+  over correct code, and the third is a code comment about an unmeasurable process-wide static.
+- **`Addressable` versus `Named` is a claim about the *backend* workspace, and nothing here checks
+  what the consumer actually holds.** `Named` covers two situations the queue cannot tell apart — a
+  file added after the open, whose identity the consumer received from an `Added` of this epoch, and
+  a path only a replaced workspace ever discovered, under which the consumer probably holds nothing.
+  A consumer that treats the two alike will be wrong about one of them, and **this step cannot help
+  it**: what the window holds is 2d-5's knowledge. The type says which arm; it does not say what to
+  do about it, and no test in this repository can.
+- **Nothing forces a consumer to read the arm at all.** `Named` and `Addressable` carry the same two
+  operands, so 2d-4b's TypeScript can mirror them as one shape with a tag nobody matches on, and the
+  round-4 defect would return in the frontend with every Rust gate green. The deliberate absence of a
+  Rust accessor over the three arms is an argument, not an enforcement, and it stops at the boundary.
+- **`address_of_minted`'s conservative arm is unreachable today and untested.** It answers `Named`
+  when the open workspace resolves the path to a *different* number than the snapshot minted. One
+  register makes that impossible, which is why the branch exists at all — the alternative was to
+  assume the agreement — but no test drives it, because no test can produce the disagreement without
+  a second register.
+- **The `ChangedContent` split is a wire change with no consumer**, exactly as `AddedContent` was one
+  round ago. Nothing in this repository reads `previous_revision` or `disk_revision` off an
+  unreadable change; what the round closed is that the two numbers now *exist* on the wire. Whether
+  they are the two a consumer needs is 2d-5's to find out, and if they are not, this is the third
+  round in which R3 was declared closed.
+- **Finding 3 was closed by a sweep for the shape, and the sweep is still a human reading.** The four
+  positions this round found beyond the two the review cited were found by searching for what the
+  claim now *is* rather than for the words of the finding — but nothing mechanical checks that the
+  retention boundary is stated identically everywhere, the way `liveness_contract.rs` checks the
+  liveness family. A seventh position written tomorrow would be invisible.
+- **The liveness sweep fired on this round's prose too, for the third round running.**
+  `address_of_minted`'s *"The workspace **must answer** with the same number"* matched `must answer`.
+  It was judged a **false positive** — it is an assertion about two identity sources agreeing about a
+  number, not about whether a path is ever looked at again — and, unlike round 3's, it was **filed in
+  the inventory rather than reworded**, precisely because a rewording leaves no trace anywhere else
+  and this is the sentence that says what the function refuses to assume. The inventory entry names
+  the function and the reason.
+- **The core register is still unbounded**, and this round only stopped the code from saying
+  otherwise. No count exists, no cap exists, no eviction rule exists, and no step of the 2d split
+  owns building one: 2d-7 could measure it and 2d-5 holds the knowledge a bound would need. Judged
+  against this project's precedent — seven Phase 2d-3 items recorded as bounded residues and later
+  found to be real defects — an honest downgrade is the least this could have been, and it is exactly
+  what it is: **a residue, restated more accurately, not a fix.**
+- **Nothing here observes a real filesystem**, unchanged from rounds 1, 2 and 3, except that
+  `an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address` builds two real
+  `Workspace` values over a temporary tree and removes a file between them. `crate::watch_check`
+  remains where real-filesystem evidence lives and gained nothing this round.
+- **R8 is unchanged, and this section is an instance of it.** Round 1's fix wrote three of round 2's
+  findings, round 2's fix wrote at least one of round 3's, and round 3's fix wrote **four of round
+  4's five**. There is no reason to think this round wrote none.

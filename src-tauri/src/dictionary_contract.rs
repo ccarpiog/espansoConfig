@@ -416,6 +416,10 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/reconciliation.rs",
         name: "AddedContent",
     },
+    CodeEnum {
+        source: "src-tauri/src/reconciliation.rs",
+        name: "ChangedContent",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -477,6 +481,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("externalObservation", 4),
     ("unreadableReason", 6),
     ("addedContent", 2),
+    ("changedContent", 2),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -556,9 +561,11 @@ const NOT_A_CODE: &[(&str, &str)] = &[
     (
         "ObservedDocument",
         "an address, not a code, exactly as `PathSegment` is: it says which \
-         file an external observation is about, and both arms are rendered \
-         literally — a `DocumentId` is a number the caller hands back and the \
-         other arm is a display path. What a screen says about a removed or \
+         file an external observation is about, and all three arms are rendered \
+         literally — a `DocumentId` is a number the caller hands back and every \
+         arm carries a display path. Which arm it is says whether the open \
+         workspace resolves that number, which a screen answers by what it \
+         draws rather than by a sentence. What a screen says about a removed or \
          unreadable file comes from `ExternalObservation`'s own namespace",
     ),
     (

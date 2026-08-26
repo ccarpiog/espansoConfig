@@ -123,11 +123,14 @@
 //! records nothing at all, because nobody has been shown it and a marker would
 //! coalesce the engine's own later reading of it into silence.
 //!
-//! **Phase 2d-4a is where what the gate admits stops being dropped**, and it
-//! adds the sixteenth workspace command and the first event. `reconciliation` is the
+//! **Phase 2d-4a is where what the gate admits reaches something that can hand
+//! it back**, and it adds the sixteenth workspace command and the first event.
+//! `reconciliation` is the
 //! typed, ordered, coalescing queue the session holds beside its open
-//! workspace: the sink behind the admission gate puts every admitted
-//! observation in it and emits `events::RECONCILIATION_READY`, and
+//! workspace: the sink behind the admission gate puts an admitted observation
+//! in it — unless it carries a replaced epoch or a sequence a drain has already
+//! acknowledged, which are the two arrivals no later drain could return — and
+//! emits `events::RECONCILIATION_READY`, and
 //! `commands::drain_external_changes` hands the pending ones back as typed wire
 //! values, coalesced — one observation per run of one path's sequence-adjacent
 //! entries asserting one state. The **event is a hint and the command answer is the authority** (the

@@ -218,14 +218,45 @@ struct SessionIdentities {
 /// The process-wide identity table.
 ///
 /// "Session" means the running process, which is what a `DocumentId` is
-/// documented to be scoped to. The table grows by one entry per distinct path
-/// ever opened; a config tree is tens of files, so it never becomes a
-/// consideration. Since Phase 2d-1 the observation engine mints from this
-/// same table, and the table is the one input the engine's injected clock and
-/// reader do not cover: the identity values in otherwise identical
+/// documented to be scoped to. Since Phase 2d-1 the observation engine mints
+/// from this same table, and the table is the one input the engine's injected
+/// clock and reader do not cover: the identity values in otherwise identical
 /// observation outputs depend on which paths anything in the process
 /// identified first, which is why every claim of the engine's determinism is
 /// qualified to observation shapes, revisions and order.
+///
+/// # Its size is unbounded, and that is a stated hole rather than a bound
+///
+/// The table grows by one entry — a [`PathBuf`] and a `u64` — per distinct path
+/// this process has ever named, and **nothing evicts from it, nothing caps it
+/// and nothing measures it.** An earlier version of this comment asserted that a
+/// config tree is tens of files "so it never becomes a consideration". That is a
+/// working assumption about a workload, it was never enforced or measured, and
+/// stating it as a fact is what round 4 of Phase 2d-4a's review called it:
+/// asserting as fact something nothing checks.
+///
+/// What the assumption now has to cover is wider than a directory walk. Since
+/// Phase 2d-1 this table is also fed by the watcher, one entry per distinct path
+/// it stabilizes under the two watched roots for as long as the process runs —
+/// a *stream*, not a tree — so an external process that creates and removes
+/// arbitrarily many distinct paths grows it without bound while every queue
+/// downstream of it stays capped.
+///
+/// **Eviction is refused rather than unconsidered.** A path this table forgets
+/// is a path whose next mention gets a *different* number, so a consumer holding
+/// something under the old one holds it under an identity nothing can name any
+/// more — the stranding `docs/decisions/2d-4a-notes.md` round 1 found and closed.
+/// A cap that refused to mint would be worse still: [`mint`] already treats an
+/// identity that cannot be told from another as unacceptable at any cost.
+///
+/// **No step of the Phase 2d split owns bounding it**, and that is said here
+/// rather than implied. A measurement first becomes meaningful in **2d-7**,
+/// which is the first step that runs this process against a real filesystem for
+/// long enough for the count to mean anything; an actual bound needs a rule for
+/// when an identity may be forgotten, and that rule needs to know that no
+/// consumer still holds it — knowledge the frontend coordinator (**2d-5**) has
+/// and this module does not. Until one of those exists this is an unbounded
+/// structure with a workload assumption behind it, said plainly.
 fn session_identities() -> &'static Mutex<SessionIdentities> {
     static IDENTITIES: OnceLock<Mutex<SessionIdentities>> = OnceLock::new();
     IDENTITIES.get_or_init(|| {
@@ -256,10 +287,17 @@ fn session_identities() -> &'static Mutex<SessionIdentities> {
 /// convenience.** A file created after a [`Workspace`] was opened whose bytes
 /// are not valid UTF-8 never reaches [`crate::workspace::project_source`], so
 /// nothing has ever minted an identity for it — and the Tauri layer must still
-/// hand its sidebar row an address, because a row with no identity is a row
+/// hand its sidebar row an identity, because a row with no identity is a row
 /// nothing can later invalidate. The alternative was for that layer to invent a
 /// number, which would name nothing and could collide with one of these.
 /// Minting is still this module's job; what changed is who may ask for it.
+///
+/// **An identity minted here is not an address in any particular
+/// [`Workspace`].** It says this process names that path under this number, and
+/// nothing more: the file may be one no open workspace enumerated, in which case
+/// [`Workspace::document_context`] answers [`WorkspaceError::UnknownDocument`]
+/// for it. Only a `Workspace` can say whether it holds a path, and
+/// [`Workspace::document_id`] is the question.
 ///
 /// **This function mints.** A caller that wants to know whether a path has
 /// *already* been identified — and that must not create an entry by asking —
@@ -279,8 +317,10 @@ pub fn identity_of(path: &Path) -> DocumentId {
 
 /// The identity `path` was already given, or `None` — **minting nothing**.
 ///
-/// The read-only half of [`identity_of`], and the authoritative answer to *does
-/// anything in this process address this file*. It exists because asking
+/// The read-only half of [`identity_of`], and the authoritative answer to *has
+/// anything in this process ever named this file* — which is **not** the same
+/// question as *does the open workspace hold it*, and the paragraph below says
+/// so. It exists because asking
 /// [`identity_of`] is not a question: it is an allocation, so a caller that used
 /// it as a lookup would create the entry it was checking for and could never
 /// answer `None`.

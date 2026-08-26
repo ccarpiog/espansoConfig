@@ -486,6 +486,12 @@ const INVENTORY: &[Judged] = &[
         reason: "a pointer: the same Q3 obligation at `ReconciliationQueue::wake`, handed to 2d-4b and 2d-5 — the wire's recovery from a dropped hint, implemented by nothing here",
     },
     Judged {
+        file: "src-tauri/src/reconciliation.rs",
+        phrase: "must answer",
+        count: 1,
+        reason: "false positive: `address_of_minted` requiring the open workspace to resolve a path to the *same* identity a snapshot minted — an assertion about two identity sources agreeing, not about whether a path is ever looked at again",
+    },
+    Judged {
         file: "src-tauri/src/commands.rs",
         phrase: "coalesce to nothing",
         count: 1,

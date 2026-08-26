@@ -73,10 +73,18 @@
 //!    queue's part of it is the `after_sequence` watermark: a drain removes
 //!    every entry at or below the sequence the caller says it already holds,
 //!    keeps everything above it, and returns the coalesced form of what it
-//!    kept. So an entry stays until a later drain acknowledges it **unless the
-//!    queue reaches [`QUEUE_CAPACITY`] first** — an overflow evicts an undrained
-//!    entry unacknowledged and counts it in
-//!    [`ReconciliationBatch::discarded`], and what that costs is the
+//!    kept.
+//!
+//!    **The retention boundary, in the one wording every position in this
+//!    module and in `crate::commands` states.** An admitted observation is
+//!    **stored** unless it is one of the two arrivals no later drain could
+//!    return — a replaced epoch, or a sequence at or below the acknowledged
+//!    watermark ([`ReconciliationQueue::enqueue`] refuses both before storing
+//!    anything, and counts the second in [`ReconciliationBatch::discarded`]).
+//!    A **stored** entry then leaves this queue in exactly two ways: **a later
+//!    drain acknowledges it, or an overflow evicts it.** The first is the
+//!    consumer saying it holds the observation; the second is a loss counted in
+//!    [`ReconciliationBatch::discarded`], and what it costs is the
 //!    whole-workspace reload a non-zero `discarded` obliges, never a repeated
 //!    drain. Short of an eviction, an answer lost on the way to the window
 //!    costs no more than the drain that repeats it, **when nothing is enqueued
@@ -110,30 +118,39 @@
 //!
 //! # Where the identities come from
 //!
-//! A [`ContentRevision`] and a projection ride the observation itself, so a
-//! [`ExternalObservation::Changed`] needs nothing but the value the gate
-//! admitted. An address does not: `espansoconfig_core::watch::engine`'s
-//! `Removed` and `Unreadable` carry a path and no identity. So the projection
-//! into wire form happens at **drain** time, under the session lock, where the
-//! configuration root is available to render a display path against.
+//! A [`ContentRevision`] rides the observation itself, so every wire value's
+//! revisions come out of the value the gate admitted. An address does not:
+//! `espansoconfig_core::watch::engine`'s `Removed` and `Unreadable` carry a path
+//! and no identity, and so does a `Changed` whose new bytes are not UTF-8. So
+//! the projection into wire form happens at **drain** time, under the session
+//! lock, where the open `Workspace` is available — both to render a display path
+//! against its root and to be **asked whether it holds that path**.
 //!
-//! **One table answers, and it is the core's.**
-//! `espansoconfig_core::workspace::identity_already_issued` is a read of the
-//! process-wide, path-keyed table every identity in this application comes out
-//! of — a `Workspace`'s at discovery, the observation engine's at projection.
-//! [`address_of`] asks it and nothing else. This queue used to keep a second,
-//! epoch-scoped copy of every identity it had put on the wire, which was a
-//! duplicate of that table written and read on the drain path; the authoritative
-//! read replaces it, and it answers for strictly more paths, since a workspace
-//! mints through the same function it does.
+//! **Two questions, and they have two different answers.**
 //!
-//! What that leaves for [`ObservedDocument::Unknown`] is exactly *nothing in
-//! this process has ever named this path* — an io-unreadable file created after
-//! the workspace was opened, say, which no projection and no discovery ever
-//! reached. A file that reaches the window as an
-//! [`ExternalObservation::Added`] is always named, its bytes valid UTF-8 or not:
-//! the projected arm carries the identity its own snapshot minted, and the
-//! unreadable arm mints one through
+//! - *Has anything in this process ever named this path?*
+//!   `espansoconfig_core::workspace::identity_already_issued` reads the
+//!   process-wide, path-keyed table every identity in this application comes out
+//!   of — a `Workspace`'s at discovery, the observation engine's at projection,
+//!   this module's at a non-UTF-8 addition. It is **not scoped to a workspace or
+//!   an epoch**: a path keeps one number for the life of the process.
+//! - *Does the **open** workspace resolve that path today?* Only
+//!   `Workspace::document_id` answers that, and the two answers genuinely
+//!   differ — a file created after the workspace was opened has an identity and
+//!   is not in the workspace, and so does a path a **replaced** workspace
+//!   discovered.
+//!
+//! [`address_of`] asks both, and [`ObservedDocument`] carries which of the three
+//! answers it got. **Every arm of it carries the display path**, so a consumer
+//! is never handed a number as its only handle on a file: an identity the
+//! current workspace rejects is still the one number this process gives that
+//! path — which is what makes a projection installed under it invalidatable —
+//! but it is not an address a command will accept today, and the value says so
+//! rather than leaving the consumer to discover it.
+//!
+//! A file that reaches the window as an [`ExternalObservation::Added`] is always
+//! named, its bytes valid UTF-8 or not: the projected arm carries the identity
+//! its own snapshot minted, and the unreadable arm mints one through
 //! `espansoconfig_core::workspace::identity_of`, because a row the consumer
 //! cannot address is a row nothing can later tell it to invalidate.
 //!
@@ -234,56 +251,92 @@ pub struct ReconciliationWake {
     pub newest_sequence: u64,
 }
 
-/// Which document an observation is about.
+/// Which document an observation is about — and whether the **open** workspace
+/// resolves it.
 ///
-/// Two arms because this application cannot always answer the first one.
-/// `espansoconfig_core::watch::engine`'s `Removed` and `Unreadable` carry a
-/// path and no identity. What can nevertheless address such a path is the
-/// core's own process-wide, path-keyed identity table, read through
-/// `espansoconfig_core::workspace::identity_already_issued` — see
-/// [`address_of`]. A path that table has never named is a path nothing in this
-/// process has ever addressed, and inventing a number here would put one on the
-/// wire that names nothing.
+/// Three arms, because there are three different things this application can
+/// truthfully say about a watched path and collapsing any two of them loses
+/// something a consumer needs. **Every arm carries the display path**, so no
+/// consumer is ever handed a number as its only handle on a file.
 ///
-/// Both variants are struct variants, including the one-field arms, so the enum
-/// crosses `serde`'s externally tagged representation as a uniform object —
-/// `{"Known":{"document":3}}` — which is the rule every wire enum in this
-/// application follows (`docs/decisions/2b-2b-3-notes.md` D5).
+/// *A process-lifetime identity is not an address in the current workspace*, and
+/// an earlier shape of this type said `Known { document }` — with no path — for
+/// both of the first two arms below. Round 4 of this phase's review is the
+/// interleaving that made that false: epoch 1 mints an identity for a file,
+/// epoch 2 reopens the root without it, and the path then stably fails to read.
+/// The identity is real and is still this process's number for that path; the
+/// **open** workspace answers `UnknownDocument` for it. `docs/decisions/
+/// 2d-4a-notes.md` §13 is the record.
+///
+/// All three variants are struct variants, including the one-field arm, so the
+/// enum crosses `serde`'s externally tagged representation as a uniform object —
+/// `{"Addressable":{"document":3,"relative_path":"match/a.yml"}}` — which is the
+/// rule every wire enum in this application follows
+/// (`docs/decisions/2b-2b-3-notes.md` D5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ObservedDocument {
-    /// Something in this process has already named this path — under this
-    /// identity.
+    /// The **open workspace** resolves this path to this identity.
+    ///
+    /// So the number is an address every workspace command accepts *today*, and
+    /// not merely a name this process once minted. It is the strongest of the
+    /// three answers and the ordinary one: a file the workspace discovered, now
+    /// removed or stably unreadable.
+    Addressable {
+        /// The session-local identity of the file, as the open workspace
+        /// resolves it.
+        document: DocumentId,
+        /// The path, for display.
+        relative_path: WirePath,
+    },
+    /// Something in this process has named this path, and the open workspace
+    /// does not hold it.
     ///
     /// It is `espansoconfig_core::workspace`'s one process-wide, path-keyed
     /// table: a `Workspace`'s `identity_of` at discovery, the engine's at
     /// projection, and this module's at a non-UTF-8 addition. **One table means
     /// one number per path**, so this is the identity every other holder of that
-    /// path already has, rather than two structures that happen to agree.
+    /// path already has, rather than two structures that happen to agree — and
+    /// a consumer holding a projection under it can therefore still act on this
+    /// value, which is the whole reason the identity crosses at all.
     ///
-    /// **Path identity outlives a workspace epoch, deliberately.** The core
-    /// keeps a path's identity for the life of the process, a recreation at that
-    /// path included, so this arm can name a path first identified under a
-    /// replaced workspace. What makes a *batch* stale across a replacement is
-    /// [`ReconciliationBatch::epoch`] and never this field.
-    Known {
-        /// The session-local identity of the file.
+    /// **It is not an address the open workspace will accept.** Two ways here,
+    /// and this arm does not distinguish them because this queue cannot:
+    ///
+    /// - a file created *after* the workspace was opened, whose identity the
+    ///   consumer received from an [`ExternalObservation::Added`] of this epoch.
+    ///   That is the case round 1 of this phase's review found stranded, and the
+    ///   identity is exactly what un-strands it;
+    /// - a path a **replaced** workspace discovered. Path identity outlives a
+    ///   workspace epoch deliberately — the core keeps one number per path for
+    ///   the life of the process, a recreation at that path included — so this
+    ///   arm can name a path the current session never enumerated, and the
+    ///   consumer may hold nothing at all under it. What makes a *batch* stale
+    ///   across a replacement is [`ReconciliationBatch::epoch`]; what makes this
+    ///   *identity* unusable as an address is this arm.
+    Named {
+        /// The session-local identity of the file, as this process minted it.
         document: DocumentId,
+        /// The path, for display.
+        relative_path: WirePath,
     },
     /// Nothing in this process has ever named this path.
     ///
     /// **So the consumer holds nothing under an identity for this file** — no
     /// identity for it has ever been minted, here or anywhere else — and a
     /// display path therefore strands no projection.
-    ///
-    /// The path is rendered relative to the configuration root where it lies
-    /// beneath it, and whole where it does not. It is display data and never an
-    /// address a command accepts back — a [`WirePath`] renders lossily, and
-    /// identity is what a caller hands back (`crate::wire_contract`).
-    Unknown {
-        /// The path, for display only.
+    Unnamed {
+        /// The path, for display.
         relative_path: WirePath,
     },
 }
+
+// **No accessor over the three arms is declared here**, deliberately. One that
+// answered *the identity, where there is one* would let a consumer treat
+// `ObservedDocument::Addressable` and `ObservedDocument::Named` as one answer
+// with a `?`, which is exactly the collapse round 4 of this phase's review
+// found: the two arms differ in whether the open workspace will accept the
+// number, and that difference is the value's whole subject. A consumer that
+// needs the identity matches, and the match is where it meets the distinction.
 
 /// Why this application cannot show a file's text.
 ///
@@ -294,6 +347,14 @@ pub enum ObservedDocument {
 /// not available* — and this application already refuses to show non-UTF-8
 /// bytes anywhere else, since `document_text` answers valid UTF-8 or refuses
 /// and never decodes lossily.
+///
+/// One type across **three** wire positions, and the whole type at each of them:
+/// [`ExternalObservation::Unreadable`], [`ChangedContent::Unreadable`] and
+/// [`AddedContent::Unreadable`]. Only [`UnreadableReason::NotUtf8`] reaches the
+/// second and third today and only the io arms reach the first, because those
+/// are the states the engine can report through each shape. Narrowing any of the
+/// three fields to the arms reachable today would be this module deciding which
+/// failures the engine may report through which observation.
 ///
 /// The io arms are a **closed** set over an open one: `std::io::ErrorKind` is
 /// `#[non_exhaustive]`, so everything this list does not name arrives as
@@ -345,30 +406,34 @@ impl UnreadableReason {
 /// is the consumer's whole arbitration rule and it may not be recovered from a
 /// hash.
 ///
-/// # Why a non-UTF-8 state is not a `Changed`, and why it *is* an `Added`
+/// # Why a non-UTF-8 state stays inside its own observation
 ///
 /// The engine reports present-but-not-UTF-8 bytes as content, so a `Changed` or
-/// an `Added` can arrive with no text and no projection. The two answer it
-/// differently, and the difference is not a preference:
+/// an `Added` can arrive with no text and no projection. **Both answer it the
+/// same way: with a discriminated content field**, which is the consult's `disk?`
+/// written as a value rather than as an absence — an absence carries no reason,
+/// and the reason is the sentence a person reads.
 ///
-/// - A **`Changed`** whose new bytes are not UTF-8 crosses as
-///   [`ExternalObservation::Unreadable`] with [`UnreadableReason::NotUtf8`].
-///   That keeps `Changed` total — its text and its projection are always
-///   present, out of one snapshot, which is the pairing a conflict's comparison
-///   side depends on. The alternative was four optional fields whose absence all
-///   meant one thing. What it costs is stated rather than smoothed over: the
-///   consult's `Changed` revisions do not survive the routing, because Q3's
-///   `Unreadable` carries none. `docs/decisions/2d-4a-notes.md` §3.2 records it.
+/// - A **`Changed`** whose new bytes are not UTF-8 stays a `Changed`, carrying
+///   its `previous_revision`, its `disk_revision` and
+///   [`ChangedContent::Unreadable`] in place of a projection. An earlier draft
+///   routed it to [`ExternalObservation::Unreadable`], which carries neither
+///   revision, **so both operands Q3 puts on `Changed` were discarded** and no
+///   consumer could recover them from the value it was handed. That is round 4
+///   of this phase's review, and it was recorded as a bounded residue (R3) for
+///   two rounds before it was called what it is.
 /// - An **`Added`** whose bytes are not UTF-8 is still an `Added`, carrying its
 ///   sidebar row and [`AddedContent::Unreadable`] in place of a projection.
-///   This is the consult's `Added { ..., disk?, findings }` written as a
-///   discriminated value, and an earlier draft of this module routed it to
-///   `Unreadable` too — which left the first sighting of such a file reaching
-///   the window as a bare display path: no row to draw and no address to
-///   invalidate one by. Nothing about `Changed`'s totality required that, and
-///   the identity a row needs is now minted for it (see [`address_of`]).
+///   An earlier draft routed that to `Unreadable` too — which left the first
+///   sighting of such a file reaching the window as a bare display path: no row
+///   to draw and no address to invalidate one by. The identity a row needs is
+///   now minted for it (see [`address_of`]).
 ///
-/// Both say the same true sentence to a person — *this file's text is not
+/// What remains of [`ExternalObservation::Unreadable`] is the one engine state
+/// that is **not** content: a path whose *read* stably fails, which has no bytes,
+/// no revision to report and no projection anything could have made.
+///
+/// All three say the same true sentence to a person — *this file's text is not
 /// available* — which this application already says everywhere else, since
 /// `document_text` answers valid UTF-8 or refuses and never decodes lossily.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -378,20 +443,115 @@ pub enum ExternalObservation {
     Changed {
         /// The sequence this observation was admitted under.
         sequence: u64,
-        /// The document, as the snapshot itself minted it.
-        document: DocumentId,
+        /// Which document, and whether the open workspace resolves it.
+        ///
+        /// The projected arm builds it around the identity **its own snapshot
+        /// minted**, so it never depends on the two identity sources agreeing;
+        /// the unreadable arm has no snapshot and asks [`address_of`]. Either
+        /// way the display path is present.
+        document: ObservedDocument,
         /// The last stable revision the engine held, or `None` when it had none.
         ///
         /// **Not a claim that the caller ever saw that revision**, and not an
         /// order: it is what the engine tracked before this reading.
         previous_revision: Option<ContentRevision>,
         /// The revision of the exact bytes now on disk.
+        ///
+        /// **Present whether or not those bytes are text.** The engine hashes
+        /// the exact stabilized bytes either way, so this field and the one
+        /// above are the two operands the consult's Q3 puts on a `Changed`, and
+        /// they no longer depend on the content arm — which is the whole of what
+        /// [`ChangedContent`] fixed.
         disk_revision: ContentRevision,
+        /// The projection of those same bytes, or why there is none.
+        content: ChangedContent,
+    },
+    /// A YAML file the watcher was not tracking stably exists.
+    Added {
+        /// The sequence this observation was admitted under.
+        sequence: u64,
+        /// The row a sidebar draws, built from the discovered file and the
+        /// identity for its path.
+        ///
+        /// **Present whether or not the bytes are text**, which is the whole of
+        /// what gives this arm an identity at all: a projected addition carries
+        /// the one its own snapshot minted, and an unreadable one carries the
+        /// one `espansoconfig_core::workspace::identity_of` mints for the same
+        /// path.
+        ///
+        /// **It is an identity and not an address the open workspace resolves.**
+        /// An addition is by definition a file that workspace does not hold, so
+        /// `document_context` refuses this number — the same position
+        /// [`ObservedDocument::Named`] describes. What the identity buys is that
+        /// a row drawn under it can later be told to go away, which is what a
+        /// bare display path could not do.
+        ///
+        /// **A summary carries the path beside the identity**, so this arm needs
+        /// no [`ObservedDocument`]: it already says both of the things that value
+        /// exists to say, and it says the third one too — `loaded` is `false`,
+        /// and truthfully, because the backend workspace does not hold this file
+        /// at all, so it holds no parse of it either.
+        document_summary: DocumentSummary,
+        /// The projection of the stabilized bytes, or why there is none.
+        content: AddedContent,
+    },
+    /// A tracked path is stably gone.
+    Removed {
+        /// The sequence this observation was admitted under.
+        sequence: u64,
+        /// Which document, and whether the open workspace resolves it.
+        document: ObservedDocument,
+        /// The last stable revision the engine held, or `None` when it had none.
+        previous_revision: Option<ContentRevision>,
+    },
+    /// A path exists as far as two reads can tell and **the read itself stably
+    /// failed**.
+    ///
+    /// The one engine state that is not content: no bytes were obtained, so
+    /// there is no revision to report and there was never a projection to make.
+    /// That is why this variant carries neither, and why present-but-not-UTF-8
+    /// bytes — which *are* content, hashed exactly — belong in
+    /// [`ChangedContent::Unreadable`] or [`AddedContent::Unreadable`] instead.
+    Unreadable {
+        /// The sequence this observation was admitted under.
+        sequence: u64,
+        /// Which document, and whether the open workspace resolves it.
+        document: ObservedDocument,
+        /// Why the text is not available.
+        reason: UnreadableReason,
+    },
+}
+
+/// What one change's stabilized bytes projected to, or why they did not.
+///
+/// [`AddedContent`]'s twin, and deliberately the same shape: the 2d design
+/// consult's Q3 gives an addition an optional projection, and this step gives a
+/// change one too, for the reason round 4 of this phase's review gave. Routing a
+/// non-UTF-8 `Changed` to [`ExternalObservation::Unreadable`] discarded
+/// `previous_revision` **and** `disk_revision`, both of which Q3 puts on a
+/// `Changed` and neither of which `Unreadable` carries — so the two operands a
+/// consumer needs to decide what a change means were destroyed by the routing
+/// rather than by anything about the bytes.
+///
+/// Two variants rather than four `Option`s, for [`AddedContent`]'s reasons: an
+/// absence carries no reason, and the operand sets stay together — a projection
+/// always comes with its findings and its correspondence evidence, and an
+/// unreadable state has none of the three. Both are struct variants, so the enum
+/// crosses `serde`'s externally tagged representation as a uniform object (D5).
+///
+/// **The unreadable arm carries no bytes**, exactly as [`AddedContent`]'s does:
+/// a change this application cannot read as text is one it will not show as
+/// text. What it does carry is above it — the two revisions — because a hash of
+/// bytes is not a rendering of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum ChangedContent {
+    /// The bytes are valid UTF-8, and this is their projection.
+    Projected {
         /// Those exact bytes, unchanged. The comparison side of a conflict.
         disk_text: String,
         /// The projection of those same bytes — paired with
-        /// [`ExternalObservation::Changed::disk_text`] by construction, since
-        /// both come out of one snapshot.
+        /// [`ChangedContent::Projected::disk_text`] by construction, since both
+        /// come out of one snapshot.
         ///
         /// Boxed for [`AddedContent::Projected::disk`]'s reason, which is that
         /// one whole projection makes every value of this enum its size. The
@@ -409,39 +569,13 @@ pub enum ExternalObservation {
         /// is forbidden from crossing IPC; a table holds answers only.
         correspondences: Option<CorrespondenceTable>,
     },
-    /// A YAML file the watcher was not tracking stably exists.
-    Added {
-        /// The sequence this observation was admitted under.
-        sequence: u64,
-        /// The row a sidebar draws, built from the discovered file and the
-        /// identity for its path.
-        ///
-        /// **Present whether or not the bytes are text**, which is the whole of
-        /// what makes this arm addressable: a projected addition carries the
-        /// identity its own snapshot minted, and an unreadable one carries the
-        /// identity [`address_of`]'s table mints for the same path.
-        ///
-        /// `loaded` is `false`, and truthfully: the backend workspace does not
-        /// hold this file at all, so it holds no parse of it either.
-        document_summary: DocumentSummary,
-        /// The projection of the stabilized bytes, or why there is none.
-        content: AddedContent,
-    },
-    /// A tracked path is stably gone.
-    Removed {
-        /// The sequence this observation was admitted under.
-        sequence: u64,
-        /// The document, when the open workspace holds this path.
-        document: ObservedDocument,
-        /// The last stable revision the engine held, or `None` when it had none.
-        previous_revision: Option<ContentRevision>,
-    },
-    /// A path exists as far as two reads can tell and its text is not available.
+    /// The bytes are present and this application cannot show them as text.
+    ///
+    /// Only [`UnreadableReason::NotUtf8`] reaches this arm today: a path whose
+    /// *read* fails is `espansoconfig_core::watch::engine`'s `Unreadable`
+    /// observation and never its `Changed`. The field is the whole reason type
+    /// rather than that one variant, for [`AddedContent::Unreadable`]'s reason.
     Unreadable {
-        /// The sequence this observation was admitted under.
-        sequence: u64,
-        /// The document, when the open workspace holds this path.
-        document: ObservedDocument,
         /// Why the text is not available.
         reason: UnreadableReason,
     },
@@ -950,11 +1084,12 @@ impl ReconciliationQueue {
     /// watermark this queue has been drained with, so a drain that arrives out
     /// of order cannot walk a caller's watermark backwards.
     ///
-    /// `workspace` is here to render a display path against the configuration
-    /// root; what turns a watched path into an *address* is the core's own
-    /// identity table, read by [`address_of`]. It is the open workspace, so this
-    /// runs under the session lock and takes this queue's mutex below it — the
-    /// one order that exists here.
+    /// `workspace` is here for two things, and [`address_of`] is where both are
+    /// asked: it renders a display path against the configuration root, and it
+    /// is **asked whether it holds the path**, which is what separates an
+    /// identity this workspace will accept from one this process merely minted.
+    /// It is the open workspace, so this runs under the session lock and takes
+    /// this queue's mutex below it — the one order that exists here.
     pub fn drain(&self, after_sequence: u64, workspace: &Workspace) -> ReconciliationBatch {
         let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         guard.acknowledged = guard.acknowledged.max(after_sequence);
@@ -1017,7 +1152,11 @@ impl ReconciliationQueue {
 /// **The production sink**, installed by every ordinary
 /// `crate::commands::WorkspaceSession`. Until Phase 2d-4a this position held a
 /// sink that dropped its argument, so a sequence and a publication were spent
-/// on a value nothing could recover; this is what recovers it.
+/// on a value nothing could recover; this is what gives one somewhere to be
+/// recovered from. **Not every argument is stored** —
+/// [`ReconciliationQueue::enqueue`] refuses a replaced epoch and a sequence at
+/// or below the acknowledged watermark before storing anything, and a refusal
+/// emits no wake.
 ///
 /// The wake happens **after** the enqueue and outside the queue's mutex, so a
 /// window that drains the instant it hears one finds the observation already
@@ -1042,12 +1181,17 @@ pub fn queueing_sink(queue: Arc<ReconciliationQueue>) -> AdmittedSink {
 /// and the second is a loss counted in [`ReconciliationBatch::discarded`] and
 /// obliging a whole-workspace reload.
 ///
-/// Every arm that needs an address asks [`address_of`], and the one arm that
-/// needs an address **nothing has minted yet** — a first sighting of a file whose
-/// bytes are not UTF-8 — mints it, because a sidebar row the consumer cannot
-/// name is a row nothing can later tell it to invalidate. This function used to
-/// keep the queue's own record of what it had addressed, which was a second copy
-/// of the core's table; `docs/decisions/2d-4a-notes.md` §12 is why it does not.
+/// **Three ways to an address, and each arm takes the strongest one available
+/// to it.** An arm holding a projection has the identity already and asks
+/// [`address_of_minted`], which only has to ask the open workspace whether it
+/// agrees; an arm holding a bare path asks [`address_of`], which asks the
+/// workspace and then the process-wide register; and the one arm that needs an
+/// address **nothing has minted yet** — a first sighting of a file whose bytes
+/// are not UTF-8 — mints one, because a sidebar row the consumer cannot name is
+/// a row nothing can later tell it to invalidate. This function used to keep the
+/// queue's own record of what it had addressed, which was a second copy of the
+/// core's table; `docs/decisions/2d-4a-notes.md` §12 is why it does not, and §13
+/// is why asking that table alone was not enough either.
 fn external_observation(
     admitted: &AdmittedObservation,
     workspace: &Workspace,
@@ -1059,23 +1203,38 @@ fn external_observation(
             previous_revision,
             content,
             correspondences,
-        } => match content {
-            StableContent::Projected { snapshot, findings } => ExternalObservation::Changed {
+        } => {
+            // The two operands the consult's Q3 puts on a `Changed`, taken
+            // before the content arm is chosen — which is the whole of what
+            // stops the arm from destroying them. `StableContent::revision`
+            // answers for both arms because the engine hashes the exact
+            // stabilized bytes whatever they decode to.
+            let disk_revision = content.revision();
+            let (document, changed) = match content {
+                StableContent::Projected { snapshot, findings } => (
+                    address_of_minted(path, snapshot.id, workspace),
+                    ChangedContent::Projected {
+                        disk_text: snapshot.source.clone(),
+                        disk: Box::new(snapshot.view.clone()),
+                        findings: findings.clone(),
+                        correspondences: correspondences.clone(),
+                    },
+                ),
+                StableContent::NotUtf8 { offset, .. } => (
+                    address_of(path, workspace),
+                    ChangedContent::Unreadable {
+                        reason: UnreadableReason::NotUtf8 { offset: *offset },
+                    },
+                ),
+            };
+            ExternalObservation::Changed {
                 sequence,
-                document: snapshot.id,
+                document,
                 previous_revision: *previous_revision,
-                disk_revision: snapshot.revision,
-                disk_text: snapshot.source.clone(),
-                disk: Box::new(snapshot.view.clone()),
-                findings: findings.clone(),
-                correspondences: correspondences.clone(),
-            },
-            StableContent::NotUtf8 { offset, .. } => ExternalObservation::Unreadable {
-                sequence,
-                document: address_of(path, workspace),
-                reason: UnreadableReason::NotUtf8 { offset: *offset },
-            },
-        },
+                disk_revision,
+                content: changed,
+            }
+        }
         Observation::Added { file, content } => {
             // The identity a row is built around: the projection's own where
             // there is one, and a freshly minted one where there is not —
@@ -1118,45 +1277,101 @@ fn external_observation(
     } // End of the match over every observation kind the engine can produce
 } // End of function external_observation()
 
-/// The address one watched path crosses as.
+/// The address one watched path crosses as — **two questions, asked in the
+/// order that makes the strongest true answer win**.
 ///
-/// One question to one table: `espansoconfig_core::workspace`'s process-wide,
-/// path-keyed identity register, read through `identity_already_issued`, which
-/// **mints nothing** — asking must not create the entry it asks about. Every
-/// identity in this application comes out of that register: a `Workspace`'s at
-/// discovery, the observation engine's at projection, and this module's at a
-/// non-UTF-8 addition. So the number here is the number every other holder of
-/// that path already has, by construction rather than by two structures
-/// agreeing.
+/// 1. *Does the **open** workspace resolve this path?* `Workspace::document_id`
+///    is the only thing that answers it, and a `Some` makes the identity an
+///    address every workspace command accepts today —
+///    [`ObservedDocument::Addressable`].
+/// 2. *Has anything in this process ever named it?*
+///    `espansoconfig_core::workspace::identity_already_issued` reads the
+///    process-wide, path-keyed register, and **mints nothing** — asking must not
+///    create the entry it asks about. Every identity in this application comes
+///    out of that register: a `Workspace`'s at discovery, the observation
+///    engine's at projection, and this module's at a non-UTF-8 addition. So the
+///    number is the number every other holder of that path already has, by
+///    construction rather than by two structures agreeing — but the open
+///    workspace has just said it does not hold it, so it is
+///    [`ObservedDocument::Named`] and not an address.
 ///
-/// `Unknown` is therefore exactly *nothing in this process has ever named this
-/// path*, which is what makes a display path here strand no projection: no
-/// identity for that file has ever been minted, so the consumer holds nothing
-/// under one. It is reachable — an io-unreadable file created after the
-/// workspace was opened is never discovered, never projected and never an
-/// addition — and it is narrower than what this function used to answer, which
-/// also said `Unknown` for a path a *replaced* workspace had named.
+/// Neither answer alone is enough, and round 3 of this phase's review deleted
+/// the first while closing a duplicate-storage finding: the register's `Some` is
+/// **not scoped to a workspace, an epoch or a moment**, so an identity minted
+/// under a replaced workspace came back as *known* with no path, and the current
+/// workspace answered `UnknownDocument` for it. Round 4 is that interleaving.
 ///
-/// **The answer is not scoped to an epoch, and that is the register's model
-/// rather than a relaxation here.** A path keeps one identity for the life of the
-/// process, a recreation at that path included, so an address is never wrong
-/// across a replacement; what a replacement makes stale is the batch, through
-/// [`ReconciliationBatch::epoch`].
+/// [`ObservedDocument::Unnamed`] is exactly *nothing in this process has ever
+/// named this path*, which is what makes it strand no projection: no identity
+/// for that file has ever been minted, so the consumer holds nothing under one.
+/// It is reachable — an io-unreadable file created after the workspace was
+/// opened is never discovered, never projected and never an addition.
 ///
-/// `workspace` is used for its root and for nothing else: a path that lies
-/// beneath it renders relative to it, and one that does not renders whole.
+/// `workspace` is used for those two things and for nothing else: it is asked
+/// whether it holds the path, and its root is what a display path renders
+/// against — a path beneath it renders relative to it and one that does not
+/// renders whole.
 fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
-    match identity_already_issued(path) {
-        Some(document) => ObservedDocument::Known { document },
-        None => ObservedDocument::Unknown {
-            relative_path: WirePath::from(
-                path.strip_prefix(workspace.root())
-                    .unwrap_or(path)
-                    .to_path_buf(),
-            ),
+    match workspace.document_id(path) {
+        Some(document) => ObservedDocument::Addressable {
+            document,
+            relative_path: display_path(path, workspace),
+        },
+        None => match identity_already_issued(path) {
+            Some(document) => ObservedDocument::Named {
+                document,
+                relative_path: display_path(path, workspace),
+            },
+            None => ObservedDocument::Unnamed {
+                relative_path: display_path(path, workspace),
+            },
         },
     }
 } // End of function address_of()
+
+/// The address one watched path crosses as when the identity is **already in
+/// hand** — a projection's own `snapshot.id`.
+///
+/// It asks the open workspace the same question [`address_of`] asks it, and it
+/// asks the identity register nothing: the caller has the number, so there is
+/// nothing to look up and no second source to depend on agreeing.
+///
+/// **The workspace must answer with the same number**, not merely with some
+/// number. One register makes that true today — a `Workspace` mints through
+/// `identity_of` and so does the engine — but nothing in the types forces it,
+/// and a disagreement would mean the open workspace resolves this path to a
+/// *different* document. The conservative answer is then
+/// [`ObservedDocument::Named`]: the snapshot's identity, which is what the
+/// consumer received the projection under, and no claim that a command will
+/// accept it.
+fn address_of_minted(path: &Path, document: DocumentId, workspace: &Workspace) -> ObservedDocument {
+    let relative_path = display_path(path, workspace);
+    if workspace.document_id(path) == Some(document) {
+        ObservedDocument::Addressable {
+            document,
+            relative_path,
+        }
+    } else {
+        ObservedDocument::Named {
+            document,
+            relative_path,
+        }
+    }
+} // End of function address_of_minted()
+
+/// One watched path, rendered for display against the configuration root.
+///
+/// Relative to the root where it lies beneath it and whole where it does not.
+/// **Display data and never an address a command accepts back** — a [`WirePath`]
+/// renders lossily, and identity is what a caller hands back
+/// (`crate::wire_contract`).
+fn display_path(path: &Path, workspace: &Workspace) -> WirePath {
+    WirePath::from(
+        path.strip_prefix(workspace.root())
+            .unwrap_or(path)
+            .to_path_buf(),
+    )
+} // End of function display_path()
 
 /// The sidebar row one newly discovered file crosses as.
 ///
@@ -1205,8 +1420,9 @@ mod tests {
     /// The identity is the **core's**, minted from the path through the same
     /// function `espansoconfig_core::watch::engine` calls when it projects
     /// stabilized bytes — never a literal. [`address_of`] reads that one
-    /// register, so a helper that invented a number would turn every identity
-    /// assertion below into a test of the helper.
+    /// register when the open workspace does not hold the path, so a helper that
+    /// invented a number would turn every identity assertion below into a test
+    /// of the helper.
     fn snapshot(path: &str, source: &str) -> SourceDocument {
         let document = identity_of(Path::new(path));
         project_source(&DocumentContext::detached(document, path), source)
@@ -1275,10 +1491,10 @@ mod tests {
             .map(|observation| match observation {
                 ExternalObservation::Changed {
                     sequence,
-                    disk_text,
+                    content: ChangedContent::Projected { disk_text, .. },
                     ..
                 } => (*sequence, disk_text.clone()),
-                other => panic!("this batch holds only Changed observations: {other:?}"),
+                other => panic!("this batch holds only projected Changed observations: {other:?}"),
             })
             .collect()
     } // End of function sequences_and_text()
@@ -1546,7 +1762,7 @@ mod tests {
     } // End of function an_out_of_order_drain_answers_the_acknowledgement_and_never_the_lower_argument()
 
     #[test]
-    fn an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot() {
+    fn an_identity_this_queue_issued_names_that_path_where_the_workspace_cannot() {
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
         // A file created after the workspace was opened: the workspace does not
@@ -1561,9 +1777,12 @@ mod tests {
         };
         let issued = document_summary.id;
         // That addition acknowledged, the same file becomes unreadable and then
-        // goes away. Both carry a path and no identity, and both must name what
-        // the addition named — otherwise the consumer holds a projection under
-        // an identity nothing can tell it to invalidate.
+        // goes away. Both carry a path and no identity of their own, and both
+        // must name what the addition named — otherwise the consumer holds a
+        // projection under an identity nothing can tell it to invalidate. The
+        // arm is `Named` and not `Addressable`, because this workspace never
+        // discovered the file: the identity is real and the open workspace will
+        // still refuse it.
         queue.enqueue(AdmittedObservation {
             sequence: 2,
             epoch: 1,
@@ -1583,23 +1802,24 @@ mod tests {
             .observations
             .iter()
             .map(|observation| match observation {
-                ExternalObservation::Unreadable { document, .. }
+                ExternalObservation::Changed { document, .. }
                 | ExternalObservation::Removed { document, .. } => document,
-                other => panic!("a path-only observation is Unreadable or Removed: {other:?}"),
+                other => panic!("this batch holds a Changed and a Removed: {other:?}"),
             })
             .collect();
+        let expected = ObservedDocument::Named {
+            document: issued,
+            relative_path: WirePath::from(PathBuf::from("match/new.yml")),
+        };
         assert_eq!(
             addresses,
-            vec![
-                &ObservedDocument::Known { document: issued },
-                &ObservedDocument::Known { document: issued },
-            ],
-            "an identity this queue has issued addresses its path afterwards: {second:?}"
+            vec![&expected, &expected],
+            "an identity this queue has issued names its path afterwards, beside the path: {second:?}"
         );
-    } // End of function an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot()
+    } // End of function an_identity_this_queue_issued_names_that_path_where_the_workspace_cannot()
 
     #[test]
-    fn a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address() {
+    fn a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_identity() {
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
         // A file created after the workspace was opened whose bytes are not
@@ -1650,15 +1870,15 @@ mod tests {
         let second = queue.drain(1, &workspace);
         assert!(
             matches!(
-                second.observations[0],
+                &second.observations[0],
                 ExternalObservation::Removed {
-                    document: ObservedDocument::Known { document },
+                    document: ObservedDocument::Named { document, .. },
                     ..
-                } if document == addressed
+                } if *document == addressed
             ),
-            "the addition's identity addresses its own removal: {second:?}"
+            "the addition's identity names its own removal: {second:?}"
         );
-    } // End of function a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address()
+    } // End of function a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_identity()
 
     #[test]
     fn an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale() {
@@ -1684,15 +1904,18 @@ mod tests {
         queue.enqueue(removed(1, 2, "match/epochs.yml"));
         let second = queue.drain(0, &workspace);
         assert_eq!(second.epoch, 2, "the batch says which workspace it is for");
-        assert!(
-            matches!(
-                second.observations[0],
-                ExternalObservation::Removed {
-                    document: ObservedDocument::Known { document },
-                    ..
-                } if document == issued
-            ),
-            "one path is one document across a replacement: {second:?}"
+        assert_eq!(
+            second.observations[0],
+            ExternalObservation::Removed {
+                sequence: 1,
+                document: ObservedDocument::Named {
+                    document: issued,
+                    relative_path: WirePath::from(PathBuf::from("match/epochs.yml")),
+                },
+                previous_revision: None,
+            },
+            "one path is one document across a replacement — named, beside its path, and \
+             never claimed as an address this workspace resolves: {second:?}"
         );
     } // End of function an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale()
 
@@ -2001,9 +2224,10 @@ mod tests {
         queue.enqueue(changed(1, 1, "match/a.yml", ONE));
         let batch = queue.drain(0, &workspace);
         let ExternalObservation::Changed {
-            disk_text,
             disk_revision,
-            disk,
+            content: ChangedContent::Projected {
+                disk_text, disk, ..
+            },
             ..
         } = &batch.observations[0]
         else {
@@ -2015,31 +2239,57 @@ mod tests {
     } // End of function a_changed_carries_its_exact_text_beside_the_projection_of_the_same_bytes()
 
     #[test]
-    fn present_bytes_that_are_not_utf8_cross_as_unreadable_rather_than_as_content() {
+    fn a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text() {
+        // Round 4's finding 2, and the whole of what R3 had left. This state was
+        // routed to `ExternalObservation::Unreadable`, which carries neither
+        // revision — so `previous_revision` and `disk_revision`, the two operands
+        // the consult's Q3 puts on a `Changed`, were **discarded by the
+        // routing** and no consumer could recover either from the value it was
+        // handed. The bytes are still not shown, and never were the question.
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
+        let before = ContentRevision::of_bytes(ONE.as_bytes());
+        let after = ContentRevision::of_bytes(&[0xff, 0xfe]);
         queue.enqueue(AdmittedObservation {
             sequence: 1,
             epoch: 1,
             observation: Observation::Changed {
                 path: PathBuf::from("match/a.yml"),
-                previous_revision: None,
+                previous_revision: Some(before),
                 content: StableContent::NotUtf8 {
-                    revision: ContentRevision::of_bytes(&[0xff, 0xfe]),
+                    revision: after,
                     offset: 0,
                 },
                 correspondences: None,
             },
         });
         let batch = queue.drain(0, &workspace);
-        assert!(matches!(
-            batch.observations[0],
-            ExternalObservation::Unreadable {
+        let ExternalObservation::Changed {
+            previous_revision,
+            disk_revision,
+            content,
+            ..
+        } = &batch.observations[0]
+        else {
+            panic!("a change stays a Changed whether or not its bytes are text: {batch:?}");
+        };
+        assert_eq!(
+            *previous_revision,
+            Some(before),
+            "the revision the engine held survives the content arm"
+        );
+        assert_eq!(
+            *disk_revision, after,
+            "and so does the hash of the exact bytes now on disk"
+        );
+        assert_eq!(
+            *content,
+            ChangedContent::Unreadable {
                 reason: UnreadableReason::NotUtf8 { offset: 0 },
-                ..
-            }
-        ));
-    } // End of function present_bytes_that_are_not_utf8_cross_as_unreadable_rather_than_as_content()
+            },
+            "the change carries why there is no projection, never a bare absence"
+        );
+    } // End of function a_change_to_bytes_that_are_not_utf8_keeps_both_revisions_and_carries_no_text()
 
     #[test]
     fn a_stable_read_failure_crosses_as_a_code_and_never_as_a_kind() {
@@ -2096,18 +2346,34 @@ mod tests {
         queue.enqueue(removed(2, 1, stranger.to_str().expect("a UTF-8 temp path")));
         let batch = queue.drain(0, &workspace);
         let ExternalObservation::Removed {
-            document: ObservedDocument::Known { .. },
+            document:
+                ObservedDocument::Addressable {
+                    document,
+                    relative_path,
+                },
             ..
         } = &batch.observations[0]
         else {
-            panic!("a discovered path has an identity: {batch:?}");
+            panic!("a path this workspace discovered is addressable: {batch:?}");
         };
+        assert_eq!(
+            *document,
+            workspace
+                .document_id(&known)
+                .expect("the workspace discovered this file"),
+            "the strongest arm names the identity the open workspace itself resolves"
+        );
+        assert_eq!(
+            relative_path.to_string_lossy(),
+            "match/known.yml",
+            "and it carries the display path too, like every other arm"
+        );
         let ExternalObservation::Removed {
-            document: ObservedDocument::Unknown { relative_path },
+            document: ObservedDocument::Unnamed { relative_path },
             ..
         } = &batch.observations[1]
         else {
-            panic!("an undiscovered path has none: {batch:?}");
+            panic!("a path nothing in this process has named has no identity: {batch:?}");
         };
         assert_eq!(
             relative_path.to_string_lossy(),
@@ -2115,6 +2381,65 @@ mod tests {
             "the path is rendered against the configuration root"
         );
     } // End of function a_path_the_workspace_never_discovered_crosses_as_a_display_path()
+
+    #[test]
+    fn an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address() {
+        // Round 4's finding 1, in its own words: epoch 1 opens a root holding
+        // `match/a.yml` and mints an identity for it; the file goes away and
+        // epoch 2 reopens the same root without it; the path is recreated but
+        // stable reads fail, so the observation is `Unreadable`. The identity
+        // register still answers with epoch 1's number — it is not scoped to a
+        // workspace, an epoch or a moment — while the epoch-2 workspace refuses
+        // that number as `UnknownDocument`. Asking the register alone therefore
+        // sent `Known { document }` **and omitted the display path**, so the
+        // consumer was handed a number the current workspace rejects and nothing
+        // else. This is what the deleted `an_identity_issued_in_one_epoch_
+        // addresses_nothing_in_the_next` was protecting: stable path identity
+        // survives an epoch, and current addressability does not.
+        let dir = tempfile::TempDir::new().expect("a temporary directory");
+        std::fs::create_dir_all(dir.path().join("match")).expect("the match directory");
+        let file = dir.path().join("match").join("a.yml");
+        std::fs::write(&file, ONE).expect("the file epoch 1 discovers");
+        let first = Workspace::discover(Some(dir.path())).expect("epoch 1 opens");
+        let minted = first
+            .document_id(&file)
+            .expect("epoch 1 discovered this file");
+
+        std::fs::remove_file(&file).expect("the file goes away");
+        let second = Workspace::discover(Some(dir.path())).expect("epoch 2 opens");
+        assert!(
+            second.document_id(&file).is_none(),
+            "epoch 2 never enumerated this path, so it resolves nothing for it"
+        );
+        assert!(
+            second.document_context(minted).is_err(),
+            "and it refuses epoch 1's identity, which is the whole finding"
+        );
+
+        let queue = queue_at_epoch(2);
+        queue.enqueue(AdmittedObservation {
+            sequence: 1,
+            epoch: 2,
+            observation: Observation::Unreadable {
+                path: file.clone(),
+                kind: io::ErrorKind::PermissionDenied,
+            },
+        });
+        let batch = queue.drain(0, &second);
+        assert_eq!(
+            batch.observations[0],
+            ExternalObservation::Unreadable {
+                sequence: 1,
+                document: ObservedDocument::Named {
+                    document: minted,
+                    relative_path: WirePath::from(PathBuf::from("match/a.yml")),
+                },
+                reason: UnreadableReason::PermissionDenied {},
+            },
+            "an identity a replaced workspace minted is named beside its path and is never \
+             offered as an address this workspace resolves: {batch:?}"
+        );
+    } // End of function an_identity_minted_under_a_replaced_workspace_is_named_and_is_not_an_address()
 
     #[test]
     fn an_added_file_carries_a_row_whose_parse_this_session_does_not_hold() {
@@ -2175,7 +2500,48 @@ mod tests {
                 "{name} carries an object, never a bare string"
             );
         } // End of the loop over the four observation kinds
-          // The answer crosses; the question never does.
+          // The two nested content enums follow the same rule, and D5 is about
+          // every wire enum rather than about the outer one: a `Changed` and an
+          // `Added` each carry a one-key object under `content`.
+        for (index, kind) in [("Changed", "Projected"), ("Added", "Projected")]
+            .into_iter()
+            .enumerate()
+        {
+            let content = &observations[index][kind.0]["content"];
+            let tagged = content
+                .as_object()
+                .unwrap_or_else(|| panic!("{}'s content crosses as an object", kind.0));
+            assert_eq!(tagged.len(), 1, "one tag per value: {tagged:?}");
+            assert!(
+                tagged[kind.1].is_object(),
+                "{}'s content carries an object, never a bare string",
+                kind.0
+            );
+        } // End of the loop over the two nested content enums
+          // **Every** arm of an address carries the display path, whichever arm
+          // it is, so no consumer is ever handed a number as its only handle on
+          // a file. Which arm each of these lands in is not this test's subject
+          // and is not stable across a test binary either: the identity register
+          // is process-wide, so another test in this process may already have
+          // named one of these paths.
+        for (index, kind) in [(0, "Changed"), (2, "Removed"), (3, "Unreadable")] {
+            let document = observations[index][kind]["document"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{kind} carries an address object: {json}"));
+            let (arm, operands) = document
+                .iter()
+                .next()
+                .unwrap_or_else(|| panic!("{kind}'s address carries one tag: {json}"));
+            assert_eq!(document.len(), 1, "one tag per value: {document:?}");
+            assert!(
+                operands["relative_path"].is_string(),
+                "{kind}'s {arm} arm carries the display path: {json}"
+            );
+        } // End of the loop over the three arms that carry an address
+          // An `Added` carries no `ObservedDocument` because its row already says
+          // both things one would say.
+        assert!(observations[1]["Added"]["document_summary"]["relative_path"].is_string());
+        // The answer crosses; the question never does.
         assert!(!json.to_string().contains("owned_runs_digest"));
     } // End of function every_observation_crosses_as_a_uniform_object_and_carries_no_anchor()
 
@@ -2213,8 +2579,8 @@ mod tests {
         assert_eq!(batch.observations.len(), 1, "{batch:?}");
         let ExternalObservation::Changed {
             document,
-            disk_text,
             previous_revision,
+            content: ChangedContent::Projected { disk_text, .. },
             ..
         } = &batch.observations[0]
         else {
@@ -2227,10 +2593,14 @@ mod tests {
         );
         assert_eq!(
             *document,
-            workspace
-                .document_id(&file)
-                .expect("the workspace discovered this file"),
-            "the engine and the workspace agree on one path's identity"
+            ObservedDocument::Addressable {
+                document: workspace
+                    .document_id(&file)
+                    .expect("the workspace discovered this file"),
+                relative_path: WirePath::from(PathBuf::from("match/a.yml")),
+            },
+            "the engine and the workspace agree on one path's identity, and the open \
+             workspace resolving it is what makes this the addressable arm"
         );
     } // End of function a_real_engines_conclusion_reaches_the_queue_and_names_the_workspaces_document()
 }

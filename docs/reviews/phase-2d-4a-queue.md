@@ -153,3 +153,72 @@ NOT READY — 0 High, 4 Medium, 1 Low findings.
 
 Codex session ID: 01a03ded-e3bb-7403-9ce6-35d50a7d824c
 Resume in Codex: codex resume 01a03ded-e3bb-7403-9ce6-35d50a7d824c
+
+---
+
+## Round 4 — verbatim
+
+Scope: **the round-3 fix**, not the original implementation and not round 1's or round 2's fixes.
+Commissioned under the rule that commissioned rounds 2 and 3 — a fix is a change, and the round
+that reviews it is not optional. Round 3's own lesson was carried into this brief: *moving a rule
+does not move the bound it depended on*, so round 4 was asked what the round-3 fix's own new code
+and its own new sentences now rest on, the round-3 fix having changed the eviction victim, the wire
+shape and the identity source in one round. It was pointed hardest at `evictable_sequence`, whose
+order-independence §12.4 records as argued and bounded-checked but **expressly not proved**, and at
+the residues R3, R9 and R10 against this project's precedent that seven items recorded as bounded
+residues in Phase 2d-3 were later found to be real defects.
+
+Gates when this round was commissioned, all measured on this clean tree at `c8e9ef1` by the
+orchestrator: `cargo test --workspace` **1307** passed / 0 failed over **26** result lines all `ok`,
+exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+`cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::` **20/20** with 262 filtered out
+in 77.24 s; `npm test` **2125** in 56 files; `npm run check` **431** files / 0 errors; `npm run build`
+**184** modules with the server oracle absent and the client oracle present with 2 matches.
+
+## High
+
+None.
+
+## Medium
+
+1. A process-lifetime identity is not necessarily an address in the current workspace. `address_of` now consults only the global identity register, even though that API explicitly says `Some` does not mean the current workspace contains the document or that the caller ever saw the number (`crates/espansoconfig-core/src/workspace/mod.rs:288`, `crates/espansoconfig-core/src/workspace/mod.rs:294`, `src-tauri/src/reconciliation.rs:1148`). Exact sequence:
+
+   - Epoch 1 opens root `R` containing `match/a.yml`, minting `D`.
+   - The file is removed and epoch 2 reopens `R` without it; the epoch-2 workspace and frontend summary contain no `D`.
+   - An external process recreates the path but stable reads fail, producing `Observation::Unreadable`, not `Added`.
+   - `identity_already_issued` returns epoch 1’s `D`, so the epoch-2 wire sends `Known { document: D }` and omits the display path, although the current workspace rejects `D` as `UnknownDocument`.
+
+   The replacement test constructs precisely an empty workspace that cannot resolve the identity, then declares the resulting `Known` value correct without testing current addressability (`src-tauri/src/reconciliation.rs:1664`, `src-tauri/src/reconciliation.rs:1683`, `src-tauri/src/reconciliation.rs:1687`; current-workspace lookup semantics at `crates/espansoconfig-core/src/workspace/mod.rs:487` and `crates/espansoconfig-core/src/workspace/mod.rs:506`). The deleted epoch-scoped test was protecting a real distinction: stable path identity may survive an epoch, but current addressability does not. The replacement test does not replace that protection.
+
+2. R3 is still a wire defect, not a bounded residue for 2d-5. For a known UTF-8 document at revision `R1` that stabilizes to non-UTF-8 bytes at revision `R2`, projection produces `ExternalObservation::Unreadable { sequence, document, reason }`; both `previous_revision = R1` and `disk_revision = R2` are discarded (`src-tauri/src/reconciliation.rs:354`, `src-tauri/src/reconciliation.rs:378`, `src-tauri/src/reconciliation.rs:439`, `src-tauri/src/reconciliation.rs:1073`). Q3 requires those operands on `Changed`, and 2d-5 cannot recover either from the supplied value. `Changed` should move to a discriminated content shape, or `Unreadable` must carry the revisions; merely assigning the decision to the future consumer cannot close missing Rust wire data.
+
+3. The round-3 retention correction still states a false universal headline. It says every admitted observation is held until acknowledgement or overflow (`docs/decisions/2d-4a-notes.md:3`), while its own correction immediately admits two additional rejection causes: replaced epoch and sequence at or below the watermark (`docs/decisions/2d-4a-notes.md:25`). Both are implemented by returning before insertion (`src-tauri/src/reconciliation.rs:872`). Exact interleavings:
+
+   - An observation passes ledger admission under epoch 1, pauses, the queue adopts epoch 2, then `enqueue` rejects it.
+   - After `drain(10)`, an admitted same-epoch sequence 5 reaches `enqueue`; it is counted and dropped without acknowledgement or overflow.
+
+   One command position is also false in the opposite direction: “kept only until an overflow evicts it” omits removal by acknowledgement (`src-tauri/src/commands.rs:1314`, `src-tauri/src/commands.rs:1321`). The claimed identical boundary was therefore not achieved.
+
+## Low
+
+1. The specific refused “prefer a currently redundant entry” policy is correctly rejected, but §12.4 overgeneralizes its counterexample into a false rule. Under the recorded preference—lowest currently folded entry, otherwise lowest—the `S,T,S,S,S` history with capacity 3 retains `{1,2,5}` for arrival `1,2,3,4,5` and `{2,4,5}` for `1,3,4,5,2`, confirming the stated counterexample (`docs/decisions/2d-4a-notes.md:376`). But the claim that any capacity rule depending on state equality “cannot” be arrival-order independent is false (`docs/decisions/2d-4a-notes.md:1410`). For example, insert then retain the top `K` under any fixed total key containing `(state discriminant, sequence)` is state-dependent and arrival-order independent. The evidence supports refusing this policy, not the universal claim.
+
+2. R9 remains a real unbounded-retention defect after its duplicate was deleted. The core retains every distinct `PathBuf` ever named for the process lifetime (`crates/espansoconfig-core/src/workspace/mod.rs:210`, `crates/espansoconfig-core/src/workspace/mod.rs:214`, `crates/espansoconfig-core/src/workspace/mod.rs:267`). Create, stabilize and remove `N` distinct watched paths while regularly draining: the queue stays at or below 256, but `by_path` retains all `N` paths indefinitely. The code’s “tens of files, so it never becomes a consideration” assertion is neither enforced nor measured (`crates/espansoconfig-core/src/workspace/mod.rs:218`). Deleting the second map closes duplication, not this resource bound, as the record itself concedes (`docs/decisions/2d-4a-notes.md:1418`).
+
+## Verified without findings
+
+- The new busiest-path selector stores before eviction and removes only the selected path’s lowest sequence (`src-tauri/src/reconciliation.rs:717`, `src-tauri/src/reconciliation.rs:881`). Its state count is irrelevant because it never reads `ObservedState`; four or more paths introduce no new tie shape, and two paths cannot tie on both documented keys because globally unique sequences cannot be both paths’ lowest sequence.
+- The selector preserves a suffix per path, so eviction cannot join two state runs. The sampled boundary and repeat-stream tests correctly exercise their stated cases.
+- The refused redundancy policy’s concrete `{1,2,5}` / `{2,4,5}` counterexample is valid.
+- `AddedContent` gives both projected and non-UTF-8 additions a row and address. Its discriminated shape is usable by 2d-4b and stronger than unrelated optional fields.
+- `Box<DocumentView>` is serialization-transparent under Serde; both boxed fields preserve the prior JSON value shape.
+- Current `src-tauri` production code uses public `identity_of` only for the intended non-UTF-8 `Added` case; the other occurrence is a test helper. No separate misuse exists in this tree.
+- The fourteen correction positions and §12.2’s three evidence-table corrections otherwise match the implementation. The old §7 table remains historical, but the prose accurately identifies the changed test names and `AddedContent` access.
+- The liveness-comment rewording was an honest false-positive removal: it concerns eviction selection, not whether a path is observed again. I found no other round-3 liveness claim hidden from the current phrase family.
+- R10 is conservative but bounded: repeats can consume all 256 slots and cause a counted reload, but cannot evict a singleton while their own path has multiple entries.
+- The step still draws nothing, makes no open-write-surface decision, and introduces no Tauri dependency into `espansoconfig-core`.
+
+NOT READY — 0 High, 3 Medium, 2 Low findings.
+
+Codex session ID: 01a03ea0-a509-7e51-86ec-99e8b6790a85
+Resume in Codex: codex resume 01a03ea0-a509-7e51-86ec-99e8b6790a85

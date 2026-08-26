@@ -440,12 +440,14 @@ impl WorkspaceSession {
     /// An empty session, with no workspace open.
     ///
     /// **The production wiring, and since Phase 2d-4a its watchers' admitted
-    /// observations are recoverable**: the sink behind the admission gate is
-    /// [`queueing_sink`] over this session's own
+    /// observations have somewhere to be recovered from**: the sink behind the
+    /// admission gate is [`queueing_sink`] over this session's own
     /// [`ReconciliationQueue`], which
     /// `drain_external_changes` reads. Until 2d-4a this position held a sink
     /// that dropped its argument, so a sequence and a publication were spent on
-    /// a value no code could recover.
+    /// a value no code could recover. Which arrivals that queue stores, and
+    /// which two it refuses before storing anything, is
+    /// [`crate::reconciliation::ReconciliationQueue::enqueue`]'s own contract.
     pub fn new() -> WorkspaceSession {
         let queue = Arc::new(ReconciliationQueue::new());
         WorkspaceSession::assembled(
@@ -483,7 +485,8 @@ impl WorkspaceSession {
     /// `crate::watch_check`'s evidence stays about the gate and about a real
     /// filesystem, which is what it was built to be about.
     // Since Phase 2d-4a no production constructor calls this: `new` installs the
-    // queue instead, which is what makes an admitted observation recoverable.
+    // queue instead, which is what gives an admitted observation somewhere to be
+    // recovered from at all.
     // The allow is scoped to non-test builds so the injection seam stays
     // lint-armed exactly where its consumers exist, and it is not `cfg(test)`
     // because two doc comments in this crate link to it and a link that stops
@@ -1318,8 +1321,9 @@ impl WorkspaceSession {
     /// ([`crate::reconciliation::ReconciliationQueue::drain`]). So draining
     /// twice with the same value answers the same batch twice **when nothing
     /// was enqueued between the two calls**, and an answer lost on the way to
-    /// the window costs no more than the drain that repeats it. **An entry is
-    /// kept only until an overflow evicts it**: past
+    /// the window costs no more than the drain that repeats it. **A stored
+    /// entry leaves this queue in exactly two ways — a later drain
+    /// acknowledges it, or an overflow evicts it**: past
     /// [`crate::reconciliation::QUEUE_CAPACITY`] an undrained entry goes
     /// unacknowledged and is counted in the batch's `discarded`, whose
     /// answer is a whole-workspace reload rather than a repeated drain. Zero
@@ -3466,7 +3470,9 @@ pub fn read_backup_text(
 ///   nothing was enqueued between the two calls, so a lost answer costs no more
 ///   than the drain that repeats it — **short of an overflow**, which evicts
 ///   an undrained entry unacknowledged and reports it in the
-///   batch's `discarded`, whose answer is a whole-workspace reload. The
+///   batch's `discarded`, whose answer is a whole-workspace reload. Those two
+///   are the whole of how a stored entry leaves the queue: **a later drain
+///   acknowledges it, or an overflow evicts it.** The
 ///   answer's `newest_sequence` never falls below a watermark this session has
 ///   already been drained with, so it is safe to store unconditionally even out
 ///   of order.
