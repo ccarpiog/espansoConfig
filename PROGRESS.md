@@ -3791,6 +3791,17 @@ The documented host scar recurred once and behaved exactly as recorded: the impl
 workspace run hit 3 `watch_check` baseline timeouts **while two of its own poll loops were running**;
 loops killed, orphans reaped, re-run quiet, clean. **Do not poll the machine while these suites run.**
 
+**Git state:** `04d0889`, tree clean, pushed to `origin/main` (`5c2a285..04d0889`; this paragraph
+recorded by the follow-up commit). The commit holds **18** files: **three new** —
+`crates/espansoconfig-core/src/watch/liveness.rs` (the contract),
+`src-tauri/src/liveness_contract.rs` (the check) and `docs/decisions/2d-3-C-notes.md` (the record) —
+eleven modified sources across both crates, `docs/decisions/2d-3-notes.md` (§1's headline, one
+correction block and one §5 note; **§7–§20 and the review ledger untouched**, per residue 43) and this
+checkpoint. **This is the first 2d-3 commit to add a file to `crates/espansoconfig-core`**, and
+`cargo tree -p espansoconfig-core | rg tauri` is still empty. **No frontend file and no `src/` path**,
+for the last time — 2d-4 touches the frontend. `git status --short --untracked-files=all` after the
+commit is empty. **Phase 2d-3 is CLOSED by this commit**; the next action is 2d-4.
+
 ---
 
 ## Verification — Phase 2d-3 review round 14 (NOT READY — 2 High, 2 Low; fix in the tree, round 15 owed)
