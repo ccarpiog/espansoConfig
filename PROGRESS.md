@@ -3775,6 +3775,19 @@ now inventoried) and five more in fix round 2 (`drained again`, `re-drain`, `rec
 The orchestrator's stop rule — report rather than fix if a widening surfaces more than five
 pre-existing hits — was never reached in either round.
 
+**Git state:** `00cb174`, tree clean, pushed to `origin/main` (this paragraph recorded by the
+follow-up commit). The commit holds **16** files: **four new** — `src-tauri/src/reconciliation.rs`
+(the queue, the wire types and the command), `docs/decisions/2d-4a-notes.md` (the record, with both
+fix rounds' correction blocks), `docs/decisions/2d-4-split-notes.md` (the split decision, taken
+before execution) and `docs/reviews/phase-2d-4a-queue.md` (rounds 1 and 2 verbatim) — nine modified
+`src-tauri` sources, the **two i18n dictionaries**, and this checkpoint. **No core file at all**, and
+`cargo tree -p espansoconfig-core | rg tauri` is still empty. **The only `src/` paths are
+`src/lib/i18n/{en,es}.json`** — the TypeScript wire is 2d-4b's by the split. `git status --short
+--untracked-files=all` after the commit is empty: no real-config path, no launch artifact, no
+untracked file. **The step is NOT closed by it** — two Codex rounds, both NOT READY, both fixes in
+the tree and green, and **round 3 is owed against the round-2 fix**. A fresh session resumes from
+"Next action".
+
 ### What is NOT proven
 
 - **Round 3 has not run.** Fix round 2 changed both code and prose, including a design change no
