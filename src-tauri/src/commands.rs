@@ -1319,9 +1319,9 @@ impl WorkspaceSession {
     /// twice with the same value answers the same batch twice **when nothing
     /// was enqueued between the two calls**, and an answer lost on the way to
     /// the window costs no more than the drain that repeats it. **An entry is
-    /// kept only until an overflow evicts it**: at
-    /// [`crate::reconciliation::QUEUE_CAPACITY`] the oldest undrained entries
-    /// go unacknowledged and are counted in the batch's `discarded`, whose
+    /// kept only until an overflow evicts it**: past
+    /// [`crate::reconciliation::QUEUE_CAPACITY`] an undrained entry goes
+    /// unacknowledged and is counted in the batch's `discarded`, whose
     /// answer is a whole-workspace reload rather than a repeated drain. Zero
     /// asks for everything the current epoch still holds. The batch's
     /// `newest_sequence` is never below the highest watermark this session has
@@ -3465,7 +3465,7 @@ pub fn read_backup_text(
 ///   draining twice with the same value answers the same batch twice when
 ///   nothing was enqueued between the two calls, so a lost answer costs no more
 ///   than the drain that repeats it — **short of an overflow**, which evicts
-///   the oldest undrained entries unacknowledged and reports them in the
+///   an undrained entry unacknowledged and reports it in the
 ///   batch's `discarded`, whose answer is a whole-workspace reload. The
 ///   answer's `newest_sequence` never falls below a watermark this session has
 ///   already been drained with, so it is safe to store unconditionally even out

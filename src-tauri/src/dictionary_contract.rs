@@ -412,6 +412,10 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/reconciliation.rs",
         name: "UnreadableReason",
     },
+    CodeEnum {
+        source: "src-tauri/src/reconciliation.rs",
+        name: "AddedContent",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -472,6 +476,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("backupTarget", 2),
     ("externalObservation", 4),
     ("unreadableReason", 6),
+    ("addedContent", 2),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.

@@ -1003,5 +1003,7 @@
   "code.unreadableReason.invalidData": "Your system reported this file as unreadable data, twice in a row.",
   "code.unreadableReason.timedOut": "Reading this file timed out, twice in a row.",
   "code.unreadableReason.interrupted": "Reading this file was interrupted, twice in a row.",
-  "code.unreadableReason.other": "Your system refused to read this file for a reason espansoConfig has no name for."
+  "code.unreadableReason.other": "Your system refused to read this file for a reason espansoConfig has no name for.",
+  "code.addedContent.projected": "espansoConfig read this new file and can show you what it holds.",
+  "code.addedContent.unreadable": "espansoConfig cannot read this new file, so it can show you its name but not its text."
 }

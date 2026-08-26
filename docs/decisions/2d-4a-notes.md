@@ -1,7 +1,8 @@
 # Phase 2d-4a — the Rust half of the reconciliation wire
 
-**An observation this application admits is no longer dropped: it is held, in sequence order,
-beside the open workspace session, and a window can ask for it.** `src-tauri/src/reconciliation.rs`
+**An observation this application admits is held, in sequence order, beside the open workspace
+session, until a later drain acknowledges it or an overflow evicts it — and a window can ask for
+it.** `src-tauri/src/reconciliation.rs`
 is the new module. `ReconciliationQueue` is the typed, ordered, coalescing queue; `queueing_sink` is
 the **production downstream sink** that replaced the sink which dropped its argument;
 `ReconciliationWake` goes out on `workspace://reconciliation-ready` after every enqueue; and
@@ -21,6 +22,17 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 > drain but the whole-workspace reload a non-zero `discarded` obliges. §2's guarantee 4 carries the
 > same correction at the place the module states it.
 
+> **Correction, round 3 (finding 4).** The opening sentence — *"An observation this application
+> admits is no longer dropped: it is held…"* — is still false, and round 2's correction above fixed
+> the neighbouring sentence while leaving the **headline** claiming more than the code does. An
+> admitted observation is dropped for **three** reasons: it carries a replaced epoch, its sequence is
+> at or below the acknowledged watermark, or the queue is over `QUEUE_CAPACITY` and the eviction
+> policy names it. The true headline is the one now above: *an observation this application admits is
+> **held until a later drain acknowledges it or an overflow evicts it**, and an eviction is a counted
+> loss obliging a whole-workspace reload*. This is a false claim corrected to a true one, not a
+> guarantee narrowed to dodge a finding — nothing about what the code does changed for it, and every
+> position that states retention now states the same boundary (§12.1, finding 4).
+
 ---
 
 ## 1. What this step built
@@ -36,12 +48,22 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
     > set in sequence order. `QueueState::reindex` went with it. What the queue holds beside the
     > pending map is the acknowledged watermark, the discarded counter and — since round 1 —
     > `issued_identities`. §2's round-2 correction is why.
+    > **Correction, round 3 (findings 3 and 5).** `QueueState::issued_identities` is **deleted** too.
+    > What the queue holds is the pending map, the acknowledged watermark and the discarded counter,
+    > and nothing else: addressing a path is now one read of the core's own process-wide identity
+    > register through the new `espansoconfig_core::workspace::identity_already_issued`. §3.3's
+    > round-3 correction is why.
   - `queueing_sink(queue)` — the `AdmittedSink` the production session installs behind
     `admitting_sink`. It enqueues, then emits, with no lock held.
   - `ReconciliationWake { workspace_epoch, newest_sequence }` — the event payload, and the whole
     of it.
   - `ReconciliationBatch { epoch, newest_sequence, observations, discarded }`.
   - `ExternalObservation` — `Changed | Added | Removed | Unreadable`, all struct variants.
+    > **Correction, round 3 (finding 3).** `ExternalObservation::Added` now carries
+    > `content: AddedContent` — `Projected { disk, findings } | Unreadable { reason }` — in place of
+    > its `disk` and `findings` fields, which is the consult's `disk?` written as a discriminated
+    > value. `AddedContent` is a fifth wire type and a new dictionary namespace with two sentences in
+    > each language. §3.2's round-3 correction is why.
   - `ObservedDocument` — `Known { document } | Unknown { relative_path }`.
   - `UnreadableReason` — `NotUtf8 { offset } | PermissionDenied | InvalidData | TimedOut |
     Interrupted | Other`, all struct variants.
@@ -65,6 +87,18 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 - **`src-tauri/src/dictionary_contract.rs`** — `ExternalObservation` and `UnreadableReason` are
   namespaces; `ObservedDocument` is a named `NOT_A_CODE` address.
 - **`src/lib/i18n/{en,es}.json`** — ten new keys each, EN and ES.
+
+> **Correction, round 3 (finding 3).** Two files this step did not touch are now part of it, and one
+> count above moved:
+>
+> - **`crates/espansoconfig-core/src/workspace/mod.rs`** — `identity_of` is **public** and
+>   `identity_already_issued` is **new**. The core gains no dependency and no behaviour; what changed
+>   is who may ask it a question it could already answer. `cargo tree -p espansoconfig-core | rg
+>   tauri` is still empty.
+> - **`src/lib/i18n/{en,es}.json`** — **twelve** new keys each, not ten: `code.addedContent.projected`
+>   and `code.addedContent.unreadable` are round 3's.
+> - **`src-tauri/src/dictionary_contract.rs`** — `AddedContent` is a third namespace from this
+>   module, with its variant count.
 
 ---
 
@@ -160,6 +194,32 @@ surface is open** — Q7 item 4's two prohibitions, inherited verbatim by
 > 5]` answered `[(5, B), (9, A)]` against an expected `[(3, A), (5, B), (9, A)]`, and `[9, 5, 3]`
 > answered `[(3, B), (5, B), (9, A)]` against an expected `[(5, B), (9, A)]`.
 
+> **Correction, round 3 (finding 1) — the fold was arrival-order independent and the *capacity bound*
+> was not, so the guarantee above was still conditional on something its own sentence called "not a
+> coalescing failure".** `enqueue` ran `while pending.len() >= QUEUE_CAPACITY { evict the lowest }`
+> **before** storing the arrival, which makes the retained set depend on arrival order: a full queue
+> made room by dropping a *resident* entry even for an arrival lower than everything it held. Round
+> 3's counterexample is one path at `A(1), B(2), A(257)` with sequences 3–256 belonging to other
+> paths. Arriving `1..257` evicted `A(1)` and returned `B(2), A(257)`; arriving `2..257, 1` evicted
+> `B(2)` and stored `A(1)` — and with the separator gone the drain **folded** the two `A` entries and
+> returned only `A(257)`. One admitted history, two batches. Calling that a `discarded` loss rather
+> than a coalescing failure was a relabelling: the loss is real, and it is also what made the fold
+> answer differently.
+>
+> **The fix is in the code, and it is the order of two statements.** The arrival is stored **first**
+> and the bound restored **after** — `while pending.len() > QUEUE_CAPACITY`. What the queue retains
+> is then its best `QUEUE_CAPACITY` entries out of everything admitted, a function of the admitted
+> set; and an arrival that is itself the right victim simply leaves again rather than displacing a
+> resident entry. `a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in` drives that
+> exact history in three arrival orders, and
+> `an_arrival_below_everything_a_full_queue_holds_is_the_entry_that_leaves` pins the boundary the
+> `>=` was wrong about. Both were watched failing first (§12.4).
+>
+> With this, guarantee 3 above is unconditional in the reading round 3 asked for: **no part of what a
+> drain answers depends on the order two threads reached `enqueue` in.** What is still conditional is
+> *how much history a batch is*, which is the retention boundary — acknowledgement or eviction — and
+> not the fold.
+
 **Not guaranteed, each stated because it is a way to be wrong:**
 
 - **No filesystem chronology is inferred from hashes.** Nothing here compares two
@@ -241,6 +301,20 @@ watermark backwards.
 >   **returns** the coalesced form of them, so an entry the fold does not carry is kept and not
 >   returned. Both `drain_external_changes` docs and `ReconciliationQueue::drain` say it that way.
 
+> **Correction, round 3 (finding 4).** Round 2's own list of positions is now out of date in two
+> ways, both of which round 3 found as one finding.
+>
+> - **The four positions were not all of them.** `ReconciliationQueue::drain` said a folded entry
+>   *"stays pending and holds its slot against `QUEUE_CAPACITY`"* without saying that an eviction can
+>   take it, and `external_observation` named eviction without naming what it costs. Every position
+>   that states retention now states the identical boundary — **acknowledgement or eviction, and an
+>   eviction is a loss obliging a whole-workspace reload** — and the record's own header is one of
+>   them (§12.1, finding 4). No code changed for any of it.
+> - **"The oldest undrained entries" is no longer what an overflow evicts.** Round 3's findings 1 and
+>   2 changed the policy: an overflow now evicts `evictable_sequence`'s answer, which is the lowest
+>   pending sequence of the **busiest path**. Every sentence naming *oldest* was rewritten, including
+>   the two in `commands.rs`. §2.2's round-3 correction is the policy.
+
 
 
 ### 2.2 The capacity bound, and what `discarded` claims
@@ -282,6 +356,43 @@ queue. It is inert on every ordinary run.
 >   `a_sequence_at_or_below_the_acknowledged_watermark_is_counted_as_a_loss` is the second cause's
 >   existing test.
 
+> **Correction, round 3 (findings 1 and 2). The eviction policy is not "the oldest entry" any more,
+> and both halves of the change were review findings before they were a design.** `enqueue` now
+> stores the arrival and *then* restores the bound, and the entry it drops is `evictable_sequence`'s:
+> **the lowest pending sequence of the path holding the most pending entries**, ties between equally
+> busy paths broken by the lower of their lowest sequences.
+>
+> - **Storing before evicting** is finding 1: see §2's round-3 correction. Without it a full queue's
+>   contents depended on arrival order, and through the fold so did the batch.
+> - **The busiest path** is finding 2. With capacity counted over raw entries — which is what round
+>   2's move of the fold to drain made it — `QUEUE_CAPACITY` identical states for one document evict
+>   another document's **only** state, and the pre-round-2 queue would have kept both. A repeat
+>   stream for one file therefore cost the consumer a second file entirely and a whole-workspace
+>   reload, where the fold alone costs nothing. The new rule makes one invariant true: **a document
+>   with one pending entry is never the victim while another document has two.** When every path
+>   holds one entry it degenerates to the lowest sequence, which is the case the original overflow
+>   test drives, and that test is unchanged.
+>
+> **What was refused, and why it is worth recording.** The obvious policy was *prefer to evict an
+> entry the fold currently makes redundant*. It is **not arrival-order independent**, so it would
+> have reopened finding 1 while closing finding 2. Redundancy is a property of the set at the moment
+> of the eviction, and an arrival that later lands between two folded entries un-folds them — the
+> same reason the fold itself had to move to drain. An exhaustive search over every assignment of two
+> paths and two states to five sequences at a capacity of three found counterexamples immediately:
+> one path at states `S, T, S, S, S` on sequences 1–5 retains `{1, 2, 5}` in one arrival order and
+> `{2, 4, 5}` in another. The busiest-path rule does not look at state at all, which is what keeps it
+> out of that trap.
+>
+> **What the order-independence of the new rule rests on, stated exactly.** For the *lowest sequence*
+> it is a proof: keeping the largest `K` of a set under a fixed key cannot depend on insertion order.
+> For *busiest path* it is an argument plus a measurement, and not a proof. The argument is that each
+> path retains a suffix of its own entries — evictions always take that path's current lowest — and
+> that the surviving count per path is the max-min fair share of `QUEUE_CAPACITY`, which is a
+> function of the path sizes. The measurement is an exhaustive search over **every** assignment of
+> paths and states to sequences and **every** arrival order of them, for two and three paths, two
+> states, up to six sequences and capacities two to four: no configuration answered two different
+> batches. That is a bounded check of an unbounded claim, and §12.4 carries it as thin.
+
 ---
 
 ## 3. Why each wire type is shaped as it is
@@ -315,6 +426,40 @@ Residue R3 below.
 
 With that routing, `Added.disk` is never absent, so it is **not** an `Option`: a shape with exactly
 one inhabitant claims a state that cannot occur.
+
+> **Correction, round 3 (finding 3). Half of this deviation is withdrawn, and it is the half that
+> cost something.** The argument above is sound about `Changed` and was never an argument about
+> `Added`: keeping `Changed` total is what pairs `disk_text` with `disk` out of one snapshot, and an
+> `Added` has no such pairing to protect. Routing an addition to `Unreadable` bought nothing and left
+> the **first sighting of a file whose bytes are not UTF-8 reaching the window as a bare display
+> path** — no row for a sidebar to draw and no address by which anything could later be told to
+> invalidate one. R3 recorded that as a cost; round 3 called it a wire defect 2d-5 cannot repair from
+> the value supplied, and it is right.
+>
+> **What changed.** `ExternalObservation::Added` carries `content: AddedContent` —
+> `Projected { disk, findings } | Unreadable { reason }` — which is the consult's `disk?` written as
+> a **discriminated value** rather than as an optional field, because an absence carries no reason
+> and the reason is the sentence a person reads. It also keeps the operand sets together: a
+> projection always comes with its findings and an unreadable state never has any, where two
+> `Option`s would let one be present without the other. `Changed` is untouched and still total.
+>
+> **The identity a row needs is minted for it.** `summary_of` is built around `snapshot.id` on the
+> projected arm and around `espansoconfig_core::workspace::identity_of(&file.path)` on the unreadable
+> one — the same register, so the two arms cannot disagree about one file, and a later removal of
+> that path resolves to the number the row was drawn under. §3.3's round-3 correction is the register.
+>
+> **What is still not closed**, said here rather than left to be discovered: a `Changed` that becomes
+> non-UTF-8 still loses its `previous_revision` and its `disk_revision`, because Q3's `Unreadable`
+> carries neither. That half of R3 stands, narrowed to exactly it.
+>
+> `AddedContent` is registered as a dictionary namespace rather than excluded as `NOT_A_CODE`. The
+> exclusion would have been arguable — both arms render through operands that already have their own
+> sentences — but the two mistakes are not symmetric: a namespace nothing renders is an unused key,
+> and a wrong exclusion is a code with no string, which this project has ruled is the worse of the
+> two.
+>
+> `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` fails without the
+> fix, and its failure message is the finding: `Unreadable { document: Unknown { relative_path } }`.
 
 ### 3.3 `ObservedDocument`, and why `Removed` does not simply carry a `DocumentId`
 
@@ -382,6 +527,56 @@ through the same process-wide table a `Workspace` uses.
 > a `Changed` that becomes unreadable still loses its revisions. And **nothing in Rust makes a
 > consumer invalidate what it holds** — this step makes the identity available, which is the half a
 > type can carry; acting on it is 2d-5's.
+
+> **Correction, round 3 (findings 3 and 5). `QueueState::issued_identities` is deleted, and what
+> replaces it is the table it was a copy of.** The round-1 fix above is right about the defect and
+> wrong about the remedy in two ways it names itself: it said this crate *cannot* mint an identity
+> and that widening `identity_of` would be *"reversing a recorded decision for the convenience of one
+> field"* — and then built a second, epoch-scoped copy of the core's own path-keyed register on the
+> drain path. Round 2's finding 5 and round 3's finding 5 are that copy.
+>
+> **The core now answers the question directly.** `espansoconfig_core::workspace` gains
+> `identity_already_issued(path) -> Option<DocumentId>`, a **read that mints nothing**, and
+> `identity_of` — which mints — becomes public. Both are documented as what they are, because asking
+> the minting one is not a question but an allocation, and a caller that used it as a lookup could
+> never answer `None`. `address_of` is now one read of `identity_already_issued` and nothing else;
+> `external_observation` no longer threads a map; `drain` no longer needs its disjoint borrow. The
+> core gains no dependency and no behaviour — `cargo tree -p espansoconfig-core | rg tauri` is still
+> empty — and what changed is who may ask.
+>
+> **Widening `identity_of` is a reversal, and it is recorded as one.** It was `pub(crate)` because
+> handing identities out is that module's job. It still is; the one case that forced this is a file
+> created after the workspace was opened whose bytes are never valid UTF-8, which reaches no
+> projection and so has no identity for a sidebar row to be drawn around (§3.2's round-3 correction).
+> The alternative was for this crate to invent a number, which would name nothing and could collide
+> with one the core later mints for a different path.
+>
+> **Two answers changed, and both are corrections rather than relaxations.**
+>
+> - **`Unknown` got narrower and its promise got stronger.** It used to mean *this session handed no
+>   identity out for this path in this epoch*; it now means *nothing in this process has ever named
+>   this path*. The claim that rests on it — a display path strands no projection — was true before
+>   and is true by a wider margin now. It stays reachable: a file created after the workspace was
+>   opened whose *read* fails emits `Observation::Unreadable` and never an `Added`, so it is never
+>   discovered, never projected and never minted for.
+> - **An address now survives a workspace replacement**, where `begin_epoch` used to empty the copy.
+>   The reason that was written down — *"one path in two epochs is two files, so an address carried
+>   across a replacement would name the wrong one"* — **contradicts the core's identity model**,
+>   which deliberately gives a path one number for the life of the process, a recreation at that path
+>   included. What a replacement makes stale is the batch, through `ReconciliationBatch::epoch`, and
+>   never an address. `an_identity_issued_in_one_epoch_addresses_nothing_in_the_next` asserted the
+>   false sentence and is replaced by
+>   `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale`.
+>
+> **What no type forces, in the same breath.** `address_of`'s answer is the identity the consumer
+> holds only because every identity in this application comes out of that one register — a
+> `Workspace`'s at discovery, the engine's at projection, this module's at a non-UTF-8 addition.
+> That is now a **single source** rather than two structures documented as agreeing, which is
+> strictly better than what round 1 shipped, and it is still the register's property and not these
+> types'. The tests were changed to mint through it rather than through a literal `DocumentId(7)`,
+> because a helper that invents a number turns every identity assertion into a test of the helper.
+>
+> All three identity tests fail without the fix; §12.4 has the watched failures.
 
 ### 3.4 The projection happens at drain time, not at enqueue
 
@@ -780,6 +975,17 @@ the host scar `PROGRESS.md` records.
   non-UTF-8 still crosses as a path, because no identity has been issued for it. A file this queue
   has already addressed keeps its identity when it later becomes unreadable (§3.3's correction), and
   the lost revisions are untouched either way.
+
+  > **Correction, round 3 (finding 3). The first half is closed and the second is all that is left.**
+  > A non-UTF-8 `Added` is now an `Added`: it carries its `DocumentSummary` and
+  > `AddedContent::Unreadable { reason }`, and its identity is minted through the core's register, so
+  > it is a row a sidebar can draw and an address a later removal resolves to (§3.2 and §3.3, round
+  > 3). Both closures the residue offered were taken — the public identity accessor **and** the wire
+  > shape — and the accessor is recorded as the reversal it is rather than as a convenience. **What
+  > remains, and R3 now means only this:** a `Changed` whose new bytes are not UTF-8 crosses as
+  > `Unreadable` and loses its `previous_revision` and `disk_revision`, because Q3's `Unreadable`
+  > carries neither. Closing that is a wire change on `Unreadable`, and 2d-5 is where the consumer
+  > that would read those two fields is written.
 - **R4. `discarded` has no consumer.** A non-zero value means *reload the workspace, do not
   reconcile*, and nothing enforces that reading. It is inert on every ordinary run, which is exactly
   what makes it easy to leave unread. **Round 1 sharpened what it is carrying**: overflow is
@@ -811,6 +1017,23 @@ the host scar `PROGRESS.md` records.
   > issued_identities`'s own doc carried the same understatement — *"bounded by how many files the
   > watched tree produces in one epoch"* — and now says unbounded, names the duplication and says
   > it is measured by nothing.
+
+  > **Correction, round 3 (finding 5). R9 is closed by deletion, which is the closure it was asking
+  > for.** Round 2 answered *"it is a duplicate, and it is unmeasured"* by removing the false
+  > reassurance; round 3 pointed out that an avoidable second unbounded path-retention structure is
+  > not a documentation residue. `QueueState::issued_identities` no longer exists.
+  > `espansoconfig_core::workspace::identity_already_issued` reads the register this map was a copy
+  > of, so there is now **one** path-keyed structure instead of two, and this crate adds nothing to
+  > it that was not already there — the one place it mints, a non-UTF-8 addition, is a path the core
+  > would have minted for the moment those bytes became valid UTF-8. §3.3's round-3 correction is the
+  > change and what its two behavioural consequences are. What is **not** closed is the core's own
+  > retention: that register keeps every path it has ever named for the life of the process, by
+  > design and with its own reasoning at `SessionIdentities`, and nothing here measures it either.
+
+  > **Correction, round 3.** R9's title above says `QueueState::issued_identities` *"is unbounded
+  > within an epoch and is never evicted from"*, in the present tense, of a field that no longer
+  > exists. The paragraphs are left as they were written — they are the record of what round 2
+  > decided — and the correction block directly above is the state.
 - **R5. The epoch field is supplied and nothing enforces it.** §4. Q3's *installs nothing* is a rule
   2d-5 obeys; this step can only make the mismatch visible.
 - **R7. A drain clones what it returns, once per pending document per drain.** §3.4. Bounded by
@@ -825,6 +1048,21 @@ the host scar `PROGRESS.md` records.
   `announced` map suppresses the rest — but §2's guarantee 3 says the queue is additive to that rule
   rather than a restatement of it, so *rare* is not *never*. **Measured by nothing**: no test drives
   a repeat stream against `QUEUE_CAPACITY`, and the fold's cost is stated rather than bounded.
+
+  > **Correction, round 3 (finding 2). The cost is now bounded where it mattered, and a test does
+  > drive that stream.** *"Repeats are rare"* was the whole of the argument and it justified nothing:
+  > round 3's counterexample is one unique observation for document B followed by `QUEUE_CAPACITY`
+  > identical ones for document A, which evicted B's **only** state and obliged a whole-workspace
+  > reload where the fold alone would have cost nothing. `evictable_sequence` closes exactly that: a
+  > document with one pending entry is never the victim while another has two, so a repeat stream can
+  > only displace its own document's older entries. §2.2's round-3 correction is the policy and the
+  > alternative it refused.
+  >
+  > `a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state` is the test —
+  > `QUEUE_CAPACITY + 1` entries, 256 of them one path's repeats — and it is the one round 2 said did
+  > not exist. **What R10 still carries** is the plain fact that a folded repeat holds a pending slot
+  > until a drain acknowledges it or an eviction removes it, so a repeat stream *does* consume
+  > capacity; what it no longer carries is that the capacity it consumes is another document's.
 
 **Inherited from 2d-3 and still open:**
 
@@ -972,6 +1210,13 @@ changed the code; 2, 3, 4 and 5 changed words to what is true. Nothing here was 
 sentence: the coalescing guarantee round 1 wrote is the one Q3 states, it was **not** weakened, and
 the code now keeps it.
 
+> **Correction, round 3.** *"The code now keeps it"* was true of the fold and false of the queue.
+> Round 3 reviewed this fix round and returned **NOT READY — 0 High, 4 Medium, 1 Low**, and its
+> finding 1 is that the **capacity bound** was still arrival-order dependent, so a full queue could
+> erase the separator that made two states two observations — round 1's finding 3 and round 2's
+> finding 1 surviving into a third shape. Read §12 with this section: the table below is left exactly
+> as it was written, and rows 1, 2 and 5 are superseded there.
+
 ### 11.1 Finding by finding
 
 | # | Severity | What was wrong | What closes it | The test that fails without it |
@@ -1047,3 +1292,151 @@ JSON dictionaries.
 - **R8 is unchanged, and this section is an instance of it.** Every claim above about what the code
   does is prose over code. Round 2 found three sentences round 1's fix wrote; there is no reason to
   think this round wrote none.
+
+---
+
+## 12. Round 3 of the review, and the fix round that answered it
+
+`docs/reviews/phase-2d-4a-queue.md` holds round 3 verbatim: **NOT READY — 0 High, 4 Medium, 1 Low**,
+against gates that were green again. Its scope was **the round-2 fix**, not the original
+implementation and not round 1's fix, and it was commissioned under the rule that commissioned round
+2: a fix is a change, and the round that reviews it is not optional. It was asked one question in
+particular — whether calling the surviving arrival-order dependence a `discarded` **loss** rather
+than a coalescing failure is a true distinction or a relabelling — and the answer is that it was a
+relabelling.
+
+**Round 3's finding 1 is round 1's finding 3 and round 2's finding 1 in a third shape.** The rule
+moved out of `enqueue` and the *bound* stayed there: `enqueue` evicted before it stored, so a full
+queue's contents depended on which thread arrived first, and through the fold so did the batch. Each
+round's fix produced the next round's finding, three times, in the same place. That is this project's
+most reliable pattern and it is the reason this section exists at all.
+
+**Three of the five were code defects and two were claims the code did not support.** Findings 1, 2
+and 3 changed the code; 5 was closed by deleting the structure it named; 4 changed words to what is
+true. **Nothing here was closed by weakening a sentence.** Two sentences were corrected downwards —
+the record's header, which claimed no admitted observation is dropped, and §3.3's *one path in two
+epochs is two files* — and both are false claims corrected to true ones rather than guarantees
+narrowed to fit a defect: the first is stated in §12.1's finding 4 with the three drop causes it
+omitted, and the second contradicted the core's own identity model, which the corrected sentence now
+follows.
+
+### 12.1 Finding by finding
+
+| # | Severity | What was wrong | What closes it | The test that fails without it |
+|---|---|---|---|---|
+| 1 | Medium | Capacity eviction was arrival-order dependent, so the unconditional coalescing guarantee was conditional on it. `enqueue` ran `while pending.len() >= QUEUE_CAPACITY { evict the lowest }` **before** storing the arrival, so a full queue dropped a *resident* entry even for an arrival lower than everything it held. One path at `A(1), B(2), A(257)` retained `B(2), A(257)` in one arrival order and, having lost the separator to the eviction, folded to `A(257)` alone in the other | **Code.** The arrival is stored **first** and the bound restored after — `while pending.len() > QUEUE_CAPACITY`. What the queue retains is then its best `QUEUE_CAPACITY` entries out of everything admitted, a function of the admitted set; an arrival that is itself the right victim leaves again rather than displacing a resident entry. §2's round-3 correction | `a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in` — round 3's own history in three arrival orders, asserting the (sequence, text) list — and `an_arrival_below_everything_a_full_queue_holds_is_the_entry_that_leaves` for the boundary the `>=` was wrong about |
+| 2 | Medium | Capacity counted over raw entries, so `QUEUE_CAPACITY` folded repeats for one document evicted another document's **only** state and obliged a whole-workspace reload — where the pre-round-2 queue would have kept both. *"Repeats are rare"* was unmeasured and justified nothing | **Code.** `evictable_sequence`: the lowest pending sequence of the **busiest path**, ties broken by the lower of their lowest sequences. **A document with one pending entry is never the victim while another has two.** With every path at one entry it degenerates to the lowest sequence, which is the original overflow test's case. §2.2's round-3 correction has the refused alternative and the order-independence evidence | `a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state` — and it fails against finding 1's fix alone, which is what separates the two |
+| 3 | Medium | A first stable non-UTF-8 **addition** reached the window as a bare display path: no `Added` row and no address, so 2d-5 could neither install a projection nor invalidate one. Neither the workspace nor `issued_identities` knew the path, and nothing had ever minted an identity for it | **Code, in the core and on the wire.** `ExternalObservation::Added` carries `content: AddedContent` — `Projected { disk, findings } \| Unreadable { reason }` — which is Q3's `disk?` as a discriminated value; the row's identity comes from `snapshot.id` where there is a projection and from the now-public `espansoconfig_core::workspace::identity_of` where there is not. `Changed` is untouched and still total. §3.2's round-3 correction | `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` — its failure message against the old routing is the finding itself |
+| 4 | Medium | The retention correction claimed more than it changed: the record's **header** still said every admitted observation *"is no longer dropped"* despite three drop causes, `external_observation` named eviction without its cost, and `drain` said a folded entry stays pending without saying an eviction can take it | **Words.** Every position that states retention now states the identical boundary — **acknowledgement or eviction, and an eviction is a loss obliging a whole-workspace reload** — the header included. Every sentence naming the *oldest* entry was rewritten for findings 1 and 2, in `reconciliation.rs` and in both `commands.rs` docs | None. No code changed for it and no test can fail a false comment; `a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state` and `a_full_queue_drops_its_oldest_entries_and_the_documents_they_were_the_only_state_of` are the behaviour it now describes truthfully |
+| 5 | Low | `issued_identities` was an avoidable **second** unbounded path-retention structure, not a documentation residue: it duplicated the core's process-wide path-keyed register on the drain path, and `QUEUE_CAPACITY` bounded neither | **Code, by deletion.** The field is gone. `espansoconfig_core::workspace::identity_already_issued` — a new public read that **mints nothing** — is what `address_of` asks, so there is one path-keyed structure instead of two. §3.3's round-3 correction has the two behavioural consequences and why each is a correction | `an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot`, `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` and `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` all fail when `address_of` asks only the workspace |
+
+### 12.2 What this round changed, by file
+
+- **`crates/espansoconfig-core/src/workspace/mod.rs`** — `identity_of` is **public**, with its doc
+  saying which one case forced the reversal and that it mints; `identity_already_issued` is **new**,
+  a read that mints nothing. No behaviour changed and no dependency was added.
+- **`src-tauri/src/reconciliation.rs`** — `evictable_sequence` and `AddedContent` are new;
+  `QueueState::issued_identities` is **deleted**; `enqueue`, `drain`, `external_observation` and
+  `address_of` changed behaviour; `ExternalObservation::Added` changed shape and both its `disk`
+  fields are boxed. Reworded: the module doc's guarantees 3 and 4, its *no one-to-one relation
+  between a wake and a queued value* bullet and its *where the identities come from* section,
+  `QUEUE_CAPACITY`, `ObservedDocument` and both arms, `ExternalObservation`'s non-UTF-8 section,
+  `ReconciliationBatch::discarded`, `QueueState`, `begin_epoch`, `enqueue`, `drain` and
+  `external_observation`. Four new tests, one new test helper, one test rewritten, the `snapshot`
+  helper now mints through the core, and three test comments corrected.
+- **`src-tauri/src/commands.rs`** — both `drain_external_changes` docs: the *oldest undrained
+  entries* wording, which the new policy makes false.
+- **`src-tauri/src/dictionary_contract.rs`** — `AddedContent` as a namespace, with its variant count.
+- **`src/lib/i18n/{en,es}.json`** — two new keys each, `code.addedContent.projected` and
+  `code.addedContent.unreadable`, EN and ES.
+- **`docs/decisions/2d-4a-notes.md`** — the header sentence and **fourteen** round-3 correction
+  blocks (the header, §1 three times, §2, §2.1, §2.2, §3.2, §3.3, R3, R9 twice, R10 and §11's
+  opening), and this section.
+
+No Svelte component changed and no TypeScript changed. The two dictionary files are data, and
+`npm run check`, `npm test` and `npm run build` are unmoved by them. Q7 item 4's two prohibitions
+hold — this step still draws nothing and still decides nothing about whether a write surface is open.
+
+**Three rows of §7's evidence table are now out of date**, said here rather than by editing it:
+`an_added_file_carries_a_row_whose_parse_this_session_does_not_hold` now reads its projection through
+`AddedContent::Projected`; the row naming `a_full_queue_drops_its_oldest_entry_and_counts_it` was
+already corrected in §10.2 and its subject is now one case of a wider policy; and
+`an_identity_issued_in_one_epoch_addresses_nothing_in_the_next`, which §10.1 names, **no longer
+exists** — `an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale` replaced it
+because the sentence it asserted was false.
+
+### 12.3 The gates after this round
+
+| Gate | Result |
+|---|---|
+| `cargo build --workspace` | exit 0 |
+| `cargo test --workspace` | **1307** passed, 0 failed, 26 result lines all `ok`, exit 0 (1303 before the round, +4 — exactly the four new tests) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, clean |
+| `cargo fmt --check` | exit 0, clean |
+| `cargo doc --workspace --no-deps` | exit 0; **73** `private_intra_doc_links` warnings, the pre-existing count — the new public core function first added a seventy-fourth by linking a private type, and its doc names that type in words instead |
+| `cargo tree -p espansoconfig-core \| rg tauri` | no match |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20/20**, 262 filtered out (was 258; +4), 75.90 s, no timeout |
+| `npm test` | **2125** passed, 56 files — unchanged |
+| `npm run check` | **431** files, 0 errors, 0 warnings — unchanged |
+| `npm run build` | **184** modules — unchanged; the server oracle is absent and the client oracle matches twice |
+
+The workspace suite was run once on a quiet host after `pkill -f 'target/debug/deps/espansoconfig-'`,
+with nothing else running concurrently. The three frontend numbers are unchanged rather than
+re-measured, for §7.1's reason: this round's only frontend change is two keys in two JSON files,
+which adds no module, no `svelte-check` file and no test.
+
+### 12.4 What this round did not do, and where it is thin
+
+- **All four new tests were watched failing before their fix**, by applying the inverse edit and
+  restoring it. Against the pre-fix `>=`-before-insert eviction,
+  `a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in`,
+  `an_arrival_below_everything_a_full_queue_holds_is_the_entry_that_leaves` and
+  `a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state` all failed. With
+  insert-before-evict restored but the victim still the globally lowest sequence, **only** the repeat
+  test failed — which is what separates finding 1's fix from finding 2's rather than letting one
+  cover for the other. With the non-UTF-8 addition routed back to `Unreadable`,
+  `a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address` failed on
+  `Unreadable { document: Unknown { relative_path } }`, which is the finding verbatim. With
+  `address_of` asking only the workspace, the two identity tests and the addition test failed on
+  `Unknown` against `Known`. Finding 4 has no test that can fail: it is false sentences over correct
+  code.
+- **The busiest-path policy's order-independence is argued and measured, not proved.** §2.2's
+  round-3 correction states both halves. The measurement is exhaustive over every assignment and
+  every arrival order for two and three paths, two states, up to six sequences and capacities two to
+  four — which is a bounded check of an unbounded claim, and it lives in this record rather than in
+  the repository: **no test enumerates arrival orders.** The three orders in
+  `a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in` are a sample, chosen because
+  round 3 named two of them.
+- **The refused alternative is recorded because refusing it was the substance of finding 2's fix.**
+  Preferring an entry the fold currently makes redundant is not arrival-order independent and would
+  have reopened finding 1; the counterexample is in §2.2. A capacity rule that is a function of the
+  set at the moment of the eviction can be safe, and one that is a function of *state equality* at
+  that moment cannot, because a later arrival can un-fold what it folded.
+- **`identity_of` being public is a reversal of a recorded decision, and nothing enforces its one
+  intended use.** Any code in `src-tauri` can now mint an identity for any path. What forced it is
+  §3.2's addition; what would catch a misuse is a review, not a type.
+- **The core register's own retention is untouched and still unmeasured.** R9 is closed as a
+  *duplicate*, not as a bound: `espansoconfig_core::workspace` still keeps every path it has ever
+  named for the life of the process. This round removed the second copy and measures neither.
+- **The sweep fired on this round's own prose again, exactly as it did in round 2.** A new test
+  comment read *"so a full queue answered by what arrived last"*, and `answered by` is in
+  `LIVENESS_SHAPES`; `every_liveness_claim_is_judged` failed on it. It is a genuine false positive —
+  the sentence is about which entries survived a bound, not about a path being observed again — so it
+  was reworded to *"what a full queue held depended on what arrived last"* rather than filed. Recorded
+  because a rewording leaves no trace anywhere else.
+- **Two `disk` fields are boxed for a lint, and the wire is unchanged.** Extracting `AddedContent`
+  left `clippy::large_enum_variant` firing on it and then on `ExternalObservation`, so
+  `AddedContent::Projected::disk` and `ExternalObservation::Changed::disk` are `Box<DocumentView>`.
+  `serde` writes a `Box<T>` as its `T`, and
+  `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor` is the test that would have
+  seen a change in the serialized shape.
+- **`AddedContent`'s two dictionary sentences are checked for existence, parity, non-blankness and
+  non-identity between EN and ES — never for truth**, and R1 still stands: no suite asserts that a
+  key has an accessor, so nothing here shows these two are reachable. 2d-4b's `describe*` builders
+  are what discharge that.
+- **Nothing here observes a real filesystem**, unchanged from rounds 1 and 2. `crate::watch_check`
+  remains where real-filesystem evidence lives and gained nothing this round either — including for
+  the non-UTF-8 addition, which is driven by hand through the queue.
+- **R8 is unchanged, and this section is an instance of it.** Round 1's fix wrote three of round 2's
+  findings and round 2's fix wrote at least one of round 3's; there is no reason to think this round
+  wrote none.

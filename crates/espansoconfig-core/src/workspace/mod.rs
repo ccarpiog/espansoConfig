@@ -250,10 +250,21 @@ fn session_identities() -> &'static Mutex<SessionIdentities> {
 /// answer, and one shared mutable input: prior or concurrent allocation here
 /// changes the identity values in otherwise identical engine outputs, so the
 /// engine's determinism is qualified to observation shapes, revisions and
-/// order (its module docs say so in the same sentence). It stays
-/// crate-private because handing identities out is this module's job, not
-/// part of the public surface.
-pub(crate) fn identity_of(path: &Path) -> DocumentId {
+/// order (its module docs say so in the same sentence).
+///
+/// **Public since Phase 2d-4a, and the reason is one case rather than a
+/// convenience.** A file created after a [`Workspace`] was opened whose bytes
+/// are not valid UTF-8 never reaches [`crate::workspace::project_source`], so
+/// nothing has ever minted an identity for it — and the Tauri layer must still
+/// hand its sidebar row an address, because a row with no identity is a row
+/// nothing can later invalidate. The alternative was for that layer to invent a
+/// number, which would name nothing and could collide with one of these.
+/// Minting is still this module's job; what changed is who may ask for it.
+///
+/// **This function mints.** A caller that wants to know whether a path has
+/// *already* been identified — and that must not create an entry by asking —
+/// wants [`identity_already_issued`] instead.
+pub fn identity_of(path: &Path) -> DocumentId {
     let mut table = session_identities()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
@@ -265,6 +276,39 @@ pub(crate) fn identity_of(path: &Path) -> DocumentId {
     table.by_path.insert(path.to_path_buf(), id);
     id
 } // End of function identity_of()
+
+/// The identity `path` was already given, or `None` — **minting nothing**.
+///
+/// The read-only half of [`identity_of`], and the authoritative answer to *does
+/// anything in this process address this file*. It exists because asking
+/// [`identity_of`] is not a question: it is an allocation, so a caller that used
+/// it as a lookup would create the entry it was checking for and could never
+/// answer `None`.
+///
+/// Its answer is a superset of any one [`Workspace`]'s: [`Workspace::from_tree`]
+/// mints through [`identity_of`] for every file it enumerates, so a path this
+/// session discovered is always here, and so is a path a *previous* workspace of
+/// this process discovered. That is the same table by construction and not a
+/// coincidence two structures happen to agree on.
+///
+/// **It is not scoped to a workspace, an epoch or a moment.** A `Some` says only
+/// that this process has named that path; it says nothing about whether the file
+/// exists now, whether the caller ever saw the number, or which workspace
+/// generation was open when it was minted. Path identity is deliberately
+/// process-lifetime-stable — the session identity table this module keeps — so
+/// the same path answers the same number for as long as the process runs, a
+/// recreation at that path included.
+///
+/// Poisoning is absorbed for [`identity_of`]'s reason: a poisoned table is still
+/// a correct table, and this function only reads it.
+pub fn identity_already_issued(path: &Path) -> Option<DocumentId> {
+    session_identities()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .by_path
+        .get(path)
+        .copied()
+} // End of function identity_already_issued()
 
 /// Turns the counter's next value into an identity, or refuses.
 ///

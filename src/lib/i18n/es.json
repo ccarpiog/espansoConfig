@@ -1003,5 +1003,7 @@
   "code.unreadableReason.invalidData": "Tu sistema informó de que los datos de este archivo no se pueden leer, dos veces seguidas.",
   "code.unreadableReason.timedOut": "La lectura de este archivo agotó el tiempo de espera, dos veces seguidas.",
   "code.unreadableReason.interrupted": "La lectura de este archivo se interrumpió, dos veces seguidas.",
-  "code.unreadableReason.other": "Tu sistema se negó a leer este archivo por un motivo al que espansoConfig no da nombre."
+  "code.unreadableReason.other": "Tu sistema se negó a leer este archivo por un motivo al que espansoConfig no da nombre.",
+  "code.addedContent.projected": "espansoConfig ha leído este archivo nuevo y puede mostrarte lo que contiene.",
+  "code.addedContent.unreadable": "espansoConfig no puede leer este archivo nuevo, así que puede mostrarte su nombre pero no su texto."
 }

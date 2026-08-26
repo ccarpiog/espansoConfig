@@ -52,23 +52,30 @@
 //!    file genuinely held `B` in between and neither `A` is adjacent to the
 //!    other. And the fold happens at **drain**, over the complete set, rather
 //!    than at enqueue over the history so far; the price is that a folded entry
-//!    keeps its slot against [`QUEUE_CAPACITY`] until a drain acknowledges it,
-//!    since it is folded out of the batch and not out of the queue.
+//!    keeps its slot against [`QUEUE_CAPACITY`] until a drain acknowledges it
+//!    **or an eviction removes it**, since it is folded out of the batch and
+//!    not out of the queue.
 //!
-//!    **One thing can still make two arrival orders answer differently, and it
-//!    is not this rule:** an overflow evicts by sequence, so which entries a
-//!    full queue is holding when a drain arrives depends on what arrived and
-//!    when. That is a **loss**, reported in [`ReconciliationBatch::discarded`]
-//!    and obliging a whole-workspace reload — not a coalescing failure, and
-//!    not something a fold could repair.
+//!    **The capacity bound is arrival-order independent too, and it has to be
+//!    or this guarantee would be conditional on it.** An overflow evicts
+//!    [`evictable_sequence`]'s answer *after* the arrival has been stored, so
+//!    the set a full queue holds is a function of what was admitted and not of
+//!    the order two threads reached [`ReconciliationQueue::enqueue`] in — which
+//!    an evict-before-insert bound was not. **That is a property of
+//!    [`evictable_sequence`] together with that order, and its own doc says
+//!    which half of it is proved and which half is argued and measured.** What
+//!    an eviction still costs is a
+//!    **loss**, reported in [`ReconciliationBatch::discarded`] and obliging a
+//!    whole-workspace reload; see [`QUEUE_CAPACITY`] for the policy and for
+//!    what it does and does not buy.
 //! 4. **Per document the consumer acts on the highest sequence it has
 //!    accepted** — which is the *consumer's* rule, not this queue's, and this
 //!    queue's part of it is the `after_sequence` watermark: a drain removes
 //!    every entry at or below the sequence the caller says it already holds,
 //!    keeps everything above it, and returns the coalesced form of what it
 //!    kept. So an entry stays until a later drain acknowledges it **unless the
-//!    queue reaches [`QUEUE_CAPACITY`] first** — an overflow evicts the oldest
-//!    undrained entries unacknowledged and counts them in
+//!    queue reaches [`QUEUE_CAPACITY`] first** — an overflow evicts an undrained
+//!    entry unacknowledged and counts it in
 //!    [`ReconciliationBatch::discarded`], and what that costs is the
 //!    whole-workspace reload a non-zero `discarded` obliges, never a repeated
 //!    drain. Short of an eviction, an answer lost on the way to the window
@@ -89,8 +96,9 @@
 //!   disk.
 //! - **It assumes no one-to-one relation between a wake and a queued value.** A
 //!   wake may be dropped by the event system; a refused enqueue emits none; and
-//!   an enqueue whose entry the fold above will not carry emits one like any
-//!   other, so a wake is no promise that the next batch grew.
+//!   an enqueue whose entry the fold above will not carry — or whose entry the
+//!   capacity bound evicts in the same call — emits one like any other, so a
+//!   wake is no promise that the next batch grew.
 //! - **A `Removed` followed by an `Added` at the same path is two entries**,
 //!   even when the new bytes hash like the old ones, because file membership
 //!   changed. The coalescing rule above compares
@@ -105,20 +113,29 @@
 //! A [`ContentRevision`] and a projection ride the observation itself, so a
 //! [`ExternalObservation::Changed`] needs nothing but the value the gate
 //! admitted. An address does not: `espansoconfig_core::watch::engine`'s
-//! `Removed` and `Unreadable` carry a path and no identity, and this crate
-//! cannot mint one — the core keeps identity minting private on purpose. So the
-//! projection into wire form happens at **drain** time, under the session lock,
-//! where the open `Workspace` can be asked.
+//! `Removed` and `Unreadable` carry a path and no identity. So the projection
+//! into wire form happens at **drain** time, under the session lock, where the
+//! configuration root is available to render a display path against.
 //!
-//! The workspace answers for the paths it **discovered**, and a file created
-//! after it was opened is not among them. So a drain also *records*: every
-//! identity this queue puts on the wire is remembered against the path it was
-//! put on, for the life of the epoch. Without that memory an
-//! [`ExternalObservation::Added`] would hand the consumer a [`DocumentId`] and
-//! the same file's later removal or unreadability would cross as a display
-//! path, leaving the consumer holding a projection under an identity nothing
-//! could tell it to invalidate. [`ObservedDocument`] is what a path **neither**
-//! of those two can address crosses as.
+//! **One table answers, and it is the core's.**
+//! `espansoconfig_core::workspace::identity_already_issued` is a read of the
+//! process-wide, path-keyed table every identity in this application comes out
+//! of — a `Workspace`'s at discovery, the observation engine's at projection.
+//! [`address_of`] asks it and nothing else. This queue used to keep a second,
+//! epoch-scoped copy of every identity it had put on the wire, which was a
+//! duplicate of that table written and read on the drain path; the authoritative
+//! read replaces it, and it answers for strictly more paths, since a workspace
+//! mints through the same function it does.
+//!
+//! What that leaves for [`ObservedDocument::Unknown`] is exactly *nothing in
+//! this process has ever named this path* — an io-unreadable file created after
+//! the workspace was opened, say, which no projection and no discovery ever
+//! reached. A file that reaches the window as an
+//! [`ExternalObservation::Added`] is always named, its bytes valid UTF-8 or not:
+//! the projected arm carries the identity its own snapshot minted, and the
+//! unreadable arm mints one through
+//! `espansoconfig_core::workspace::identity_of`, because a row the consumer
+//! cannot address is a row nothing can later tell it to invalidate.
 //!
 //! # Locks
 //!
@@ -131,7 +148,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde::Serialize;
@@ -141,7 +158,9 @@ use espansoconfig_core::model::DocumentView;
 use espansoconfig_core::validate::Finding;
 use espansoconfig_core::watch::correspond::CorrespondenceTable;
 use espansoconfig_core::watch::engine::{Observation, StableContent};
-use espansoconfig_core::workspace::{DocumentSummary, Workspace};
+use espansoconfig_core::workspace::{
+    identity_already_issued, identity_of, DocumentSummary, Workspace,
+};
 use espansoconfig_core::{ContentRevision, DocumentId, WirePath};
 
 use crate::ledger::{observed_state, AdmittedObservation, AdmittedSink, ObservedState};
@@ -156,17 +175,36 @@ use crate::watch::NO_EPOCH;
 ///
 /// It exists because the consumer is a webview that can be suspended while an
 /// external process keeps writing. Without a bound a suspended window and a
-/// busy writer grow this queue until the process dies; with one, the oldest
-/// entries are dropped and [`ReconciliationBatch::discarded`] counts them, so a
-/// caller that sees a non-zero count knows its batch is not a complete history
-/// of the epoch and must reload rather than reconcile.
+/// busy writer grow this queue until the process dies; with one, entries are
+/// dropped and [`ReconciliationBatch::discarded`] counts them, so a caller that
+/// sees a non-zero count knows its batch is not a complete history of the epoch
+/// and must reload rather than reconcile.
 ///
-/// **Dropping the oldest entry preserves no document.** The entry dropped is
-/// the globally oldest one, and it may be the only entry its document has — in
-/// which case that document's newest observed state is exactly what overflow
-/// lost. What the policy does buy is that the entries kept are the ones nearest
-/// the present state of the tree; what it does **not** buy is a per-document
-/// survivor, and an earlier draft of this comment claimed one. Overflow is
+/// # What the eviction policy buys, and what it still does not
+///
+/// [`evictable_sequence`] is the policy: **the lowest pending sequence of the
+/// path holding the most pending entries**, ties between equally busy paths
+/// broken by the lower of their lowest sequences. Two properties follow, and
+/// both were review findings before they were properties:
+///
+/// - **A document with one pending entry is never evicted while another
+///   document has two.** So a stream of repeats for one file cannot displace a
+///   second file's only observed state — which the previous *globally oldest*
+///   rule allowed, and which the drain-time fold made reachable, since a folded
+///   repeat holds a slot against this bound rather than leaving the queue.
+/// - **The retained set does not depend on arrival order.** The arrival is
+///   stored *first* and the bound restored afterwards, so a full queue holds a
+///   function of what was admitted; evicting *before* the insert made a queue at
+///   capacity drop a resident entry even for an arrival lower than everything
+///   it held, which is how two orders of one history came to answer differently.
+///   Read that claim with [`evictable_sequence`]'s own qualification of it: for
+///   *the lowest sequence* it is a proof, and for *the busiest path* it is an
+///   argument and a bounded measurement.
+///
+/// **It still preserves no document.** A path with one pending entry is evicted
+/// as soon as every path has one, and then this is the lowest sequence in the
+/// queue — which may be the only, and therefore newest, state its document has.
+/// What the policy buys is a *fairer* victim, never a survivor. Overflow is
 /// therefore **observable rather than harmless**: a cumulative
 /// [`ReconciliationBatch::discarded`] and the whole-workspace reload it obliges
 /// are the whole of the safety here. Nothing in Phase 2d-4a enforces that
@@ -200,13 +238,12 @@ pub struct ReconciliationWake {
 ///
 /// Two arms because this application cannot always answer the first one.
 /// `espansoconfig_core::watch::engine`'s `Removed` and `Unreadable` carry a
-/// path and no identity, and this crate cannot mint one. **Two** things can
-/// nevertheless address such a path: the open `Workspace`, which maps every
-/// path it *discovered* to an identity, and this queue's own record of every
-/// identity it has already put on the wire in this epoch
-/// ([`ReconciliationQueue::drain`]). A path in neither is a path this session
-/// has handed no identity out for, and inventing one here would put a number on
-/// the wire that names nothing.
+/// path and no identity. What can nevertheless address such a path is the
+/// core's own process-wide, path-keyed identity table, read through
+/// `espansoconfig_core::workspace::identity_already_issued` — see
+/// [`address_of`]. A path that table has never named is a path nothing in this
+/// process has ever addressed, and inventing a number here would put one on the
+/// wire that names nothing.
 ///
 /// Both variants are struct variants, including the one-field arms, so the enum
 /// crosses `serde`'s externally tagged representation as a uniform object —
@@ -214,28 +251,29 @@ pub struct ReconciliationWake {
 /// application follows (`docs/decisions/2b-2b-3-notes.md` D5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ObservedDocument {
-    /// The open workspace holds this path, or this queue has already put an
-    /// identity for it on the wire in this epoch — under this identity.
+    /// Something in this process has already named this path — under this
+    /// identity.
     ///
-    /// Both are `espansoconfig_core::workspace`'s `identity_of` over one
-    /// process-wide, path-keyed table — a `Workspace`'s at discovery, the
-    /// engine's at projection — so **where the two hold the same path key they
-    /// hold the same number**. Nothing in this crate forces that: a
-    /// [`DocumentId`] is a plain number and `identity_of` is crate-private to
-    /// the core, so this is that table's property restated here rather than a
-    /// guarantee of these types.
+    /// It is `espansoconfig_core::workspace`'s one process-wide, path-keyed
+    /// table: a `Workspace`'s `identity_of` at discovery, the engine's at
+    /// projection, and this module's at a non-UTF-8 addition. **One table means
+    /// one number per path**, so this is the identity every other holder of that
+    /// path already has, rather than two structures that happen to agree.
+    ///
+    /// **Path identity outlives a workspace epoch, deliberately.** The core
+    /// keeps a path's identity for the life of the process, a recreation at that
+    /// path included, so this arm can name a path first identified under a
+    /// replaced workspace. What makes a *batch* stale across a replacement is
+    /// [`ReconciliationBatch::epoch`] and never this field.
     Known {
         /// The session-local identity of the file.
         document: DocumentId,
     },
-    /// Neither the open workspace nor any identity this queue has issued in
-    /// this epoch addresses this path.
+    /// Nothing in this process has ever named this path.
     ///
-    /// **So the consumer holds nothing under an identity for this file** — this
-    /// queue put none on the wire for it — and a display path strands no
-    /// projection. The qualification *in this epoch* is the whole of it: a
-    /// replacement empties the record with everything else, and an epoch
-    /// mismatch is what makes the batch stale rather than this field.
+    /// **So the consumer holds nothing under an identity for this file** — no
+    /// identity for it has ever been minted, here or anywhere else — and a
+    /// display path therefore strands no projection.
     ///
     /// The path is rendered relative to the configuration root where it lies
     /// beneath it, and whole where it does not. It is display data and never an
@@ -307,22 +345,32 @@ impl UnreadableReason {
 /// is the consumer's whole arbitration rule and it may not be recovered from a
 /// hash.
 ///
-/// # Why a non-UTF-8 state is not a `Changed`
+/// # Why a non-UTF-8 state is not a `Changed`, and why it *is* an `Added`
 ///
 /// The engine reports present-but-not-UTF-8 bytes as content, so a `Changed` or
-/// an `Added` can arrive with no text and no projection. Rather than give
-/// [`ExternalObservation::Changed`] four optional fields whose absence all mean
-/// one thing, such a state crosses as [`ExternalObservation::Unreadable`] with
-/// [`UnreadableReason::NotUtf8`]. That keeps `Changed` total — its text and its
-/// projection are always present — and it says the true sentence, which is that
-/// this application cannot show the file. **It is a deviation from the
-/// consult's literal field list**, which gives `Added` an optional projection;
-/// `docs/decisions/2d-4a-notes.md` §3 records it and what it costs, which is
-/// that a file whose **first** stable observation is non-UTF-8 reaches the
-/// window as an unreadable path rather than as a new row: no identity has ever
-/// been issued for it, so nothing can address it. A file this queue has already
-/// addressed keeps that identity when it later becomes unreadable — see
-/// [`ObservedDocument`].
+/// an `Added` can arrive with no text and no projection. The two answer it
+/// differently, and the difference is not a preference:
+///
+/// - A **`Changed`** whose new bytes are not UTF-8 crosses as
+///   [`ExternalObservation::Unreadable`] with [`UnreadableReason::NotUtf8`].
+///   That keeps `Changed` total — its text and its projection are always
+///   present, out of one snapshot, which is the pairing a conflict's comparison
+///   side depends on. The alternative was four optional fields whose absence all
+///   meant one thing. What it costs is stated rather than smoothed over: the
+///   consult's `Changed` revisions do not survive the routing, because Q3's
+///   `Unreadable` carries none. `docs/decisions/2d-4a-notes.md` §3.2 records it.
+/// - An **`Added`** whose bytes are not UTF-8 is still an `Added`, carrying its
+///   sidebar row and [`AddedContent::Unreadable`] in place of a projection.
+///   This is the consult's `Added { ..., disk?, findings }` written as a
+///   discriminated value, and an earlier draft of this module routed it to
+///   `Unreadable` too — which left the first sighting of such a file reaching
+///   the window as a bare display path: no row to draw and no address to
+///   invalidate one by. Nothing about `Changed`'s totality required that, and
+///   the identity a row needs is now minted for it (see [`address_of`]).
+///
+/// Both say the same true sentence to a person — *this file's text is not
+/// available* — which this application already says everywhere else, since
+/// `document_text` answers valid UTF-8 or refuses and never decodes lossily.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ExternalObservation {
     /// A document this application already knew about now stably holds
@@ -344,7 +392,11 @@ pub enum ExternalObservation {
         /// The projection of those same bytes — paired with
         /// [`ExternalObservation::Changed::disk_text`] by construction, since
         /// both come out of one snapshot.
-        disk: DocumentView,
+        ///
+        /// Boxed for [`AddedContent::Projected::disk`]'s reason, which is that
+        /// one whole projection makes every value of this enum its size. The
+        /// wire is unchanged: `serde` writes a `Box<T>` as its `T`.
+        disk: Box<DocumentView>,
         /// The pure semantic report over that projection.
         findings: Vec<Finding>,
         /// Snapshot-bound correspondence evidence from the previously projected
@@ -362,15 +414,18 @@ pub enum ExternalObservation {
         /// The sequence this observation was admitted under.
         sequence: u64,
         /// The row a sidebar draws, built from the discovered file and the
-        /// identity its own projection minted.
+        /// identity for its path.
+        ///
+        /// **Present whether or not the bytes are text**, which is the whole of
+        /// what makes this arm addressable: a projected addition carries the
+        /// identity its own snapshot minted, and an unreadable one carries the
+        /// identity [`address_of`]'s table mints for the same path.
         ///
         /// `loaded` is `false`, and truthfully: the backend workspace does not
         /// hold this file at all, so it holds no parse of it either.
         document_summary: DocumentSummary,
-        /// The projection of the stabilized bytes.
-        disk: DocumentView,
-        /// The pure semantic report over that projection.
-        findings: Vec<Finding>,
+        /// The projection of the stabilized bytes, or why there is none.
+        content: AddedContent,
     },
     /// A tracked path is stably gone.
     Removed {
@@ -387,6 +442,48 @@ pub enum ExternalObservation {
         sequence: u64,
         /// The document, when the open workspace holds this path.
         document: ObservedDocument,
+        /// Why the text is not available.
+        reason: UnreadableReason,
+    },
+}
+
+/// What one addition's stabilized bytes projected to, or why they did not.
+///
+/// The 2d design consult's Q3 writes `Added { sequence, document_summary, disk?,
+/// findings }`, and this is that `disk?` as a **discriminated value** rather
+/// than as an optional field: an absence carries no reason, and the reason is
+/// the sentence a person reads. It also keeps the two operand sets apart — a
+/// projection always comes with its findings, and an unreadable state never has
+/// any — where two `Option`s would let one be present without the other.
+///
+/// Both variants are struct variants, so the enum crosses `serde`'s externally
+/// tagged representation as a uniform object (D5), and neither carries the
+/// stabilized bytes: an addition this application cannot read as text is one it
+/// will not show as text, exactly as `document_text` refuses rather than
+/// decoding lossily.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum AddedContent {
+    /// The bytes are valid UTF-8, and this is their projection.
+    Projected {
+        /// The projection of the stabilized bytes.
+        ///
+        /// Boxed for `espansoconfig_core::watch::engine::StableContent`'s
+        /// reason and to its precedent: a whole projection beside a two-word
+        /// refusal makes every value of this enum the size of the larger one.
+        /// `serde` writes a `Box<T>` as its `T`, so the wire is unchanged.
+        disk: Box<DocumentView>,
+        /// The pure semantic report over that projection.
+        findings: Vec<Finding>,
+    },
+    /// The bytes are present and this application cannot show them as text.
+    ///
+    /// Only [`UnreadableReason::NotUtf8`] reaches this arm today: a path whose
+    /// *read* fails is `espansoconfig_core::watch::engine`'s `Unreadable`
+    /// observation and never its `Added`, so it has no `DiscoveredFile` and no
+    /// row to carry. The field is the whole reason type rather than that one
+    /// variant, because narrowing it would be this module deciding which
+    /// failures the engine may report through an addition.
+    Unreadable {
         /// Why the text is not available.
         reason: UnreadableReason,
     },
@@ -447,8 +544,8 @@ pub struct ReconciliationBatch {
     /// How many admitted observations this epoch's queue dropped rather than
     /// held — for **either** of two reasons.
     ///
-    /// The queue was at [`QUEUE_CAPACITY`] and its oldest entry made room for a
-    /// newer one, or the observation's sequence was at or below the
+    /// The queue was over [`QUEUE_CAPACITY`] and [`evictable_sequence`] named an
+    /// entry to make room, or the observation's sequence was at or below the
     /// acknowledged watermark and no later drain could ever have returned it
     /// ([`ReconciliationQueue::enqueue`]). The two are counted together because
     /// they mean the same thing to a consumer and oblige the same response;
@@ -487,37 +584,6 @@ struct QueueState {
     pending: BTreeMap<u64, AdmittedObservation>,
     /// The highest sequence a drain has been told the caller already holds.
     acknowledged: u64,
-    /// Every identity this queue has put on the wire in this epoch, against the
-    /// path it put it on.
-    ///
-    /// Written by [`external_observation`] at drain time and read by
-    /// [`address_of`] when the open `Workspace` cannot address a path — which
-    /// is every path discovered after the workspace was opened.
-    ///
-    /// **Not the pending set, and it does not shrink with it.** An entry
-    /// outlives the acknowledgement of the observation that created it on
-    /// purpose: the removal of a file added mid-epoch arrives after that
-    /// addition has been acknowledged and dropped, and must still name it.
-    /// [`QueueState::empty`] is what empties this, so an identity never crosses
-    /// an epoch.
-    ///
-    /// **Unbounded within one epoch.** It holds one `PathBuf` and one
-    /// [`DocumentId`] per distinct path this epoch has put an identity on the
-    /// wire for, and nothing caps that number: not [`QUEUE_CAPACITY`], which
-    /// bounds only the pending set, and not any other rule here. A long-lived
-    /// epoch that keeps drawing observations for newly created paths keeps
-    /// growing this map while `pending` stays at 256. Only
-    /// [`QueueState::empty`] — a workspace replacement — clears it.
-    ///
-    /// Evicting from it would restore exactly the stranding it exists to close,
-    /// so it is not evicted from. What it duplicates is real and worth naming
-    /// rather than reassuring about: `espansoconfig_core::workspace`'s
-    /// process-wide, path-keyed identity table already retains every path it
-    /// has minted an identity for, for the life of the process, so this adds no
-    /// new class of retained address — it adds a **second** copy of the same
-    /// path on a path that runs at every drain. **Measured by nothing**;
-    /// `docs/decisions/2d-4a-notes.md` R9 carries it as a residue.
-    issued_identities: BTreeMap<PathBuf, DocumentId>,
     /// How many entries this epoch dropped rather than held, for capacity or
     /// for arriving at or below the acknowledged watermark — the two causes
     /// [`ReconciliationBatch::discarded`] states.
@@ -531,7 +597,6 @@ impl QueueState {
             epoch,
             pending: BTreeMap::new(),
             acknowledged: 0,
-            issued_identities: BTreeMap::new(),
             discarded: 0,
         }
     }
@@ -612,6 +677,59 @@ fn coalesced_sequences(pending: &BTreeMap<u64, AdmittedObservation>) -> BTreeSet
     carried
 } // End of function coalesced_sequences()
 
+/// Which entry an overflow drops — **the whole capacity policy, in one place**.
+///
+/// The **lowest pending sequence of the path holding the most pending entries**,
+/// ties between equally busy paths broken by the lower of their lowest
+/// sequences. `None` only for an empty set, which [`ReconciliationQueue::enqueue`]
+/// never reaches, since it has just inserted.
+///
+/// Three properties, each chosen against an alternative this phase's review
+/// found shipped or considered:
+///
+/// - **A path with one pending entry is never the victim while another path has
+///   two.** That is what stops a repeated hint stream for one file from
+///   displacing a second file's only observed state — which *the globally
+///   lowest sequence* allowed, and which the drain-time fold made reachable,
+///   because a folded repeat holds its slot against this bound rather than
+///   leaving the queue.
+///   When every path holds one entry the rule degenerates to exactly that older
+///   one, which is the case the overflow test drives.
+/// - **It is a pure function of the pending set**, so the retained set cannot
+///   depend on the order two threads reached
+///   [`ReconciliationQueue::enqueue`] in — provided the arrival is stored before
+///   the bound is restored, which is why it is. Note what this does *not*
+///   claim: order-independence here is a property of this rule together with
+///   insert-before-evict, and it is argued and exhaustively checked over small
+///   configurations rather than proved. `docs/decisions/2d-4a-notes.md` §12 has
+///   the check and its limits.
+/// - **It does not look at [`ObservedState`].** Preferring an entry the fold
+///   currently makes redundant was the obvious alternative and it is
+///   **refused**: redundancy is a property of the set *at the moment of the
+///   eviction*, and an arrival that later lands between two folded entries
+///   un-folds them — so one history in two arrival orders retains two different
+///   sets, which is the defect the fold moved to drain to close. §12 records the
+///   counterexample.
+///
+/// Removing a path's **lowest** entry is also what keeps the fold's own
+/// adjacency intact: it takes a prefix of that path's entries, so it can never
+/// join two runs that were separated, and never turns two observations into one.
+fn evictable_sequence(pending: &BTreeMap<u64, AdmittedObservation>) -> Option<u64> {
+    // The walk is in ascending sequence order, so the first sighting of a path
+    // already carries that path's lowest pending sequence.
+    let mut by_path: BTreeMap<&Path, (usize, u64)> = BTreeMap::new();
+    for (sequence, entry) in pending {
+        let counted = by_path
+            .entry(entry.observation.path())
+            .or_insert((0, *sequence));
+        counted.0 += 1;
+    } // End of the walk that counts each path's pending entries
+    by_path
+        .into_values()
+        .min_by_key(|(count, lowest)| (std::cmp::Reverse(*count), *lowest))
+        .map(|(_, lowest)| lowest)
+} // End of function evictable_sequence()
+
 /// The typed, ordered, coalescing queue that sits behind the open workspace
 /// session.
 ///
@@ -679,13 +797,19 @@ impl ReconciliationQueue {
     /// replacement, so an entry kept across one could describe a different
     /// directory's file.
     ///
-    /// **Everything** means the pending set, the acknowledged watermark, the
-    /// loss count *and* the record of identities already put on the wire, for
-    /// that same reason: one path in two epochs is two files, so an address
-    /// carried across a replacement would name the wrong one. It is one
-    /// assignment of a fresh [`QueueState`] rather than four clears, which is
-    /// what keeps a field added later from being the one nobody remembered to
-    /// reset.
+    /// **Everything** means the pending set, the acknowledged watermark and the
+    /// loss count. It is one assignment of a fresh [`QueueState`] rather than
+    /// three clears, which is what keeps a field added later from being the one
+    /// nobody remembered to reset.
+    ///
+    /// **What it does not reset is a path's identity**, and it never did in the
+    /// place that matters: identity lives in the core's process-wide table, and
+    /// a path keeps its number for the life of the process. This queue briefly
+    /// kept an epoch-scoped copy of the identities it had issued, on the ground
+    /// that *one path in two epochs is two files* — which the core's own model
+    /// contradicts, since it hands a recreation at one path the same number.
+    /// What a replacement makes stale is the batch, through
+    /// [`ReconciliationBatch::epoch`], and never an address.
     pub fn begin_epoch(&self, epoch: u64) {
         *self.state.lock().unwrap_or_else(PoisonError::into_inner) = QueueState::empty(epoch);
     }
@@ -716,10 +840,16 @@ impl ReconciliationQueue {
     ///
     /// One case more owes a wake like any other and is not a refusal:
     ///
-    /// - **a full queue**: the **oldest** entry is dropped and counted in
+    /// - **a full queue**: the arrival is stored, and [`evictable_sequence`]
+    ///   then names the entry that leaves, which is counted in
     ///   [`ReconciliationBatch::discarded`]. That entry may be its document's
     ///   only state, so this is a real loss and never a tidying — see
-    ///   [`QUEUE_CAPACITY`].
+    ///   [`QUEUE_CAPACITY`]. **Storing first and evicting after is the whole of
+    ///   why the bound cannot depend on arrival order**: evicting first made a
+    ///   queue at capacity drop a resident entry to make room for an arrival
+    ///   lower than everything it held, so one history in two orders retained
+    ///   two different sets — and the arrival that was itself the right victim
+    ///   is now simply the entry that leaves again.
     ///
     /// **Coalescing is not decided here**, and that is this function's one
     /// deliberate omission. An arrival that repeats what a pending entry
@@ -748,14 +878,14 @@ impl ReconciliationQueue {
             guard.discarded += 1;
             return None;
         }
-        while guard.pending.len() >= QUEUE_CAPACITY {
-            let Some(oldest) = guard.pending.keys().next().copied() else {
+        guard.pending.insert(admitted.sequence, admitted);
+        while guard.pending.len() > QUEUE_CAPACITY {
+            let Some(evicted) = evictable_sequence(&guard.pending) else {
                 break;
             };
-            guard.pending.remove(&oldest);
+            guard.pending.remove(&evicted);
             guard.discarded += 1;
-        } // End of the loop that makes room for one more entry
-        guard.pending.insert(admitted.sequence, admitted);
+        } // End of the loop that brings the queue back within its capacity
         Some(guard.owed_wake())
     } // End of function enqueue()
 
@@ -800,7 +930,11 @@ impl ReconciliationQueue {
     /// pending and holds its slot against [`QUEUE_CAPACITY`]: it is folded out
     /// of the batch, never out of the queue, and never counted in
     /// [`ReconciliationBatch::discarded`], because what it asserts crosses under
-    /// a higher sequence.
+    /// a higher sequence. **Holding a slot is not the same as being safe**: a
+    /// later overflow may evict that entry like any other, and then it is a
+    /// counted loss obliging a whole-workspace reload rather than a fold —
+    /// which is why the entries it holds a slot *against* are chosen by
+    /// [`evictable_sequence`] rather than by sequence alone.
     ///
     /// A caller that drains twice with the same watermark therefore receives
     /// the same batch twice **when nothing was enqueued between the two
@@ -808,40 +942,31 @@ impl ReconciliationQueue {
     /// consumes nothing from it — so an answer lost between Rust and the window
     /// costs no more than the drain that repeats it. An enqueue in between adds
     /// to the second batch, which is what a queue is for and not an exception
-    /// to the rule.
+    /// to the rule — **and an enqueue is also what can evict**, which is the one
+    /// way a second batch can be *missing* something the first one carried. That
+    /// is a counted loss and a whole-workspace reload, not a repeated drain.
     ///
     /// [`ReconciliationBatch::newest_sequence`] is never below the highest
     /// watermark this queue has been drained with, so a drain that arrives out
     /// of order cannot walk a caller's watermark backwards.
     ///
-    /// `workspace` is what turns a watched path into an address — and this is
-    /// also where an address is **recorded**: every identity that crosses here
-    /// is remembered against its path, so a file added after the workspace was
-    /// opened can still be addressed when it is later removed or becomes
-    /// unreadable. It is the open workspace, so this runs under the session lock
-    /// and takes this queue's mutex below it — the one order that exists here.
+    /// `workspace` is here to render a display path against the configuration
+    /// root; what turns a watched path into an *address* is the core's own
+    /// identity table, read by [`address_of`]. It is the open workspace, so this
+    /// runs under the session lock and takes this queue's mutex below it — the
+    /// one order that exists here.
     pub fn drain(&self, after_sequence: u64, workspace: &Workspace) -> ReconciliationBatch {
         let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         guard.acknowledged = guard.acknowledged.max(after_sequence);
         guard
             .pending
             .retain(|sequence, _| *sequence > after_sequence);
-        // Split into disjoint borrows so the projection can read the pending set
-        // and write the identity record in one pass: an addition and the
-        // removal of the same path can share a batch, and the removal is
-        // addressed by what the addition just recorded.
-        let QueueState {
-            epoch,
-            pending,
-            acknowledged,
-            issued_identities,
-            discarded,
-        } = &mut *guard;
-        let carried = coalesced_sequences(pending);
-        let observations: Vec<ExternalObservation> = pending
+        let carried = coalesced_sequences(&guard.pending);
+        let observations: Vec<ExternalObservation> = guard
+            .pending
             .iter()
             .filter(|(sequence, _)| carried.contains(sequence))
-            .map(|(_, admitted)| external_observation(admitted, workspace, issued_identities))
+            .map(|(_, admitted)| external_observation(admitted, workspace))
             .collect();
         // The batch's own highest — which is also the highest *pending*
         // sequence, since `coalesced_sequences` always carries that entry — and
@@ -854,13 +979,13 @@ impl ReconciliationQueue {
         let newest_sequence = observations
             .last()
             .map(ExternalObservation::sequence)
-            .unwrap_or(*acknowledged)
-            .max(*acknowledged);
+            .unwrap_or(guard.acknowledged)
+            .max(guard.acknowledged);
         ReconciliationBatch {
-            epoch: *epoch,
+            epoch: guard.epoch,
             newest_sequence,
             observations,
-            discarded: *discarded,
+            discarded: guard.discarded,
         }
     } // End of function drain()
 
@@ -910,21 +1035,22 @@ pub fn queueing_sink(queue: Arc<ReconciliationQueue>) -> AdmittedSink {
 ///
 /// The whole projection into wire form, in one place, so no consumer builds a
 /// second one. It clones out of the queued value rather than consuming it,
-/// because a drain consumes nothing: an entry survives its own drain, and
-/// leaves the queue only when a later drain acknowledges it or an overflow
-/// evicts it ([`QUEUE_CAPACITY`]).
+/// because a drain consumes nothing: an entry survives its own drain, and leaves
+/// the queue in exactly two ways — a later drain **acknowledges** it, or an
+/// overflow **evicts** it ([`QUEUE_CAPACITY`]). Those two are not
+/// interchangeable: the first is the consumer saying it holds the observation,
+/// and the second is a loss counted in [`ReconciliationBatch::discarded`] and
+/// obliging a whole-workspace reload.
 ///
-/// `issued` is this epoch's record of what has been addressed, and this function
-/// is its **only** writer: every arm that puts a [`DocumentId`] on the wire
-/// records it against the path it belongs to first, so that a later observation
-/// of that same path — which carries a path and no identity — can be addressed
-/// by [`address_of`]. Writing it here rather than at the call site is what makes
-/// *every identity that crosses is remembered* true by construction: a variant
-/// added later cannot cross without passing through this match.
+/// Every arm that needs an address asks [`address_of`], and the one arm that
+/// needs an address **nothing has minted yet** — a first sighting of a file whose
+/// bytes are not UTF-8 — mints it, because a sidebar row the consumer cannot
+/// name is a row nothing can later tell it to invalidate. This function used to
+/// keep the queue's own record of what it had addressed, which was a second copy
+/// of the core's table; `docs/decisions/2d-4a-notes.md` §12 is why it does not.
 fn external_observation(
     admitted: &AdmittedObservation,
     workspace: &Workspace,
-    issued: &mut BTreeMap<PathBuf, DocumentId>,
 ) -> ExternalObservation {
     let sequence = admitted.sequence;
     match &admitted.observation {
@@ -934,52 +1060,59 @@ fn external_observation(
             content,
             correspondences,
         } => match content {
-            StableContent::Projected { snapshot, findings } => {
-                issued.insert(path.clone(), snapshot.id);
-                ExternalObservation::Changed {
-                    sequence,
-                    document: snapshot.id,
-                    previous_revision: *previous_revision,
-                    disk_revision: snapshot.revision,
-                    disk_text: snapshot.source.clone(),
-                    disk: snapshot.view.clone(),
-                    findings: findings.clone(),
-                    correspondences: correspondences.clone(),
-                }
-            }
+            StableContent::Projected { snapshot, findings } => ExternalObservation::Changed {
+                sequence,
+                document: snapshot.id,
+                previous_revision: *previous_revision,
+                disk_revision: snapshot.revision,
+                disk_text: snapshot.source.clone(),
+                disk: Box::new(snapshot.view.clone()),
+                findings: findings.clone(),
+                correspondences: correspondences.clone(),
+            },
             StableContent::NotUtf8 { offset, .. } => ExternalObservation::Unreadable {
                 sequence,
-                document: address_of(path, workspace, issued),
+                document: address_of(path, workspace),
                 reason: UnreadableReason::NotUtf8 { offset: *offset },
             },
         },
-        Observation::Added { file, content } => match content {
-            StableContent::Projected { snapshot, findings } => {
-                issued.insert(file.path.clone(), snapshot.id);
-                ExternalObservation::Added {
-                    sequence,
-                    document_summary: summary_of(snapshot.id, file),
-                    disk: snapshot.view.clone(),
-                    findings: findings.clone(),
-                }
-            }
-            StableContent::NotUtf8 { offset, .. } => ExternalObservation::Unreadable {
+        Observation::Added { file, content } => {
+            // The identity a row is built around: the projection's own where
+            // there is one, and a freshly minted one where there is not —
+            // `identity_of` answers the same number for this path forever, so
+            // the two arms cannot disagree about one file.
+            let (document, added) = match content {
+                StableContent::Projected { snapshot, findings } => (
+                    snapshot.id,
+                    AddedContent::Projected {
+                        disk: Box::new(snapshot.view.clone()),
+                        findings: findings.clone(),
+                    },
+                ),
+                StableContent::NotUtf8 { offset, .. } => (
+                    identity_of(&file.path),
+                    AddedContent::Unreadable {
+                        reason: UnreadableReason::NotUtf8 { offset: *offset },
+                    },
+                ),
+            };
+            ExternalObservation::Added {
                 sequence,
-                document: address_of(&file.path, workspace, issued),
-                reason: UnreadableReason::NotUtf8 { offset: *offset },
-            },
-        },
+                document_summary: summary_of(document, file),
+                content: added,
+            }
+        }
         Observation::Removed {
             path,
             previous_revision,
         } => ExternalObservation::Removed {
             sequence,
-            document: address_of(path, workspace, issued),
+            document: address_of(path, workspace),
             previous_revision: *previous_revision,
         },
         Observation::Unreadable { path, kind } => ExternalObservation::Unreadable {
             sequence,
-            document: address_of(path, workspace, issued),
+            document: address_of(path, workspace),
             reason: UnreadableReason::of_io_kind(*kind),
         },
     } // End of the match over every observation kind the engine can produce
@@ -987,28 +1120,33 @@ fn external_observation(
 
 /// The address one watched path crosses as.
 ///
-/// The open workspace first, then `issued` — this epoch's record of every
-/// identity already put on the wire, which is the only thing that can address a
-/// file created after the workspace was opened. **The order changes no answer**:
-/// both are `espansoconfig_core::workspace`'s one process-wide, path-keyed
-/// identity table, so where both hold the same path key they hold the same
-/// number, and where they do not, one of them simply has none. The workspace is
-/// asked first only because it is the authority on what this session
-/// discovered. Nothing here forces the agreement — see [`ObservedDocument`].
+/// One question to one table: `espansoconfig_core::workspace`'s process-wide,
+/// path-keyed identity register, read through `identity_already_issued`, which
+/// **mints nothing** — asking must not create the entry it asks about. Every
+/// identity in this application comes out of that register: a `Workspace`'s at
+/// discovery, the observation engine's at projection, and this module's at a
+/// non-UTF-8 addition. So the number here is the number every other holder of
+/// that path already has, by construction rather than by two structures
+/// agreeing.
 ///
-/// `Unknown` is therefore exactly *this session handed no identity out for this
-/// path in this epoch*, which is what makes a display path here strand no
-/// projection. What it is not is a promise across epochs: a replacement empties
-/// the record, and an epoch mismatch is what makes such a batch stale.
-fn address_of(
-    path: &Path,
-    workspace: &Workspace,
-    issued: &BTreeMap<PathBuf, DocumentId>,
-) -> ObservedDocument {
-    match workspace
-        .document_id(path)
-        .or_else(|| issued.get(path).copied())
-    {
+/// `Unknown` is therefore exactly *nothing in this process has ever named this
+/// path*, which is what makes a display path here strand no projection: no
+/// identity for that file has ever been minted, so the consumer holds nothing
+/// under one. It is reachable — an io-unreadable file created after the
+/// workspace was opened is never discovered, never projected and never an
+/// addition — and it is narrower than what this function used to answer, which
+/// also said `Unknown` for a path a *replaced* workspace had named.
+///
+/// **The answer is not scoped to an epoch, and that is the register's model
+/// rather than a relaxation here.** A path keeps one identity for the life of the
+/// process, a recreation at that path included, so an address is never wrong
+/// across a replacement; what a replacement makes stale is the batch, through
+/// [`ReconciliationBatch::epoch`].
+///
+/// `workspace` is used for its root and for nothing else: a path that lies
+/// beneath it renders relative to it, and one that does not renders whole.
+fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
+    match identity_already_issued(path) {
         Some(document) => ObservedDocument::Known { document },
         None => ObservedDocument::Unknown {
             relative_path: WirePath::from(
@@ -1042,6 +1180,7 @@ fn summary_of(id: DocumentId, file: &DiscoveredFile) -> DocumentSummary {
 mod tests {
     use super::*;
 
+    use std::path::PathBuf;
     use std::sync::mpsc::channel;
 
     use espansoconfig_core::discovery::FileKind;
@@ -1062,8 +1201,15 @@ mod tests {
     const TWO: &str = "matches:\n  - trigger: ':one'\n    replace: beta\n";
 
     /// Projects a source string as a detached snapshot at `path`.
+    ///
+    /// The identity is the **core's**, minted from the path through the same
+    /// function `espansoconfig_core::watch::engine` calls when it projects
+    /// stabilized bytes — never a literal. [`address_of`] reads that one
+    /// register, so a helper that invented a number would turn every identity
+    /// assertion below into a test of the helper.
     fn snapshot(path: &str, source: &str) -> SourceDocument {
-        project_source(&DocumentContext::detached(DocumentId(7), path), source)
+        let document = identity_of(Path::new(path));
+        project_source(&DocumentContext::detached(document, path), source)
     }
 
     /// One admitted `Changed` observation, with no correspondence evidence.
@@ -1182,7 +1328,8 @@ mod tests {
         queue.enqueue(changed(1, 1, "match/a.yml", ONE));
         queue.enqueue(changed(2, 1, "match/a.yml", ONE));
         // Both are stored: the fold is a property of the batch and not of the
-        // queue, so a repeat holds its slot until a drain acknowledges it.
+        // queue, so a repeat holds its slot until a drain acknowledges it or an
+        // eviction removes it.
         assert_eq!(queue.pending(), 2);
         let batch = queue.drain(0, &workspace);
         assert_eq!(
@@ -1452,32 +1599,102 @@ mod tests {
     } // End of function an_identity_this_queue_issued_addresses_that_path_where_the_workspace_cannot()
 
     #[test]
-    fn an_identity_issued_in_one_epoch_addresses_nothing_in_the_next() {
+    fn a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address() {
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
-        queue.enqueue(added(1, 1, "match/new.yml", ONE));
-        let first = queue.drain(0, &workspace);
-        assert!(matches!(
-            first.observations[0],
-            ExternalObservation::Added { .. }
-        ));
-        // A replacement empties the record with everything else: an epoch is a
-        // different workspace, and one path in two of them is two files.
-        queue.begin_epoch(2);
-        queue.enqueue(removed(1, 2, "match/new.yml"));
-        let second = queue.drain(0, &workspace);
-        assert_eq!(second.epoch, 2);
+        // A file created after the workspace was opened whose bytes are not
+        // UTF-8. Nothing has ever projected it, so nothing had ever minted an
+        // identity for it — and an earlier draft sent it as an `Unreadable`
+        // carrying a display path: no row for a sidebar to draw, and no address
+        // by which anything could later be told to invalidate one.
+        queue.enqueue(AdmittedObservation {
+            sequence: 1,
+            epoch: 1,
+            observation: Observation::Added {
+                file: DiscoveredFile {
+                    path: PathBuf::from("match/binary.yml"),
+                    kind: FileKind::MatchFile,
+                    relative_path: PathBuf::from("match/binary.yml"),
+                    disabled: false,
+                },
+                content: StableContent::NotUtf8 {
+                    revision: ContentRevision::of_bytes(&[0xff, 0xfe]),
+                    offset: 0,
+                },
+            },
+        });
+        let batch = queue.drain(0, &workspace);
+        let ExternalObservation::Added {
+            document_summary,
+            content,
+            ..
+        } = &batch.observations[0]
+        else {
+            panic!("a new file is Added whether or not its bytes are text: {batch:?}");
+        };
+        assert_eq!(
+            *content,
+            AddedContent::Unreadable {
+                reason: UnreadableReason::NotUtf8 { offset: 0 },
+            },
+            "the row carries why there is no projection, never a bare absence"
+        );
+        assert!(
+            !document_summary.loaded,
+            "the backend workspace holds no parse of it, and could not"
+        );
+        let addressed = document_summary.id;
+        // The identity is the core register's, so the same file's later removal
+        // names exactly what the row was drawn under.
+        queue.enqueue(removed(2, 1, "match/binary.yml"));
+        let second = queue.drain(1, &workspace);
         assert!(
             matches!(
                 second.observations[0],
                 ExternalObservation::Removed {
-                    document: ObservedDocument::Unknown { .. },
+                    document: ObservedDocument::Known { document },
                     ..
-                }
+                } if document == addressed
             ),
-            "{second:?}"
+            "the addition's identity addresses its own removal: {second:?}"
         );
-    } // End of function an_identity_issued_in_one_epoch_addresses_nothing_in_the_next()
+    } // End of function a_first_sighting_of_a_file_that_is_not_text_still_carries_a_row_and_an_address()
+
+    #[test]
+    fn an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale() {
+        let queue = queue_at_epoch(1);
+        let (_dir, workspace) = empty_workspace();
+        queue.enqueue(added(1, 1, "match/epochs.yml", ONE));
+        let first = queue.drain(0, &workspace);
+        let ExternalObservation::Added {
+            document_summary, ..
+        } = &first.observations[0]
+        else {
+            panic!("a new file is Added: {first:?}");
+        };
+        let issued = document_summary.id;
+        // A replacement empties the pending set, the watermark and the loss
+        // count — and **not** a path's identity, which is the core's register
+        // and keeps one number per path for the life of the process. An earlier
+        // draft of this queue kept an epoch-scoped copy and answered `Unknown`
+        // here, on the ground that one path in two epochs is two files: the
+        // core's own model says the opposite, a recreation at that path
+        // included. What a replacement makes stale is the batch.
+        queue.begin_epoch(2);
+        queue.enqueue(removed(1, 2, "match/epochs.yml"));
+        let second = queue.drain(0, &workspace);
+        assert_eq!(second.epoch, 2, "the batch says which workspace it is for");
+        assert!(
+            matches!(
+                second.observations[0],
+                ExternalObservation::Removed {
+                    document: ObservedDocument::Known { document },
+                    ..
+                } if document == issued
+            ),
+            "one path is one document across a replacement: {second:?}"
+        );
+    } // End of function an_identity_survives_a_replacement_and_the_epoch_is_what_makes_a_batch_stale()
 
     #[test]
     fn an_empty_batch_answers_the_watermark_it_was_asked_with() {
@@ -1505,12 +1722,143 @@ mod tests {
         assert_eq!(queue.drain(5, &workspace).discarded, 1);
     } // End of function a_sequence_at_or_below_the_acknowledged_watermark_is_counted_as_a_loss()
 
+    /// The path and the source one sequence of the capacity counterexample
+    /// carries.
+    ///
+    /// Sequences 1, 2 and 257 are **one** path at states A, B and A; every
+    /// sequence between them is a path of its own. So the queue arrives at one
+    /// entry over capacity holding 256 documents, exactly one of which has more
+    /// than a single entry.
+    fn subject_or_filler(sequence: u64) -> (String, String) {
+        match sequence {
+            1 | 257 => ("match/subject.yml".to_owned(), ONE.to_owned()),
+            2 => ("match/subject.yml".to_owned(), TWO.to_owned()),
+            other => (
+                format!("match/filler{other}.yml"),
+                format!("matches:\n  - trigger: ':f{other}'\n    replace: filler\n"),
+            ),
+        }
+    } // End of function subject_or_filler()
+
+    #[test]
+    fn a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in() {
+        // Round 3's first counterexample. Evicting *before* the insert dropped
+        // the resident lowest entry to make room, so arriving `1..257` evicted
+        // A(1) and kept B(2), while arriving `2..257, 1` evicted B(2) and stored
+        // A(1) — and with B(2) gone the drain folded A(1) into A(257). One
+        // admitted history, two batches, decided by which thread was first.
+        let ascending: Vec<u64> = (1..=257).collect();
+        let descending: Vec<u64> = (1..=257).rev().collect();
+        let lowest_last: Vec<u64> = (2..=257).chain(std::iter::once(1)).collect();
+        let mut answers: Vec<(Vec<(u64, String)>, u64)> = Vec::new();
+        for arrival in [ascending, descending, lowest_last] {
+            let queue = queue_at_epoch(1);
+            let (_dir, workspace) = empty_workspace();
+            for sequence in arrival {
+                let (path, source) = subject_or_filler(sequence);
+                queue.enqueue(changed(sequence, 1, &path, &source));
+            } // End of the loop that feeds one arrival order to the queue
+            let batch = queue.drain(0, &workspace);
+            answers.push((sequences_and_text(&batch), batch.discarded));
+        } // End of the loop over the three arrival orders of one admitted history
+        assert_eq!(
+            answers[0], answers[1],
+            "the retained set follows what was admitted, never the arrival order"
+        );
+        assert_eq!(
+            answers[0], answers[2],
+            "and that holds for a third order too"
+        );
+        let (carried, discarded) = &answers[0];
+        assert_eq!(*discarded, 1, "one entry over capacity is one eviction");
+        assert!(
+            carried.contains(&(2, TWO.to_owned())),
+            "the separator that makes the two A states two observations survives"
+        );
+        assert!(
+            carried.iter().any(|(sequence, _)| *sequence == 257),
+            "so does the newest state of the busiest path"
+        );
+        assert!(
+            !carried.iter().any(|(sequence, _)| *sequence == 1),
+            "and the lowest entry of that path is what left"
+        );
+    } // End of function a_full_queue_retains_the_same_entries_whatever_order_they_arrive_in()
+
+    #[test]
+    fn an_arrival_below_everything_a_full_queue_holds_is_the_entry_that_leaves() {
+        // The boundary of the bound, and the reason the loop tests `>` after the
+        // insert rather than `>=` before it: the queue is exactly full and the
+        // arrival is lower than every entry in it. Evicting first made room by
+        // dropping a *resident* entry and then stored the older arrival, so
+        // what a full queue held depended on what arrived last.
+        let queue = queue_at_epoch(1);
+        let (_dir, workspace) = empty_workspace();
+        for index in 0..QUEUE_CAPACITY as u64 {
+            let path = format!("match/{index}.yml");
+            queue.enqueue(changed(index + 2, 1, &path, ONE));
+        } // End of the loop that fills the queue exactly
+        assert_eq!(queue.pending(), QUEUE_CAPACITY);
+        let wake = queue
+            .enqueue(changed(1, 1, "match/late.yml", TWO))
+            .expect("an arrival the bound evicts owes a wake like any other");
+        assert_eq!(
+            wake.newest_sequence,
+            QUEUE_CAPACITY as u64 + 1,
+            "the wake names what the queue holds, never what arrived"
+        );
+        let batch = queue.drain(0, &workspace);
+        assert_eq!(batch.discarded, 1);
+        assert_eq!(batch.observations.len(), QUEUE_CAPACITY);
+        assert_eq!(
+            batch
+                .observations
+                .first()
+                .map(ExternalObservation::sequence),
+            Some(2),
+            "every path holds one entry, so the tie goes to the lowest sequence — \
+             which is the arrival itself, and the queue holds what it held before"
+        );
+    } // End of function an_arrival_below_everything_a_full_queue_holds_is_the_entry_that_leaves()
+
+    #[test]
+    fn a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state() {
+        // Round 3's second counterexample. Document B has one observation;
+        // document A then produces QUEUE_CAPACITY identical ones. With the
+        // globally lowest sequence as the victim, B's only state was the first
+        // thing to go — so a repeat stream for one file cost the consumer a
+        // second file entirely and obliged a whole-workspace reload, where the
+        // fold alone would have cost nothing.
+        let queue = queue_at_epoch(1);
+        let (_dir, workspace) = empty_workspace();
+        queue.enqueue(changed(1, 1, "match/b.yml", TWO));
+        for sequence in 2..=QUEUE_CAPACITY as u64 + 1 {
+            queue.enqueue(changed(sequence, 1, "match/a.yml", ONE));
+        } // End of the loop that overfills the queue with one path's repeats
+        assert_eq!(queue.pending(), QUEUE_CAPACITY);
+        let batch = queue.drain(0, &workspace);
+        assert_eq!(
+            sequences_and_text(&batch),
+            vec![
+                (1, TWO.to_owned()),
+                (QUEUE_CAPACITY as u64 + 1, ONE.to_owned()),
+            ],
+            "B's only state survives and A's repeats fold onto their highest: {batch:?}"
+        );
+        assert_eq!(
+            batch.discarded, 1,
+            "the entry that left belonged to the busiest path, and it is still a loss"
+        );
+    } // End of function a_stream_of_repeats_for_one_document_never_evicts_another_documents_only_state()
+
     #[test]
     fn a_full_queue_drops_its_oldest_entries_and_the_documents_they_were_the_only_state_of() {
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
         // One observation per document, so every entry is its document's only
-        // state and nothing can survive on another entry's behalf.
+        // state and nothing can survive on another entry's behalf. This is also
+        // where the eviction policy degenerates to the lowest sequence: with
+        // every path holding one entry, no path is busier than another.
         for index in 0..QUEUE_CAPACITY as u64 + 3 {
             let path = format!("match/{index}.yml");
             queue.enqueue(added(index + 1, 1, &path, ONE));
@@ -1776,7 +2124,7 @@ mod tests {
         let batch = queue.drain(0, &workspace);
         let ExternalObservation::Added {
             document_summary,
-            disk,
+            content,
             ..
         } = &batch.observations[0]
         else {
@@ -1787,6 +2135,9 @@ mod tests {
             "the backend workspace holds no parse of a file it never discovered"
         );
         assert!(!document_summary.read_only);
+        let AddedContent::Projected { disk, .. } = content else {
+            panic!("readable bytes project: {content:?}");
+        };
         assert_eq!(disk.matches.len(), 1);
     } // End of function an_added_file_carries_a_row_whose_parse_this_session_does_not_hold()
 

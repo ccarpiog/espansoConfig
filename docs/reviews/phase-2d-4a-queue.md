@@ -96,3 +96,60 @@ NOT READY — 0 High, 4 Medium findings.
 
 Codex session ID: 01a03db2-1d38-72a3-948d-9b2a33255631
 Resume in Codex: codex resume 01a03db2-1d38-72a3-948d-9b2a33255631
+
+---
+
+## Round 3 — verbatim
+
+Scope: **the round-2 fix**, not the original implementation and not round 1's fix. Commissioned
+under the same rule that commissioned round 2 — a fix is a change, and the round that reviews it
+is not optional. Round 2's own lesson was carried into this brief: *a fix can close a finding's
+example without closing its shape*, so round 3 was asked what the round-2 fix's own new sentences
+and its new code now rest on, and specifically whether calling the surviving arrival-order
+dependence a `discarded` **loss** rather than a coalescing failure is a true distinction or a
+relabelling.
+
+Gates when this round was commissioned, all measured on this clean tree at `55ebd74` by the
+orchestrator: `cargo test --workspace` **1303** passed / 0 failed over **26** result lines all
+`ok`, exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check`
+clean; `cargo doc --workspace --no-deps` exit 0 (its ~73 `private_intra_doc_links` warnings are a
+different, pre-existing lint); `cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::`
+**20/20** with 258 filtered out in 68.00 s; `npm test` **2125** in 56 files; `npm run check` **431**
+files / 0 errors; `npm run build` **184** modules with the server oracle absent and the client
+oracle present.
+
+## High
+
+None.
+
+## Medium
+
+1. Capacity eviction reintroduces arrival-order-dependent coalescing. Consider one path with `A(1), B(2), A(257)` and sequences 3–256 belonging to other paths. Arrival order `1..257` evicts `A(1)`, returning `B(2), A(257)`. Order `2..257, 1` instead evicts `B(2)`, stores `A(1)`, and the drain folds the two A entries, returning only `A(257)`. Thus eviction can erase the separator that made the A states distinct; calling this "not a coalescing failure" and the guarantee "unconditional" is false even though `discarded == 1` makes the loss observable (`src-tauri/src/reconciliation.rs:40`, `src-tauri/src/reconciliation.rs:58`, `src-tauri/src/reconciliation.rs:751`). Closure requires an arrival-order-independent capacity representation/policy that preserves sequence-run information, with this boundary case tested; merely relabelling the outcome as loss does not close the coalescing claim.
+
+2. R10 records but does not bound a concrete cross-document regression. Enqueue one unique state for document B at sequence 1, then 256 identical states for document A at sequences 2–257. The new raw-entry accounting evicts B's only state and forces a whole-workspace reload; the pre-fix queue would have retained B plus one coalesced A state without overflowing. "Repeats are rare" is unmeasured and cannot justify allowing redundant entries to displace unrelated documents (`src-tauri/src/reconciliation.rs:481`, `src-tauri/src/reconciliation.rs:751`, `docs/decisions/2d-4a-notes.md:818`). Closure requires capacity accounting that prevents folded repeats from displacing unique document state, or an enforceable, measured bound proving this stream cannot reach capacity.
+
+3. R3 remains a wire defect that 2d-5 cannot repair from the value supplied. A first stable non-UTF-8 addition is converted to `Unreadable`; because neither the workspace nor `issued_identities` knows the new path, it carries only `ObservedDocument::Unknown`, explicitly display-only. The consumer receives neither the `Added` row Q3 specifies nor an address with which to install or invalidate one (`src-tauri/src/reconciliation.rs:360`, `src-tauri/src/reconciliation.rs:384`, `src-tauri/src/reconciliation.rs:966`, `docs/decisions/2d-4a-notes.md:776`). Closure requires the Rust wire/core observation to carry sufficient identity and summary metadata for this addition, or an explicit authoritative reload signal and policy that actually makes the file addressable.
+
+4. The round-2 retention correction still claims more than it changed. The record's opening continues to say every admitted observation "is no longer dropped," despite stale-epoch, watermark, and capacity drops. It also says every named retention position states that eviction costs a whole-workspace reload, but `external_observation` only names eviction, while `drain` says a folded entry stays pending without stating that eviction removes it or requires reload (`docs/decisions/2d-4a-notes.md:3`, `docs/decisions/2d-4a-notes.md:235`, `docs/decisions/2d-4a-notes.md:980`, `src-tauri/src/reconciliation.rs:799`, `src-tauri/src/reconciliation.rs:913`). Closure requires every claimed position—including the header—to state the same exact retention boundary: acknowledgement or eviction, with eviction reported as loss requiring whole-workspace reload.
+
+## Low
+
+5. R9 accurately admits that `issued_identities` is unbounded, but that is still an avoidable second unbounded path-retention structure, not merely a documentation residue. Arbitrarily many distinct projected additions in one long-lived epoch grow both the process-wide identity table and this map; `QUEUE_CAPACITY` provides no protection (`src-tauri/src/reconciliation.rs:504`, `crates/espansoconfig-core/src/workspace/mod.rs:210`, `docs/decisions/2d-4a-notes.md:789`). Closure requires eliminating the duplicate through an authoritative identity lookup/carried identity, or a safe lifecycle bound backed by measurement.
+
+## Verified without findings
+
+- `coalesced_sequences` correctly folds runs longer than two: each equal successor removes its immediate predecessor, leaving only the run maximum.
+- Three or more runs and interleaved paths are handled independently by the per-path `previous` map.
+- The highest pending sequence is always carried, including when it is the final member of a folded run; `newest_sequence` therefore remains correct.
+- The replacement-epoch two-case split is exhaustive over the queue mutex. Wholesale state replacement and the queue epoch check are the actual fences claimed.
+- The four earlier same-watermark idempotence qualifications are true when no enqueue occurs between calls.
+- The two liveness inventory entries fit the expanded `a pointer:` definition: they cite Q3, state a future obligation, and explicitly deny local implementation.
+- Rewording "answered by" to "obliging" was an honest false-positive removal; whole-workspace reload is a consumer response to recorded loss, not observation-pipeline liveness.
+- R4 correctly identifies the future consumer obligation and that 2d-4a does not enforce it.
+- `issued_identities` is cleared at epoch replacement and does not introduce a stale-identity result across epochs.
+- The step still draws nothing and makes no write-surface policy decision.
+
+NOT READY — 0 High, 4 Medium, 1 Low findings.
+
+Codex session ID: 01a03ded-e3bb-7403-9ce6-35d50a7d824c
+Resume in Codex: codex resume 01a03ded-e3bb-7403-9ce6-35d50a7d824c
