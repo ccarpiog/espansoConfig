@@ -1951,7 +1951,12 @@ fn a_remote_origin_is_refused() {
 /// It also pins the two facts the wire type carries when there is nothing to
 /// reconcile: the batch names the workspace epoch it belongs to, and an empty
 /// batch answers the watermark it was asked with rather than zero — which is
-/// what lets a caller store `newest_sequence` unconditionally.
+/// what lets a caller showing that epoch store `newest_sequence`
+/// unconditionally. **Both drains here are the same epoch's**, which is the
+/// scope of that claim: a replacement epoch discards the watermark with
+/// everything else, so the successor's first batch may name a smaller number
+/// than the predecessor's last
+/// ([`crate::reconciliation::ReconciliationBatch::newest_sequence`]).
 ///
 /// **What it does not show is an external change.** Nothing here writes to the
 /// tree behind the application's back, and a real filesystem observation is
@@ -2002,7 +2007,7 @@ fn drain_external_changes_is_reachable_and_its_watermark_deserializes() {
     .expect("a watermark above everything pending is legal");
     assert_eq!(
         later["newest_sequence"], 12,
-        "an empty batch never moves a caller's watermark backwards: {later}"
+        "an empty batch never moves a caller's watermark backwards within one epoch: {later}"
     );
 } // End of function drain_external_changes_is_reachable_and_its_watermark_deserializes()
 

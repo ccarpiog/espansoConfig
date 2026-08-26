@@ -287,3 +287,100 @@ NOT READY — 0 High, 1 Medium, 3 Low findings.
 
 Codex session ID: 01a03faa-8450-7672-a78a-356908c41f8d
 Resume in Codex: codex resume 01a03faa-8450-7672-a78a-356908c41f8d
+
+---
+
+## Round 6 — verbatim
+
+Scope: **the round-5 fix**, not the original implementation and not the rounds 1–4 fixes. Commissioned
+under the rule that commissioned rounds 2, 3, 4 and 5 — a fix is a change, and the round that reviews
+it is not optional. Round 5's own lesson was carried into this brief: *every round so far counted the
+ways a stored entry leaves the queue by the entry's own properties, and none counted the one that
+depends on nothing about the entry at all*, so round 6 was asked what **else** in this step is
+described by a rule written from the thing's own properties and made false by a whole-state
+replacement — naming the coalescing fold, `evictable_sequence`, the watermark, the wake, `discarded`
+and the sequence allocator as the candidates. It was also pointed at the twelve retention positions in
+**both** directions, at a possible thirteenth position and a fifth mutation of `QueueState::pending`,
+at the `debug_assert_eq!` on a path a Tauri command reaches, at the changed `commands.rs` fixture
+against the charge §14.4 lays against it itself, at the `UnreadableReason` walk's three-of-six
+coverage argument, at R3/R9/R10 against the Phase 2d-3 precedent, and at §14's six correction blocks
+and §14.2's by-file list against `git show --stat eced554`.
+
+The brief closed with the standing instruction that **if everything found were a restatement of the
+retention-boundary wording with no new substance, the round was to say so explicitly** — the owner
+having a standing decision to stop the tail and build a mechanical check in that case. It did not say
+so: it **cleared** the twelve positions and the fifth-mutation question and found the same *shape* one
+level above, on the watermark.
+
+Gates when this round was commissioned, all measured on this clean tree at `345f066` by the
+orchestrator: `cargo test --workspace` **1308** passed / 0 failed over **26** result lines all `ok`,
+exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+`cargo doc --workspace --no-deps` exit 0 with **73** `private_intra_doc_links` warnings, the
+pre-existing count; `cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::` **20/20**
+with 263 filtered out in 70.68 s; `npm test` **2125** in 56 files; `npm run check` **431** files /
+0 errors; `npm run build` **184** modules with the server oracle absent and the client oracle present
+with 2 matches.
+
+## High
+
+None.
+
+## Medium
+
+1. The watermark guarantee still ignores whole-state replacement. `begin_epoch` resets `acknowledged` to zero, but four public positions claim `newest_sequence` never falls below the highest watermark this queue/session has ever seen and may be stored unconditionally ([reconciliation.rs](src-tauri/src/reconciliation.rs:683), [reconciliation.rs](src-tauri/src/reconciliation.rs:1135), [commands.rs](src-tauri/src/commands.rs:1342), [commands.rs](src-tauri/src/commands.rs:3492)). The decision record makes the same process-lifetime claim ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:347)).
+
+   Exact sequence:
+
+   1. Epoch 1 drains with watermark 9, producing `newest_sequence == 9`.
+   2. `begin_epoch(2)` replaces the state with `acknowledged == 0`.
+   3. `drain(0)` on the empty successor returns `newest_sequence == 0`.
+
+   That follows directly from the fresh-state assignment and drain fallback ([reconciliation.rs](src-tauri/src/reconciliation.rs:992), [reconciliation.rs](src-tauri/src/reconciliation.rs:1145)). Round 5’s strengthened test expressly proves that replacement resets the watermark ([reconciliation.rs](src-tauri/src/reconciliation.rs:1714)). The code is right because sequences and watermarks are epoch-scoped; the guarantee needs the same qualification. A correct consumer first validates the epoch, but “ever” and “this session” currently over-claim.
+
+## Low
+
+1. `debug_assert_eq!` leaves a contradictory release wire if its invariant ever fails. In debug, disagreement panics while `drain_external_changes` holds the queue and session locks. In release, the assertion disappears and `address_of_minted` returns the workspace’s identity ([reconciliation.rs](src-tauri/src/reconciliation.rs:1419)), while the accompanying `DocumentView.id` and its `MatchId.document` still carry the snapshot’s identity ([document.rs](crates/espansoconfig-core/src/model/document.rs:101), [match_view.rs](crates/espansoconfig-core/src/model/match_view.rs:84)). That is not merely an `Addressable` arm which is locally true; it is one `Changed` object containing two document identities.
+
+   Exact sequence: open path `P` as identity `X`; enqueue a projected `Changed` for `P` whose snapshot carries `Y != X`; drain. Debug panics, while release returns outer `document = X` and `content.Projected.disk.id = Y`. This is precisely the branch §14.4 concedes is untested ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:2085)). Nearby new prose is also internally contradictory: it first says there is “no second source to depend on agreeing,” then requires agreement, and incorrectly says a path is in both sources or neither—newly projected additions are in the register but not the open workspace ([reconciliation.rs](src-tauri/src/reconciliation.rs:1390)).
+
+   Current production minting does preserve the invariant, so this remains Low: workspace discovery and watcher projection both use `identity_of`, while non-UTF-8 additions also mint there ([workspace/mod.rs](crates/espansoconfig-core/src/workspace/mod.rs:469), [engine.rs](crates/espansoconfig-core/src/watch/engine.rs:997), [reconciliation.rs](src-tauri/src/reconciliation.rs:1293)). But a release fallback that emits split identities is not a valid invariant-failure policy.
+
+2. The new `UnreadableReason` walk repeats the exact coverage argument round 5 rejected one level above. The enum has six variants ([reconciliation.rs](src-tauri/src/reconciliation.rs:383)); the serialization walk exercises only `PermissionDenied` and `NotUtf8`—with `NotUtf8` duplicated—while `Other` is checked only as a Rust value and `InvalidData`, `TimedOut`, and `Interrupted` are never serialized ([reconciliation.rs](src-tauri/src/reconciliation.rs:2413), [reconciliation.rs](src-tauri/src/reconciliation.rs:2691)). A coherent change of `InvalidData {}` to a unit variant would make it serialize as a bare string while this test stayed green. §14.4 admits the gap and substitutes uniform reasoning for coverage ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:2109)); that is not sufficient for D5’s per-arm wire rule.
+
+3. R10’s correction overstates which document a repeat stream can evict. The record says the repeat stream “can only displace its own document’s older entries” and no longer consumes another document’s capacity ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:1299)). The policy instead breaks equal-count ties by the lower lowest sequence ([reconciliation.rs](src-tauri/src/reconciliation.rs:847)).
+
+   Exact sequence at capacity 256:
+
+   1. Path B holds sequences 1 and 2.
+   2. 253 singleton paths hold sequences 3–255.
+   3. Path A holds sequence 256.
+   4. An identical repeat for A arrives at sequence 257.
+
+   A and B now each hold two entries. The tie chooses B’s lowest sequence 1, so A’s repeat evicts another document’s entry and increments `discarded`. The narrower implemented guarantee—never evict a singleton while another path has two—remains true. R10 is bounded, but its recorded closure is false.
+
+4. R9 remains a real, known-open defect, not a bounded residue. `SessionIdentities::by_path` retains every path for the process lifetime ([workspace/mod.rs](crates/espansoconfig-core/src/workspace/mod.rs:201)); every first `identity_of` inserts and nothing removes ([workspace/mod.rs](crates/espansoconfig-core/src/workspace/mod.rs:305)). Repeatedly create, stabilize, and remove distinct watched paths `P1…PN` while draining: the queue stays capped at 256, while the register retains all N. Round 5 now records this honestly ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:1263)), but its deliberate no-change answer leaves the Low open.
+
+5. §14.2 is not actually file-by-file. It lists four files ([2d-4a-notes.md](docs/decisions/2d-4a-notes.md:2008)), while commit `eced554` touched five: it omits `docs/reviews/phase-2d-4a-queue.md`, where the 65-line round-5 record was added ([phase-2d-4a-queue.md](docs/reviews/phase-2d-4a-queue.md:228)).
+
+## Verified without findings
+
+- All twelve round-5 retention positions now describe the actual three exits. I found no fifth mutation of `QueueState::pending`: insertion and eviction are in `enqueue`, acknowledgement uses `retain` in `drain`, and replacement assigns a fresh `QueueState` in `begin_epoch` ([reconciliation.rs](src-tauri/src/reconciliation.rs:992), [reconciliation.rs](src-tauri/src/reconciliation.rs:1051), [reconciliation.rs](src-tauri/src/reconciliation.rs:1145)). `queueing_sink` is an admission-boundary statement rather than an omitted retention position ([reconciliation.rs](src-tauri/src/reconciliation.rs:1201)).
+
+- Coalescing remains a sequence-order fold over current pending state; replacement cannot combine runs across epochs. `Removed` and recreated content remain distinct states ([reconciliation.rs](src-tauri/src/reconciliation.rs:796)).
+
+- Wake races remain safe: storage precedes emission, and a wake delayed across replacement carries the old epoch and is expendable ([reconciliation.rs](src-tauri/src/reconciliation.rs:1213)). `discarded` is correctly cumulative only within an epoch and reset on replacement.
+
+- The ledger sequence allocator is reset with the epoch, and the queue’s independent epoch fence rejects an old admitted value arriving after replacement ([ledger.rs](src-tauri/src/ledger.rs:1120), [reconciliation.rs](src-tauri/src/reconciliation.rs:998)).
+
+- The commands fixture change is legitimate. Its production-shaped projection now mints from the observation’s real path ([commands.rs](src-tauri/src/commands.rs:8803)). Other tests fabricate `DocumentId`s through `DocumentContext::detached`, including wire, save, and core projection tests, but those are isolated projections and do not compare their snapshot against a live workspace ([wire_contract.rs](src-tauri/src/wire_contract.rs:156), [save.rs](src-tauri/src/save.rs:440), [document.rs](crates/espansoconfig-core/src/model/document.rs:76)).
+
+- R3 is substantively closed: non-UTF-8 `Changed` preserves both revisions outside `ChangedContent`, and non-UTF-8 `Added` carries a row and identity ([reconciliation.rs](src-tauri/src/reconciliation.rs:1255), [reconciliation.rs](src-tauri/src/reconciliation.rs:1293)). R10’s actual resource bound and singleton-protection rule are sound despite the false victim-locality sentence.
+
+- The liveness contract was not over-applied: it expressly denies eventual emission, continued ticking, worker survival, and survival of ordinary hints ([liveness.rs](crates/espansoconfig-core/src/watch/liveness.rs:79)).
+
+- Scope prohibitions hold. Commit `eced554` touched no Svelte, TypeScript, i18n, or core file; the step draws nothing and decides no write-surface state as required by Q7 item 4 ([phase-2d-design.md](docs/reviews/phase-2d-design.md:124)). The core manifest has no Tauri dependency ([Cargo.toml](crates/espansoconfig-core/Cargo.toml:10)), and the application still has one `save_document` call in the shared save tail ([commands.rs](src-tauri/src/commands.rs:1942)).
+
+NOT READY — 0 High, 1 Medium, 5 Low findings.
+
+Codex session ID: 01a03ff1-0d15-7423-82df-300113b0e626
+Resume in Codex: codex resume 01a03ff1-0d15-7423-82df-300113b0e626

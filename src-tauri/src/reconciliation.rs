@@ -464,10 +464,21 @@ pub enum ExternalObservation {
         sequence: u64,
         /// Which document, and whether the open workspace resolves it.
         ///
-        /// The projected arm builds it around the identity **its own snapshot
-        /// minted**, so it never depends on the two identity sources agreeing;
-        /// the unreadable arm has no snapshot and asks [`address_of`]. Either
-        /// way the display path is present.
+        /// The projected arm asks [`address_of_minted`] with the identity **its
+        /// own snapshot minted** and the unreadable arm has no snapshot, so it
+        /// asks [`address_of`]. Either way the display path is present.
+        ///
+        /// **This number and the one inside a projected [`ChangedContent`] are
+        /// one identity**, and that is a property of
+        /// [`address_of_minted`] rather than of this field: a `DocumentView`
+        /// carries its own `id` and every `MatchId` under it carries the same
+        /// number, so a value here that differed from the snapshot's would put
+        /// two identities for one file in one object. An earlier draft of this
+        /// paragraph said the arm *never depends on the two identity sources
+        /// agreeing*, which stopped being true when round 5 of this phase's
+        /// review made the workspace's answer the number that crosses; round 6
+        /// found the split it left, and [`address_of_minted`] is where the
+        /// agreement is now required rather than hoped for.
         document: ObservedDocument,
         /// The last stable revision the engine held, or `None` when it had none.
         ///
@@ -681,16 +692,35 @@ pub struct ReconciliationBatch {
     /// hoped away.
     pub epoch: u64,
     /// The highest sequence in [`ReconciliationBatch::observations`], or — when
-    /// the batch is empty — the highest watermark this queue has ever been
-    /// drained with, which is **not** necessarily the `after_sequence` of this
-    /// call.
+    /// the batch is empty — the highest watermark **this epoch's** queue has
+    /// been drained with, which is **not** necessarily the `after_sequence` of
+    /// this call.
     ///
-    /// So a caller may store it as its new watermark unconditionally, and no
-    /// batch moves that watermark backwards. **The distinction is the
-    /// out-of-order drain**, which the 2d design consult's Q7 item 5 requires
-    /// Phase 2d-5 to handle: a caller that acknowledged 10 and then drains with
-    /// 5 gets 10 back, because answering its own lower argument would walk its
+    /// **The whole claim, and it is scoped to one epoch: within the epoch
+    /// [`ReconciliationBatch::epoch`] names, this never falls.** So a caller
+    /// showing that epoch may store it as its new watermark unconditionally,
+    /// and no later batch of that epoch moves the watermark backwards. The
+    /// distinction that makes the claim worth stating is the **out-of-order
+    /// drain**, which the 2d design consult's Q7 item 5 requires Phase 2d-5 to
+    /// handle: a caller that acknowledged 10 and then drains with 5 gets 10
+    /// back, because giving back its own lower argument would walk its
     /// watermark backwards — which is what an earlier draft of this field did.
+    ///
+    /// **Across a replacement epoch it does fall, and that is not a walk-back.**
+    /// [`ReconciliationQueue::begin_epoch`] discards the acknowledged watermark
+    /// with everything else the previous epoch held, and `crate::ledger`'s
+    /// allocator starts the successor's sequences again: drain epoch 1 with
+    /// watermark 9, adopt epoch 2, drain the empty successor, and this field is
+    /// 0. **A sequence means nothing across two epochs** — the module doc's
+    /// guarantee 1 — so there is no order between those two numbers for
+    /// anything to walk backwards along, and what separates them is
+    /// [`ReconciliationBatch::epoch`]: a batch whose epoch a caller is not
+    /// showing installs nothing at all, whatever it holds (the consult's Q3).
+    /// Round 6 of this phase's review is where *ever* and *this session* were
+    /// found over-claiming here, and it is a **words** finding: the code has
+    /// been epoch-scoped since the original round, and
+    /// `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses`
+    /// asserts the reset.
     pub newest_sequence: u64,
     /// The observations above the caller's watermark, ordered by sequence.
     pub observations: Vec<ExternalObservation>,
@@ -1133,8 +1163,14 @@ impl ReconciliationQueue {
     /// second batch is the successor workspace's, and the first one is stale.
     ///
     /// [`ReconciliationBatch::newest_sequence`] is never below the highest
-    /// watermark this queue has been drained with, so a drain that arrives out
-    /// of order cannot walk a caller's watermark backwards.
+    /// watermark this queue has been drained with **under the epoch it names**,
+    /// so a drain that arrives out of order cannot walk a caller's watermark
+    /// backwards. The qualification is not decoration:
+    /// [`ReconciliationQueue::begin_epoch`] discards the watermark with
+    /// everything else, so the successor epoch's first batch may name a smaller
+    /// number than the predecessor's last — which is not a walk-back, because a
+    /// sequence means nothing across two epochs. The field's own doc is the
+    /// whole claim.
     ///
     /// `workspace` is here for two things, and [`address_of`] is where both are
     /// asked: it renders a display path against the configuration root, and it
@@ -1158,7 +1194,10 @@ impl ReconciliationQueue {
         // The batch's own highest — which is also the highest *pending*
         // sequence, since `coalesced_sequences` always carries that entry — and
         // never below the highest watermark this queue has been acknowledged
-        // with. The `max` is what makes `newest_sequence`'s claim a property of
+        // with **since the epoch in `guard` was adopted**, which is the only
+        // watermark this state holds: `begin_epoch` replaced the whole
+        // `QueueState`, so `guard.acknowledged` says nothing about any earlier
+        // epoch. The `max` is what makes `newest_sequence`'s claim a property of
         // this function rather than of an invariant elsewhere: every pending
         // entry is above `acknowledged` today, because `enqueue` refuses at or
         // below it and a drain only removes — but nothing in the types forces
@@ -1238,8 +1277,10 @@ pub fn queueing_sink(queue: Arc<ReconciliationQueue>) -> AdmittedSink {
 ///
 /// **Three ways to an address, and each arm takes the strongest one available
 /// to it.** An arm holding a projection has the identity already and asks
-/// [`address_of_minted`], which only has to ask the open workspace whether it
-/// agrees; an arm holding a bare path asks [`address_of`], which asks the
+/// [`address_of_minted`], which asks the open workspace only whether it holds
+/// the path — and **requires** it to hold that path under the same number,
+/// because the projection this observation carries is addressed by the
+/// snapshot's; an arm holding a bare path asks [`address_of`], which asks the
 /// workspace and then the process-wide register; and the one arm that needs an
 /// address **nothing has minted yet** — a first sighting of a file whose bytes
 /// are not UTF-8 — mints one, because a sidebar row the consumer cannot name is
@@ -1388,39 +1429,57 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// hand** — a projection's own `snapshot.id`.
 ///
 /// It asks the open workspace the same question [`address_of`] asks it, and it
-/// asks the identity register nothing: the caller has the number, so there is
-/// nothing to look up and no second source to depend on agreeing.
+/// asks the **identity register** nothing: the caller already has the number
+/// that register would give, so there is nothing to look up there.
 ///
 /// **Each arm is chosen because it is true of the value it carries**, which
 /// is what decided the shape of this function rather than something that
 /// followed from it. A `Some` is exactly [`ObservedDocument::Addressable`]'s
-/// claim — *the open workspace resolves this path to this identity* — and it is
-/// true of the number the **workspace** answered with, whatever number that is,
-/// so that is the number which crosses. A `None` is exactly
-/// [`ObservedDocument::Named`]'s claim, and the number which crosses is then the
+/// claim — *the open workspace resolves this path to this identity* — and a
+/// `None` is exactly [`ObservedDocument::Named`]'s, whose number is then the
 /// snapshot's, which is what the consumer received the projection under.
 ///
-/// **The workspace must answer with the same number**, not merely with some
-/// number. One register makes that true today — a `Workspace` mints through
-/// `identity_of` and so does the engine, so a path has one number in both or is
-/// in neither — but nothing in the types forces it, so the agreement is a
-/// `debug_assert_eq!` rather than an assumption: a second identity source
-/// introduced later breaks a debug build at this site instead of putting a
-/// number on the wire whose meaning nobody can state.
+/// # A second source, which must answer the same number where it answers at all
 ///
-/// An earlier draft branched on that disagreement and answered
-/// [`ObservedDocument::Named`] for it, keeping the snapshot's number. That was
-/// the wrong trade in the one way this project refuses: `Named` claims the open
-/// workspace **does not hold the path**, and in that branch it demonstrably
-/// does. Round 5 of this phase's review is the finding, and
-/// `docs/decisions/2d-4a-notes.md` §14 is the record — including why nothing in
-/// this repository can reach the disagreement, and why the assertion is a
-/// `debug_assert_eq!` on a path a command reaches.
+/// The two sources have **different membership** and that is ordinary rather
+/// than a fault: the process-wide register holds every path anything in this
+/// process has ever named, and the open workspace holds only what it discovered,
+/// so a file created after the open is in the register and not in the workspace.
+/// That difference is the whole subject of [`ObservedDocument`]'s three arms.
+/// What may **not** differ is the number, where both hold the path at all. One
+/// register makes that true today — a `Workspace` mints through `identity_of`
+/// and so does the engine — but nothing in the types forces it.
+///
+/// **So a disagreement is a failure and not a value, in every build profile,
+/// and the `assert_eq!` below is that policy.** There is no honest wire value
+/// for it, which is what rules the alternatives out rather than taste:
+/// [`ObservedDocument::Named`] would claim the open workspace does not hold a
+/// path it demonstrably holds — round 5 of this phase's review is that finding —
+/// while `Addressable` carrying the **workspace's** number would put one
+/// identity on this observation and the snapshot's other identity inside the
+/// same object's projection, since a `DocumentView` carries its own `id` and
+/// every `MatchId` beneath it carries that. Round 6 is that finding: the arm was
+/// locally true and the object held two identities for one file. A
+/// `debug_assert_eq!` left exactly that split standing in a release build, which
+/// is not an invariant-failure policy — it is the same value with the check
+/// removed.
+///
+/// **What the trade costs, stated rather than implied.** A disagreement now
+/// panics inside a Tauri command, holding this queue's mutex and the session
+/// lock, on any profile. It is **not a panic on input**: no file's bytes, no
+/// filesystem state and no action a person can take reaches it — only a second
+/// identity source added to this process's own code, which is the bug the
+/// assertion is for. `crate::commands`'s module header is why the two poisoned
+/// mutexes are not a second failure: every lock here absorbs poisoning through
+/// `PoisonError::into_inner`. What happens to the process around the panic is
+/// asserted by nothing in this repository. `docs/decisions/2d-4a-notes.md` §15
+/// is the record, including why no test can fail on this and why the fixture
+/// that once reached it was the review's own evidence.
 fn address_of_minted(path: &Path, document: DocumentId, workspace: &Workspace) -> ObservedDocument {
     let relative_path = display_path(path, workspace);
     match workspace.document_id(path) {
         Some(resolved) => {
-            debug_assert_eq!(
+            assert_eq!(
                 resolved, document,
                 "one register means one identity per path, so the open workspace resolving \
                  {path:?} must resolve it to the number a snapshot of it minted"
@@ -1721,6 +1780,10 @@ mod tests {
             acknowledged.observations.is_empty(),
             "sequence 9 is acknowledged: {acknowledged:?}"
         );
+        assert_eq!(
+            acknowledged.newest_sequence, 9,
+            "epoch 2's watermark, which the replacement below is about to discard: {acknowledged:?}"
+        );
         queue.begin_epoch(3);
         queue.enqueue(changed(3, 3, "match/a.yml", TWO));
         let after = queue.drain(0, &workspace);
@@ -1730,6 +1793,20 @@ mod tests {
             "a replacement resets the watermark with everything else: {after:?}"
         );
         assert_eq!(after.discarded, 0, "and resets the loss count with it");
+        // **`newest_sequence` falls across a replacement, and the field's own
+        // claim is scoped to one epoch for exactly this.** 9 was the watermark
+        // under epoch 2 and 3 is the successor's answer, which is smaller — not
+        // a walk-back, because a sequence means nothing across two epochs and
+        // the batch names the epoch it belongs to. Round 6 of this phase's
+        // review found four public positions and one record position claiming
+        // this number never falls below anything this *queue* or *session* had
+        // ever been drained with; asserting it here is what stops the corrected
+        // wording from resting on a reading alone.
+        assert_eq!(
+            after.newest_sequence, 3,
+            "the successor epoch answers its own sequences, below the epoch before it: {after:?}"
+        );
+        assert_eq!(after.epoch, 3, "and the batch says which epoch that is");
     } // End of function adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses()
 
     #[test]
@@ -1866,7 +1943,11 @@ mod tests {
         // The 2d design consult's Q7 item 5 requires 2d-5 to handle out-of-order
         // drains, so this is a path that will be exercised. A caller that stores
         // `newest_sequence` unconditionally — which the field's own
-        // documentation tells it to — must not be walked back to 5.
+        // documentation tells it to, *within one epoch* — must not be walked
+        // back to 5. Both drains here are epoch 1's, which is the scope the
+        // claim carries;
+        // `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses`
+        // is where the watermark legitimately falls, across a replacement.
         let late = queue.drain(5, &workspace);
         assert!(late.observations.is_empty());
         assert_eq!(
@@ -2047,7 +2128,7 @@ mod tests {
         assert!(batch.observations.is_empty());
         assert_eq!(
             batch.newest_sequence, 4,
-            "an empty batch never moves a watermark backwards"
+            "an empty batch never moves a watermark backwards within one epoch"
         );
     } // End of function an_empty_batch_answers_the_watermark_it_was_asked_with()
 
@@ -2586,6 +2667,40 @@ mod tests {
     } // End of function an_added_file_carries_a_row_whose_parse_this_session_does_not_hold()
 
     #[test]
+    #[should_panic(expected = "one register means one identity per path")]
+    fn a_snapshot_identity_the_open_workspace_contradicts_is_a_failure_and_never_a_wire_value() {
+        // **Round 6's Low 1, and the release half of round 5's.** With the
+        // agreement carried by a `debug_assert_eq!`, a release build compiled
+        // the check out and crossed `Addressable` with the **workspace's**
+        // number beside a projection addressed by the **snapshot's** — one
+        // observation carrying two identities for one file, since a
+        // `DocumentView` has its own `id` and every `MatchId` beneath it carries
+        // that. There is no arm of `ObservedDocument` that is true in that case,
+        // so the policy is a failure rather than a value, and `assert_eq!` is
+        // what makes it one on every profile.
+        //
+        // **Round 5 said no test was possible and it was right about the code it
+        // had**: a `debug_assert_eq!` would have made this pass in a debug build
+        // and fail in a release one, which is a test that measures the profile.
+        // This one does not.
+        //
+        // Nothing in the production pipeline reaches it — `Workspace::from_tree`
+        // and `watch::engine` mint through one register, so a path has one
+        // number in both — and the disagreement is fabricated here exactly as
+        // the `crate::commands` fixture round 5 repaired had fabricated it by
+        // accident.
+        let dir = tempfile::TempDir::new().expect("a temporary directory");
+        std::fs::create_dir_all(dir.path().join("match")).expect("the match directory");
+        let known = dir.path().join("match").join("known.yml");
+        std::fs::write(&known, ONE).expect("the known file is written");
+        let workspace = Workspace::discover(Some(dir.path())).expect("the workspace opens");
+        let resolved = workspace
+            .document_id(&known)
+            .expect("the workspace discovered the file it just walked over");
+        let _ = address_of_minted(&known, DocumentId(resolved.get() + 1), &workspace);
+    } // End of function a_snapshot_identity_the_open_workspace_contradicts_is_a_failure_and_never_a_wire_value()
+
+    #[test]
     fn every_observation_crosses_as_a_uniform_object_and_carries_no_anchor() {
         let queue = queue_at_epoch(1);
         let (_dir, workspace) = empty_workspace();
@@ -2634,12 +2749,40 @@ mod tests {
                 },
             },
         });
+        // **The remaining four `UnreadableReason` variants, so the walk below
+        // covers all six rather than three of them.** Round 6 of this phase's
+        // review is why they are here: round 5 added a walk over that enum and
+        // covered `NotUtf8` and `PermissionDenied`, and argued that the rule
+        // being uniform across the enum made the other four unnecessary — which
+        // is a coverage argument, and this project has now had four rounds in
+        // which a coverage argument stood in for coverage and was wrong. Turning
+        // `InvalidData {}` into a unit variant would have crossed as a bare
+        // string with the old walk green. Each takes a path of its own, because
+        // the fold is per path and two reasons for one path would coalesce.
+        for (sequence, name, kind) in [
+            (7_u64, "match/g.yml", io::ErrorKind::InvalidData),
+            (8, "match/h.yml", io::ErrorKind::TimedOut),
+            (9, "match/i.yml", io::ErrorKind::Interrupted),
+            // Everything the closed list does not name, which is the `Other`
+            // arm — the one variant that is reachable only through the
+            // wildcard.
+            (10, "match/j.yml", io::ErrorKind::WouldBlock),
+        ] {
+            queue.enqueue(AdmittedObservation {
+                sequence,
+                epoch: 1,
+                observation: Observation::Unreadable {
+                    path: PathBuf::from(name),
+                    kind,
+                },
+            });
+        } // End of the loop that admits one read failure per remaining reason
         let batch = queue.drain(0, &workspace);
         let json = serde_json::to_value(&batch).expect("a batch serializes");
         let observations = json["observations"]
             .as_array()
             .expect("observations is an array");
-        assert_eq!(observations.len(), 6);
+        assert_eq!(observations.len(), 10);
         for (index, name) in [
             "Changed",
             "Added",
@@ -2647,6 +2790,10 @@ mod tests {
             "Unreadable",
             "Changed",
             "Added",
+            "Unreadable",
+            "Unreadable",
+            "Unreadable",
+            "Unreadable",
         ]
         .into_iter()
         .enumerate()
@@ -2659,7 +2806,7 @@ mod tests {
                 tagged[name].is_object(),
                 "{name} carries an object, never a bare string"
             );
-        } // End of the loop over the six observation kinds
+        } // End of the loop over the ten observations of the four kinds
           // The two nested content enums follow the same rule, and D5 is about
           // every wire enum rather than about the outer one: a `Changed` and an
           // `Added` each carry a one-key object under `content`. **Both arms of
@@ -2694,7 +2841,38 @@ mod tests {
           // five operandless variants are written as struct variants for exactly
           // this rule, so each must cross tagged and as an object rather than as
           // a bare string.
-        for (reason, arm) in [
+          //
+          // **All six arms cross here, not three of them.** Round 5 walked
+          // `NotUtf8` and `PermissionDenied` and argued that the rule is uniform
+          // across the enum, so the other four needed no fixture; round 6
+          // refused the argument, because a coherent change of `InvalidData {}`
+          // to a unit variant is exactly what a walk over a subset cannot see.
+          //
+          // **What `wire_tag` forces, exactly.** It matches the enum
+          // exhaustively, so a seventh variant is a **compile error here** and
+          // not a silent gap — which forces a decision at this test and does
+          // **not** force a fixture for the new arm: keeping `EVERY_REASON` in
+          // step with the enum is still a reader's job, and this comment says so
+          // rather than leaving the guard to look stronger than it is.
+        fn wire_tag(reason: &UnreadableReason) -> &'static str {
+            match reason {
+                UnreadableReason::NotUtf8 { .. } => "NotUtf8",
+                UnreadableReason::PermissionDenied {} => "PermissionDenied",
+                UnreadableReason::InvalidData {} => "InvalidData",
+                UnreadableReason::TimedOut {} => "TimedOut",
+                UnreadableReason::Interrupted {} => "Interrupted",
+                UnreadableReason::Other {} => "Other",
+            }
+        } // End of function wire_tag()
+        const EVERY_REASON: [UnreadableReason; 6] = [
+            UnreadableReason::NotUtf8 { offset: 0 },
+            UnreadableReason::PermissionDenied {},
+            UnreadableReason::InvalidData {},
+            UnreadableReason::TimedOut {},
+            UnreadableReason::Interrupted {},
+            UnreadableReason::Other {},
+        ];
+        let reasons = [
             (&observations[3]["Unreadable"]["reason"], "PermissionDenied"),
             (
                 &observations[4]["Changed"]["content"]["Unreadable"]["reason"],
@@ -2704,7 +2882,19 @@ mod tests {
                 &observations[5]["Added"]["content"]["Unreadable"]["reason"],
                 "NotUtf8",
             ),
-        ] {
+            (&observations[6]["Unreadable"]["reason"], "InvalidData"),
+            (&observations[7]["Unreadable"]["reason"], "TimedOut"),
+            (&observations[8]["Unreadable"]["reason"], "Interrupted"),
+            (&observations[9]["Unreadable"]["reason"], "Other"),
+        ];
+        let walked: BTreeSet<&str> = reasons.iter().map(|(_, arm)| *arm).collect();
+        let declared: BTreeSet<&str> = EVERY_REASON.iter().map(wire_tag).collect();
+        assert_eq!(
+            walked, declared,
+            "every arm of UnreadableReason is serialized by this batch, and a fixture removed \
+             later fails here rather than leaving an arm unwalked"
+        );
+        for (reason, arm) in reasons {
             let tagged = reason
                 .as_object()
                 .unwrap_or_else(|| panic!("a reason crosses as an object: {json}"));
@@ -2714,7 +2904,7 @@ mod tests {
                 "the {arm} reason is tagged by its variant name and carries an object, never a \
                  bare string: {json}"
             );
-        } // End of the loop over the three reasons this batch puts on the wire
+        } // End of the loop over every reason this batch puts on the wire
           // **Every** arm of an address carries the display path, whichever arm
           // it is, so no consumer is ever handed a number as its only handle on
           // a file. Which arm each of these lands in is not this test's subject
@@ -2726,6 +2916,10 @@ mod tests {
             (2, "Removed"),
             (3, "Unreadable"),
             (4, "Changed"),
+            (6, "Unreadable"),
+            (7, "Unreadable"),
+            (8, "Unreadable"),
+            (9, "Unreadable"),
         ] {
             let document = observations[index][kind]["document"]
                 .as_object()
@@ -2739,7 +2933,7 @@ mod tests {
                 operands["relative_path"].is_string(),
                 "{kind}'s {arm} arm carries the display path: {json}"
             );
-        } // End of the loop over the four arms that carry an address
+        } // End of the loop over every observation that carries an address
           // An `Added` carries no `ObservedDocument` because its row already says
           // both things one would say — including the one whose bytes are not
           // text, which is why that arm mints an identity at all.

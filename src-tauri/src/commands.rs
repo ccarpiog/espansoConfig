@@ -1338,11 +1338,19 @@ impl WorkspaceSession {
     /// the ledger — is counted nowhere, because the open that caused it has
     /// already replaced the workspace a reload would fetch and the batch's own
     /// epoch is what makes the discarded history stale. Zero
-    /// asks for everything the current epoch still holds. The batch's
-    /// `newest_sequence` is never below the highest watermark this session has
-    /// been drained with, so a drain arriving out of order — which the consult's
-    /// Q7 item 5 requires 2d-5 to handle — cannot walk a caller's watermark
-    /// backwards.
+    /// asks for everything the current epoch still holds. **Within one epoch**
+    /// the batch's `newest_sequence` is never below the highest watermark this
+    /// session has been drained with under that epoch, so a drain arriving out
+    /// of order — which the consult's Q7 item 5 requires 2d-5 to handle —
+    /// cannot walk a caller's watermark backwards. **Across a replacement it
+    /// falls, and that is not a walk-back**: the same `begin_epoch` that
+    /// discards the pending set discards the watermark, and the successor's
+    /// sequences start again, so the first batch of a new epoch may name a
+    /// smaller number than the last batch of the old one. A caller separates
+    /// them by the batch's own `epoch` and installs nothing from a batch whose
+    /// epoch it is not showing —
+    /// [`crate::reconciliation::ReconciliationBatch::newest_sequence`] is the
+    /// whole claim.
     ///
     /// It reads the workspace and writes nothing to disk. What it does mutate is
     /// this session's own queue, which is why it is not on the read-only
@@ -3488,10 +3496,15 @@ pub fn read_backup_text(
 ///   epoch and discards everything the previous one held.** The third is
 ///   counted in no `discarded`, because the open that causes it has already
 ///   replaced the workspace a reload would fetch, and the batch's own epoch is
-///   what tells a caller its history belongs to another workspace. The
-///   answer's `newest_sequence` never falls below a watermark this session has
-///   already been drained with, so it is safe to store unconditionally even out
-///   of order.
+///   what tells a caller its history belongs to another workspace. **Within one
+///   epoch** the answer's `newest_sequence` never falls below a watermark this
+///   session has already been drained with under that epoch, so a caller showing
+///   that epoch stores it unconditionally, out-of-order drains included. **A
+///   replacement epoch resets it with everything else**, so the successor's
+///   first answer may be smaller than the predecessor's last; that is visible as
+///   a different `epoch` and not as a walk-back, since a sequence means nothing
+///   across two epochs. See
+///   [`crate::reconciliation::ReconciliationBatch::newest_sequence`].
 ///
 /// # Errors
 ///
@@ -8811,8 +8824,10 @@ mod tests {
         // `snapshot` helper already did for the same reason. A literal fabricated
         // a snapshot claiming a number the register never issued for this path,
         // so the drain had to answer a document identity that contradicted the
-        // open workspace's; round 5's `debug_assert_eq!` in `address_of_minted`
-        // is what found this fixture doing it.
+        // open workspace's; the assertion round 5 put in `address_of_minted` is
+        // what found this fixture doing it. Round 6 made that assertion hold in
+        // every build profile, because the release fallback it left behind
+        // emitted one observation carrying two identities for one file.
         let context = espansoconfig_core::model::DocumentContext::detached(
             espansoconfig_core::workspace::identity_of(&path),
             "x.yml",

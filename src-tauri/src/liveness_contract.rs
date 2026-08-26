@@ -489,7 +489,7 @@ const INVENTORY: &[Judged] = &[
         file: "src-tauri/src/reconciliation.rs",
         phrase: "must answer",
         count: 1,
-        reason: "false positive: `address_of_minted` requiring the open workspace to resolve a path to the *same* identity a snapshot minted, which round 5 turned into a `debug_assert_eq!` — an assertion about two identity sources agreeing, not about whether a path is ever looked at again",
+        reason: "false positive: `address_of_minted` requiring the open workspace to resolve a path to the *same* identity a snapshot minted, which round 5 turned into an assertion and round 6 made hold in every build profile — an assertion about two identity sources agreeing, not about whether a path is ever looked at again",
     },
     Judged {
         file: "src-tauri/src/commands.rs",
