@@ -3661,6 +3661,104 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2d-3 review round 13 (NOT READY — 2 High, 1 Low; fix in the tree, round 14 owed)
+
+Commissioned as a **static** review, by the precedent 2d-2's round-1 High set. The brief carried the
+host-measured gates and forbade running `cargo test` or anything matching `watch_check::`; the
+reviewer's closing paragraph confirms it used no tests, builds, watcher checks, npm commands or
+network access. Codex wall clock **~7 min** at `--effort medium`.
+
+**The brief predicted the seam and the reviewer found it there.** Round 12 had corrected a premise at
+four positions, and in doing so *wrote* two new claims — *bounded by the host clock advancing* and
+*bounded in the safe direction*. The brief asked, in as many words, what the corrected sentences now
+rest on. **They rested on a liveness guarantee this pipeline expressly refuses**, and the refusals
+were already written in the code's own doc comments.
+
+**Both Highs are this project's declared worst defect class, and both were verified against the code
+by the orchestrator before the fix round was commissioned** — the standing rule after twelve rounds in
+which a fix round's own fix became the next round's finding.
+
+- **High 1** — `ledger.rs:486` said the retry *"is bounded by the host clock advancing"* and that
+  *"every refusal is answered by a re-observation"*. `watch.rs`'s `ReObserveOutcome` doc says
+  **`Asked` is not a promise that an observation will arrive** and that a continuously written path
+  *"is never answered at all"*; `engine.rs`'s `observe_owed` says it *"promises no answer at all for a
+  path that never stabilizes"*; and `WorkerMessage::Stop` can be consumed before the next tick. The
+  clock may therefore advance indefinitely with the retry never completing.
+- **High 2** — the **§1 headline**, untouched across twelve rounds, said *"every one of those requests
+  is an **owed** observation the engine must answer"*. `observe_owed` refuses precisely that. This is
+  the document's single most load-bearing sentence.
+- **The Low** — §18.5 recorded all five `commands.rs` ordering-pattern hits as the serialized-doors
+  argument. **The orchestrator re-ran the sweep**: only `:155` and `:2409` are; `:1339`, `:1371` and
+  `:2057` matched the pattern's *a second time* alternative and concern resolving something twice. The
+  count was right and the judgement was wrong.
+
+**Nothing was cleared.** The reviewer positively cleared `decide`'s equality refusal (round 10's
+ruling, untouched), the safety property that a `PrecedesACommit` decision never reaches the downstream
+sink, the exact-zero assertion's removal and its round-12 replacement justification, §18.5's supplied
+sweep arithmetic and file list, and the serialized-door reasoning at the two hits where it does apply.
+
+**The fix round's own two sweeps found nine further instances the reviewer did not name**, eight in
+code — `ledger.rs`'s *two proofs* bullet, both halves of `LedgerTally::preceded_a_commit`, a comment
+in `record_app_write`, the closing sentence of *a read the save path could not use*, `watch_check.rs`'s
+round-12 paragraph, `commands.rs`'s **module header** (the code twin of the §1 sentence), and, at a
+**name position**, the assertion message at `commands.rs:8372`, which said *is observed again* over a
+test that asserts an **inbox** and now says *is asked for again*. That makes **thirteen consecutive**
+rounds with a name-position finding.
+
+**Verification the orchestrator performed rather than accepted**, because a worker's report is a claim:
+
+- the review file's verbatim half is **byte-identical** to the fetched Codex result (`diff` clean);
+- `git diff -U0 src-tauri/src/` filtered to non-comment lines yields **exactly one** changed line in
+  the whole round — the assertion's message string — so *no behaviour, no signature, no control flow*
+  is a measured statement and not the author's;
+- the changed line is the **message argument** to `assert_eq!(inbox.re_observations(), vec![path], …)`;
+  the asserted values are untouched;
+- §19.5's *file by file* list names **all five** files plus `PROGRESS.md`, so §18.4's Low 2 is not
+  repeated;
+- §18.5's and §17.5's carried sweep counts were re-measured on the tree **before** briefing, and all
+  six matched, which is why the brief told the reviewer the arithmetic was not where to look.
+
+**Gates, all measured by the orchestrator, twice — before the fix and after it:** `cargo test
+--workspace` **1268 passed / 0 failed across 26 result lines, exit 0**; focused serial
+`cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` **20/20, 223
+filtered out, exit 0** (237.04 s before the fix, 65.14 s after — host state, not a baseline); clippy
+`-D warnings` exit 0; `cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` empty;
+`git diff --name-only 08a3366 -- src/` empty, so the frontend's 431 / 2125 / 184 stand as carried.
+
+**The scar re-measured itself this session, and it is worth recording.** The **first**
+`cargo test --workspace` failed with **9 `watch_check` bounded-wait timeouts** on the clean tree at
+`719c864`, aborting before any other binary reported — while the orchestrator was polling `git status`
+and running `rg` sweeps against the same host. The focused serial gate then passed **20/20** on that
+identical tree, and a quiet re-run gave **1268 / 0 over 26 lines**. **The suite is evidence on a quiet
+host only**, and polling the machine during it is enough to confound it.
+
+**A checkpoint defect caught and repaired before the commit.** Replacing the "Next action" block
+initially **destroyed** the superseded round-12→round-13 handoff while inserting a header claiming to
+preserve it — a false label of exactly the class this review has spent thirteen rounds finding. The
+218-line block was recovered from `HEAD` and restored beneath its header; the handoff chain is intact.
+
+**Open risks and deviations:** none deviated from the reviewer's remedies, and none of the three
+findings was cleared. Three new residues in §19.7 — item 38 (**the root cause of both Highs**: the
+liveness contract is stated in no single place, so every consumer paraphrases it, no type carries the
+*asked* / *observed* distinction, and nothing enforces the paraphrase; the fix round **deliberately
+declined** to invent a canonical section while fixing eight positions, and that judgement is round
+14's to test), item 39 (the safety half is argued and not driven — no test holds a path permanently
+unstable and asserts nothing is published for it), item 40 (every correction is prose). The standing
+posture holds: **seven** §5 items recorded as bounded residues have since been found to be real
+defects, and rounds 12 **and** 13 both had Highs that were records about a residue written by the
+round that created it.
+
+**Git state:** `3b52479`, tree clean, pushed to `origin/main` (`719c864..3b52479`). The commit holds
+**six** files: three sources (`src-tauri/src/{commands,ledger,watch_check}.rs`), **no core file**
+(the fourth 2d-3 fix round to need none), two documents (`docs/decisions/2d-3-notes.md`,
+`docs/reviews/phase-2d-3-ledger.md`) and this checkpoint. **No frontend file and no `src/` path**,
+across the whole step. `git status --short --untracked-files=all` after the commit is empty — no
+real-config path, no launch artifact, no untracked file, and no unexplained one-line document change
+of the kind round 12 caught. **The step is NOT closed by it**; round 14 is owed against the round-13
+fix. A fresh session resumes from "Next action".
+
+---
+
 ## Verification — Phase 2d-3 review round 10 (NOT READY — 0 High, 0 Medium, 1 Low; fix in the tree, round 11 owed)
 
 Commissioned as a **static** review, by the precedent 2d-2's round-1 High set. The brief carried the
