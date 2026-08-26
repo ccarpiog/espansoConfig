@@ -3770,6 +3770,20 @@ round's only frontend change is two keys in two JSON dictionaries, which adds no
 victim still the globally lowest sequence, **only** finding 2's test failed. That is what separates
 finding 1's fix from finding 2's rather than letting one cover for the other.
 
+### Git state
+
+**`2cb57ec`, tree clean, pushed to `origin/main`** (this paragraph recorded by the follow-up commit).
+The commit holds **nine** files, all modified and none new: `crates/espansoconfig-core/src/workspace/mod.rs`
+— **the first core file this step has touched**, and `cargo tree -p espansoconfig-core | rg tauri` is still
+empty — `src-tauri/src/{reconciliation,commands,dictionary_contract}.rs`, the **two i18n dictionaries**,
+`docs/decisions/2d-4a-notes.md` (§12 and fourteen round-3 correction blocks),
+`docs/reviews/phase-2d-4a-queue.md` (round 3 verbatim, appended after rounds 1 and 2) and this checkpoint.
+**The only `src/` paths are `src/lib/i18n/{en,es}.json`** — the TypeScript wire is 2d-4b's by the split.
+`git status --short --untracked-files=all` after the commit is **empty**: no real-config path, no launch
+artifact, no untracked file. **The step is NOT closed by it** — three Codex rounds, all NOT READY, all
+three fixes in the tree and green, and **round 4 is owed against the round-3 fix**. A fresh session
+resumes from "Next action".
+
 ### What is NOT proven
 
 - **Round 4 has not run.** Fix round 3 changed the eviction victim, the wire shape and the identity
