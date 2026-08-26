@@ -1427,8 +1427,18 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// is asserted to have stayed at six: the phase's design consult rules that a
 /// restore is a content path on `save_raw_document`, and a seventh writing name
 /// appearing here would be that ruling silently reversed.
+///
+/// Phase 2d-4a adds `drain_external_changes`, taking the **registered** surface
+/// to sixteen workspace commands and seventeen in all, and it writes nothing
+/// either. It is the first name ever registered in Rust before the frontend
+/// declares it, because `docs/decisions/2d-4-split-notes.md` cuts 2d-4 on the
+/// seam the consult's Q3 draws — Rust answers `Result<T, CommandError>` and the
+/// TypeScript wrapper turns it into a `CommandResult<T>` — and puts the wrapper
+/// in 2d-4b. [`AWAITING_FRONTEND_DECLARATION`] is that asymmetry written down
+/// where it fails rather than described in a record, and it is checked in both
+/// directions so that 2d-4b cannot add the name without deleting the entry.
 #[test]
-fn the_registered_commands_are_the_workspace_fifteen_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1438,7 +1448,8 @@ fn the_registered_commands_are_the_workspace_fifteen_and_the_menu_command() {
     assert_eq!(
         workspace.len(),
         15,
-        "the workspace surface is nine read-only commands and six that write: {workspace:?}"
+        "the frontend declares nine read-only commands and six that write; the tenth reader is \
+         2d-4b's: {workspace:?}"
     );
     let writing = [
         "move_match",
@@ -1477,11 +1488,34 @@ fn the_registered_commands_are_the_workspace_fifteen_and_the_menu_command() {
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
     let declared: BTreeSet<String> = workspace.union(&menu).cloned().collect();
     let registered = registered_commands();
-    assert_same_names("the registered commands", &registered, &declared);
+    // Both directions on the one deliberate gap, so neither side of it can rot:
+    // a name here that Rust does not register is a stale entry, and a name here
+    // that the frontend *does* declare is an entry 2d-4b forgot to delete.
+    for pending in AWAITING_FRONTEND_DECLARATION {
+        assert!(
+            registered.contains(*pending),
+            "{pending} is listed as awaiting a frontend declaration and is not registered at all"
+        );
+        assert!(
+            !declared.contains(*pending),
+            "{pending} is declared by the frontend now, so delete its \
+             AWAITING_FRONTEND_DECLARATION entry"
+        );
+    } // End of the loop over the names Rust registers ahead of the frontend
+    let reachable: BTreeSet<String> = declared
+        .union(
+            &AWAITING_FRONTEND_DECLARATION
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        )
+        .cloned()
+        .collect();
+    assert_same_names("the registered commands", &registered, &reachable);
     assert_eq!(
         registered.len(),
-        16,
-        "Phase 2c-5-2 registers fifteen workspace commands and one menu command, and no more: {registered:?}"
+        17,
+        "Phase 2d-4a registers sixteen workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1489,7 +1523,23 @@ fn the_registered_commands_are_the_workspace_fifteen_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_fifteen_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_sixteen_and_the_menu_command()
+
+/// The commands Rust registers that the frontend has not declared yet.
+///
+/// **A bounded, dated exception and never a suppression list.** Every entry is
+/// checked in both directions by the test above: it must be registered, and it
+/// must be absent from `COMMAND_NAMES`, so the step that declares it is forced
+/// to delete the entry in the same change. An empty list is the ordinary state
+/// and is what this list is expected to return to.
+///
+/// One entry today. `drain_external_changes` is registered by Phase 2d-4a and
+/// declared by 2d-4b, because `docs/decisions/2d-4-split-notes.md` cuts the step
+/// on the Rust/TypeScript seam and the wrapper is deliberately on the far side
+/// of it. What that costs, said plainly: between the two steps the command is
+/// dispatchable and **no frontend code can call it**, so nothing in the window
+/// reconciles anything.
+const AWAITING_FRONTEND_DECLARATION: &[&str] = &["drain_external_changes"];
 
 /// The names no read of the backup tree may so much as mention.
 ///

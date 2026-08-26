@@ -27,7 +27,7 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Six of the fifteen commands write, and they write the same way
+//! # Six of the sixteen commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, and 2c-3c-2
@@ -252,7 +252,8 @@ use crate::backup::{
     BackupBatchKey, BackupBatchListing, BackupEntryKey, BackupEntryListing, BackupTextResponse,
 };
 use crate::error::CommandError;
-use crate::ledger::{admitting_sink, discarding_sink, AdmittedSink, ObservedState, WriteLedger};
+use crate::ledger::{admitting_sink, AdmittedSink, ObservedState, WriteLedger};
+use crate::reconciliation::{queueing_sink, ReconciliationBatch, ReconciliationQueue, WakeEmitter};
 use crate::save::SaveResult;
 use crate::watch::{
     EpochSpaceExhausted, LifecycleConfig, ObservationSink, ReObserver, WatchStatusView,
@@ -338,8 +339,8 @@ struct Open {
     /// [`WorkspaceSession::open`] — and it is dropped — which also cancels
     /// and joins, see [`WatcherLifecycle`]'s `Drop` — when the session itself
     /// is dropped. What it observes goes to
-    /// [`WorkspaceSession::observations`]; in 2d-2 that sink discards,
-    /// because the queue and the wake event are 2d-4's.
+    /// [`WorkspaceSession::observations`], and since Phase 2d-4a what that
+    /// sink admits reaches [`WorkspaceSession::reconciliation`].
     watcher: WatcherLifecycle,
 }
 
@@ -371,11 +372,27 @@ pub struct WorkspaceSession {
     /// **Since Phase 2d-3 this is always [`admitting_sink`]**, the app-write
     /// admission gate over [`WorkspaceSession::ledger`]; what a caller of
     /// [`WorkspaceSession::observing`] injects is the sink *behind* it, which
-    /// is [`discarding_sink`] in production until Phase 2d-4 wires the queue
-    /// and the wake event, and a channel in the `crate::watch_check`
+    /// is [`queueing_sink`] over [`WorkspaceSession::reconciliation`] in
+    /// production since Phase 2d-4a, and a channel in the `crate::watch_check`
     /// integration tests. Not behind the mutex: it is immutable for the
     /// session's life.
     observations: ObservationSink,
+    /// The queue Phase 2d-4a put behind that sink, and the seam the drain
+    /// command reads.
+    ///
+    /// Beside the session rather than on [`Open`] for
+    /// [`WorkspaceSession::ledger`]'s reason: a replacement changes which
+    /// directory is watched, never where its observations go, and the queue is
+    /// *emptied* by a replacement rather than replaced by one
+    /// (`crate::reconciliation::ReconciliationQueue::begin_epoch`).
+    ///
+    /// Its two mutexes are **leaves**, exactly as the ledger's are:
+    /// `crate::reconciliation` runs no caller-supplied code under either, and
+    /// the wake emitter is cloned out and called with neither held. The one
+    /// order is session → queue, taken by [`WorkspaceSession::open`] and by
+    /// [`WorkspaceSession::drain_external_changes`]; the watcher's worker takes
+    /// the queue with no session lock at all.
+    reconciliation: Arc<ReconciliationQueue>,
     /// This session's app-write record, announced-state map and observation
     /// sequence allocator — Phase 2d-3.
     ///
@@ -422,13 +439,21 @@ impl std::fmt::Debug for WorkspaceSession {
 impl WorkspaceSession {
     /// An empty session, with no workspace open.
     ///
-    /// Its watchers' admitted observations go to [`discarding_sink`] —
-    /// produced, decided and dropped, stated rather than hidden, because the
-    /// queue that will consume them is Phase 2d-4's and building it early would
-    /// put a wire where the consult's Q3 says none may exist yet.
+    /// **The production wiring, and since Phase 2d-4a its watchers' admitted
+    /// observations are recoverable**: the sink behind the admission gate is
+    /// [`queueing_sink`] over this session's own
+    /// [`ReconciliationQueue`], which
+    /// `drain_external_changes` reads. Until 2d-4a this position held a sink
+    /// that dropped its argument, so a sequence and a publication were spent on
+    /// a value no code could recover.
     pub fn new() -> WorkspaceSession {
-        WorkspaceSession::observing(discarding_sink(), LifecycleConfig::default())
-    }
+        let queue = Arc::new(ReconciliationQueue::new());
+        WorkspaceSession::assembled(
+            queueing_sink(Arc::clone(&queue)),
+            LifecycleConfig::default(),
+            queue,
+        )
+    } // End of function new()
 
     /// A session whose watchers' **admitted** observations reach `sink`, under
     /// `config`'s timing.
@@ -449,18 +474,47 @@ impl WorkspaceSession {
     /// receiver can tell a replaced watcher's output from its successor's — and
     /// since 2d-3 the gate is what makes that discrimination act rather than
     /// merely be possible.
+    /// **What it does not do, and the sentence is the whole of the
+    /// difference**: a session built here feeds the sink it was given and does
+    /// **not** feed its own [`ReconciliationQueue`], which stays empty for the
+    /// session's life unless a test fills it directly. The queue's own
+    /// composition with the gate — the pair [`WorkspaceSession::new`] installs
+    /// — is driven in `crate::reconciliation`'s tests instead, so
+    /// `crate::watch_check`'s evidence stays about the gate and about a real
+    /// filesystem, which is what it was built to be about.
+    // Since Phase 2d-4a no production constructor calls this: `new` installs the
+    // queue instead, which is what makes an admitted observation recoverable.
+    // The allow is scoped to non-test builds so the injection seam stays
+    // lint-armed exactly where its consumers exist, and it is not `cfg(test)`
+    // because two doc comments in this crate link to it and a link that stops
+    // resolving fails `cargo doc`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn observing(sink: AdmittedSink, config: LifecycleConfig) -> WorkspaceSession {
+        WorkspaceSession::assembled(sink, config, Arc::new(ReconciliationQueue::new()))
+    }
+
+    /// The one place a session is built.
+    ///
+    /// Every constructor above goes through here, so the ledger is created and
+    /// its admission gate installed at exactly one site: two sites are where the
+    /// two would drift apart.
+    fn assembled(
+        downstream: AdmittedSink,
+        config: LifecycleConfig,
+        reconciliation: Arc<ReconciliationQueue>,
+    ) -> WorkspaceSession {
         let ledger = Arc::new(WriteLedger::new());
         WorkspaceSession {
             open: Mutex::new(None),
             epochs: Mutex::new(WorkspaceEpochs::new()),
-            observations: admitting_sink(Arc::clone(&ledger), sink),
+            observations: admitting_sink(Arc::clone(&ledger), downstream),
             ledger,
+            reconciliation,
             watch_config: config,
             #[cfg(test)]
             watching: true,
         }
-    } // End of function observing()
+    } // End of function assembled()
 
     /// A session whose opens start no watcher — a **test-only economy**.
     ///
@@ -480,15 +534,14 @@ impl WorkspaceSession {
     /// six writers' recording behaviour is tested here at no FSEvents cost, and
     /// what an unwatched session says nothing about is only what a *watcher*
     /// would have observed. It is built **through**
-    /// [`WorkspaceSession::observing`] and then flips the one switch, so that
-    /// constructor stays the single site where the ledger is created and its
-    /// admission gate installed — an economy that assembled its own session
+    /// [`WorkspaceSession::new`] — the production constructor, so its ledger,
+    /// its admission gate and its reconciliation queue are the shipped ones —
+    /// and then flips the one switch. An economy that assembled its own session
     /// would be a second such site, and a second one is where the two would
     /// drift apart.
     #[cfg(test)]
     pub(crate) fn unwatched() -> WorkspaceSession {
-        let mut session =
-            WorkspaceSession::observing(discarding_sink(), LifecycleConfig::default());
+        let mut session = WorkspaceSession::new();
         session.watching = false;
         session
     } // End of function unwatched()
@@ -500,6 +553,27 @@ impl WorkspaceSession {
     #[cfg(test)]
     pub(crate) fn ledger(&self) -> &WriteLedger {
         &self.ledger
+    }
+
+    /// This session's reconciliation queue — the 2d-4a tests' seam, and the
+    /// same kind of value the accessor above is: an observability seam and
+    /// never a control surface. Nothing that reaches a user goes through it;
+    /// what a caller may do with it is what `crate::reconciliation` allows,
+    /// which is enqueue, drain and adopt an epoch.
+    #[cfg(test)]
+    pub(crate) fn reconciliation(&self) -> &ReconciliationQueue {
+        &self.reconciliation
+    }
+
+    /// Installs the emitter the reconciliation wake goes out through.
+    ///
+    /// Called once, from `crate::register`'s `setup`, because the session is
+    /// managed before an application handle exists. Until it is called an
+    /// enqueue still happens and simply wakes nobody — the same position a
+    /// dropped event leaves the window in, and the drain command is what makes
+    /// it recoverable either way.
+    pub fn install_wake_emitter(&self, emitter: WakeEmitter) {
+        self.reconciliation.install_wake_emitter(emitter);
     }
 
     /// Replaces the session's epoch allocator — the boundary tests' seam,
@@ -567,7 +641,8 @@ impl WorkspaceSession {
     /// apart. Commands arriving during the join see the already installed
     /// successor, never an emptied session.
     ///
-    /// **The app-write ledger is emptied here, in the same block.** Phase
+    /// **The app-write ledger and the reconciliation queue are emptied here, in
+    /// the same block.** Phase
     /// 2d-3, the consult's Q2: a replacement discards every recorded app
     /// write, every announced state — publications and markers alike — and the
     /// epoch's sequence allocator
@@ -619,6 +694,13 @@ impl WorkspaceSession {
             // where the previous workspace's app-write records, announced
             // states and sequences are discarded (the consult's Q2).
             self.ledger.begin_epoch(allocated.unwrap_or(NO_EPOCH));
+            // The reconciliation queue adopts the same epoch in the same block
+            // and for the same reason (Phase 2d-4a): a sequence means nothing
+            // across epochs, and an entry kept across a replacement could
+            // describe a different directory's file, because the identity table
+            // is keyed by path for the life of the process.
+            self.reconciliation
+                .begin_epoch(allocated.unwrap_or(NO_EPOCH));
             let watcher = match allocated {
                 Ok(epoch) => self.watcher_for(workspace.root(), epoch),
                 Err(EpochSpaceExhausted) => WatcherLifecycle::without_epoch(),
@@ -1220,6 +1302,53 @@ impl WorkspaceSession {
     ) -> Result<BackupTextResponse, CommandError> {
         self.with_workspace_read(|workspace| crate::backup::read_text(workspace, entry, document))
     }
+
+    /// Everything this session has observed on disk above `after_sequence`.
+    ///
+    /// **The authoritative half of the reconciliation protocol** (the 2d design
+    /// consult's Q3): the `workspace://reconciliation-ready` event is a hint
+    /// that says *ask*, and this is the answer. A caller compares the batch's
+    /// epoch against the workspace it is showing, and a mismatch makes the whole
+    /// batch stale and installs nothing.
+    ///
+    /// `after_sequence` is an **acknowledgement watermark, not a cursor**: what
+    /// it names is discarded, everything above it is kept, and what comes back
+    /// is the coalesced form of what was kept — one observation per run of one
+    /// path's sequence-adjacent entries asserting one state
+    /// ([`crate::reconciliation::ReconciliationQueue::drain`]). So draining
+    /// twice with the same value answers the same batch twice **when nothing
+    /// was enqueued between the two calls**, and an answer lost on the way to
+    /// the window costs no more than the drain that repeats it. **An entry is
+    /// kept only until an overflow evicts it**: at
+    /// [`crate::reconciliation::QUEUE_CAPACITY`] the oldest undrained entries
+    /// go unacknowledged and are counted in the batch's `discarded`, whose
+    /// answer is a whole-workspace reload rather than a repeated drain. Zero
+    /// asks for everything the current epoch still holds. The batch's
+    /// `newest_sequence` is never below the highest watermark this session has
+    /// been drained with, so a drain arriving out of order — which the consult's
+    /// Q7 item 5 requires 2d-5 to handle — cannot walk a caller's watermark
+    /// backwards.
+    ///
+    /// It reads the workspace and writes nothing to disk. What it does mutate is
+    /// this session's own queue, which is why it is not on the read-only
+    /// `with_workspace_read` path by accident: the workspace is what turns a
+    /// watched path into an address, and that is the whole of what it is
+    /// borrowed for.
+    ///
+    /// # Errors
+    ///
+    /// [`CommandError::NoWorkspaceOpen`], and nothing else. It refuses for that
+    /// rather than answering an empty batch because every other workspace
+    /// command does, and because with no workspace there is no root to render a
+    /// path against.
+    pub fn drain_external_changes(
+        &self,
+        after_sequence: u64,
+    ) -> Result<ReconciliationBatch, CommandError> {
+        self.with_workspace_read(|workspace| {
+            Ok(self.reconciliation.drain(after_sequence, workspace))
+        })
+    } // End of function drain_external_changes()
 
     /// Runs `action` against the open workspace, or refuses because there is
     /// none.
@@ -3320,6 +3449,39 @@ pub fn read_backup_text(
 ) -> Result<BackupTextResponse, CommandError> {
     session.backup_text(&entry, document)
 } // End of function read_backup_text()
+
+/// Hands back everything this session observed on disk above `after_sequence`
+/// (the 2d design consult's Q3).
+///
+/// **The sixteenth command, and it writes nothing.** It is the authoritative
+/// half of the reconciliation protocol: `workspace://reconciliation-ready` is a
+/// hint that says *ask*, this is the answer, and an epoch mismatch on the answer
+/// makes the whole batch stale.
+///
+/// # Its argument
+///
+/// - `after_sequence` — the highest sequence the caller has already accepted,
+///   or zero for everything. An **acknowledgement watermark and not a cursor**:
+///   draining twice with the same value answers the same batch twice when
+///   nothing was enqueued between the two calls, so a lost answer costs no more
+///   than the drain that repeats it — **short of an overflow**, which evicts
+///   the oldest undrained entries unacknowledged and reports them in the
+///   batch's `discarded`, whose answer is a whole-workspace reload. The
+///   answer's `newest_sequence` never falls below a watermark this session has
+///   already been drained with, so it is safe to store unconditionally even out
+///   of order.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], and nothing else — see
+/// [`WorkspaceSession::drain_external_changes`].
+#[tauri::command]
+pub fn drain_external_changes(
+    session: State<'_, WorkspaceSession>,
+    after_sequence: u64,
+) -> Result<ReconciliationBatch, CommandError> {
+    session.drain_external_changes(after_sequence)
+} // End of function drain_external_changes()
 
 #[cfg(test)]
 mod tests {
@@ -8586,4 +8748,110 @@ mod tests {
             "a conflict records no app write, unchanged by this round"
         );
     } // End of function a_conflict_refresh_marks_its_disk_side_and_still_asks_for_a_stabilized_reading()
+
+    /// A drain with no workspace open is refused, exactly as every other
+    /// workspace command is.
+    #[test]
+    fn a_drain_before_the_first_open_is_refused_rather_than_answered_empty() {
+        let session = WorkspaceSession::unwatched();
+        assert!(matches!(
+            session.drain_external_changes(0),
+            Err(crate::error::CommandError::NoWorkspaceOpen)
+        ));
+    }
+
+    /// An open workspace answers its own epoch, and an untouched tree has
+    /// nothing to reconcile.
+    #[test]
+    fn an_open_workspace_answers_its_epoch_with_nothing_pending() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let batch = session
+            .drain_external_changes(0)
+            .expect("an open workspace answers");
+        assert_eq!(batch.epoch, crate::watch::FIRST_WORKSPACE_EPOCH);
+        assert!(batch.observations.is_empty());
+        assert_eq!(batch.newest_sequence, 0);
+        assert_eq!(batch.discarded, 0);
+    } // End of function an_open_workspace_answers_its_epoch_with_nothing_pending()
+
+    /// What the queue holds comes back above the watermark, in order, and the
+    /// batch carries the session's epoch.
+    #[test]
+    fn the_drain_hands_back_what_the_queue_holds_above_the_watermark() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let path = dir.path().join("match").join("base.yml");
+        let source = base_bytes(&dir);
+        let context = espansoconfig_core::model::DocumentContext::detached(DocumentId(1), "x.yml");
+        for sequence in 1..=2u64 {
+            session
+                .reconciliation()
+                .enqueue(crate::ledger::AdmittedObservation {
+                    sequence,
+                    epoch: crate::watch::FIRST_WORKSPACE_EPOCH,
+                    observation: espansoconfig_core::watch::engine::Observation::Changed {
+                        path: path.clone(),
+                        previous_revision: None,
+                        content: espansoconfig_core::watch::engine::StableContent::Projected {
+                            snapshot: Box::new(espansoconfig_core::workspace::project_source(
+                                &context,
+                                &format!("{source}# {sequence}\n"),
+                            )),
+                            findings: Vec::new(),
+                        },
+                        correspondences: None,
+                    },
+                });
+        } // End of the loop that admits two distinct revisions of one path
+
+        let all = session.drain_external_changes(0).expect("a batch");
+        assert_eq!(all.observations.len(), 2);
+        assert_eq!(all.newest_sequence, 2);
+        assert_eq!(all.epoch, crate::watch::FIRST_WORKSPACE_EPOCH);
+
+        // The watermark is an acknowledgement, so the same call answers the
+        // same batch until the caller says it has one of them.
+        let again = session.drain_external_changes(0).expect("a batch");
+        assert_eq!(again, all);
+        let rest = session.drain_external_changes(1).expect("a batch");
+        assert_eq!(rest.observations.len(), 1);
+        assert_eq!(rest.newest_sequence, 2);
+    } // End of function the_drain_hands_back_what_the_queue_holds_above_the_watermark()
+
+    /// A replacement empties the queue and moves its epoch, in the same block
+    /// the ledger's own epoch moves in.
+    #[test]
+    fn a_replacement_empties_the_queue_and_moves_its_epoch() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let path = dir.path().join("match").join("base.yml");
+        session
+            .reconciliation()
+            .enqueue(crate::ledger::AdmittedObservation {
+                sequence: 1,
+                epoch: crate::watch::FIRST_WORKSPACE_EPOCH,
+                observation: espansoconfig_core::watch::engine::Observation::Removed {
+                    path,
+                    previous_revision: None,
+                },
+            });
+        assert_eq!(
+            session
+                .drain_external_changes(0)
+                .expect("a batch")
+                .observations
+                .len(),
+            1
+        );
+
+        let second = synthetic_tree();
+        session.open(Some(second.path())).expect("a replacement");
+        let batch = session.drain_external_changes(0).expect("a batch");
+        assert_eq!(batch.epoch, crate::watch::FIRST_WORKSPACE_EPOCH + 1);
+        assert!(
+            batch.observations.is_empty(),
+            "a sequence means nothing across epochs: {batch:?}"
+        );
+    } // End of function a_replacement_empties_the_queue_and_moves_its_epoch()
 }

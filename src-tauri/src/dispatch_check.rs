@@ -1,4 +1,4 @@
-//! The sixteen commands, invoked through the real dispatcher.
+//! The seventeen commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -1770,7 +1770,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the sixteen commands.
+/// A page that is not this application cannot reach any of the seventeen commands.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
 /// R20: pin both sides, never one inside). With `"permissions": []` and no
@@ -1782,7 +1782,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All sixteen are attempted, and the count is asserted against the registered
+/// **All seventeen are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -1904,6 +1904,11 @@ fn a_remote_origin_is_refused() {
                 "document": 0,
             }),
         ),
+        // The sixteenth workspace command. It writes nothing, and it is here
+        // for `document_text`'s reason: a drained batch carries whole files'
+        // text, so a navigated webview must not be able to read the user's
+        // configuration back out of the application through it either.
+        ("drain_external_changes", json!({ "afterSequence": 0 })),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -1918,7 +1923,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 16, "the surface is sixteen commands");
+    assert_eq!(attempted.len(), 17, "the surface is seventeen commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)
@@ -1933,6 +1938,73 @@ fn a_remote_origin_is_refused() {
         );
     } // End of the loop over the commands a remote page must not reach
 } // End of function a_remote_origin_is_refused()
+
+/// `drain_external_changes` is registered, reachable with `"permissions": []`,
+/// and its one argument survives the crossing.
+///
+/// The three things only the dispatcher decides, asked of the sixteenth
+/// workspace command: it is in `generate_handler!` (a missing name would come
+/// back as `Command … not found`), the empty capability set does not block it (a
+/// denial would come back as a **string** rather than as an object), and
+/// `after_sequence` arrives as `afterSequence` and deserializes into a `u64`.
+///
+/// It also pins the two facts the wire type carries when there is nothing to
+/// reconcile: the batch names the workspace epoch it belongs to, and an empty
+/// batch answers the watermark it was asked with rather than zero — which is
+/// what lets a caller store `newest_sequence` unconditionally.
+///
+/// **What it does not show is an external change.** Nothing here writes to the
+/// tree behind the application's back, and a real filesystem observation is
+/// `crate::watch_check`'s subject; what this measures is the crossing.
+#[test]
+fn drain_external_changes_is_reachable_and_its_watermark_deserializes() {
+    let dir = synthetic_tree();
+    let app = mock_app();
+    let webview = main_window(&app);
+
+    let refusal = invoke(
+        &webview,
+        "drain_external_changes",
+        json!({ "afterSequence": 0 }),
+    )
+    .expect_err("no workspace is open yet, so this must fail");
+    assert_eq!(
+        refusal.get("code").and_then(Value::as_str),
+        Some("noWorkspaceOpen"),
+        "the dispatcher rejected before reaching the command: {refusal}"
+    );
+
+    invoke(
+        &webview,
+        "open_workspace",
+        json!({ "root": dir.path().to_string_lossy() }),
+    )
+    .expect("the synthetic tree opens");
+
+    let batch = invoke(
+        &webview,
+        "drain_external_changes",
+        json!({ "afterSequence": 0 }),
+    )
+    .expect("an open workspace answers a batch");
+    assert_eq!(batch["epoch"], 1, "the first open is epoch one: {batch}");
+    assert_eq!(batch["observations"].as_array().map(Vec::len), Some(0));
+    assert_eq!(batch["newest_sequence"], 0);
+    assert_eq!(batch["discarded"], 0);
+
+    // The watermark really crosses: an empty batch answers the value it was
+    // asked with, so a non-zero one comes back unchanged rather than as zero.
+    let later = invoke(
+        &webview,
+        "drain_external_changes",
+        json!({ "afterSequence": 12 }),
+    )
+    .expect("a watermark above everything pending is legal");
+    assert_eq!(
+        later["newest_sequence"], 12,
+        "an empty batch never moves a caller's watermark backwards: {later}"
+    );
+} // End of function drain_external_changes_is_reachable_and_its_watermark_deserializes()
 
 /// A malformed identity is a typed rejection, not a wrong match.
 ///

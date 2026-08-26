@@ -112,6 +112,33 @@ const LIVENESS_SHAPES: &[&str] = &[
     "coalesces to silence",
     "coalesced to silence",
     "coalescing to silence",
+    // A lost push is recovered by a later poll — the Phase 2d-4a family, added
+    // by that phase's round-1 fix. `src-tauri/src/events.rs` claimed in the
+    // present tense that a window which never hears a wake *still drains* after
+    // listener registration, after an open and on resume, when no frontend
+    // drain existed at all; none of the phrases above matched it, which is why
+    // the sweep was green over a false claim. Every wording here is that claim
+    // or an obvious inflection of it.
+    //
+    // The last five were added by that phase's **round-2** fix, which found the
+    // first six drawn around the two sentences that had just been rewritten
+    // rather than around the family: the passive *drained again*, the prefixed
+    // *re-drain* — which covers `re-drains`, `re-drained` and `re-draining` —
+    // and both word orders of reconciliation resuming were all obvious ways to
+    // make the same claim and all invisible. Narrowing a phrase to fit the
+    // wording of the finding that prompted it is the same mistake as narrowing
+    // it to fit today's tree.
+    "still drain",
+    "still reconcile",
+    "drain again",
+    "drains again",
+    "drained again",
+    "re-drain",
+    "reconcile again",
+    "reconciles again",
+    "reconciled again",
+    "reconciliation resumes",
+    "resumes reconciliation",
     // An observation, or a settlement, is promised.
     "observation will arrive",
     "observation arrives",
@@ -156,6 +183,16 @@ struct Judged {
     /// contract itself; it is a pointer at the contract; it is a local fact that
     /// does not restate the contract; it is a false positive of the pattern from
     /// an unrelated subsystem.
+    ///
+    /// **A passage that restates an obligation and hands it on is a pointer,
+    /// not a local fact**, whichever contract it hands it to — this module's
+    /// subject is `espansoconfig_core::watch::liveness`, but the wake
+    /// protocol's two positions restate the 2d design consult's Q3 obligation
+    /// on a *future* consumer, and nothing local implements it. Phase 2d-4a's
+    /// round-1 fix
+    /// filed both as local fact, and round 2 found that this records incorrectly
+    /// the one distinction the check exists to make a reviewer judge: a local
+    /// fact is a claim this code keeps.
     reason: &'static str,
 }
 
@@ -435,6 +472,18 @@ const INVENTORY: &[Judged] = &[
         phrase: "re-observed",
         count: 1,
         reason: "false positive: a backup entry re-observed by the mapping that verified it",
+    },
+    Judged {
+        file: "src-tauri/src/events.rs",
+        phrase: "drains again",
+        count: 1,
+        reason: "a pointer: `wake_emitter` restating the 2d consult's Q3 obligation on a future consumer, and denying in the next paragraph that anything local performs it",
+    },
+    Judged {
+        file: "src-tauri/src/reconciliation.rs",
+        phrase: "drains again",
+        count: 1,
+        reason: "a pointer: the same Q3 obligation at `ReconciliationQueue::wake`, handed to 2d-4b and 2d-5 — the wire's recovery from a dropped hint, implemented by nothing here",
     },
     Judged {
         file: "src-tauri/src/commands.rs",

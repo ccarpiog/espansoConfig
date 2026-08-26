@@ -404,6 +404,14 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/persist/backup.rs",
         name: "BackupTarget",
     },
+    CodeEnum {
+        source: "src-tauri/src/reconciliation.rs",
+        name: "ExternalObservation",
+    },
+    CodeEnum {
+        source: "src-tauri/src/reconciliation.rs",
+        name: "UnreadableReason",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -462,6 +470,8 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("backupReadStep", 6),
     ("backupReadError", 6),
     ("backupTarget", 2),
+    ("externalObservation", 4),
+    ("unreadableReason", 6),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -537,6 +547,14 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          new snippet put, and are never rendered. What a screen shows is the \
          list itself, and the wire form carries no operand a sentence could be \
          built from beyond a `MatchId`",
+    ),
+    (
+        "ObservedDocument",
+        "an address, not a code, exactly as `PathSegment` is: it says which \
+         file an external observation is about, and both arms are rendered \
+         literally — a `DocumentId` is a number the caller hands back and the \
+         other arm is a display path. What a screen says about a removed or \
+         unreadable file comes from `ExternalObservation`'s own namespace",
     ),
     (
         "DraftTarget",

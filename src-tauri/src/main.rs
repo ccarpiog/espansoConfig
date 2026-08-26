@@ -40,8 +40,8 @@
 //! Phase 2d-2 adds **no command and no event**: `watch` puts the core's
 //! observation engine behind the open workspace — one epoch-tagged watcher per
 //! open, cancelled and joined on successful replacement, dropped on shutdown,
-//! polling only when the native backend fails. What it observes goes to a sink
-//! that discards it until Phase 2d-4 wires the queue and the wake event (the
+//! polling only when the native backend fails. What it observes went to a sink
+//! that discarded it until Phase 2d-4a wired the queue and the wake event (the
 //! 2d design consult's Q3); `watch_check` is the real-filesystem integration
 //! evidence the consult's Q7 item 2 places in this crate.
 //!
@@ -121,8 +121,19 @@
 //! coalesces rather than raising a second conflict (the consult's Q5, and the
 //! person has been shown that state in the payload), while `after_a_save`'s
 //! records nothing at all, because nobody has been shown it and a marker would
-//! coalesce the engine's own later reading of it into silence. What the gate
-//! admits still reaches a sink that discards it, until 2d-4.
+//! coalesce the engine's own later reading of it into silence.
+//!
+//! **Phase 2d-4a is where what the gate admits stops being dropped**, and it
+//! adds the sixteenth workspace command and the first event. `reconciliation` is the
+//! typed, ordered, coalescing queue the session holds beside its open
+//! workspace: the sink behind the admission gate puts every admitted
+//! observation in it and emits `events::RECONCILIATION_READY`, and
+//! `commands::drain_external_changes` hands the pending ones back as typed wire
+//! values, coalesced — one observation per run of one path's sequence-adjacent
+//! entries asserting one state. The **event is a hint and the command answer is the authority** (the
+//! consult's Q3) — nothing is installed from a wake, and an epoch mismatch
+//! makes a wake or a batch stale. This step draws nothing and decides nothing
+//! about whether a write surface is open; that is 2d-5's and 2d-6's.
 
 #![deny(missing_docs)]
 // Phase 2d-3-C. Every passage in this crate that needs the observation
@@ -148,6 +159,7 @@ mod liveness_contract;
 mod menu;
 #[cfg(test)]
 mod menu_contract;
+mod reconciliation;
 #[cfg(test)]
 mod rust_source;
 mod save;
@@ -169,7 +181,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the nine read-only workspace commands, the six commands that write,
+/// Registers the ten read-only workspace commands, the six commands that write,
 /// the menu command, and the state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
@@ -178,9 +190,10 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// program.
 ///
 /// The original six workspace readers — read a workspace, list its files,
-/// project one, project one match, read one's bytes, re-read one — and the three
+/// project one, project one match, read one's bytes, re-read one — the three
 /// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
-/// `read_backup_text` are read-only. The six save commands `move_match`,
+/// `read_backup_text`, and Phase 2d-4a's `drain_external_changes` are
+/// read-only. The six save commands `move_match`,
 /// `save_match`, `create_match`, `delete_match`, `save_raw_document` and
 /// `duplicate_match` write, and every one of them does it through
 /// `espansoconfig_core::persist::save_document` and through nothing else. The
@@ -196,7 +209,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the sixteen commands is a plugin command. `core:menu`'s permissions exist for a
+/// none of the seventeen commands is a plugin command. `core:menu`'s permissions exist for a
 /// frontend that builds menus through `@tauri-apps/api/menu`; this one does
 /// not, and asks Rust for a rebuild instead, so the empty permission list that
 /// Phase 1b-1's review narrowed to stays exactly as narrow and `core:default`
@@ -206,6 +219,18 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(commands::WorkspaceSession::new())
+        // The session is managed before an application handle exists, so the
+        // reconciliation wake's emitter is installed here rather than in the
+        // constructor. It is in `register` and not in `main` so that
+        // `dispatch_check`'s application is the built application in this
+        // respect too.
+        .setup(|app| {
+            use tauri::Manager as _;
+            let emitter = events::wake_emitter(app.handle().clone());
+            app.state::<commands::WorkspaceSession>()
+                .install_wake_emitter(emitter);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::open_workspace,
             commands::list_documents,
@@ -222,6 +247,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::list_backup_batches,
             commands::list_backup_entries,
             commands::read_backup_text,
+            commands::drain_external_changes,
             menu::set_menu_labels,
         ])
 } // End of function register()

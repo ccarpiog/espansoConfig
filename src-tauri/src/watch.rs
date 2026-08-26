@@ -122,19 +122,19 @@
 //! watcher: nothing re-probes the native backend, so a healthy watch returns
 //! with the next workspace open. That is a stated cost, not an accident.
 //!
-//! # What this module must not do yet
+//! # What this module must not do
 //!
 //! **No wire.** Nothing here emits a Tauri event, holds a queue, or answers a
-//! command — the wake event and `drain_external_changes` are Phase 2d-4's
-//! (consult Q3). Nothing here compares an observation against an app-write
-//! ledger either: since Phase 2d-3 that decision is `crate::ledger`'s, and the
-//! [`ObservationSink`] a session hands every watcher is that module's admission
-//! gate. What the gate admits reaches a downstream sink which, in production,
-//! is still `crate::ledger::discarding_sink` — observations are produced,
-//! decided and dropped, which is this project's established
-//! primitive-before-caller cut: the lifecycle and the gate exist and are tested
-//! before anything consumes them, exactly as `persist::save_document` existed
-//! at 2a with no command behind it.
+//! command — the wake event and `drain_external_changes` are
+//! `crate::reconciliation`'s and `crate::commands`' (consult Q3). Nothing here
+//! compares an observation against an app-write ledger either: since Phase
+//! 2d-3 that decision is `crate::ledger`'s, and the [`ObservationSink`] a
+//! session hands every watcher is that module's admission gate. What the gate
+//! admits reaches a downstream sink, which in production is
+//! `crate::reconciliation::queueing_sink` since Phase 2d-4a and was a sink that
+//! dropped its argument before it — the lifecycle and the gate were built and
+//! tested before anything consumed them, exactly as `persist::save_document`
+//! existed at 2a with no command behind it.
 
 use std::collections::BTreeSet;
 use std::fmt;

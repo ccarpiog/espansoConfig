@@ -107,8 +107,9 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2d design consult** | **Phase 2d put to a design consult before any line of it was written**, by the standing rule since 2b-2c | ✅ complete — `docs/reviews/phase-2d-design.md` (140 lines, written by the consultant itself into the working tree; the sandbox was writable this time). Like every consult since 2c-4a it **changed the phase rather than confirming it**, in four places. It rules the brief's "no dirty draft → reload automatically" **wrong as stated**: this application can prove only that *no write surface capable of targeting the document is open* (R36), so the reload predicate is that narrower conservative sentence and **a pristine open surface takes the conflict path too**. It rules the `notify`-backed watcher and the whole debounce/stability/read/hash/project/validate engine **into the Tauri-free core** with `src-tauri` owning only lifecycle, the app-write revision ledger, an ordered/coalesced queue and a wake-up event — and the **event is an expendable hint**: the frontend drains a `drain_external_changes(afterSequence)` command whose answer is authoritative, because a push may be missed. Automatic reload is **not an adoption** — a distinct guarded installation over the two selection counters, never `adoptDiskVersion`, which stays the only *confirmed-install* door; a watcher-origin conflict is a **distinct discriminant inside the one shared conflict model** (there was no failed save), with `conflictChoicesFor` still the only choice-list producer. All five plan-§6.5 offers ship by reuse — but only Keep/Reload/Copy as controls: *Compare* is the always-visible read-only panel and *Save-as-new* is the staged manual-resolution recovery, never called a duplicate. Eight dependency-ordered steps (Q7); Q8 names the sharpest green-suite failure: **an incomplete or stale open-write-surface registry classifying a live surface as clean**, so an external hint auto-reloads over the only in-memory copy of a draft — which is why step 7's rebuilt instrument owes a **command counter**, closing the inherited no-command-counter limitation for the reading |
 | **2d-1** | **The core observation engine, with no caller** — consult Q7 item 1. `watch::engine::ObservationEngine` (`start`/`hint`/`tick`/`rescan`/`next_deadline`) over an injected `Millis` clock and `WatchSource` reader: validated 150–300 ms trailing-edge debounce, two-equal-reads stability on **every** route including the baseline scan, exact hashing, projection/validation through the workspace's own path, typed `Changed`/`Added`/`Removed`/`Unreadable`. `watch::correspond` binds one table per base match to both snapshots' revisions; `watch::native` confines `notify` 8.2.0 to hints-and-degradation over exactly `watched_roots()`. `watch::self_write_suppresses` is Q2's predicate **shape** — the ledger, sequences and epochs are deliberately absent (2d-3/2d-4). **Admission and discovery's acceptance are one predicate**: `WatchSource::read` takes the engine's root and applies the walk's whole rule (plain-name components, every intermediate a real directory by `symlink_metadata`, final a regular file), so no route — baseline, hint or rescan — reads what the walk cannot reach | ✅ complete — after **five review rounds**, and the tail of them is this project's named failure mode in miniature. Round 1 NOT READY (2 High: one-read baselines a truncate/write race can tear; a `.yml` symlink reading outside the watched roots — 2 Medium, 1 Low). Round 2 NOT READY: **a narrower instance of all five** — sharpest the rescan route through a newly **symlinked ancestor**, past round 1's final-component-only check. Round 3 NOT READY on one Medium: the module headline still said "deterministic" **as a name** — the concept sweep had matched the site and misread it. Round 4 NOT READY on the same shape twice more: the notes' own D2 **heading** and the consult's Q1 **ruling line** — closed by qualifying the heading in place and a correction block under the ruling, never a rewrite. Round 5 READY, no findings. Three pinning tests verified failing without their fixes; §6–§9 of `2d-1-notes.md` record each round's closure with correction blocks preserving what was false when written |
 | **2d-2** | **The watcher lifecycle behind the workspace session, and the real-filesystem adapter** — consult Q7 item 2, the one step whose principal integration test belongs in `src-tauri`. The worker thread, its inbox, the epoch tag, cancellation and join, and `watch_check.rs`'s real-FSEvents evidence | ✅ complete — closed **READY at round 5** of its review. Round 1's High was **sandbox-confounded evidence** — the Codex sandbox blocks FSEvents delivery, so a delivery-dependent test times out there while the supported host passes it repeatedly. That precedent now binds every FSEvents-adjacent review in this project: they are briefed as **static**, with host-measured numbers supplied |
+| **2d-4a** | **The Rust half of the reconciliation wire** — the first step of the 2d-4 split (`docs/decisions/2d-4-split-notes.md`), cut on the seam consult Q3 itself draws: Rust answers `Result<T, CommandError>` and the TypeScript wrapper is what converts it to `CommandResult<T>`. New `src-tauri/src/reconciliation.rs`: a `ReconciliationQueue` held beside the open session and fed by `queueing_sink`, replacing `discarding_sink`, which is **deleted** — until this step every admitted observation was produced and dropped. `workspace://reconciliation-ready` carries `ReconciliationWake { workspace_epoch, newest_sequence }` and is a hint; `drain_external_changes(after_sequence)` is the **sixteenth** workspace command and the authoritative answer, returning `ReconciliationBatch { epoch, newest_sequence, observations, discarded }` over typed `ExternalObservation`. **Coalescing is computed at `drain`, not at `enqueue`** — see the verification section for why that had to move. Ten EN/ES code keys; `wire_contract`, `dispatch_check` and `dictionary_contract` updated. Nothing drawn, no surface-open decision, and the only paths touched under `src/` are `src/lib/i18n/{en,es}.json` | 🔶 **implemented, every gate green, and NOT closed** — two Codex rounds, both NOT READY (round 1: 1 High, 4 Medium, 2 Low; round 2, against round 1's fix: 0 High, 4 Medium, 1 Low, of which **three were sentences the fix round itself wrote** and one found round 1's finding 3 never actually closed). Both fixes are in the tree and green. **Round 3 is owed** — see the "Next action" section |
 | **2d-3** | **The write ledger and the admission gate** — consult Q7 item 3: `WriteLedger`'s record `last_app_write[DocumentId] = { workspace_epoch, revision, recorded_at }`, the per-epoch sequence allocator, the coalescing published-state map, and a **commit gate** (a second mutex, distinct from the state mutex, held across `save_document` *and* the record, by RAII). The intake is `WorkspaceSession::observing`; `run_one_save` delegates to `commit_and_record`; both save-path refreshes admit through the same `decide`. Lock order **session → gate → state**, everywhere. No command, no event, no queue, no wire, no frontend file — Q3 holds | ✅ **complete and CLOSED** at step **2d-3-C** (2026-08-26), after a fourteen-round review tail the owner ended by ruling that the convergence mechanism be built rather than a fifteenth round run — the step review had stood at **round 8 of an open-ended tail** when this cell was last rewritten. Rounds 1–6 each found a narrower instance of the finding the round before had just closed; round 7 was the first whose High was not narrower but the *same* finding re-asserted, and by owner decision (2026-08-25) the remedy was adopted — the coalescing marker split from the sequence-spending publication, `decide` given **three private, exhaustively matched doors** of which only the watcher's two-read one may spend a sequence. **Round 8 cleared that split and found the shape one step *above* where the brief pointed**: `decide`'s steps 1–4 were left shared, so step 2's `self_write_suppresses` ran **before the door was consulted** and a **stale record could answer `SelfWrite` to a serialized save-tail reading** — retaining the record, marking nothing, announcing nothing, and returning above the only two things that door exists to do. It is the first High since round 6 that is a defect in **behaviour** rather than a sentence, and it needs no race: `reload_document` touches the ledger not at all and a `committed: false` save records nothing, so the previous entry stands while the workspace has moved on. The fix round took the reviewer's remedy — step 2 is now a `match door` structurally identical to step 1's — on a **narrower argument than *the record might be stale***: suppression exists to absorb the several native hints one atomic replacement generates, a native hint has exactly one door, and since round 7 neither serialized door can publish, so neither can commit the error suppression prevents. **Round 9 cleared that argument in both halves and then returned three Highs, all defects in behaviour, all of one root cause: nothing told the ledger when the workspace accepts a foreign revision.** `reload_document` re-read disk and updated the cache while touching the ledger not at all, so the stamped door could suppress a genuine external return to stale-recorded bytes; clearing the record destroyed the only chronology anchor with it, letting a settlement stamped before a commit publish bytes the commit had replaced; and a stale `announced` entry answered `Duplicate` to a real change — **which cannot be deferred to 2d-5, because `Duplicate` sends that layer no value to arbitrate**. **Two of the three were §5 items 23 and 24, written by the round-8 fix round one round earlier as bounded residues**, bringing to **seven** the §5 items so recorded and later found to be real defects. The round-9 fix reverses §14.2's rejection of reload-time invalidation — **two of its four grounds were verified false in the code** — and separates the commit anchor's lifetime from the record's suppression licence. **Rounds 10–12 moved the tail off behaviour and onto the record, and did not shorten it.** Round 10 was the first in ten with no High and no Medium — it *cleared* the three-map combination (three lifetimes, because the three maps answer three different questions), cleared the orchestrator's suspect (the asymmetry between the reload and the two save tails is the design), and downgraded §5 item 25 to a maintenance risk. Round 11 broke that clean sheet immediately with two Highs, a Medium and a Low, on the shape *round 10 corrected a conclusion and left its premise standing, in the same paragraph*; its Medium removed `watch_check`'s `preceded_a_commit == 0` assertion, proved redundant by a neuter rather than argued. **Round 12 then applied that lesson to round 11 and found the third premise in the same paragraphs**: *the re-observation's own stamp is taken after the anchor* is true in **program order only**, while `decide` is `read_after <= at` and `Instant` is expressly not guaranteed strictly increasing — so one refusal per commit is usual, never guaranteed, and four positions claimed otherwise. Its second High is that round 11's removal was recorded as **costing nothing** when it cost the *intermittently* early stamp's detection, the tally being cumulative across an epoch. Three Lows: a stale paragraph at a bold first sentence, a *file by file* list naming three of five files (a habit **seven** sections older than round 11), and a residue assigned to 2d-4 that **Q7 item 4 assigns to no phase at all**. All five fixed, none cleared. **Round 13 then turned round 12's lesson on round 12 and found what the corrected sentences rested on**: *bounded by the host clock advancing* was a **new liveness claim** the round-12 fix had just written, and it is false — `ReObserveOutcome`'s own doc says `Asked` promises a worker's inbox and not an observation, `observe_owed` says a debt waits with a path that never stabilizes, and `WorkerMessage::Stop` can be consumed first, so the clock may advance indefinitely with the retry never completing. Its second High is the same shape at the **§1 headline**, untouched by twelve rounds: *every one of those requests is an owed observation the engine **must answer***, which `observe_owed` refuses in as many words. One Low: §18.5 called all five `commands.rs` ordering hits the serialized-doors argument when only two are, the other three being duplicate-lookup wording — the count right, the judgement wrong. All three fixed, none cleared; the fix round's own sweeps found **nine** further instances, eight in code including an **assertion message**. **Round 14 then asked whether round 13's *narrower* claim was true at every position it replaced, and it was not: the narrower claim is still unconditional where the code is conditional.** `revert_settlement` ends `if owed { observe_owed } else { hint }`, so a path is re-**owed** only where the settlement being taken back had itself **discharged** a debt — an ordinary native-hint settlement has `owed == false` and gets a plain hint, which is exactly the thing the suppression argument elsewhere says may be *coalesced into silence*. Thirteen positions said it unconditionally, including round 13's own new safety sentence. Its first High is the same shape at the **§1 headline** again — *the engine takes its settlement back and **observes the path again***, against `revert_settlement`'s own doc, which says it schedules a read and **emits nothing itself**. Two Lows, both arithmetic in round 13's record: three of §19.4's after-counts were measured on a tree that did not yet hold the review text the same commit appended, and §19.5 said **six** correction blocks while naming seven. All four fixed, none cleared; the fix round's own sweeps found **six** further positions, and **both code ones are in `src-tauri/src/main.rs`'s module header** — the file §19.4's sweep could not see because it enumerated four files rather than the directory, so **round 13's own High 2 sentence survived the round that closed it everywhere else**. §5 item 17 had said the true thing since round 5, so the record held its own refutation for nine rounds. Round 14 changed **zero** non-comment lines in `src-tauri/src/`. **The tail ended at fourteen rounds, by owner decision on 2026-08-26, and step 2d-3-C built the mechanism instead of running a fifteenth**: the liveness contract is stated **once** in `crates/espansoconfig-core/src/watch/liveness.rs` (5 guaranteed clauses, 6 expressly not, each cited to the code item it is derived from), **twenty** positions across six files now **point** at it over intra-doc links that both crates make compile-checked by denying `rustdoc::broken_intra_doc_links`, and `src-tauri/src/liveness_contract.rs` walks both source trees **recursively**, joins comment runs into prose units, matches 50 phrases in 5 shape groups and **fails the build** on any hit its 82-entry inventory does not carry. The check was **driven to red twice, by two people, on two different files** — round 13's and round 14's Highs would both now be test failures rather than review findings. The argument is the reduction of surface, one place to be right instead of twenty, and **not** that the check judges prose: it catches an *unmarked* claim and a *new* one, and `2d-3-C-notes.md` §5 records **seven** limits, including that a reworded sentence reusing a recorded phrase in the same file passes and that `docs/` is deliberately not swept. Five non-comment lines changed across both source trees; no behaviour, and `decide`, `revert_settlement` and `observe_owed` are untouched. **2d-3 is CLOSED**; the next action is **2d-4**. See the "Next action" section |
-| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult, 2d-1 and 2d-2 done; **2d-3 implemented and under review**, 2d-4 next after it closes |
+| 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult, 2d-1, 2d-2 and **2d-3 (closed at 2d-3-C)** done; **2d-4 is split into 4a and 4b** (`docs/decisions/2d-4-split-notes.md`), and **4a is implemented, green and under review — round 3 owed** |
 | 3–5 | See plan §12 | ⬜️ not started |
 
 **Phase 2 is split into 2a / 2b / 2c / 2d**, because plan §12 states it as one phase and it is far
@@ -3661,6 +3662,144 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2d-4a (IMPLEMENTED, every gate green, NOT closed — two Codex rounds, both NOT READY, both fixes in the tree, round 3 owed)
+
+**Risk class: `high`. Worker model: `opus`** (this run was driven by `/goahead-opus`, so every agent
+at every depth was Opus and no Fable quota was spent).
+
+### What was built
+
+2d-4 as consult Q7 item 4 states it spans the Rust queue, a Tauri event, a new command, the
+TypeScript wire, the i18n accessors and three re-measured frontend baselines. It was **split** before
+execution — `docs/decisions/2d-4-split-notes.md` — on the seam Q3 itself draws: *the Rust command
+surface returns `Result<T, CommandError>`, while the TypeScript wrapper converts invoke
+success/failure into `CommandResult<T>`; preserve that split.*
+
+**2d-4a is the Rust half.** `src-tauri/src/reconciliation.rs` is new. `queueing_sink` replaced
+`ledger::discarding_sink`, which is deleted and whose own doc had said it would be: until this step
+an admitted observation was produced and **dropped**, so a sequence and a publication were spent on a
+value no code recovered. `AdmittedObservation` lost its `#[cfg_attr(not(test), allow(dead_code))]`.
+
+- `ReconciliationWake { workspace_epoch, newest_sequence }` on `workspace://reconciliation-ready`.
+  A hint, expendable, and deliberately **not** a `CommandResult` — it reports no requested operation.
+- `drain_external_changes(after_sequence)` — the **sixteenth** workspace command, seventeenth
+  registered counting the menu command — is the authoritative answer:
+  `ReconciliationBatch { epoch, newest_sequence, observations, discarded }` over typed
+  `ExternalObservation` (`Changed` / `Added` / `Removed` / `Unreadable`).
+- `after_sequence` is an **acknowledgement watermark**, accumulated with `max`, so the returned
+  watermark is safe for a caller to store unconditionally (round 2 verified this explicitly).
+- Ten EN/ES keys for `ExternalObservation` and `UnreadableReason`; `ObservedDocument` is a named
+  `NOT_A_CODE` address.
+
+### The gate baseline — all measured on this tree by the orchestrator, not accepted from a report
+
+**`1303 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules). The Rust ladder across this step: **1272** at 2d-3-C, **1297** at 2d-4a's
+implementation (+25), **1301** after fix round 1 (+4), **1303** after fix round 2 (+2). 26 result
+lines, all `ok`, exit 0, on a quiet host after `pkill -f 'target/debug/deps/espansoconfig-'`.
+
+Also green, each run by the orchestrator: `cargo clippy --workspace --all-targets -- -D warnings`;
+`cargo fmt --check`; `cargo doc --workspace --no-deps` (the 2d-3-C gate — 74 warnings, all
+pre-existing `private_intra_doc_links` in `espansoconfig-core`, none in `src-tauri`);
+`cargo tree -p espansoconfig-core | rg tauri` **empty**;
+`cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` **20/20** with
+**258** filtered out (223 → 227 → 252 → 256 → 258 across the step), 66.35 s, no timeout; the
+production-bundle oracles — `$$payload|head_payload|push_element` **absent**,
+`window.__svelte|svelte-trusted-html` **present** with 2 matches.
+
+**The three frontend numbers are no longer carried — they were re-measured here and are unchanged
+at 431 / 2125 / 184**, because 2d-4a touched only `src/lib/i18n/{en,es}.json`, which are neither
+modules nor `svelte-check` files. **The re-measurement obligation the 2d-3 handoff assigned to 2d-4
+therefore falls to 2d-4b**, which is the step whose `git diff --name-only 08a3366 -- src/` first
+becomes non-empty beyond those two files.
+
+### The two review rounds
+
+`docs/reviews/phase-2d-4a-queue.md` holds both **verbatim**, newest last. Round 2's scope was round
+1's fix, exactly as this project requires: *a fix is a change, and the round that reviews it is not
+optional.*
+
+**Round 1 — NOT READY, 1 High, 4 Medium, 2 Low.** The High was the Q8 failure class reached through
+the implementer's own deviation: `Added` hands out a `DocumentId` the backend `Workspace` never
+adopts, so a later non-UTF-8 `Changed` resolved to `ObservedDocument::Unknown`, whose
+`relative_path` is expressly lossy display data and **not an address** — the consumer was left
+holding a projection it could no longer be told to invalidate. Two code Mediums: an **empty** drain
+returned the caller's lower `after_sequence` instead of the accumulated acknowledgement, so an
+out-of-order drain (which Q7 item 5 requires of 2d-5) moved the watermark backwards; and coalescing
+had an arrival-order hole. Four findings were the **declared worst defect class** — the sharpest
+being an overflow rationale claiming that dropping the globally oldest entry preserves "the newest
+state of every document", **asserted by a test that was itself dropping three documents that were
+their document's only state**.
+
+**Round 2 — NOT READY, 0 High, 4 Medium, 1 Low, and three of the five were sentences round 1's fix
+round wrote.** Its finding 1 is the one that mattered: **round 1's finding 3 was never closed.**
+Comparing only the highest pending entry for a path cannot normalise arbitrary arrival order — given
+9/A then 3/A, 3 was discarded as a repeat; if 5/B then arrived, the true history was A(3), B(5),
+A(9) and **an observation that was not a repeat in sequence order had been dropped**. The mirror
+order left the batch uncoalesced.
+
+Round 2 also **cleared** five things, and they are worth not re-litigating: the lock order is
+session → ledger gate → ledger state with both ledger guards released before the downstream call, so
+a re-entrant `WorkspaceSession::open` meets no held lock; `issued_identities` cannot hand back a
+stale identity, because this repository's process-wide table deliberately assigns a path the same
+identity for the process lifetime, recreation included; the watermark `max` cannot skip a pending
+entry; the extension of the High to `Removed` and io-`Unreadable` is valid, both arms sharing the
+`address_of` fallback; and `AWAITING_FRONTEND_DECLARATION` is genuinely bidirectional, so the hole
+the split opened **cannot outlive 2d-4b**.
+
+### What the two fix rounds changed, and the one that is a design decision
+
+**Coalescing moved from `enqueue` to `drain`.** This is the step's substantive design change and it
+was **not** what round 2's brief asked for. The brief said sequence-adjacency; the fixer established
+that adjacency is necessary but **not sufficient at enqueue time** — in arrival order `[9, 3, 5]` an
+enqueue-time rule still drops A(3) — so the rule had to become a pure function of the complete
+pending set. `coalesced_sequences` now folds, at drain, each path's sequence-**adjacent** run of one
+`ObservedState` to its highest sequence; `newest_for_path` and `reindex` are deleted and `enqueue`
+stores every admitted observation. Q3's rule that `Removed` → `Added` at one path stays **two**
+observations survives on `Absent != Content`. Cost recorded as **R10**: a folded repeat holds a
+pending slot until the drain that folds it.
+
+The other fixes: the watermark answers `max(batch highest, acknowledged)`; `issued_identities`
+records every `DocumentId` put on the wire against its path for the epoch and is consulted by
+`address_of` after the workspace answers `None`; the retention sentence carries its eviction
+condition at five positions and says an eviction costs a **whole-workspace reload**, not a repeated
+drain; §4's epoch passage was rewritten twice and now splits exhaustively on the queue-mutex order,
+covering the interleaving round 2 found (an observation that passes `ledger.admit`, pauses, and
+resumes after **both** resets, failing the **queue** check rather than either previously claimed
+one); the two liveness-inventory entries were reclassified from *local fact* to the taxonomy's
+existing **`a pointer:`** category, which is what they always were.
+
+`LIVENESS_SHAPES` was widened twice — six phrases in fix round 1 (2 hits, both self-inflicted, both
+now inventoried) and five more in fix round 2 (`drained again`, `re-drain`, `reconciled again`,
+`reconciliation resumes`, `resumes reconciliation`) producing **zero** new unmarked hits tree-wide.
+The orchestrator's stop rule — report rather than fix if a widening surfaces more than five
+pre-existing hits — was never reached in either round.
+
+### What is NOT proven
+
+- **Round 3 has not run.** Fix round 2 changed both code and prose, including a design change no
+  reviewer asked for, and this project's record is unambiguous about what that means: in Phase 2d-3,
+  rounds 12, 13 and 14 each found a High that a previous fix round had written.
+- **No mounted and no window evidence, deliberately.** Q7 assigns those to 2d-6 and 2d-7. 2d-4a
+  draws nothing, so it owes neither — but that also means **nothing here has been seen on a screen**.
+- **Nothing consumes the queue.** No frontend can call `drain_external_changes` until 2d-4b registers
+  the wrapper, so every claim about what a consumer will do is a claim about a future step. The two
+  wake sentences now say so in as many words; they said the opposite for one round.
+- **The obligations `discarded > 0` implies are assigned, not enforced.** Overflow is observable
+  rather than silent because `discarded` is cumulative, and the documentation requires a complete
+  workspace reload rather than partial reconciliation — but **nothing in 2d-4a enforces that**, and
+  R4 assigns enforcement to the future consumer.
+- **`issued_identities` has no bound within an epoch** (R9), and duplicates the path retention of
+  `espansoconfig_core::workspace`'s process-wide table. It is unmeasured; round 2 confirmed it adds
+  no new stale-address class.
+- **R3 is narrowed, not closed**: a non-UTF-8 *added* file still arrives as a path rather than a
+  sidebar row, and a non-UTF-8 `Changed` still loses its revisions. That is a deviation from Q3's
+  `Added { disk? }`, taken deliberately and argued in `2d-4a-notes.md` §3.
+- **Q3's watcher failure/degraded-mode code does not exist to register.** `WatchStatusView` is two
+  booleans, unserialized and rendered by nothing, so nothing tells a window that the polling fallback
+  engaged. That is a **phase hole for 2d-6**, not something 2d-4a could close.
+
+---
 ## Verification — Phase 2d-3-C (COMPLETE — the liveness contract, its twenty pointers and the check that keeps them; 2d-3 CLOSED by owner decision)
 
 **This step exists to end a review tail, by owner decision taken 2026-08-26: *"Do it then, I don't
@@ -9368,6 +9507,109 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 ---
 
 ## Next action
+
+### **STEP 2d-4a IS IMPLEMENTED AND *NOT* CLOSED — every gate is green, and two Codex rounds both returned NOT READY. Both fixes are in the tree. THE NEXT ACTION IS ROUND 3 OF THE 2d-4a REVIEW, against the round-2 fix.**
+
+**Read `docs/reviews/phase-2d-4a-queue.md` first — it is the work list.** Rounds 1 and 2 are in it
+verbatim, newest last, each with the host-measured evidence its brief carried. Round 3's brief is
+written from round 2's fix, exactly as round 2's was written from round 1's.
+
+**Round 2's lesson is that a fix can close a finding's example without closing its shape.** Round 1
+found coalescing arrival-order dependent; round 1's fix made a repeat coalesce onto the higher
+sequence and round 2 showed that **round 1's finding 3 was never closed** — comparing only the
+highest pending entry cannot normalise arbitrary arrival order, and in order `[9, 3, 5]` the queue
+was **dropping an observation that was not a repeat in sequence order**. Three of round 2's five
+findings were sentences round 1's *fix round* wrote. **Write round 3's brief the same way: ask what
+the round-2 fix's own new sentences and its new code now rest on.**
+
+#### What the round-2 fix built — re-derive these, do not inherit them
+
+- **Coalescing moved from `enqueue` to `drain`, and this is a design change no reviewer asked for.**
+  `coalesced_sequences` folds, at drain, each path's sequence-**adjacent** run of one
+  `crate::ledger::ObservedState` to that run's highest sequence. `newest_for_path` and `reindex` are
+  **deleted**; `enqueue` now stores every admitted observation. The fixer's argument is that
+  adjacency is necessary but not sufficient at enqueue time, because in arrival order `[9, 3, 5]` an
+  enqueue-time rule still drops A(3) — so the rule had to become a pure function of the complete
+  pending set. **Round 3 should test that argument and the new fold**, including: whether the fold
+  is correct when a path has three or more runs; whether it is correct across the capacity eviction,
+  which still evicts by sequence and is therefore still arrival-timing dependent (documented in
+  guarantee 3 as a `discarded` loss, **not** a coalescing failure — is that distinction true?); and
+  whether **R10**, which concedes a folded repeat holds a pending slot until the drain that folds it,
+  interacts with the 256-entry cap in a way the record does not state.
+- **`issued_identities`** records every `DocumentId` put on the wire against its path for the epoch;
+  `address_of` consults it after the workspace answers `None`. Round 2 cleared it of the
+  stale-identity class. **R9** concedes it has no bound within an epoch and duplicates
+  `espansoconfig_core::workspace`'s process-wide path retention, and now says it is unmeasured.
+- **Five retention positions** now carry the eviction condition and say an eviction costs a
+  **whole-workspace reload**, not a repeated drain. Four idempotence sentences were qualified in fix
+  round 1 and round 2 found them mutually consistent; the fifth was the one it found unqualified.
+  **Ask whether the five now agree with each other and with the four.**
+- **§4's epoch passage has now been rewritten twice** — once to replace a false atomicity claim, once
+  because the replacement recorded an incomplete mechanism as the complete one. It now splits
+  exhaustively on the queue-mutex order. **A passage wrong twice is where round 3 should look first.**
+- **The two liveness-inventory entries were reclassified** from *local fact* to `a pointer:`, the
+  taxonomy's existing category, with one clarifying paragraph added to `Judged::reason`.
+  `LIVENESS_SHAPES` gained five more phrases for **zero** new unmarked hits. The fix round also
+  reports that the sweep fired on its own new prose (`answered by`) and that it **reworded rather
+  than inventoried** it — recorded in `2d-4a-notes.md` §11.4. **That judgement is round 3's to test**:
+  rewording to dodge a sweep is exactly what the check cannot catch.
+
+#### What round 3 must attack
+
+- **The fix is a change, and the round that reviews it is not optional.** Round 3's scope is the
+  round-2 fix: the drain-time fold and the deletion of `newest_for_path`/`reindex`, the five
+  retention positions, §4's twice-rewritten epoch passage, the reclassified inventory entries, the
+  reworded `answered by` prose, and R9/R10.
+- **Apply round 2's own lesson to round 2.** It closed an example by moving the rule. **Is the shape
+  closed?** Arrival-order dependence survives at the capacity eviction by the record's own admission.
+  Is calling that a `discarded` loss rather than a coalescing failure a true distinction or a
+  relabelling?
+- **The record's residues.** R3 narrowed, R4 sharpened, R9 added, R10 added. Note this project's
+  precedent: **seven** §5 items recorded as bounded residues in Phase 2d-3 were later found to be
+  real defects, and rounds 12, 13 and 14 all had Highs that were records about a residue written by
+  the round that created it.
+
+#### Read these first, in this order
+
+```sh
+cd /Users/ccarpio/Developer/espansoConfig
+git status --short --untracked-files=all     # expect EMPTY after this checkpoint's commit
+# docs/reviews/phase-2d-4a-queue.md          # THE WORK LIST — rounds 1 and 2 verbatim
+# docs/decisions/2d-4a-notes.md              # the record, with both fix rounds' correction blocks
+# docs/decisions/2d-4-split-notes.md         # why 2d-4 is two steps and what 4b owes
+# docs/reviews/phase-2d-design.md            # THE AUTHORITY for 2d. Q3 the wire, Q7 item 4 the
+#   scope and its prohibitions, Q7 item 5 the out-of-order drains 2d-5 will perform, Q8 the
+#   sharpest failure mode
+# src-tauri/src/reconciliation.rs            # the whole step
+# crates/espansoconfig-core/src/watch/liveness.rs — THE CONTRACT. Read before writing any sentence
+#   about what the pipeline guarantees, and point at it rather than restating it
+```
+
+#### After round 3 closes: 2d-4b
+
+`docs/decisions/2d-4-split-notes.md` §2 is the spec. The TypeScript half: the mirrored types, the
+`BrowserCommands` wrapper for the drain, the **injectable** event-listener wrapper (injectable
+exactly as `BrowserCommands` is, so tests drive state without Tauri), the `describe*` builders in
+`src/lib/i18n/codes.ts` and their reactive `t*` wrappers in `index.ts`, the frontend tests, and the
+**re-measured** `npm run check` / `npm test` / `npm run build` baselines.
+
+Three things 2d-4b inherits, stated so they are not rediscovered:
+
+- **`AWAITING_FRONTEND_DECLARATION` in `wire_contract.rs` must be deleted by 2d-4b.** It is the
+  one-entry gap the split opened, and Codex round 2 verified it is checked in **both** directions —
+  declaring the command name on the frontend without deleting the entry fails the build. The hole
+  cannot silently outlive the step.
+- **`src/lib/i18n/codes.test.ts:379` holds variant counts** ("hold the variant counts this phase
+  measured") that the ten new EN/ES keys do **not** yet appear in, because no accessor exists.
+  Adding the accessors moves those counts.
+- **A key with no accessor is a key nothing can render.** 2d-4a's frontend gate is green with the
+  keys present and unreachable; that is a fact about the present suites, not a licence, and
+  `2d-4-split-notes.md` §3 says so.
+
+---
+
+
+### ⚠️ HISTORICAL — the 2d-3 closure and its handoff to 2d-4, superseded by the 2d-4a status above. 2d-4 was **split** into 4a and 4b (`docs/decisions/2d-4-split-notes.md`) and 4a is implemented; this section is kept for the 2d-3 record it carries and for its reading list, not as an instruction.
 
 ### **STEP 2d-3 IS CLOSED. The review tail is over by owner decision, and 2d-3-C built the mechanism that ends it rather than reviewing a fifteenth round. THE NEXT ACTION IS PHASE 2d-4.**
 

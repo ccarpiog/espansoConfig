@@ -993,5 +993,15 @@
   "code.draftError.nestedRemovalWouldDiscardUnshownStructure": "Removing that entry would also delete a list or a block of keys that the visual editor never showed you, so nothing was removed.",
   "code.draftError.nestedItemRemoval": "espansoConfig cannot yet take an item out of that list.",
   "code.draftError.targetDraftedTwice": "Two of the changes name one and the same position, so it is not clear which of them was meant.",
-  "code.draftError.ambiguousNestedKey": "A change names a key its own block writes more than once, so the change would not name a single entry."
+  "code.draftError.ambiguousNestedKey": "A change names a key its own block writes more than once, so the change would not name a single entry.",
+  "code.externalObservation.changed": "This file changed on disk after espansoConfig read it.",
+  "code.externalObservation.added": "This file appeared in your configuration folder after espansoConfig read it.",
+  "code.externalObservation.removed": "This file is no longer in your configuration folder.",
+  "code.externalObservation.unreadable": "espansoConfig cannot read this file, so it cannot show you its text.",
+  "code.unreadableReason.notUtf8": "The bytes in this file are not valid UTF-8 text, so espansoConfig will not guess at what they say.",
+  "code.unreadableReason.permissionDenied": "Your system refused espansoConfig permission to read this file.",
+  "code.unreadableReason.invalidData": "Your system reported this file as unreadable data, twice in a row.",
+  "code.unreadableReason.timedOut": "Reading this file timed out, twice in a row.",
+  "code.unreadableReason.interrupted": "Reading this file was interrupted, twice in a row.",
+  "code.unreadableReason.other": "Your system refused to read this file for a reason espansoConfig has no name for."
 }

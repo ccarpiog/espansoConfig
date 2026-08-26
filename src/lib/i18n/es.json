@@ -993,5 +993,15 @@
   "code.draftError.nestedRemovalWouldDiscardUnshownStructure": "Quitar esa entrada borraría también una lista o un bloque de claves que el editor visual nunca te mostró, así que no se quitó nada.",
   "code.draftError.nestedItemRemoval": "espansoConfig todavía no puede sacar un elemento de esa lista.",
   "code.draftError.targetDraftedTwice": "Dos de los cambios señalan una misma posición, así que no queda claro cuál de ellos se pretendía.",
-  "code.draftError.ambiguousNestedKey": "Un cambio señala una clave que su propio bloque escribe más de una vez, así que el cambio no señalaría una única entrada."
+  "code.draftError.ambiguousNestedKey": "Un cambio señala una clave que su propio bloque escribe más de una vez, así que el cambio no señalaría una única entrada.",
+  "code.externalObservation.changed": "Este archivo cambió en el disco después de que espansoConfig lo leyera.",
+  "code.externalObservation.added": "Este archivo apareció en tu carpeta de configuración después de que espansoConfig la leyera.",
+  "code.externalObservation.removed": "Este archivo ya no está en tu carpeta de configuración.",
+  "code.externalObservation.unreadable": "espansoConfig no puede leer este archivo, así que no puede mostrarte su texto.",
+  "code.unreadableReason.notUtf8": "Los bytes de este archivo no son texto UTF-8 válido, así que espansoConfig no va a adivinar qué dicen.",
+  "code.unreadableReason.permissionDenied": "Tu sistema le denegó a espansoConfig el permiso para leer este archivo.",
+  "code.unreadableReason.invalidData": "Tu sistema informó de que los datos de este archivo no se pueden leer, dos veces seguidas.",
+  "code.unreadableReason.timedOut": "La lectura de este archivo agotó el tiempo de espera, dos veces seguidas.",
+  "code.unreadableReason.interrupted": "La lectura de este archivo se interrumpió, dos veces seguidas.",
+  "code.unreadableReason.other": "Tu sistema se negó a leer este archivo por un motivo al que espansoConfig no da nombre."
 }

@@ -522,16 +522,16 @@
 //! into this ledger; `the_downstream_sink_runs_outside_the_ledger_lock` is that
 //! as a bounded test rather than as a claim.
 //!
-//! # What this module is not, yet
+//! # What this module is not
 //!
 //! **No wire.** An [`Admission::Admitted`] carries a sequence and reaches a
-//! downstream sink, and in production that sink is [`discarding_sink`]:
-//! observations are admitted and dropped, because the queue, the wake event and
-//! `drain_external_changes` are Phase 2d-4's (consult Q3). A value this sink
-//! drops is gone, and no present code recovers it — whatever recovery 2d-4
-//! offers is 2d-4's to build and to claim. The sequence a publication spends is
-//! therefore not yet a number any consumer has seen; what it *does* today is
-//! make the next hint at the same state a duplicate.
+//! downstream sink, and since Phase 2d-4a that sink is
+//! `crate::reconciliation::queueing_sink`: the queue, the wake event and
+//! `drain_external_changes` are that step's (consult Q3), and nothing about
+//! them is decided here. What this module owns is which observations reach that
+//! sink at all and what number each one carries; **the sequence is spent here
+//! and read there**, and what it *does* inside this module is make the next
+//! hint at the same state a duplicate.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -2107,16 +2107,16 @@ fn decide(
 /// One admitted observation: the engine's conclusion, its watcher's epoch, and
 /// the sequence this session gave it.
 ///
-/// What a downstream sink receives, and the shape 2d-4's queue will carry. A
+/// What a downstream sink receives, and the shape
+/// `crate::reconciliation`'s queue carries. A
 /// value of this type has already passed the epoch check, the suppression
 /// predicate and the coalescing rule — which is why it is a different type from
 /// [`EpochObservation`] rather than the same one with a number added.
-// Read by `crate::watch_check` today and by 2d-4's queue in production — the
-// production downstream sink drops the whole value, so nothing reads a field of
-// it yet. The allow is scoped to non-test builds so the fields stay lint-armed
-// exactly where their consumers exist, and so that wiring the queue is what
-// removes it.
-#[cfg_attr(not(test), allow(dead_code))]
+///
+/// **Every field has a production reader since Phase 2d-4a**, which is what
+/// removed the non-test `dead_code` allow this declaration used to carry: the
+/// queue keys its pending set by the sequence, refuses an epoch it is not
+/// holding, and projects the observation into a wire value.
 #[derive(Debug)]
 pub struct AdmittedObservation {
     /// The sequence, unique and increasing within [`AdmittedObservation::epoch`].
@@ -2135,19 +2135,6 @@ pub struct AdmittedObservation {
 /// same contract [`ObservationSink`] states. It runs **outside** the ledger's
 /// mutex, so it may call back into the session and into the ledger.
 pub type AdmittedSink = Arc<dyn Fn(AdmittedObservation) + Send + Sync>;
-
-/// The production downstream sink until Phase 2d-4 wires the queue: it drops
-/// every admitted observation.
-///
-/// Deliberate and stated rather than smoothed over, exactly as
-/// `crate::watch::WatcherLifecycle`'s own sink was at 2d-2: the admission gate
-/// is built and tested before its consumer exists. Until that consumer exists,
-/// admitted observations are produced and deliberately unconsumed in
-/// production — a value this sink drops is gone, and no present code recovers
-/// it. Whatever recovery 2d-4 offers is 2d-4's to build and to claim.
-pub fn discarding_sink() -> AdmittedSink {
-    Arc::new(|_| {})
-}
 
 /// The gate itself: an [`ObservationSink`] that asks `ledger` about every
 /// observation and forwards only the admitted ones to `downstream`.
