@@ -15,8 +15,9 @@ observe that path again, and where it has one it acted on but cannot prove **sta
 save-path refresh, which is one read where the engine takes two — it publishes **nothing from that
 one either** and asks for a stabilized reading in its place, marking the state for coalescing where
 the person has been shown it and recording nothing where nobody has, so a state that never stably
-existed never enters the sequence at all; and every one of those requests is an **owed** observation the engine
-must answer rather than a hint it may coalesce into silence — retained across a failing baseline,
+existed never enters the sequence at all; and every one of those requests is an **owed** observation
+the engine may not discharge by **coalescing** it into silence, which stays owed until a settlement of
+that path emits and which is never a promise that one will — retained across a failing baseline,
 emitted even against a state the engine established but never announced, and re-owed when a refusal
 takes its settlement back. That record is one entry per document, written
 in exactly one place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
@@ -166,6 +167,27 @@ is a native hint (§14).
 > which are the stamped door's, because saying *the same checks* is what let a shared step mean three
 > different things. §5 gains items 23 and 24, both of them holes this round **found** rather than
 > made. This round changed **no** core file at all.
+
+> **Correction (round-13 fix round, §19).** The headline as §14 left it ended on a **liveness
+> guarantee the engine expressly refuses**, and that is round 13's second High, at this record's
+> sharpest name position: *every one of those requests is an **owed** observation the engine **must
+> answer** rather than a hint it may coalesce into silence*.
+> `crates/espansoconfig-core/src/watch/engine.rs`'s `observe_owed` says the opposite in its own
+> *what this does not do* paragraph — it *"promises no answer at all for a path that never
+> stabilizes: a file written continuously stays pending, and the debt waits with it"* — and a path
+> outside this engine's roots is dropped exactly as a hint is, recording **no** debt at all. §5 item
+> 21 of this record already conceded, separately, that a re-observation absorbed by a worker that
+> then receives `Stop` is *"a request no tick will serve"* — so **the headline contradicted its own
+> §5 from the round-6 fix round that wrote the clause**, through the two correction blocks added
+> above it since (rounds 7 and 8) and six reviews. What the debt really gives is a **negative**
+> guarantee, and the sentence above now says only that: an owed observation cannot be discharged by
+> **coalescing** it into silence, and it stays owed until a settlement of that path emits — with the
+> denial that a settlement will occur written into the **same sentence**, per §17.2's rule. The code
+> twin of the false sentence stood in `src-tauri/src/commands.rs`'s module header, in the same words,
+> and is corrected there in the same round (§19.2). **Nothing about the property this headline claims
+> is weakened by the correction**: *a hint that could be answered by silence* was round 6's **first**
+> High (§12.1) and `observe_owed` still closes it; what is withdrawn is a promise that the answer
+> arrives, which no round ever built and which §5 items 19 and 21 already denied.
 
 The consult is `docs/reviews/phase-2d-design.md`; **Q7 item 3** is this step's specification,
 **Q2** is the ruling on the predicate, the ledger's location and lifetime, where the update
@@ -2518,6 +2540,20 @@ comment; `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
 > residues that replace item 18, §5 items 19 and 20. Everything else in this section stands
 > unchanged; this round altered no decision the ledger takes.
 
+> **Correction (round-13 fix round, §19.4).** The **first** sentence of the *Guaranteed* paragraph
+> above ends on a liveness claim this step never built — *"and is answered so the engine re-observes
+> it"* — and it is a narrower instance of round 13's first High, found by §19.4's shape pass and not
+> named by the reviewer. It sits under a **`**Guaranteed.**` name position**, which is what makes it
+> worth a block of its own rather than a mention. What `admitting_sink` gives is
+> `ObservationOutcome::Undecided`, and what `deliver` does with it is
+> `ObservationEngine::revert_settlement`, which un-concludes the state and **re-owes the path**; a
+> re-observation follows only if that path stabilizes again and this watcher's worker is still
+> ticking, and §5 items 19 and 21 are the two standing statements that neither is forced. The
+> guarantee that survives is the one the rest of the sentence already carries and is **safety, not
+> liveness**: such a reading neither publishes nor clears the record, and the settlement is taken
+> back rather than kept, so the state is left owed instead of consumed. The module doc this sentence
+> describes now says exactly that (§19.1).
+
 ### 10.6 The evidence and the neuter runs
 
 | Owed | Where |
@@ -3355,6 +3391,22 @@ gained is ledger-agnostic; `cargo tree -p espansoconfig-core | rg tauri` still f
 > caller does. **Also falsified by the rename**: *a caller of `admit_under_the_session_lock` holds
 > the session lock* now reads *a caller of either serialized door*, and the obligation is unchanged
 > (§5 item 14's third half).
+
+> **Correction (round-13 fix round, §19.4).** The *guaranteed* paragraph's second sentence — *a
+> re-observation this application asks for is a **debt** the engine must answer rather than a hint it
+> may coalesce into silence* — is the **origin** of round 13's second High: this is the round that
+> wrote it, and §1's headline took the same words. It over-claims in one direction only, and the
+> paragraph itself half-knew it: its own last sentence says *"every one of these is a claim about a
+> running watcher plus a running engine"*, and its *not guaranteed* list, three lines below, already
+> names §5 items 19 and 21. What the debt gives is that the engine may not answer a settlement of
+> that path with **silence** — the coalescing arm is what `observe_owed` closes — and that the debt
+> survives until such a settlement emits; it is **not** a guarantee that a settlement emits, because
+> `observe_owed`'s own doc says a path being written continuously *"stays pending, and the debt waits
+> with it"* and an unwatched path records no debt at all. The three clauses that follow the false one
+> are unaffected: retention across a failing baseline, emission against an established-but-unannounced
+> state, and re-owing on a rollback are each conditional on a settlement happening and claim nothing
+> about whether one does. §1's headline and `src-tauri/src/commands.rs`'s module header carry the
+> corrected sentence from round 13 on.
 
 ### 12.7 The evidence and the neuter runs
 
@@ -4600,6 +4652,21 @@ inert: every observation produced after this session's last commit to a path bea
 > every one of those refusals is answered by a re-observation and none publishes anything. The
 > module doc this paragraph describes now carries the concession in the same sentence as the claim.
 
+> **Correction (round-13 fix round, §19.1).** The **round-12 correction block directly above** closed
+> one premise and shipped another in its own last two lines: *bounded by the host clock advancing
+> rather than by construction — bounded in the safe direction, since every one of those refusals is
+> answered by a re-observation and none publishes anything*. That is round 13's first High, at the
+> position where round 12 wrote it. The clock advancing bounds only the run of **repeated chronology
+> refusals once another settlement for that path is produced**, and nothing produces one: a path being
+> written continuously never stabilizes (`observe_owed`'s own doc), `crate::watch::ReObserveOutcome`
+> says an `Asked` promises a worker's inbox and not an observation, and the worker can take `Stop`
+> before its next tick (§5 item 21). So the clock may advance for ever with the retry never
+> completing, and *every refusal is answered by a re-observation* is false. **The safe direction is
+> unaffected and needs none of this**: a refusal here publishes nothing, clears nothing and mutates
+> nothing but the tally, and the settlement is taken back, so what an uncompleted retry leaves is a
+> state still **owed** — the reviewer cleared that half expressly. Each round's fix has produced the
+> next round's finding for thirteen rounds, and this block is the thirteenth instance of it.
+
 **Across a `begin_epoch`** the anchor is discarded with everything else, which is the whole of its
 lifetime rule and is why it carries no *clearing* logic of its own. **Across a failed reload** it is
 untouched, because a reload says nothing about when this session last wrote. And the `epoch` field is
@@ -4902,6 +4969,17 @@ not.
 > once per commit and the premise this bullet argues from is not enforced anywhere. The doc comment
 > it describes now says *usually* and carries that concession in the same sentence as the claim, so
 > this bullet's description of it is superseded on that point as well as on the last bullet's.
+
+> **Correction (round-13 fix round, §19.1).** The **third** bullet has a *second* false premise,
+> untouched by the round-12 block above and standing beneath it for a whole round: *a refusal is
+> **answered***, read as *a re-observation arrives*. It does not have to. `admitting_sink` answers
+> `Undecided`, `deliver` calls `revert_settlement`, and that re-**owes** the path; whether a
+> settlement ever follows depends on the path stabilizing and on the worker outliving the debt, and
+> §5 items 19 and 21 say neither is forced. So *sustained growth out of proportion to this session's
+> commits* rests on a premise that is weaker in **two** independent ways — the clock, which round 12
+> named, and the arrival, which it did not — and the diagnosis was already, in the fourth bullet, a
+> suspicion nothing enforces. `LedgerTally::preceded_a_commit`'s doc now carries **both** concessions
+> inside the same sentence as the claim (§19.1), which is what this bullet describes.
 
 **It does not overclaim in the other direction.** The counter is not meaningless: it still counts
 refusals and never losses, the *first* half of the old paragraph is intact, and the one production
@@ -5376,6 +5454,20 @@ message closing
 generalized a property that test has **by construction** through `later_than_now`. That message and
 the step-5 comment above it now say which of the two they are.
 
+> **Correction (round-13 fix round, §19.1).** The paragraph two above ends on the sentence round 13
+> found: *"`ledger.rs:480` adds what bounds the retry … **the host clock advancing**, not construction
+> — and it is bounded in the safe direction, since every refusal is answered by a re-observation and
+> none of them publishes anything."* **Answering the livelock question was right; the answer was
+> wrong**, and it is this record's worst defect class one more time — a fix round writing a guarantee
+> while closing one. The clock advancing bounds only *repeated chronology refusals once another
+> settlement for that path is produced*, and nothing makes one be produced: `observe_owed` promises no
+> answer for a path that never stabilizes, `crate::watch::ReObserveOutcome::Asked` promises a worker's
+> inbox and not an observation, and the worker can consume `Stop` first (§5 item 21). The word
+> **every** is the load-bearing error. §19.1 rewrites the module-doc sentence to say what the clock
+> really bounds and to state the two unguaranteed conditions beside it, and **keeps the safety half
+> unweakened** — the reviewer cleared that a `PrecedesACommit` refusal publishes nothing, and §19
+> does not touch `decide`'s comparison, any signature or any control flow.
+
 ### 18.2 High 2 — the removal of the exact-zero assertion was recorded as costing nothing, and it cost a detection
 
 **What was checked before this was written.** `WatchWorker::observe` takes `let read_after =
@@ -5497,6 +5589,25 @@ rg -c 'costs nothing|cost nothing|detected nothing|detects nothing|loses nothing
   reach them. `ledger.rs:3157` is a test comment whose next line is `later_than_now()`, true by
   construction. The remaining hits are the four §18.1 fixes, the two the reviewer did not name, and
   the one assertion message;
+
+  > **Correction (round-13 fix round, §19.3).** *"The five `commands.rs` hits … are the **serialized
+  > doors'** argument"* is **round 13's Low**: the count of five is right and the classification is
+  > not, and the sweep's recorded judgement is the defect rather than the prose it judged. Read on the
+  > tree round 13 reviewed, only **two** of the five are that argument —
+  > `commands.rs:155` (*"itself, under the session lock, after the record, through a door that
+  > cannot"*) and `commands.rs:2409` (*"function performed itself, under the session lock, after the
+  > record, through"*). The other **three** matched the pattern's *a second time* alternative and are
+  > about resolving something **twice**, with nothing to do with clock ordering at all:
+  > `commands.rs:1339` (*"a second time here would be two lookups that agree today and are two
+  > places"*), `commands.rs:1371` (*"identity a second time for that would be two lookups that agree
+  > today and are"*) and `commands.rs:2057` (*"planner a second time here would resolve the document
+  > twice and let this layer"*). All three are sound as written and none is a finding; what was wrong
+  > is this record saying they were the serialized-doors argument, which is the shape a later round
+  > would have had to re-derive to trust the sweep. **The `ledger.rs` half of the sentence stands**:
+  > 1860, 1875 and 1996 really are the serialized doors', and so is the *no clock at all* reasoning
+  > about them. The lesson is the sweep's own: a single `rg` pattern with alternatives returns hits
+  > from **every** alternative, and a bullet that describes them with one argument has stopped
+  > reporting a measurement and started summarizing one.
 - the costless-removal shape, on the **narrowed** pattern printed above — the word *free* was
   deliberately dropped from it after a first pass, because *deadlock-free* and *free function* put
   ten hits in `commands.rs`, two in `watch.rs` and four in `phase-2d-design.md` that have nothing to
@@ -5642,3 +5753,354 @@ it, and both overstated it. What this round leaves:
     file* list against `git show <commit> --stat`, so the next incomplete list will be found by the
     next reviewer or not at all — which is exactly how this one was found, seven sections after the
     habit started.
+
+## 19. The round-13 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 13 returned **NOT READY** with **two Highs and one Low**.
+Round 12's lesson was *a fix round's own fix becomes the next round's finding*; round 13 is that
+lesson at its purest, because **both Highs are sentences round 12's fix round wrote or left
+standing**, and the High the reviewer calls the sharpest is at this record's **§1 headline** — the
+one position eight correction blocks have already been stacked under.
+
+**That makes thirteen consecutive rounds with a name-position finding.** Both Highs are again this
+project's declared worst defect class — a record claiming a guarantee the code does not give — and
+the shape they share is new to this review: not an *ordering* premise, which rounds 10 to 12 chased,
+but a **liveness** one. *The refusal is answered.* *The engine must answer the debt.* Both are true
+of a rollback and of a coalescing rule, and neither is true of an observation arriving.
+
+**All three findings were verified against the code before anything was written**, and all three are
+real; **none is rejected by this record**, unlike round 9, which reversed a rejection, and round 10,
+which downgraded an item. What the **reviewer** cleared, expressly: `decide`'s equality refusal, the safety
+property that a `PrecedesACommit` decision never reaches the downstream sink, the exact-zero
+assertion's removal and its replacement justification, residues 35–37 apart from the liveness
+overclaim, §18.5's supplied sweep arithmetic and file list, and the serialized-door reasoning **at
+the hits where it applies**.
+
+### 19.1 High 1 — the retry is bounded by nothing, and the module doc said the host clock bounded it
+
+**The claim, as round 12's fix round left it** (`ledger.rs`, the module doc's *the anchor outlives
+the record* section, line 486 at `719c864`):
+
+> That retry is bounded by the host clock advancing rather than by construction, and it is bounded
+> in the safe direction: **every** refusal is answered by a re-observation and none of them
+> publishes anything.
+
+**The code that refuses it, in this same crate.** `crate::watch::ReObserveOutcome`'s own doc:
+*"**Neither variant claims anything about what will be observed.** … a path that never stabilizes —
+one being written continuously — is never answered at all. … In particular `ReObserveOutcome::Asked`
+is **not** a promise that an observation will arrive: it is a promise that the request reached the
+inbox of a worker that had not yet exited."* `ObservationEngine::observe_owed`'s: *"It also promises
+no answer at all for a path that never stabilizes: a file written continuously stays pending, and
+the debt waits with it."* And `WorkerMessage::Stop` exists, so the worker can consume it before its
+next tick — which is §5 item 21, written seven rounds ago.
+
+**So the word doing the damage is *every*, and the second is *bounded*.** The host clock advancing
+bounds only the run of **repeated chronology refusals once another settlement for that path is
+produced**; nothing makes one be produced, so the clock may advance indefinitely with the retry
+never completing. That is the reviewer's minimal fix and it is the one taken: the module doc now
+says what the clock bounds, and states the two unguaranteed conditions — stabilization and worker
+lifetime — beside it.
+
+**What is *not* wrong, and is deliberately not weakened.** The **safety** half needs no liveness at
+all and the reviewer cleared it: a `PrecedesACommit` refusal publishes nothing, clears no record and
+mutates nothing but the tally, and the engine's settlement is **taken back** rather than kept, so
+what an uncompleted retry leaves behind is a state still **owed** — never a state reported wrongly,
+and never a record cleared by a reading older than the commit. That is why the counter is named for
+refusals and not for losses, and it survives this round untouched. `decide`'s `read_after <= at`
+comparison is not changed, nor is any signature, control flow or behaviour anywhere in the round.
+
+**The positions fixed** (line numbers as at `719c864`, the tree round 13 read):
+
+| Position | What it said |
+|---|---|
+| `ledger.rs:486` (module doc, *the anchor outlives the record*) | *"every refusal is answered by a re-observation"*, and the retry *"bounded by the host clock advancing"* |
+| `ledger.rs:190` (module doc, *two proofs*) | *"the engine's settlement is taken back, so the path is re-observed"* |
+| `ledger.rs:871` (`LedgerTally::preceded_a_commit`, first bullet) | *"because a refusal here is answered and the re-observation's own stamp is taken after the anchor"* |
+| `ledger.rs:904` (`LedgerTally::preceded_a_commit`, closing paragraph) | *"every refusal of a watcher observation is answered by taking the engine's settlement back, and the path is re-observed"* |
+| `ledger.rs:1199` (a comment inside `record_app_write`) | *"a refusal that is answered and re-observed, never a lost change"* |
+| `ledger.rs:278` (module doc, the *re-observed* section's closing sentence) | *"is followed by one somebody can"* |
+| `watch_check.rs:1228` (the round-12 paragraph) | *"the re-reading is stamped after the anchor and **is** suppressed"* |
+| `commands.rs:8372` (an **assertion message**) | *"the file this save may have written is observed again rather than assumed"*, over a test that reads the **inbox** |
+
+Each now separates the two halves in the **same sentence**, per §17.2's rule: *answered* names the
+rollback and the re-owing, and never an arriving observation. The assertion message is the round's
+name-position instance in code — it asserts `inbox.re_observations() == vec![path]`, which is
+exactly what `ReObserveOutcome` says an `Asked` promises, and its message generalized that to an
+observation. It now says **asked for**.
+
+**Three record positions carry correction blocks for the same premise**, all found by §19.4's shape
+pass: §10.5's *Guaranteed* paragraph (*"and is answered so the engine re-observes it"* — a
+**`Guaranteed.` name position**), §15.3's own **round-12 correction block**, whose last two lines
+shipped the overclaim while closing the ordering one, and §16.1's third bullet, which round 12
+corrected for the clock and left standing for the arrival. §18.1's paragraph — the record of the
+sentence itself — carries a fourth.
+
+### 19.2 High 2 — the §1 headline guaranteed liveness `observe_owed` expressly refuses
+
+**The claim, at this record's sharpest name position** (§1, line 18 at `719c864`):
+
+> and every one of those requests is an **owed** observation the engine **must answer** rather than
+> a hint it may coalesce into silence
+
+**The code that refuses it** is the primitive the clause is about.
+`crates/espansoconfig-core/src/watch/engine.rs`'s `observe_owed`, in its own *what this does not do,
+said beside what it does* paragraph: it *"promises no answer at all for a path that never
+stabilizes: a file written continuously stays pending, and the debt waits with it"* — and one
+paragraph above, *"A path this engine does not watch is dropped exactly as `ObservationEngine::hint`
+drops it, and records no debt."* So the engine neither must answer, nor always can, nor always
+records a debt to answer.
+
+**And the record already knew, in two places.** §5 item 21 says a re-observation absorbed by a worker
+that then receives `Stop` is *"a request no tick will serve"*, and §5 item 19 says one reaches
+nothing when no watcher is running. §12.6, the section that **wrote** the clause, ends its own
+*guaranteed* paragraph with *"every one of these is a claim about a running watcher plus a running
+engine"*. The headline contradicted its own §5 from the round-6 fix round onward, through two
+further correction blocks and six reviews.
+
+**The fix is the reviewer's minimal one**, and it turns the claim into the **negative** guarantee
+that is real: an owed observation cannot be discharged by **coalescing** it into silence, and it
+stays owed until a settlement of that path emits — with *never a promise that one will* inside the
+**same sentence**. Nothing the clause was built for is weakened: *a hint that could be answered by
+silence* was round 6's first High (§12.1) and `observe_owed` still closes it. What is withdrawn is a
+promise no round ever built.
+
+**The same sentence stood in code**, which the reviewer did not name and §19.4's pass found:
+`src-tauri/src/commands.rs`'s module header, in the list of the six things this module composes with
+— *"the fact that such a request is an **owed** observation the engine must answer rather than a
+hint it may coalesce away"*. It carries the corrected sentence from this round on. §12.6 gets a
+correction block as the clause's origin.
+
+### 19.3 The Low — §18.5 classified five sweep hits as one argument, and they are two
+
+§18.5's ordering-shape bullet said *"The five `commands.rs` hits and `ledger.rs`'s at 1860, 1875 and
+1996 are the **serialized doors'** argument — a read the caller performed itself, under the session
+lock, after the record in program order"*. The **count is right and the classification is not**, and
+the defect is in the sweep's recorded judgement rather than in any prose it judged.
+
+Measured on the tree round 13 read, only **two** of the five are that argument:
+
+- `commands.rs:155` — *"itself, under the session lock, after the record, through a door that
+  cannot"*;
+- `commands.rs:2409` — *"function performed itself, under the session lock, after the record,
+  through"*.
+
+The other **three** matched the pattern's *a second time* alternative and are about resolving
+something **twice**, with nothing to do with clock ordering:
+
+- `commands.rs:1339` — *"a second time here would be two lookups that agree today and are two
+  places"*;
+- `commands.rs:1371` — *"identity a second time for that would be two lookups that agree today and
+  are"*;
+- `commands.rs:2057` — *"planner a second time here would resolve the document twice and let this
+  layer"*.
+
+All three are sound as written; none is a finding. The `ledger.rs` half of the sentence stands — 1860,
+1875 and 1996 really are the serialized doors', and so is the *those doors consult no clock at all*
+reasoning about them. A correction block sits inside §18.5's bullet, indented into it so the bullet
+and its correction are read together.
+
+**The general lesson is the sweep's own**: a single `rg` pattern with alternatives returns hits from
+**every** alternative, and a bullet that describes them all with one argument has stopped reporting a
+measurement and started summarizing one. §19.4 therefore names, for each pattern, which alternative
+each surviving hit matched wherever the hits are not homogeneous.
+
+### 19.4 The two sweeps
+
+Both were run as **separate passes**, written from the *shape* and not from the words of the three
+findings. Counts are `rg -c` line counts given as **before → after**, *before* measured on the clean
+tree at `719c864` **prior to any edit of this round**, so round 14 does not read this round's own
+work as a discrepancy.
+
+**Pass 1 — for the shape.** Two shapes, and neither is round 12's ordering shape: *a liveness or
+answer-guarantee presented as certain*, and *a debt or request described as one that will be
+discharged*.
+
+```sh
+rg -c 'is answered|are answered|re-observed|observed again|must answer|is re-observed|will be observed|answered by a re-observation|bounded by the host clock' \
+  src-tauri/src/{ledger,watch,watch_check,commands}.rs crates/espansoconfig-core/src/watch/engine.rs \
+  docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+rg -c 'must answer|will be answered|is discharged|debt is answered|owed observation the engine|the engine must' \
+  src-tauri/src/{ledger,watch,watch_check,commands}.rs crates/espansoconfig-core/src/watch/engine.rs \
+  docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+```
+
+- the **liveness** shape, **at `719c864` → on the finished tree**: `ledger.rs` **16 → 11**,
+  `watch.rs` **8 → 8**, `watch_check.rs` **0 → 0**, `commands.rs` **11 → 9**,
+  `engine.rs` **12 → 12**, this record **21 → 52**, `phase-2d-design.md` **0 → 0**,
+  `phase-2d-3-ledger.md` **0 → 0**. **Every hit at `719c864` was read.** `ledger.rs` loses **nine**
+  matching lines across the six positions §19.1 rewrote and gains **four** back — three rewritten
+  sentences that still contain *is answered* and now carry the concession beside it, plus one new
+  line saying what the section heading's *re-observed* means. `commands.rs` falls by two, the module
+  header and the assertion message. This record rises by thirty-one because §19's seven correction
+  blocks and this section quote the corrected words back, which is the same inflation §18.5 recorded
+  and for the same reason. Of what survives in `ledger.rs`: the section heading at 257 and the four
+  test comments and assertion messages at 3203, 3434, 3839 and 3925 are **driven by the test that
+  contains them** —
+  each of those tests ticks the engine itself, so the re-observation is true by construction there,
+  which is round 12's own precedent for `later_than_now()`; `Admission::PrecedesACommit`'s *"the one
+  arm a producer must answer"* is an **obligation on the producer**, and `admitting_sink`'s doc says
+  in as many words that nothing forces a caller to meet it; and the remaining four are §19.1's own
+  rewritten sentences and the new heading gloss. In `commands.rs` the survivors are unrelated senses
+  of *answered* — a command answering a value, a finding answered separately — except line 101,
+  *"a refused reading is answered by `ObservationEngine::revert_settlement`"*, which is sound
+  precisely because it **names the function** that does the answering rather than an observation;
+- the **debt** shape, **at `719c864` → on the finished tree**: `ledger.rs` **2 → 2**, `watch.rs`
+  **3 → 3**, `watch_check.rs` **0 → 0**, `commands.rs` **2 → 1**, `engine.rs` **7 → 7**, this record
+  **2 → 10**, both review files **0 → 0**. `commands.rs` falls by the module-header sentence
+  §19.2 corrected. **This record's own movement is the one to read with care, and it is the reverse
+  of what a reader expects**: the two hits at `719c864` were §1's headline and §12.6's sentence — the
+  two false ones — and the headline's is now gone, yet the count went **up**, because §19.2 and three
+  correction blocks quote the removed sentence in order to correct it. **A rising count can mean a
+  removal here**, which is why every hit is read and none of these totals is a gate. Of the
+  survivors, `watch.rs:1199` (*"A debt is the one form a settlement must
+  answer"*) and `engine.rs:591` (*"a debt is discharged by the settlement that …"*) are **conditional
+  on a settlement occurring** and claim nothing about whether one does; `watch.rs:271` and
+  `ledger.rs:619` are obligations on a named caller; and the rest are assertion messages in tests
+  that drive their own ticks.
+
+**Pass 2 — name positions, as a distinct pass.** Headings, bold ruling lines, first sentences, doc
+comments, module headers, test names and assertion messages.
+
+```sh
+rg -n '^\s*fn [a-z_]+\(' src-tauri/src/{ledger,watch_check,commands,watch}.rs -o | rg -i 'answer|observ|owed|debt|suppress|bounded'
+rg -n '^//! # ' src-tauri/src/{ledger,watch,commands}.rs
+rg -n '^#{2,4} .*(answer|observ|owed|debt|guarantee|must)' -i docs/decisions/2d-3-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+```
+
+- **it found three, and all three are fixed**: §1's headline (the High the reviewer named), the
+  assertion message at `commands.rs:8372` (§19.1's table), and §10.5's ***Guaranteed.*** paragraph,
+  whose first sentence ended *"and is answered so the engine re-observes it"*;
+- **`ledger.rs`'s module-doc heading *A read the save path could not use — or could not prove
+  stable — is re-observed* was judged and kept**, and the reason is recorded rather than assumed: its
+  contrast is with **published**, which is what the section is about and how §11.4's file list
+  describes it, and renaming it would strand that description. What was wrong was the section's
+  **closing sentence** — *"is followed by one somebody can"* — which now says *asked* to be followed,
+  with the three reasons an ask may go unanswered in the same sentence and a line saying the heading's
+  *re-observed* is the contrast and not a promise;
+- **the `…_asks_for_a_re_observation…` test names in `commands.rs` are this shape done right** and
+  are left alone: three names, each saying **asks for**, over tests that assert an inbox. So is
+  `watch.rs`'s `a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts`, whose
+  *once it starts* is the condition;
+  `ledger.rs`'s `a_refused_stabilized_state_is_re_observed_rather_than_lost` drives its own ticks,
+  and its *rather than lost* is the safety half this round does not weaken;
+- the **eight** `### … What is guaranteed now, and what is not` sections were read again, this time
+  for a **liveness** claim rather than round 12's *one refusal per commit*. §10.5 carried one and is
+  corrected. §12.6 carried the origin of the §1 headline and is corrected. **§8.7 is the one that got
+  it right all along** and is worth naming: its *not guaranteed* list says, in as many words, *"That a
+  refused reading is re-observed"*. §§7.4, 11.5, 13.6 and 14.8 state their claims in a *Guaranteed*
+  paragraph whose companion *Not guaranteed* paragraph names §5 items 19, 20 and 21 immediately
+  below; that is the section's declared two-paragraph shape rather than a concession lost in another
+  sentence, and they are judged sound as structured and left.
+
+**Round 12's four carried counts move, and both numbers are given for each.** On §18.5's ordering
+pattern: `ledger.rs` **7 → 7**, `watch_check.rs` **1 → 1**, `commands.rs` **5 → 5**, `watch.rs`
+**0 → 0**, this record **24 → 38**, `phase-2d-design.md` **0 → 0** — no code hit moves, because
+§19 rewrote no sentence that matched that pattern. On §18.5's costless-removal pattern: `ledger.rs`
+**1 → 1**, `watch_check.rs` **0 → 0**, `commands.rs` **0 → 0**, `watch.rs` **0 → 0**, this record
+**25 → 25**, `phase-2d-design.md` **1 → 1**. `rg -c 'same sentence'`: `ledger.rs` **7 → 7**, this
+record **18 → 26**, `docs/reviews/phase-2d-3-ledger.md` **5 → 5**, and `commands.rs` **0 → 1** —
+the identifier reaches that file for the first time because §19.2's replacement says which record
+sentence it is the twin of. `rg -c 'preceded_a_commit'`: `ledger.rs` **15 → 15**, `watch_check.rs`
+**2 → 2**, `commands.rs` **1 → 1**. **No identifier was added to production code and none was
+removed.**
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule, and 2c-5-4a's scar): this round
+adds no operation, consumes nothing and discards no result. It changes one assertion **message**,
+edits comments and doc comments, and adds correction blocks.
+
+### 19.5 What changed, file by file
+
+**Per §18.6's declaration: this list names every file in the round's commit, and says which is a
+verbatim append and which is not this round's authorship.**
+
+- **`src-tauri/src/ledger.rs`** — six doc-comment and comment positions given the liveness
+  concession in the same sentence as the claim (§19.1's table): the module doc's *two proofs* bullet,
+  the *the anchor outlives the record* sentence the reviewer cited, the closing sentence of the
+  *a read the save path could not use* section, both halves of
+  `LedgerTally::preceded_a_commit`'s doc, and one comment inside `record_app_write`. **Comments and
+  doc comments only. No behaviour, no signature, no control flow; `decide`'s `read_after <= at`
+  comparison untouched; no test, no assertion and no assertion message added, removed or changed in
+  this file.**
+- **`src-tauri/src/commands.rs`** — the module header's *owed observation* sentence rewritten to the
+  negative guarantee (§19.2), and the **assertion message** at the end of
+  `an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation` changed from *is observed
+  again* to *is asked for again*, with four lines saying what the assertion reads (§19.1).
+  **One assertion message changed; no assertion added or removed, no test added or removed, no
+  behaviour, no signature and no control flow.**
+- **`src-tauri/src/watch_check.rs`** — inside
+  `a_committed_save_is_suppressed_while_a_later_external_write_is_not`, the round-12 paragraph's
+  *is suppressed* sentence now says the re-reading is conditional on the path stabilizing again and
+  on the worker still ticking (§19.1). **Comments only.** The removed exact-zero assertion is **not**
+  restored.
+- **`docs/decisions/2d-3-notes.md`** — **six** correction blocks, one per corrected position: §1's
+  headline (which is also rewritten in place, as every previous §1 correction has done), §10.5's
+  *Guaranteed* paragraph, §12.6's *guaranteed* paragraph, §15.3's round-12 correction block, §16.1's
+  third bullet and §18.1's fix paragraph, plus the one indented inside §18.5's ordering bullet for
+  the Low — **and this §19**. Every one is **added beneath** the text it corrects; nothing is deleted
+  or silently rewritten, including the two round-12 correction blocks that two of these correct in
+  their turn.
+- **`docs/reviews/phase-2d-3-ledger.md`** — round 13's section appended: a prose preamble and the
+  reviewer's reply **verbatim**. The verbatim half is not an authored change.
+- **`PROGRESS.md`** — the orchestrator's, not this round's: the round-13→round-14 handoff and the
+  commit row. Named here because §18.4's Low 2 was an incomplete list and §18.6 declared the
+  convention that fixes it.
+- **no core file** — `crates/espansoconfig-core` is untouched, which matters this round because both
+  Highs quote `ObservationEngine::observe_owed`'s doc **as the authority that refuses them**: the
+  primitive already said the true thing, and only its consumers' descriptions were wrong. **No
+  `src/` path, and no command, wire type, event, queue, i18n key or user-visible string.**
+
+### 19.6 The gates
+
+No neuter was run and none was owed: this round changes no production behaviour, deletes no check
+and adds none. The one code change with a runtime existence — an assertion **message** — is exercised
+by `an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation` on every run.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1268 passed, 0 failed** (exit 0, summed over **26** `test result` lines — unchanged, and it must be: this round adds and removes no test, and changes one assertion's message only) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, **223** filtered out, **72.63 s**, quiet host, no timeout; this round changed only comments in that file) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched no core file) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §19.5's file list and of `git diff --name-only 08a3366 -- src/` being empty on the tree this round started from |
+
+**§18.6b's warning about the focused gate's duration stands and is repeated because it is easy to
+mistake for a regression**: that suite is built of bounded waits, so a slower or busier host
+lengthens the run without changing the verdict. What the gate asserts is **20/20 and no timeout**,
+never a wall-clock, and this round edited only comments in that file — no timing constant, no wait,
+no test.
+
+### 19.7 What this round's own change leaves open
+
+Written with the expectation §15 states and this round does not weaken: **seven** §5 items recorded
+as bounded residues have since been found to be real defects. Round 13's own two Highs are a further
+instance of round 12's warning — both are sentences a *fix round* wrote while closing something
+else. What this round leaves:
+
+38. **Nothing anywhere states the liveness contract in one place, so each consumer restates it and
+    each restatement can be wrong.** The true statement lives in three separate doc comments —
+    `ObservationEngine::observe_owed`'s *what this does not do*, `ReObserveOutcome`'s *neither variant
+    claims anything about what will be observed*, and §5 items 19 and 21 — and every description of
+    the pipeline paraphrases them. Both of this round's Highs are paraphrases that dropped a
+    qualification, in a module doc and in a headline, and §19.4 found nine more of the same shape.
+    **Nothing enforces the paraphrase**: no type carries the distinction between *asked* and
+    *observed*, `ReObserveOutcome` is discarded by four of its five callers by design (the ask may
+    not steer a save), and no test can fail a sentence. What would close it is a single named
+    statement every position points at instead of restating — a real edit to make, and this round
+    did not make it, because inventing a canonical section while fixing eight positions is how a
+    fix round produces the next round's finding.
+39. **The safety half is argued and not driven.** *A `PrecedesACommit` refusal publishes nothing,
+    clears nothing and leaves the state owed* is the half that survives this round, and the
+    reviewer cleared it — but what a test drives is the refusal and the rollback, over an engine the
+    test ticks itself. **No test in this crate holds a path in a permanently unstable state and
+    asserts that nothing is published for it**, because doing so needs a way to keep a real watcher
+    probing while the disk never settles. So the property that the retry's failure is *safe* rests
+    on reading `decide`'s arm and `admitting_sink`'s match, exactly as it rested before this round.
+40. **Every correction this round made is prose, and no test fails if a later round un-makes one.**
+    §18.7 item 36 said this of §18's nine positions; it is now true of a further eight, and the
+    argument is unchanged — this is the same gap `CLAUDE.md` records for the i18n suites, where
+    parity and placeholders are checked and *meaning* is not. What round 13 adds to the item is a
+    sharper version of its own lesson: §19.4's liveness sweep shows that **a fix can leave the
+    line-based count almost unmoved** — this record's debt-shape count went 2 → 2 while the false
+    sentence was removed and a correction block quoting it was added — so a future round must read
+    the hits and never the totals.

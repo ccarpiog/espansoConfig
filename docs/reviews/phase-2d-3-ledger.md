@@ -689,3 +689,86 @@ NOT READY
 
 Codex session ID: 01a03b0f-cc25-76c1-9127-df788259dd6d
 Resume in Codex: codex resume 01a03b0f-cc25-76c1-9127-df788259dd6d
+---
+
+## Round 13 — NOT READY (2 High, 1 Low)
+
+Scoped to round 12's fix. **Round 12's lesson was that a fix round's own fix becomes the next round's
+finding, and round 13 is that lesson at its purest**: both Highs are sentences round 12's fix round
+wrote or left standing, and the sharper of the two is at this record's **§1 headline** — the position
+eight correction blocks are already stacked under. The shape is new to this review. Rounds 10 to 12
+chased an **ordering** premise; round 13's is a **liveness** one. *The refusal is answered.* *The
+engine must answer the debt.* Both are true of a rollback and of a coalescing rule, and neither is
+true of an observation arriving.
+
+That is the **thirteenth consecutive** round with a name-position finding, and **both Highs are again
+this project's declared worst defect class**.
+
+**High 1 — the retry is bounded by nothing, and the module doc said the host clock bounded it.**
+`ledger.rs:486`, the sentence round 12's fix round added while closing the ordering premise: *"That
+retry is bounded by the host clock advancing rather than by construction, and it is bounded in the
+safe direction: **every** refusal is answered by a re-observation and none of them publishes
+anything."* The crate refuses both halves in its own doc comments — `ReObserveOutcome` says *neither
+variant claims anything about what will be observed* and that an `Asked` promises a worker's inbox
+and not an observation; `ObservationEngine::observe_owed` says a path being written continuously
+*"stays pending, and the debt waits with it"*; and `WorkerMessage::Stop` can be consumed before the
+worker's next tick, which is §5 item 21. **The safety half was cleared expressly and is not
+weakened**: a `PrecedesACommit` refusal publishes nothing and the settlement is taken back, so an
+uncompleted retry leaves the state owed. `decide`'s `read_after <= at` comparison is untouched.
+
+**High 2 — the §1 headline guaranteed liveness `observe_owed` expressly refuses.** *"every one of
+those requests is an **owed** observation the engine **must answer** rather than a hint it may
+coalesce into silence"*, against a primitive whose own *what this does not do* paragraph promises no
+answer for a path that never stabilizes and records no debt at all for a path it does not watch. §5
+items 19 and 21 of the record had said so for seven rounds. The headline now claims only the
+**negative** guarantee that is real — an owed observation cannot be discharged by **coalescing**, and
+stays owed until a settlement emits — with the denial that one will occur in the same sentence.
+
+**Low — §18.5 classified five `commands.rs` sweep hits as one argument, and they are two.** The count
+of five is right; only `commands.rs:155` and `:2409` are the serialized-doors argument, while `:1339`,
+`:1371` and `:2057` matched the pattern's *a second time* alternative and warn against a duplicate
+lookup. Their prose is sound; the sweep's recorded judgement was not.
+
+**Nothing was cleared as a non-defect**: all three findings verified against the code, all three real,
+all three fixed. The fix round's own **shape** sweep then found **nine more instances the reviewer did
+not name** — eight in code and one in the record — all of the same liveness shape and two of them at
+name positions: `ledger.rs`'s *two proofs* bullet, both halves of `LedgerTally::preceded_a_commit`'s
+doc, a comment inside `record_app_write`, the closing sentence of the module's *a read the save path
+could not use* section, `watch_check.rs`'s round-12 paragraph, the `commands.rs` module header's twin
+of the §1 sentence, an **assertion message** in
+`an_uncertain_write_evicts_the_parse_and_asks_for_a_re_observation` that read *is observed again* over
+a test that asserts an **inbox**, and §10.5's ***Guaranteed.*** paragraph. Four further record
+positions that describe or repeat the corrected sentences — §§12.6, 15.3, 16.1 and 18.1 — carry
+correction blocks of their own. It also recorded what it
+judged and kept, with reasons: `ledger.rs`'s *is re-observed* section heading (its contrast is with
+*published*), the four driven test comments, and the `…_asks_for_a_re_observation…` test names, which
+are this shape done right. The reviewer **cleared**, with reasons: `decide`'s equality refusal, the
+safety property, the exact-zero assertion's removal and its replacement justification, residues 35–37
+apart from the liveness overclaim, §18.5's supplied arithmetic and file list, and the serialized-door
+reasoning at the hits where it applies.
+
+Host-measured evidence supplied, all re-measured by the orchestrator on this exact clean tree at
+`719c864`: `cargo test --workspace` 1268 passed / 0 failed across 26 result lines, exit 0; focused
+serial `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` 20/20, 223
+filtered out, 237.04 s, exit 0; clippy `-D warnings` exit 0; `cargo fmt --check` exit 0; `cargo tree
+-p espansoconfig-core | rg tauri` empty. `git diff --name-only 08a3366 -- src/` is empty, so
+431 / 2125 / 184 stand as carried.
+
+### Verbatim reply
+
+## High
+
+- src-tauri/src/ledger.rs:486, src-tauri/src/watch.rs:532 — The new claim that the retry “is bounded by the host clock advancing” and that every refusal is answered by a re-observation overstates the state machine. `revert_settlement` schedules another read, but `ReObserveOutcome` expressly promises no resulting observation, and a continuously changing path may never stabilize; additionally, the worker can consume `Stop` before its next tick. The clock may therefore advance indefinitely without completing the retry. Minimal fix: say clock advancement bounds only repeated chronology refusals once another settlement is produced; separately retain the existing qualifications that stabilization and worker lifetime are not guaranteed.
+
+- docs/decisions/2d-3-notes.md:18, crates/espansoconfig-core/src/watch/engine.rs:759 — The §1 headline still guarantees that every owed request is an observation “the engine must answer,” although `observe_owed` explicitly promises no answer for a path that never stabilizes, and §5 item 21 separately concedes that a worker stopping before its next tick drops the request. This is the declared worst defect class at a headline/name position: the record claims liveness the code does not provide. Minimal fix: qualify the headline to say an owed debt cannot be discharged by coalescing and remains owed until a settlement emits, without promising that a settlement will occur.
+
+## Low
+
+- docs/decisions/2d-3-notes.md:5493, src-tauri/src/commands.rs:1339 — §18.5 falsely says all five `commands.rs` ordering-pattern hits are the serialized-doors argument. Only the hits at lines 155 and 2409 concern serialized reads after a ledger record; lines 1339, 1371, and 2057 merely warn against performing identity/planner lookups “a second time.” Their prose is sound, but the sweep’s recorded judgment is not. Minimal fix: classify the two serialized-door hits separately and identify the remaining three as unrelated duplicate-lookup wording.
+
+I cleared `decide`’s equality refusal, the safety property that a `PrecedesACommit` decision itself never reaches the downstream sink, the exact-zero assertion’s removal and its replacement justification, residues 35–37 apart from the broader liveness overclaim above, the supplied sweep arithmetic and file list, and the serialized-door reasoning at the actual relevant hits. No tests, builds, watcher checks, npm commands or network access were used.
+
+NOT READY
+
+Codex session ID: 01a03b42-45c2-7781-bfb9-91bb8a008d38
+Resume in Codex: codex resume 01a03b42-45c2-7781-bfb9-91bb8a008d38

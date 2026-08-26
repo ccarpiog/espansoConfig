@@ -103,8 +103,13 @@
 //! believing it announced a state nobody heard and the same bytes re-read
 //! coalesce to nothing forever), the session lock, a re-observation asked of the
 //! watcher (the round-5 fix round) and, since the round-6 fix round, the fact
-//! that such a request is an **owed** observation the engine must answer rather
-//! than a hint it may coalesce away. **The count and the list are re-derived by
+//! that such a request is an **owed** observation, which the engine may not
+//! discharge by coalescing it into silence and which stays owed until a
+//! settlement of that path emits — never a promise that a settlement will
+//! happen, because a path written continuously never stabilizes and the worker
+//! may take its `Stop` first (round 13's second High, at this position because
+//! the same sentence stood in the record's §1 headline).
+//! **The count and the list are re-derived by
 //! counting the list**, which round 7's first Low is: it said five while naming
 //! five and omitting the rollback, and a maintainer reading it as exhaustive
 //! could remove `revert_settlement` and restore round 3's lost-observation
@@ -8369,7 +8374,11 @@ mod tests {
         assert_eq!(
             inbox.re_observations(),
             vec![path],
-            "the file this save may have written is observed again rather than assumed"
+            // **What this checks is the inbox, and the message says so** — round
+            // 13's first High at an assertion message. `re_observe` promises that
+            // the request reached a worker that had not exited and nothing about
+            // an observation arriving, so *asked for* is what this test drives.
+            "the file this save may have written is asked for again rather than assumed"
         );
         // The eviction is the arm's older half and is unchanged; what makes it
         // observable is that the entry reloads on the next ask rather than

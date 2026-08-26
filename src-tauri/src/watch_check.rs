@@ -1224,9 +1224,12 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // **That was an ordering of two durations, and nothing enforces it**: a save
     // thread stalled between the rename and `record_app_write` lets the worker
     // stamp and settle the saved bytes first, this application's own hint is then
-    // refused once as `PrecedesACommit`, the engine takes the settlement back, the
-    // re-reading is stamped after the anchor and *is* suppressed — usually, and
-    // only usually, because that stamp follows the anchor in program order while
+    // refused once as `PrecedesACommit`, the engine takes the settlement back and
+    // re-owes the path, and a re-reading — *if* the path stabilizes again and this
+    // watcher's worker is still ticking, neither of which anything here forces
+    // (round 13's first High) — is stamped after the anchor and *is* suppressed:
+    // usually, and only usually, because that stamp follows the anchor in program
+    // order while
     // `Instant` is not guaranteed strictly increasing and `decide` refuses at
     // equality, so a clock collision can refuse successive re-readings until one
     // stamp strictly exceeds the anchor; correct behaviour throughout either way,

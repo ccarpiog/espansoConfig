@@ -187,7 +187,11 @@
 //! - a refusal of a *watcher* observation is **answered** —
 //!   [`admitting_sink`] returns
 //!   [`crate::watch::ObservationOutcome::Undecided`] and the engine's settlement
-//!   is taken back, so the path is re-observed;
+//!   is taken back, so the path is put back on the engine's pending table as an
+//!   **owed** observation, which is what a re-reading of it would have to come
+//!   through — though *answered* names that rollback and not an arriving
+//!   observation, because nothing here makes the path stabilize or the worker
+//!   live to see it (round 13's first High);
 //! - a refusal of a *save-path* refresh was answered by nothing. Those two
 //!   callers settle nothing in any engine, so there was nothing to take back,
 //!   and they run once per save rather than in a loop, so nothing retried them.
@@ -275,7 +279,13 @@
 //! reaches this ledger is one the engine read **twice**, carrying a stamp, going
 //! through [`WriteLedger::admit`] like any other observation. So no third proof
 //! of chronology exists: what changed is that a reading nobody could use, or
-//! nobody could prove, is followed by one somebody can.
+//! nobody could prove, is **asked** to be followed by one somebody can — asked
+//! and not guaranteed, because there may be no running watcher to hear the ask
+//! (§5 item 19 of `docs/decisions/2d-3-notes.md`), the worker may take its `Stop`
+//! before the next tick (§5 item 21), and a path being written continuously never
+//! stabilizes, so the debt waits with it. **This heading's *re-observed* is the
+//! contrast with *published*, and never a promise of arrival** (round 13's first
+//! High).
 //!
 //! # The marker and the publication are two jobs, and one map did both
 //!
@@ -476,16 +486,31 @@
 //! to keep answering. And **widening the refusal is safe in the direction that
 //! matters**: a refusal at the stamped door is *answered* — [`admitting_sink`]
 //! returns [`crate::watch::ObservationOutcome::Undecided`], the engine's
-//! settlement is taken back and the path is observed again — and the
-//! re-observation's own stamp is taken after the anchor **in program order
-//! only**, which makes one refusal per commit the usual outcome and not a
-//! guaranteed one, because [`std::time::Instant`] is monotonic and expressly not
-//! guaranteed strictly increasing while [`decide`] puts equality on the refusing
-//! side, so the same anchor can refuse successive re-readings until one stamp
-//! *strictly* exceeds it and nothing in the type system forces the two clock
-//! reads apart. That retry is bounded by the host clock advancing rather than by
-//! construction, and it is bounded in the safe direction: every refusal is
-//! answered by a re-observation and none of them publishes anything.
+//! settlement is taken back and the path is re-owed — and *if* another
+//! settlement for that path is produced, its stamp is taken after the anchor
+//! **in program order only**, which makes one refusal per commit the usual
+//! outcome and not a guaranteed one, because [`std::time::Instant`] is monotonic
+//! and expressly not guaranteed strictly increasing while [`decide`] puts
+//! equality on the refusing side, so the same anchor can refuse successive
+//! re-readings until one stamp *strictly* exceeds it and nothing in the type
+//! system forces the two clock reads apart.
+//!
+//! **What the host clock advancing bounds is narrower than the retry, and
+//! saying it bounded the retry is round 13's first High.** It bounds the run of
+//! *repeated chronology refusals* once another settlement for that path is
+//! produced — and nothing here makes one be produced, so the clock may advance
+//! indefinitely with the retry never completing: this crate's own
+//! `crate::watch::ReObserveOutcome` says in as many words that a path being
+//! written continuously is never answered at all and that an `Asked` is a
+//! promise about a worker's inbox rather than about an observation,
+//! `espansoconfig_core::watch::engine::ObservationEngine::observe_owed` says a
+//! debt waits with a path that never stabilizes, and
+//! `crate::watch::WorkerMessage::Stop` can be consumed before the worker's next
+//! tick. **The safe direction is the half that holds without any of that**: a
+//! refusal here mutates nothing but the tally and publishes nothing, and the
+//! settlement is taken back rather than kept, so what a retry that never
+//! completes leaves behind is a state still owed — never a state reported
+//! wrongly, and never a record cleared by a reading older than the commit.
 //!
 //! # The gate is a leaf, and that is load-bearing
 //!
@@ -868,13 +893,19 @@ pub struct LedgerTally {
     /// - **sustained growth out of proportion to this session's commits** —
     ///   especially growth for a path this session has stopped committing to,
     ///   which a correctly stamped pipeline cannot produce, because a refusal
-    ///   here is answered and the re-observation's own stamp is taken after the
+    ///   here is answered by taking the engine's settlement back and re-owing
+    ///   the path, and *any* settlement that then follows is stamped after the
     ///   anchor, so one commit **usually** refuses one reading once — usually
-    ///   and not always, because that stamp follows the anchor in program order
+    ///   and not always, for two independent reasons stated here and not
+    ///   elsewhere: that stamp follows the anchor in program order
     ///   only while [`std::time::Instant`] is not guaranteed strictly increasing
     ///   and [`decide`] refuses at equality, so a clock collision can make one
     ///   anchor refuse successive re-readings until one stamp *strictly* exceeds
-    ///   it — **and no threshold is enforced anywhere for it**: nothing in the
+    ///   it, and **nothing makes a further settlement happen at all** — a path
+    ///   being written continuously never stabilizes and the debt waits with it,
+    ///   and the worker can take `crate::watch::WorkerMessage::Stop` before its
+    ///   next tick (round 13's first High) —
+    ///   **and no threshold is enforced anywhere for it**: nothing in the
     ///   type system and no test
     ///   distinguishes proportionate growth from disproportionate, the tally
     ///   keeps no per-path count to read one from, and nothing fails when the
@@ -899,11 +930,15 @@ pub struct LedgerTally {
     ///
     /// It counts **refusals, never losses**, and since the round-4 fix round
     /// that sentence is true of everything it can count: only
-    /// [`WriteLedger::admit`] reaches the arm, every refusal of a watcher
-    /// observation is answered by taking the engine's settlement back, and the
-    /// path is re-observed (see [`Admission::PrecedesACommit`]). A count that
-    /// climbs steadily for one path is therefore a pipeline re-running, not a
-    /// change disappearing. Before round 4 the same sentence stood over a
+    /// [`WriteLedger::admit`] reaches the arm, and every refusal of a watcher
+    /// observation is answered by taking the engine's settlement back and
+    /// re-owing the path (see [`Admission::PrecedesACommit`]) — *answered* being
+    /// that rollback and **not** an arriving re-reading, because nothing here
+    /// makes the path stabilize or the worker outlive the debt (round 13's first
+    /// High). That is what makes this a refusal rather than a loss: the state is
+    /// left **owed** instead of concluded, so nothing has consumed it. A count
+    /// that climbs steadily for one path is therefore a pipeline re-running, not
+    /// a change disappearing. Before round 4 the same sentence stood over a
     /// counter that could also count a save-path refresh, which **was** a loss —
     /// see this module's *two proofs* section.
     pub preceded_a_commit: u64,
@@ -1196,8 +1231,10 @@ impl WriteLedger {
         // ends: the identity table is keyed by path for the life of the process
         // (`docs/decisions/2d-1-notes.md` D7), so this cannot happen today, and
         // if it ever does the residue is one path over-refusing readings older
-        // than a commit this session really made — a refusal that is answered
-        // and re-observed, never a lost change.
+        // than a commit this session really made — a refusal that is answered by
+        // taking the settlement back and re-owing the path, never a lost change,
+        // and *answered* is that rollback rather than a re-reading that must
+        // arrive (round 13's first High).
         ledger.latest_commit_at.insert(
             path.to_path_buf(),
             CommitAnchor {
