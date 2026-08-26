@@ -3808,6 +3808,18 @@ stamps `updatedAt` once and never advances it, so it cries STALLED on a healthy 
 file's mtime**); `cargo test --workspace 2>&1 | tail -40` discards the totals; and `git status` for
 unexplained one-line document changes came back with exactly the five expected files and nothing else.
 
+**Git state:** `c5f2289`, tree clean, pushed to `origin/main` (`5a41d7d..c5f2289`; this paragraph
+recorded by the follow-up commit). The commit holds **six** files: three sources
+(`src-tauri/src/{ledger,main,watch_check}.rs`), **no core file** (the fifth 2d-3 fix round to need
+none — and the second running in which the core said the true thing and only its consumers were
+wrong), two documents (`docs/decisions/2d-3-notes.md`, `docs/reviews/phase-2d-3-ledger.md`) and this
+checkpoint. **No frontend file and no `src/` path**, across the whole step. **`src-tauri/src/main.rs`
+is in a 2d-3 commit for the first time since round 9** — it is where both of round 14's Highs had a
+twin nobody had swept. `git status --short --untracked-files=all` after the commit is empty — no
+real-config path, no launch artifact, no untracked file, and no unexplained one-line document change
+of the kind round 12 caught. **The step is NOT closed by it**; round 15 is owed against the round-14
+fix. A fresh session resumes from "Next action".
+
 ---
 
 ## Verification — Phase 2d-3 review round 13 (NOT READY — 2 High, 1 Low; fix in the tree, round 14 owed)
