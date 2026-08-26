@@ -77,11 +77,20 @@
 //! refreshes already hold, which orders their reads against every record with no
 //! clock in between; a **re-observation** asked of the running watcher when a
 //! save could not read the file at all, or read it once where the engine reads
-//! twice; and the fact that such a request is an **owed** observation the engine
-//! must answer — retained across a failing baseline, emitted even when the state
-//! it settles on is one the engine established but never announced, and re-owed
-//! when a refusal takes its settlement back — rather than a hint the engine may
-//! coalesce into silence.
+//! twice; and the fact that such a request is an **owed** observation, which the
+//! engine may not discharge by coalescing it into silence and which stays owed
+//! until a settlement of that path emits — never a promise that a settlement
+//! will happen, because a path written continuously never stabilizes and the
+//! worker may take its `Stop` first (round 13's second High, whose twin stood
+//! here unfixed for a round because that round's sweep read
+//! `ledger.rs`, `watch.rs`, `watch_check.rs` and `commands.rs` and not this
+//! file — round 14's own sweep found it). It is retained across a failing
+//! baseline, emitted even when the state it settles on is one the engine
+//! established but never announced, and restored by a refusal that takes its
+//! settlement back **only where that settlement had discharged it** — an
+//! ordinary native hint's settlement discharges none, so what a refusal of one
+//! leaves behind is a re-**hinted** path rather than an owed one (round 14's
+//! second High).
 //!
 //! **One more thing is about a different event entirely, and so is not in that
 //! list**: `commands::reload_document` is the only read path that can install a
@@ -93,7 +102,12 @@
 //! bytes a duplicate — this step's round-9 first and third Highs. A *watcher* reading the session cannot
 //! place strictly after its own last commit to that path is discarded rather
 //! than published, it does not clear the record, and the engine is told to
-//! un-conclude it and observe the path again. **The two save-path refreshes are
+//! un-conclude it — restoring the state that settlement replaced and re-hinting
+//! the path, and re-owing it only where that settlement had discharged a debt.
+//! **That is a rollback and not an observation**: whether one follows depends on
+//! the path stabilizing again and on the worker still ticking, and nothing here
+//! forces either (round 14's first High, whose twin stood here for the same
+//! reason the sentence above it did). **The two save-path refreshes are
 //! not stamped and cannot be discarded that way**: they run under the session
 //! lock, which is the lock every producer of a record holds, so their reads
 //! follow any record in program order and no clock decides it — a refusal there

@@ -772,3 +772,109 @@ NOT READY
 
 Codex session ID: 01a03b42-45c2-7781-bfb9-91bb8a008d38
 Resume in Codex: codex resume 01a03b42-45c2-7781-bfb9-91bb8a008d38
+
+---
+
+## Round 14 — NOT READY (2 High, 2 Low)
+
+Scoped to round 13's fix. **Round 13 called itself round 12's lesson at its purest, and round 14 is
+the same lesson again**: both Highs are sentences round 13's fix round wrote or left standing, and
+the sharper of the two is once more at this record's **§1 headline** — the position that now carries
+nine correction blocks. That makes **fourteen consecutive rounds with a name-position finding**, and
+both Highs are again this project's declared worst defect class, a record claiming a guarantee the
+code does not give.
+
+The shape is the one round 13 opened and did not finish. Round 13 corrected *the refusal is
+answered* and *the engine must answer the debt* — two **liveness** claims — and in doing so wrote a
+description of the **rollback itself** that is wrong in two independent ways. Round 14 is about the
+rollback, not about the arrival.
+
+**High 1 — the headline still made a rollback produce an observation.** `docs/decisions/2d-3-notes.md:7`,
+against `crates/espansoconfig-core/src/watch/engine.rs:899`: *"the engine takes its settlement back
+and **observes the path again**"*. `ObservationEngine::revert_settlement` emits nothing. Its own doc
+says *"it schedules a read, so it **emits nothing itself**. The observation comes back out of a later
+`tick`, with whatever the file holds **then**"*, and a path that never stabilizes is never answered
+at all — so the headline preserved round 13's liveness defect at the first mechanism it names. The
+sentence now says the engine **restores the prior tracked state and re-hints the path**, with
+*answered* naming that rollback and nothing that arrives.
+
+**High 2 — *re-owes the path* is conditional in the code and was unconditional in thirteen
+descriptions of it.** `src-tauri/src/ledger.rs:190`, `:489`, `:512`, `:896`, `:935`, `:1235`;
+`src-tauri/src/watch_check.rs:1228`; `docs/decisions/2d-3-notes.md:2549`, `:4667`, `:4976`, `:5807`,
+`:6092`; against `crates/espansoconfig-core/src/watch/engine.rs:928`. `revert_settlement` reads
+`Undone { replaced, owed }` and branches: `if owed { self.observe_owed(path, now) } else {
+self.hint(path, now) }`. A debt comes back **only where the settlement being taken back had
+discharged one**, and an ordinary native-hint settlement has `owed == false`. So what a
+`PrecedesACommit` refusal leaves behind is a **re-hinted** path — and a hint can be coalesced away,
+which is precisely what *stays owed* promises cannot happen. The new safety account round 13's fix
+round wrote at `ledger.rs:509–513` is one of the overclaiming positions, which is the pattern round
+12 named and round 13 repeated. **The two negatives the reviewer cleared are retained unweakened**: a
+`PrecedesACommit` refusal publishes nothing and clears nothing.
+
+**The primitive said the true thing and only its consumers' descriptions were wrong**, exactly as at
+round 13. `revert_settlement`'s *"A debt is restored with the state. If the settlement being taken
+back discharged an `observe_owed` request, the path is owed again"* is correctly conditional, and so
+is `§5 item 17` of the record — *"`revert_settlement` restores unconditionally and re-hints only a
+watched path … the same is true of the debt it restores"* — written at round 5 and extended at round
+6 and never wrong. **No core file is changed by this round.**
+
+**The two Lows are both arithmetic in round 13's own record.** §19.4's finished-tree after-counts for
+`docs/reviews/phase-2d-3-ledger.md` were measured on a tree that did not yet hold the round-13 review
+text the same commit appended to that file, so three of them were wrong the moment the commit was
+made: re-measured on `5a41d7d` that file holds **10** liveness-shape hits, **3** debt-shape hits and
+**6** `same sentence` hits against the recorded 0, 0 and 5, and §19.7 item 40's example said the
+record's debt count went 2 → 2 while §19.4 correctly says 2 → 10. §19.5 claimed **six** correction
+blocks while naming seven, and `rg -n 'Correction \(round-13 fix round'` returns seven. All of these
+are corrected **in place**, each marked with a correction block beside it, because a count is read as
+a measurement and a block beneath it would leave the false figure standing where a later round
+re-runs the sweep.
+
+**Nothing was cleared as a non-defect**: all four findings were verified against the code before
+anything was written, all four are real, all four are fixed. The fix round's own two sweeps then
+found **six more positions the reviewer did not name** — **two in code and four in the record**, and
+both code positions are in the **module header of `src-tauri/src/main.rs`**, which is the twin
+`§19.4`'s sweep could not see because its file list named `ledger.rs`, `watch.rs`, `watch_check.rs`
+and `commands.rs` and not `main.rs`. One of the two is round 13's *own* High 2 sentence — *"an
+**owed** observation the engine **must answer**"* — still standing a round after it was corrected in
+`commands.rs` and in the headline. The record's four are §12.6's *guaranteed* clause (the origin of
+the unconditional re-owing, with its round-13 correction block listing it as unaffected), §19.1's
+*"answered names the rollback and the re-owing"*, §1's round-6 correction block, and — from the
+**name-position pass**, run separately — §10.3's **section heading**, *a rollback promises a fresh
+observation, not a replay*, which is **blocked rather than rewritten** because four sections point at
+it. What was judged and **kept**, with reasons recorded: `ledger.rs`'s *is re-observed* section
+heading and its four driven test comments and assertion messages (round 13's judgements, re-checked
+against the debt shape), the `…_asks_for_a_re_observation…` test names, `engine.rs`'s own
+`revert_settlement` and `settle` docs and the core module header (conditional, and cited by the
+reviewer as the authority), `2d-1-notes.md:140` and `watch.rs:1199` (*the next settlement … must
+answer*, conditional on a settlement occurring), §1's `Undone` bullet (whose antecedent is the debt),
+and the eight *What is guaranteed now, and what is not* sections whose declared two-paragraph shape
+carries the concession.
+
+Host-measured evidence supplied, all measured by the orchestrator on this exact clean tree at
+`5a41d7d` before the fix and re-measured after it: `cargo test --workspace` 1268 passed / 0 failed
+across 26 result lines, exit 0; focused serial `cargo test -p espansoconfig --bin espansoconfig
+watch_check:: -- --test-threads=1` 20/20, 223 filtered out, exit 0, no timeout; clippy `-D warnings`
+exit 0; `cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` empty.
+`git diff --name-only 08a3366 -- src/` is empty, so 431 / 2125 / 184 stand as carried.
+
+**One sentence in this file's own round-13 preamble carries the corrected claim** — *"an uncompleted
+retry leaves the state owed"* — and it is **not edited**, because every round of this ledger is an
+append and its preambles are read as the record of what that round said. `docs/decisions/2d-3-notes.md`
+§20.2 is the correction.
+
+### Verbatim reply
+
+## High
+- docs/decisions/2d-3-notes.md:7, crates/espansoconfig-core/src/watch/engine.rs:899 — The §1 headline still says rollback makes the engine “observe the path again.” `revert_settlement` emits nothing; it only restores state and schedules a read, which may never settle. This preserves the round-13 liveness defect at the headline’s first mechanism. Minimal fix: say the engine restores the prior tracked state and re-hints the path, without promising another observation.
+- src-tauri/src/ledger.rs:190, src-tauri/src/ledger.rs:489, src-tauri/src/ledger.rs:512, src-tauri/src/ledger.rs:896, src-tauri/src/ledger.rs:935, src-tauri/src/ledger.rs:1235, src-tauri/src/watch_check.rs:1228, docs/decisions/2d-3-notes.md:2549, docs/decisions/2d-3-notes.md:4667, docs/decisions/2d-3-notes.md:4976, docs/decisions/2d-3-notes.md:5807, docs/decisions/2d-3-notes.md:6092, crates/espansoconfig-core/src/watch/engine.rs:928 — The new safety account falsely says every `PrecedesACommit` rollback “re-owes” the path or leaves the state owed. `revert_settlement` preserves debt only when `Undone::owed` is true; an ordinary native-hint settlement has `owed == false` and takes the plain `hint` branch. Minimal fix: say rollback restores the prior tracked state and re-hints the path, and that it restores an owed debt only when the refused settlement had discharged one; retain the true negatives that nothing is published or cleared.
+
+## Low
+- docs/decisions/2d-3-notes.md:5927, docs/decisions/2d-3-notes.md:5947, docs/decisions/2d-3-notes.md:6000, docs/decisions/2d-3-notes.md:6104 — §19.4’s finished-tree counts omit the appended round-13 review: that file currently has 10 liveness-shape hits, 3 debt-shape hits, and 6 `same sentence` hits, not 0, 0, and 5. Item 40 also says the record’s debt count went 2→2, contradicting §19.4’s correct 2→10. Minimal fix: correct these four after-counts and the item-40 example.
+- docs/decisions/2d-3-notes.md:6035 — §19.5 claims six correction blocks while its own list contains seven: §1, §10.5, §12.6, §15.3, §16.1, §18.1, and §18.5. Minimal fix: change “six” to “seven.”
+
+I cleared the conditional clock claim: once another settlement exists, repeated equality refusals can continue until a strictly greater stamp, while no settlement is guaranteed. I also cleared the two actual safety negatives in `decide`/`admitting_sink`—`PrecedesACommit` neither publishes nor clears the record—the revised `commands.rs` inbox assertion, the owed-debt anti-coalescing rule while the engine retains that debt, the round-13 behavior/scope claims, and the supplied gate outcomes.
+
+NOT READY
+
+Codex session ID: 01a03ce3-34db-7fa0-beea-da7431e07fa6
+Resume in Codex: codex resume 01a03ce3-34db-7fa0-beea-da7431e07fa6

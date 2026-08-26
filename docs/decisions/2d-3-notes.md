@@ -5,8 +5,9 @@ external change, and no external change is lost to that suppression, because six
 together: the commit and the record that describes it are one window no admission can *decide*
 inside; every **watcher** observation carries a stamp taken before its reads, so a reading already
 in hand when that window opened cannot clear the record either; a refused reading is **answered** —
-the engine takes its settlement back and observes the path again, rather than keeping a state it
-never really announced; the two save-path refreshes carry **no** stamp, because they run under
+the engine takes its settlement back, restoring the prior tracked state and **re-hinting** the path,
+rather than keeping a state it never really announced, and *answered* names that rollback and never
+an observation that arrives; the two save-path refreshes carry **no** stamp, because they run under
 the session lock that every producer of a record holds, so their reads follow any record in program
 order and no clock decides whether they are heard; where this application has **no** reading to
 bring at all — a refresh that raised, or a write that may have landed without saying what it
@@ -18,8 +19,10 @@ the person has been shown it and recording nothing where nobody has, so a state 
 existed never enters the sequence at all; and every one of those requests is an **owed** observation
 the engine may not discharge by **coalescing** it into silence, which stays owed until a settlement of
 that path emits and which is never a promise that one will — retained across a failing baseline,
-emitted even against a state the engine established but never announced, and re-owed when a refusal
-takes its settlement back. That record is one entry per document, written
+emitted even against a state the engine established but never announced, and restored by a refusal
+that takes its settlement back **only where that settlement had discharged one** — a refused native
+hint's settlement had not, so it is re-hinted rather than re-owed. That record is one entry per
+document, written
 in exactly one place.** `src-tauri/src/ledger.rs` is the new module: `WriteLedger` holds the
 consult's `last_app_write[DocumentId] = { workspace_epoch, revision }` beside the open Tauri
 session, together with the per-epoch observation sequence allocator and the announced-state map
@@ -188,6 +191,35 @@ is a native hint (§14).
 > is weakened by the correction**: *a hint that could be answered by silence* was round 6's **first**
 > High (§12.1) and `observe_owed` still closes it; what is withdrawn is a promise that the answer
 > arrives, which no round ever built and which §5 items 19 and 21 already denied.
+
+> **Correction (round-14 fix round, §20).** The headline as §19 left it was wrong about the
+> **rollback itself**, twice, and both are round 14's Highs — the fourteenth consecutive round to
+> find something at a name position, and the ninth §1 correction block. First: *the engine takes its
+> settlement back **and observes the path again*** promised an observation that
+> `ObservationEngine::revert_settlement` expressly does not emit. Its own doc says *"it schedules a
+> read, so it **emits nothing itself**. The observation comes back out of a later `tick`, with
+> whatever the file holds **then**"* — and a path that never stabilizes is never answered at all.
+> The sentence now says the engine **restores the prior tracked state and re-hints the path**, with
+> *answered* naming that rollback and nothing that arrives. Second: *re-owed when a refusal takes its
+> settlement back* was unconditional, and the primitive is conditional. `revert_settlement` restores
+> the debt **with the state** — `Undone { replaced, owed }`, then `if owed { self.observe_owed(…) }
+> else { self.hint(…) }` — so a settlement that had discharged no debt, which is every ordinary
+> **native hint's**, takes the plain `hint` arm. A hint *can* be coalesced away, which is exactly
+> what "stays owed" promises cannot happen, so the clause claimed the anti-coalescing guarantee for
+> readings that do not carry it. It now says the debt is restored **only where that settlement had
+> discharged one**. **The two negatives the reviewer cleared are retained word for word and are not
+> weakened**: a `PrecedesACommit` refusal publishes nothing and clears nothing. And as at round 13,
+> **the primitive said the true thing and only its consumers' descriptions were wrong** —
+> `revert_settlement`'s *"A debt is restored with the state. If the settlement being taken back
+> discharged an `observe_owed` request, the path is owed again"* is correctly conditional, and this
+> round changes no core file.
+>
+> **This block corrects the identical clause wherever it stands in this stack**, and it stands twice:
+> in the headline above, and in the **round-6 fix round's** block, whose *"re-owed when a refusal
+> takes its settlement back"* is the clause's origin in §1. That older block is left as it was
+> written, as every superseded block in this stack is; read it with *restored only where that
+> settlement had discharged a debt* in place of *re-owed*. §12.6, where round 6 wrote the same clause
+> in its *guaranteed* paragraph, carries its own round-14 block.
 
 The consult is `docs/reviews/phase-2d-design.md`; **Q7 item 3** is this step's specification,
 **Q2** is the ruling on the predicate, the ledger's location and lifetime, where the update
@@ -877,6 +909,18 @@ Consult Q3 and Q7 items 4–8 own all of it, and none of it exists here:
 ---
 
 ## 5. Holes, stated rather than hoped about
+
+> **Note (round-14 fix round, §20.7): items 1–24 are here, and items 25 onward are in the fix rounds
+> that found them.** This section holds the residues written up to the round-8 fix round, which is the
+> last round that added to it (§14's block above says *"§5 gains items 23 and 24"*). From the round-9
+> fix round on, each round records its own residues in its *what this round's own change leaves open*
+> subsection — items 25–29 in **§15.8**,
+> 30–32 in **§16.6**, 33–34 in **§17.7**, 35–37 in **§18.7**, 38–40 in **§19.7** and **41–44 in
+> §20.7** — because a
+> residue belongs beside the round that found it and renumbering a list eight rounds of cross-references
+> point into is a defect waiting to happen. **The numbering is one sequence across all of them**, so
+> *item 21* means the same thing wherever it is cited, and a search for an item number finds exactly
+> one definition. This note is navigational and corrects nothing.
 
 1. **Admitted observations are still discarded in production.** The gate decides, numbers, and
    hands the value to `discarding_sink`; a value it drops is gone, and no present code recovers
@@ -2442,6 +2486,18 @@ item 14 now carries it as its third half.
 
 ### 10.3 Low — a rollback promises a fresh observation, not a replay
 
+> **Correction (round-14 fix round, §20.4), on the heading directly above.** **The heading is blocked
+> rather than rewritten**, as §2.6's was, because it names round 10's Low and four sections point at
+> it — but read on its own it is round 14's **first High**: a rollback promises **no** observation at
+> all. `ObservationEngine::revert_settlement` restores the state the settlement replaced and
+> schedules a read; *"it schedules a read, so it emits nothing itself. The observation comes back out
+> of a later `tick`, with whatever the file holds **then**"* is the primitive's own third bullet, and
+> a path that never stabilizes is never answered. The heading's *promises* is a contrast with
+> **replay** — the axis round 10's Low was about, *which* observation rather than *whether* one — and
+> the body below says the true thing in its second sentence: *the rollback restores the base and
+> schedules a **read***. Found by §20.4's name-position pass, at a **section heading**, which makes
+> fourteen consecutive rounds with a name-position finding.
+
 **What the finding was.** `revert_settlement`'s first paragraph said the re-hint *"produces the same
 observation again"*, unconditionally, while its own third bullet said the observation comes back
 *"with whatever the file holds then — which may no longer be the state that was refused"*. The
@@ -2553,6 +2609,17 @@ comment; `cargo tree -p espansoconfig-core | rg tauri` still finds nothing.
 > liveness**: such a reading neither publishes nor clears the record, and the settlement is taken
 > back rather than kept, so the state is left owed instead of consumed. The module doc this sentence
 > describes now says exactly that (§19.1).
+
+> **Correction (round-14 fix round, §20.2), on the round-13 block directly above.** That block closed
+> the liveness overclaim and shipped a **debt** one in the same breath, twice: *"un-concludes the
+> state and **re-owes the path**"* and *"the state is left owed instead of consumed"*.
+> `revert_settlement` re-owes only where the settlement it takes back had discharged an
+> `observe_owed` request; the settlement refused here is an ordinary **native hint's**, which owes
+> nothing, so the plain `hint` arm runs and what is left is a **re-hinted** path, not an owed one.
+> Read both sentences as *un-concludes the state and re-hints the path* and *the state is left
+> un-concluded instead of consumed*. Nothing else in the block moves: the safety half it names —
+> neither publishes nor clears the record — is exactly what round 14's reviewer cleared, and its
+> liveness correction stands.
 
 ### 10.6 The evidence and the neuter runs
 
@@ -3407,6 +3474,21 @@ gained is ledger-agnostic; `cargo tree -p espansoconfig-core | rg tauri` still f
 > state, and re-owing on a rollback are each conditional on a settlement happening and claim nothing
 > about whether one does. §1's headline and `src-tauri/src/commands.rs`'s module header carry the
 > corrected sentence from round 13 on.
+
+> **Correction (round-14 fix round, §20.2), on the *guaranteed* paragraph and on the round-13 block
+> directly above.** The paragraph's fourth clause — *"and it is re-owed when a refusal takes its
+> settlement back"* — is round 14's second High at its **origin**, exactly as its second sentence was
+> round 13's, and the round-13 block reproduced it while clearing it (*"re-owing on a rollback"* among
+> the three clauses it called unaffected). Both are unconditional and the primitive is not.
+> `ObservationEngine::revert_settlement` reads `Undone { replaced, owed }` and branches — `if owed {
+> self.observe_owed(path, now) } else { self.hint(path, now) }` — so the debt comes back **only where
+> the settlement being taken back had discharged one**. A refusal of an owed observation re-owes it,
+> which is the case this clause was written for and which still holds; a refusal of an ordinary
+> **native hint's** settlement re-**hints**, and a hint may be coalesced away, which is precisely the
+> outcome an owed observation is proof against. So the clause is true of the arm that carries a debt
+> and false as a general statement about refusals, and the block above was wrong to list it as
+> unaffected. Read it as *and it is re-owed when a refusal takes back a settlement that had discharged
+> it*. Round 13's own correction — what the debt gives is a **negative** guarantee — stands untouched.
 
 ### 12.7 The evidence and the neuter runs
 
@@ -4667,6 +4749,18 @@ inert: every observation produced after this session's last commit to a path bea
 > state still **owed** — the reviewer cleared that half expressly. Each round's fix has produced the
 > next round's finding for thirteen rounds, and this block is the thirteenth instance of it.
 
+> **Correction (round-14 fix round, §20.2), on the round-13 block directly above.** *"What an
+> uncompleted retry leaves is a state still **owed**"* is round 14's second High, and this is the
+> **fourteenth** instance of the pattern the block above names — a fix round's own fix becoming the
+> next round's finding, now for two consecutive rounds at this one paragraph.
+> `revert_settlement` restores a debt only where the settlement it takes back had discharged one, and
+> the settlement refused here is a **native hint's**, which had not; the plain `hint` arm runs and
+> what is left is a re-**hinted** path. Read it as *a state still **un-concluded and re-hinted***.
+> **What the reviewer cleared is retained and is not weakened by this**: publishes nothing, clears
+> nothing, mutates nothing but the tally. What is withdrawn is the anti-coalescing property, which a
+> hint does not carry — the paragraph above the round-12 block already said the true thing, *"the path
+> is re-hinted"*, and neither correction block noticed.
+
 **Across a `begin_epoch`** the anchor is discarded with everything else, which is the whole of its
 lifetime rule and is why it carries no *clearing* logic of its own. **Across a failed reload** it is
 untouched, because a reload says nothing about when this session last wrote. And the `epoch` field is
@@ -4980,6 +5074,17 @@ not.
 > named, and the arrival, which it did not — and the diagnosis was already, in the fourth bullet, a
 > suspicion nothing enforces. `LedgerTally::preceded_a_commit`'s doc now carries **both** concessions
 > inside the same sentence as the claim (§19.1), which is what this bullet describes.
+
+> **Correction (round-14 fix round, §20.2), on the round-13 block directly above.** *"`deliver` calls
+> `revert_settlement`, and that re-**owes** the path"* is round 14's second High. It re-owes only
+> where the settlement being taken back had discharged an `observe_owed` request; the settlement a
+> `PrecedesACommit` refusal takes back is an ordinary **native hint's**, which had not, so the
+> `else { self.hint(path, now) }` arm runs and the path is re-**hinted**. Read the clause as *and that
+> restores the state it replaced and re-hints the path, re-owing it only where that settlement had
+> discharged a debt*. The block's own finding — *answered* is the rollback and not an arrival — is
+> unaffected and stands; what this correction removes is the further claim that the rollback leaves an
+> anti-coalescing debt behind, which is the property a hint precisely does not have.
+> `LedgerTally::preceded_a_commit`'s doc now carries **all three** concessions (§20.2).
 
 **It does not overclaim in the other direction.** The counter is not meaningless: it still counts
 refusals and never losses, the *first* half of the old paragraph is intact, and the one production
@@ -5809,6 +5914,17 @@ and never a record cleared by a reading older than the commit. That is why the c
 refusals and not for losses, and it survives this round untouched. `decide`'s `read_after <= at`
 comparison is not changed, nor is any signature, control flow or behaviour anywhere in the round.
 
+> **Correction (round-14 fix round, §20.2).** The paragraph directly above says *"what an uncompleted
+> retry leaves behind is a state still **owed**"*, and that is round 14's second High at the very
+> position §19 wrote to record what it was keeping. A refusal at the stamped door takes back an
+> ordinary **native hint's** settlement, which discharged no `observe_owed` request, so
+> `revert_settlement` runs its `else { self.hint(path, now) }` arm: what is left behind is a state
+> **un-concluded and re-hinted**, and a hint can be coalesced away. Read the sentence with
+> *un-concluded and re-hinted* in place of *still owed*. **The three claims the reviewer cleared, in
+> round 13 and again in round 14, are unchanged**: publishes nothing, clears no record, mutates
+> nothing but the tally — and neither *never a state reported wrongly* nor *never a record cleared by
+> a reading older than the commit* depends on the debt.
+
 **The positions fixed** (line numbers as at `719c864`, the tree round 13 read):
 
 | Position | What it said |
@@ -5827,6 +5943,17 @@ rollback and the re-owing, and never an arriving observation. The assertion mess
 name-position instance in code — it asserts `inbox.re_observations() == vec![path]`, which is
 exactly what `ReObserveOutcome` says an `Asked` promises, and its message generalized that to an
 observation. It now says **asked for**.
+
+> **Correction (round-14 fix round, §20.2).** *"**Answered** names the rollback and the re-owing"* is
+> round 14's second High in the sentence that says what §19 put in each of those eight positions: the
+> rollback restores the state and **re-hints**, and re-owes only where the settlement taken back had
+> discharged an `observe_owed` request, which an ordinary native hint's had not. Read it as *answered
+> names the rollback — the restore and the re-hint, with the debt back only where one was
+> discharged*. All eight positions in the table above carry that correction from round 14 on, six of
+> them named again by the reviewer; the ninth, `src-tauri/src/main.rs`'s module header, is a twin
+> §19.4's sweep could not see because its file list did not include `main.rs` (§20.4). Everything
+> else in this subsection stands, including the assertion message's **asked for**, which round 14's
+> reviewer cleared by name.
 
 **Three record positions carry correction blocks for the same premise**, all found by §19.4's shape
 pass: §10.5's *Guaranteed* paragraph (*"and is answered so the engine re-observes it"* — a
@@ -5927,7 +6054,9 @@ rg -c 'must answer|will be answered|is discharged|debt is answered|owed observat
 - the **liveness** shape, **at `719c864` → on the finished tree**: `ledger.rs` **16 → 11**,
   `watch.rs` **8 → 8**, `watch_check.rs` **0 → 0**, `commands.rs` **11 → 9**,
   `engine.rs` **12 → 12**, this record **21 → 52**, `phase-2d-design.md` **0 → 0**,
-  `phase-2d-3-ledger.md` **0 → 0**. **Every hit at `719c864` was read.** `ledger.rs` loses **nine**
+  `phase-2d-3-ledger.md` **0 → 10** (corrected in place by the round-14 fix round; it said **0 → 0**,
+  which is round 14's first Low — see the block at the end of this section).
+  **Every hit at `719c864` was read.** `ledger.rs` loses **nine**
   matching lines across the six positions §19.1 rewrote and gains **four** back — three rewritten
   sentences that still contain *is answered* and now carry the concession beside it, plus one new
   line saying what the section heading's *re-observed* means. `commands.rs` falls by two, the module
@@ -5946,7 +6075,10 @@ rg -c 'must answer|will be answered|is discharged|debt is answered|owed observat
   precisely because it **names the function** that does the answering rather than an observation;
 - the **debt** shape, **at `719c864` → on the finished tree**: `ledger.rs` **2 → 2**, `watch.rs`
   **3 → 3**, `watch_check.rs` **0 → 0**, `commands.rs` **2 → 1**, `engine.rs` **7 → 7**, this record
-  **2 → 10**, both review files **0 → 0**. `commands.rs` falls by the module-header sentence
+  **2 → 10**, `phase-2d-design.md` **0 → 0** and `phase-2d-3-ledger.md` **0 → 3** (corrected in place
+  by the round-14 fix round; the two were given together as *both review files* **0 → 0**, which is
+  round 14's first Low — see the block at the end of this section).
+  `commands.rs` falls by the module-header sentence
   §19.2 corrected. **This record's own movement is the one to read with care, and it is the reverse
   of what a reader expects**: the two hits at `719c864` were §1's headline and §12.6's sentence — the
   two false ones — and the headline's is now gone, yet the count went **up**, because §19.2 and three
@@ -5998,7 +6130,8 @@ pattern: `ledger.rs` **7 → 7**, `watch_check.rs` **1 → 1**, `commands.rs` **
 §19 rewrote no sentence that matched that pattern. On §18.5's costless-removal pattern: `ledger.rs`
 **1 → 1**, `watch_check.rs` **0 → 0**, `commands.rs` **0 → 0**, `watch.rs` **0 → 0**, this record
 **25 → 25**, `phase-2d-design.md` **1 → 1**. `rg -c 'same sentence'`: `ledger.rs` **7 → 7**, this
-record **18 → 26**, `docs/reviews/phase-2d-3-ledger.md` **5 → 5**, and `commands.rs` **0 → 1** —
+record **18 → 26**, `docs/reviews/phase-2d-3-ledger.md` **5 → 6** (corrected in place by the round-14
+fix round; it said **5 → 5**, which is round 14's first Low), and `commands.rs` **0 → 1** —
 the identifier reaches that file for the first time because §19.2's replacement says which record
 sentence it is the twin of. `rg -c 'preceded_a_commit'`: `ledger.rs` **15 → 15**, `watch_check.rs`
 **2 → 2**, `commands.rs` **1 → 1**. **No identifier was added to production code and none was
@@ -6007,6 +6140,24 @@ removed.**
 **For the consuming-operation shape** (`CLAUDE.md`'s standing rule, and 2c-5-4a's scar): this round
 adds no operation, consumes nothing and discards no result. It changes one assertion **message**,
 edits comments and doc comments, and adds correction blocks.
+
+> **Correction (round-14 fix round, §20.3), on three of this section's after-counts.** Round 14's
+> first Low: every *after* figure above for `docs/reviews/phase-2d-3-ledger.md` was measured on a tree
+> that did **not** yet hold the round-13 review text the same commit appended to that file, so three
+> of them were wrong the moment the commit was made. Re-measured on `5a41d7d` — the finished tree of
+> the round-13 commit, with `git archive 5a41d7d | rg -c` over the same three patterns — that file
+> holds **10** liveness-shape hits, **3** debt-shape hits and **6** `same sentence` hits, against the
+> **0**, **0** and **5** recorded. All three are corrected **in place** above, each marked, because a
+> count is read as a measurement and a block beneath it would leave the false figure standing where a
+> later round re-runs the sweep. **Nothing else moves**: every other before- and after-count in this
+> section was re-measured on the same tree and stands — `ledger.rs` 16 → 11 and 2 → 2, `watch.rs`
+> 8 → 8 and 3 → 3, `watch_check.rs` 0 → 0, `commands.rs` 11 → 9 and 2 → 1, `engine.rs` 12 → 12 and
+> 7 → 7, this record 21 → 52 and 2 → 10, both of round 12's carried patterns, and
+> `rg -c 'preceded_a_commit'`. **The cause is the rule this section already states one paragraph
+> above and did not apply to itself**: the round's own commit inflates a count by quoting the words it
+> corrects, and the review file is inflated by an *append* rather than by an edit — which is why
+> §20.4 measures every after-count on the finished tree **including** the review file's new section,
+> and says so.
 
 ### 19.5 What changed, file by file
 
@@ -6032,13 +6183,24 @@ verbatim append and which is not this round's authorship.**
   *is suppressed* sentence now says the re-reading is conditional on the path stabilizing again and
   on the worker still ticking (§19.1). **Comments only.** The removed exact-zero assertion is **not**
   restored.
-- **`docs/decisions/2d-3-notes.md`** — **six** correction blocks, one per corrected position: §1's
+- **`docs/decisions/2d-3-notes.md`** — **seven** correction blocks, one per corrected position: §1's
   headline (which is also rewritten in place, as every previous §1 correction has done), §10.5's
   *Guaranteed* paragraph, §12.6's *guaranteed* paragraph, §15.3's round-12 correction block, §16.1's
-  third bullet and §18.1's fix paragraph, plus the one indented inside §18.5's ordering bullet for
+  third bullet and §18.1's fix paragraph — six — plus the seventh, indented inside §18.5's ordering
+  bullet for
   the Low — **and this §19**. Every one is **added beneath** the text it corrects; nothing is deleted
   or silently rewritten, including the two round-12 correction blocks that two of these correct in
   their turn.
+
+  > **Correction (round-14 fix round, §20.3).** The count above said **six** while its own list named
+  > **seven**, and `rg -n 'Correction \(round-13 fix round'` over this record returns seven: §1, §10.5,
+  > §12.6, §15.3, §16.1, §18.1 and §18.5's indented one. Round 14's second Low. The number is
+  > corrected **in place**, for the same reason the three counts in §19.4 are — a figure a later round
+  > re-derives must be right where it is read — and the *plus* clause is rewritten so the sentence's
+  > own arithmetic is visible rather than inferred. Nothing about which positions were corrected
+  > changes; the list was always right and only the number was wrong. The miscount also reached
+  > `PROGRESS.md`, which is the orchestrator's file and is reported here rather than edited (§18.4's
+  > Low 2 and §18.6's convention).
 - **`docs/reviews/phase-2d-3-ledger.md`** — round 13's section appended: a prose preamble and the
   reviewer's reply **verbatim**. The verbatim half is not an authored change.
 - **`PROGRESS.md`** — the orchestrator's, not this round's: the round-13→round-14 handoff and the
@@ -6096,11 +6258,436 @@ else. What this round leaves:
     asserts that nothing is published for it**, because doing so needs a way to keep a real watcher
     probing while the disk never settles. So the property that the retry's failure is *safe* rests
     on reading `decide`'s arm and `admitting_sink`'s match, exactly as it rested before this round.
+
+    > **Correction (round-14 fix round, §20.2).** *"Leaves the state owed"* is round 14's second
+    > High inside the item that names what survives. The refusal takes back a **native hint's**
+    > settlement, which discharged no debt, so `revert_settlement`'s `else { self.hint(…) }` arm runs
+    > and what is left is a state **un-concluded and re-hinted**. Read the item with that phrase in
+    > place of *leaves the state owed*; the two negatives it turns on — publishes nothing, clears
+    > nothing — are exactly what round 14's reviewer cleared, and the item's own point, that they are
+    > argued rather than driven, is unchanged. Item 42 is round 14's version of the same gap.
 40. **Every correction this round made is prose, and no test fails if a later round un-makes one.**
     §18.7 item 36 said this of §18's nine positions; it is now true of a further eight, and the
     argument is unchanged — this is the same gap `CLAUDE.md` records for the i18n suites, where
     parity and placeholders are checked and *meaning* is not. What round 13 adds to the item is a
     sharper version of its own lesson: §19.4's liveness sweep shows that **a fix can leave the
-    line-based count almost unmoved** — this record's debt-shape count went 2 → 2 while the false
-    sentence was removed and a correction block quoting it was added — so a future round must read
+    line-based count almost unmoved** — this record's debt-shape count went **2 → 10** while the false
+    sentence was removed and correction blocks quoting it were added, and the *liveness* count moved
+    the same way, 21 → 52 — so a future round must read
     the hits and never the totals.
+
+    > **Correction (round-14 fix round, §20.3).** The example above read *"this record's debt-shape
+    > count went 2 → 2"*, which contradicts §19.4's own — and correct — **2 → 10** two subsections
+    > earlier, and is round 14's first Low. The figures are corrected **in place**; the item's point
+    > survives intact and is arguably better served by the true numbers, because *"a rising count can
+    > mean a removal"* is the trap §19.4 names in as many words, while *2 → 2* implied the softer
+    > *"a count that does not move"*. Both readings lead to the same rule: read the hits, never the
+    > totals.
+
+---
+
+## 20. The round-14 fix round
+
+`docs/reviews/phase-2d-3-ledger.md` round 14 returned **NOT READY** with **two Highs and two Lows**.
+Round 13 called itself round 12's lesson at its purest — *a fix round's own fix becomes the next
+round's finding* — and round 14 is the same lesson a second time: **both Highs are sentences round
+13's fix round wrote or left standing**, and the sharper is again at this record's **§1 headline**,
+which now carries nine correction blocks.
+
+**That makes fourteen consecutive rounds with a name-position finding.** Both Highs are again this
+project's declared worst defect class — a record or a doc claiming a guarantee the code does not give
+— and their shape is round 13's shape finished. Round 13 corrected two **liveness** claims, *the
+refusal is answered* and *the engine must answer the debt*; in correcting them it wrote descriptions
+of the **rollback itself** that are wrong in two independent ways. Round 14 is about the rollback,
+not about the arrival.
+
+**All four findings were verified against the code before anything was written**, and all four are
+real; **none is rejected by this record**. What the **reviewer** cleared, expressly: the conditional
+clock claim (repeated equality refusals can continue until a strictly greater stamp, while no
+settlement is guaranteed), the two actual safety negatives in `decide` and `admitting_sink` — a
+`PrecedesACommit` decision neither publishes nor clears the record — the revised `commands.rs` inbox
+assertion message, the owed-debt anti-coalescing rule *while the engine retains that debt*, round
+13's behaviour and scope claims, and the supplied gate outcomes.
+
+**The primitive said the true thing and only its consumers' descriptions were wrong**, exactly as at
+round 13, and this round therefore changes **no core file** either.
+`ObservationEngine::revert_settlement`'s own doc paragraph is correctly conditional — *"**A debt is
+restored with the state.** If the settlement being taken back discharged an
+[`ObservationEngine::observe_owed`] request, the path is owed again"* — and so is **§5 item 17** of
+this record, at a **bold ruling line**: *"`revert_settlement` restores unconditionally and re-hints
+only a watched path … **Since §12 the same is true of the debt it restores**"*. Item 17 was written
+at round 5, extended at round 6, and has never been wrong; it is worth naming for the same reason
+§19.4 named §8.7.
+
+### 20.1 High 1 — the headline made a rollback produce an observation
+
+**The claim, at this record's sharpest name position** (§1, line 7 at `5a41d7d`):
+
+> a refused reading is **answered** — the engine takes its settlement back and observes the path
+> again, rather than keeping a state it never really announced
+
+**The code that refuses it** is the primitive the clause is about, at
+`crates/espansoconfig-core/src/watch/engine.rs:899`, in `revert_settlement`'s own *What it does not
+do, said beside what it does* list:
+
+> it schedules a read, so it **emits nothing itself**. The observation comes back out of a later
+> [`ObservationEngine::tick`], with whatever the file holds **then** — which may no longer be the
+> state that was refused, and that is the honest answer rather than a replay of a stale reading.
+
+So the rollback restores and schedules; it does not observe. And whether a later `tick` ever answers
+is exactly what round 13 established that nothing here forces: `observe_owed`'s doc says a path
+written continuously *"stays pending, and the debt waits with it"*, `ReObserveOutcome` says an
+`Asked` is a promise about a worker's inbox and not about an observation, and `WorkerMessage::Stop`
+can be consumed before the next tick (§5 items 19 and 21). **The headline therefore preserved round
+13's liveness defect at the first mechanism it names**, which is the reviewer's sentence for it and
+is right.
+
+**The fix is the reviewer's minimal one**: the headline says the engine **restores the prior tracked
+state and re-hints the path**, and *answered* names that rollback and never an observation that
+arrives. Nothing the clause was built for is weakened — *a refusal is not a free action* was round
+3's High (§9.1) and `revert_settlement` still closes it; what is withdrawn is a promise the
+primitive expressly declines.
+
+**The same shape stood twice in `src-tauri/src/main.rs`'s module header**, which the reviewer did not
+name and §20.4's passes found: *"the engine is told to un-conclude it and **observe the path
+again**"*. It is corrected there in the same words the headline now uses.
+
+**§10.3's section heading is the name-position pass's own find** — *a rollback promises a fresh
+observation, not a replay* — and it is **blocked rather than rewritten**, as §2.6's heading was,
+because it names round 10's Low and four sections point at it. Its *promises* is a contrast with
+**replay**, the axis round 10 was about; read as liveness it is this High at a heading.
+
+### 20.2 High 2 — *re-owes the path* is conditional in the code and was unconditional in thirteen descriptions of it
+
+**The claim**, in the safety account round 13's fix round wrote and in twelve places beside it: that
+a `PrecedesACommit` refusal *re-owes* the path, or *leaves the state owed*.
+
+**The code that refuses it**, at `crates/espansoconfig-core/src/watch/engine.rs:928`:
+
+```rust
+let owed = match self.undo.remove(path) {
+    Some(Undone { replaced, owed }) => { /* restore the tracked state */ owed }
+    None => false,
+};
+if owed { self.observe_owed(path, now); } else { self.hint(path, now); }
+```
+
+A debt comes back **only where the settlement being taken back had itself discharged an
+`observe_owed` request**. An ordinary **native-hint** settlement has `owed == false` and takes the
+plain `hint` arm — and a hint *can be coalesced away*, which is precisely what *stays owed* promises
+cannot happen. So the descriptions claimed the anti-coalescing property for readings that do not
+carry it, at the one place where the difference is the whole point.
+
+**What is *not* wrong, and is deliberately not weakened.** The **two negatives the reviewer cleared
+are retained word for word**: a `PrecedesACommit` refusal **publishes nothing** and **clears
+nothing**. Neither depends on the debt, and neither is touched anywhere in this round. Nor is
+*never a state reported wrongly* or *never a record cleared by a reading older than the commit* — the
+rollback plus the retained record give both without any liveness or any debt. `decide`'s
+`read_after <= at` comparison is not changed, nor is any signature, control flow or behaviour
+anywhere in the round.
+
+**The positions fixed** (line numbers as at `5a41d7d`, the tree round 14 read):
+
+| Position | What it said |
+|---|---|
+| `ledger.rs:190` (module doc, *two proofs*) | *"the path is put back on the engine's pending table as an **owed** observation"* |
+| `ledger.rs:489` (module doc, *the anchor outlives the record*) | *"the engine's settlement is taken back and the path is re-owed"* |
+| `ledger.rs:512` (module doc, the round-13 safety sentence) | *"what a retry that never completes leaves behind is a state still owed"* |
+| `ledger.rs:896` (`LedgerTally::preceded_a_commit`, first bullet) | *"answered by taking the engine's settlement back and re-owing the path"* |
+| `ledger.rs:935` (`LedgerTally::preceded_a_commit`, closing paragraph) | *"and re-owing the path"*, and *"the state is left **owed** instead of concluded"* |
+| `ledger.rs:1235` (a comment inside `record_app_write`) | *"taking the settlement back and re-owing the path"* |
+| `watch_check.rs:1228` (the round-12 paragraph) | *"the engine takes the settlement back and re-owes the path"* |
+| `2d-3-notes.md:21` (§1's headline; the reviewer named this record only for its five later positions, and the headline clause is the same sentence's) | *"re-owed when a refusal takes its settlement back"* |
+| `2d-3-notes.md:2549` (§10.5's round-13 correction block) | *"un-concludes the state and **re-owes the path**"*, and *"the state is left owed instead of consumed"* |
+| `2d-3-notes.md:4667` (§15.3's round-13 correction block) | *"what an uncompleted retry leaves is a state still **owed**"* |
+| `2d-3-notes.md:4976` (§16.1's round-13 correction block) | *"`deliver` calls `revert_settlement`, and that re-**owes** the path"* |
+| `2d-3-notes.md:5807` (§19.1's *what is not wrong* paragraph) | *"what an uncompleted retry leaves behind is a state still **owed**"* |
+| `2d-3-notes.md:6092` (§19.7 item 39) | *"publishes nothing, clears nothing and leaves the state owed"* |
+
+Each code position now names the branch: *restores the state that settlement replaced and re-hints
+the path, re-owing it only where that settlement had discharged a debt*. Each record position carries
+a correction block beneath it saying the same and naming what survives.
+
+**Four further record positions were found by §20.4's passes and the reviewer did not name them**:
+§12.6's *guaranteed* paragraph, which is the clause's **origin** — round 6 wrote *"and it is re-owed
+when a refusal takes its settlement back"* there and §1's headline took the same words, exactly as it
+did for round 13's High 2 — together with §12.6's **round-13 correction block**, which reproduced the
+overclaim while clearing the liveness one by listing *"re-owing on a rollback"* among the three
+clauses it called unaffected; §19.1's summary sentence *"**answered** names the rollback and the
+re-owing"*; and §1's own **round-6 correction block**, corrected inside the §1 stack's round-14 block
+rather than by a block of its own, because that stack is read as a stack.
+
+**And the code twin the reviewer did not name is in `src-tauri/src/main.rs`'s module header** — where
+round 13's *own* High 2 sentence was **still standing a round after it was corrected everywhere
+else**: *"the fact that such a request is an **owed** observation the engine **must answer**"*, with
+*"and re-owed when a refusal takes its settlement back"* in the same sentence. §19.4's sweep could
+not see it because its file list was `ledger.rs`, `watch.rs`, `watch_check.rs` and `commands.rs`.
+**The lesson is the sweep's own and is now recorded twice**: sweep the *directory*, never a list of
+the files the last finding happened to touch.
+
+### 20.3 The two Lows — three after-counts measured on the wrong tree, and a miscount of seven as six
+
+**Low 1 — §19.4's after-counts for `docs/reviews/phase-2d-3-ledger.md`.** That file receives the
+round's review as an **append**, in the same commit as the fix, and §19.4's *finished tree* figures
+for it were taken before the append. Re-measured with `git archive 5a41d7d` into a scratch tree and
+`rg -c` over §19.4's own three patterns, that file holds **10** liveness-shape hits, **3** debt-shape
+hits and **6** `same sentence` hits, against the **0**, **0** and **5** recorded. §19.7 item 40's
+worked example also said *"this record's debt-shape count went 2 → 2"*, contradicting §19.4's own —
+and correct — **2 → 10** two subsections above it.
+
+**Every one of these was re-measured rather than copied from the reviewer**, and so was every other
+count in §19.4, on the same extracted tree: `ledger.rs` 16 → 11 and 2 → 2, `watch.rs` 8 → 8 and
+3 → 3, `watch_check.rs` 0 → 0, `commands.rs` 11 → 9 and 2 → 1, `engine.rs` 12 → 12 and 7 → 7, this
+record 21 → 52 and 2 → 10, round 12's ordering pattern (`ledger.rs` 7, `watch_check.rs` 1,
+`commands.rs` 5, `watch.rs` 0, this record 38, `phase-2d-design.md` 0), its costless-removal pattern
+(`ledger.rs` 1, this record 25, `phase-2d-design.md` 1) and `rg -c 'preceded_a_commit'`
+(`ledger.rs` 15, `watch_check.rs` 2, `commands.rs` 1) — **all of which stand**. Only the three review-file
+figures and item 40's example move.
+
+**Low 2 — §19.5 said six correction blocks and named seven.** `rg -n 'Correction \(round-13 fix
+round'` over this record returns seven: §1, §10.5, §12.6, §15.3, §16.1, §18.1 and §18.5's indented
+one. The number is corrected and the sentence's own arithmetic is made visible rather than inferred.
+
+**All four figures are corrected *in place*, and each carries a correction block beside it.** That is
+a deliberate departure from *nothing is rewritten*: a count is read as a **measurement**, a later
+round re-runs the sweep against it, and a block underneath would leave the false figure standing
+where the comparison is made. The blocks say what the figure was, what it is, and how it was
+re-measured. The same miscount reached `PROGRESS.md`, which is the orchestrator's file and is
+**reported rather than edited** (§18.4's Low 2 and §18.6's convention).
+
+### 20.4 The two sweeps
+
+Both were run as **separate passes**, written from the *shape* and not from the words of the four
+findings. Counts are `rg -c` line counts given as **before → after**, *before* measured on the clean
+tree at `5a41d7d` **prior to any edit of this round** (extracted with `git archive` into a scratch
+tree), *after* on the finished tree **including this round's own append to
+`docs/reviews/phase-2d-3-ledger.md`** — which is Low 1's whole lesson and is why the file set below
+is a **directory** rather than a list of four files.
+
+**Pass 1 — for the shape.** Two shapes, and both are about the **rollback** rather than about an
+arrival: *a rollback described as producing an observation*, and *a refusal or a rollback described
+as leaving a path owed, re-owed or owed again unconditionally*.
+
+```sh
+rg -c --pcre2 'observes? the path again|observe the path again|observed again|re-observes|is re-observed|fresh observation' \
+  src-tauri/src crates/espansoconfig-core/src \
+  docs/decisions/2d-{1,2,3}-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+rg -c --pcre2 '\bre-?owe[sd]?\b|\bre-?owing\b|owed again|leaves the state owed|state still owed|left \*\*owed\*\*|the state is left owed' \
+  src-tauri/src crates/espansoconfig-core/src \
+  docs/decisions/2d-{1,2,3}-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+```
+
+- the **rollback-produces-an-observation** shape, **at `5a41d7d` → on the finished tree**:
+  `ledger.rs` **4 → 4**, `watch.rs` **5 → 5**, `watch_check.rs` **0 → 0**,
+  `commands.rs` **0 → 0**, `main.rs` **1 → 0**, `engine.rs` **3 → 3**, this record
+  **23 → 28**, `2d-1-notes.md` **0 → 0**, `2d-2-notes.md` **0 → 0**,
+  `phase-2d-design.md` **0 → 0**, `phase-2d-3-ledger.md` **4 → 7**. **Every hit at
+  `5a41d7d` was read.** The only code change is `main.rs`'s module header. Of what survives:
+  `watch.rs`'s module heading *A save may ask for one path to be observed again* and its two prose
+  hits describe an **ask**, which is this shape done right; `engine.rs`'s three are the core
+  primitive's own doc and one test, and the reviewer cites that doc as the **authority** that refuses
+  the Highs, so it is judged sound as structured and kept; `ledger.rs`'s four are two test assertion
+  messages and two test comments **driven by the test that contains them** — each ticks the engine
+  itself, so the re-observation is true by construction there, which is round 12's precedent for
+  `later_than_now()` and round 13's for these same four lines. This record rises because §20 quotes
+  the corrected words back, which is the inflation §18.5 and §19.4 both recorded, and the review file
+  rises because round 14's section quotes them too;
+- the **unconditional re-owing** shape, **at `5a41d7d` → on the finished tree**: `ledger.rs`
+  **6 → 5**, `watch.rs` **0 → 0**, `watch_check.rs` **1 → 0**, `commands.rs`
+  **0 → 0**, `main.rs` **1 → 1**, `engine.rs` **2 → 2**, this record **10 → 56**,
+  `2d-1-notes.md` **0 → 0**, `2d-2-notes.md` **0 → 0**, `phase-2d-design.md` **0 → 0**,
+  `phase-2d-3-ledger.md` **3 → 9**. **Every hit at `5a41d7d` was read**, and **every surviving hit in
+  `ledger.rs` and `main.rs` was read again after the fix**: all six now say *re-owed only where that
+  settlement had discharged a debt*, or *never re-owed* of the native-hint arm, so the count barely
+  falls while every false claim is gone — **a near-flat count can mean a full correction here**,
+  which is the same warning §19.4 recorded in the other direction and the reason no total in this
+  section is a gate. `watch_check.rs` is the one that reaches **0**, because its sentence now names
+  the **hint** arm and has no occasion to say *re-owe* at all. `engine.rs`'s two are the primitive's
+  own conditional sentences — *"If the settlement being
+  taken back discharged an `observe_owed` request, the path is owed again"* and *"an owed observation
+  that is then refused is re-owed by `revert_settlement`"* — both correct and both untouched. The
+  three hits in the review file at `5a41d7d` are reviewer text (two verbatim, one in round 13's
+  preamble) and are
+  **not edited**, because that file is an append-only ledger; the preamble's *"leaves the state
+  owed"* is corrected here instead, and round 14's own section says so. The six it gains are round
+  14's own section quoting the corrected words back.
+
+**Pass 2 — name positions, as a distinct pass.** Headings, bold ruling lines, first sentences, doc
+comments, module headers, test names and assertion messages, read for both shapes.
+
+```sh
+rg -n '^\s*fn [a-z_]+\(' src-tauri/src/*.rs crates/espansoconfig-core/src/watch/*.rs -o \
+  | rg -i 'owed|owe|observ|answer|debt|revert|refus'
+rg -n '^//! # ' src-tauri/src/{ledger,watch,commands,main}.rs crates/espansoconfig-core/src/watch/engine.rs
+rg -n --pcre2 '^#{2,4} .*(answer|observ|owed|debt|guarantee|must|refus)' -i \
+  docs/decisions/2d-{1,2,3}-notes.md docs/reviews/phase-2d-design.md docs/reviews/phase-2d-3-ledger.md
+rg -n --pcre2 '^\*\*[^*]*(owed|re-owe|observ|answer|debt)[^*]*\*\*' -i docs/decisions/2d-{1,2,3}-notes.md
+```
+
+- **it found three, and all three are fixed or blocked**: §1's headline (the High the reviewer
+  named), **`src-tauri/src/main.rs`'s module header** — two sentences, one of them round 13's own
+  High 2 still standing — and **§10.3's section heading**, *a rollback promises a fresh observation,
+  not a replay*, which is blocked rather than rewritten;
+- **`ledger.rs`'s module-doc heading *A read the save path could not use — or could not prove
+  stable — is re-observed* was re-checked and kept**, this time against the debt shape as well as the
+  liveness one. Round 13's reason stands — its contrast is with **published** — and the section's
+  closing sentence, which round 13 rewrote, already carries the three reasons an ask may go
+  unanswered and the line saying the heading's *re-observed* is a contrast and never a promise;
+- **`watch.rs`'s module heading *A save may ask for one path to be observed again* is this shape done
+  right** and is left alone: *ask* is the verb, and the section beneath it says the request becomes an
+  owed observation, which for `re_observe` is exactly true. So are the three
+  `…_asks_for_a_re_observation…` test names in `commands.rs`,
+  `watch.rs`'s `a_re_observation_issued_while_the_baseline_fails_is_answered_once_it_starts` (whose
+  *once it starts* is the condition), `ledger.rs`'s
+  `a_refused_stabilized_state_is_re_observed_rather_than_lost` and `engine.rs`'s
+  `a_reverted_settlement_is_observed_again_instead_of_coalescing_away`, both of which drive their own
+  ticks;
+- **§5 item 17 is the bold ruling line that got it right all along** and is worth naming beside
+  §8.7's *not guaranteed* list: *"`revert_settlement` restores unconditionally and re-hints only a
+  watched path … Since §12 the same is true of the debt it restores"*. Written at round 5, extended
+  at round 6, never wrong, and never consulted by any of the thirteen positions that contradicted it;
+- the **eight** `### … What is guaranteed now, and what is not` sections were read again, this time
+  for the **debt** shape rather than round 13's liveness one. §12.6 carried the origin clause and is
+  corrected. §§7.4, 8.7, 10.5, 11.5, 13.6 and 14.8 carry no unconditional re-owing: §14.8's
+  *"unconditionally"* is about the record not naming the same bytes, which the next clause says in as
+  many words, and §11.5's and §13.6's *owed* sentences are about what an `observe_owed` request is
+  and are conditional on a settlement. They are judged sound as structured and left;
+- **`docs/decisions/2d-1-notes.md:140` and `src-tauri/src/watch.rs:1199` were judged and kept**: *a
+  hint plus a **debt** the next settlement of that path must answer* and *the one form a settlement
+  must answer* are obligations **on a settlement that occurs**, claim nothing about whether one does,
+  and were cleared on that reading by round 13's own pass;
+- **§1's `Undone` bullet was judged and kept** — *"carries the debt beside the replaced state so a
+  refusal re-owes it"* — because its antecedent is *the debt*: `Undone` carries one only where a
+  settlement discharged one, so *it* is what a refusal re-owes. It is the closest call in this pass
+  and is recorded rather than left silent.
+
+**Round 12's and round 13's carried counts.** `rg -c 'same sentence'`: `ledger.rs` **7 → 7**,
+this record **26 → 32**, `commands.rs` **1 → 1**, `docs/reviews/phase-2d-3-ledger.md`
+**6 → 8**. `rg -c 'preceded_a_commit'`: `ledger.rs` **15 → 15**, `watch_check.rs`
+**2 → 2**, `commands.rs` **1 → 1**. **No identifier was added to production code and none
+was removed.**
+
+**For the consuming-operation shape** (`CLAUDE.md`'s standing rule, and 2c-5-4a's scar): this round
+adds no operation, consumes nothing and discards no result. It edits comments and doc comments and
+adds correction blocks, and — unlike round 13 — it changes **no assertion message** and no other
+runtime-bearing line.
+
+### 20.5 What changed, file by file
+
+**Per §18.6's declaration: this list names every file in the round's commit, and says which is a
+verbatim append and which is not this round's authorship.**
+
+- **`src-tauri/src/ledger.rs`** — six doc-comment and comment positions given the **branch** in the
+  same sentence as the claim (§20.2's table): the module doc's *two proofs* bullet, the *the anchor
+  outlives the record* sentence, the round-13 safety sentence that closes that section, both halves
+  of `LedgerTally::preceded_a_commit`'s doc, and one comment inside `record_app_write`. **Comments
+  and doc comments only. No behaviour, no signature, no control flow; `decide`'s `read_after <= at`
+  comparison untouched; no test, no assertion and no assertion message added, removed or changed in
+  this file.**
+- **`src-tauri/src/main.rs`** — the **module header**, two sentences, both twins the reviewer did not
+  name and §19.4's sweep could not see: *"the engine is told to un-conclude it and observe the path
+  again"* (§20.1) and *"such a request is an **owed** observation the engine **must answer** …
+  re-owed when a refusal takes its settlement back"*, the latter being **round 13's own High 2 still
+  standing a round after it was corrected in `commands.rs` and in the headline** (§20.2). **Module
+  doc comment only. No behaviour, no signature, no control flow, no test.**
+- **`src-tauri/src/watch_check.rs`** — inside
+  `a_committed_save_is_suppressed_while_a_later_external_write_is_not`, the round-12 paragraph's
+  *re-owes the path* now names the **hint** arm and why it is the one that runs there (§20.2).
+  **Comments only.** The removed exact-zero assertion is **not** restored.
+- **`docs/decisions/2d-3-notes.md`** — **twelve** correction blocks over **sixteen** corrected
+  positions, and the number is derived by counting the list rather than asserted over it, because
+  saying *six* over a list of seven is round 14's second Low and this is the sentence that would
+  repeat it. The twelve blocks, in file order, with the positions each covers:
+  **(1)** §1's headline — two clauses, one per High — which is also **rewritten in place**, as every
+  previous §1 correction has done, and whose block additionally corrects **§1's round-6 correction
+  block** in the same stack (two positions); **(2)** §10.3's **section heading**, blocked and not
+  rewritten; **(3)** §10.5's round-13 block, two sentences in it; **(4)** §12.6's *guaranteed*
+  paragraph **and** its round-13 block, named together in one block (two positions); **(5)** §15.3's
+  round-13 block; **(6)** §16.1's round-13 block; **(7)** §19.1's *what is not wrong* paragraph;
+  **(8)** §19.1's summary sentence; **(9)** §19.4's **three** after-counts (three positions);
+  **(10)** §19.5's *six*; **(11)** §19.7 item 39; **(12)** §19.7 item 40's worked example. That is
+  2+1+1+2+1+1+1+1+3+1+1+1 = **sixteen** positions over twelve blocks — **and this §20** beside them.
+  Every block is
+  **added beneath** the text it corrects; nothing is deleted. **Four numbers are corrected in place**
+  (§19.4's three after-counts and §19.5's block count), each with a block beside it, for the reason
+  §20.3 gives.
+- **`docs/reviews/phase-2d-3-ledger.md`** — round 14's section appended: a prose preamble and the
+  reviewer's reply **verbatim**, checked byte-for-byte against the result file. The verbatim half is
+  not an authored change. **Round 13's preamble is not edited**, and the one sentence in it that
+  carries the corrected claim is named in §20.4 and in round 14's own preamble.
+- **`PROGRESS.md`** — the orchestrator's, not this round's: the round-14→round-15 handoff and the
+  commit row. Named here because §18.4's Low 2 was an incomplete list and §18.6 declared the
+  convention that fixes it. §19.5's *six* also reached that file and is reported rather than edited.
+- **no core file** — `crates/espansoconfig-core` is untouched, which matters this round for the same
+  reason it mattered at round 13: both Highs quote `revert_settlement`'s own doc **as the authority
+  that refuses them**. **No `src/` path, and no command, wire type, event, queue, i18n key or
+  user-visible string.**
+
+### 20.6 The gates
+
+No neuter was run and none was owed: this round changes no production behaviour, deletes no check and
+adds none. **It changes no runtime-bearing line at all** — round 13 changed one assertion message and
+this round changes none — so the workspace total must be exactly round 13's, and a movement in it
+would itself be the finding.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1268 passed, 0 failed** (exit 0, summed over **26** `test result` lines — unchanged from round 13, and it must be: this round adds and removes no test and changes no assertion) |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** (exit 0, **223** filtered out, **76.96 s**, quiet host, no timeout; this round changed only comments in that file) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean** (exit 0) |
+| `cargo fmt --check` | **clean** (exit 0) |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** (no match; this round touched no core file) |
+| `npm run check` files / `npm test` / `npm run build` modules | **431 / 2125 / 184 — not re-run; the frontend was not touched**, on the warrant of §20.5's file list and of `git diff --name-only 08a3366 -- src/` being empty on the tree this round started from |
+
+**§18.6b's warning about the focused gate's duration stands and is repeated because it is easy to
+mistake for a regression**: that suite is built of bounded waits, so a slower or busier host
+lengthens the run without changing the verdict. What the gate asserts is **20/20 and no timeout**,
+never a wall-clock, and this round edited only comments in that file — no timing constant, no wait,
+no test.
+
+### 20.7 What this round's own change leaves open
+
+Written with the expectation §15 states and this round does not weaken: **seven** §5 items recorded as
+bounded residues have since been found to be real defects. Round 14's own two Highs are a further
+instance of round 12's warning — both are sentences a *fix round* wrote while closing something else —
+and one of them, `main.rs`'s module header, is round 13's finding **surviving its own fix round**
+because the sweep that found the others was scoped to a file list. What this round leaves:
+
+41. **A sweep scoped to a file list cannot find the twin in the file the list omits, and nothing
+    makes a sweep's scope match the pipeline's.** §19.4's shape pass named `ledger.rs`, `watch.rs`,
+    `watch_check.rs` and `commands.rs` because those are the files the previous findings had touched;
+    `src-tauri/src/main.rs`'s module header describes the same six mechanisms in the same words and
+    was outside it, so round 13's own High 2 sentence survived the round that closed it everywhere
+    else. §20.4 sweeps the **directory**, which closes this instance and not the class: the class is
+    that **no list is derivable** — nothing enumerates which files describe this pipeline, a document
+    under `docs/` can join them at any time, and a directory sweep over a repository this size trades
+    the omission for noise a reader must filter by hand. What would close it is a marker every such
+    passage carries and a check that the marker's set is the swept set. That is a real edit and this
+    round did not make it, for §19.7 item 38's reason: inventing machinery while fixing eight
+    positions is how a fix round produces the next round's finding.
+42. **The conditional half of the rollback is argued and not driven.** *A debt is restored only where
+    the settlement being taken back had discharged one* is now claimed in thirteen places, and what a
+    test drives is the **positive** arm: `engine.rs`'s
+    `an_owed_observation_is_answered_where_a_hint_coalesces_to_silence` has a step that reverts a
+    settlement which discharged a debt and asserts the debt comes back. **No test asserts the negative
+    arm** — that reverting a settlement which owed nothing leaves a plain hint that a subsequent
+    identical stabilization coalesces away — because asserting *nothing was emitted for a reason* over
+    an engine that also emits nothing when the disk is quiet needs a discriminating oracle this crate
+    does not have. So the branch that carries round 14's whole correction rests on reading
+    `revert_settlement`'s six lines, exactly as §19.7 item 39 says the safety half rests on reading
+    `decide`'s arm.
+43. **Four numbers in §19 are now corrected in place, and nothing distinguishes a corrected count
+    from an original one except the block beside it.** §20.3 argues the departure and §20.5 records
+    it, but the record now contains figures whose provenance is *this round re-measured them* and
+    figures whose provenance is *the round that wrote them measured them*, in the same tables, told
+    apart only by prose. A later round re-running §19.4's patterns against §19.4's tree gets the
+    corrected numbers and no signal that they were corrected unless it reads the blocks. **Nothing
+    enforces reading the blocks**, which is §19.7 item 40's gap applied to arithmetic rather than to
+    meaning — and Low 1 is itself the proof that a count written once is trusted afterwards.
+44. **Every correction this round made is prose, and no test fails if a later round un-makes one.**
+    §18.7 item 36 and §19.7 item 40 said this of §18's nine and §19's eight positions; it is now true
+    of a further nineteen. What round 14 adds is narrower and worse than the general gap: two of the
+    thirteen positions §20.2 corrected are **correction blocks written by round 13 to fix a different
+    claim in the same sentence**, so the record now has a stack in which block *n* corrects block
+    *n−1* and block *n+1* corrects block *n*. Nothing checks that a stack converges, and a reader who
+    stops at the first block gets a sentence two rounds out of date.
