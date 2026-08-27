@@ -2066,6 +2066,23 @@ than to confirm. Had a hit appeared it would have been recorded as a judged entr
 narrowing a family or rewording an assertion to make a hit disappear is the one move these checks
 cannot catch (`2d-4a-notes.md` §11.4).
 
+> **Corrected, step 2 round 4 (§20.5) — the scope of the paragraph above is wrong twice.** *The two
+> swept files — `prose_sweep.rs` and `liveness_contract.rs`, since each check's own source is skipped
+> by itself* mis-states which files are swept and by which check. Round 2 wrote prose into **three**
+> source files and **all three are swept**: `prose_sweep.rs` by both checks, `liveness_contract.rs`
+> by the retained-state check, `retained_state_contract.rs` by the liveness check. Each check skips
+> only **its own** source, never its sibling's. So the two green guards establish the
+> **cross-family** result for the two guards' own sources and **both** families for `prose_sweep.rs`
+> — never *no phrase of either family* for `liveness_contract.rs`, whose own family its own guard
+> cannot see.
+>
+> The two own-family holes were measured by hand in round 4, for this commit as well as round 3's,
+> and both are empty: `retained_state_contract.rs` holds **308** retained-state matches and
+> `liveness_contract.rs` **196** liveness matches, and each set is **identical** across
+> `e75ec2b~1..e75ec2b`, with no matched window gained or lost. §20.6 says how that was measured and
+> how the replication was validated. *Had a hit appeared it would have been recorded* is true of what
+> each guard sweeps and silent about what it skips.
+
 **`crates/espansoconfig-core` is untouched.** No path under `src/` changed, so the three frontend
 figures are carried forward unverified.
 
@@ -2192,14 +2209,31 @@ forms:
   of an inventory key, and the value the skip list is compared against, which is exactly where round 1
   and the original code had the lossy conversion.
 
-**Why a struct rather than bare relative `PathBuf`s**, which the review offered as the other shape:
-it leaves both callers simpler, which is the criterion the round was given. `sweep` needs *both*
-forms in the same iteration — the path to read and the string to stamp on every `Hit` — so a bare
-`PathBuf` would have made it call `to_string_lossy` itself, moving the lossy conversion back out of
-the selection layer and into the sweep, which is the opposite of what the finding asks for. The six
-assertion sites in the two guards go on comparing against string literals (`file.reported == "…"`)
-instead of wrapping each literal in `Path::new`. **Skip membership is unchanged**: still
-`skipped.contains(&reported.as_str())`, still the lossy string, so no file's selection status moved.
+**Why a struct rather than bare relative `PathBuf`s**, which the review offered as the other shape.
+**Both shapes satisfy the finding, and this one was chosen for the callers rather than for
+correctness.** The finding asks that the path a file is *read* through never be reconstructed from
+the lossy string, and it says in the same breath to keep `to_string_lossy` at the `Hit::file`
+reporting boundary — which a bare `PathBuf` return does, by leaving `sweep` to convert as it stamps
+each `Hit`. That is where the conversion sat before round 2's extraction, and it is what the review
+asked for, not the opposite of it. Note also that the conversion would not have left the selection
+layer under that shape either: the skip lists are `&[&str]`, so `selected_files` must spell each path
+as a string to test membership whatever it returns. What the struct buys is caller simplicity and one
+place where the two spellings are written down beside each other — `sweep` needs *both* forms in the
+same iteration, the path to read and the string to stamp on every `Hit`, and the six assertion sites
+in the two guards go on comparing against string literals (`file.reported == "…"`) instead of
+wrapping each literal in `Path::new`. **That is a preference between two correct shapes**, and this
+paragraph is not to be read as an argument that the other one was wrong. **Skip membership is
+unchanged**: still `skipped.contains(&reported.as_str())`, still the lossy string, so no file's
+selection status moved.
+
+> **Corrected, step 2 round 4 (§20.2) — the paragraph above was rewritten, and what it said before
+> is recorded here so the change is visible.** It read: *a bare `PathBuf` would have made it call
+> `to_string_lossy` itself, moving the lossy conversion back out of the selection layer and into the
+> sweep, **which is the opposite of what the finding asks for***. That last clause is false. Round 3's
+> finding offered the bare relative `PathBuf` **first**, and asked in the same sentence that
+> `to_string_lossy` be kept at the `Hit::file` reporting boundary — which is exactly where converting
+> inside `sweep` puts it. The struct was a preference, not a correctness argument, and the paragraph
+> now says so.
 
 **What this fix is, said plainly.** It restores the fidelity of an extraction. **It repairs nothing
 observable in this repository, and no test in this workspace distinguishes the two implementations.**
@@ -2226,11 +2260,20 @@ same arguments** — not the `Vec` the sweep walked, which belongs to one invoca
 handed out. (The fourth compares `SKIPPED` with its own literal and reads no selection at all;
 §18.8 item 2 already says what that is worth.)
 
-**The narrowed claim, which every corrected position now makes:** the test re-derives the check's
-selection through the same function the sweep selects with, so what it asserts is *what that function
-answers for this check's trees and skip list*. That is weaker than identity and stronger than a test
-that rebuilt the walk for itself, which would prove only its own copy. Each position also says what
-holds the two traversals together — nothing in the code does.
+**The narrowed claim, and how far each position states it.** The uniform part is the removal: **all
+six corrected positions dropped the identity assertion**, and that is the only thing all six do
+alike. What they leave is that the test re-derives the check's selection through the same function
+the sweep selects with, so what it asserts is *what that function answers for this check's trees and
+skip list* — weaker than identity, and stronger than a test that rebuilt the walk for itself, which
+would prove only its own copy. **Five of the six say the second traversal in so many words**:
+`selected_files`'s doc, both guards' test doc comments, §18.2's correction block and §14 item 5's
+third amendment. The sixth, `prose_sweep.rs`'s **module doc**, is an overview: it says only that a
+check asks which files were selected *through the very function `sweep` selects with*, which is true
+and claims no identity, and it links [`selected_files`], whose doc carries the paragraph. **Two of
+the six go further and say that nothing in the code holds the two traversals to each other** — the
+two guards' test doc comments, where the second call is written. Round 3's record claimed that last
+detail for every position; §20.3 corrects it and says why the fix was to correct the sentence rather
+than to grow this module's doc surface a fourth consecutive round.
 
 **The API-widening remedy was refused.** The review's alternative was to widen `sweep` so it hands
 its selection back beside the hits, making the assertions inspect the very vector that was walked.
@@ -2238,11 +2281,31 @@ Round 3 did not do it, on this ground: **this phase's own §17.8 item 4 and §18
 the doc-and-API surface of `prose_sweep.rs` has been growing with every round and never shrinking**,
 and each widening is a new signature, a new doc paragraph and a new tuple at two call sites — prose
 and shape a later round must audit, to buy an upgrade from *the same function, the same arguments* to
-*the same value*. The narrowed sentence is still real evidence about a real property, and the
-property the assertions defend — that a file dropped from the walk is noticed — is unaffected by
-which of the two traversals answers. Had the fix round come to think the widening was right, the
+*the same value*.
+
+**What the refusal costs, stated at its true size.** The narrowed sentence is still real evidence
+about a real property — **what `selected_files` answers for this check's `SWEPT_TREES` and
+`SKIPPED`**. What it is **not** is evidence about the exact files *this* invocation of `sweep`
+opened, and the difference is not academic: a filter inserted between `selected_files` and `sweep`'s
+read loop, or a change on disk between the two calls, would drop a file from the walk while the
+test's fresh traversal still named it, and every assertion in both guards would stay green. So
+widening `sweep` would buy something real — actual-walk coverage in place of same-function coverage
+— and the refusal is a judgement that the surface costs more than that is worth here, never a claim
+that the upgrade buys nothing. Had the fix round come to think the widening was right, the
 instruction was to stop and report rather than do it; it did not come to think so, and this paragraph
 is the record of the refusal rather than of a deferral.
+
+> **Corrected, step 2 round 4 (§20.3) — two sentences of this section were rewritten, and both are
+> recorded here.** The first read *the narrowed claim, **which every corrected position now makes***
+> and *each position also says what holds the two traversals together — nothing in the code does*:
+> the six positions are individually true but **not equally explicit**, and the module doc states
+> neither the second traversal nor the no-coupling limitation. The second read *the property the
+> assertions defend — that a file dropped from the walk is noticed — **is unaffected by which of the
+> two traversals answers***, which **restated the very identity overclaim this section was fixing**,
+> one paragraph after fixing it: a filter inserted between `selected_files` and `sweep`'s read loop,
+> or a change on disk between the two calls, drops a file from the actual walk while the test's fresh
+> traversal still names it. §20.3 carries both, with the six positions read one by one and the
+> judgement not to grow `prose_sweep.rs`'s module doc to make the first sentence true.
 
 ### 19.4 Finding 3 — what round 2 actually did to the assertions, counted
 
@@ -2293,9 +2356,18 @@ names, assertion messages, module headers and the correction blocks of earlier r
 | Finding | Cited by the review | Found beyond it | Corrected in total | Inspected and left |
 |---|---|---|---|---|
 | 1 | 1 (`prose_sweep.rs`) | **0** in the two guards' subject code; **1** out of scope, named below | 1 | 1 |
-| 2 | 3 homes (§18.2; `prose_sweep.rs` `selected_files` doc; both guards' test docs) | **2** | **6** | 4 |
+| 2 | **4 positions** (§18.2; `prose_sweep.rs`'s `selected_files` doc; the retained-state guard's test doc; the liveness guard's test doc) | **2** | **6** | 4 — two sentences in each guard's `SKIPPED` doc |
 | 3 | 1 (§18.2's last sentence) | **3** | 4 | 2 |
 | 4 | 1 (§18.8 item 4) | **0** | 1 | 4 |
+
+> **Corrected, step 2 round 4 (§20.4) — row 2's two cells.** The *cited* cell read **3 homes**,
+> grouping the two guards' test docs into one; the review cited **four** positions, so the row's own
+> arithmetic was 3 + 2 ≠ 6 in a section that calls itself *cited position by cited position*. The
+> four are now named and the total of six is unchanged. The *inspected and left* cell counts
+> **sentences**, not files — two in each guard's `SKIPPED` doc — where the other cells of the row
+> count positions, and it now says so rather than leaving the granularity to be inferred. §19.1's
+> row 2 was already right, because it spells the same set as *`prose_sweep.rs` ×2, both guards' test
+> docs*.
 
 **Finding 1.** `rg 'to_string_lossy|to_str\(\)' src-tauri/src/` returns 21 positions. Exactly one
 other has the finding's shape — *a path lossily converted and then used to name a file on disk*:
@@ -2307,8 +2379,10 @@ round 4 can decide rather than discover.
 
 **Finding 2.** The two further positions: `prose_sweep.rs`'s **module doc** (*it asks the very list
 `sweep` used*) and §14 item 5's **round-2 amendment** (*the same file selection `sweep` itself
-walks*). Neither is in the review's list, and both are the identity claim in different words. All six
-now carry the narrowed sentence. **Inspected and left, with the reason:** both guards' `SKIPPED` doc
+walks*). Neither is in the review's list, and both are the identity claim in different words. **All
+six dropped the identity claim**, which is the uniform part; how far each one goes beyond that
+differs, and §19.3's *the narrowed claim* paragraph — as round 4 corrected it — says which position
+states what. **Inspected and left, with the reason:** both guards' `SKIPPED` doc
 comments say the test asserts coverage *of this check's own selection — through
 `crate::prose_sweep::selected_files`*, which names the helper and claims no identity with the sweep's
 vector; and both say *`sweep` passes it and `the_sweep_reaches_both_trees` reads it, so the list the
@@ -2353,6 +2427,25 @@ stayed green in both directions — which means the new prose matched no phrase 
 no existing hit was reworded away. **Had a hit appeared it would have been recorded as a judged entry
 with its reason.** Narrowing a family, deleting an entry or rewording a comment to dodge the guard is
 the one move these checks cannot catch (`2d-4a-notes.md` §11.4), and none of the three was made.
+
+> **Corrected, step 2 round 4 (§20.5) — a green guard does not cover a file it skips.** *Both stayed
+> green in both directions — which means the new prose matched no phrase of either family* and *had a
+> hit appeared it would have been recorded as a judged entry with its reason* are **wider than the
+> gates that were run**. Each check's `SKIPPED` holds exactly one path, its own source, so a
+> **liveness**-family phrase written into `liveness_contract.rs`, and a **retained-state**-family
+> phrase written into `retained_state_contract.rs`, are invisible to their own guard and would
+> require no inventory entry however many of them were added. What two green guards establish about
+> this round's edits is therefore: **both** families for `prose_sweep.rs`, the **retained-state**
+> family for `liveness_contract.rs`, and the **liveness** family for `retained_state_contract.rs` —
+> the cross-family half, and nothing at all about the two own-family holes.
+>
+> Those two holes were closed for this commit by **inspection rather than by a gate**, in round 4 and
+> not here; §20.6 records what it measured and how it was validated. The result: the own-family match
+> sets of both files are **identical** across `2bd7bd5~1..2bd7bd5` — **308** retained-state matches in
+> `retained_state_contract.rs`, **196** liveness matches in `liveness_contract.rs`, with no matched
+> window gained and none lost. **86 / 140 unchanged** and *no existing hit was reworded away* stand
+> as written: every inventoried hit lives in a file its own guard sweeps, so those two are inside what
+> the gates cover.
 
 ### 19.8 What changed, file by file
 
@@ -2435,3 +2528,427 @@ Round 4 should start here.
    sentences, and the likeliest sites this time are the two paragraphs named in item 3 and §19.4's
    assertion arithmetic, which asserts counts a reader must take from `e75ec2b~1` rather than from
    any test.
+
+---
+
+## 20. Step 2, review round 4, and the fix round that answers it
+
+**Verdict: NOT READY**, four findings, all Low, **all four sentences and none of them code**.
+`docs/reviews/phase-2d-4a-C.md`, section *Step 2 — round 4*. Every one of the four is a defect the
+round-3 fix wrote **about its own work**, in §19 — the section whose subject is round 2's sentences
+being false about round 2's work.
+
+**That is the fourth consecutive round whose entire finding list is a previous fix round's own
+output**, and the count is worth stating plainly because it is now a property of this phase rather
+than an accident of one round: step 1 took four rounds, each finding the previous fix's new
+sentences; step 2's rounds 1, 2 and 3 did the same; round 4 makes four in a row on step 2 alone.
+What round 4 did **not** find is as much of the record as the four findings: the read-path fix of
+§19.2 was cleared as sound, `SelectedFile`'s untestable-filename argument was cleared as no stronger
+than its evidence, §19.4's assertion arithmetic was checked against the `e75ec2b~1..e75ec2b` diff and
+agreed with, the 29/20 reverse-inventory figures agreed, the six correction blocks were read as
+accurate historical markers, and **the annotate-rather-than-delete policy was explicitly cleared as
+defensible** rather than tolerated. So the code this step ships was reviewed and stands; what failed
+again is the account of it.
+
+### 20.1 The four items
+
+| # | Where | Kind | What was wrong |
+|---|---|---|---|
+| 1 | §19.2, the *why a struct* paragraph | sentence — a rejected alternative mischaracterized | *a bare `PathBuf` … is the opposite of what the finding asks for*; the review **offered** that shape |
+| 2 | §19.3, two sentences | sentence — a uniformity claim and a revived identity claim | *every corrected position now makes* the same claim; and *the property the assertions defend … is unaffected by which of the two traversals answers* |
+| 3 | §19.6, the table's row 2 | sentence — an accounting whose grouping breaks its own arithmetic | *3 homes* against four cited positions, so 3 + 2 ≠ 6 |
+| 4 | §19.7 | sentence — a green gate promoted past what it covers | *both stayed green … which means the new prose matched no phrase of either family*; each guard skips its own source |
+
+### 20.2 Finding 1 — the alternative the review offered, described as its opposite
+
+**What §19.2 said.** *A bare `PathBuf` would have made it call `to_string_lossy` itself, moving the
+lossy conversion back out of the selection layer and into the sweep, which is the opposite of what
+the finding asks for.*
+
+**Why it is false.** Round 3's finding named that shape first: *"Have `selected_files` retain relative
+`PathBuf`s, or return a small structure containing both … keep `to_string_lossy` at the `Hit.file`
+reporting boundary as before."* Converting inside `sweep` as it stamps each `Hit` **is** the
+reporting boundary, and it is where the conversion sat before round 2's extraction. A record that
+describes the reviewer's own first suggestion as the opposite of the finding biases the recorded
+trade toward the shape that was taken, and it is the trade the next round has to audit.
+
+**What it says now.** That **both shapes satisfy the finding**, and that `SelectedFile` was chosen
+for the callers rather than for correctness: `sweep` needs both forms in the same iteration, and the
+six assertion sites compare against string literals instead of wrapping each in `Path::new`. One
+detail was added because it is true and makes the *opposite* claim untenable in either direction:
+**the conversion would not have left the selection layer under the bare-`PathBuf` shape either**,
+because the skip lists are `&[&str]` and `selected_files` must spell each path as a string to test
+membership whatever it returns. The paragraph now ends by saying it is a preference between two
+correct shapes and is not to be read as an argument that the other was wrong.
+
+### 20.3 Finding 2 — the uniformity claim, and the identity claim that came back one sentence later
+
+Two sentences of §19.3, and they fail differently.
+
+**(a) *The narrowed claim, which every corrected position now makes* … *Each position also says what
+holds the two traversals together — nothing in the code does*.** The six positions are each true, and
+they are **not equally explicit**. Read against the tree rather than against the round's intention:
+
+| Position | dropped the identity claim | says *second traversal* | says *nothing couples them* |
+|---|---|---|---|
+| `prose_sweep.rs` module doc | yes | **no** — an overview, and it links `selected_files` | **no** |
+| `prose_sweep.rs`, `selected_files`'s doc | yes | yes | no |
+| `retained_state_contract.rs`, the test doc | yes | yes | **yes** |
+| `liveness_contract.rs`, the test doc | yes | yes | **yes** |
+| §18.2's round-3 correction block | yes | yes | no |
+| §14 item 5's third amendment | yes | yes | no |
+
+So the uniform part is the **removal**, five of the six state the second traversal, and two state the
+no-coupling limitation. §19.3 now says exactly that, and §19.6's *all six now carry the narrowed
+sentence* — which the review did not cite and which has the same shape — was narrowed with it.
+
+**The judgement this round had to make, and which way it went.** The alternative was to make the
+claim true by growing `prose_sweep.rs`'s module doc until it carries the limitation too. **It was not
+taken, and the reasons are three:**
+
+1. **The doc surface has grown three consecutive rounds and shrunk in none** — §19.10 item 3 measured
+   it, 153 comment lines to 176 — and nothing in this workspace pins a word of it. Growing it a
+   fourth time to rescue a sentence in the record spends the exact currency this phase keeps
+   recording as overspent.
+2. **It would put a second copy of one claim in one module.** `selected_files`'s doc holds *what a
+   test calling this gets, stated exactly*; the module doc links to it. Duplicating the limitation
+   into the overview creates two statements that must be kept in step — a fix applied to one copy and
+   not the other is the failure mode this module's own header names as the reason the module exists.
+3. **The record's job is to be true of the code; the code's job is not to be shaped so that a
+   convenient sentence becomes true.** Editing a swept source file for a documentation reason, on a
+   round with no code finding, inverts that.
+
+The cost is real and is written down rather than absorbed: a reader who reaches the module doc alone
+gets the shared-function fact without the limitation and has to follow the link. §20.10 item 2 keeps
+it on round 5's list.
+
+**(b) *The property the assertions defend — that a file dropped from the walk is noticed — is
+unaffected by which of the two traversals answers*.** This is the round-3 finding restated as a
+consequence, one paragraph after correcting it. It is false in exactly the way the finding said: a
+filter inserted between `selected_files` and `sweep`'s read loop, or a change on disk between the two
+calls, drops a file from the actual walk while the test's fresh traversal still names it, and every
+assertion in both guards stays green. §19.3 now says that the assertions protect **what
+`selected_files` answers for this check's `SWEPT_TREES` and `SKIPPED`**, not the exact files that
+invocation of `sweep` opened; that widening `sweep` would therefore buy something real — actual-walk
+coverage in place of same-function coverage; and that the refusal is a judgement about surface cost,
+never a claim that the upgrade buys nothing.
+
+### 20.4 Finding 3 — a table that groups two files into one and then adds them up
+
+§19.6's row 2 read `| 2 | 3 homes (§18.2; prose_sweep.rs selected_files doc; both guards' test docs)
+| 2 | 6 | 4 |`. The review cited **four** positions — §18.2, `selected_files`'s doc, and **one test
+doc in each guard** — so the row's own arithmetic was 3 + 2 ≠ 6, inside a section that calls itself
+*cited position by cited position*. The cited cell now names the four, the total of six is unchanged,
+and a correction block under the table records what the row said and why it was wrong.
+
+Two things the fix does beyond the requested word change. First, the row's **inspected and left**
+cell counts *sentences* — two in each guard's `SKIPPED` doc — where every other cell counts
+positions; the cell now says so rather than leaving the granularity to be inferred, because mixing
+two units silently in one row is the same defect at one remove. Second, §19.1's row 2 was checked and
+is **right**: it spells the same set as *§18.2, `prose_sweep.rs` ×2, both guards' test docs, §14 item
+5*, which is six, so the two tables now agree with each other and with §19.3.
+
+### 20.5 Finding 4 — what a green guard covers, and what it cannot
+
+§19.7 said that both guards *stayed green in both directions — which means the new prose matched no
+phrase of either family*, and that *had a hit appeared it would have been recorded as a judged entry
+with its reason*.
+
+**The self-skip is real, and it was verified in the code rather than taken from the review.** Each
+guard's skip list holds exactly one path, and it is that guard's own source:
+`retained_state_contract.rs:288` is `const SKIPPED: &[&str] = &["src-tauri/src/retained_state_contract.rs"]`
+and `liveness_contract.rs:203` is the mirror. Each guard's `the_sweep_reaches_both_trees` pins its own
+list with `assert_eq!(SKIPPED, [...])` and asserts the selection excludes it. So a **liveness**-family
+phrase written into `liveness_contract.rs`, and a **retained-state**-family phrase written into
+`retained_state_contract.rs`, are invisible to their own guard and would require no inventory entry
+however many were added.
+
+What two green guards therefore establish about round 3's edits is:
+
+| File round 3 edited | retained-state family | liveness family |
+|---|---|---|
+| `prose_sweep.rs` | covered — swept by the retained-state check | covered — swept by the liveness check |
+| `liveness_contract.rs` | covered | **not covered — its own guard skips it** |
+| `retained_state_contract.rs` | **not covered — its own guard skips it** | covered |
+
+§19.7 now carries a correction block saying that, scoping the gate evidence to the cross-family half
+plus both families for `prose_sweep.rs`, and pointing at §20.6 for the inspection that closes the
+other two cells. Two claims of §19.7 stand as written and are marked as standing: **86 / 140
+inventory entries unchanged**, and *no existing hit was reworded away* — every inventoried hit lives
+in a file its own guard sweeps, which was checked rather than assumed (neither inventory names its
+own check's source at all; the one entry naming any of the three files is the retained-state
+inventory's `prose_sweep.rs` / `"one entry per"`, at `retained_state_contract.rs:954`).
+
+The same shape was found one section earlier and corrected with it — §18.6, sweep 4 below.
+
+### 20.6 The own-family inspection finding 4 demanded
+
+**What was inspected.** The two cells the guards cannot fill: the **retained-state** family over
+`retained_state_contract.rs`, and the **liveness** family over `liveness_contract.rs`, at
+`2bd7bd5~1` and at `2bd7bd5` — round 3's own commit, whose source files the working tree still
+matches byte for byte (`git status` names no file under `src-tauri/`).
+
+**How.** By replicating `prose_sweep`'s matching by hand — `prose_units`' comment-run joining, the
+lowercased plain-substring search, the phrase family read out of the file's own `const` array — and
+running it over the skipped file at both revisions. A hand replication is only worth what its
+agreement with the real thing is worth, so it was **validated against both inventories before being
+believed**: run over the 70 files each check actually selects, it reproduces the retained-state
+`INVENTORY` exactly — **140 entries, 140 distinct `(file, phrase)` keys found, zero disagreements** —
+and the liveness `INVENTORY` exactly — **86 and 86, zero disagreements**. Every count matches, in
+both directions, for both checks.
+
+**What it found.**
+
+| Skipped file | Own family | Matches at `2bd7bd5~1` | Matches at `2bd7bd5` | Windows gained | Windows lost |
+|---|---|---|---|---|---|
+| `retained_state_contract.rs` | `RETAINED_STATE_SHAPES` (88) | **308** | **308** | 0 | 0 |
+| `liveness_contract.rs` | `LIVENESS_SHAPES` (61) | **196** | **196** | 0 | 0 |
+
+Per-phrase counts are identical for all 88 and all 61 phrases, and the multiset of matched **text
+windows** is identical too — so nothing was added, and no existing own-family match was reworded
+within 60 characters either side. Round 3 added **13 lines to each guard**, of which **20** across the
+two are `///` doc-comment lines; none of them matches a phrase of the family that file's own guard
+cannot see. **The claim §19.7 made is true for this commit — it was simply not the guards that
+established it.**
+
+The same inspection was run over round 2's commit, because §18.6 makes the same over-scoped claim:
+`e75ec2b~1..e75ec2b` also leaves both own-family match sets identical, 308 and 196, no window gained
+or lost.
+
+**A number this record did not have before, and should.** The self-skip hole of §14 item 5 has always
+been stated qualitatively — *a retained-state claim written into `retained_state_contract.rs` is
+invisible to this check*. Its size, measured: **308** own-family matches sit in
+`retained_state_contract.rs` and **196** in `liveness_contract.rs`, every one of them unjudged and
+unjudgeable by its own guard. Where they sit, measured by line against the two `const` arrays rather
+than described:
+
+| Skipped file | inside its phrase array | inside its `INVENTORY` | everywhere else in the file |
+|---|---|---|---|
+| `retained_state_contract.rs` | **95** | **192** | **21** |
+| `liveness_contract.rs` | **72** | **106** | **18** |
+
+The first two columns are the reason both `SKIPPED` docs give for the skip, stated there as *one
+inventory entry per phrase, kept in step with the phrase list, recording nothing about the pipeline*
+— the array's literal lines match themselves, and a reason line quotes the wording it judges. **The
+last column is the part that is prose about the subsystem** — and it was read rather than
+characterized: in `retained_state_contract.rs` the 21 are **6** in the module doc's first comment
+run, **11** in a later comment run of the same header, and **4** in the wrapped-claim test, whose
+fixture string deliberately holds `within the epoch` across a line break. Not one of the 21 is judged
+by any inventory, because its own check never opens the file. That is the
+hole at its measured size, and it is not a defect of this round; it is the stated design, now with a
+number on it.
+
+### 20.7 The sweeps, cited position by cited position
+
+Each finding was swept for its **shape** rather than for its words, over this record and the three
+source files, per `CLAUDE.md`. **Sweep 1 found nothing at all beyond its cited position and sweep 3
+found no second table — both are said out loud rather than left silent**, which is what §19.6
+established as this record's form and what the empty half of a sweep is for.
+
+| Finding | Cited by the review | Found beyond it | Corrected in total | Inspected and left |
+|---|---|---|---|---|
+| 1 | 1 (§19.2) | **0** | 1 | **8** |
+| 2 | 1 position, 2 sentences (§19.3) | **1** (§19.6) | 2 positions, 3 sentences | **6** |
+| 3 | 1 row, 1 cell (§19.6) | **0** further table; 1 further **cell of the same row** | 1 row, 2 cells | **12 further tables**, plus 2 arithmetic claims re-derived outside a table |
+| 4 | 1 (§19.7) | **1** (§18.6) | 2 | **18 lines**, in the four kinds below |
+
+**Sweep 1 — a record that mischaracterizes a rejected alternative.**
+`rg -n -i 'refus|declin|rejected|the alternative|the other shape|instead of|was not built|would have
+(made|meant|been)|the review offered|not do it|trade'` over the record returns **36** lines. Every
+recorded refusal or trade in §14, §17, §18 and §19 was then read against the review round that
+prompted it. **Nothing further was found**, and the eight inspected and left are:
+
+1. **§19.3's API-widening refusal.** The review's alternative was *"return the selected paths
+   alongside the hits from one sweep operation"*; §19.3 renders it as *widen `sweep` so it hands its
+   selection back beside the hits* — faithful. Round 4 cleared the refusal itself as defensible. Its
+   **benefit** sentence was wrong, and that is finding 2, corrected in §20.3.
+2. **§18.2's correction block**, naming the same refusal — accurate.
+3. **§19.10 item 4** — *the refusal is a judgement, not a measurement* — accurate, and it does not
+   characterize the alternative at all.
+4. **§18.8 item 4's refusal of a general selection assertion.** The alternative there is the fix
+   round's own, not a reviewer's, and *it would be `selected_files` restated in the test* is a true
+   description of it; round 3's correction block already cut the **benefit** claim down.
+5. **§18.3's rejected `&[SKIPPED]`-in-the-test shape** — a second spelling of one skip list, which is
+   what the sentence says.
+6. **§14 item 7 and §17.3's kept-the-copies trade** — leaving two copies to preserve the byte-identity
+   proof would have left one defect in both, which is what the record says and what round 1 found.
+7. **§17.8 item 1's refusal to make a zero count meaningful** — it names what is lost, a pinned
+   absence, rather than dismissing it.
+8. **§11.2 item 2** (outside the four sections, returned by the pattern): *making them read alike
+   would have been the regression, not the fix* — step 1's subject, describing a homogenization the
+   round declined, and cleared at step 1's round 4.
+
+**Sweep 2 — an *every position now says X* uniformity claim, and any surviving traversal-identity
+claim.** Two searches. `rg -n -i 'every (corrected )?position|each position|all six|every one of
+the|in all (three|four|five|six)|every occurrence|everywhere|both guards.{0,40}(now|each)|uniform'`
+returns **13** lines; `rg -n -i 'the same one the sweep|the very list|the list the walk is given|same
+file selection|the very vector|the vec the sweep|identity|actual selection|same selection'` over the
+record **and** the three source files returns **60** — 43, 14, 2 and 1 — most of them the word
+*identity* in this
+project's two unrelated senses — the path-identity register, and byte-identity of a test block.
+**One position beyond the citation**: §19.6's *all six now carry the narrowed sentence*, corrected
+with §19.3. Six inspected and left:
+
+1. **§18.4's *every position is annotated in §13.1's pattern*** — a claim about annotation, not about
+   strength, and true of the three positions it lists.
+2. **§14 item 5's third amendment** and 3. **§18.2's round-3 correction block** — both **quote** the
+   identity sentence as the defect and correct it; the quoted words are historical by the record's
+   own policy, which round 4 cleared.
+4. **`prose_sweep.rs:220`, *weaker than identity*** — the narrowed verdict itself.
+5. **Both guards' `SKIPPED` docs, *the list the walk is given*** — re-checked against the code, not
+   inherited from §19.6: `SKIPPED` is one `const`, `sweep` is passed it and the test reads it, so the
+   claim is true and correcting it would be the mirror of the defect.
+6. **Step 1's §3 and §5 *every position that says…* claims** — the pointer inventory, a different
+   subject, cleared across step 1's four rounds.
+
+**Sweep 3 — an accounting table whose groupings make its own arithmetic wrong.** Every table in §17,
+§18 and §19 was re-added, and two arithmetic claims outside a table were re-derived from the source
+rather than accepted. **No second table is wrong**; what the sweep did find is a second **cell** of
+the same row, fixed with it. **Thirteen tables were re-added — §19.6's is the corrected one, and the
+other twelve are left**:
+
+- **§19.6's rows 1, 3 and 4** — 1 + 0 = 1, 1 + 3 = 4, 1 + 0 = 1, and each row's *inspected and left*
+  count matches the positions its paragraph names (1, 2, 4). Row 2's second cell is the extra fix.
+- **§19.1's item table** — row 2's *where* cell names six positions and agrees with the corrected
+  total.
+- **§19.4's assertion table** — 4 → 7 net +3 and 3 → 7 net +4; round 4 verified both against the
+  `e75ec2b~1..e75ec2b` diff.
+- **§18.1's four items**, **§18.2's four-assertion table** (four rows, and the sentence says *gains
+  four*), **§18.5's two probes**, **§17.2's before/now table**, **§17.4's array table** (140 → 140,
+  86 entries), **§17.5's eight probes**, and the three gate tables of §16, §17.7, §18.7 and §19.9 —
+  no grouping, and no arithmetic to break.
+- **Re-derived rather than accepted:** §13.3's *224 hits over 29 files* — the `count:` fields of the
+  retained-state inventory sum to **224** and its distinct `file:` values number **29**; and §19.5's
+  *29 protected files and 20* — **29** and **20** distinct files. Both hold.
+
+**Sweep 4 — a green gate promoted into evidence beyond what it covers.**
+`rg -n -i 'green|stayed (green|clean)|matched no phrase|had a hit appeared|run after every edit|to
+find out rather than'` over the record returns **23** lines. **One position beyond the citation, and
+it is worse than the cited one**: §18.6's closing paragraph calls `prose_sweep.rs` and
+`liveness_contract.rs` *the two swept files … since each check's own source is skipped by itself*,
+which mis-states both which files are swept — round 2 edited **three** source files and all three are
+swept, each by the check that is not it — and what green proves for them. It now carries a correction
+block with the round-2 measurement of §20.6.
+
+**Five of the 23 lines are the two corrected positions.** The other **18** were read one by one and
+fall into four kinds, and **no line of any of them infers coverage from green**:
+
+- **Gate rows reporting what was run** — §16's last row with its round-2 correction block, §18.7's
+  last row, and §19.9's *both prose guards* row, which now sits in the same section as the correction
+  that scopes it.
+- **Disclaimers of what green means**, which are the opposite shape — §10.7's and §11.7's *a family
+  is discovered by a reviewer, after the sweep is green*, and §17.8 item 4's *reverting any sentence
+  of it while keeping the code leaves every test green*.
+- **Green measured under a probe, where it is the finding rather than the evidence** — §13.5's
+  revert, §14 item 5's round-2 amendment and §18.1 item 3 (*adding it to this check's skip list left
+  all four assertions green*), and §18.5's *dropping either sibling would have left every test in
+  both files green*, which is the round-2 finding stated as a measurement. §17.5's eight probes and
+  §18.5's two are records of **red**.
+- **The older check's four tests are green**, each already annotated as the weaker thing that
+  replaced the retired byte-identity proof — §13.1 with its correction block, §15's correction block,
+  §17.3 and §18.4.
+
+One line sits outside those kinds and is left: §10.6's *both were green with identical counts*, a
+note that the workspace suite ran twice in that round, which claims nothing about coverage.
+
+### 20.8 What changed, file by file
+
+**One file. No source file changed, and nothing under `src/` was touched.**
+
+- **`docs/decisions/2d-4a-C-notes.md`** — 2437 lines to **2954**, measured with `wc -l` before and
+  after (+517, and this section is the bulk of it). **Four corrected passages in
+  §19** — §19.2's *why a struct* paragraph; §19.3's *narrowed claim* and its *what the refusal costs*
+  half; §19.6's table row 2 and its *all six now carry the narrowed sentence*. **Five new correction
+  blocks**, one under each rewritten passage so the change is visible to a reader of §19 alone —
+  §19.2, §19.3, §19.6's table and §19.7 — plus §18.6's, which sweep 4 found rather than the review.
+  And this section.
+- **`src-tauri/src/prose_sweep.rs`** — **405** lines, unchanged. **`retained_state_contract.rs`** —
+  **1305**, unchanged. **`liveness_contract.rs`** — **874**, unchanged. `RETAINED_STATE_SHAPES` (88),
+  `LIVENESS_SHAPES` (61) and both `INVENTORY` arrays (140 and 86) are untouched, and §20.3 records
+  the decision **not** to grow `prose_sweep.rs`'s module doc, which is why the first of those numbers
+  did not move.
+- **`docs/reviews/phase-2d-4a-C.md`** is modified in the tree and **was not touched by this round**:
+  it is the orchestrator's verbatim append of the round-4 reply.
+
+**`crates/espansoconfig-core` is untouched**, and no path under `src/` changed, so the three frontend
+figures are carried forward unverified.
+
+### 20.9 The gates after this round
+
+Every row is a command run on this host for this round; nothing is carried from §19.9 except the
+frontend line, which is marked as carried.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1313 passed, 0 failed**, 26 result lines all `ok` — **unmoved**, and necessarily so: this round changed one Markdown file |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed**, 268 filtered out, 77.08 s — the host-scar gate, run alone after `pkill -f 'target/debug/deps/espansoconfig-'` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| `cargo fmt --check` | clean, exit 0 |
+| `cargo doc --workspace --no-deps` | exit 0, **73** `links to private item` warnings — the pre-existing count, unmoved — and **zero** unresolved links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `retained_state_contract`'s four tests | **4 passed, 0 failed** — the guard green in both directions |
+| `liveness_contract`'s four tests | **4 passed, 0 failed** — likewise |
+| The own-family inspection of §20.6 | 140/140 and 86/86 inventory agreement; **308 → 308** and **196 → 196** across `2bd7bd5~1..2bd7bd5`, 0 windows gained, 0 lost |
+| `git status --short --untracked-files=all` | two paths: `docs/decisions/2d-4a-C-notes.md` and `docs/reviews/phase-2d-4a-C.md` — **none under `src/`, and none under `src-tauri/`**. The second is the orchestrator's verbatim append of the round-4 reply, **76 insertions, 0 deletions, and untouched by this round** (`git diff --numstat`) |
+
+**One deviation, recorded rather than smoothed over, exactly as §10.6 recorded the same one.** The
+workspace suite was run **twice**: the first invocation's tail showed the last crates' results but not
+a total, and the second was piped through a `test result` fold to add the 26 lines up. Both were
+green; the figure above is the fold's. Host discipline says *once*, and the reason it says so is the
+spurious baseline-scan timeout this machine produces after a build — which did not occur in either
+run, and the `watch_check::` gate that is sensitive to it was run alone, after a `pkill`, as
+instructed.
+
+The frontend baselines **431 / 2125 / 184** are carried forward **unverified**, because this round
+touched no path under `src/`. `npm run check`, `npm test` and `npm run build` were **not run**, and
+no figure for them is claimed.
+
+### 20.10 What this round does **not** close, and where it is thin
+
+Round 5 should start here, and the first three items are this round's own new prose.
+
+1. **§20.3's table of six positions is a hand reading of six passages, and nothing checks it.** It
+   claims which of them state the second traversal and which state the no-coupling limitation. A
+   later edit to any of the six — the module doc especially — makes a row of it false with no test
+   failing. It is the same class of claim the four rounds before this one kept getting wrong, written
+   in a denser form.
+2. **The judgement in §20.3 is a judgement, and a round that weighs it differently would edit the
+   module doc.** Refusing to grow `prose_sweep.rs`'s doc leaves the module doc as the one corrected
+   position that states neither the second traversal nor the no-coupling limitation, and it relies on
+   a reader following the link to `selected_files`. Nothing enforces that the link stays, or that
+   `selected_files`'s paragraph stays.
+3. **§20.6's inspection is a hand replication, and its validation is an agreement, not a proof.** It
+   reproduces both inventories exactly over the 70 files each guard selects, which is strong evidence
+   that the replication matches the Rust — but it is a **second implementation** of `prose_units` and
+   the substring search, which is the very thing §18.8 item 4 refused to build inside a test, and it
+   lives in a scratch directory rather than in the repository. Nothing in the workspace re-runs it.
+   If round 5 wants this property guarded rather than measured once, the honest options are a test
+   that sweeps each guard's own source with its own family and pins the **count**, or an accepted
+   permanent hole; a note in a record is what exists today.
+4. **The self-skip hole now has a number, and no owner.** 308 and 196 own-family matches sit
+   unjudged in the two guards' own sources. §14 item 5 states the hole; §20.6 sizes it; nothing
+   proposes to close it, and closing it would mean one inventory entry per phrase-array line, which
+   is what both `SKIPPED` docs give as the reason for the skip. A round that wants the *prose* half
+   without the array half would need a selection finer than a file, which neither `sweep` nor
+   `selected_files` has.
+5. **Round 3 left six correction blocks and one inline addition; this round added five more**, in
+   §18.6, §19.2, §19.3, §19.6 and §19.7 — so the annotations now sit in §14 item 5, §17.2, §18.2
+   (two), §18.6 (an inline one **and** a block, from different rounds), §18.7, §18.8 item 4, §19.2,
+   §19.3, §19.6 and §19.7, on top of the round-1 and round-2 blocks in §13.1, §15 and §16. §18.8
+   item 6 called them *prose about prose* and §19.10 item 5 said it compounds; it compounded again,
+   and **§19 has now become what §18 was — a section that cannot be read straight**. The policy was
+   cleared by round 4 as defensible and is kept — but the cost is now large enough that a round which
+   reorganizes §18 and §19 rather than annotating them again should say so before starting.
+6. **This round asserted counts a reader must take from a scratch script**: 308 and 196; their
+   95 / 192 / 21 and 72 / 106 / 18 splits; the 6 / 11 / 4 reading of the 21; 140/140 and 86/86; and
+   the 20 added `///` lines. They are reproducible from
+   `2bd7bd5~1..2bd7bd5` and the shipped tree by anyone who rebuilds the replication, and that is the
+   whole of their evidence. §19.4's assertion arithmetic was the equivalent exposure last round, and
+   round 4 checked it against the diff; this round's figures are a larger surface of the same kind.
+7. **This round wrote sentences, and the round that reviews them is not optional.** Four consecutive
+   rounds have found their entire finding list in the previous fix round's own words, and there is no
+   reason to expect the fifth to be different. The likeliest sites are item 1's table, §20.6's *the
+   claim §19.7 made is true for this commit — it was simply not the guards that established it*
+   (which is a claim about **two** revisions of two files and nothing else), and §20.7's four sweep
+   counts, which are hand tallies of `rg` output and are exactly the kind of arithmetic finding 3 was
+   about.

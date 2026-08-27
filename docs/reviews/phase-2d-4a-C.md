@@ -366,3 +366,79 @@ Suggested remedy: State that no general selection assertion covers the remaining
 ### Verdict rationale
 
 The reciprocal non-exemption behavior requested by round 2 is present, and the historical correction blocks now hold. The round is nevertheless NOT READY because the extraction loses filesystem path fidelity and §18 introduces three substantively false descriptions of its evidence, diff, and remaining coverage hole. These are new defects in this fix round, not restatements of wording already corrected.
+
+## Step 2 — round 4 (against the round-3 fix: `SelectedFile` and the lossless read path, the narrowed identity sentence at six positions, the refused API widening, §19.4's assertion arithmetic, the six correction blocks, and §19 in full)
+
+VERDICT: NOT READY
+Counts: 0 High, 0 Medium, 4 Low
+
+### Finding 1 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2195-2200`
+
+> “a bare `PathBuf` would have made it call `to_string_lossy` itself, moving the lossy conversion back out of the selection layer and into the sweep, which is the opposite of what the finding asks for.”
+
+What is wrong: The review explicitly offered bare relative `PathBuf`s as one valid remedy and said to keep `to_string_lossy` at the `Hit::file` reporting boundary. Moving that conversion into `sweep` would therefore have followed, not opposed, the finding. The struct is still a reasonable choice because it keeps both forms together and simplifies callers.
+
+Why it matters: §19 falsely characterizes the rejected alternative, biasing the recorded design trade in favor of the chosen representation.
+
+Suggested remedy: Say that both alternatives satisfy the finding and that `SelectedFile` was chosen for caller simplicity and to centralize the two spellings.
+
+### Finding 2 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2229-2243`
+
+> “The narrowed claim, which every corrected position now makes … Each position also says what holds the two traversals together — nothing in the code does.”
+>
+> “the property the assertions defend — that a file dropped from the walk is noticed — is unaffected by which of the two traversals answers.”
+
+What is wrong: The second sentence repeats the identity overclaim this round was fixing. A filter inserted between `selected_files` and `sweep`’s read loop, or a filesystem change between the two calls, can drop a file from the actual walk while the test’s fresh traversal still includes it. Which traversal answers therefore does affect whether the assertion proves actual-walk coverage. The six corrected homes are individually true, but not equally explicit: `prose_sweep.rs`’s module doc only says the same function is used and does not state the second-traversal/no-coupling limitation that §19 says every position carries.
+
+Why it matters: This overstates the evidence precisely where §19 justifies refusing the stronger API. The refusal remains defensible, but the record understates what widening `sweep` could buy.
+
+Suggested remedy: State that the assertions protect what `selected_files` answers for the constants, not necessarily the exact files opened by that invocation of `sweep`. Narrow the “every corrected position” claim to say all six removed the identity assertion; do not claim they carry equal detail.
+
+### Finding 3 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2293-2297`
+
+> `| 2 | 3 homes (§18.2; prose_sweep.rs selected_files doc; both guards' test docs) | 2 | 6 | 4 |`
+
+What is wrong: The review cited four positions: §18.2, `selected_files`’s doc, and one test doc in each of the two guards. Adding the two positions found beyond the review gives the stated total of six. Calling the cited set “3 homes” makes the row’s arithmetic 3 + 2 ≠ 6.
+
+Why it matters: §19.6 describes itself as “cited position by cited position”; grouping two separate files into one “home” defeats that accounting and creates another false count in the audit record.
+
+Suggested remedy: Change “3 homes” to “4 positions,” preserving the total of six.
+
+### Finding 4 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2347-2354`
+
+> “both stayed green in both directions — which means the new prose matched no phrase of either family”
+>
+> “Had a hit appeared it would have been recorded as a judged entry with its reason.”
+
+What is wrong: Each guard skips its own source. A new liveness-family phrase in `liveness_contract.rs`, or a new retained-state-family phrase in `retained_state_contract.rs`, is invisible to the corresponding guard and would not require an inventory entry. Green guards establish only the cross-family result for those two files; they establish both families for `prose_sweep.rs`. The actual additions happen not to introduce a matching own-family phrase, but that requires inspecting the diff, not inferring it from the tests.
+
+Why it matters: §19 promotes green checks into evidence over the exact self-skip holes both modules expressly disclose.
+
+Suggested remedy: Scope the gate evidence to files each guard actually sweeps, and record any separate inspection used to clear own-family additions in each guard’s source.
+
+### What I checked and cleared
+
+- `SelectedFile` restores the lossless read path: `sweep` joins `file.relative`, never `file.reported`, when opening a file.
+- Leaving skip membership, `Hit::file`, and inventory keys on `reported` is correct for this fix. It preserves the original representation and all 86/140 inventory keys while preventing that lossy spelling from naming the file read.
+- `SelectedFile`’s non-UTF-8 claim is sound and no stronger than the argument supports: lossy conversion changes an invalid name’s representation, so reconstructing a path from it names a different path or none.
+- All six corrected identity passages are individually true and no longer claim that the test receives the vector `sweep` walked. Finding 2 concerns §19’s claim that they have equal strength and that actual-walk coverage is unaffected.
+- Refusing to widen `sweep` is defensible: the current assertions materially protect the shared selection function and constants, while returning the selection would enlarge an already growing API and documentation surface. The refusal only needs its benefit stated accurately.
+- The assertion arithmetic in §19.4 matches the actual `e75ec2b~1..e75ec2b` diff: retained-state 4→7 after one removal and four additions; liveness 3→7 after four additions.
+- The reverse inventory comparison protects 29 retained-state files and 20 liveness files, as §19.5 states.
+- The six correction blocks and inline addition accurately mark historical text. Although they make §18 harder to read linearly, retaining immediately annotated measurements is a defensible decision-record policy rather than a defect.
+- The path-selection order, ASCII-tree count of 71 files, 70 selected files per guard, 153→176 comment-line measurement, source line counts, and unchanged inventories agree with the tree.
+- The disclosed `dispatch_check.rs` lossy destination is harmless for its committed ASCII corpus and was not rediscovered as a finding.
+- The supplied test, clippy, formatting, and frontend-disclosure evidence is not contradicted by the source or diffs. I did not rerun those gates, as instructed.
+- The retained-state and liveness contracts themselves remain untouched and consistent with the checks’ stated scope.
+
+### Verdict rationale
+
+The read-path code fix is sound, the untestable filename argument holds, and the principal assertion arithmetic is correct. The round remains NOT READY because §19 introduces four Low record defects. Finding 2 reintroduces the same selection-versus-actual-traversal substance round 3 had already corrected; Findings 1, 3, and 4 are new defects in this fix round’s account of the alternative remedy, its position count, and what green guards prove.
