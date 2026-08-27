@@ -3663,6 +3663,122 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2d-4a-C step 2 (the check; implemented and green, **the mandatory Codex round is owed**)
+
+**The mechanism exists.** `src-tauri/src/retained_state_contract.rs` (1281 lines) is the analogue of
+`liveness_contract.rs` for the family four review rounds kept finding, and
+`src-tauri/src/prose_sweep.rs` (236 lines) is the machinery both checks now share. Record
+`docs/decisions/2d-4a-C-notes.md` §13–§16.
+
+### The extraction took nothing away, and that was verified as characters rather than accepted
+
+The step's central risk was that factoring the sweep out of the shipped check would quietly weaken it.
+**The orchestrator verified the three named blocks itself**, by extracting each from
+`git show HEAD:src-tauri/src/liveness_contract.rs` and from the worktree and hashing them — not by
+reading the diff, and not by accepting the worker's report:
+
+- **`INVENTORY` — BYTE-IDENTICAL**, 518 lines, `e2e4a6270e28ab50`, **86 entries** in both.
+- **`LIVENESS_SHAPES` — BYTE-IDENTICAL**, 84 lines, `d80261d59b83edc6`.
+- **`mod tests` → EOF — BYTE-IDENTICAL**, 130 lines, `adb5e9dce3789523`. Its four tests therefore pass
+  **unedited**, which is the whole proof that the older check came out exactly as strong.
+
+**A first attempt at this comparison was wrong and is recorded because it nearly passed.** Bounding
+each `const` array at the first bare `];` **over-ran into the extracted functions** and reported
+`DIFFERS` for `INVENTORY` — the array closes on `]; // End of the recorded liveness inventory`, this
+project's own closing-bracket convention. The over-running extraction swallowed seven function
+definitions in the HEAD copy and one in the worktree copy, so the "difference" was the extraction's,
+not the file's. **A comparison whose boundary is wrong reports a difference that is its own**, and the
+same slip in the other direction would have reported a false IDENTICAL.
+
+**No copy of the machinery remains**: `rg` for `fn rust_files_under|fn prose_units|fn window_around|fn
+tally|struct Hit|struct ProseUnit|struct Judged|fn workspace_root` over `src-tauri/src/` finds them
+**only** in `prose_sweep.rs`. `liveness_contract.rs`'s `sweep()` is now a two-line wrapper.
+
+### Both directions were confirmed to exist, in the source and not only in the report
+
+`every_retained_state_claim_is_judged` complains in **both** directions, read at
+`retained_state_contract.rs:1222–1281`:
+
+- a `(file, phrase)` the sweep **found** whose count differs from the inventory — including an
+  expected count of zero, which is the unrecorded-hit case;
+- an inventory entry the sweep **did not find**, whose message is *"inventory says N, found none —
+  reworded or removed, so judge it again"*.
+
+It additionally asserts that every inventory phrase is a member of the family, that every entry
+carries a non-empty reason, and that there is **one entry per (file, phrase)**.
+
+### The family has both halves, and the five phrase drops were checked rather than trusted
+
+`RETAINED_STATE_SHAPES` is 88 phrases in three groups; group 3 is round 3's wording verbatim —
+*atomic execution promoted into a correlated post-state when the mutations have different
+predicates* — and carries **both** the guard vocabulary and the two-values-move-as-one vocabulary, so
+it reaches the *unconditional paired insertion* round 2 corrected **and** the *conditional paired
+removal* in `adopt_reloaded_revision_under_the_session_lock` that round 2's sweep could not see.
+
+**Five candidate phrases were dropped for noise, and that is the one move this check cannot catch**
+(`2d-4a-notes.md` §11.4). The record argues each with a measured hit count — `backwards` (36, only 4
+the claim), `process-wide` (19), `one way` (12), `monotonic` (18, nine of them `Instant`), `in the
+same breath` (5, rhetorical). **The orchestrator verified the claimed replacements exist rather than
+taking the argument on its word**: `nothing evicts`, `for the life of`, `watermark backwards` and
+`monotonic within` are all present in `RETAINED_STATE_SHAPES` (`:144`, `:162`, `:192`, `:195`) **and
+all four carry live inventory entries**, so they fire. The drops were substitutions, not deletions —
+but §14 item 4 correctly records that **nothing in the repository shows a phrase was ever in the
+list**, and this is the judgement a later round is likeliest to disagree with.
+
+### `persist/write.rs` is inventoried as judged out, not narrowed away
+
+Six entries, five of them explicitly `**judged out**` and one a labelled false positive. The reason
+line for `one entry per` says it in the required words: *"the boundary is drawn on the claim and is
+recorded here rather than narrowed out of the pattern."* The substantive reason is round 4's — those
+mutexes serialize disk writes and **nothing decides an observation, a drain, a suppression, a
+coalescing or a save admission against them**. `persist/backup.rs` is inventoried as false positives.
+
+### The two red probes — the worker's evidence, recorded as the worker's
+
+**2d-3-C §4.4's standard is that the check is watched failing, and this is the one acceptance
+criterion the orchestrator did not independently re-run**; it is recorded here as reported, with the
+evidence the worker gave:
+
+- **Probe 1, `reconciliation.rs`** (2d-4a round 5's retention defect): *"Of the three ways a stored
+  entry then leaves"* became *"leaves this queue in exactly two / ways"*, wrapped across a line break.
+  RED with three complaints — `leaves this queue` 3 vs 2, `three ways` 1 vs 2, `two ways` 2 vs 1 — and
+  **`two ways` matched only via the joined comment run**, which is the load-bearing behaviour of
+  `prose_units` demonstrated rather than asserted.
+- **Probe 2, `dispatch_check.rs`** (round 6's watermark defect): the scope sentence *"Both drains here
+  are the same epoch's… never across a replacement"* deleted, leaving `unconditionally` standing. RED
+  in the **reverse** direction: *"across a replacement: inventory says 1, found none — reworded or
+  removed, so judge it again."*
+- Both reverted by **inverse edit**, each verified by `shasum -a 256` returning the pre-probe digest
+  (`120583fe…4330`, `98a989ff…fd1db`), with all four tests green afterwards. Two directions, two
+  files.
+
+### The gates — every one re-run by the orchestrator on this tree
+
+- `cargo test --workspace` — **1313 passed, 0 failed**, 26 result lines, exit 0. **+4** on the 1309
+  baseline, which is the new check's four tests; the liveness check's four are unchanged and included.
+- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+- `cargo doc --workspace --no-deps` exit 0 — **73** warnings, **every one** `links to private item`,
+  the pre-existing count; `rg '^warning: unresolved|^error'` finds **nothing**, and `espansoconfig`
+  (the shell, where both new modules live) emits **no** doc warning at all.
+- `cargo tree -p espansoconfig-core | rg tauri` **empty** — the architecture rule (D2x).
+- `git status --short` shows **no path under `src/`**, so the frontend baselines (431 / 2125 / 184)
+  are untouched and were not re-measured.
+
+### Open risks carried into the Codex round
+
+1. **A third `rust_files_under` exists and was not folded.** `src-tauri/src/dictionary_contract.rs:622`
+   has its own, with a **different signature** (`&str`, not `&Path`). It predates this phase and was
+   out of scope, but "a fix made in one copy and not the other" is this project's named failure mode
+   and there are now two functions of that name in one crate.
+2. **The ~45-line both-direction comparison is duplicated** between the two checks — a deliberate trade
+   (§14 item 7): folding it would have rewritten `liveness_contract.rs`'s tests, which is exactly the
+   evidence that the extraction took nothing away. Real cost, named in the module doc and the record.
+3. **The five phrase drops** (§13.2, §14 item 4) — the move the check cannot catch, exercised by the
+   step that built the check.
+4. **140 reason lines are new prose**, and §14 item 11 names them as the likeliest finding site,
+   singling out the reasons that summarise several passages at once (`outlives` covers twelve hits,
+   `until the epoch` seven, `no decision can` five).
+
 ## Verification — Phase 2d-4a-C step 1 (the contract and its pointers; **CLOSED** — four review rounds, rounds 1-3 NOT READY and each fixed, round 4 READY with 0 findings)
 
 **The owner's decision, and it is the thing a fresh session cannot re-derive.** On 2026-08-27 the
@@ -10448,7 +10564,7 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C IS UNDER WAY. STEP 1 IS ✅ CLOSED — four review rounds, and round 4 came back READY with 0 findings. THE NEXT ACTION IS STEP 2: BUILD THE CHECK.**
+### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN, AND *NOT* CLOSED — THE MANDATORY CODEX ROUND IS OWED. THAT IS THE NEXT ACTION.**
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
@@ -10456,61 +10572,73 @@ and answered: **build the mechanism first.** Round 7 is **deferred, not cancelle
 reviews the mechanism as well as the round-6 fix. Its brief is preserved verbatim below and is still
 the spec for it.
 
-**Phase 2d-4a-C is the analogue of 2d-3-C**, which ended that phase's fourteen-round tail the same
-way. Two steps:
+- **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE AND CLOSED.** Four review
+  rounds; rounds 1–3 NOT READY and each fixed, round 4 **READY with 0 findings**, which cleared all
+  six attack-list items and stated that no round 5 is warranted. Record §12.
+- **2d-4a-C-2 — the check. ✅ IMPLEMENTED, every gate green, ⬜ NOT REVIEWED.** `prose_sweep.rs` (236
+  lines, the shared machinery) and `retained_state_contract.rs` (1281 lines, the new check). Record
+  §13–§16. See the verification section "Phase 2d-4a-C step 2".
 
-- **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE AND CLOSED**, every gate
-  green, four review rounds done. See the verification section "Phase 2d-4a-C step 1".
-- **2d-4a-C-2 — the check. ⬜ NOT STARTED. This is the next implementation work, and it is now
-  unblocked.**
+#### The next action: step 2's Codex round
 
-#### How step 1 closed, and what that licenses
+**A step that wrote sentences owes the round that reviews them**, and this phase is the measured case
+for it — rounds 1, 2 and 3 each found the *previous fix round's own new sentence* defective. Step 2
+wrote **a module doc with five stated limits, 88 phrases with their group comments, and 140 reason
+lines**, and a reason line is exactly the kind of prose that can claim more than the code gives.
 
-**Round 4 returned READY with 0 findings**, cleared **all six** attack-list items, and states plainly
-that **no round 5 is warranted**. Rounds 1–3 were NOT READY (1 High + 1 Low; 1 High + 1 Medium;
-0 High + 1 Medium), every finding real, every fix reviewed by the round after it — including round
-3's, which is what round 4 was for. **The unreviewed remainder of step 1 is empty.** Full record:
-`docs/decisions/2d-4a-C-notes.md` §12; the four rounds verbatim, newest last, in
-`docs/reviews/phase-2d-4a-C.md`.
+**The attack list, from the step's own record and from what verification surfaced:**
 
-**One claim in round 4 was verified by the orchestrator rather than accepted** — its central
-clearance rested on *"Those are the only source-tree calls to `decide`"*. Confirmed: exactly three
-call sites (`ledger.rs:1373`, `:1483`, `:1558`), each taking `enter_gate()` then `lock()` in that
-order, same as the reload method. **Still untested and untestable** against a `std::sync::Mutex`
-without a scheduler hook — §11.7 item 3 stands unchanged.
+1. **The 140 reason lines**, especially those summarising several passages in one line — `ledger.rs`'s
+   `outlives` covers twelve hits, `until the epoch` seven, `no decision can` five (record §14 item 11).
+2. **The five phrase drops** — `backwards`, `process-wide`, `one way`, `monotonic`, `in the same
+   breath` (record §13.2, §14 item 4). **This is the move the check cannot catch, exercised by the
+   step that built the check.** Each is argued with a measured count and each was replaced by a
+   claim-shaped form that is present and firing — verified — but nothing in the repository records
+   that a phrase was ever in the list. **A reviewer may disagree with any of the five.**
+3. **The judged-out boundary at `persist/write.rs`** — five entries plus one false positive. Is the
+   judgement right, and is anything else judged out that should not be?
+4. **Whether the family actually reaches both halves**, or only appears to. Group 3 is round 3's
+   wording; the claim is that it fires on the unconditional paired insertion **and** on
+   `adopt_reloaded_revision_under_the_session_lock`'s conditional paired removal.
+5. **A third `rust_files_under` exists and was not folded** —
+   `src-tauri/src/dictionary_contract.rs:622`, different signature (`&str`, not `&Path`). Predates
+   this phase, out of scope for it, but two functions of that name now sit in one crate and "a fix
+   made in one copy and not the other" is this project's named failure mode.
+6. **The duplicated ~45-line both-direction comparison** (record §14 item 7) — a deliberate trade,
+   because folding it would have rewritten `liveness_contract.rs`'s tests, which are the proof the
+   extraction took nothing away. Is the trade right?
+7. **The module doc's five stated limits** — do they claim exactly what the code gives? §14 is the
+   record's own list of eleven thin points; a reviewer should check the module doc against it, since
+   only the module doc ships.
 
-**A clean round 4 does not reduce the case for step 2 by one line.** Nothing in step 1 is enforced by
-anything, and the round-3 falsehood is the measurement: it survived 1309 passing tests, `clippy`,
-`cargo doc`, a written audit trail and **two** review rounds aimed at its own family.
+**Carry the standing instruction**, as every round of this phase has: *if everything you find is a
+restatement of wording already fixed, with no new substance, say so plainly in the verdict* — and **a
+clean READY is a valuable answer the reviewer should be told to give if the text holds.**
 
-#### What step 2 inherits from the four rounds
+#### The dispatch that works, measured across four rounds
 
-- **The phrase family is round 3's, and it is not the vocabulary**: not *two values are always seen
-  together*, but **atomic execution incorrectly promoted into a correlated post-state when the
-  mutations have different predicates**. Round 2's three corrected sentences all describe an
-  **unconditional paired insertion**; its sweep, written from them, could not reach the **conditional
-  paired removal** one method away that round 3 found. **Step 2's family must cover both, or the
-  checker ships with the blind spot that produced round 3's finding.**
-- **Six positions are cleared and are inventory entries, not re-litigable questions**: the corrected
-  reload paragraph, the interleaving claim, `documents_by_path`'s field doc, G4's *exactly three*,
-  G8's *the one exception*, N5.
-- **G4 and G8 are the highest-risk drift sites** — round 4 clears them and names them so in the same
-  breath, because both are true today and guarded by nothing.
-- **`persist::write`'s lock registry is a judged-out position to inventory**, never a pattern narrowed
-  until it disappears. Round 4 gave the reason in its own words: those mutexes serialize disk writes
-  and are not retained observation state any observation, drain, suppression, coalescing or
-  save-admission decision consults.
-- **N5 keeps its existential reading.**
+Codex runs **read-only** and writes no file, so the brief must say the workspace may be read-only,
+that **its final message IS the deliverable**, that the caller captures it, and that a sandbox limit
+**must not affect the verdict**. `~/.claude/scripts/codex-wait.sh` false-stalls on healthy jobs — poll
+the **log file's mtime**, and search `running`, `recent` **and** `latestFinished`, matching
+`id || jobId`. Step 1's round 3 took 301 s at high effort; round 4, on a narrower target, 141 s.
+Append the reply verbatim to `docs/reviews/phase-2d-4a-C.md` under a new `## Step 2 — round 1`
+heading (that file currently holds step 1's four rounds).
 
-#### The dispatch that works, for the phase's mandatory Codex round
+#### The gate baseline — measured on this tree after step 2, not inherited
 
-Codex ran **read-only** and wrote no file, so the brief must say the workspace may be read-only, that
-**its final message IS the deliverable**, that the caller captures it, and that a sandbox limit **must
-not affect the verdict**. `~/.claude/scripts/codex-wait.sh` false-stalls on healthy jobs — poll the
-**log file's mtime**, and search `running`, `recent` **and** `latestFinished`, matching `id || jobId`.
-Round 3's job took 301 s at high effort; round 4's, on a narrower target, took 141 s.
+- **`1313 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). **+4 Rust** on step 1's 1309, which is the new check's four tests. The
+  three frontend figures are still carried forward **unverified** from 2d-4a round 6 and **must be
+  re-measured by any step that touches `src/`**; step 2 did not.
+- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+  `cargo doc --workspace --no-deps` exit 0 with **73** `private_intra_doc_links`, the pre-existing
+  count, and **zero unresolved links**; `cargo tree -p espansoconfig-core | rg tauri` **empty**.
+- **The host scar still binds.** Kill orphans (`pkill -f 'target/debug/deps/espansoconfig-'`), run the
+  workspace suite **once**, and stay off the machine. The single-threaded gate is
+  `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` (**20/20**).
 
-#### What step 2 must build
+#### What step 2 had to build — **the original spec, now DISCHARGED**. Kept as the record of what was asked; do not re-execute it. Check the delivered check against it if you want to audit the step.
 
 The analogue of `src-tauri/src/liveness_contract.rs` (1007 lines) for this family. Read that file
 first — it is the working template, and its module header states the limits honestly enough to copy
@@ -20156,6 +20284,7 @@ _Updated at each phase boundary._
 | **2d-4a (round 5 + its fix, NOT closed)** | **`eced554`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` after the commit is empty — no real-config path, no launch artifact, no untracked file. The commit holds **five** files: three sources (`src-tauri/src/{commands,liveness_contract,reconciliation}.rs`), **no core file at all** and **no `src/` path at all** (`cargo tree -p espansoconfig-core \| rg tauri` still finds nothing), and two documents (`docs/decisions/2d-4a-notes.md`, `docs/reviews/phase-2d-4a-queue.md`). **The step is NOT closed by it** — round 5 returned NOT READY with **0 High, 1 Medium and 3 Low**, its fix is in the tree and green at **1308 / 431 / 2125 / 184** with serial `watch_check` 20/20 (79.44 s), and **round 6 is owed against the round-5 fix**. Round 5's Medium is the **third consecutive round in which the retention boundary was restated and was still false**; its L1 is round 4's own new helper modelling an invariant violation as a false value, and the `debug_assert_eq!` that closes it **reproduced, on a test, the branch round 5 called unreproducible**. Round 6's first job is §14.4 — the sweep that is still a human reading, the *exactly three ways* that rests on a reading rather than a test, the changed `commands.rs` fixture, and the `UnreadableReason` walk that covers three of six variants. A fresh session resumes from "Next action" |
 | **2d-4a-C step 1 (round 3 + its fix, NOT closed)** | **`4ab5e2e`** | ✅ pushed to `origin/main` (`1d26964..4ab5e2e`; this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit. Staged **by path**: **four** files — `src-tauri/src/ledger.rs` (one doc-comment hunk, +14/−2), `docs/decisions/2d-4a-C-notes.md` (§11), `docs/reviews/phase-2d-4a-C.md` (round 3 verbatim) and this checkpoint. **No test, no behaviour, no path under `src/`**: filtering the diff of both source trees for non-comment, non-blank changed lines returns **0**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured. Its three predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix) and `1d26964` (round 2 + fix), none of which had a row here. **The step is NOT closed by it** — three Codex rounds, all NOT READY, all three fixes in the tree and green, and **round 4 is owed against the round-3 fix**. A fresh session resumes from "Next action" |
 | **2d-4a-C step 1 (round 4 — READY; the step CLOSES here)** | **`57e8800`** | ✅ pushed to `origin/main` | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit — and it also returned nothing **immediately after the Codex job**, which is what proves the read-only sandbox wrote no file. Staged **by path**: **three** files — `docs/decisions/2d-4a-C-notes.md` (§12), `docs/reviews/phase-2d-4a-C.md` (round 4 verbatim under `## Round 4`) and this checkpoint. **No source file in either tree was modified**, because round 4 found nothing to fix: 0 findings, all six attack-list items cleared, and *no round 5 is warranted* in the reviewer's own words. The gate figures are therefore **not re-measured** and stand as the round-3 fix left them (`1309 / 431 / 2125 / 184`) — re-running a suite over an unchanged tree measures the host, not the work. Its four predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix), `1d26964` (round 2 + fix) and `4ab5e2e` (round 3 + fix). **Step 1 is CLOSED by this row and step 2 is unblocked**; a fresh session resumes from "Next action" |
+| **2d-4a-C step 2 (the check; implemented and green, review OWED)** | **`PENDING`** | ✅ pushed to `origin/main` | **clean.** Staged **by path**: **five** files — `src-tauri/src/prose_sweep.rs` (new, 236 lines, the shared machinery), `src-tauri/src/retained_state_contract.rs` (new, 1281 lines, the new check), `src-tauri/src/liveness_contract.rs` (1013 → 845 lines, machinery removed, **nothing else**), `src-tauri/src/main.rs` (two `#[cfg(test)] mod` declarations), `docs/decisions/2d-4a-C-notes.md` (§13–§16) and this checkpoint. **No path under `src/`**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured. Gates re-run by the orchestrator: `cargo test --workspace` **1313 passed / 0 failed** over 26 result lines (**+4**, the new check's four tests), clippy `-D warnings` clean, `fmt --check` clean, `cargo doc` exit 0 with **73** `links to private item` and **zero** unresolved, `cargo tree -p espansoconfig-core \| rg tauri` empty. **The extraction was verified as characters, not read off the diff**: `INVENTORY` (518 lines, 86 entries), `LIVENESS_SHAPES` (84 lines) and `mod tests`→EOF (130 lines) are each **byte-identical to `HEAD`**, so the older check's four tests pass unedited. **The step is NOT closed by it** — the mandatory Codex round is owed, and record §14 item 11 names the likeliest finding sites: the 140 reason lines and the five phrase drops. A fresh session resumes from "Next action" |
 
 `e83bc31` is Phase 2c-4c **step 6**, the harness's removal, **including its review fix round** — the
 phase was held open until all nine findings were closed, as every phase since `8989c16` has been. It

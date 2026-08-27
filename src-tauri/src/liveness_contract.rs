@@ -46,10 +46,19 @@
 //!   against span a line break — including the core engine's own module doc.
 //!   A line-based sweep, which is what every round of the 2d-3 review ran by
 //!   hand, cannot see them.
+//!
+//! # Where the machinery lives
+//!
+//! In [`crate::prose_sweep`], since Phase 2d-4a-C step 2 built the second check
+//! of this shape ([`crate::retained_state_contract`]) by **extracting** the walk,
+//! the prose-unit split, the matcher and the tally out of this file rather than
+//! copying them. What stays here is what makes this check *this* check: the
+//! phrase family, the trees, the skip list and the recorded inventory. The four
+//! tests below are unchanged by that extraction, which is the evidence that it
+//! took nothing away.
 
+use crate::prose_sweep::{prose_units, tally, Hit, Judged};
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
 
 /// One wording of the liveness shape family, matched case-insensitively as a
 /// plain substring of a prose unit.
@@ -165,36 +174,6 @@ const SWEPT_TREES: &[&str] = &["src-tauri/src", "crates/espansoconfig-core/src"]
 /// skipped, and that is a stated hole: a liveness claim written into this file
 /// is invisible to this check.
 const SKIPPED: &str = "src-tauri/src/liveness_contract.rs";
-
-/// One judged position: how many times one phrase may appear in one file, and
-/// why every one of those occurrences is acceptable.
-///
-/// The key is `(file, phrase)` rather than `(file, line)` because a line number
-/// moves whenever anything above it is edited, and a guard that fails on an
-/// unrelated edit is a guard people learn to re-baseline without reading.
-struct Judged {
-    /// The file, relative to the workspace root.
-    file: &'static str,
-    /// The phrase, exactly as it appears in [`LIVENESS_SHAPES`].
-    phrase: &'static str,
-    /// How many occurrences of `phrase` this file may hold.
-    count: usize,
-    /// Why they are acceptable — one line, and one of four kinds: it is the
-    /// contract itself; it is a pointer at the contract; it is a local fact that
-    /// does not restate the contract; it is a false positive of the pattern from
-    /// an unrelated subsystem.
-    ///
-    /// **A passage that restates an obligation and hands it on is a pointer,
-    /// not a local fact**, whichever contract it hands it to — this module's
-    /// subject is `espansoconfig_core::watch::liveness`, but the wake
-    /// protocol's two positions restate the 2d design consult's Q3 obligation
-    /// on a *future* consumer, and nothing local implements it. Phase 2d-4a's
-    /// round-1 fix
-    /// filed both as local fact, and round 2 found that this records incorrectly
-    /// the one distinction the check exists to make a reviewer judge: a local
-    /// fact is a claim this code keeps.
-    reason: &'static str,
-}
 
 /// Every position in the two trees that matches the shape family, judged.
 ///
@@ -721,164 +700,17 @@ const INVENTORY: &[Judged] = &[
     },
 ]; // End of the recorded liveness inventory
 
-/// Every `.rs` file under `root`, in path order, recursively.
-fn rust_files_under(root: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = Vec::new();
-    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory)
-            .unwrap_or_else(|error| panic!("cannot read {}: {error}", directory.display()));
-        for entry in entries {
-            let path = entry
-                .unwrap_or_else(|error| {
-                    panic!("cannot read an entry of {}: {error}", directory.display())
-                })
-                .path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                found.push(path);
-            }
-        } // End of the loop over one directory's entries
-    } // End of the walk over the directory tree
-    found.sort();
-    found
-} // End of function rust_files_under()
-
-/// One stretch of prose to match against: a joined run of comment lines, or one
-/// non-comment line.
-struct ProseUnit {
-    /// The 1-based line the unit starts at, for the failure report.
-    line: usize,
-    /// The text, with `//!`, `///` and `//` markers removed and the run's lines
-    /// joined by single spaces.
-    text: String,
-}
-
-/// Splits `source` into the units the sweep matches against.
-///
-/// **A contiguous run of comment lines becomes one unit.** This workspace wraps
-/// its doc comments at about 76 columns, so a claim of eleven words straddles a
-/// line break as a matter of course, and a line-based sweep — which is what
-/// every hand-run round of the 2d-3 review used — cannot see it. Everything that
-/// is not a comment line stays one unit per line, which is what keeps an
-/// assertion message or a test name reported at its own position.
-fn prose_units(source: &str) -> Vec<ProseUnit> {
-    let lines: Vec<&str> = source.lines().collect();
-    let mut units: Vec<ProseUnit> = Vec::new();
-    let mut index = 0usize;
-    while index < lines.len() {
-        if lines[index].trim_start().starts_with("//") {
-            let start = index;
-            let mut joined: Vec<&str> = Vec::new();
-            while index < lines.len() && lines[index].trim_start().starts_with("//") {
-                let trimmed = lines[index].trim_start();
-                let body = trimmed
-                    .strip_prefix("//!")
-                    .or_else(|| trimmed.strip_prefix("///"))
-                    .or_else(|| trimmed.strip_prefix("//"))
-                    .unwrap_or(trimmed);
-                joined.push(body.trim());
-                index += 1;
-            } // End of the loop over one run of comment lines
-            units.push(ProseUnit {
-                line: start + 1,
-                text: joined.join(" "),
-            });
-        } else {
-            units.push(ProseUnit {
-                line: index + 1,
-                text: lines[index].to_string(),
-            });
-            index += 1;
-        }
-    } // End of the walk over the file's lines
-    units
-} // End of function prose_units()
-
-/// One occurrence of one phrase in one file.
-struct Hit {
-    /// The file, relative to the workspace root.
-    file: String,
-    /// The 1-based line the prose unit holding it starts at.
-    line: usize,
-    /// The phrase that matched.
-    phrase: &'static str,
-    /// A window of the unit's text around the match, for the failure report.
-    context: String,
-}
-
-/// The workspace root — this crate's manifest directory's parent.
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("src-tauri has a parent directory")
-        .to_path_buf()
-} // End of function workspace_root()
-
 /// Every occurrence of every [`LIVENESS_SHAPES`] phrase in the two
 /// [`SWEPT_TREES`], in file order.
+///
+/// The walk, the prose-unit split, the matcher and the tally are
+/// [`crate::prose_sweep`]'s — shared with [`crate::retained_state_contract`]
+/// rather than copied into it, because a fix made in one copy and not the other
+/// is this project's recurring failure mode. What this function contributes is
+/// the three constants above.
 fn sweep() -> Vec<Hit> {
-    let root = workspace_root();
-    assert!(
-        root.join(SKIPPED).is_file(),
-        "the skipped file {SKIPPED} must exist, or the skip list is silently empty"
-    );
-    let mut hits: Vec<Hit> = Vec::new();
-    for tree in SWEPT_TREES {
-        for path in rust_files_under(&root.join(tree)) {
-            let relative = path
-                .strip_prefix(&root)
-                .expect("a swept file lives under the workspace root")
-                .to_string_lossy()
-                .into_owned();
-            if relative == SKIPPED {
-                continue;
-            }
-            let source = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-            for unit in prose_units(&source) {
-                let lowered = unit.text.to_lowercase();
-                for phrase in LIVENESS_SHAPES {
-                    let mut from = 0usize;
-                    while let Some(offset) = lowered[from..].find(phrase) {
-                        let at = from + offset;
-                        hits.push(Hit {
-                            file: relative.clone(),
-                            line: unit.line,
-                            phrase,
-                            context: window_around(&unit.text, at, phrase.len()),
-                        });
-                        from = at + phrase.len();
-                    } // End of the loop over one phrase's occurrences in one unit
-                } // End of the loop over the phrase family
-            } // End of the loop over one file's prose units
-        } // End of the loop over one tree's files
-    } // End of the loop over the swept trees
-    hits
+    crate::prose_sweep::sweep(LIVENESS_SHAPES, SWEPT_TREES, &[SKIPPED])
 } // End of function sweep()
-
-/// Up to 70 characters either side of a match, on character boundaries.
-fn window_around(text: &str, at: usize, length: usize) -> String {
-    let start = (0..=at.saturating_sub(70))
-        .rev()
-        .find(|candidate| text.is_char_boundary(*candidate))
-        .unwrap_or(0);
-    let end = (at + length..=(at + length + 70).min(text.len()))
-        .rev()
-        .find(|candidate| text.is_char_boundary(*candidate))
-        .unwrap_or(text.len());
-    text[start..end].to_string()
-} // End of function window_around()
-
-/// `(file, phrase)` to the number of hits, for one side of the comparison.
-fn tally(hits: &[Hit]) -> BTreeMap<(String, &'static str), usize> {
-    let mut counted: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
-    for hit in hits {
-        *counted.entry((hit.file.clone(), hit.phrase)).or_insert(0) += 1;
-    }
-    counted
-} // End of function tally()
 
 #[cfg(test)]
 mod tests {

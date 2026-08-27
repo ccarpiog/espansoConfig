@@ -1257,3 +1257,284 @@ entries rather than as re-litigable questions, the `persist::write` boundary as 
 position, N5's **existential** reading, and the phrase family as round 3 named it — *atomic execution
 incorrectly promoted into a correlated post-state when the mutations have different predicates* —
 covering **both** the unconditional paired insertion and the conditional paired removal.
+
+---
+
+# Step 2d-4a-C-2 — the check
+
+**The scoped-lifetime contract is now enforced by a test.** `src-tauri/src/retained_state_contract.rs`
+sweeps both source trees for a family of retained-state claims and fails on any position its recorded
+inventory does not carry — the analogue of `src-tauri/src/liveness_contract.rs`, built on the same
+machinery rather than on a copy of it. The three modules are:
+
+| File | Lines | What it is |
+|---|---|---|
+| `src-tauri/src/prose_sweep.rs` | 236 | the shared walk, prose-unit split, matcher, window and tally, **extracted** from `liveness_contract.rs` |
+| `src-tauri/src/retained_state_contract.rs` | 1281 | the new check: 88 phrases, 140 inventory entries, four tests |
+| `src-tauri/src/liveness_contract.rs` | 845 (was 1013) | unchanged except for its module doc and a thin `sweep()` wrapper |
+
+## 13. What step 2 built
+
+### 13.1 The machinery is shared, and the older check's tests prove the extraction took nothing away
+
+`prose_sweep.rs` holds `rust_files_under`, `ProseUnit`, `prose_units`, `Hit`, `window_around`,
+`workspace_root`, `sweep` and `Judged` — every item the two checks need identically. Nothing of that
+list remains in `liveness_contract.rs`; what stays there is what makes it *that* check, its phrase
+family, its trees, its skip list and its inventory.
+
+**The proof that the extraction is lossless is that the older check's four tests pass unchanged.**
+Verified as bytes, not as a claim: the whole `#[cfg(test)] mod tests { … }` block of
+`liveness_contract.rs`, its `INVENTORY` and its `LIVENESS_SHAPES` are **identical character for
+character** to `HEAD` — the tests block is 5512 characters on both sides of the split — and its four
+tests are green. **No test expectation was
+edited to accommodate the refactor**, which is the whole point: an extraction that had to relax the
+older guard would not be an extraction.
+
+Two shape changes were needed and are the only ones. `sweep` now takes the phrase family, the trees
+and the skip list as arguments, so `liveness_contract::sweep()` is a two-line wrapper over it; and
+the skip list is a slice rather than one `&str`, so a later check can skip more than one file. The
+`assert!` that every skipped file exists moved with the function and still fires per path, which is
+what stops a rename silently emptying a skip list and turning a check into a vacuous pass.
+
+**`prose_units`'s comment-run joining was not touched.** It is load-bearing rather than convenient:
+this workspace wraps its doc comments at about 76 columns, so a claim of eleven words straddles a
+line break as a matter of course. The probe run in §13.5 shows it firing — the planted `two ways`
+matched only because the run was joined.
+
+### 13.2 The family, and why it has two halves
+
+`RETAINED_STATE_SHAPES` is 88 phrases in three groups, drawn around the **claims** and never around
+the vocabulary:
+
+1. **how long a retained value survives, and what removes it** — the enumeration Phase 2d-4a's round 5
+   found counting two ways where the code has three;
+2. **what a number a consumer stores claims over time** — the monotonicity round 6 found unscoped, on
+   the watermark, which is round 5's finding one level up;
+3. **atomic execution promoted into a correlated post-state when the mutations have different
+   predicates** — step 1's round 3 named this one, and the wording is the specification. Group 3
+   carries **both** the vocabulary of the guard (`under one state guard`, `can interleave`,
+   `half-written pair`, `half-applied`, `no decision can`) and the vocabulary of two values said to
+   move as one (`seen together`, `observed together`, `co-existence`, `written together`,
+   `cleared apart`, `without the other`, `travel together`, `in lockstep`). **A family drawn from
+   either half alone ships with the blind spot that produced round 3's finding**: round 2 corrected
+   three sentences of the *unconditional paired insertion* form, its sweep was written from those
+   three, and the *conditional paired removal* in `adopt_reloaded_revision_under_the_session_lock`
+   one method away was invisible to it.
+
+Both halves are demonstrably reached in the shipped tree. Group 3 fires on `ledger.rs`'s module doc
+and `record_app_write` (the insertions round 2 corrected) **and** on
+`adopt_reloaded_revision_under_the_session_lock` (`under one state guard`, `can interleave`,
+`half-applied` — round 3's Medium), which is the case a one-sided family could not see.
+
+**Phrases with no hit today are kept deliberately — twenty of the 88.** `no decision can observe`,
+`cannot interleave`, `discarded whole`, `moves as one` and `both maps` are among them: a fix round
+removed the sentence that held one, or the wording is an obvious inflection nobody has written yet.
+They stay so that writing one of them is a finding rather than a silent arrival — the same reason
+2d-3-C kept phrases its own tree no longer held.
+
+**What was deliberately left out, and why**, because a pattern that is only ever widened is a pattern
+nobody can read, all five figures measured rather than estimated: `backwards` (36 hits, of which
+**4** are the watermark claim — 12 are `syntax/block.rs`'s backwards header lexer and 10 the backup
+catalogue's clock-ordering argument), `process-wide` (19, pure vocabulary and not one claim by
+itself), `one way` (12, six of them `commands.rs` saying it *writes a file exactly one way*),
+`monotonic` (18, nine of them `ledger.rs` on `Instant` being documented monotonic and expressly not
+strictly increasing) and `in the same breath` (5, rhetorical — where a sentence sits, not what a
+value does). Each was replaced by the claim-shaped form that carries the same claim —
+`watermark backwards`, `monotonic within`, `nothing evicts`, `for the life of`. This is the one judgement in step 2 that a
+later round is most likely to disagree with, and §14 item 4 says so.
+
+### 13.3 The inventory: 224 hits over 29 files, every one judged
+
+Not one hit was dropped by narrowing the pattern. The kinds, as the check's own taxonomy:
+
+| Kind | Entries | Hits | Files |
+|---|---|---|---|
+| **the contract itself** | 29 | 34 | `watch/retained_state.rs` |
+| **a pointer** | 3 | 3 | `lib.rs`, `ledger.rs`, `reconciliation.rs` |
+| **a pointer *and* a local fact** | 1 | 2 | `reconciliation.rs` |
+| **a pointer *and* a false positive** | 2 | 4 | `reconciliation.rs` |
+| **a local fact** | 61 | 119 | `ledger.rs`, `reconciliation.rs`, `commands.rs`, `dispatch_check.rs`, `workspace/mod.rs` |
+| **a false positive** | 39 | 56 | 25 files |
+| **judged out** | 5 | 6 | `persist/write.rs` |
+
+The seven rows are **140 entries and 224 hits**, and the totals are derived by summing the rows
+rather than asserted over them — saying *six* over a list of seven was 2d-3's round 14's second Low.
+Three rows are mixed because one `(file, phrase)` key can cover two passages of different kinds; the
+row names both rather than picking the flattering one.
+
+The false positives are the pattern meeting unrelated subsystems — the patch engine's lockstep tree
+walks, backup-file rotation, the codec's unconditional quoting, two ways an enum reaches `serde`.
+**They are carried, not filtered.** A pattern narrowed to make today's noise go away is a pattern that
+misses tomorrow's claim, and the noise costs 39 inventory lines once.
+
+### 13.4 The judged-out positions, recorded rather than pattern-tuned away
+
+**`crates/espansoconfig-core/src/persist/write.rs`'s lock registry is in the inventory as a judged-out
+position**, which is what step 1 §5 item 8 and round 4 both required. The family hits it five ways —
+`path ever written`, `one entry per`, `the process has ever`, `leaked deliberately`, `for the life of`
+— and every one of those entries carries round 4's reason in its own words: those mutexes **serialize
+disk writes** and are **not retained observation state** that any observation, drain, suppression,
+coalescing or save-admission decision consults. The registry really is R9's shape in a second
+subsystem (one entry per real path ever written, process-wide, never evicted, a leaked
+`&'static Mutex<()>` per path) and it is **out on the claim, not on the shape**.
+
+`crates/espansoconfig-core/src/persist/backup.rs` — backup-file rotation, step 1's *vocabulary trap* —
+is out for the same kind of reason and is carried as five false-positive entries.
+
+**Narrowing the pattern until a hit disappears is the one move this check cannot catch**
+(`2d-4a-notes.md` §11.4), which is exactly why both boundaries are written beside the hit rather than
+into the pattern. Step 1's other 31 judged-out prose units were not re-litigated: where the family
+reaches them at all they are inventoried with the judgement step 1 gave them (the resource and thread
+lifetimes in `watch.rs`, the parse cache, the determinism qualification, the plain false positives).
+
+### 13.5 The proof that the check fails — two probes, two files, the actual historical defects
+
+2d-3-C §4.4's standard: an argued guard is how round 11 removed an assertion and round 12 found the
+removal had cost a detection. **This one was driven, twice, on two different files, with the two
+defects the review actually shipped.** Each probe was reverted by the **inverse edit** — never by
+`git checkout`, which on a tree carrying unstaged work is not an undo — and the revert was verified by
+`shasum -a 256` matching the pre-probe digest exactly.
+
+**Probe 1 — a retention position, `src-tauri/src/reconciliation.rs`**, Phase 2d-4a round 5's Medium:
+the boundary counting two ways where the code has three. The module doc's *"Of the three ways a
+**stored** entry then leaves"* was replaced by *"A **stored** entry leaves this queue in exactly two /
+ways"*, wrapped so the phrase straddles a line break. Digest before: `120583fe…4330`.
+
+```
+test retained_state_contract::tests::every_retained_state_claim_is_judged ... FAILED
+    src-tauri/src/reconciliation.rs / "leaves this queue": found 3, inventory says 2
+    src-tauri/src/reconciliation.rs / "three ways": found 1, inventory says 2
+    src-tauri/src/reconciliation.rs / "two ways": found 2, inventory says 1
+            line 1: …A **stored** entry leaves this queue in exactly two ways, and the one this module decides is the overflow…
+```
+
+Three phrases fired on one planted sentence, and **`two ways` fired across the line break** — the
+joined-unit sweep doing the thing a line sweep cannot. The inverse edit restored digest
+`120583fe…4330`.
+
+**Probe 2 — a watermark position, `src-tauri/src/dispatch_check.rs`**, Phase 2d-4a round 6's Medium:
+`newest_sequence` told a caller to store it *unconditionally* with no scope. The sentence *"**Both
+drains here are the same epoch's**, which is the scope that claim carries … so what this test covers
+is the claim inside its scope and never across a replacement"* was deleted, leaving the
+unconditional half standing. Digest before: `98a989ff…fd1db`.
+
+```
+test retained_state_contract::tests::every_retained_state_claim_is_judged ... FAILED
+    src-tauri/src/dispatch_check.rs / "across a replacement": inventory says 1, found none — reworded or removed, so judge it again
+```
+
+The inverse edit restored digest `98a989ff…fd1db`, and all four tests were green again.
+
+**Both directions were watched failing.** Probe 1 is the *unrecorded hit* direction — a position
+nobody judged, printed with its line and its context; probe 2 is the *inventory entry matching
+nothing* direction — a passage reworded or removed without being judged again. Note what probe 2
+shows about the check's grain: **dropping the scope did not remove the claim**, it removed the
+qualification, and the check caught it because the qualification carried a phrase of the family. Had
+round 6's defect been written with no family phrase in the deleted clause, nothing would have fired —
+which is §14 item 1.
+
+## 14. What step 2 does **not** close, and where it is thin
+
+Stated plainly, because getting this wrong would reproduce, inside the mechanism built to stop it,
+this project's declared worst defect class.
+
+1. **The check cannot judge whether a passage's claim is true.** It catches an **unmarked** claim and
+   a **new** claim. A passage that carries a pointer and still says something false passes it, and so
+   does a rewording that keeps the same phrase in the same file — the key is `(file, phrase)`, so
+   swapping one recorded sentence for a different sentence using the same phrase moves no count.
+   **The reason it is worth having is the reduction of surface — one place to be right instead of
+   fifty — and never the check's judgement.**
+2. **A paraphrase built from none of the 88 phrases is invisible, and this is measured rather than
+   feared.** Step 1's sweep ran 33 probe phrases over 85 prose units of these two trees, comment runs
+   joined, and **four of its 45 pointer passages sat in units none of the 33 matched** —
+   `ReconciliationWake::newest_sequence`, `ReconciliationQueue::drain`'s inline `max` comment,
+   `CommitAnchor`, `LedgerState::announced` — with a fifth in `watch/native.rs`. They were found by
+   **reading the files**. That is direct evidence that **a phrase family is not the family**, and the
+   module doc says so rather than letting the guard look stronger than it is. A future round writing
+   *"the queue keeps this until the session ends"* with none of the 88 phrases in it would pass.
+3. **Nothing forces a new passage to point rather than restate.** The check forces it to be *judged*.
+   A maintainer who judges a fresh paraphrase acceptable and records it has satisfied every test in
+   this workspace.
+4. **Narrowing the pattern is the move it cannot catch**, and step 2 exercised exactly that move five
+   times in §13.2 when it dropped `backwards`, `process-wide`, `one way`, `monotonic` and `in the same
+   breath`. Each drop is argued and each was replaced by a claim-shaped form, but **a later round is
+   free to disagree with any of them**, and nothing in the repository records that a phrase was ever
+   in the list. That is a hole in the same class as the one the check closes.
+5. **The sweep skips exactly one file: the check's own source.** A retained-state claim written into
+   `retained_state_contract.rs` is invisible to it. The sweep asserts the skipped file exists, so a
+   rename cannot silently empty the skip list, and nothing else defends this hole. **The two checks do
+   not exempt each other** — `the_sweep_reaches_both_trees` asserts that `liveness_contract.rs` is
+   swept by this one — but each is blind to itself.
+6. **It sweeps two source trees and no document.** `docs/` is deliberately not swept and **cannot be**:
+   `2d-4a-notes.md` quotes six review rounds' false sentences on purpose, so a check over the
+   documentation tree would fail on the record of every defect this phase fixed. This file and that one
+   point at the contract as prose, with nothing enforcing that they keep pointing — 2d-3-C §5 limit 4,
+   inherited unchanged.
+7. **The both-direction comparison is duplicated between the two checks, and that is a deliberate
+   trade with a real cost.** `prose_sweep.rs` holds the machinery; the ~45-line comparison loop stayed
+   in each check's own guard test, because the proof that the extraction took nothing away from the
+   older check is that **its four tests pass unchanged**, and folding the comparison into a shared
+   helper would have rewritten them. So there are two copies of one loop, which is the exact shape
+   this project's recurring failure mode takes. It is named in the module doc as well as here, and a
+   later step that is willing to re-review the liveness guard should fold it.
+8. **The contract's own clauses are still prose over code.** No test fails if a clause drifts from the
+   code it cites; §2's tables remain an audit trail rather than an oracle. G4's *exactly three* and
+   G8's *the one exception* still rest on a reading of every mutation of one field. What the check
+   adds is that a **restatement** of those clauses elsewhere must be judged — not that the clause is
+   true.
+9. **Eight of step 1's 45 pointers are still not compile-checked**, and this step changed nothing
+   about that. `#[cfg(test)]` modules and `//` comments are not resolved by rustdoc, so a rename of the
+   contract leaves those eight silently stale. Both new modules are themselves `#[cfg(test)]`, so
+   their own intra-doc links are in that same unchecked set.
+10. **R9 is still OPEN.** The identity register's unbounded retention is stated in the contract and
+    now inventoried at `workspace/mod.rs`, which is not a bound and not a measurement.
+11. **This step wrote sentences, and the round that reviews them is not optional.** Every fix round of
+    this phase has written the next round's findings. This one wrote a module doc with five stated
+    limits, 88 phrases with their group comments, and 140 reason lines — and a reason line is exactly
+    the kind of prose that can claim more than the code gives. The likeliest sites are the reasons that
+    summarise several passages in one line (`ledger.rs`'s `outlives` covers twelve hits, `until the
+    epoch` seven, `no decision can` five) and the five phrase drops in §13.2.
+
+## 15. What changed, file by file
+
+**Five files, and none of them under `src/`.** Five, not four: this record is one of them, and
+listing the code and forgetting the record is the exact habit Phase 2d-4a's round 6 filed as L5 and
+Phase 2d-3's round 12 found before it. `PROGRESS.md` is the orchestrator's and is written in its own
+commit, as every step of this phase has been.
+
+- **`src-tauri/src/prose_sweep.rs`** — new, 236 lines. The shared machinery, moved out of
+  `liveness_contract.rs` with `sweep`'s signature widened to take the family, the trees and the skip
+  list, and `Judged`'s `reason` doc generalised from *this module's subject is
+  `espansoconfig_core::watch::liveness`* to a statement true of both checks.
+- **`src-tauri/src/retained_state_contract.rs`** — new, 1281 lines. The module doc with its five
+  limits, `RETAINED_STATE_SHAPES` (88), `SWEPT_TREES`, `SKIPPED`, `INVENTORY` (140), the `sweep()`
+  wrapper and four tests: `every_shape_is_lowercase`, `the_sweep_reaches_both_trees`,
+  `a_claim_that_wraps_across_a_line_break_is_seen` and the guard,
+  `every_retained_state_claim_is_judged`.
+- **`src-tauri/src/liveness_contract.rs`** — 1013 lines to 845. The machinery deleted, a
+  `use crate::prose_sweep::{…}` added, a *where the machinery lives* section added to the module doc,
+  and `sweep()` reduced to a wrapper. **`LIVENESS_SHAPES`, `INVENTORY` and the whole `mod tests` block
+  are byte-identical to `HEAD`.**
+- **`src-tauri/src/main.rs`** — two `#[cfg(test)] mod` declarations, in alphabetical position.
+- **`docs/decisions/2d-4a-C-notes.md`** — this step-2 record: §13 to §16 and the header above them.
+
+**`crates/espansoconfig-core` is untouched**: no core file changed, and
+`cargo tree -p espansoconfig-core | rg tauri` is still empty. **No Svelte component, no TypeScript and
+no i18n key changed**, so the three frontend figures are carried forward from 2d-4a round 6 exactly as
+step 1 carried them, unverified by this step.
+
+## 16. The gates
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1313 passed, 0 failed**, 26 result lines all `ok`, exit 0. **+4** — the new check's four tests, and nothing else moved |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** — the host-scar gate |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| `cargo fmt --check` | clean, exit 0 (one string literal was re-wrapped by `cargo fmt` before this run) |
+| `cargo doc --workspace --no-deps` | exit 0, **73** `private_intra_doc_links` warnings — the pre-existing count, unmoved — and **zero** unresolved links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `git status --short --untracked-files=all` | four paths, **none under `src/`** |
+| `liveness_contract.rs`'s four tests | green, and byte-identical to `HEAD` |
+
+The frontend baselines **431 / 2125 / 184** are carried forward unverified, because this step touched
+no path under `src/`. Any step that does must re-measure them.

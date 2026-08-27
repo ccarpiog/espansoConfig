@@ -163,7 +163,11 @@ mod liveness_contract;
 mod menu;
 #[cfg(test)]
 mod menu_contract;
+#[cfg(test)]
+mod prose_sweep;
 mod reconciliation;
+#[cfg(test)]
+mod retained_state_contract;
 #[cfg(test)]
 mod rust_source;
 mod save;
