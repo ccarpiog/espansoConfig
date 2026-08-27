@@ -891,3 +891,261 @@ The reviewer's own list, carried here with this round's outcome against each:
   judged-out** rather than pattern-narrow away.
 
 **Do not commit** — the orchestrator commits at the phase boundary.
+
+## 11. Review round 3, and the fix round that answers it
+
+`docs/reviews/phase-2d-4a-C.md` § *Round 3 — step 1, against the round-2 fix* is the review. Verdict
+**NOT READY**, **one finding — a Medium, prose-only** — and everything else on the attack list
+**explicitly cleared**. The finding is the **fourth** member of the claim family round 2 discovered,
+and round 2's own sweep could not see it: that sweep's pattern was written from the two *insertion*
+sentences the reviewer had named, and this one is about two **conditional removals**.
+
+**Round 3 reviewed round 2's fix.** Unlike rounds 1 and 2, its finding is **not** text a previous fix
+round wrote — the false sentence predates this phase. What the fix rounds did was narrow three
+sentences of the same family and leave the fourth standing, which is §10.7 item 3's prediction
+arriving from the direction that item did not name.
+
+### 11.1 The Medium — a shared guard promoted into a correlated post-state over two independent predicates
+
+`src-tauri/src/ledger.rs`, in `adopt_reloaded_revision_under_the_session_lock`'s doc comment, said:
+
+> **Both invalidations happen under one state guard**, taken once here, so no decision can observe
+> the record cleared and the announcement still standing, or the reverse.
+
+**That is false, and the same doc comment refutes it twelve lines above**: *"the equal cases are kept
+deliberately, and the two comparisons are independent: a reload can leave the record standing and
+drop the announcement, or the reverse."* The body is where the correction is derived from, and it is
+two independently conditional removals:
+
+| Mutation | Its predicate | When the reload matches |
+|---|---|---|
+| `clear_the_record_at(&mut ledger, path)` | a record exists **and** `recorded.revision != revision` | the record is **kept** |
+| `ledger.announced.remove(path)` | an announcement exists **and** `*announced != ObservedState::Content(revision)` | the announcement is **kept** |
+
+Nothing ties the two predicates. A reload whose revision the announcement already names but the
+record does not clears the record and keeps the announcement — **an announcement with no record**;
+the converse keeps the record and drops the announcement — **a record with no announcement**. Both
+are the states the *equal cases are kept deliberately* paragraph calls intended, and both are legally
+observable **after the method returns**.
+
+**What the guard does prove, and it is the only thing it proves:** the gate and the state mutex are
+held across both checks and across whatever removals they select, so no decision can interleave
+between them and meet a **half-applied** invalidation. That is a claim about **interleaving during
+this call**, never about the pair of values afterwards.
+
+**How it was restated.** The sentence now says exactly that, then denies the wider reading in the
+same breath: it names the two predicates as they are written in the body, **points at** the *equal
+cases are kept deliberately* paragraph rather than restating its argument (the reviewer's own
+suggestion, and the correct one — this file has now held a correct local statement beside a false
+general one four times, and a fourth restatement would be a fourth thing to drift), names **both**
+one-sided outcomes as legal after the return, and records itself as this phase's **round-3 Medium**
+so a later reader sees corrected text rather than quietly rewritten text.
+
+### 11.2 The four things this fix was told not to do, verified by reading after the edit
+
+1. **The true local facts survive intact.** The independence paragraph (`ledger.rs:1612–1614`) and
+   the two predicates in the body are **byte-identical** to what they were — the whole diff is 14
+   inserted and 2 deleted lines in one doc comment, and `git diff --stat` names one source file.
+2. **The three insertion-atomicity passages were not homogenized.** `ledger.rs:494–500`, `:1243–1251`
+   and `:1279–1284` are untouched. They describe genuinely **unconditional** paired
+   insertion/invalidation — `record_app_write` inserts the record, rewrites the path index, inserts
+   the anchor and removes the announcement with no condition on any of them — so their wording is
+   right and the reload method's is a **different** claim. Making them read alike would have been the
+   regression, not the fix.
+3. **`clear_the_record_at`'s pairing was not generalized.** Untouched. It still says the record and
+   its path index are one fact in two maps, and still says expressly that it does **not** touch
+   `latest_commit_at`.
+4. **No behaviour changed.** Zero non-comment, non-blank changed lines (§11.5).
+
+### 11.3 The sweep — pattern, counts, and what it found
+
+Same discipline as rounds 1 and 2: both trees (`crates/espansoconfig-core/src` and `src-tauri/src`),
+**recursive, never a file list**, `#[cfg(test)]` modules, test names and plain `//` comments included,
+and **runs of comment lines joined into prose units before matching**, because this workspace wraps at
+~76 columns and a claim straddles a line break as a matter of course.
+
+**The pattern was derived from the claim, not from the finding's words.** Round 3 states the family
+precisely, and it is narrower than *two values are always seen together*: **atomic execution
+incorrectly promoted into a correlated post-state when the mutations have different predicates.** So
+the pattern matched anything that turns a critical section into a statement about what can or cannot
+be observed, or that binds two mutations into one outcome.
+
+| | Pass 1 | Pass 2 (widened) |
+|---|---|---|
+| regexes | 26 | 39 |
+| comment runs joined and scanned | 4950 | 4950 |
+| runs matching | 97 | 166 |
+| prose windows read and judged | 138 | 252 (**114 new**) |
+
+**252 windows judged in all. 12 are the claim's subject matter — two retained values said to move as
+one. 1 was false and is fixed; 11 are true and were left**, listed here so a later round can see they
+were read rather than skipped:
+
+- **`ledger.rs:494–500`** (module) and **`:1243–1251`** (`record_app_write`) — record/anchor. True:
+  both narrow themselves to the insertion and deny the wider reading. Round 2's fix, round 3 cleared.
+- **`ledger.rs:1279–1284`** — record/announcement at the **insertion**. True for the same reason, and
+  it is the sentence whose *insertion* framing is why round 2's sweep could not see the reload one.
+- **`ledger.rs:1314–1325`** — the insertion comment, *"taken on the same line group and under the
+  same guard as the record"*. True and safe: a statement about **where the code is**, with no
+  post-state attached.
+- **`ledger.rs:1208–1216`** (`begin_epoch`) and **`:1948–1963`** (`clear_the_record_at`, whose
+  post-edit lines these are — round 3 cited it as `:1936–1950`, and this round's twelve inserted
+  lines sit above it) — round 2's tightenings, round 3 cleared. Verified against the bodies:
+  `begin_epoch` clears all **four** maps unconditionally and resets the epoch and the sequence
+  allocator beside them; `clear_the_record_at` touches two of those maps and expressly not
+  `latest_commit_at`.
+- **`ledger.rs:1093–1104`** — `documents_by_path`'s field doc, *"written and erased in the same two
+  statements as `writes`"*. **True of every mutation site**: construction, `begin_epoch` (two
+  adjacent unconditional clears), `record_app_write` (one insert plus a retain-and-insert) and
+  `clear_the_record_at`. **Left as it stands, and here is the residue it rests on and Rust does not
+  force.** In `clear_the_record_at` the `writes` removal is conditional on the index removal
+  answering `Some`, so a `writes` entry whose path-index key was already gone would not be reached.
+  Only one thing could produce one — two `DocumentId`s recorded at a single path, where the second
+  `insert` replaces the index value and orphans the first's `writes` entry — and the field doc
+  **already names the invariant that excludes it**, one `DocumentId` per path
+  (`retained_state.rs` clause 1, `2d-1-notes.md` D7). Nothing in the type system enforces that
+  invariant. Were it ever violated the residue is an orphaned `writes` entry **no decision reads** —
+  `decide` and `record_at` both enter through the path index — discarded at the next `begin_epoch`.
+  So: true as written, correctly hedged, and not the family shape, because its two removals share one
+  predicate rather than carrying two.
+- **`retained_state.rs` clause 2** — *"the pending set, the acknowledged watermark and the loss count
+  go together"*. True by construction: the queue's `begin_epoch` is a **single whole-value
+  assignment**, `*state = QueueState::empty(epoch)` (`reconciliation.rs:1029–1030`). Three fields of
+  one struct replaced in one statement is not two predicates.
+- **`commands.rs`'s two `begin_epoch` call comments** (~`:665–671`, `:702–706`) and
+  **`:8847–8848`** — *"emptied here, in the same block"*, *"adopts the same epoch in the same
+  block"*. True: both calls are inside the session-lock block, and — the point — **none of the three
+  says a decision cannot observe one done and not the other.** They state execution location and
+  point at the contract for scope. That is the correct shape, arrived at without this round's help.
+
+**The remaining 242 windows were judged out by subject**, and the categories are worth naming because
+they are where the pattern's noise lives: `rename()` atomicity in `persist::write`/`persist::save`
+(each already hedged as *"not a compare-and-swap"*); `patch::edit`'s lockstep tree walks, paired lines
+and *two removals*; type-level bundling where a struct's own shape is the guarantee
+(`BackupBatchScan`/`BackupBatchListing`'s *never one without the other*, `SessionSideOfASave`'s three
+borrows that *travel together*, `reconciliation`'s struct variants that keep operand sets together);
+lock-ordering and validation-coupling statements in `watch.rs` and `watch_check.rs`; and
+`watch::engine`'s *"in the same call"* passages, which state an execution fact and then describe the
+**problem** it causes rather than a guarantee.
+
+**Positions found false beyond the reviewer's one: zero.** The widening from 26 regexes to 39 —
+adding the generic *together*, *at the same time*, *while holding*, *the two are*, *both maps*,
+*in one call/block/step* forms — produced **114 further windows and no further defect.** That is
+evidence the pattern was adequate **this time**, and no evidence whatever that a fifth family does
+not exist: rounds 1, 2 and 3 each ended with a sweep its author believed adequate.
+
+### 11.4 What round 3 cleared — this shrinks the unreviewed remainder, and is evidence in its own right
+
+Recorded because a *cleared* position is a position a later round need not re-derive from scratch:
+
+- **G9's corrected conclusion** (`retained_state.rs:152–170`) — the round-2 rewrite holds. Record
+  clearing, anchor replacement and epoch clearing stay distinct, and the chronology refusal is
+  preserved. **The two false universals of rounds 1 and 2 are both gone and neither came back.**
+- **The three narrowed co-existence sentences** — all three match the single state guard and
+  correctly disclaim permanent co-existence.
+- **The slot/value wording at `CommitAnchor` (`:807–821`) and `begin_epoch` (`:1208–1216`)** —
+  neither slides back from slot or chronology fact to the concrete value.
+- **N2** (`retained_state.rs:191–195`) — *a path's slot* selects the true reading; the
+  expressly-not-guaranteed bound is unchanged.
+- **G4's *exactly three*** — still the whole set of production mutations of `QueueState::pending`;
+  no fifth has appeared, and the queue still states that same-key uniqueness is not type-enforced.
+- **G8's *the one exception*** — `begin_epoch` still resets every `LedgerState` field but `tally`;
+  no second session-lived value has appeared inside the contract's boundary.
+- **N5** — the counterexample is still existential and no pointer has made it universal.
+
+Both structural risks named in round 2 remain **unencoded and unchanged**: nothing in the type system
+fixes the number of `pending` mutations, and nothing prevents a second session-lived field.
+
+### 11.5 What changed, file by file
+
+- **`src-tauri/src/ledger.rs`** — one doc comment sentence in
+  `adopt_reloaded_revision_under_the_session_lock` (§11.1). **Comments only.** No function body,
+  signature, field, type or test was touched, and no other passage in the file moved.
+- **`docs/decisions/2d-4a-C-notes.md`** — this section.
+- **no other source file, no `crates/espansoconfig-core` path, no `src/` path, no command, no wire
+  type, no event, no queue, no i18n key and no user-visible string.**
+
+**Prose only, and verified rather than claimed.**
+
+```sh
+git diff -U0 -- crates/espansoconfig-core/src src-tauri/src \
+  | rg '^[+-]' | rg -v '^(\+\+\+|---)' | sed -E 's/^[+-][[:space:]]*//' \
+  | rg -v '^(///|//!|//|$)' | wc -l
+# 0
+```
+
+### 11.6 The gates after this round
+
+Each run as a separate command, with `pkill -f 'target/debug/deps/espansoconfig-'` before the
+workspace suite and nothing else running on the host.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1309 passed, 0 failed**, exit 0, summed over every `test result` line — the baseline, unmoved |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean**, exit 0 |
+| `cargo fmt --check` | **clean**, exit 0 |
+| `cargo doc --workspace --no-deps` | **exit 0**, **73** `links to private item` warnings — unchanged — and **zero** unresolved or ambiguous links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `git diff --stat -- crates/espansoconfig-core/src src-tauri/src` | one source file, `+14 −2`; **no path under `src/`** |
+
+**No gate is recorded here that was not run**, and two deviations are recorded rather than smoothed
+over. **The workspace suite ran twice** — the first invocation's tail did not show the summary lines
+and the second was piped through the `test result` fold — which is the same deviation §10.6 recorded;
+host discipline says *once*. And the **73** figure is `espansoconfig-core`'s, a crate this round did
+not edit: `src-tauri`, which holds the one edited file, emitted **no doc warning at all**, so the new
+`[`ObservedState::Content`]` link resolves and costs nothing. The frontend gates were **not** run and
+no figure for them is claimed — this step touches no path under `src/`, and §8's carry is unchanged.
+
+### 11.7 What this round did not do, and where it is thin
+
+1. **The corrected sentence is new text no reviewer has read.** §9.7 item 1 applies to it exactly as
+   it applied to rounds 1 and 2, and it is the *only* new prose this round produced — which narrows
+   the target for round 4 rather than removing it. **Every fix round of this phase has written a
+   later round's finding**, and rounds 1, 2 and 3 each found the previous fix defective.
+2. **Nothing here is enforced, and the false sentence proves how little that costs.** It stood
+   through 1309 passing tests, `clippy`, `cargo doc`, a written audit trail and **two** review rounds
+   whose sweeps were aimed at its own family. No test fails if it drifts back.
+3. **The interleaving claim the corrected sentence now makes is itself untested.** It rests on
+   reading the code: the method takes `enter_gate()` then `lock()`, and `decide`'s entry points take
+   the same two in the same order, so no decision can run between the two checks. **No test in this
+   repository races a decision against this method**, and none can be written against a
+   `std::sync::Mutex` without a scheduler hook. The sentence claims what the guard proves; the proof
+   is a reading, not an execution.
+4. **The sweep is still a human reading with a throwaway script**, and this round adds the sharpest
+   evidence yet for §10.7 item 3: the pattern that must find these claims cannot be derived from the
+   words of the last one. Round 2's pattern was insertion-oriented and missed a removal; this round's
+   was widened by 13 regexes **after** the first pass, on suspicion rather than on a hit, and the
+   widening found nothing. A family is discovered by a reviewer, after the sweep is green.
+5. **One true position was examined and deliberately left with its residue written down rather than
+   removed** — `documents_by_path`'s field doc (§11.3). Its pairing rests on an invariant Rust does
+   not force, the doc already names that invariant, and the residue of violating it is unreachable
+   today and harmless if reached. Recorded so round 4 can disagree with the judgement rather than
+   rediscover the position.
+6. **No behaviour was changed, and no code defect was found.** One passage was false; the code it
+   describes was right and remains untouched. Had it been the other way round this section would say
+   so and the change would not be prose-only.
+
+### 11.8 Likeliest sites for round 4, so step 2 and round 4 start from them
+
+The reviewer's own list, carried here with this round's outcome against each:
+
+- **the correction at `ledger.rs:1656`** — rewritten this round, and therefore the text most worth
+  re-reading. The regression the reviewer names is a sentence that says both invalidations or both
+  values are always absent or present together instead of only that no decision interleaves. The new
+  text denies exactly that reading twice, in the same paragraph, and names both asymmetric outcomes
+  as legal — **which is itself new prose that could be wrong in a way this round cannot see**;
+- **the independence statement above it (`:1612–1614`) and the two predicates below it** —
+  **untouched, verified byte-identical after the edit** (§11.2 item 1);
+- **the three insertion-atomicity passages (`:494–500`, `:1243–1251`, `:1279–1284`)** — **untouched**,
+  and the sweep was run with their correctness as a hypothesis to be preserved, not a shape to
+  propagate (§11.2 item 2);
+- **`clear_the_record_at` (`:1948–1963` after this round's insertion; `:1936–1950` in round 3's own
+  numbering)** — **untouched**, and its non-generalization re-verified against the body
+  (§11.2 item 3);
+- **`documents_by_path`'s field doc (`:1093–1104`)** — examined this round, judged true, left, and
+  its unenforced premise written down (§11.3, §11.7 item 5). Not on round 3's list; added by this
+  round;
+- **G4's *exactly three***, **G8's *the one exception***, **N5** — all three cleared by round 3 and
+  untouched here, all three still structurally unguarded;
+- **the `persist::write` lock-registry boundary** (§5 item 8), still to be **inventoried as
+  judged-out** by step 2 rather than pattern-narrowed away.

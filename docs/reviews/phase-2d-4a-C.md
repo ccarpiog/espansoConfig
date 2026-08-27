@@ -128,3 +128,38 @@ the ledger's two false co-existence assertions first, while preserving the
 epoch-scoped chronology guarantee that the implementation does provide.
 
 **NOT READY**
+
+## Round 3 — step 1, against the round-2 fix
+
+### Verdict
+
+**NOT READY.** G9’s rewritten conclusion now holds: record clearing, anchor replacement, and epoch clearing remain distinct, and the chronology refusal is preserved. The three co-existence sentences changed by the round-2 fix are also accurate. However, a fourth co-existence claim remains in the reload invalidation documentation: it derives an impossible paired post-state from a shared mutex even though the two invalidations are intentionally conditional and independent. This is prose-only and does not expose a code defect. It is the same broad claim family as round 2’s Medium, but it is not a restatement of wording already fixed there; it concerns a different pair of retained values and a different mutation path, so it is new substance.
+
+### Findings
+
+1. **Medium — `src-tauri/src/ledger.rs:1656`: the reload invalidation comment says the shared state guard prevents a decision from seeing either one-sided record/announcement state, although the method deliberately permits both.** The passage claims that because “both invalidations happen under one state guard,” no decision can observe the record cleared while the announcement stands, “or the reverse.” The guard does prevent a decision from interleaving between the two conditional checks, but it does not make their predicates agree. At lines 1673–1683, the record is cleared only when its revision differs from the reload, while the announcement is removed only when its state differs. Thus a reload matching the announcement but not the record leaves an announcement with no record, and a reload matching the record but not the announcement leaves a record with no announcement. Lines 1612–1614 expressly identify those two states as intentional. The corrected claim should say that no decision can interleave between the two checks and any removals they select, while expressly preserving that either asymmetric result may be observed after the method returns. This is a prose-only finding.
+
+### Priority audit
+
+- **G9’s corrected conclusion — CLEARED.** `clear_the_record_at` removes `documents_by_path` and `writes` without touching `latest_commit_at` (`ledger.rs:1947–1950`), and reload invalidation reaches that same helper (`ledger.rs:1673–1675`). Supersession inserts a fresh record and fresh anchor under one guard, replacing the previous value without emptying the path’s slot (`ledger.rs:1305–1332`). Epoch replacement clears the record maps and the anchor map (`ledger.rs:1204–1217`), while `admit` rejects a predecessor epoch before calling `decide` or consulting chronology (`ledger.rs:1367–1378`). Finally, `decide` consults the anchor independently of the record and refuses `read_after <= anchor` (`ledger.rs:2094–2117`). The consumer consequence at `retained_state.rs:152–170` therefore follows from the three stated premises without restoring either false universal from rounds 1 or 2.
+
+- **The three narrowed co-existence sentences — CLEARED; a fourth exists and is the finding above.** The module-level record/anchor sentence (`ledger.rs:494–500`) and `record_app_write`’s equivalent (`ledger.rs:1243–1251`) now claim only that no decision can interleave with that insertion and observe a half-written pair. The record/announcement sentence (`ledger.rs:1279–1284`) likewise limits itself to the unconditional insertion-plus-invalidation performed by that call. All three match the single state guard and correctly disclaim permanent co-existence. The missed family is slightly narrower than “two values are always seen together”: it is **atomic execution incorrectly promoted into a correlated post-state when the mutations have different predicates**. The surviving reload sentence phrases that as “both invalidations” under one guard, which let it escape the insertion-oriented correction.
+
+- **The slot/value wording around `CommitAnchor` and `begin_epoch` — CLEARED.** `begin_epoch` now names “a commit anchor’s slot” and immediately distinguishes the shorter-lived value (`ledger.rs:1208–1216`). `CommitAnchor` likewise says the path’s slot is maintained while the concrete value is replaced, then gives creation, reading, and removal subjects explicitly (`ledger.rs:807–821`). Neither passage slides back from slot or chronology fact to the concrete value.
+
+- **N2 — CLEARED.** `announced` may remove an individual path when a commit or reload makes its announcement false (`ledger.rs:1333`, `1682`); `latest_commit_at` has no individual removal at all, and insertion at an existing path replaces only its value (`ledger.rs:1326–1332`). Naming “a path’s slot” at `retained_state.rs:191–195` therefore selects the true reading: an anchor value can leave while its slot remains. Both maps still lack a capacity policy and neither is pruned as a whole before `begin_epoch`, so the expressly-not-guaranteed bound is unchanged.
+
+- **G4’s “exactly three” — CLEARED.** The production mutations of `QueueState::pending` remain the whole-state replacement in `begin_epoch` (`reconciliation.rs:1029–1030`), insertion and overflow removal in `enqueue` (`reconciliation.rs:1097–1103`), and acknowledgement retention in `drain` (`reconciliation.rs:1184–1190`). A same-key insertion would be a fourth exit, but production sequences are allocated uniquely within an epoch; the queue documentation continues to state that this is not type-enforced. No fifth production mutation has appeared.
+
+- **G8’s “the one exception” — CLEARED.** `LedgerState` still consists of the epoch, record maps, announced map, anchor map, sequence allocator, and tally (`ledger.rs:1079–1143`). `begin_epoch` resets or clears every one except `tally` (`ledger.rs:1204–1218`), while the queue replaces its entire `QueueState`. Within the contract’s retained-state boundary, no second session-lived value has appeared.
+
+- **N5 — CLEARED.** Overflow can evict an entry before any drain returns it, and epoch replacement can discard such a pending entry wholesale. Previously returned entries remain stored and can also be evicted or replacement-discarded, so the counterexample must remain existential. In the reviewed source, no pointer turns it into a universal claim; `retained_state.rs:207–212` remains the negative clause itself.
+
+### Likeliest sites for round 4
+
+- The correction at `ledger.rs:1656`: the likely regression is another sentence that says both invalidations or both retained values are always absent or present together, instead of saying only that no decision interleaves between the conditional operations.
+- The independent-condition statement immediately above it (`ledger.rs:1612–1614`) and the two predicates below it (`ledger.rs:1673–1683`): a fix must preserve both legitimate asymmetric outcomes rather than “repair” the contradiction by weakening those true local facts.
+- The insertion atomicity passages at `ledger.rs:494–500`, `1243–1251`, and `1279–1284`: a sweep-driven fix could incorrectly homogenize unconditional paired insertion/invalidation with the reload method’s independently conditional removals.
+- `clear_the_record_at` at `ledger.rs:1936–1950`: its record/index pairing is genuinely unconditional, but that true local pair must not be generalized to the record/anchor or record/announcement pairs.
+
+**NOT READY**

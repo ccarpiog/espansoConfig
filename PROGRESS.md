@@ -108,7 +108,7 @@ Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds t
 | **2d-1** | **The core observation engine, with no caller** — consult Q7 item 1. `watch::engine::ObservationEngine` (`start`/`hint`/`tick`/`rescan`/`next_deadline`) over an injected `Millis` clock and `WatchSource` reader: validated 150–300 ms trailing-edge debounce, two-equal-reads stability on **every** route including the baseline scan, exact hashing, projection/validation through the workspace's own path, typed `Changed`/`Added`/`Removed`/`Unreadable`. `watch::correspond` binds one table per base match to both snapshots' revisions; `watch::native` confines `notify` 8.2.0 to hints-and-degradation over exactly `watched_roots()`. `watch::self_write_suppresses` is Q2's predicate **shape** — the ledger, sequences and epochs are deliberately absent (2d-3/2d-4). **Admission and discovery's acceptance are one predicate**: `WatchSource::read` takes the engine's root and applies the walk's whole rule (plain-name components, every intermediate a real directory by `symlink_metadata`, final a regular file), so no route — baseline, hint or rescan — reads what the walk cannot reach | ✅ complete — after **five review rounds**, and the tail of them is this project's named failure mode in miniature. Round 1 NOT READY (2 High: one-read baselines a truncate/write race can tear; a `.yml` symlink reading outside the watched roots — 2 Medium, 1 Low). Round 2 NOT READY: **a narrower instance of all five** — sharpest the rescan route through a newly **symlinked ancestor**, past round 1's final-component-only check. Round 3 NOT READY on one Medium: the module headline still said "deterministic" **as a name** — the concept sweep had matched the site and misread it. Round 4 NOT READY on the same shape twice more: the notes' own D2 **heading** and the consult's Q1 **ruling line** — closed by qualifying the heading in place and a correction block under the ruling, never a rewrite. Round 5 READY, no findings. Three pinning tests verified failing without their fixes; §6–§9 of `2d-1-notes.md` record each round's closure with correction blocks preserving what was false when written |
 | **2d-2** | **The watcher lifecycle behind the workspace session, and the real-filesystem adapter** — consult Q7 item 2, the one step whose principal integration test belongs in `src-tauri`. The worker thread, its inbox, the epoch tag, cancellation and join, and `watch_check.rs`'s real-FSEvents evidence | ✅ complete — closed **READY at round 5** of its review. Round 1's High was **sandbox-confounded evidence** — the Codex sandbox blocks FSEvents delivery, so a delivery-dependent test times out there while the supported host passes it repeatedly. That precedent now binds every FSEvents-adjacent review in this project: they are briefed as **static**, with host-measured numbers supplied |
 | **2d-4a** | **The Rust half of the reconciliation wire** — the first step of the 2d-4 split (`docs/decisions/2d-4-split-notes.md`), cut on the seam consult Q3 itself draws: Rust answers `Result<T, CommandError>` and the TypeScript wrapper is what converts it to `CommandResult<T>`. New `src-tauri/src/reconciliation.rs`: a `ReconciliationQueue` held beside the open session and fed by `queueing_sink`, replacing `discarding_sink`, which is **deleted** — until this step every admitted observation was produced and dropped. `workspace://reconciliation-ready` carries `ReconciliationWake { workspace_epoch, newest_sequence }` and is a hint; `drain_external_changes(after_sequence)` is the **sixteenth** workspace command and the authoritative answer, returning `ReconciliationBatch { epoch, newest_sequence, observations, discarded }` over typed `ExternalObservation`. **Coalescing is computed at `drain`, not at `enqueue`** — see the verification section for why that had to move. Ten EN/ES code keys; `wire_contract`, `dispatch_check` and `dictionary_contract` updated. Nothing drawn, no surface-open decision, and the only paths touched under `src/` are `src/lib/i18n/{en,es}.json` | 🔶 **implemented, every gate green, and NOT closed** — **four** Codex rounds, all NOT READY (round 1: 1 High, 4 Medium, 2 Low; round 2, against round 1's fix: 0 High, 4 Medium, 1 Low, of which **three were sentences the fix round itself wrote**; round 3, against round 2's fix: 0 High, 4 Medium, 1 Low). **Round 3's finding 1 is round 1's finding 3 in a third shape**: round 2's fix moved the coalescing rule out of `enqueue` into `drain` and **left the capacity bound behind**, evicting before it stored, so a full queue's contents — and through the fold the batch — still depended on arrival order. Its fix stores first and evicts after, and picks the victim by `evictable_sequence` (the lowest sequence of the **busiest path**), so a document with one pending entry is never evicted while another has two. Round 3 also put `AddedContent` on the wire (Q3's `disk?` as a discriminated value, so a first non-UTF-8 **addition** is a row with an address), made `espansoconfig_core::workspace::identity_of` **public** and added `identity_already_issued`, and **deleted** `QueueState::issued_identities` — one path-keyed structure instead of two. All three fixes are in the tree and green. **Round 4** then took round 3's own lesson — *moving a rule does not move the bound it depended on* — and turned it on round 3, which had changed the eviction victim, the wire shape and the identity source in one round: **NOT READY — 0 High, 3 Medium, 2 Low**. The thing the brief attacked hardest **cleared** — `evictable_sequence` is order-independent at four or more paths, its state count is irrelevant because it never reads `ObservedState`, and two paths cannot tie on both keys because a globally unique sequence cannot be both paths' lowest — and so did the refused alternative's counterexample, the boxing's serialization-transparency, public `identity_of`'s use in this tree, round 3's liveness rewording and R10. **What it found is that round 3 closed round 1's finding by replacing one wrong answer with another**: `address_of` asking only the process-wide register answered `Known { D }` for an identity minted in a **previous** epoch that the open workspace rejects as `UnknownDocument`, and dropped the display path doing it — and the test round 3 deleted was protecting exactly that distinction while its replacement builds an empty workspace, receives `Known` and declares it correct **without testing addressability**. The fix makes `ObservedDocument` `Addressable | Named | Unnamed` with the display path on **every** arm, asks the workspace first and the register second, adds `address_of_minted` for the arms already holding a snapshot's identity, and declares **no accessor over the three arms** so a consumer cannot collapse the first two with a `?`. M2 gave `Changed` the `ChangedContent` symmetry round 3 left untaken, with `previous_revision` and `disk_revision` **outside** the arm, closing Q3's missing operands. M3's sweep found **four** false retention positions beyond the two cited; L1 corrected a false universal to the claim its counterexample supports; L2 is an **honest downgrade** — the core register is still unbounded and now says so. Committed at `16d11b3` and green at **1308 / 431 / 2125 / 184**. **Round 5** then asked what round 4's own new code and new sentences rest on, and returned **NOT READY — 0 High, 1 Medium, 3 Low**. Its Medium is the **third consecutive round in which the retention boundary was restated and was still false**, and this time in a direction none of rounds 2, 3 or 4 looked in: every one of them counted the ways a stored entry leaves the queue *by the entry's own properties* — acknowledged, or an eviction policy's victim — and none counted the one that depends on nothing about the entry at all, `begin_epoch` assigning a fresh `QueueState` on a workspace replacement and discarding the pending set, the watermark and the loss count together. The boundary now has **three** clauses at **twelve** positions, the third counted in **no** `discarded` because the open that causes it has already replaced the authoritative workspace; the idempotence sentences gained *and no replacement epoch was adopted between them*. **L1 is round 4's own new helper modelling an invariant violation as a false value** — `address_of_minted` answered `Named`, an arm whose doc says the open workspace does not hold the path, in a branch reached only when it demonstrably does; it now matches `Some(resolved)` and answers `Addressable { document: resolved }`, true of what it carries whatever the number, with a `debug_assert_eq!` carrying the agreement and `Named` reserved for `None`. **The branch round 5 called unreproducible was reproduced by a test within one run**: a `commands.rs` fixture built `DocumentContext::detached(DocumentId(1), "x.yml")` and the shipped code answered the false `Named { document: 1 }` for a path the workspace resolved to 157; the fixture now mints through `identity_of`, and §14.4 says plainly that changing a fixture is the shape of fixing the test instead of the code and argues why it is not that here. **L3** is §13.2 overstating its own test — round 4's strengthened uniform-wire walk had two **projected** fixtures, so it covered neither `Unreadable` arm; both are now serialized and a walk over `UnreadableReason`, which nothing checked, was added one level further down. **L2 is a no-change verdict**: R9 is **OPEN**, the core identity register still unbounded, unevicted, uncapped and unmeasured, and round 4's block opening with the word *Closed* is corrected in R9's own entry. Nothing was closed by weakening a guarantee. `docs/decisions/2d-4a-notes.md` §14 is the record and §14.4 is what it is thin about. Green at **1308 / 431 / 2125 / 184** (**+0** Rust — three tests strengthened, none added). **Round 6** then asked what round 5's own new code and new sentences rest on, and returned **NOT READY — 0 High, 1 Medium, 5 Low**. **It was the round that could have ended the tail and did not**: its brief carried the owner's standing instruction to say so if the findings were only restatements of the retention sentence, and instead it **cleared** the twelve retention positions and the fifth-mutation question outright and found round 5's lesson **one level up**. Its Medium is the **watermark**: `ReconciliationBatch::newest_sequence` was documented as never falling below the highest watermark this queue — or, in `commands.rs`, this session — had *ever* been drained with, and therefore storable **unconditionally**, while `begin_epoch` assigns a fresh `QueueState` with `acknowledged == 0`, so a drain of the empty successor answers 0 after epoch 1 drained at 9. The code is right, sequences and watermarks being epoch-scoped; the claim is now scoped *within the epoch the batch names* at **nine** source positions, two of them in `dispatch_check.rs`, which no round before 6 had swept. **L1 is the one behaviour change and a data defect wearing a Low's label**: a `debug_assert_eq!` is not an invariant-failure policy, and in release it left `address_of_minted` answering the workspace's identity while the same observation's projection carried the snapshot's in `DocumentView::id` and every `MatchId` beneath it — **one `Changed` object with two document identities for one file**. It is now an `assert_eq!` on every profile, forced because **no arm is true** in that case, with the trade stated: a panic inside a command holding two poison-absorbing mutexes, but **not a panic on input**. L2 refused the coverage-by-argument move for the third time — all six `UnreadableReason` arms are serialized and `wire_tag`'s exhaustive `match` makes a seventh a compile error. L3 narrowed R10's false closure to the implemented rule (a singleton is never the victim while another path has two), L5 corrected §14.2's four-of-five file list, and **L4 is a no-change verdict: R9 stays open**. `docs/decisions/2d-4a-notes.md` §15 is the record and §15.4 what it is thin about. Green at **1309 / 431 / 2125 / 184** (**+1** Rust — L1's new test, the only one added). **Round 7 is owed** — see the "Next action" section |
-| **2d-4a-C-1** | **The scoped-lifetime contract, stated once, and its pointers** — the first half of the mechanism the owner commissioned on 2026-08-27 in place of running review round 7. New `crates/espansoconfig-core/src/watch/retained_state.rs`: **211 lines, zero non-comment lines**, a pure doc module beside `liveness.rs`, stating the family — *how long does a piece of retained pipeline state survive, and under what scope* — as **9 guaranteed clauses and 8 expressly-NOT-guaranteed**, each cited to the code item it is derived from. **45 passages now point at it**, 37 over compile-checked intra-doc links and 8 as plain text where rustdoc cannot resolve one (`#[cfg(test)]` modules and `//` comments); **31 prose units were judged out of the family**. It sits in the **core** because two of the family's three holders are the shell's and only a core doc comment is reachable from both trees — the tension is stated, not smoothed. **One false claim was found in the tree and fixed**: `ledger.rs`'s module doc named *a serialized reading* as what ends an app-write record where `decide` clears it for **every** reading surviving both retaining checks, the ordinary external change included; `decide`'s own doc had contradicted it since round 8. **7 non-comment lines changed, all additions** | 🔶 **implemented, every gate green, NOT closed — TWO Codex rounds, both NOT READY, both fixes in the tree; round 3 is owed.** Round 1: 1 High, 1 Low. Round 2, against round 1's fix: **1 High, 1 Medium**, and the reviewer stated unprompted that neither is a restatement — *"Both have new substantive content."* **Round 2's High is round 1's fix's own new sentence**: G9 ended *"none of the record's four ends touches the anchor"*, false in **both** senses the fix had just separated, because supersession replaces the concrete anchor and epoch replacement clears its slot — the fix corrected the subject and collapsed the distinction again one sentence later. **Round 2's Medium is a claim family the round-1 sweep could not see by construction**: two unqualified *co-existence* assertions that no decision can see the record without the anchor or the anchor without the record, when seeing an anchor after its record is gone is the **intended design** (2d-3 round 9's mechanism) and **G9 depends on that exact state**. The round-2 fix's own sweep found **a third**. Round 2 cleared G4, G8, N2 and N5 as true at their stated boundary, and certified G9's slot/value account as matching production code. The **High is G9**, which gave a `CommitAnchor` an epoch lifetime where `record_app_write` replaces the value on every later commit to the same path — three subjects (the record, the per-path slot and chronology fact, the concrete value) asserted to have one lifetime, and the module defines its own family as retained **values**, which is what makes it a defect. `ledger.rs:1258`'s local insertion comment said the true thing all along, so **for the second time in two rounds this file held its own refutation**. The fix round's sweep judged **152 family sentences** one at a time and found **ten false positions — eight beyond the reviewer's two**, and **its own first pattern missed two test comments**, reproducing this project's named failure mode inside the sweep and catching it before any edit. Prose only: **zero** non-comment lines changed, verified by filtering the diff. 1309/0 failed unchanged, clippy/fmt clean, `cargo doc` exit 0 at the pre-existing 73 `private_intra_doc_links` with zero unresolved, core free of tauri, no path under `src/`. See the verification section |
+| **2d-4a-C-1** | **The scoped-lifetime contract, stated once, and its pointers** — the first half of the mechanism the owner commissioned on 2026-08-27 in place of running review round 7. New `crates/espansoconfig-core/src/watch/retained_state.rs`: **211 lines, zero non-comment lines**, a pure doc module beside `liveness.rs`, stating the family — *how long does a piece of retained pipeline state survive, and under what scope* — as **9 guaranteed clauses and 8 expressly-NOT-guaranteed**, each cited to the code item it is derived from. **45 passages now point at it**, 37 over compile-checked intra-doc links and 8 as plain text where rustdoc cannot resolve one (`#[cfg(test)]` modules and `//` comments); **31 prose units were judged out of the family**. It sits in the **core** because two of the family's three holders are the shell's and only a core doc comment is reachable from both trees — the tension is stated, not smoothed. **One false claim was found in the tree and fixed**: `ledger.rs`'s module doc named *a serialized reading* as what ends an app-write record where `decide` clears it for **every** reading surviving both retaining checks, the ordinary external change included; `decide`'s own doc had contradicted it since round 8. **7 non-comment lines changed, all additions** | 🔶 **implemented, every gate green, NOT closed — THREE Codex rounds, all NOT READY, all three fixes in the tree; round 4 is owed, and the count is falling: 1 High + 1 Low, then 1 High + 1 Medium, then **0 High + 1 Medium, prose-only**.** Round 1: 1 High, 1 Low. Round 2, against round 1's fix: **1 High, 1 Medium**, and the reviewer stated unprompted that neither is a restatement — *"Both have new substantive content."* **Round 2's High is round 1's fix's own new sentence**: G9 ended *"none of the record's four ends touches the anchor"*, false in **both** senses the fix had just separated, because supersession replaces the concrete anchor and epoch replacement clears its slot — the fix corrected the subject and collapsed the distinction again one sentence later. **Round 2's Medium is a claim family the round-1 sweep could not see by construction**: two unqualified *co-existence* assertions that no decision can see the record without the anchor or the anchor without the record, when seeing an anchor after its record is gone is the **intended design** (2d-3 round 9's mechanism) and **G9 depends on that exact state**. The round-2 fix's own sweep found **a third**. Round 2 cleared G4, G8, N2 and N5 as true at their stated boundary, and certified G9's slot/value account as matching production code. The **High is G9**, which gave a `CommitAnchor` an epoch lifetime where `record_app_write` replaces the value on every later commit to the same path — three subjects (the record, the per-path slot and chronology fact, the concrete value) asserted to have one lifetime, and the module defines its own family as retained **values**, which is what makes it a defect. `ledger.rs:1258`'s local insertion comment said the true thing all along, so **for the second time in two rounds this file held its own refutation**. The fix round's sweep judged **152 family sentences** one at a time and found **ten false positions — eight beyond the reviewer's two**, and **its own first pattern missed two test comments**, reproducing this project's named failure mode inside the sweep and catching it before any edit. Prose only: **zero** non-comment lines changed, verified by filtering the diff. 1309/0 failed unchanged, clippy/fmt clean, `cargo doc` exit 0 at the pre-existing 73 `private_intra_doc_links` with zero unresolved, core free of tauri, no path under `src/`. **Round 3, against the round-2 fix: 0 High, 1 Medium, and it CLEARED six of its seven attack-list items** — G9's corrected conclusion, all three narrowed co-existence sentences, the `CommitAnchor`/`begin_epoch` slot-vs-value wording, N2 (the edit no review had asked for), G4's *exactly three*, G8's *the one exception* and N5 — so **the unreviewed remainder of step 1 is one paragraph, twelve lines long**. Its Medium is a **fourth** member of round 2's co-existence family, in the one shape round 2's sweep could not reach: `adopt_reloaded_revision_under_the_session_lock` said *"Both invalidations happen under one state guard … so no decision can observe the record cleared and the announcement still standing, or the reverse"*, while both invalidations are **independently conditional** and either one-sided result is intentional — which the same doc comment says **twelve lines above the false sentence**, the **fourth time in this phase** `ledger.rs` has held its own refutation. Round 3 named the family more precisely than round 2 could — **atomic execution promoted into a correlated post-state when the mutations have different predicates**, round 2's three positions all being *unconditional paired insertions* — and step 2 must cover both halves or ship with that blind spot. The round-3 fix claims only what the guard proves, denies predicate agreement expressly, names both legal one-sided post-states, and **points at** the *equal cases are kept deliberately* paragraph rather than restating it; round 3's four predicted round-4 regressions were all avoided, **verified by reading after the edit**, and the `ledger.rs` diff is one hunk. Its sweep derived the pattern from the claim rather than the finding's words, joined comment runs into prose units, and judged **252 windows** over two passes (the second widened by 13 regexes on suspicion, finding **nothing further**): of **12** positions in the claim's subject matter, **1 was false and 11 true and left**, each listed. One position beyond round 3's list — `documents_by_path`'s field doc — was judged true and **left with its unenforced invariant written down** so round 4 can disagree rather than rediscover it. Prose only again: **zero** non-comment lines changed, verified by filtering the diff; 1309/0 unchanged, clippy/fmt clean, `cargo doc` exit 0 at 73 `links to private item` with zero unresolved and **no** doc warning from the shell, core free of tauri, no path under `src/`. See the verification section |
 | **2d-3** | **The write ledger and the admission gate** — consult Q7 item 3: `WriteLedger`'s record `last_app_write[DocumentId] = { workspace_epoch, revision, recorded_at }`, the per-epoch sequence allocator, the coalescing published-state map, and a **commit gate** (a second mutex, distinct from the state mutex, held across `save_document` *and* the record, by RAII). The intake is `WorkspaceSession::observing`; `run_one_save` delegates to `commit_and_record`; both save-path refreshes admit through the same `decide`. Lock order **session → gate → state**, everywhere. No command, no event, no queue, no wire, no frontend file — Q3 holds | ✅ **complete and CLOSED** at step **2d-3-C** (2026-08-26), after a fourteen-round review tail the owner ended by ruling that the convergence mechanism be built rather than a fifteenth round run — the step review had stood at **round 8 of an open-ended tail** when this cell was last rewritten. Rounds 1–6 each found a narrower instance of the finding the round before had just closed; round 7 was the first whose High was not narrower but the *same* finding re-asserted, and by owner decision (2026-08-25) the remedy was adopted — the coalescing marker split from the sequence-spending publication, `decide` given **three private, exhaustively matched doors** of which only the watcher's two-read one may spend a sequence. **Round 8 cleared that split and found the shape one step *above* where the brief pointed**: `decide`'s steps 1–4 were left shared, so step 2's `self_write_suppresses` ran **before the door was consulted** and a **stale record could answer `SelfWrite` to a serialized save-tail reading** — retaining the record, marking nothing, announcing nothing, and returning above the only two things that door exists to do. It is the first High since round 6 that is a defect in **behaviour** rather than a sentence, and it needs no race: `reload_document` touches the ledger not at all and a `committed: false` save records nothing, so the previous entry stands while the workspace has moved on. The fix round took the reviewer's remedy — step 2 is now a `match door` structurally identical to step 1's — on a **narrower argument than *the record might be stale***: suppression exists to absorb the several native hints one atomic replacement generates, a native hint has exactly one door, and since round 7 neither serialized door can publish, so neither can commit the error suppression prevents. **Round 9 cleared that argument in both halves and then returned three Highs, all defects in behaviour, all of one root cause: nothing told the ledger when the workspace accepts a foreign revision.** `reload_document` re-read disk and updated the cache while touching the ledger not at all, so the stamped door could suppress a genuine external return to stale-recorded bytes; clearing the record destroyed the only chronology anchor with it, letting a settlement stamped before a commit publish bytes the commit had replaced; and a stale `announced` entry answered `Duplicate` to a real change — **which cannot be deferred to 2d-5, because `Duplicate` sends that layer no value to arbitrate**. **Two of the three were §5 items 23 and 24, written by the round-8 fix round one round earlier as bounded residues**, bringing to **seven** the §5 items so recorded and later found to be real defects. The round-9 fix reverses §14.2's rejection of reload-time invalidation — **two of its four grounds were verified false in the code** — and separates the commit anchor's lifetime from the record's suppression licence. **Rounds 10–12 moved the tail off behaviour and onto the record, and did not shorten it.** Round 10 was the first in ten with no High and no Medium — it *cleared* the three-map combination (three lifetimes, because the three maps answer three different questions), cleared the orchestrator's suspect (the asymmetry between the reload and the two save tails is the design), and downgraded §5 item 25 to a maintenance risk. Round 11 broke that clean sheet immediately with two Highs, a Medium and a Low, on the shape *round 10 corrected a conclusion and left its premise standing, in the same paragraph*; its Medium removed `watch_check`'s `preceded_a_commit == 0` assertion, proved redundant by a neuter rather than argued. **Round 12 then applied that lesson to round 11 and found the third premise in the same paragraphs**: *the re-observation's own stamp is taken after the anchor* is true in **program order only**, while `decide` is `read_after <= at` and `Instant` is expressly not guaranteed strictly increasing — so one refusal per commit is usual, never guaranteed, and four positions claimed otherwise. Its second High is that round 11's removal was recorded as **costing nothing** when it cost the *intermittently* early stamp's detection, the tally being cumulative across an epoch. Three Lows: a stale paragraph at a bold first sentence, a *file by file* list naming three of five files (a habit **seven** sections older than round 11), and a residue assigned to 2d-4 that **Q7 item 4 assigns to no phase at all**. All five fixed, none cleared. **Round 13 then turned round 12's lesson on round 12 and found what the corrected sentences rested on**: *bounded by the host clock advancing* was a **new liveness claim** the round-12 fix had just written, and it is false — `ReObserveOutcome`'s own doc says `Asked` promises a worker's inbox and not an observation, `observe_owed` says a debt waits with a path that never stabilizes, and `WorkerMessage::Stop` can be consumed first, so the clock may advance indefinitely with the retry never completing. Its second High is the same shape at the **§1 headline**, untouched by twelve rounds: *every one of those requests is an owed observation the engine **must answer***, which `observe_owed` refuses in as many words. One Low: §18.5 called all five `commands.rs` ordering hits the serialized-doors argument when only two are, the other three being duplicate-lookup wording — the count right, the judgement wrong. All three fixed, none cleared; the fix round's own sweeps found **nine** further instances, eight in code including an **assertion message**. **Round 14 then asked whether round 13's *narrower* claim was true at every position it replaced, and it was not: the narrower claim is still unconditional where the code is conditional.** `revert_settlement` ends `if owed { observe_owed } else { hint }`, so a path is re-**owed** only where the settlement being taken back had itself **discharged** a debt — an ordinary native-hint settlement has `owed == false` and gets a plain hint, which is exactly the thing the suppression argument elsewhere says may be *coalesced into silence*. Thirteen positions said it unconditionally, including round 13's own new safety sentence. Its first High is the same shape at the **§1 headline** again — *the engine takes its settlement back and **observes the path again***, against `revert_settlement`'s own doc, which says it schedules a read and **emits nothing itself**. Two Lows, both arithmetic in round 13's record: three of §19.4's after-counts were measured on a tree that did not yet hold the review text the same commit appended, and §19.5 said **six** correction blocks while naming seven. All four fixed, none cleared; the fix round's own sweeps found **six** further positions, and **both code ones are in `src-tauri/src/main.rs`'s module header** — the file §19.4's sweep could not see because it enumerated four files rather than the directory, so **round 13's own High 2 sentence survived the round that closed it everywhere else**. §5 item 17 had said the true thing since round 5, so the record held its own refutation for nine rounds. Round 14 changed **zero** non-comment lines in `src-tauri/src/`. **The tail ended at fourteen rounds, by owner decision on 2026-08-26, and step 2d-3-C built the mechanism instead of running a fifteenth**: the liveness contract is stated **once** in `crates/espansoconfig-core/src/watch/liveness.rs` (5 guaranteed clauses, 6 expressly not, each cited to the code item it is derived from), **twenty** positions across six files now **point** at it over intra-doc links that both crates make compile-checked by denying `rustdoc::broken_intra_doc_links`, and `src-tauri/src/liveness_contract.rs` walks both source trees **recursively**, joins comment runs into prose units, matches 50 phrases in 5 shape groups and **fails the build** on any hit its 82-entry inventory does not carry. The check was **driven to red twice, by two people, on two different files** — round 13's and round 14's Highs would both now be test failures rather than review findings. The argument is the reduction of surface, one place to be right instead of twenty, and **not** that the check judges prose: it catches an *unmarked* claim and a *new* one, and `2d-3-C-notes.md` §5 records **seven** limits, including that a reworded sentence reusing a recorded phrase in the same file passes and that `docs/` is deliberately not swept. Five non-comment lines changed across both source trees; no behaviour, and `decide`, `revert_settlement` and `observe_owed` are untouched. **2d-3 is CLOSED**; the next action is **2d-4**. See the "Next action" section |
 | 2d | External change reconciliation — plan §6.5, as ruled by the consult: eight steps 2d-1 … 2d-8 | 🔶 in progress — consult, 2d-1, 2d-2 and **2d-3 (closed at 2d-3-C)** done; **2d-4 is split into 4a and 4b** (`docs/decisions/2d-4-split-notes.md`), and **4a is implemented, green and under review — round 3 owed** |
 | 3–5 | See plan §12 | ⬜️ not started |
@@ -3663,7 +3663,7 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
-## Verification — Phase 2d-4a-C step 1 (the contract and its pointers; review round 1 PENDING)
+## Verification — Phase 2d-4a-C step 1 (the contract and its pointers; three review rounds done, all NOT READY, round 4 owed)
 
 **The owner's decision, and it is the thing a fresh session cannot re-derive.** On 2026-08-27 the
 standing question recorded at the head of "Next action" — *round 7 first, or the mechanism first* —
@@ -3910,24 +3910,106 @@ so naming the slot selects the reading round 2 certified true, and the capacity 
 - **Prose-only, verified not asserted**: non-comment, non-blank changed lines across both source
   trees = **0**. No code defect found; in every case the code was right and the comment wrong.
 
-### Round 3 is owed, and step 2 still must not start before it
+### Review round 3 — **NOT READY (0 High, 1 Medium, prose-only)**, and the fix that answers it
 
-The round-2 fix rewrote G9's conclusion, three co-existence sentences, two ambiguity positions and N2 —
-**text no reviewer has read**, including one edit (N2) no review requested. Round 2's closing
-instruction stands: *"Step 2 should not be built on the current text."*
+Appended verbatim to `docs/reviews/phase-2d-4a-C.md`. Codex ran **read-only** and wrote no file; its
+final message was the deliverable and the orchestrator appended it. Job `task-mtbiox9r-v74dy9`,
+high effort, 301 s.
 
-**Round 3's attack list, from round 2's own "likeliest sites" plus what the fix wrote:**
+**The count is falling, and that is the fact the owner is owed at this handoff.** Round 1: 1 High,
+1 Low. Round 2: 1 High, 1 Medium. Round 3: **0 High, 1 Medium**. And round 3 **cleared six of the
+seven attack-list items** — G9's corrected conclusion, all three narrowed co-existence sentences,
+the slot/value wording at `CommitAnchor` and `begin_epoch`, N2 (the edit no review had asked for),
+G4's *exactly three*, G8's *the one exception*, and N5. The unreviewed remainder of step 1 is now
+**one paragraph of new prose**, twelve lines long.
 
-- **G9's corrected conclusion** (`retained_state.rs:152`) — it must keep record clearing, anchor
-  replacement and epoch clearing distinct **without weakening the chronology refusal**. This is the
-  second consecutive round in which G9's closing sentence was the finding.
-- **The three narrowed co-existence sentences**, and whether a fourth of that shape exists — the
-  round-2 sweep's own pattern is now the thing to doubt.
-- **`ledger.rs:805` and `:1198`**, where *anchor* can still slide from slot/fact back to value.
-- **N2** (`retained_state.rs:176`), which the fix changed **unasked**.
-- **G4 and G8** remain the highest-risk true enumerations, because neither the set of `pending`
-  mutations nor the absence of another session-lived field is encoded anywhere.
-- **N5** remains vulnerable to a pointer turning its existential counterexample into a universal.
+**The Medium is a fourth member of round 2's co-existence family, in the one shape round 2's own
+sweep could not see.** `adopt_reloaded_revision_under_the_session_lock`'s doc
+(`src-tauri/src/ledger.rs:1656`) said *"Both invalidations happen under one state guard, taken once
+here, so no decision can observe the record cleared and the announcement still standing, or the
+reverse."* Both invalidations are **independently conditional** — the record is cleared only when
+its revision differs from the reload, the announcement removed only when its state differs — so a
+reload the announcement already names but the record does not leaves an announcement with no
+record, and the converse leaves a record with no announcement. **Both are intentional**, and the
+same doc comment says so **twelve lines above the false sentence**: *"the equal cases are kept
+deliberately, and the two comparisons are independent."* That is the **fourth time in this phase**
+`ledger.rs` has held a correct local statement beside a false general one.
+
+**Round 3 names the family more precisely than round 2 could**, and this is what step 2's phrase
+family must absorb: not *two values are always seen together*, but **atomic execution incorrectly
+promoted into a correlated post-state when the mutations have different predicates**. Round 2's
+three corrected sentences are all about an **unconditional paired insertion**, which is why its
+sweep, written from them, could not reach a **conditional paired removal**.
+
+### The round-3 fix, and what its sweep found
+
+**The corrected sentence claims what the guard proves and nothing wider**: no decision can interleave
+between the two conditional checks and the removals they select, so none meets a half-applied
+invalidation. It then **denies predicate agreement expressly**, names both predicates as the body
+writes them, states that both one-sided post-states are legal **after the method returns**, and
+**points at** the *equal cases are kept deliberately* paragraph rather than restating its argument.
+The false sentence is named inline as round 3's Medium, as the round-1 and round-2 fixes named
+theirs.
+
+**Round 3's four predicted round-4 regressions were all avoided, verified by reading after the edit
+rather than asserted**: the independence statement above the sentence and the two predicates below
+it are byte-identical; the three insertion-atomicity passages round 3 cleared are untouched; and
+`clear_the_record_at`'s genuinely unconditional record/index pairing was not generalized. The
+`ledger.rs` diff is **one hunk**.
+
+**The sweep, and its pattern was derived from the claim rather than from the finding's words** —
+`CLAUDE.md`'s standing rule, and the third consecutive round to supply evidence for it. Both trees,
+recursive, `#[cfg(test)]` modules and `//` comments included, **comment runs joined into prose units**
+because a ~76-column wrap puts a claim across a line break. Pass 1: 26 regexes, 97 matching runs, 138
+windows judged. Pass 2 widened by 13 regexes **on suspicion rather than on a hit**: 166 runs, **252
+windows judged**, 114 of them new — and the widening found **nothing further**. Of the 252, **12 are
+the claim's subject matter; 1 was false and is fixed, 11 are true and were left**, each listed in
+record §11.3 with the code checked against it.
+
+**One position beyond round 3's list was examined and deliberately left with its residue written
+down**: `documents_by_path`'s field doc (`ledger.rs:1093–1104`) claims a pairing that is true at
+every mutation site but rests on the one-`DocumentId`-per-path invariant **Rust does not enforce**.
+The residue of violating it — an orphaned `writes` entry no decision reads, cleared at the next
+`begin_epoch` — is recorded so round 4 can **disagree with the judgement rather than rediscover the
+position**.
+
+### The gates after the round-3 fix — every one re-measured by the orchestrator on this tree
+
+- `cargo test --workspace` — **1309 passed, 0 failed**, 26 result lines, exit 0. **+0**.
+- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+- `cargo doc --workspace --no-deps` exit 0, **73** warnings and **every one of them** `links to
+  private item` — zero unresolved, zero ambiguous, zero error. `espansoconfig` (the shell) emitted
+  **no** doc warning, which is what proves the fix's new `[ObservedState::Content]` link resolves.
+- `cargo tree -p espansoconfig-core | rg tauri` **empty**; `git diff --stat` shows **no path under
+  `src/`**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured.
+- **Prose-only, verified not asserted**: filtering the diff of both source trees for non-comment,
+  non-blank changed lines returns **0**. No code defect was found — the code was right and the
+  comment wrong, for the third round running.
+
+### Round 4 is owed, and step 2 still must not start before it
+
+**A fix is a change, and the round that reviews it is not optional** — and in this phase that is not
+a precaution, it is the measured record: **rounds 1, 2 and 3 each found the previous fix round's own
+new sentence defective**, twice at the very clause the round before had just corrected. The round-3
+fix wrote **one** new paragraph and nothing else, so round 4's target is narrower than any before it,
+but it is not empty.
+
+**Round 4's attack list, from round 3's own "likeliest sites" plus what the fix wrote:**
+
+- **The corrected paragraph itself** (`ledger.rs:1656` onward) — the regression round 3 names is a
+  sentence that says both invalidations are always absent or present together instead of only that no
+  decision interleaves. The new text denies that reading twice in the same paragraph and names both
+  asymmetric outcomes as legal, **which is itself new prose that this round cannot see the flaw in**.
+- **Whether the interleaving claim is true.** Record §11.7 item 3 says plainly that it rests on a
+  **reading** — the method takes `enter_gate()` then `lock()` and `decide`'s entry points take the
+  same two in the same order — and that **no test in this repository races a decision against this
+  method**, nor can one be written against a `std::sync::Mutex` without a scheduler hook.
+- **`documents_by_path`'s field doc** (`ledger.rs:1093–1104`), judged true and left this round on an
+  unenforced invariant. Round 4 may disagree.
+- **G4's *exactly three*, G8's *the one exception* and N5** — all three cleared by round 3, all three
+  still structurally unguarded by any test or type.
+- **The `persist::write` lock-registry boundary** (record §5 item 8), still owed an **inventory as a
+  judged-out position** by step 2, never a narrowing of the pattern to make it disappear.
 
 ---
 
@@ -10291,7 +10373,7 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C IS UNDER WAY. STEP 1 IS IMPLEMENTED AND *NOT* CLOSED: two Codex rounds, both NOT READY, both fixes committed. THE NEXT ACTION IS ROUND 3 OF THE STEP-1 REVIEW, against the round-2 fix. STEP 2 MUST NOT START BEFORE IT.**
+### **PHASE 2d-4a-C IS UNDER WAY. STEP 1 IS IMPLEMENTED AND *NOT* CLOSED: three Codex rounds, all NOT READY, all three fixes committed. THE NEXT ACTION IS ROUND 4 OF THE STEP-1 REVIEW, against the round-3 fix. STEP 2 MUST NOT START BEFORE IT.**
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
@@ -10306,37 +10388,60 @@ way. Two steps:
   verification section "Phase 2d-4a-C step 1".
 - **2d-4a-C-2 — the check. ⬜ NOT STARTED. This is the next implementation work.**
 
-#### Round 3 first — and this is not optional
+#### Round 4 first — and this is not optional
 
-**A fix is a change, and the round that reviews it is not optional.** Rounds 1 and 2 are in
-`docs/reviews/phase-2d-4a-C.md`, verbatim, newest last. **Round 2's High was round 1's fix's own new
-sentence**, at the exact clause round 1 had found false — so the pattern is not hypothetical here, it
-has already happened once inside this phase. The round-2 fix rewrote **G9's conclusion, three
-co-existence sentences, two ambiguity positions and N2**, and N2 was changed **unasked by any review**.
-Round 2's closing instruction stands: *"Step 2 should not be built on the current text."*
+**A fix is a change, and the round that reviews it is not optional.** Rounds 1, 2 and 3 are in
+`docs/reviews/phase-2d-4a-C.md`, verbatim, newest last. In this phase that rule is not a precaution
+but a measured record: **each of the three rounds found the previous fix round's own new sentence
+defective**, twice at the very clause the round before had just corrected.
 
-**Write round 3's brief from the round-2 fix**, exactly as round 2's was written from round 1's: ask
-what the fix's own new sentences now rest on. Append it under `## Round 3`. The attack list is in the
-"Review round 2" verification section, and its head is **G9's corrected conclusion — the second
-consecutive round whose finding was G9's closing sentence.**
+**The round-3 fix wrote exactly one new paragraph** — the corrected doc sentence at
+`src-tauri/src/ledger.rs:1656` — and nothing else in either source tree. So round 4's target is
+**narrower than any round before it**, and the brief should say so and be scoped to it.
 
-**Carry this instruction into round 3's brief**, as rounds 6 and 2 both carried it: *if everything you
-find is a restatement of wording already fixed, with no new substance, say so plainly in the verdict.*
-Round 2 was asked and answered that these were **not** restatements. **A clean READY is a valuable
-answer and the reviewer should be told to give it if the text holds.**
+**Write round 4's brief from the round-3 fix**, exactly as round 3's was written from round 2's: ask
+what the fix's own new sentences now rest on. Append it under `## Round 4`. **The attack list is in
+the "Review round 3" verification section**, under *Round 4 is owed*, and its head is **the corrected
+paragraph itself** plus **whether the interleaving claim it now makes is true**, which record §11.7
+item 3 states plainly rests on a reading and on no test.
 
-#### The standing question this phase has now raised for the owner
+**Carry this instruction into round 4's brief**, as rounds 6, 2 and 3 all carried it: *if everything
+you find is a restatement of wording already fixed, with no new substance, say so plainly in the
+verdict.* Round 3 was asked and gave a substantive answer without prompting — it named the family it
+had found more precisely than round 2 could. **A clean READY is a valuable answer and the reviewer
+should be told to give it if the text holds.**
 
-**The mechanism was commissioned to end a review tail, and building it has started one.** Step 1 is at
-**two rounds, both NOT READY**, and every finding so far has been real — round 2 said so unprompted.
-That is the same evidence on which the 2d-4a tail was continued to six.
+**The dispatch that works, measured this round.** Codex ran **read-only** and wrote no file, so the
+brief must say the workspace may be read-only, that **its final message IS the deliverable**, that the
+caller captures it, and that a sandbox limit **must not affect the verdict**. `~/.claude/scripts/`'s
+`codex-wait.sh` false-stalls on healthy jobs — poll the **log file's mtime**, and search `running`,
+`recent` **and** `latestFinished`, matching `id || jobId`. Round 3's job took 301 s at high effort.
 
-**What is different, and why it is not yet the same problem:** rounds 1 and 2 have been finding defects
-in **the contract's own prose**, which is a *bounded* surface — 211 lines, 17 clauses — unlike 2d-4a's
-tail, which ranged over a whole subsystem. Round 2 also **certified four clauses and the slot/value
-account as true**, so the unreviewed remainder is shrinking round on round. **The orchestrator's
-judgement is to continue**, and the owner should be told the count at each handoff rather than asked
-to rule again while findings are still substantive.
+#### The standing question this phase has raised for the owner — and the count it is owed
+
+**The mechanism was commissioned to end a review tail, and building it started one.** Step 1 is now
+at **three rounds, all NOT READY**, and every finding has been real.
+
+**But the trend is the answer, and it is sharply favourable.** The counts: round 1 — **1 High,
+1 Low**; round 2 — **1 High, 1 Medium**; round 3 — **0 High, 1 Medium, prose-only**. And round 3
+**cleared six of its seven attack-list items** outright (G9's corrected conclusion, all three narrowed
+co-existence sentences, the `CommitAnchor`/`begin_epoch` slot-vs-value wording, N2, G4's *exactly
+three*, G8's *the one exception*, N5). **The unreviewed remainder of step 1 is one paragraph, twelve
+lines long** — against 2d-4a's tail, which ranged over a whole subsystem and never shrank.
+
+**The orchestrator's judgement is to run round 4 and expect it to be the last**, per the checkpoint's
+own standing instruction: tell the owner the count at each handoff rather than ask them to rule again
+while findings are still substantive. If round 4 returns findings that are only restatements, or
+returns READY, step 1 closes and step 2 starts.
+
+#### What round 3 taught that step 2 must absorb
+
+**The phrase family is not the vocabulary, and round 3 named this family more precisely than round 2
+could**: not *two values are always seen together*, but **atomic execution incorrectly promoted into a
+correlated post-state when the mutations have different predicates**. Round 2's three corrected
+sentences all describe an **unconditional paired insertion**; its sweep, written from them, could not
+reach a **conditional paired removal** one method away. **Step 2's family must cover both, or the
+checker ships with the blind spot that produced round 3's finding.**
 
 #### What step 2 must build
 
@@ -10379,6 +10484,11 @@ the honesty as well as the shape.
    `2d-4a-notes.md` quotes six rounds' false sentences on purpose.
 8. Then the record `docs/decisions/2d-4a-C-notes.md` gains its step-2 sections, and the phase gets
    its mandatory Codex round.
+9. **Cover the co-existence family round 3 named, not only the duration family.** The claim shape is
+   **atomic execution promoted into a correlated post-state when the mutations have different
+   predicates** — round 2 found three instances of it in *unconditional paired insertions*, and round
+   3 found a fourth in a **conditional paired removal** the round-2 sweep could not reach. A family
+   drawn from either half alone ships with the blind spot that produced the finding.
 
 #### The gate baseline — measured on this tree at the step-1 commit, not inherited
 
@@ -10400,9 +10510,9 @@ the honesty as well as the shape.
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
 git status --short --untracked-files=all     # expect EMPTY after the step-1 commit
-# docs/reviews/phase-2d-4a-C.md              # ROUND 1 — read before anything else
+# docs/reviews/phase-2d-4a-C.md              # ROUNDS 1-3 — read before anything else
 # crates/espansoconfig-core/src/watch/retained_state.rs  # THE CONTRACT step 2 enforces
-# docs/decisions/2d-4a-C-notes.md            # step 1's record; §5 is where step 2 starts
+# docs/decisions/2d-4a-C-notes.md            # step 1's record; §11 is round 3, §5 is where step 2 starts
 # src-tauri/src/liveness_contract.rs         # THE TEMPLATE — and the code to factor, not copy
 # crates/espansoconfig-core/src/watch/liveness.rs  # the other contract; unchanged by this phase
 # docs/decisions/2d-3-C-notes.md             # the precedent, §4.4 the proof-it-fails standard

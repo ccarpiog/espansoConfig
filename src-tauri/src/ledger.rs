@@ -1654,8 +1654,20 @@ impl WriteLedger {
     /// caller taking it out of the value `Workspace::refresh` just returned.
     ///
     /// **Both invalidations happen under one state guard**, taken once here, so
-    /// no decision can observe the record cleared and the announcement still
-    /// standing, or the reverse.
+    /// no decision can interleave between the two conditional checks and the
+    /// removals they select, and so none of them meets a half-applied
+    /// invalidation. That is all the guard proves. It does **not** make the two
+    /// predicates agree: one compares the record's revision against `revision`
+    /// and the other compares the announced state against the
+    /// [`ObservedState::Content`] this reload builds from that same `revision`,
+    /// and the *equal cases are kept deliberately* paragraph above says in as
+    /// many words that the two comparisons are independent. So both
+    /// one-sided results are legal **after this returns**, and either may be
+    /// observed: a reload the announcement already names but the record does
+    /// not leaves an announcement with no record, and the converse leaves a
+    /// record with no announcement — the two outcomes that paragraph calls
+    /// deliberate. This sentence claimed the guard excluded them until Phase
+    /// 2d-4a-C's round 3, twelve lines under its own refutation.
     ///
     /// # Why a [`ContentRevision`] rather than an [`ObservedState`]
     ///
