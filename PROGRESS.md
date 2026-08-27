@@ -3663,7 +3663,7 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
-## Verification — Phase 2d-4a-C step 1 (the contract and its pointers; three review rounds done, all NOT READY, round 4 owed)
+## Verification — Phase 2d-4a-C step 1 (the contract and its pointers; **CLOSED** — four review rounds, rounds 1-3 NOT READY and each fixed, round 4 READY with 0 findings)
 
 **The owner's decision, and it is the thing a fresh session cannot re-derive.** On 2026-08-27 the
 standing question recorded at the head of "Next action" — *round 7 first, or the mechanism first* —
@@ -4011,6 +4011,81 @@ but it is not empty.
 - **The `persist::write` lock-registry boundary** (record §5 item 8), still owed an **inventory as a
   judged-out position** by step 2, never a narrowing of the pattern to make it disappear.
 
+
+### Review round 4 — **READY (0 findings)**. No fix round. **Step 1 is closed.**
+
+Appended verbatim to `docs/reviews/phase-2d-4a-C.md` under `## Round 4`. Codex ran **read-only** and
+wrote no file; its final message was the deliverable and the orchestrator appended it. Job
+`task-mtbk9hs8-ubpryt`, high effort, **141 s** — under half of round 3's 301 s, which is what a
+target narrowed to one paragraph costs. Record §12.
+
+**Round 4 is the first round of this phase to find nothing.** The counts, whole: round 1 — 1 High,
+1 Low; round 2 — 1 High, 1 Medium; round 3 — 0 High, 1 Medium, prose-only; **round 4 — 0 findings**.
+It cleared **all six** attack-list items and states plainly that **no round 5 is warranted**. The
+brief carried the standing instruction — *if everything you find is a restatement of wording already
+fixed, say so plainly in the verdict* — and the answer came back stronger than that: not a
+restatement, but nothing at all. **The judgement recorded at the round-3 handoff — run round 4 and
+expect it to be the last — is therefore measured rather than predicted.**
+
+**What it cleared, against what round 3 left open**: the corrected paragraph itself (the regression
+round 3 predicted was **not** written — the record clears only on a differing revision, the
+announcement only on a differing state, so both asymmetric outcomes the paragraph calls legal *are*
+legal, and they agree with the *equal cases are kept deliberately* statement twelve lines above); the
+interleaving claim; `documents_by_path`'s field doc, which round 4 was invited to disagree with and
+did not, finding **no concrete production violation**; G4's *exactly three*, G8's *the one exception*
+and N5; the four regressions round 3 forbade, all confirmed intact — which **independently
+corroborates §11.2**, where the fix round asserted the same thing from its own reading; and the
+`persist::write` lock-registry boundary, cleared **as judged out** in the reviewer's own words —
+those mutexes serialize disk writes and are **not** retained observation state any observation,
+drain, suppression, coalescing or save-admission decision consults.
+
+**The one claim the orchestrator verified rather than accepted.** A review's report is a claim, and
+round 4's central clearance rests on *"Those are the only source-tree calls to `decide`"* — a fourth
+entry point reaching decision state without both acquisitions would falsify the corrected paragraph
+and the clearance together. `rg -n 'decide\(' src-tauri/src/ crates/ --type rust` returns **exactly
+three** call sites of this `decide` (`ledger.rs:1373`, `:1483`, `:1558`) plus its definition at
+`:2088`; the only other match is `syntax/ownership.rs`'s unrelated function of the same name in a
+different crate. Each of the three takes `let _gate = self.enter_gate();` then
+`let mut ledger = self.lock();` in that order immediately before the call — `:1367–1368`,
+`:1481–1482`, `:1556–1557` — the same pair in the same order as
+`adopt_reloaded_revision_under_the_session_lock` at `:1683–1684`. **Verified by reading, twice, by
+two readers — and still not tested**: §11.7 item 3 stands, no test races a decision against this
+method and none can be written against a `std::sync::Mutex` without a scheduler hook. Round 4 records
+the same limit in its own words, correctly calling the absence *unenforced evidence, not proof that
+the claim is false*.
+
+### The gates after round 4 — deliberately not re-measured, because nothing changed
+
+**No fix round ran.** Round 4 found nothing to fix, so **no file in either source tree was
+modified**; `git status --short --untracked-files=all` was **empty** immediately after the job, which
+also confirms the read-only sandbox wrote nothing. Re-running a suite over an unchanged tree measures
+the host, not the work, so the step-1 figures stand exactly as the round-3 fix measured them:
+
+- **`1309 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The three frontend figures remain carried forward unverified from 2d-4a
+  round 6 and **must be re-measured by any step that touches `src/`**. Step 2 should not touch `src/`.
+
+### What step 2 inherits, and where step 1 is still thin
+
+**A READY is a reader's judgement, not a proof, and it does not reduce the case for step 2 by one
+line.** Nothing in step 1 is enforced by anything: the round-3 falsehood survived 1309 passing tests,
+`clippy`, `cargo doc`, a written audit trail and **two** review rounds aimed at its own family. That
+is precisely what step 2 exists to fix.
+
+- The six cleared positions are **inventory entries**, not re-litigable questions.
+- **G4's *exactly three* and G8's *the one exception* are the highest-risk drift sites** — round 4
+  clears them and names them so in the same breath, because both are true today and guarded by
+  nothing; a fourth mutation site or a second session-lived field would falsify them silently.
+- **`persist::write` is a judged-out position** to be inventoried, **never** a pattern narrowed until
+  it disappears (`2d-4a-notes.md` §11.4 records that move as the one such a check cannot catch).
+- **N5 keeps its existential reading.**
+- **The phrase family is round 3's**: *atomic execution incorrectly promoted into a correlated
+  post-state when the mutations have different predicates* — covering **both** the unconditional
+  paired insertion and the conditional paired removal, or it ships with the blind spot that produced
+  round 3's finding.
+- **`docs/` is deliberately not swept and cannot be**: `2d-4a-notes.md` quotes six rounds' false
+  sentences on purpose, so sweeping the documentation tree would flag the record of every defect this
+  phase fixed. The module doc must say so.
 ---
 
 ## Verification — Phase 2d-4a review round 6 (NOT READY — 0 High, 1 Medium, 5 Low; the fix is in the tree, every gate green, committed at `6be7231`, round 7 owed)
@@ -10373,7 +10448,7 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C IS UNDER WAY. STEP 1 IS IMPLEMENTED AND *NOT* CLOSED: three Codex rounds, all NOT READY, all three fixes committed. THE NEXT ACTION IS ROUND 4 OF THE STEP-1 REVIEW, against the round-3 fix. STEP 2 MUST NOT START BEFORE IT.**
+### **PHASE 2d-4a-C IS UNDER WAY. STEP 1 IS ✅ CLOSED — four review rounds, and round 4 came back READY with 0 findings. THE NEXT ACTION IS STEP 2: BUILD THE CHECK.**
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
@@ -10384,64 +10459,56 @@ the spec for it.
 **Phase 2d-4a-C is the analogue of 2d-3-C**, which ended that phase's fourteen-round tail the same
 way. Two steps:
 
-- **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE**, every gate green. See the
-  verification section "Phase 2d-4a-C step 1".
-- **2d-4a-C-2 — the check. ⬜ NOT STARTED. This is the next implementation work.**
+- **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE AND CLOSED**, every gate
+  green, four review rounds done. See the verification section "Phase 2d-4a-C step 1".
+- **2d-4a-C-2 — the check. ⬜ NOT STARTED. This is the next implementation work, and it is now
+  unblocked.**
 
-#### Round 4 first — and this is not optional
+#### How step 1 closed, and what that licenses
 
-**A fix is a change, and the round that reviews it is not optional.** Rounds 1, 2 and 3 are in
-`docs/reviews/phase-2d-4a-C.md`, verbatim, newest last. In this phase that rule is not a precaution
-but a measured record: **each of the three rounds found the previous fix round's own new sentence
-defective**, twice at the very clause the round before had just corrected.
+**Round 4 returned READY with 0 findings**, cleared **all six** attack-list items, and states plainly
+that **no round 5 is warranted**. Rounds 1–3 were NOT READY (1 High + 1 Low; 1 High + 1 Medium;
+0 High + 1 Medium), every finding real, every fix reviewed by the round after it — including round
+3's, which is what round 4 was for. **The unreviewed remainder of step 1 is empty.** Full record:
+`docs/decisions/2d-4a-C-notes.md` §12; the four rounds verbatim, newest last, in
+`docs/reviews/phase-2d-4a-C.md`.
 
-**The round-3 fix wrote exactly one new paragraph** — the corrected doc sentence at
-`src-tauri/src/ledger.rs:1656` — and nothing else in either source tree. So round 4's target is
-**narrower than any round before it**, and the brief should say so and be scoped to it.
+**One claim in round 4 was verified by the orchestrator rather than accepted** — its central
+clearance rested on *"Those are the only source-tree calls to `decide`"*. Confirmed: exactly three
+call sites (`ledger.rs:1373`, `:1483`, `:1558`), each taking `enter_gate()` then `lock()` in that
+order, same as the reload method. **Still untested and untestable** against a `std::sync::Mutex`
+without a scheduler hook — §11.7 item 3 stands unchanged.
 
-**Write round 4's brief from the round-3 fix**, exactly as round 3's was written from round 2's: ask
-what the fix's own new sentences now rest on. Append it under `## Round 4`. **The attack list is in
-the "Review round 3" verification section**, under *Round 4 is owed*, and its head is **the corrected
-paragraph itself** plus **whether the interleaving claim it now makes is true**, which record §11.7
-item 3 states plainly rests on a reading and on no test.
+**A clean round 4 does not reduce the case for step 2 by one line.** Nothing in step 1 is enforced by
+anything, and the round-3 falsehood is the measurement: it survived 1309 passing tests, `clippy`,
+`cargo doc`, a written audit trail and **two** review rounds aimed at its own family.
 
-**Carry this instruction into round 4's brief**, as rounds 6, 2 and 3 all carried it: *if everything
-you find is a restatement of wording already fixed, with no new substance, say so plainly in the
-verdict.* Round 3 was asked and gave a substantive answer without prompting — it named the family it
-had found more precisely than round 2 could. **A clean READY is a valuable answer and the reviewer
-should be told to give it if the text holds.**
+#### What step 2 inherits from the four rounds
 
-**The dispatch that works, measured this round.** Codex ran **read-only** and wrote no file, so the
-brief must say the workspace may be read-only, that **its final message IS the deliverable**, that the
-caller captures it, and that a sandbox limit **must not affect the verdict**. `~/.claude/scripts/`'s
-`codex-wait.sh` false-stalls on healthy jobs — poll the **log file's mtime**, and search `running`,
-`recent` **and** `latestFinished`, matching `id || jobId`. Round 3's job took 301 s at high effort.
+- **The phrase family is round 3's, and it is not the vocabulary**: not *two values are always seen
+  together*, but **atomic execution incorrectly promoted into a correlated post-state when the
+  mutations have different predicates**. Round 2's three corrected sentences all describe an
+  **unconditional paired insertion**; its sweep, written from them, could not reach the **conditional
+  paired removal** one method away that round 3 found. **Step 2's family must cover both, or the
+  checker ships with the blind spot that produced round 3's finding.**
+- **Six positions are cleared and are inventory entries, not re-litigable questions**: the corrected
+  reload paragraph, the interleaving claim, `documents_by_path`'s field doc, G4's *exactly three*,
+  G8's *the one exception*, N5.
+- **G4 and G8 are the highest-risk drift sites** — round 4 clears them and names them so in the same
+  breath, because both are true today and guarded by nothing.
+- **`persist::write`'s lock registry is a judged-out position to inventory**, never a pattern narrowed
+  until it disappears. Round 4 gave the reason in its own words: those mutexes serialize disk writes
+  and are not retained observation state any observation, drain, suppression, coalescing or
+  save-admission decision consults.
+- **N5 keeps its existential reading.**
 
-#### The standing question this phase has raised for the owner — and the count it is owed
+#### The dispatch that works, for the phase's mandatory Codex round
 
-**The mechanism was commissioned to end a review tail, and building it started one.** Step 1 is now
-at **three rounds, all NOT READY**, and every finding has been real.
-
-**But the trend is the answer, and it is sharply favourable.** The counts: round 1 — **1 High,
-1 Low**; round 2 — **1 High, 1 Medium**; round 3 — **0 High, 1 Medium, prose-only**. And round 3
-**cleared six of its seven attack-list items** outright (G9's corrected conclusion, all three narrowed
-co-existence sentences, the `CommitAnchor`/`begin_epoch` slot-vs-value wording, N2, G4's *exactly
-three*, G8's *the one exception*, N5). **The unreviewed remainder of step 1 is one paragraph, twelve
-lines long** — against 2d-4a's tail, which ranged over a whole subsystem and never shrank.
-
-**The orchestrator's judgement is to run round 4 and expect it to be the last**, per the checkpoint's
-own standing instruction: tell the owner the count at each handoff rather than ask them to rule again
-while findings are still substantive. If round 4 returns findings that are only restatements, or
-returns READY, step 1 closes and step 2 starts.
-
-#### What round 3 taught that step 2 must absorb
-
-**The phrase family is not the vocabulary, and round 3 named this family more precisely than round 2
-could**: not *two values are always seen together*, but **atomic execution incorrectly promoted into a
-correlated post-state when the mutations have different predicates**. Round 2's three corrected
-sentences all describe an **unconditional paired insertion**; its sweep, written from them, could not
-reach a **conditional paired removal** one method away. **Step 2's family must cover both, or the
-checker ships with the blind spot that produced round 3's finding.**
+Codex ran **read-only** and wrote no file, so the brief must say the workspace may be read-only, that
+**its final message IS the deliverable**, that the caller captures it, and that a sandbox limit **must
+not affect the verdict**. `~/.claude/scripts/codex-wait.sh` false-stalls on healthy jobs — poll the
+**log file's mtime**, and search `running`, `recent` **and** `latestFinished`, matching `id || jobId`.
+Round 3's job took 301 s at high effort; round 4's, on a narrower target, took 141 s.
 
 #### What step 2 must build
 
@@ -10509,10 +10576,10 @@ the honesty as well as the shape.
 
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
-git status --short --untracked-files=all     # expect EMPTY after the step-1 commit
-# docs/reviews/phase-2d-4a-C.md              # ROUNDS 1-3 — read before anything else
+git status --short --untracked-files=all     # expect EMPTY after the round-4 commit
+# docs/reviews/phase-2d-4a-C.md              # ROUNDS 1-4 — read before anything else; round 4 is the READY
 # crates/espansoconfig-core/src/watch/retained_state.rs  # THE CONTRACT step 2 enforces
-# docs/decisions/2d-4a-C-notes.md            # step 1's record; §11 is round 3, §5 is where step 2 starts
+# docs/decisions/2d-4a-C-notes.md            # step 1's record; §12 closes it, §11 is round 3, §5 is where step 2 starts
 # src-tauri/src/liveness_contract.rs         # THE TEMPLATE — and the code to factor, not copy
 # crates/espansoconfig-core/src/watch/liveness.rs  # the other contract; unchanged by this phase
 # docs/decisions/2d-3-C-notes.md             # the precedent, §4.4 the proof-it-fails standard
@@ -20088,6 +20155,7 @@ _Updated at each phase boundary._
 | **2c-5 step 6b (partial)** | **`ee40a29`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **DELIBERATELY NOT CLEAN**, as every 5a/5b/6a commit was. The commit holds **five** files staged **by path**: `src/lib/components/RestorePane.svelte` and `src/lib/components/RestorePane.test.ts` (the fix round — the reading's Medium made this a source-carrying step, as 2c-4c-5b-1/5b-2 was), `docs/decisions/2c-5-6-window-reading.md` (§§1–12), the captured review `docs/reviews/phase-2c-5-6b-reading.md` (round 1, **NOT READY**: one Medium — the occlusion derivation, §12's disposition; one Low — fixed) and this checkpoint. **The same four harness paths stay in the working tree on purpose**, and `git status --short --untracked-files=all` after the commit lists **those four and nothing else**. **`git commit -a` from here would commit the instrument.** **Step 6b is NOT closed by it**: twelve re-takes (P87+, `visibility=visible` required) are owed and were blocked on a locked console; the round-2 review and the manifest follow them. **2c-5-7 still deletes the instrument** and re-derives the harness-free gate counts |
 | **2d-4a (round 5 + its fix, NOT closed)** | **`eced554`** | ✅ pushed to `origin/main` (this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` after the commit is empty — no real-config path, no launch artifact, no untracked file. The commit holds **five** files: three sources (`src-tauri/src/{commands,liveness_contract,reconciliation}.rs`), **no core file at all** and **no `src/` path at all** (`cargo tree -p espansoconfig-core \| rg tauri` still finds nothing), and two documents (`docs/decisions/2d-4a-notes.md`, `docs/reviews/phase-2d-4a-queue.md`). **The step is NOT closed by it** — round 5 returned NOT READY with **0 High, 1 Medium and 3 Low**, its fix is in the tree and green at **1308 / 431 / 2125 / 184** with serial `watch_check` 20/20 (79.44 s), and **round 6 is owed against the round-5 fix**. Round 5's Medium is the **third consecutive round in which the retention boundary was restated and was still false**; its L1 is round 4's own new helper modelling an invariant violation as a false value, and the `debug_assert_eq!` that closes it **reproduced, on a test, the branch round 5 called unreproducible**. Round 6's first job is §14.4 — the sweep that is still a human reading, the *exactly three ways* that rests on a reading rather than a test, the changed `commands.rs` fixture, and the `UnreadableReason` walk that covers three of six variants. A fresh session resumes from "Next action" |
 | **2d-4a-C step 1 (round 3 + its fix, NOT closed)** | **`4ab5e2e`** | ✅ pushed to `origin/main` (`1d26964..4ab5e2e`; this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit. Staged **by path**: **four** files — `src-tauri/src/ledger.rs` (one doc-comment hunk, +14/−2), `docs/decisions/2d-4a-C-notes.md` (§11), `docs/reviews/phase-2d-4a-C.md` (round 3 verbatim) and this checkpoint. **No test, no behaviour, no path under `src/`**: filtering the diff of both source trees for non-comment, non-blank changed lines returns **0**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured. Its three predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix) and `1d26964` (round 2 + fix), none of which had a row here. **The step is NOT closed by it** — three Codex rounds, all NOT READY, all three fixes in the tree and green, and **round 4 is owed against the round-3 fix**. A fresh session resumes from "Next action" |
+| **2d-4a-C step 1 (round 4 — READY; the step CLOSES here)** | **`PENDING`** | ✅ pushed to `origin/main` | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit — and it also returned nothing **immediately after the Codex job**, which is what proves the read-only sandbox wrote no file. Staged **by path**: **three** files — `docs/decisions/2d-4a-C-notes.md` (§12), `docs/reviews/phase-2d-4a-C.md` (round 4 verbatim under `## Round 4`) and this checkpoint. **No source file in either tree was modified**, because round 4 found nothing to fix: 0 findings, all six attack-list items cleared, and *no round 5 is warranted* in the reviewer's own words. The gate figures are therefore **not re-measured** and stand as the round-3 fix left them (`1309 / 431 / 2125 / 184`) — re-running a suite over an unchanged tree measures the host, not the work. Its four predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix), `1d26964` (round 2 + fix) and `4ab5e2e` (round 3 + fix). **Step 1 is CLOSED by this row and step 2 is unblocked**; a fresh session resumes from "Next action" |
 
 `e83bc31` is Phase 2c-4c **step 6**, the harness's removal, **including its review fix round** — the
 phase was held open until all nine findings were closed, as every phase since `8989c16` has been. It

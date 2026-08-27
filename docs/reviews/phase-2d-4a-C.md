@@ -163,3 +163,38 @@ epoch-scoped chronology guarantee that the implementation does provide.
 - `clear_the_record_at` at `ledger.rs:1936–1950`: its record/index pairing is genuinely unconditional, but that true local pair must not be generalized to the record/anchor or record/announcement pairs.
 
 **NOT READY**
+
+---
+
+## Round 4 — step 1, against the round-3 fix
+
+### Verdict
+
+**READY.** The round-3 fix accurately limits the mutex guarantee to non-interleaving during independently conditional invalidations, correctly describes both asymmetric post-states, and preserves the surrounding predicates and insertion-only atomicity claims. I found no new substantive issue and no restatement of the wording defects fixed in rounds 1–3.
+
+### Findings
+
+None.
+
+### Priority audit
+
+- **1. Corrected paragraph — CLEARED.** The record is removed only when its revision differs (`src-tauri/src/ledger.rs:1685–1687`); the announcement is removed only when its state differs (`src-tauri/src/ledger.rs:1688–1695`). Consequently, the two asymmetric outcomes named at `ledger.rs:1664–1668` are legal and agree with the independence statement at `ledger.rs:1612–1614`.
+
+- **2. Interleaving claim — CLEARED.** Reload invalidation acquires `enter_gate()` and then `lock()` (`ledger.rs:1683–1684`). Every entry point reaching `decide` does likewise: `admit` at `ledger.rs:1367–1373`, `mark_under_the_session_lock` at `ledger.rs:1481–1483`, and `withhold_under_the_session_lock` at `ledger.rs:1556–1558`. Those are the only source-tree calls to `decide`. Thus no decision on this ledger can interleave with the checks and selected removals. The absence of a scheduler-controlled race test is correctly recorded as unenforced evidence, not proof that the claim is false.
+
+- **3. `documents_by_path` field documentation — CLEARED.** Production identities remain stable per path through `identity_of` (`crates/espansoconfig-core/src/workspace/mod.rs:316–327`). `record_app_write` replaces the record and removes any prior path for that document before inserting the current mapping (`ledger.rs:1307–1313`), while `clear_the_record_at` removes the path mapping and corresponding record together (`ledger.rs:1959–1962`). The invariant is not encoded in the method’s argument types, but I found no concrete production violation warranting disagreement with round 3’s judgement.
+
+- **4. G4, G8 and N5 — CLEARED.** G4 still derives three exit routes from insertion/overflow removal (`src-tauri/src/reconciliation.rs:1097–1103`), acknowledgement retention (`reconciliation.rs:1184–1189`), and whole-state replacement (`reconciliation.rs:1029–1030`). G8 still has `tally` as the only `LedgerState` field preserved by `begin_epoch` (`ledger.rs:1079–1143`, `1202–1218`). N5 remains an existential counterexample: overflow and epoch replacement can remove a pending entry before any drain returns it (`retained_state.rs:207–212`). I found no concrete reason to reopen any of the three.
+
+- **5. Predicted regressions — CLEARED.** The independence statement (`ledger.rs:1612–1614`) and both predicates (`ledger.rs:1685–1695`) remain intact. The insertion-atomicity passages remain correctly scoped to their unconditional operations (`ledger.rs:494–500`, `1243–1251`, `1279–1284`). `clear_the_record_at` still pairs only the record and path index and expressly leaves the anchor untouched (`ledger.rs:1948–1962`). None was generalized into a permanent co-existence claim.
+
+- **6. `persist::write` lock registry — CLEARED as judged out.** The registry retains one leaked synchronization mutex per real path (`crates/espansoconfig-core/src/persist/write.rs:432–475`), but those mutexes guard disk-write serialization and are not retained observation state consulted by an observation, drain, suppression, coalescing, or save-admission decision. Step 2 should inventory this position as judged out.
+
+### Likeliest sites for round 5
+
+- No round 5 is warranted by this review. If one is nevertheless conducted, `ledger.rs:1656–1670` remains the likeliest drift site because its conditional-atomicity distinction is still documentation-enforced only.
+- G4 (`retained_state.rs:97–111`) and G8 (`retained_state.rs:132–135`) remain the highest-risk true enumerations because neither is structurally guarded against future mutation sites or fields.
+- `documents_by_path` (`ledger.rs:1093–1104`) remains dependent on a production identity invariant not encoded in `record_app_write`’s types.
+- Step 2 should preserve N5’s existential reading and inventory the `persist::write` registry as judged out.
+
+READY

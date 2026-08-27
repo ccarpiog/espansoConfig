@@ -1149,3 +1149,111 @@ The reviewer's own list, carried here with this round's outcome against each:
   untouched here, all three still structurally unguarded;
 - **the `persist::write` lock-registry boundary** (§5 item 8), still to be **inventoried as
   judged-out** by step 2 rather than pattern-narrowed away.
+
+## 12. Review round 4 — **READY**, no fix round, and step 1 closes
+
+Appended verbatim to `docs/reviews/phase-2d-4a-C.md` under `## Round 4`. Codex ran **read-only** and
+wrote no file; its final message was the deliverable and the orchestrator appended it. Job
+`task-mtbk9hs8-ubpryt`, high effort, **141 s** — less than half of round 3's 301 s, which is what a
+target narrowed to one paragraph costs.
+
+**Round 4 is the first round of this phase to find nothing, and it says so without being asked
+twice.** Counts across the phase: round 1 — 1 High, 1 Low; round 2 — 1 High, 1 Medium; round 3 —
+0 High, 1 Medium, prose-only; **round 4 — 0 findings**. It cleared **all six** attack-list items and
+states plainly that **no round 5 is warranted**. The brief carried the standing instruction — *if
+everything you find is a restatement of wording already fixed, say so plainly in the verdict* — and
+the answer came back stronger than that: not a restatement, but nothing at all.
+
+**So the trend the round-3 handoff reported to the owner was the right read.** The judgement recorded
+there was to run round 4 and expect it to be the last, on the grounds that the unreviewed remainder
+had shrunk to one twelve-line paragraph while the finding severity fell round on round. That is now
+measured rather than predicted.
+
+### 12.1 What the round cleared, against what round 3 left open
+
+- **The corrected paragraph itself** — the only new prose the round-3 fix wrote. Cleared against the
+  method body: the record is removed only when its revision differs, the announcement only when its
+  state differs, so the two asymmetric outcomes the paragraph names as legal *are* legal, and they
+  agree with the *equal cases are kept deliberately* statement twelve lines above. The regression
+  round 3 predicted — a sentence re-promoting the guard into a correlated post-state — was **not**
+  written.
+- **The interleaving claim** — §11.7 item 3 flagged it as resting on a reading and on no test. Round
+  4 checked the reading and confirmed it, and **the orchestrator then checked it independently**
+  rather than accepting the claim (§12.2).
+- **`documents_by_path`'s field doc**, judged true and left by round 3 on an unenforced invariant.
+  Round 4 was told it could disagree; it examined `identity_of`, `record_app_write` and
+  `clear_the_record_at` and found **no concrete production violation**, so the judgement stands with
+  a second reader behind it.
+- **G4's *exactly three*, G8's *the one exception*, N5** — re-derived from the mutation sites and
+  cleared again, all three still structurally unguarded.
+- **The four regressions round 3 told the fix round to avoid** — the independence statement above,
+  the two predicates below, the three insertion-atomicity passages, and `clear_the_record_at`'s
+  unconditional pairing. All confirmed intact, which independently corroborates §11.2, where the fix
+  round asserted the same thing from its own reading.
+- **The `persist::write` lock-registry boundary** — cleared **as judged out**, with the reason stated
+  in the reviewer's own words: those mutexes serialize disk writes and are **not** retained
+  observation state that any observation, drain, suppression, coalescing or save-admission decision
+  consults. Step 2 inherits this as an inventory obligation, never as a pattern to narrow.
+
+### 12.2 The one claim the orchestrator verified rather than accepted
+
+**A review's report is a claim, and the load-bearing one here was checked.** Round 4's clearance of
+the interleaving statement rests on *"Those are the only source-tree calls to `decide`"* — if a
+fourth entry point reached decision state without both acquisitions, the corrected paragraph would be
+false and the round's central clearance with it.
+
+- `rg -n 'decide\(' src-tauri/src/ crates/ --type rust` returns **exactly three** call sites of this
+  `decide` — `ledger.rs:1373`, `:1483`, `:1558` — plus its definition at `:2088`. The only other
+  match is `syntax/ownership.rs`'s own unrelated `decide`, a different function in a different crate.
+- Each of the three takes `let _gate = self.enter_gate();` then `let mut ledger = self.lock();`, in
+  that order, immediately before the call — `:1367–1368`, `:1481–1482`, `:1556–1557` — which is the
+  same pair in the same order as `adopt_reloaded_revision_under_the_session_lock` at `:1683–1684`.
+
+**The claim is therefore verified by reading, twice, by two readers — and it is still not tested.**
+§11.7 item 3 stands unchanged: no test in this repository races a decision against this method, and
+none can be written against a `std::sync::Mutex` without a scheduler hook. Round 4 records the same
+limit in its own words, correctly calling the absence *unenforced evidence, not proof that the claim
+is false*.
+
+### 12.3 The gates after round 4 — nothing was measured, because nothing changed
+
+**No fix round ran.** Round 4 found nothing to fix, so **no file in either source tree was
+modified**; `git status --short --untracked-files=all` was **empty** immediately after the job, which
+also confirms the read-only sandbox wrote nothing. The step-1 gate figures therefore stand exactly as
+the round-3 fix measured them and are **not** re-measured here, because re-running a suite over an
+unchanged tree measures the host, not the work:
+
+- **`1309 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
+  `npm run build` modules). The three frontend figures remain carried forward unverified from 2d-4a
+  round 6, as §11.6 says, and **must be re-measured by any step that touches `src/`**.
+
+### 12.4 What this round did not do, and where it is thin
+
+1. **A READY is a reader's judgement, not a proof.** Round 4 read the same tree rounds 1–3 read, with
+   a narrower brief, and found nothing. That is evidence the paragraph holds; it is not evidence that
+   no claim in step 1 can drift. **Nothing in step 1 is enforced by anything** — §11.7 item 2's
+   measurement stands: the round-3 falsehood survived 1309 passing tests, `clippy`, `cargo doc`, a
+   written audit trail and two review rounds aimed at its own family. **That is what step 2 is for**,
+   and a clean round 4 does not reduce the case for it by one line.
+2. **The three enumerations round 4 cleared are the ones it also names as the highest-risk drift
+   sites** — G4's *exactly three* and G8's *the one exception* are true today and guarded by nothing,
+   so a fourth mutation site or a second session-lived field would falsify them silently. Round 4
+   says this in its round-5 list, and step 2 should treat both as inventory positions.
+3. **The residue at `documents_by_path` is unchanged**, only better attested: two readers now agree
+   the pairing claim is true and that the invariant behind it is not encoded in `record_app_write`'s
+   types.
+4. **`docs/` was not reviewed and cannot be**, for the reason step 2 must also state in its module
+   doc: `2d-4a-notes.md` quotes six rounds' false sentences on purpose, so sweeping the documentation
+   tree would flag the record of every defect this phase fixed.
+
+### 12.5 Step 1 is closed
+
+Every clause of the contract has been read by a reviewer at least once; the four rounds' findings are
+all fixed and each fix has itself been reviewed by the round after it — including round 3's, which is
+what round 4 was for. **The unreviewed remainder of step 1 is empty.**
+
+**Step 2 is now unblocked**, and it inherits from this round: the six cleared positions as inventory
+entries rather than as re-litigable questions, the `persist::write` boundary as a **judged-out**
+position, N5's **existential** reading, and the phrase family as round 3 named it — *atomic execution
+incorrectly promoted into a correlated post-state when the mutations have different predicates* —
+covering **both** the unconditional paired insertion and the conditional paired removal.
