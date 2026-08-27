@@ -63,7 +63,7 @@
 //! moves no count. **The reason it is worth having is the reduction of surface —
 //! one place to be right instead of fifty — and never the check's judgement.**
 //!
-//! Five further limits, stated rather than hoped about:
+//! Four further limits, stated rather than hoped about:
 //!
 //! - **A paraphrase built from none of the phrases is invisible, and here that is
 //!   measured rather than feared.** Step 1's sweep ran 33 probe phrases over 85
@@ -96,14 +96,25 @@
 //!   swept and **cannot be**: `docs/decisions/2d-4a-notes.md` quotes six review
 //!   rounds' false sentences on purpose, so a check over the documentation tree
 //!   would fail on the record of every defect this phase fixed.
-//! - **The both-direction comparison below is this test's own, and
-//!   [`crate::liveness_contract`] keeps its own copy of it.** The machinery the
-//!   two checks share is [`crate::prose_sweep`]; the comparison stayed
-//!   duplicated because the proof that the extraction took nothing away from the
-//!   older check is that **its four tests pass unchanged**, and folding the
-//!   comparison into a shared helper would have rewritten them. That is a
-//!   deliberate trade with a real cost — two copies of one loop — and it is
-//!   named here rather than left for a later reader to find.
+//!
+//! # Where the comparison lives
+//!
+//! In [`crate::prose_sweep::complaints_against`], written once and called from
+//! [`every_retained_state_claim_is_judged`] here and from
+//! `crate::liveness_contract::every_liveness_claim_is_judged` there. **Neither
+//! guard keeps a copy of it.** What each check keeps is what makes it *that*
+//! check: its phrase family, its trees, its skip list, its inventory, and the
+//! sentence it wraps a non-empty complaint list in, which names its own contract
+//! module and its own `INVENTORY` path.
+//!
+//! It was not always so. Step 2 shipped the comparison duplicated, so that the
+//! older check's four tests would pass byte-identical and thereby prove the
+//! extraction had taken nothing away from it; step 2's round 1 then found one
+//! defect sitting in **both** copies — zero used as an *unseen* sentinel — and
+//! folded the loop into the shared module, which rewrote the older check's guard
+//! test. **That byte-identity proof is therefore historical**: it stands at commit
+//! `65a0138` and cannot be re-derived from this tree. What replaces it is weaker
+//! and is stated as weaker in `docs/decisions/2d-4a-C-notes.md` §17.3.
 
 use crate::prose_sweep::{complaints_against, Hit, Judged};
 
@@ -251,7 +262,7 @@ const RETAINED_STATE_SHAPES: &[&str] = &[
 /// the round that closed it everywhere else.
 const SWEPT_TREES: &[&str] = &["src-tauri/src", "crates/espansoconfig-core/src"];
 
-/// The one file the sweep skips, and the reason it is skipped.
+/// The files the sweep skips — one, this module's own source — and the reason.
 ///
 /// This module's own source contains every phrase of [`RETAINED_STATE_SHAPES`] by
 /// construction. Sweeping it would mean one inventory entry per phrase, kept in
@@ -259,10 +270,22 @@ const SWEPT_TREES: &[&str] = &["src-tauri/src", "crates/espansoconfig-core/src"]
 /// skipped, and that is a stated hole: a retained-state claim written into this
 /// file is invisible to this check.
 ///
+/// **A slice, and named once.** [`sweep`] passes it and
+/// [`the_sweep_reaches_both_trees`] reads it, so the list the test makes its
+/// claim about is the list the walk is given; two spellings of one skip list is
+/// the shape that lets a test go on describing a walk that changed.
+///
 /// **`crate::liveness_contract` is not skipped**, and neither is
-/// [`crate::prose_sweep`]. The two checks do not exempt each other, which
-/// [`the_sweep_reaches_both_trees`] asserts.
-const SKIPPED: &str = "src-tauri/src/retained_state_contract.rs";
+/// [`crate::prose_sweep`]. [`the_sweep_reaches_both_trees`] asserts that of this
+/// check's own selection — through [`crate::prose_sweep::selected_files`] and
+/// never through a phrase hit, because a file this family has nothing to say
+/// about and a file the walk never opened are the same absence in a hit list,
+/// and `liveness_contract.rs` has been in exactly that position since step 2's
+/// round 1 moved its one retained-state-shaped wording into `prose_sweep.rs`.
+/// The sibling check's test of the same name asserts the other direction, so
+/// *the two checks do not exempt each other* is a claim two tests carry between
+/// them and neither carries alone.
+const SKIPPED: &[&str] = &["src-tauri/src/retained_state_contract.rs"];
 
 /// Every position in the two trees that matches the shape family, judged.
 ///
@@ -1134,7 +1157,7 @@ const INVENTORY: &[Judged] = &[
 /// [`crate::prose_sweep`]'s, shared with [`crate::liveness_contract`]. What this
 /// function contributes is the three constants above.
 fn sweep() -> Vec<Hit> {
-    crate::prose_sweep::sweep(RETAINED_STATE_SHAPES, SWEPT_TREES, &[SKIPPED])
+    crate::prose_sweep::sweep(RETAINED_STATE_SHAPES, SWEPT_TREES, SKIPPED)
 } // End of function sweep()
 
 #[cfg(test)]
@@ -1156,20 +1179,29 @@ mod tests {
     } // End of function every_shape_is_lowercase()
 
     /// The sweep finds something, in both trees, in the contract itself and in
-    /// the machinery the two contract checks share.
+    /// the machinery the two contract checks share; and its walk covers the
+    /// sibling check as well.
     ///
     /// A guard that silently swept an empty set would pass every assertion below
     /// it, which is the vacuous pass every check in this repository exists to
-    /// avoid. The last two assertions are the ones worth stating: the contract
-    /// this module is about is swept rather than exempted, and so is
-    /// [`crate::prose_sweep`], which both checks are built on — a check does not
-    /// get to shield the code it shares with its sibling.
+    /// avoid. Beyond that, the assertions worth stating are that the contract this
+    /// module is about is swept rather than exempted, and that neither
+    /// [`crate::prose_sweep`] nor `crate::liveness_contract` is shielded — a check
+    /// does not get to exempt its sibling or the code it shares with it.
     ///
-    /// That second assertion named `src-tauri/src/liveness_contract.rs` until
-    /// 2d-4a-C's review round, when the comparison the two checks had been
-    /// carrying a copy of each was extracted into `crate::prose_sweep` — which
-    /// took the one retained-state-shaped wording in the sibling's source with
-    /// it, and left that file with nothing for this sweep to find.
+    /// **The assertions after those read the walk's file selection and its skip
+    /// list, never its hits**, and that is Phase 2d-4a-C step 2's round-2
+    /// finding. The sibling-coverage assertion was hit-based, and it named
+    /// `src-tauri/src/liveness_contract.rs` until step 2's round 1 moved the
+    /// comparison — and the one retained-state-shaped wording that file held, its
+    /// own duplicate-detection assertion message — into `crate::prose_sweep`,
+    /// leaving the sibling with nothing for this sweep to find. Re-pointing the
+    /// assertion at `prose_sweep.rs` kept it true and left the property it was
+    /// defending unguarded: **a hit-based assertion cannot cover a file that
+    /// legitimately holds no hit**, so dropping `liveness_contract.rs` from the
+    /// walk would have gone unnoticed. [`crate::prose_sweep::selected_files`]
+    /// answers which files the walk covers, and [`sweep`] is built on the same
+    /// call, so what is asserted here is what the guard below actually reads.
     #[test]
     fn the_sweep_reaches_both_trees() {
         let hits = sweep();
@@ -1187,10 +1219,28 @@ mod tests {
                 .any(|hit| hit.file == "crates/espansoconfig-core/src/watch/retained_state.rs"),
             "the contract itself is swept, not exempted"
         );
+
+        let selected = crate::prose_sweep::selected_files(SWEPT_TREES, SKIPPED);
         assert!(
-            hits.iter()
-                .any(|hit| hit.file == "src-tauri/src/prose_sweep.rs"),
-            "the machinery both contract checks share is swept too — neither exempts it"
+            selected
+                .iter()
+                .any(|file| file == "src-tauri/src/liveness_contract.rs"),
+            "the sibling contract check is covered by this walk, hit or no hit — neither check exempts the other"
+        );
+        assert!(
+            selected
+                .iter()
+                .any(|file| file == "src-tauri/src/prose_sweep.rs"),
+            "the machinery both contract checks share is covered by this walk too"
+        );
+        assert_eq!(
+            SKIPPED,
+            ["src-tauri/src/retained_state_contract.rs"],
+            "this check skips exactly one file, its own source — the stated hole, and nothing else"
+        );
+        assert!(
+            !selected.iter().any(|file| file == SKIPPED[0]),
+            "and the skip list has that effect on the walk"
         );
     } // End of function the_sweep_reaches_both_trees()
 

@@ -17,8 +17,14 @@
 //! out; it gets back every occurrence with its position and a window of text for
 //! the failure report. It then hands that back with its own inventory and gets
 //! the disagreements between the two — [`complaints_against`], added by Phase
-//! 2d-4a-C's review round, because the comparison had been copied into both
+//! 2d-4a-C's step-2 round 1, because the comparison had been copied into both
 //! checks and the copy had already propagated one defect into both.
+//!
+//! The walk's file selection is also a caller-visible answer of its own,
+//! [`selected_files`], added by that step's round 2. A check that wants to assert
+//! it covers a particular file cannot do it through a phrase hit — a file with no
+//! hit and a file the walk never opened look alike from the hits — so it asks
+//! which files were selected instead, and it asks the very list [`sweep`] used.
 //!
 //! **Judging those occurrences stays the caller's**, because that judgement is
 //! the whole of what a contract check is for: the inventory that says which
@@ -170,16 +176,23 @@ pub(crate) fn workspace_root() -> PathBuf {
         .to_path_buf()
 } // End of function workspace_root()
 
-/// Every occurrence of every phrase in `phrases`, over every `.rs` file of every
-/// tree in `trees`, in file order, with each file in `skipped` left out.
+/// Which files a sweep of `trees` covers once `skipped` is taken out, in file
+/// order, each relative to the workspace root.
 ///
 /// Each skipped path is asserted to exist, so a rename that silently emptied a
 /// skip list fails here rather than turning a check into a vacuous pass.
-pub(crate) fn sweep(
-    phrases: &'static [&'static str],
-    trees: &[&str],
-    skipped: &[&str],
-) -> Vec<Hit> {
+///
+/// # Why the selection is a function rather than a step inside [`sweep`]
+///
+/// So that a check can assert **which files it covers** without going through a
+/// phrase hit. A hit-based coverage assertion cannot tell a file the sweep opened
+/// and found nothing in from a file the sweep never opened at all, so it goes on
+/// passing after the file is dropped from the walk — which is what Phase
+/// 2d-4a-C's step-2 round 2 found in both guards' `the_sweep_reaches_both_trees`.
+/// [`sweep`] calls this, so the list a test reads is the same list the sweep
+/// works from; a test that rebuilt the walk for itself would prove only its own
+/// copy.
+pub(crate) fn selected_files(trees: &[&str], skipped: &[&str]) -> Vec<String> {
     let root = workspace_root();
     for path in skipped {
         assert!(
@@ -187,7 +200,7 @@ pub(crate) fn sweep(
             "the skipped file {path} must exist, or the skip list is silently empty"
         );
     }
-    let mut hits: Vec<Hit> = Vec::new();
+    let mut selected: Vec<String> = Vec::new();
     for tree in trees {
         for path in rust_files_under(&root.join(tree)) {
             let relative = path
@@ -195,29 +208,44 @@ pub(crate) fn sweep(
                 .expect("a swept file lives under the workspace root")
                 .to_string_lossy()
                 .into_owned();
-            if skipped.contains(&relative.as_str()) {
-                continue;
+            if !skipped.contains(&relative.as_str()) {
+                selected.push(relative);
             }
-            let source = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-            for unit in prose_units(&source) {
-                let lowered = unit.text.to_lowercase();
-                for phrase in phrases {
-                    let mut from = 0usize;
-                    while let Some(offset) = lowered[from..].find(phrase) {
-                        let at = from + offset;
-                        hits.push(Hit {
-                            file: relative.clone(),
-                            line: unit.line,
-                            phrase,
-                            context: window_around(&unit.text, at, phrase.len()),
-                        });
-                        from = at + phrase.len();
-                    } // End of the loop over one phrase's occurrences in one unit
-                } // End of the loop over the phrase family
-            } // End of the loop over one file's prose units
         } // End of the loop over one tree's files
     } // End of the loop over the swept trees
+    selected
+} // End of function selected_files()
+
+/// Every occurrence of every phrase in `phrases`, over every file
+/// [`selected_files`] returns for `trees` and `skipped`, in file order.
+pub(crate) fn sweep(
+    phrases: &'static [&'static str],
+    trees: &[&str],
+    skipped: &[&str],
+) -> Vec<Hit> {
+    let root = workspace_root();
+    let mut hits: Vec<Hit> = Vec::new();
+    for relative in selected_files(trees, skipped) {
+        let path = root.join(&relative);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        for unit in prose_units(&source) {
+            let lowered = unit.text.to_lowercase();
+            for phrase in phrases {
+                let mut from = 0usize;
+                while let Some(offset) = lowered[from..].find(phrase) {
+                    let at = from + offset;
+                    hits.push(Hit {
+                        file: relative.clone(),
+                        line: unit.line,
+                        phrase,
+                        context: window_around(&unit.text, at, phrase.len()),
+                    });
+                    from = at + phrase.len();
+                } // End of the loop over one phrase's occurrences in one unit
+            } // End of the loop over the phrase family
+        } // End of the loop over one file's prose units
+    } // End of the loop over the selected files
     hits
 } // End of function sweep()
 

@@ -237,3 +237,51 @@ READY
 - The judged-out lock-registry wording at `persist/write.rs:432–460`.
 
 NOT READY
+
+## Step 2 — round 2 (the round-1 fix: the shared comparison, the re-pointed entry, the changed assertion and the amended record)
+
+VERDICT: NOT READY
+Counts: 0 High, 0 Medium, 2 Low
+
+### Finding 1 — Low — sentence
+
+`src-tauri/src/retained_state_contract.rs:99-106`
+
+> “The both-direction comparison below is this test's own, and [`crate::liveness_contract`] keeps its own copy of it.”
+
+What is wrong: This present-tense limitation is now false. The comparison exists once as `prose_sweep::complaints_against` (`src-tauri/src/prose_sweep.rs:288-349`), called by the retained-state guard at `retained_state_contract.rs:1234` and the liveness guard at `liveness_contract.rs:791`. Neither guard keeps a copy.
+
+Why it matters: The fix left its predecessor’s deliberately accepted defect shape documented as current behavior. This is new substantive residue caused by the extraction, not wording already corrected in §13.1 or §14 item 7.
+
+Suggested remedy: Replace this limit with the current arrangement: the comparison is shared, while each caller retains its inventory and final assertion sentence. If the lost byte-identity proof is mentioned here, label it explicitly historical.
+
+### Finding 2 — Low — behaviour
+
+`src-tauri/src/retained_state_contract.rs:262-264, 1163-1172, 1190-1194`
+
+> “The two checks do not exempt each other, which [`the_sweep_reaches_both_trees`] asserts.”
+
+What is wrong: The test no longer asserts that the retained-state sweep reaches `liveness_contract.rs`. Its replacement assertion only requires a hit from `prose_sweep.rs`. If the retained-state sweep were changed to skip `liveness_contract.rs`, all four assertions in this test could still pass: other files provide both tree hits, the canonical contract hit remains, and `prose_sweep.rs` remains visible. The current `SWEPT_TREES` and `SKIPPED` constants still cause the sibling to be swept, but the intended proof capability was lost.
+
+Why it matters: The original assertion guarded the explicit “the checks do not exempt each other” invariant. Moving the only matching phrase made a hit-based assertion impossible; substituting shared machinery proves a different and useful property, but not the original one.
+
+Suggested remedy: Keep the `prose_sweep.rs` assertion and add a file-selection assertion independent of phrase hits. Prefer exposing or reusing the exact selected-file layer used by `sweep`, then assert that each guard’s sibling source is selected and not skipped. Add the reciprocal assertion to the liveness guard if mutual non-exemption is the intended invariant.
+
+### What I checked and cleared
+
+- `complaints_against`: the three repairs are correct. Zero is illegal, duplicate detection uses map occupancy rather than a value sentinel, and every missing recorded key enters the reverse complaint loop.
+- Forward comparison: a swept `(file, phrase)` absent from the inventory receives expected count zero and necessarily complains.
+- Keys: hits and inventory use identical content-ordered `(file, phrase)` keys; the same phrase in two files remains two independent keys.
+- Case handling: source text is lowercased, both callers permanently test that every shape is lowercase, and inventory phrases must exactly belong to that family.
+- Substrings: distinct shapes that contain one another are tallied independently rather than overwriting or hiding each other.
+- Empty results and caller handling: the non-empty real inventories make an empty hit set produce reverse complaints; both callers retain a non-vacuous `complaints.is_empty()` assertion.
+- Re-pointed inventory entry: retaining it is correct. The assertion remains a false positive about guard-inventory structure, not an observation-pipeline retained-state claim; moving it into shared machinery does not change that judgement. Its history agrees with the code movement.
+- Guard comparison strength: both guards retain every former positive-count forward and reverse check and gain the zero-count and sentinel repairs. Neither local final assertion can ignore a non-empty complaint vector.
+- Record §13.1: the correction plainly says the byte-identity proof is historical at `65a0138`, cannot be re-derived, and has been replaced by weaker evidence.
+- Record §14 item 7: it records the discharge’s cost explicitly; it does not present sharing as a free win.
+- Record §14 item 5: its amendment accurately says the changed assertion now concerns shared machinery. Finding 2 is that the test no longer proves the separate sibling-coverage property.
+- Eight probes: they demonstrate the three repaired failure classes through both callers. The zero-first duplicate is rejected at the new positive-count precondition, while the two-positive duplicate separately exercises `insert(...).is_none()`. They are not comprehensive: no post-extraction probe covers a forward count mismatch/unrecorded hit, an out-of-family phrase, or an empty reason; §17.8 accurately discloses those omissions.
+
+### Verdict rationale
+
+The shared comparison itself is sound and strictly stronger than either copied loop. The round is nevertheless NOT READY because the fix left one direct description of the old duplication false and replaced the sibling-coverage assertion with a test of a different property, leaving the original non-exemption invariant unverified.

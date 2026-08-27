@@ -1484,6 +1484,17 @@ this project's declared worst defect class.
    > and reads *the machinery both contract checks share is swept too — neither exempts it*. Both
    > files are still swept rather than skipped; what changed is which one carries a hit, and the
    > claim the assertion is allowed to make about it. Each check is still blind to itself.
+
+   > **Amended again, step 2 round 2 (§18.2).** The amendment above is the fix that round 2 filed as
+   > a finding, and its last-but-one sentence is where it went wrong: re-pointing the assertion kept
+   > it *true* and left the property it was defending *unguarded*, because **a hit-based assertion
+   > cannot cover a file that legitimately holds no hit** — with `liveness_contract.rs` in exactly
+   > that position, adding it to this check's skip list would have kept all four assertions green.
+   > Coverage is now asserted through `prose_sweep::selected_files`, the same file selection `sweep`
+   > itself walks, in **both** guards: each names its sibling and `prose_sweep.rs`, and each pins its
+   > own skip list to its own source. So *the two checks do not exempt each other* is now a claim two
+   > tests carry between them — this one's test never asserted the liveness guard's half, and the
+   > mutuality had been stated as though it did. Each check is still blind to itself.
 6. **It sweeps two source trees and no document.** `docs/` is deliberately not swept and **cannot be**:
    `2d-4a-notes.md` quotes six review rounds' false sentences on purpose, so a check over the
    documentation tree would fail on the record of every defect this phase fixed. This file and that one
@@ -1537,6 +1548,14 @@ listing the code and forgetting the record is the exact habit Phase 2d-4a's roun
 Phase 2d-3's round 12 found before it. `PROGRESS.md` is the orchestrator's and is written in its own
 commit, as every step of this phase has been.
 
+> **Correction, step 2 round 2 (§18) — the three line counts below are history, not a description of
+> the tree.** They are what each file measured **at the step-2 commit `65a0138`**, which is what a
+> *what changed in this step* section is for, and they are left at those numbers deliberately. They
+> have since moved twice and **must not be read as current**: after round 1, `prose_sweep.rs` was 349
+> and `retained_state_contract.rs` 1247 (§17.6); after round 2's fix the three are **377 / 1297 /
+> 867**. §18.6 carries that measurement. Any later section wanting a current count takes it from the
+> latest round's *what changed*, never from here.
+
 - **`src-tauri/src/prose_sweep.rs`** — new, 236 lines. The shared machinery, moved out of
   `liveness_contract.rs` with `sweep`'s signature widened to take the family, the trees and the skip
   list, and `Judged`'s `reason` doc generalised from *this module's subject is
@@ -1550,6 +1569,19 @@ commit, as every step of this phase has been.
   `use crate::prose_sweep::{…}` added, a *where the machinery lives* section added to the module doc,
   and `sweep()` reduced to a wrapper. **`LIVENESS_SHAPES`, `INVENTORY` and the whole `mod tests` block
   are byte-identical to `HEAD`.**
+
+  > **Correction, step 2 round 2 (§18).** The bolded sentence was true of the tree committed at
+  > **`65a0138`** and is **historical**; its `mod tests` half is no longer true of this tree, and the
+  > sentence is left standing only as the record of what was measured then. Round 1's fix folded the
+  > comparison into `prose_sweep::complaints_against`, which rewrote `every_liveness_claim_is_judged`
+  > and its doc comment; round 2's fix rewrote `the_sweep_reaches_both_trees`, its doc comment and
+  > `SKIPPED`. **`LIVENESS_SHAPES` and this file's `INVENTORY` are still byte-identical** — neither
+  > round touched either, and no entry was added, removed or re-counted in round 2 — so nothing about
+  > *what this check judges* has moved. What is gone is the byte-identity of the tests, and with it
+  > their standing as **independent evidence** about the extraction that moved the machinery out from
+  > under them: they are green, which is weaker, and §17.3 says why. A round wanting that evidence
+  > reads `65a0138`. The same correction is now in the file's own *where the machinery lives* section,
+  > because the false sentence had been copied into it and stood there for a round.
 - **`src-tauri/src/main.rs`** — two `#[cfg(test)] mod` declarations, in alphabetical position.
 - **`docs/decisions/2d-4a-C-notes.md`** — this step-2 record: §13 to §16 and the header above them.
 
@@ -1570,6 +1602,14 @@ step 1 carried them, unverified by this step.
 | `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
 | `git status --short --untracked-files=all` | four paths, **none under `src/`** |
 | `liveness_contract.rs`'s four tests | green, and byte-identical to `HEAD` |
+
+> **Correction, step 2 round 2 (§18) — the last row.** *Byte-identical to `HEAD`* was a true
+> measurement of the tree committed at **`65a0138`** and is **historical**; it is not re-derivable
+> from this tree, and the row is left standing as the record of what that gate reported then. Round 1
+> rewrote `every_liveness_claim_is_judged` and round 2 rewrote `the_sweep_reaches_both_trees`, so what
+> holds now is only the first half — **the four tests are green** — plus the narrower fact that
+> `LIVENESS_SHAPES` and that file's `INVENTORY` are untouched. §17.3 states why the replacement is
+> weaker than what it replaces, and §18.7 re-measures the tests.
 
 The frontend baselines **431 / 2125 / 184** are carried forward unverified, because this step touched
 no path under `src/`. Any step that does must re-measure them.
@@ -1652,6 +1692,15 @@ loud, on the first run.** This is worth recording because it is the check workin
   still swept, it simply has nothing to find. It now names **`src-tauri/src/prose_sweep.rs`**, the
   machinery both checks are built on, and reads *the machinery both contract checks share is swept
   too — neither exempts it*. §14 item 5 carries the amendment.
+
+  > **Correction, step 2 round 2 (§18.2).** *It now names …* was true when written and is
+  > **historical**; the re-pointing it describes is also the round-2 finding. Re-pointing a
+  > **hit-based** assertion kept it true and left the property unguarded — `liveness_contract.rs` had
+  > become a file with no hit of this family, and no hit-based assertion can distinguish that from a
+  > file the walk never opened. Both guards now assert coverage through
+  > `prose_sweep::selected_files`; the assertion that used to name `prose_sweep.rs` alone has been
+  > replaced, in each guard, by one naming the sibling check and one naming `prose_sweep.rs`, plus a
+  > pin on the guard's own skip list. §18.2 and §18.3 carry it.
 
 ### 17.3 What the fix costs, said plainly
 
@@ -1794,3 +1843,229 @@ no path under `src/`.
    this phase has written the next round's findings. The likeliest sites are §17.2's account of the
    re-pointed entry — whose new `reason` line now carries a small history and could easily claim more
    than it should — and §17.3's claim about what survives of the byte-identity proof.
+
+---
+
+## 18. Step 2, review round 2, and the fix round that answers it
+
+**Verdict: NOT READY**, two findings, both Low — one a sentence, one a behaviour.
+`docs/reviews/phase-2d-4a-C.md`, section *Step 2 — round 2*. The orchestrator confirmed both by
+reading the code, then swept for the **shape** of the first rather than for its words and found **two
+more instances the review did not name**. All four are fixed here.
+
+Both findings are the same failure at two removes: **round 1's fix changed the world and three
+positions went on describing the world before it.** That is this project's declared recurring failure
+mode — *sweep for what the type now says, not for the words of the finding you just closed* — and it
+is worth saying that it recurred inside the pair of modules built to catch prose from drifting away
+from code, one round after they shipped.
+
+### 18.1 The four items
+
+| # | Where | Kind | Found by |
+|---|---|---|---|
+| 1 | `retained_state_contract.rs` module doc, the fifth *limit* | sentence — every clause false | the review |
+| 2 | `liveness_contract.rs` module doc, *where the machinery lives* | sentence — the same false claim, in the sibling | **the orchestrator's sweep** |
+| 3 | `SKIPPED`'s doc and `the_sweep_reaches_both_trees`, **both** files | behaviour — an assertion that cannot fail for its reason | the review |
+| 4 | this record, §15 and §16 | sentence — §13.1's retracted claim, restated twice with no correction | **the orchestrator's sweep** |
+
+**Item 1.** The fifth limit said *the both-direction comparison below is this test's own, and
+`crate::liveness_contract` keeps its own copy of it*, and explained that the duplication was the price
+of the byte-identity proof. Round 1 had already deleted both copies; the very next line of the file is
+`use crate::prose_sweep::{complaints_against, …}`. Every clause of the bullet was false, including its
+statement of the cost.
+
+**Item 2.** The sibling's *where the machinery lives* section ended *the four tests below are unchanged
+by that extraction, which is the evidence that it took nothing away* — the identical retracted claim,
+in the file the claim is about. §13.1 had been corrected in round 1 and this had not.
+
+**Item 3.** `SKIPPED`'s doc in `retained_state_contract.rs` said *the two checks do not exempt each
+other, which `the_sweep_reaches_both_trees` asserts*. It did not assert it, and could not:
+
+- that test's fourth assertion named `liveness_contract.rs` until round 1's fix moved the one
+  retained-state-shaped wording that file held into `prose_sweep.rs`, and was then **re-pointed at
+  `prose_sweep.rs`** to keep it true;
+- **a hit-based assertion cannot cover a file that legitimately holds no hit.** With
+  `liveness_contract.rs` in exactly that position, adding it to this check's skip list left all four
+  assertions green — measured, in §18.5, not argued;
+- the claim was stated as **mutual**, and the liveness guard's own `the_sweep_reaches_both_trees` had
+  **no assertion about the sibling check at all** — neither about `retained_state_contract.rs` nor
+  about `prose_sweep.rs`. Half of a mutual claim was carried by nothing.
+
+**Item 4.** §13.1 carries a correction block saying the byte-identity proof is historical. **§15's
+`liveness_contract.rs` bullet and §16's last table row made the identical claim and carried none**,
+so the record contradicted itself in three places at once. §15's three line counts were stale as
+descriptions of the tree for the same reason.
+
+### 18.2 The behaviour fix — one file selection, and coverage asserted through it
+
+The file-selection layer is now `prose_sweep::selected_files(trees, skipped) -> Vec<String>`,
+returning workspace-relative paths in file order, with the *every skipped path exists* assertion
+moved into it. **`sweep` calls it**, so there is one selection and a test observes the same one the
+sweep walks. Reimplementing the walk inside a test would have proved only the test's own copy, which
+is the defect, not the fix.
+
+Each guard's `the_sweep_reaches_both_trees` keeps its three hit-based assertions — both trees reached,
+the contract itself swept — and gains four that never look at a hit:
+
+| Assertion | `retained_state_contract.rs` | `liveness_contract.rs` |
+|---|---|---|
+| the sibling check is selected | `src-tauri/src/liveness_contract.rs` | `src-tauri/src/retained_state_contract.rs` |
+| the shared machinery is selected | `src-tauri/src/prose_sweep.rs` | `src-tauri/src/prose_sweep.rs` |
+| the skip list names exactly this module's own source | yes | yes |
+| and the walk actually leaves that file out | yes | yes |
+
+*Neither check exempts the other* is therefore a claim **two tests carry between them**, and each doc
+comment now says which half its own test carries. The `prose_sweep.rs` hit-based assertion in the
+retained-state guard is **kept**: nothing was dropped, four assertions were added.
+
+### 18.3 The skip list is now one value, because the fix would otherwise have re-created the defect
+
+`SKIPPED` was `&str` and the skip list was spelled `&[SKIPPED]` at the call site. A test that wrote
+`&[SKIPPED]` for itself would have been asserting over **its own copy of the skip list** — the exact
+shape of the finding — so `SKIPPED` is now `&[&str]`, spelled once, passed by `sweep` and read by the
+test. This is why the round touched the constant's type in both files, and it is why probe A and
+probe B are each a **single** edit.
+
+### 18.4 The three stale positions, corrected rather than deleted
+
+Deleting a measurement destroys the record of what was true when, so every position is annotated in
+§13.1's pattern — a blockquoted correction naming this round, saying the measurement was true at
+**`65a0138`**, and saying what replaces it:
+
+- **`retained_state_contract.rs`'s fifth limit** is gone from the limits list (now *four further
+  limits*) and replaced by a section, **# Where the comparison lives**, stating the current
+  arrangement: `complaints_against` written once and called by both guards; each check keeping its
+  phrase family, trees, skip list, inventory and final assertion sentence. It ends with the
+  byte-identity proof labelled explicitly historical at `65a0138`, with §17.3 named as where the
+  weaker replacement is stated.
+- **`liveness_contract.rs`'s *where the machinery lives*** gains the same correction in the terms
+  §13.1 uses: at `65a0138` this file's four tests were byte-identical; round 1 rewrote the guard test
+  and round 2 rewrote `the_sweep_reaches_both_trees`, so the measurement is not re-derivable. What
+  stands is weaker and is stated as weaker — the four tests are green, `LIVENESS_SHAPES` and that
+  file's `INVENTORY` are still byte-identical, but the tests themselves changed and are **no longer
+  independent evidence** about the refactor that moved the machinery out from under them.
+- **§15 and §16** carry correction blocks; §15's line counts are declared **history of the step-2
+  commit**, with the round-1 and round-2 numbers given so nothing reads them as current. §14 item 5
+  and §17.2 carry a second amendment each, because both described the re-pointed assertion in the
+  present tense.
+
+### 18.5 The two red probes, watched failing and reverted by digest
+
+Item 3's whole point is that the previous assertion could not fail for the reason it existed, so the
+new one was driven to red in **both** guards. Each probe is one edit — the sibling's path added to
+that check's `SKIPPED` — the tests run, then the **inverse edit** applied and the digest compared.
+`git checkout` is not an undo on a tree with unstaged work, and this round ran no git command.
+
+| Probe | File | Pre-probe digest | Probed digest | Post-revert digest |
+|---|---|---|---|---|
+| A | `retained_state_contract.rs` | `b8e9ee46…87e4` | `923f287b…e711` | `b8e9ee46…87e4` ✔ |
+| B | `liveness_contract.rs` | `31f0264c…bf5d` | `2631de4e…37f8` | `31f0264c…bf5d` ✔ |
+
+Full pre/post digests, identical on both sides of each probe, and of the tree this round ships:
+
+- `retained_state_contract.rs`: `b8e9ee464cebf501b85e7f5d17c989465d6afee0c33076fd4f2b0c9ac5ca87e4`
+- `liveness_contract.rs`: `31f0264c6ba61d1829fc529eb52a5fe845de31174c6239b865d157f28d54bf5d`
+- `prose_sweep.rs` (unprobed, unchanged throughout):
+  `90b7a5d8fa0d35686224080c75e07c04feed7cbbc2622a5072e51e6e85397615`
+
+Both probes failed at the same message, each from its own file:
+
+```
+panicked at src-tauri/src/retained_state_contract.rs:1227:9:
+the sibling contract check is covered by this walk, hit or no hit — neither check exempts the other
+
+panicked at src-tauri/src/liveness_contract.rs:799:9:
+the sibling contract check is covered by this walk, hit or no hit — neither check exempts the other
+```
+
+**The line worth reading is the other one.** Under both probes the guard itself —
+`every_retained_state_claim_is_judged`, `every_liveness_claim_is_judged` — **passed**, and so did the
+three hit-based assertions above the new ones. Each probe run reported `3 passed; 1 failed`. That is
+the finding measured rather than argued: **before this round, dropping either sibling from either
+walk would have left every test in both files green.** Each file holds no hit of the other's family,
+so no hit-based assertion could ever have covered it.
+
+### 18.6 What changed, file by file
+
+**Four files, none under `src/`.** Four, not three: this record is one of them.
+
+- **`src-tauri/src/prose_sweep.rs`** — 349 lines to 377. `selected_files` added with its doc comment
+  saying why the selection is a function rather than a step inside `sweep`; `sweep` rewritten to walk
+  that list, keeping its per-file read and the two loops verbatim; the module doc given a paragraph on
+  the new answer. **`prose_units` was not touched** — its comment-run joining is load-bearing, and
+  this fix had no business anywhere near it.
+- **`src-tauri/src/retained_state_contract.rs`** — 1247 lines to 1297. The fifth limit replaced by the
+  *where the comparison lives* section; `SKIPPED` widened to a slice with its doc saying why it is
+  named once, and its mutual-exemption sentence made true of what the tests now assert;
+  `the_sweep_reaches_both_trees` given four selection-based assertions and a rewritten doc comment.
+  **`RETAINED_STATE_SHAPES` and `INVENTORY` are untouched** — 140 entries, none added, removed,
+  re-counted or reworded.
+- **`src-tauri/src/liveness_contract.rs`** — 804 lines to 867. The same four changes, mirrored: the
+  correction in *where the machinery lives*, the `SKIPPED` widening and its new reciprocal sentence,
+  and the four selection-based assertions with their doc comment. **`LIVENESS_SHAPES` and `INVENTORY`
+  are untouched** — 86 entries, likewise.
+- **`docs/decisions/2d-4a-C-notes.md`** — this section, the correction blocks in §15 and §16, and the
+  second amendments to §14 item 5 and §17.2.
+
+**No inventory entry was added or changed in either check, and neither phrase family was touched.**
+That is a measurement, not a policy: the prose this round wrote into the two swept files —
+`prose_sweep.rs` and `liveness_contract.rs`, since each check's own source is skipped by itself —
+matched **no phrase of either family**, and both guards were run after every edit to find out rather
+than to confirm. Had a hit appeared it would have been recorded as a judged entry with its reason;
+narrowing a family or rewording an assertion to make a hit disappear is the one move these checks
+cannot catch (`2d-4a-notes.md` §11.4).
+
+**`crates/espansoconfig-core` is untouched.** No path under `src/` changed, so the three frontend
+figures are carried forward unverified.
+
+### 18.7 The gates after this round
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1313 passed, 0 failed**, 26 result lines all `ok`, exit 0 — **unmoved**: four assertions were added to two existing tests, and no test was added |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** — the host-scar gate |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| `cargo fmt --check` | clean, exit 0 |
+| `cargo doc --workspace --no-deps` | exit 0, **73** `links to private item` warnings — the pre-existing count, unmoved — and **zero** unresolved links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| The two probes of §18.5 | both red, both reverted, both digests matched |
+| `liveness_contract.rs`'s four tests | **green** — and *byte-identical* is retired as a gate, per §18.4 |
+
+The frontend baselines **431 / 2125 / 184** are carried forward unverified, because this round touched
+no path under `src/`.
+
+### 18.8 What this round does **not** close, and where it is thin
+
+Round 3 should start here.
+
+1. **The new coverage assertions name three paths as string literals, and nothing checks that those
+   files exist.** `selected_files` asserts that every **skipped** path exists — that is round 1's
+   protection against a rename silently emptying a skip list — but an assertion looking for
+   `"src-tauri/src/prose_sweep.rs"` in the selection would simply fail if the file were renamed,
+   which is loud but reports the wrong cause. A renamed sibling reads as *the sibling is exempted*.
+2. **The skip-list assertion compares a constant with its own literal.** `assert_eq!(SKIPPED,
+   ["src-tauri/src/liveness_contract.rs"])` pins the module doc's *exactly one file* limit and it does
+   fail under a second skip, which is what it is for — but it is a restatement of the constant, and a
+   round that changes both together sees nothing. The assertion beside it, that the walk really
+   leaves the file out, is the one with behaviour in it.
+3. **Nothing pins what `selected_files`'s doc comment claims**, and this round added ~15 lines of
+   exactly the prose class `CLAUDE.md` names as this project's worst defect. §17.8 item 4 said the
+   same of `complaints_against`; the surface has grown, not shrunk.
+4. **Coverage is now asserted for three files and no more.** The two checks name each other and
+   `prose_sweep.rs`. Every other file in the two trees is still covered only by the walk, and a change
+   that dropped, say, `crates/espansoconfig-core/src/watch/` from `SWEPT_TREES` would be caught by the
+   hit-based *the core tree is swept* assertion but a change dropping one **file** would not. The
+   general form — assert that the selection is exactly the `.rs` files of the trees minus the skip
+   list — was **not** built, because it would be `selected_files` restated in the test.
+5. **This round rewrote a second test in each guard**, so §13.1's byte-identity evidence has now been
+   invalidated twice, by two consecutive rounds, each for a good reason. There is no longer any
+   automated statement about the extraction at all — only `65a0138` and this record's word for it.
+6. **The correction blocks are prose about prose.** §15's line counts are now declared history, and
+   nothing fails when they drift again; §18.6's counts will be stale on the next round and are labelled
+   with the round that took them for that reason.
+7. **This round wrote sentences, and the round that reviews them is not optional.** Every fix round of
+   this phase has written the next round's findings, and this one is the second consecutive round
+   whose entire finding list was *a previous fix round's sentences*. The likeliest sites are §18.2's
+   table — which claims a symmetry the two files must actually hold — and the two `SKIPPED` doc
+   comments, which now each describe what the *other* file's test asserts, a claim neither file can
+   check.
