@@ -24,7 +24,8 @@
 //! [`selected_files`], added by that step's round 2. A check that wants to assert
 //! it covers a particular file cannot do it through a phrase hit — a file with no
 //! hit and a file the walk never opened look alike from the hits — so it asks
-//! which files were selected instead, and it asks the very list [`sweep`] used.
+//! which files were selected instead, through the very function [`sweep`]
+//! selects with.
 //!
 //! **Judging those occurrences stays the caller's**, because that judgement is
 //! the whole of what a contract check is for: the inventory that says which
@@ -158,7 +159,8 @@ pub(crate) fn prose_units(source: &str) -> Vec<ProseUnit> {
 
 /// One occurrence of one phrase in one file.
 pub(crate) struct Hit {
-    /// The file, relative to the workspace root.
+    /// The file, relative to the workspace root, spelled as
+    /// `SelectedFile::reported` spells it.
     pub(crate) file: String,
     /// The 1-based line the prose unit holding it starts at.
     pub(crate) line: usize,
@@ -176,6 +178,25 @@ pub(crate) fn workspace_root() -> PathBuf {
         .to_path_buf()
 } // End of function workspace_root()
 
+/// One file the walk covers: the path it is read through, and the string it is
+/// reported and inventoried under.
+///
+/// **The two are not interchangeable, which is why both travel.** `relative` is
+/// the real path, so joining it to the workspace root names the file on disk
+/// whatever bytes its name holds. `reported` is that path through
+/// `to_string_lossy`, which is what [`Hit`] carries, what an inventory key's
+/// first half is written as, and what a skip list is compared against — a
+/// display form, and a lossy one. A `.rs` file whose name is not valid UTF-8
+/// gains a replacement character on the way into it, and a read through that
+/// string would open some other path or none.
+pub(crate) struct SelectedFile {
+    /// The file's path relative to the workspace root, losslessly.
+    pub(crate) relative: PathBuf,
+    /// The same path as a `String`, lossily: [`Hit`]'s `file`, the inventory
+    /// key's first half, and the value a skip list is matched against.
+    pub(crate) reported: String,
+}
+
 /// Which files a sweep of `trees` covers once `skipped` is taken out, in file
 /// order, each relative to the workspace root.
 ///
@@ -189,10 +210,17 @@ pub(crate) fn workspace_root() -> PathBuf {
 /// and found nothing in from a file the sweep never opened at all, so it goes on
 /// passing after the file is dropped from the walk — which is what Phase
 /// 2d-4a-C's step-2 round 2 found in both guards' `the_sweep_reaches_both_trees`.
-/// [`sweep`] calls this, so the list a test reads is the same list the sweep
-/// works from; a test that rebuilt the walk for itself would prove only its own
-/// copy.
-pub(crate) fn selected_files(trees: &[&str], skipped: &[&str]) -> Vec<String> {
+///
+/// **What a test calling this gets, stated exactly.** [`sweep`] selects through
+/// this function, so a test that calls it with a check's own trees and skip list
+/// re-derives that check's selection through the very code the sweep selects
+/// with. It does not get the `Vec` the sweep walked: that value belongs to one
+/// invocation of [`sweep`] and is never handed out, so a test asking again gets
+/// a **second traversal** with the same arguments. The evidence is therefore
+/// *what this function answers for those arguments* — weaker than identity, and
+/// stronger than a test that rebuilt the walk for itself, which would prove only
+/// its own copy.
+pub(crate) fn selected_files(trees: &[&str], skipped: &[&str]) -> Vec<SelectedFile> {
     let root = workspace_root();
     for path in skipped {
         assert!(
@@ -200,16 +228,16 @@ pub(crate) fn selected_files(trees: &[&str], skipped: &[&str]) -> Vec<String> {
             "the skipped file {path} must exist, or the skip list is silently empty"
         );
     }
-    let mut selected: Vec<String> = Vec::new();
+    let mut selected: Vec<SelectedFile> = Vec::new();
     for tree in trees {
         for path in rust_files_under(&root.join(tree)) {
             let relative = path
                 .strip_prefix(&root)
                 .expect("a swept file lives under the workspace root")
-                .to_string_lossy()
-                .into_owned();
-            if !skipped.contains(&relative.as_str()) {
-                selected.push(relative);
+                .to_path_buf();
+            let reported = relative.to_string_lossy().into_owned();
+            if !skipped.contains(&reported.as_str()) {
+                selected.push(SelectedFile { relative, reported });
             }
         } // End of the loop over one tree's files
     } // End of the loop over the swept trees
@@ -225,8 +253,8 @@ pub(crate) fn sweep(
 ) -> Vec<Hit> {
     let root = workspace_root();
     let mut hits: Vec<Hit> = Vec::new();
-    for relative in selected_files(trees, skipped) {
-        let path = root.join(&relative);
+    for file in selected_files(trees, skipped) {
+        let path = root.join(&file.relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
         for unit in prose_units(&source) {
@@ -236,7 +264,7 @@ pub(crate) fn sweep(
                 while let Some(offset) = lowered[from..].find(phrase) {
                     let at = from + offset;
                     hits.push(Hit {
-                        file: relative.clone(),
+                        file: file.reported.clone(),
                         line: unit.line,
                         phrase,
                         context: window_around(&unit.text, at, phrase.len()),

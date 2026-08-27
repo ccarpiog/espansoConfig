@@ -285,3 +285,84 @@ Suggested remedy: Keep the `prose_sweep.rs` assertion and add a file-selection a
 ### Verdict rationale
 
 The shared comparison itself is sound and strictly stronger than either copied loop. The round is nevertheless NOT READY because the fix left one direct description of the old duplication false and replaced the sibling-coverage assertion with a test of a different property, leaving the original non-exemption invariant unverified.
+
+## Step 2 — round 3 (against the round-2 fix: the extracted `selected_files`, its doc, the eight new assertions, the two `SKIPPED` comments, the correction blocks and §18)
+
+VERDICT: NOT READY
+Counts: 0 High, 0 Medium, 4 Low
+
+### Finding 1 — Low — code
+
+`src-tauri/src/prose_sweep.rs:206-231`
+
+> ```rust
+> let relative = path
+>     .strip_prefix(&root)
+>     .expect("a swept file lives under the workspace root")
+>     .to_string_lossy()
+>     .into_owned();
+> // ...
+> for relative in selected_files(trees, skipped) {
+>     let path = root.join(&relative);
+>     let source = fs::read_to_string(&path)
+> ```
+
+What is wrong: The extraction is not completely lossless. Previously, `sweep` used the original `PathBuf` from `rust_files_under` for `read_to_string` and used the lossy string only for reporting and skip comparison. It now reconstructs the filesystem path from that lossy string. On a platform permitting a non-UTF-8 `.rs` filename, the old implementation reads the actual file; the new implementation substitutes U+FFFD, attempts to read a different path, and panics.
+
+Why it matters: A shared helper has changed the file set both guards can successfully sweep, contradicting the extraction’s requirement to preserve file selection and unreadable-file behavior. The unchanged inventories do not exercise this path.
+
+Suggested remedy: Have `selected_files` retain relative `PathBuf`s, or return a small structure containing both the lossless relative path and its display/inventory string. Reconstruct paths only from the `PathBuf`; keep `to_string_lossy` at the `Hit.file` reporting boundary as before.
+
+### Finding 2 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:1901-1905`
+
+> “`sweep` calls it, so there is one selection and a test observes the same one the sweep walks.”
+
+What is wrong: There are two selections. Each test first calls `sweep()`, which calls `selected_files`, and then calls `selected_files` again to obtain `selected`. The test observes a fresh traversal using the same implementation and arguments, not the `Vec` that the sweep walked. The same overclaim appears in `prose_sweep.rs:192-194` and both guards’ test documentation.
+
+Why it matters: The wording promotes shared implementation into stronger evidence than the test provides. A later filter between `selected_files` and the read loop, or a filesystem change between the two traversals, could make the test’s selection differ from the files actually opened while these comments continued claiming identity.
+
+Suggested remedy: Either narrow every occurrence to say that the test recomputes selection through the same helper, or return the selected paths alongside the hits from one sweep operation so the assertions inspect the actual selection used.
+
+### Finding 3 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:1917-1919`
+
+> “The `prose_sweep.rs` hit-based assertion in the retained-state guard is **kept**: nothing was dropped, four assertions were added.”
+
+What is wrong: The hit-based assertion was dropped. Before this commit it inspected `hits` for `src-tauri/src/prose_sweep.rs`; the current assertion at `retained_state_contract.rs:1230-1235` inspects `selected`. The test went from four assertions to seven: one assertion was replaced and four were added, for a net gain of three.
+
+Why it matters: §18’s account contradicts both the diff and its own §18.5 statement that only three hit-based assertions remain. Although the inventory’s reverse direction still indirectly requires the existing `prose_sweep.rs` hit, the historical claim about what this fix did is false.
+
+Suggested remedy: Say that the old `prose_sweep.rs` hit assertion was replaced by a selection-based assertion, while its present hit remains independently forced by the retained-state inventory’s reverse comparison.
+
+### Finding 4 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2054-2059`
+
+> “Every other file in the two trees is still covered only by the walk, and a change that dropped, say, `crates/espansoconfig-core/src/watch/` from `SWEPT_TREES` would be caught by the hit-based *the core tree is swept* assertion but a change dropping one **file** would not.”
+
+What is wrong: Dropping a file with any inventoried hit is caught by `complaints_against`’s reverse direction: its recorded `(file, phrase)` keys become missing. Only a file with zero family hits can disappear without that indirect coverage firing. The risk is real but materially narrower than “dropping one file would not” states.
+
+Why it matters: This is the same hit-versus-selection distinction the round is documenting, inverted into an overstatement of the remaining hole. It also weakens §18.8’s argument about whether exhaustive independent enumeration is worth duplicating.
+
+Suggested remedy: State that no general selection assertion covers the remaining files; hit-bearing files are indirectly protected by inventory entries, while zero-hit files can still be dropped silently.
+
+### What I checked and cleared
+
+- `selected_files` preserves tree order, per-tree sorted file order, skip membership semantics, and the skipped-path `is_file()` assertion for ordinary UTF-8 repository paths. The matching loops and per-file read panic text are otherwise unchanged.
+- The four new assertions are symmetric between the guards: each selects its sibling and `prose_sweep.rs`, pins its own one-element skip list, and confirms that selected output excludes that element.
+- The targeted-coverage trade is defensible: independently enumerating every `.rs` file would duplicate the helper’s traversal and create a second implementation to keep synchronized. The stronger useful improvement is to expose the actual selection from the sweep invocation, as Finding 2 describes.
+- Both `SKIPPED` comments accurately describe the cross-file symmetry. Each local test proves its own direction, and inspection of the sibling confirms the reciprocal direction.
+- The constant-versus-literal assertions and missing named-file existence checks are real limitations, but §18.8 items 1 and 2 disclose them accurately; a rename fails loudly rather than silently weakening coverage.
+- The retained-state module’s comparison-location correction is accurate: `complaints_against` is shared, while the families, trees, skips, inventories, and final assertion messages remain local.
+- The liveness module header and the §15 and §16 correction blocks plainly label the byte-identity evidence historical at `65a0138`, distinguish the still-identical arrays from the changed tests, and call the surviving evidence weaker.
+- §18.1, §18.3, §18.4, and §18.6 otherwise match the code and diff, including the slice-valued skip lists and current line counts of 377 / 1297 / 867.
+- §18.5’s three file digests match the reviewed tree, and its reported failure sites agree with the sibling-selection assertions.
+- §18.7’s test and gate figures agree with the host results supplied for this review; no new test was added.
+- The phrase families and inventories were untouched by this commit; the liveness and retained-state entry counts remain 86 and 140.
+
+### Verdict rationale
+
+The reciprocal non-exemption behavior requested by round 2 is present, and the historical correction blocks now hold. The round is nevertheless NOT READY because the extraction loses filesystem path fidelity and §18 introduces three substantively false descriptions of its evidence, diff, and remaining coverage hole. These are new defects in this fix round, not restatements of wording already corrected.

@@ -1200,8 +1200,16 @@ mod tests {
     /// defending unguarded: **a hit-based assertion cannot cover a file that
     /// legitimately holds no hit**, so dropping `liveness_contract.rs` from the
     /// walk would have gone unnoticed. [`crate::prose_sweep::selected_files`]
-    /// answers which files the walk covers, and [`sweep`] is built on the same
-    /// call, so what is asserted here is what the guard below actually reads.
+    /// answers which files the walk covers, and [`sweep`] selects through that
+    /// same function.
+    ///
+    /// **What that is worth, exactly.** The call below is a second traversal,
+    /// not the `Vec` the sweep above walked — that value belongs to one
+    /// invocation of `sweep` and is never handed out. What is asserted here is
+    /// what `selected_files` answers for this check's [`SWEPT_TREES`] and
+    /// [`SKIPPED`], which is what the guard's own sweep selects from because it
+    /// asks the same function with the same two arguments; nothing in the code
+    /// holds the two traversals to each other.
     #[test]
     fn the_sweep_reaches_both_trees() {
         let hits = sweep();
@@ -1224,13 +1232,13 @@ mod tests {
         assert!(
             selected
                 .iter()
-                .any(|file| file == "src-tauri/src/liveness_contract.rs"),
+                .any(|file| file.reported == "src-tauri/src/liveness_contract.rs"),
             "the sibling contract check is covered by this walk, hit or no hit — neither check exempts the other"
         );
         assert!(
             selected
                 .iter()
-                .any(|file| file == "src-tauri/src/prose_sweep.rs"),
+                .any(|file| file.reported == "src-tauri/src/prose_sweep.rs"),
             "the machinery both contract checks share is covered by this walk too"
         );
         assert_eq!(
@@ -1239,7 +1247,7 @@ mod tests {
             "this check skips exactly one file, its own source — the stated hole, and nothing else"
         );
         assert!(
-            !selected.iter().any(|file| file == SKIPPED[0]),
+            !selected.iter().any(|file| file.reported == SKIPPED[0]),
             "and the skip list has that effect on the walk"
         );
     } // End of function the_sweep_reaches_both_trees()
