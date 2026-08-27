@@ -11045,10 +11045,10 @@ the honesty as well as the shape.
 
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
-git status --short --untracked-files=all     # expect EMPTY after the round-2 commit
-# docs/reviews/phase-2d-4a-C.md              # step 1 rounds 1-4, step 2 rounds 1-2 — read before anything else
-# docs/decisions/2d-4a-C-notes.md            # §18 is round 2 and its fix; §18.8 is round 3's work list
-# src-tauri/src/prose_sweep.rs               # complaints_against (round 1) and selected_files (round 2)
+git status --short --untracked-files=all     # expect EMPTY after the round-3 commit `ef3ea07`
+# docs/reviews/phase-2d-4a-C.md              # step 1 rounds 1-4, step 2 rounds 1-3 — read before anything else
+# docs/decisions/2d-4a-C-notes.md            # §19 is round 3 and its fix; §19.10 is round 4's work list
+# src-tauri/src/prose_sweep.rs               # complaints_against (r1), selected_files (r2), SelectedFile (r3)
 # src-tauri/src/retained_state_contract.rs   # the check; its SKIPPED doc and the_sweep_reaches_both_trees
 # src-tauri/src/liveness_contract.rs         # the sibling; the same two positions, and its corrected module doc
 # crates/espansoconfig-core/src/watch/retained_state.rs  # THE CONTRACT step 2 enforces
