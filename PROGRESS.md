@@ -3663,7 +3663,7 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
-## Verification — Phase 2d-4a-C step 2 (the check; implemented and green, **the mandatory Codex round is owed**)
+## Verification — Phase 2d-4a-C step 2 (the check; implemented and green, **review round 1 done and its fix in the tree — round 2 is OWED**)
 
 **The mechanism exists.** `src-tauri/src/retained_state_contract.rs` (1281 lines) is the analogue of
 `liveness_contract.rs` for the family four review rounds kept finding, and
@@ -3763,6 +3763,89 @@ evidence the worker gave:
 - `cargo tree -p espansoconfig-core | rg tauri` **empty** — the architecture rule (D2x).
 - `git status --short` shows **no path under `src/`**, so the frontend baselines (431 / 2125 / 184)
   are untouched and were not re-measured.
+
+
+### Step 2 review round 1 — **NOT READY (1 Low, and it is a *code* defect)**, and the fix that answers it
+
+Appended verbatim to `docs/reviews/phase-2d-4a-C.md` under `## Step 2 — round 1`. Codex ran
+**read-only** and wrote no file. Job `task-mtbmi9p6-ia8b5z`, high effort, **604 s**. Record §17.
+
+**This is the first finding of the whole phase that is not prose-only.** Rounds 1–4 of step 1 each
+found a false sentence beside right code; this one found working prose over a guard that did not do
+what it said.
+
+**The defect: zero as an "unseen" sentinel, in *both* guards.** The comparison loop read
+`or_insert(0)` → `assert_eq!(*slot, 0, …)` → `*slot = entry.count`, and its reverse direction was
+guarded by `*count > 0`. Two invariants each test **expressly claims** were therefore defeated:
+
+- a first inventory entry with `count: 0` leaves the slot at zero, so **a duplicate for that
+  `(file, phrase)` passes** the uniqueness assertion;
+- **a phantom entry — one matching nothing — passes the reverse check**, which is precisely the
+  *reworded or removed, so judge it again* direction the guard exists for.
+
+**Nothing was broken on the shipped data** — all 86 liveness entries and all 140 retained-state
+entries carry positive counts — which is why it is a Low. **The orchestrator confirmed both halves by
+reading before commissioning the fix**, rather than accepting the finding.
+
+**The defect was pre-existing in `liveness_contract.rs`, and the duplication propagated it into the
+new check.** That is the concrete instance of the failure mode **§14 item 7 predicted in the same
+breath as accepting the trade**, and the review's own audit item 6 says so. So the fix is **not** to
+repair it twice: `prose_sweep::complaints_against(hits, inventory, shapes)` now holds the comparison
+**once**, both guards call it, and each keeps only its own final `assert!` sentence. `entry.count > 0`
+is a hard error with a message saying why; duplicates are detected by
+`recorded.insert(key, count).is_none()` with **no sentinel**; the reverse loop lost its `count > 0`
+condition and now covers **every** recorded key. `prose_units` is untouched.
+
+**What the discharge cost, stated rather than elided.** §13.1's proof that the extraction took
+nothing away was that `liveness_contract.rs`'s four tests pass **byte-identical**. Folding the
+comparison rewrites that guard test, so **that proof is now historical** — it holds at commit
+`65a0138` and **cannot be re-derived from the current tree**. §14 item 7 is amended to say the trade
+is discharged and what it cost, not deleted; §13.1 carries a correction block.
+
+### The check caught its own refactor, and that is better evidence than any probe
+
+**One `INVENTORY` entry had to change, and it is the only one.** Extracting the comparison physically
+moved the assertion string `one entry per file and phrase` out of `liveness_contract.rs` into
+`prose_sweep.rs` — and **that string was itself an inventoried retained-state hit**. The guard failed
+on the first run **in both directions** and printed it.
+
+**The entry was re-pointed, not deleted, and the orchestrator ruled on that rather than leaving it to
+the worker.** `file` moved from `src-tauri/src/liveness_contract.rs` to `src-tauri/src/prose_sweep.rs`;
+`phrase` (`one entry per`), `count` (`1`) and the judgement (false positive) are **unchanged**, and the
+reason was reworded to stay true and to record the move. 140 entries before and after. **The
+alternative was to reword the assertion message so the hit disappeared, and that is exactly the
+narrow-the-pattern-until-the-hit-vanishes move `2d-4a-notes.md` §11.4 records as the one such a check
+cannot catch.** Re-pointing preserves a judged position; rewording would have destroyed one to keep a
+test quiet. For the same reason `the_sweep_reaches_both_trees`'s last assertion — which asserted
+`liveness_contract.rs` appears among the retained-state hits — became **false** and now names
+`prose_sweep.rs`. Both are recorded in §17.2 and §14 item 5.
+
+**Verified by the orchestrator, not accepted**: the diff of `retained_state_contract.rs` changes
+exactly one entry's `file` and `reason` and nothing else in the data; the diff of
+`liveness_contract.rs` is **purely** the comparison's removal, with no `file:`/`phrase:`/`count:`/
+`reason:` line touched, so `INVENTORY` (86) and `LIVENESS_SHAPES` are untouched there.
+
+### The probes — eight, four per guard, and the shared line numbers are the evidence
+
+Reported by the worker and recorded as the worker's; all exit 101, all reverted by **inverse edit**
+with `shasum -a 256` matching the pre-probe digest (liveness `14229287…aae50`, retained
+`0ecdc2f3…b8997`). Four modes: a **phantom** entry; a **duplicate whose first has `count: 0`** — the
+exact case the old sentinel let through; a **duplicate both positive**; and an **existing entry set to
+`count: 0`**. **The two zero-count modes both fail at `prose_sweep.rs:307` and the duplicate at
+`:314`, reached through *both* guards** — which is what proves the comparison is genuinely shared
+rather than merely called from two places. Full table with all eight digests in §17.5.
+
+### The gates after the fix — every one re-run by the orchestrator
+
+- `cargo test --workspace` — **1313 passed, 0 failed**, 26 result lines, exit 0. **Unmoved**: the
+  repair changed guard logic, not coverage.
+- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+- `cargo doc --workspace --no-deps` exit 0 — **73** `links to private item`, the pre-existing count;
+  `rg '^warning: unresolved|^error'` finds nothing.
+- `cargo tree -p espansoconfig-core | rg tauri` **empty**; **no path under `src/`**, so the frontend
+  baselines (431 / 2125 / 184) are untouched and were not re-measured.
+- The comparison exists **once**: `rg` finds `fn complaints_against` only in `prose_sweep.rs:288`,
+  called from `liveness_contract.rs:791` and `retained_state_contract.rs:1234`.
 
 ### Open risks carried into the Codex round
 
@@ -10564,7 +10647,7 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN, AND *NOT* CLOSED — THE MANDATORY CODEX ROUND IS OWED. THAT IS THE NEXT ACTION.**
+### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN, ITS REVIEW ROUND 1 IS DONE (NOT READY — 1 Low, a *code* defect) AND ITS FIX IS IN THE TREE. THE NEXT ACTION IS **ROUND 2**, AGAINST THAT FIX.**
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
@@ -10575,45 +10658,52 @@ the spec for it.
 - **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE AND CLOSED.** Four review
   rounds; rounds 1–3 NOT READY and each fixed, round 4 **READY with 0 findings**, which cleared all
   six attack-list items and stated that no round 5 is warranted. Record §12.
-- **2d-4a-C-2 — the check. ✅ IMPLEMENTED, every gate green, ⬜ NOT REVIEWED.** `prose_sweep.rs` (236
-  lines, the shared machinery) and `retained_state_contract.rs` (1281 lines, the new check). Record
-  §13–§16. See the verification section "Phase 2d-4a-C step 2".
+- **2d-4a-C-2 — the check. ✅ IMPLEMENTED, every gate green, ⬜ NOT CLOSED — round 1 done, round 2
+  owed.** `prose_sweep.rs` (the shared machinery **and**, since the round-1 fix,
+  `complaints_against` — the comparison both guards now share) and `retained_state_contract.rs`
+  (the new check). Round 1 returned **NOT READY, 1 Low, the phase's first *code* defect**; its fix
+  is in the tree and green. Record §13–§17. See the verification section "Phase 2d-4a-C step 2".
 
-#### The next action: step 2's Codex round
+#### The next action: **step 2 review round 2**, against the round-1 fix
 
-**A step that wrote sentences owes the round that reviews them**, and this phase is the measured case
-for it — rounds 1, 2 and 3 each found the *previous fix round's own new sentence* defective. Step 2
-wrote **a module doc with five stated limits, 88 phrases with their group comments, and 140 reason
-lines**, and a reason line is exactly the kind of prose that can claim more than the code gives.
+**A fix is a change, and the round that reviews it is not optional** — in this phase that is a
+measured record, not a precaution: rounds 1, 2 and 3 of step 1 each found the **previous fix round's
+own new sentence** defective, twice at the very clause the round before had just corrected.
 
-**The attack list, from the step's own record and from what verification surfaced:**
+**Round 1 of step 2 returned NOT READY with one Low — the phase's first *code* defect** (zero as an
+"unseen" sentinel in both guards). The fix extracted the comparison into
+`prose_sweep::complaints_against` so it exists once, repaired all three holes, and **discharged §14
+item 7**. See the verification section "Phase 2d-4a-C step 2".
 
-1. **The 140 reason lines**, especially those summarising several passages in one line — `ledger.rs`'s
-   `outlives` covers twelve hits, `until the epoch` seven, `no decision can` five (record §14 item 11).
-2. **The five phrase drops** — `backwards`, `process-wide`, `one way`, `monotonic`, `in the same
-   breath` (record §13.2, §14 item 4). **This is the move the check cannot catch, exercised by the
-   step that built the check.** Each is argued with a measured count and each was replaced by a
-   claim-shaped form that is present and firing — verified — but nothing in the repository records
-   that a phrase was ever in the list. **A reviewer may disagree with any of the five.**
-3. **The judged-out boundary at `persist/write.rs`** — five entries plus one false positive. Is the
-   judgement right, and is anything else judged out that should not be?
-4. **Whether the family actually reaches both halves**, or only appears to. Group 3 is round 3's
-   wording; the claim is that it fires on the unconditional paired insertion **and** on
-   `adopt_reloaded_revision_under_the_session_lock`'s conditional paired removal.
-5. **A third `rust_files_under` exists and was not folded** —
-   `src-tauri/src/dictionary_contract.rs:622`, different signature (`&str`, not `&Path`). Predates
-   this phase, out of scope for it, but two functions of that name now sit in one crate and "a fix
-   made in one copy and not the other" is this project's named failure mode.
-6. **The duplicated ~45-line both-direction comparison** (record §14 item 7) — a deliberate trade,
-   because folding it would have rewritten `liveness_contract.rs`'s tests, which are the proof the
-   extraction took nothing away. Is the trade right?
-7. **The module doc's five stated limits** — do they claim exactly what the code gives? §14 is the
-   record's own list of eleven thin points; a reviewer should check the module doc against it, since
-   only the module doc ships.
+**Round 2's target, and it is a real one:**
 
-**Carry the standing instruction**, as every round of this phase has: *if everything you find is a
-restatement of wording already fixed, with no new substance, say so plainly in the verdict* — and **a
-clean READY is a valuable answer the reviewer should be told to give if the text holds.**
+1. **`prose_sweep::complaints_against` itself** (`prose_sweep.rs:288–349`) — new code, shared by two
+   guards, that no reviewer has read. Are the three repairs right, and is there a **fourth** way a
+   claim slips past? The old defect was a sentinel; look for what replaced it.
+2. **The re-pointed `INVENTORY` entry** (`retained_state_contract.rs`, `one entry per`, now naming
+   `prose_sweep.rs`). Its `reason` is new prose that claims a history. **Is re-pointing the right
+   call at all?** The orchestrator ruled it is — deleting the entry, or rewording the assertion so
+   the hit vanished, would be the narrow-the-pattern move `2d-4a-notes.md` §11.4 forbids — **but a
+   reviewer may disagree**, and the entry's judgement (false positive) was carried over rather than
+   re-derived.
+3. **`the_sweep_reaches_both_trees`'s changed assertion** — it asserted `liveness_contract.rs` is
+   swept by the retained-state check and now names `prose_sweep.rs`. **Does it still prove the two
+   checks do not exempt each other?** That is what the original assertion was for (§14 item 5).
+4. **§13.1's correction block and §14 items 5 and 7 as amended** — a decision record claiming a
+   guarantee the code does not give is this project's declared worst defect class, and §13.1's
+   byte-identity proof is now **historical and not re-derivable**. Does the amended text say that
+   plainly, or does it still read as if the proof stands?
+5. **Whether the fix weakened either guard.** `liveness_contract.rs`'s four tests are **no longer
+   byte-identical**, so the old proof is gone. Is the liveness check still exactly as strong?
+6. **The eight probes** (§17.5) — reported, not orchestrator-re-run. Do they demonstrate what they
+   claim, and is any mode missing?
+
+**Carry the standing instruction**: *if everything you find is a restatement of wording already
+fixed, with no new substance, say so plainly in the verdict* — and **a clean READY is a valuable
+answer the reviewer should be told to give if the text holds.**
+
+**Append round 2's reply under `## Step 2 — round 2`** in `docs/reviews/phase-2d-4a-C.md`, which now
+holds step 1's four rounds and step 2's round 1.
 
 #### The dispatch that works, measured across four rounds
 
@@ -20285,6 +20375,7 @@ _Updated at each phase boundary._
 | **2d-4a-C step 1 (round 3 + its fix, NOT closed)** | **`4ab5e2e`** | ✅ pushed to `origin/main` (`1d26964..4ab5e2e`; this row recorded by the follow-up commit) | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit. Staged **by path**: **four** files — `src-tauri/src/ledger.rs` (one doc-comment hunk, +14/−2), `docs/decisions/2d-4a-C-notes.md` (§11), `docs/reviews/phase-2d-4a-C.md` (round 3 verbatim) and this checkpoint. **No test, no behaviour, no path under `src/`**: filtering the diff of both source trees for non-comment, non-blank changed lines returns **0**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured. Its three predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix) and `1d26964` (round 2 + fix), none of which had a row here. **The step is NOT closed by it** — three Codex rounds, all NOT READY, all three fixes in the tree and green, and **round 4 is owed against the round-3 fix**. A fresh session resumes from "Next action" |
 | **2d-4a-C step 1 (round 4 — READY; the step CLOSES here)** | **`57e8800`** | ✅ pushed to `origin/main` | **clean.** `git status --short --untracked-files=all` returns nothing before staging and after the commit — and it also returned nothing **immediately after the Codex job**, which is what proves the read-only sandbox wrote no file. Staged **by path**: **three** files — `docs/decisions/2d-4a-C-notes.md` (§12), `docs/reviews/phase-2d-4a-C.md` (round 4 verbatim under `## Round 4`) and this checkpoint. **No source file in either tree was modified**, because round 4 found nothing to fix: 0 findings, all six attack-list items cleared, and *no round 5 is warranted* in the reviewer's own words. The gate figures are therefore **not re-measured** and stand as the round-3 fix left them (`1309 / 431 / 2125 / 184`) — re-running a suite over an unchanged tree measures the host, not the work. Its four predecessors on this step are `34cd5af` (step 1), `d1d7ab2` (round 1 + fix), `1d26964` (round 2 + fix) and `4ab5e2e` (round 3 + fix). **Step 1 is CLOSED by this row and step 2 is unblocked**; a fresh session resumes from "Next action" |
 | **2d-4a-C step 2 (the check; implemented and green, review OWED)** | **`65a0138`** | ✅ pushed to `origin/main` | **clean.** Staged **by path**: **five** files — `src-tauri/src/prose_sweep.rs` (new, 236 lines, the shared machinery), `src-tauri/src/retained_state_contract.rs` (new, 1281 lines, the new check), `src-tauri/src/liveness_contract.rs` (1013 → 845 lines, machinery removed, **nothing else**), `src-tauri/src/main.rs` (two `#[cfg(test)] mod` declarations), `docs/decisions/2d-4a-C-notes.md` (§13–§16) and this checkpoint. **No path under `src/`**, so the frontend baselines (431 / 2125 / 184) are untouched and were not re-measured. Gates re-run by the orchestrator: `cargo test --workspace` **1313 passed / 0 failed** over 26 result lines (**+4**, the new check's four tests), clippy `-D warnings` clean, `fmt --check` clean, `cargo doc` exit 0 with **73** `links to private item` and **zero** unresolved, `cargo tree -p espansoconfig-core \| rg tauri` empty. **The extraction was verified as characters, not read off the diff**: `INVENTORY` (518 lines, 86 entries), `LIVENESS_SHAPES` (84 lines) and `mod tests`→EOF (130 lines) are each **byte-identical to `HEAD`**, so the older check's four tests pass unedited. **The step is NOT closed by it** — the mandatory Codex round is owed, and record §14 item 11 names the likeliest finding sites: the 140 reason lines and the five phrase drops. A fresh session resumes from "Next action" |
+| **2d-4a-C step 2 (review round 1 + its fix; round 2 OWED)** | **`PENDING`** | ✅ pushed to `origin/main` | **clean.** Staged **by path**: **five** files — `src-tauri/src/prose_sweep.rs` (gains `complaints_against`, the comparison both guards now share), `src-tauri/src/liveness_contract.rs` and `src-tauri/src/retained_state_contract.rs` (each loses its copy, keeps only its own final `assert!` sentence), `docs/decisions/2d-4a-C-notes.md` (§17, plus a correction block on §13.1 and amendments to §14 items 5 and 7), `docs/reviews/phase-2d-4a-C.md` (round 1 verbatim under `## Step 2 — round 1`) and this checkpoint. **The phase's first non-prose finding**: zero used as an "unseen" sentinel let a duplicate `(file, phrase)` and a phantom entry through **both** guards — pre-existing in `liveness_contract.rs` and propagated into the new check by the duplication §14 item 7 had accepted as a trade. Gates re-run by the orchestrator: `cargo test --workspace` **1313 passed / 0 failed** over 26 result lines (**unmoved** — the repair changed guard logic, not coverage), clippy `-D warnings` clean, `fmt --check` clean, `cargo doc` exit 0 with **73** `links to private item` and **zero** unresolved, `cargo tree -p espansoconfig-core \| rg tauri` empty, no path under `src/`. **One `INVENTORY` entry changed and it is the only one**: extracting the comparison moved the assertion string `one entry per file and phrase` into `prose_sweep.rs`, and that string was itself an inventoried hit, so the guard **failed on its own refactor in both directions**; the entry was **re-pointed, not deleted** — `phrase`, `count` and the false-positive judgement unchanged — because rewording the assertion to make the hit vanish is the move `2d-4a-notes.md` §11.4 forbids. **§13.1's byte-identity proof of the extraction is now HISTORICAL**, holding at `65a0138` and not re-derivable from this tree; §14 item 7 records the discharge and its cost rather than being deleted. **The step is NOT closed by it** — round 2 is owed against this fix. A fresh session resumes from "Next action" |
 
 `e83bc31` is Phase 2c-4c **step 6**, the harness's removal, **including its review fix round** — the
 phase was held open until all nine findings were closed, as every phase since `8989c16` has been. It

@@ -1290,6 +1290,16 @@ tests are green. **No test expectation was
 edited to accommodate the refactor**, which is the whole point: an extraction that had to relax the
 older guard would not be an extraction.
 
+> **Correction, step 2 round 1 (§17).** The paragraph above is **historical as of that round**, and
+> the measurement it reports can no longer be re-derived from the current tree. It was true of the
+> tree committed at **`65a0138`**, and that commit is where it stands. Round 1's fix folded the
+> comparison loop into `prose_sweep::complaints_against`, which rewrote `liveness_contract.rs`'s
+> guard test — so the `mod tests` block is **no longer byte-identical to the pre-split `HEAD`**.
+> `LIVENESS_SHAPES` and that file's `INVENTORY` still are, and were re-measured in §17.4. What
+> replaces the byte-identity proof is weaker and is stated as such in §17.3: the older check's four
+> tests are still green, and its inventory and phrase family are still untouched, but the *tests
+> themselves* changed, so they are no longer independent evidence about the refactor that moved them.
+
 Two shape changes were needed and are the only ones. `sweep` now takes the phrase family, the trees
 and the skip list as arguments, so `liveness_contract::sweep()` is a two-line wrapper over it; and
 the skip list is a slice rather than one `&str`, so a later check can skip more than one file. The
@@ -1465,18 +1475,43 @@ this project's declared worst defect class.
    rename cannot silently empty the skip list, and nothing else defends this hole. **The two checks do
    not exempt each other** — `the_sweep_reaches_both_trees` asserts that `liveness_contract.rs` is
    swept by this one — but each is blind to itself.
+
+   > **Amended, step 2 round 1 (§17.2).** The middle clause is **no longer what the assertion says**.
+   > Round 1's fix moved the comparison — and with it the one retained-state-shaped wording
+   > `liveness_contract.rs` held, its own duplicate-detection assertion message — into
+   > `prose_sweep.rs`, leaving the sibling's source with nothing for this sweep to find. The
+   > assertion now names **`src-tauri/src/prose_sweep.rs`**, the machinery both checks are built on,
+   > and reads *the machinery both contract checks share is swept too — neither exempts it*. Both
+   > files are still swept rather than skipped; what changed is which one carries a hit, and the
+   > claim the assertion is allowed to make about it. Each check is still blind to itself.
 6. **It sweeps two source trees and no document.** `docs/` is deliberately not swept and **cannot be**:
    `2d-4a-notes.md` quotes six review rounds' false sentences on purpose, so a check over the
    documentation tree would fail on the record of every defect this phase fixed. This file and that one
    point at the contract as prose, with nothing enforcing that they keep pointing — 2d-3-C §5 limit 4,
    inherited unchanged.
-7. **The both-direction comparison is duplicated between the two checks, and that is a deliberate
-   trade with a real cost.** `prose_sweep.rs` holds the machinery; the ~45-line comparison loop stayed
-   in each check's own guard test, because the proof that the extraction took nothing away from the
-   older check is that **its four tests pass unchanged**, and folding the comparison into a shared
-   helper would have rewritten them. So there are two copies of one loop, which is the exact shape
-   this project's recurring failure mode takes. It is named in the module doc as well as here, and a
-   later step that is willing to re-review the liveness guard should fold it.
+7. ~~**The both-direction comparison is duplicated between the two checks, and that is a deliberate
+   trade with a real cost.**~~ **DISCHARGED at step 2 round 1 (§17).** What this item said, kept
+   because the round that closed it is the concrete instance of what it predicted: `prose_sweep.rs`
+   held the machinery; the ~45-line comparison loop stayed in each check's own guard test, because
+   the proof that the extraction took nothing away from the older check is that **its four tests pass
+   unchanged**, and folding the comparison into a shared helper would have rewritten them. So there
+   were two copies of one loop, which is the exact shape this project's recurring failure mode takes.
+   It was named in the module doc as well as here, and *a later step that is willing to re-review the
+   liveness guard should fold it*.
+
+   **That step is step 2's round 1, and it did not have the luxury of choosing.** The review found a
+   Low-severity **code defect** in the duplicated loop — zero used as an "unseen" sentinel — and it
+   was in **both** copies, because the copy carried it. The comparison is now
+   `prose_sweep::complaints_against`, written once, and neither guard holds a copy; each keeps only
+   its own final assertion sentence, which names its own contract module and its own `INVENTORY`
+   path. **The trade this item described is therefore no longer current, and its statement of the
+   cost is now a statement about the past.**
+
+   **What the discharge cost is exactly the thing this item was protecting.** `liveness_contract.rs`'s
+   guard test is **no longer byte-identical to what it was**, so §13.1's *its four tests pass
+   unchanged* proof of the extraction is now **historical** — it stands recorded at commit
+   **`65a0138`** and **cannot be re-derived from the current tree**. §17.3 says what is left in its
+   place and why that is weaker.
 8. **The contract's own clauses are still prose over code.** No test fails if a clause drifts from the
    code it cites; §2's tables remain an audit trail rather than an oracle. G4's *exactly three* and
    G8's *the one exception* still rest on a reading of every mutation of one field. What the check
@@ -1538,3 +1573,224 @@ step 1 carried them, unverified by this step.
 
 The frontend baselines **431 / 2125 / 184** are carried forward unverified, because this step touched
 no path under `src/`. Any step that does must re-measure them.
+
+---
+
+## 17. Step 2, review round 1, and the fix round that answers it
+
+**Verdict: NOT READY**, one finding, Low. `docs/reviews/phase-2d-4a-C.md`, section
+*Step 2 — round 1 (the check, the shared machinery and the record)*. The inventory, the phrase family,
+the five phrase drops and both insertion/removal halves all held up; what did not was the guard's own
+comparison loop.
+
+### 17.1 The finding — a **code defect**, and the first of this phase that was not prose-only
+
+Every previous round of 2d-4a-C found a sentence that claimed more than the code gave. **This one
+found code.** The guard compared what the sweep found against what the inventory records using **zero
+as an "unseen" sentinel**, and that sentinel defeated two invariants the test's own doc comment states
+it enforces:
+
+1. **Duplicate detection was defeated for a zero-count key.** The uniqueness check was
+   `assert_eq!(*slot, 0, …)` against a slot created by `.or_insert(0)`. A first entry with `count: 0`
+   left the slot holding `0`, so a **second entry for the same `(file, phrase)` also saw `*slot == 0`
+   and passed**. The sentinel and a legitimate value were the same value.
+2. **A phantom entry passed the reverse check.** The reverse loop was
+   `if !found.contains_key(key) && *count > 0`, so an inventory entry with `count: 0` that matched
+   **nothing** was skipped in silence — the *reworded or removed, so judge it again* direction, which
+   is the whole reason the reverse loop exists.
+
+Neither is broken in the shipped tree: all 86 liveness entries and all 140 retained-state entries carry
+positive counts. **It is latent, which is why it is a Low — and it is real, and it was in both guards.**
+
+**The defect was pre-existing in `liveness_contract.rs`** — it shipped with the first prose-contract
+check in Phase 2d-3-C — and step 2's extraction, which copied the comparison rather than sharing it,
+**propagated it into the new guard**. The review says so in its own words: keeping the comparison
+unchanged *"was reasonable evidence for the extraction, but the duplication has now propagated the same
+zero-sentinel defect into both guards."*
+
+**This is the concrete instance of what §14 item 7 predicted.** That item named the duplicated
+comparison as *"the exact shape this project's recurring failure mode takes"* and said a later step
+should fold it. It did not have to wait long: one review round after the copy was made, one defect was
+sitting in both copies. The prediction and its instance are two commits apart.
+
+### 17.2 The fix — extracted once, and the two positions the extraction moved
+
+The comparison now lives once, as `prose_sweep::complaints_against(hits, inventory, shapes)
+-> Vec<String>`. **Neither guard holds a copy.** Each guard's test is now one call and its own
+`assert!`, and the assertion sentence stays with the check because the two differ: each names its own
+contract module and its own file's `INVENTORY` path.
+
+What the shared function does, and what changed inside it:
+
+| | Before, in two copies | Now, once |
+|---|---|---|
+| phrase membership | `SHAPES.contains(&entry.phrase)` | unchanged, asserted for the caller's `shapes` |
+| non-empty reason | asserted | unchanged |
+| **zero counts** | legal, and used as the sentinel | **`assert!(entry.count > 0)`** — a zero-count entry can match nothing and is indistinguishable from the entry's absence, so it is a hard error |
+| **duplicates** | `assert_eq!(*slot, 0)` against a sentinel | **`recorded.insert(key, count).is_none()`** — the map's own answer about what was already there |
+| forward | count mismatch, absent key giving an expected 0 | unchanged, and the per-hit `line`/`context` detail is kept verbatim |
+| **reverse** | `!found.contains_key(key) && *count > 0` | **`!found.contains_key(key)`** — the `count > 0` condition is gone, and is now unreachable anyway |
+
+Making zero illegal and dropping the reverse condition are one decision, not two: once no entry can
+carry a zero, the reverse loop's guard could only ever have hidden the case it was written to hide.
+
+**The extraction moved two recorded positions, and both had to be judged again — by the guard, out
+loud, on the first run.** This is worth recording because it is the check working on its own author:
+
+- **`liveness_contract.rs` / `"one entry per"` → `prose_sweep.rs`.** The duplicate-detection assertion
+  message *"one entry per file and phrase"* is a **retained-state family phrase**, and the
+  retained-state inventory carried it as a false positive at the sibling check's path. Moving the
+  assertion into `prose_sweep.rs` produced an unrecorded hit there and a phantom entry at the old
+  path, and the guard printed both. **The one entry was re-pointed: `file` and `reason` changed,
+  `phrase` and `count` did not, and the judgement — *false positive: a contract check's own assertion
+  message* — did not.** The inventory still holds 140 entries. This is the single exception to *the
+  inventory does not change*, and it is stated as an exception rather than folded into the fix.
+- **`the_sweep_reaches_both_trees`'s last assertion.** It asserted that
+  `src-tauri/src/liveness_contract.rs` appears among this sweep's hits — *"the other contract check is
+  swept too — neither exempts the other"*. With the one retained-state-shaped wording gone from that
+  file, the assertion became false while the property it was defending was untouched: the sibling is
+  still swept, it simply has nothing to find. It now names **`src-tauri/src/prose_sweep.rs`**, the
+  machinery both checks are built on, and reads *the machinery both contract checks share is swept
+  too — neither exempts it*. §14 item 5 carries the amendment.
+
+### 17.3 What the fix costs, said plainly
+
+**§13.1's byte-identity proof is now historical.** It read: the extraction is lossless because
+`liveness_contract.rs`'s whole `mod tests` block is identical character for character to `HEAD` and its
+four tests are green. Folding the comparison **rewrote that block**, so the measurement stands recorded
+at commit **`65a0138`** and **cannot be re-derived from the current tree**. §13.1 carries a correction
+block saying so.
+
+What is left in its place is weaker, and is not a substitute:
+
+- `LIVENESS_SHAPES` and `liveness_contract.rs`'s `INVENTORY` are **still byte-identical to the
+  pre-split `HEAD`** — re-measured in §17.4 — so nothing about *what the older check judges* moved;
+- its four tests are still green;
+- but the tests themselves changed, so they are **no longer independent evidence** about the split
+  that moved the machinery out from under them. A future round wanting that evidence has to read
+  `65a0138`.
+
+This was not a free choice. Leaving the copies to preserve the proof would have left a known defect in
+two places, which is the trade §14 item 7 had already lost.
+
+### 17.4 The three data arrays, verified unchanged
+
+Verified by extracting each array from `git show HEAD:<path>` and from the working tree and comparing
+the two byte for byte, not by reading the diff:
+
+| Array | `HEAD` | now | identical | entries |
+|---|---|---|---|---|
+| `LIVENESS_SHAPES` | 2765 bytes | 2765 bytes | **yes** | — |
+| `liveness_contract.rs`'s `INVENTORY` | 20088 bytes | 20088 bytes | **yes** | 86 → 86 |
+| `RETAINED_STATE_SHAPES` | 4009 bytes | 4009 bytes | **yes** | — |
+| `retained_state_contract.rs`'s `INVENTORY` | 35100 bytes | 35324 bytes | **no — one entry** | 140 → 140 |
+
+The one difference is §17.2's re-pointed entry and nothing else: the unified diff of the two array
+texts is exactly that entry's removal at its old alphabetical position and its reinsertion at its new
+one, with `phrase` and `count` unchanged. **No entry was added, removed or re-counted, and no phrase in
+either family was touched.**
+
+### 17.5 The three new failure modes, watched failing — eight probes, both guards
+
+`docs/decisions/2d-3-C-notes.md` §4.4 requires that a check of this kind is **watched failing**, not
+asserted to fail. Each probe was applied by a textual edit, the guard run, and the edit **reverted by
+its inverse** — the probe text replaced by the original text — with `shasum -a 256` before and after.
+Every revert digest equals its pre-probe digest.
+
+Pre-probe and post-revert digest of `src-tauri/src/liveness_contract.rs`:
+`14229287e6abff2d2a007b226aca5b4d841903e2f7d3e127492ff1f3c1eaae50`
+Pre-probe and post-revert digest of `src-tauri/src/retained_state_contract.rs`:
+`0ecdc2f3448491490bd02904d7442f7c71df61a17d2799d4104e008d80db8997`
+
+| Probe | Planted | Probed digest | Exit | What the test printed |
+|---|---|---|---|---|
+| L1 phantom | `Judged { probe_nonexistent.rs, "must answer", 1 }` | `0da12420…bb6b67` | 101 | `src-tauri/src/probe_nonexistent.rs / "must answer": inventory says 1, found none — reworded or removed, so judge it again` |
+| L2 duplicate, first `count: 0` | two entries, same key, counts 0 then 1 | `aa633bac…113ca0` | 101 | `an inventory entry records at least one occurrence — a count of zero can match nothing and is indistinguishable from the entry's absence: src-tauri/src/probe_nonexistent.rs / must answer` |
+| L3 duplicate, both positive | two entries, same key, counts 1 and 1 | `d1d65736…acc235` | 101 | `one entry per file and phrase: src-tauri/src/probe_nonexistent.rs / must answer` |
+| L4 existing entry to `count: 0` | `watch_check.rs / "observation arrives"` 2 → 0 | `b0813f49…cac838` | 101 | `an inventory entry records at least one occurrence … : src-tauri/src/watch_check.rs / observation arrives` |
+| R1 phantom | `Judged { probe_nonexistent.rs, "one entry per", 1 }` | `e4bd7038…cb93bf8` | 101 | `src-tauri/src/probe_nonexistent.rs / "one entry per": inventory says 1, found none — reworded or removed, so judge it again` |
+| R2 duplicate, first `count: 0` | two entries, same key, counts 0 then 1 | `78ba0a85…814913` | 101 | `an inventory entry records at least one occurrence … : src-tauri/src/probe_nonexistent.rs / one entry per` |
+| R3 duplicate, both positive | two entries, same key, counts 1 and 1 | `373941ca…61a252` | 101 | `one entry per file and phrase: src-tauri/src/probe_nonexistent.rs / one entry per` |
+| R4 existing entry to `count: 0` | `watch.rs / "two ways"` 2 → 0 | `2ee9bdc6…8341ce` | 101 | `an inventory entry records at least one occurrence … : src-tauri/src/watch.rs / two ways` |
+
+Three things the table shows that are worth naming:
+
+- **L2 and R2 are the reported defect's exact shape**, and they now fail. Under the shipped code they
+  passed in silence.
+- **L3 and R3 panic from `src-tauri/src/prose_sweep.rs:314` and L2/L4/R2/R4 from
+  `prose_sweep.rs:307`** — from the shared function, reached through *both* guards. That is the
+  positive evidence that the comparison is genuinely shared rather than merely copied into a third
+  place: one line number serves two checks.
+- **L1 and R1 panic from each check's own file**, at its own assertion sentence — the half that
+  deliberately did not move.
+
+A zero-count phantom is now caught by the `count > 0` assertion rather than by the reverse loop, which
+is why the reverse loop no longer needs the condition: the case it was hiding cannot be constructed.
+
+### 17.6 What changed, file by file
+
+**Four files, none under `src/`.** Four, not three: this record is one of them.
+
+- **`src-tauri/src/prose_sweep.rs`** — 236 lines to 349. `complaints_against` added with its doc
+  comment: what it asserts about the inventory before comparing anything, why a zero count is now a
+  hard error, why duplicates are detected by `insert(..).is_none()`, and why both directions are
+  unconditional. The module doc's *judging those occurrences stays the caller's* paragraph was
+  narrowed to what is still true — the inventory and the final assertion sentence are the caller's.
+  **`prose_units` was not touched**: its comment-run joining is load-bearing, and this fix had no
+  business anywhere near it.
+- **`src-tauri/src/liveness_contract.rs`** — 845 lines to 804. The guard test's ~45-line body replaced
+  by one call, its doc comment given a sentence naming where the comparison now lives, and the `use`
+  narrowed (`tally` and `std::collections::BTreeMap` are no longer needed here). **`LIVENESS_SHAPES`
+  and `INVENTORY` are byte-identical to `HEAD`.**
+- **`src-tauri/src/retained_state_contract.rs`** — 1281 lines to 1247. The same replacement and the
+  same `use` narrowing; §17.2's one re-pointed `INVENTORY` entry; and
+  `the_sweep_reaches_both_trees`'s last assertion re-pointed at `prose_sweep.rs` with its doc comment
+  saying why it moved. **`RETAINED_STATE_SHAPES` is byte-identical to `HEAD`.**
+- **`docs/decisions/2d-4a-C-notes.md`** — this section, the correction block in §13.1, and the
+  amendments to §14 items 5 and 7.
+
+**`crates/espansoconfig-core` is untouched.** No path under `src/` changed, so the three frontend
+figures are carried forward unverified, exactly as step 2 carried them.
+
+### 17.7 The gates after this round
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1313 passed, 0 failed**, 26 result lines all `ok`, exit 0 — **unmoved**, as a pure refactor of two test bodies should be |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20 passed, 0 failed** — the host-scar gate |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean, exit 0 |
+| `cargo fmt --check` | clean, exit 0 |
+| `cargo doc --workspace --no-deps` | exit 0, **73** `links to private item` warnings — the pre-existing count, unmoved — and **zero** unresolved links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `git status --short` | `docs/decisions/2d-4a-C-notes.md`, `docs/reviews/phase-2d-4a-C.md` and the three `src-tauri/src` files — **none under `src/`** |
+| The eight probes of §17.5 | all red, all reverted, all digests matched |
+
+The frontend baselines **431 / 2125 / 184** are carried forward unverified, because this round touched
+no path under `src/`.
+
+### 17.8 What this round does **not** close
+
+1. **The zero-count hole is closed by making zero illegal, not by making it meaningful.** There is now
+   no way to record *"this phrase deliberately appears nowhere in this file"*. If a later round wants
+   that — a pinned absence — it needs a different field, not a count of zero, and the assertion
+   message says why in the same breath as refusing it.
+2. **The `(file, phrase)` key is unchanged, so §14 item 1 stands untouched.** Swapping one recorded
+   sentence for a different sentence using the same phrase in the same file still moves no count, and
+   the repaired comparison does not see it.
+3. **`INVENTORY` is now known to move when code moves, and nothing warns before the fact.** §17.2's
+   re-pointing was discovered by the guard failing on the first run of the fix — which is the guard
+   working — but it means **any future refactor that relocates an inventoried assertion message
+   relocates an inventory entry**, and the only notice is a red test. The assertion messages of these
+   checks are prose in the swept trees like any other, and nothing marks them as such.
+4. **Nothing pins what `complaints_against`'s doc comment claims.** Its contract — three asserted
+   properties, two unconditional directions — is prose, and reverting any sentence of it while keeping
+   the code leaves every test green. That is `CLAUDE.md`'s stated worst defect class, and this round
+   added ~50 lines of exactly that kind of prose.
+5. **The eight probes prove the three failure modes fire; they do not prove the comparison is
+   otherwise correct.** No probe exercised a forward count mismatch, an out-of-family phrase or an
+   empty reason — those paths are unchanged from `65a0138` and were re-run only as part of the
+   two guards passing over their real data.
+6. **This round wrote sentences, and the round that reviews them is not optional.** Every fix round of
+   this phase has written the next round's findings. The likeliest sites are §17.2's account of the
+   re-pointed entry — whose new `reason` line now carries a small history and could easily claim more
+   than it should — and §17.3's claim about what survives of the byte-identity proof.

@@ -57,8 +57,7 @@
 //! tests below are unchanged by that extraction, which is the evidence that it
 //! took nothing away.
 
-use crate::prose_sweep::{prose_units, tally, Hit, Judged};
-use std::collections::BTreeMap;
+use crate::prose_sweep::{complaints_against, prose_units, Hit, Judged};
 
 /// One wording of the liveness shape family, matched case-insensitively as a
 /// plain substring of a prose unit.
@@ -782,54 +781,14 @@ mod tests {
     /// entry that matches nothing is a passage that was reworded or removed
     /// without being judged again. What this **cannot** do is decide whether a
     /// recorded passage's claim is true — see this module's own documentation.
+    ///
+    /// The comparison itself is [`crate::prose_sweep::complaints_against`],
+    /// shared with [`crate::retained_state_contract`] rather than copied into
+    /// it. What stays here is the sentence a non-empty answer is wrapped in,
+    /// which names this contract and this file's `INVENTORY`.
     #[test]
     fn every_liveness_claim_is_judged() {
-        let hits = sweep();
-        let found = tally(&hits);
-        let mut recorded: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
-        for entry in INVENTORY {
-            assert!(
-                LIVENESS_SHAPES.contains(&entry.phrase),
-                "the inventory names a phrase the family does not hold: {}",
-                entry.phrase
-            );
-            assert!(
-                !entry.reason.is_empty(),
-                "every inventory entry carries its reason: {} / {}",
-                entry.file,
-                entry.phrase
-            );
-            let slot = recorded
-                .entry((entry.file.to_string(), entry.phrase))
-                .or_insert(0);
-            assert_eq!(*slot, 0, "one entry per file and phrase: {}", entry.file);
-            *slot = entry.count;
-        } // End of the loop over the recorded inventory
-
-        let mut complaints: Vec<String> = Vec::new();
-        for (key, count) in &found {
-            let expected = recorded.get(key).copied().unwrap_or(0);
-            if expected != *count {
-                let where_ = hits
-                    .iter()
-                    .filter(|hit| hit.file == key.0 && hit.phrase == key.1)
-                    .map(|hit| format!("            line {}: …{}…", hit.line, hit.context))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-                complaints.push(format!(
-                    "    {} / {:?}: found {}, inventory says {}\n{}",
-                    key.0, key.1, count, expected, where_
-                ));
-            }
-        } // End of the loop over what the sweep found
-        for (key, count) in &recorded {
-            if !found.contains_key(key) && *count > 0 {
-                complaints.push(format!(
-                    "    {} / {:?}: inventory says {}, found none — reworded or removed, so judge it again",
-                    key.0, key.1, count
-                ));
-            }
-        } // End of the loop over what the inventory records
+        let complaints = complaints_against(&sweep(), INVENTORY, LIVENESS_SHAPES);
 
         assert!(
             complaints.is_empty(),

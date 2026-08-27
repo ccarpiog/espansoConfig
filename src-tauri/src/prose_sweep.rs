@@ -15,8 +15,16 @@
 //!
 //! A caller supplies a phrase family, the trees to walk and the files to leave
 //! out; it gets back every occurrence with its position and a window of text for
-//! the failure report. **Judging those occurrences stays the caller's**, because
-//! that judgement is the whole of what a contract check is for.
+//! the failure report. It then hands that back with its own inventory and gets
+//! the disagreements between the two — [`complaints_against`], added by Phase
+//! 2d-4a-C's review round, because the comparison had been copied into both
+//! checks and the copy had already propagated one defect into both.
+//!
+//! **Judging those occurrences stays the caller's**, because that judgement is
+//! the whole of what a contract check is for: the inventory that says which
+//! positions are acceptable and why is the caller's, and so is the sentence the
+//! caller wraps a non-empty complaint list in, which names its own contract
+//! module and its own `INVENTORY` path.
 //!
 //! # The one part that is load-bearing rather than convenient
 //!
@@ -234,3 +242,108 @@ pub(crate) fn tally(hits: &[Hit]) -> BTreeMap<(String, &'static str), usize> {
     }
     counted
 } // End of function tally()
+
+/// Every disagreement between what a sweep found and what an inventory records,
+/// one formatted line per `(file, phrase)`, empty when the two agree.
+///
+/// This is the whole of both guards' comparison, shared rather than copied. The
+/// caller keeps what makes its check *its* check: the phrase family, the trees,
+/// the skip list, the inventory and — because the two differ and each names its
+/// own module and its own `INVENTORY` path — the final assertion message it
+/// wraps a non-empty answer in.
+///
+/// # What it asserts about the inventory before comparing anything
+///
+/// Three properties of `inventory`, each a panic rather than a complaint,
+/// because a malformed inventory cannot be judged against a sweep at all:
+///
+/// - every entry's `phrase` is a member of `shapes`, so an entry cannot record
+///   a wording the sweep never looks for;
+/// - every entry carries a non-empty `reason`;
+/// - every entry's `count` is greater than zero. **A zero-count entry is a hard
+///   error rather than a recorded absence**: it can match nothing, so it is
+///   indistinguishable from the entry not being there, and both comparisons
+///   below would silently agree with it. Phase 2d-4a-C's review found the
+///   opposite arrangement — zero used as an *unseen* sentinel — defeating the
+///   two invariants the guards exist to enforce, in both of them at once.
+///
+/// # Duplicate detection
+///
+/// A second entry for one `(file, phrase)` is caught by
+/// `BTreeMap::insert(..).is_none()` — the map's own answer about what was
+/// already there — never by comparing the slot against a value a legitimate
+/// entry could also hold.
+///
+/// # The two directions, and why both are unconditional
+///
+/// Forward: a `(file, phrase)` the sweep found whose count differs from the
+/// inventory's is a complaint, and an inventory that does not name the key at
+/// all supplies an expected count of zero, which is the unrecorded-hit case.
+/// The complaint keeps every hit's line and context window, because a reviewer
+/// judging a position needs to see it.
+///
+/// Reverse: **every** recorded key the sweep did not find is a complaint. That
+/// is the *reworded or removed, so judge it again* direction, and it carries no
+/// condition on the recorded count.
+pub(crate) fn complaints_against(
+    hits: &[Hit],
+    inventory: &[Judged],
+    shapes: &[&str],
+) -> Vec<String> {
+    let found = tally(hits);
+    let mut recorded: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
+    for entry in inventory {
+        assert!(
+            shapes.contains(&entry.phrase),
+            "the inventory names a phrase the family does not hold: {}",
+            entry.phrase
+        );
+        assert!(
+            !entry.reason.is_empty(),
+            "every inventory entry carries its reason: {} / {}",
+            entry.file,
+            entry.phrase
+        );
+        assert!(
+            entry.count > 0,
+            "an inventory entry records at least one occurrence — a count of zero can \
+             match nothing and is indistinguishable from the entry's absence: {} / {}",
+            entry.file,
+            entry.phrase
+        );
+        assert!(
+            recorded
+                .insert((entry.file.to_string(), entry.phrase), entry.count)
+                .is_none(),
+            "one entry per file and phrase: {} / {}",
+            entry.file,
+            entry.phrase
+        );
+    } // End of the loop over the recorded inventory
+
+    let mut complaints: Vec<String> = Vec::new();
+    for (key, count) in &found {
+        let expected = recorded.get(key).copied().unwrap_or(0);
+        if expected != *count {
+            let where_ = hits
+                .iter()
+                .filter(|hit| hit.file == key.0 && hit.phrase == key.1)
+                .map(|hit| format!("            line {}: …{}…", hit.line, hit.context))
+                .collect::<Vec<String>>()
+                .join("\n");
+            complaints.push(format!(
+                "    {} / {:?}: found {}, inventory says {}\n{}",
+                key.0, key.1, count, expected, where_
+            ));
+        }
+    } // End of the loop over what the sweep found
+    for (key, count) in &recorded {
+        if !found.contains_key(key) {
+            complaints.push(format!(
+                "    {} / {:?}: inventory says {}, found none — reworded or removed, so judge it again",
+                key.0, key.1, count
+            ));
+        }
+    } // End of the loop over what the inventory records
+    complaints
+} // End of function complaints_against()

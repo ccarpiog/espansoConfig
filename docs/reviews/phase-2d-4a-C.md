@@ -198,3 +198,42 @@ None.
 - Step 2 should preserve N5’s existential reading and inventory the `persist::write` registry as judged out.
 
 READY
+
+---
+
+## Step 2 — round 1 (the check, the shared machinery and the record)
+
+### Verdict
+
+**NOT READY.** The shipped inventory and phrase family hold up, including the five phrase drops and both insertion/removal halves. However, the new guard has one Low-severity code defect: zero-count inventory entries bypass two invariants the test expressly claims to enforce. This is new substance not disclosed in §14.
+
+### Findings
+
+1. **Low — `src-tauri/src/retained_state_contract.rs:1238` — code defect.** The guard claims every inventory entry matches something and permits only one entry per `(file, phrase)`. It uses zero as the “unseen” sentinel, then ignores missing entries whose count is zero at line 1262. Consequently, a nonexistent entry with `count: 0` passes, and duplicate entries pass when the first has count zero. Require `entry.count > 0`, use `recorded.insert(key, count).is_none()` for duplicate detection, and check every recorded key in the reverse comparison. The identical logic at `src-tauri/src/liveness_contract.rs:802–827` should be repaired simultaneously or extracted once.
+
+### Priority audit
+
+- **1 — CLEARED.** All 140 current entries have positive counts, and the reasons at `retained_state_contract.rs:289–1128` accurately describe their passages. In particular, `ledger.rs`’s `outlives` twelve hits (`ledger.rs:152–4051`), `until the epoch` seven hits (`:643–4040`), and `no decision can` five hits (`:93–1657`) are not stretched across incompatible claims.
+
+- **2 — CLEARED.** The four relevant `backwards` occurrences remain covered by `watermark backwards` at `reconciliation.rs:713`, `:718`, `:2130` and `dispatch_check.rs:2011`. The remaining `backwards`, `process-wide`, `one way`, `monotonic`, and `in the same breath` occurrences are mechanism vocabulary, unrelated subsystems, clock properties, or rhetorical location—not uncovered retained-state claims.
+
+- **3 — CLEARED.** Group 3 reaches unconditional insertion at `ledger.rs:494–500` and `:1243–1284`, and conditional removal at `:1656–1670` through `under one state guard`, `no decision can`, and `half-applied`.
+
+- **4 — CLEARED.** `persist/write.rs:432–460` is genuinely a process-lifetime synchronization registry, not observation state; `:681–682` is a transaction resource lifetime. The backup hits are unrelated disk-rotation claims. The boundary reasons at `retained_state_contract.rs:380–413` are supportable.
+
+- **5 — CLEARED.** The module documentation at `retained_state_contract.rs:1–110` states the measured phrase-free misses, semantic-judgment limitation, self-skip, source-tree scope, judged-out boundary, and duplicated comparison. Its broader inability to force pointers rather than recorded restatements follows explicitly from its “cannot judge” qualification.
+
+- **6 — Finding 1 applies.** Keeping the comparison unchanged was reasonable evidence for the extraction, but the duplication has now propagated the same zero-sentinel defect into both guards.
+
+- **7 — CLEARED.** `dictionary_contract.rs:622` has a different repository-relative interface and purpose. Sharing its directory walk would add coupling without improving either prose-contract guard.
+
+- **8 — Finding 1.** Family membership and non-empty reasons work, and positive unrecorded hits still fail. Zero counts defeat the claimed reverse and uniqueness invariants at `retained_state_contract.rs:1238–1263`.
+
+### Likeliest sites for a later round
+
+- The synchronized repair of `retained_state_contract.rs:1238–1263` and `liveness_contract.rs:802–827`.
+- The five deliberately dropped phrases, especially `process-wide`, if the contract boundary later expands.
+- The grouped `ledger.rs` reasons after any future prose or mutation-site change.
+- The judged-out lock-registry wording at `persist/write.rs:432–460`.
+
+NOT READY

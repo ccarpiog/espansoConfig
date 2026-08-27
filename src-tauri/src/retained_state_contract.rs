@@ -105,8 +105,7 @@
 //!   deliberate trade with a real cost — two copies of one loop — and it is
 //!   named here rather than left for a later reader to find.
 
-use crate::prose_sweep::{tally, Hit, Judged};
-use std::collections::BTreeMap;
+use crate::prose_sweep::{complaints_against, Hit, Judged};
 
 /// One wording of the retained-state shape family, matched case-insensitively as
 /// a plain substring of a prose unit.
@@ -923,16 +922,16 @@ const INVENTORY: &[Judged] = &[
         reason: "local fact: `record_app_write`'s heading, the insertion half of round 9's second High",
     },
     Judged {
-        file: "src-tauri/src/liveness_contract.rs",
-        phrase: "one entry per",
-        count: 1,
-        reason: "false positive: that check's own assertion that its inventory holds one entry per file and phrase — the sibling check is swept rather than exempted, and this is what that costs",
-    },
-    Judged {
         file: "src-tauri/src/menu.rs",
         phrase: "never observe",
         count: 1,
         reason: "false positive: nothing in libtest can build a `muda::Menu`, so no test looks at the real closure failing",
+    },
+    Judged {
+        file: "src-tauri/src/prose_sweep.rs",
+        phrase: "one entry per",
+        count: 1,
+        reason: "false positive: the shared comparison's assertion that an inventory holds one entry per file and phrase — the machinery both checks share is swept rather than exempted, and this is what that costs. It named src-tauri/src/liveness_contract.rs until 2d-4a-C's review round moved that assertion into `crate::prose_sweep`; only the file moved, and this reverse-direction failure is what made it be judged again",
     },
     Judged {
         file: "src-tauri/src/reconciliation.rs",
@@ -1157,13 +1156,20 @@ mod tests {
     } // End of function every_shape_is_lowercase()
 
     /// The sweep finds something, in both trees, in the contract itself and in
-    /// the other contract check's own source.
+    /// the machinery the two contract checks share.
     ///
     /// A guard that silently swept an empty set would pass every assertion below
     /// it, which is the vacuous pass every check in this repository exists to
     /// avoid. The last two assertions are the ones worth stating: the contract
-    /// this module is about is swept rather than exempted, and the **other**
-    /// check of this shape is swept too, so the two do not shield each other.
+    /// this module is about is swept rather than exempted, and so is
+    /// [`crate::prose_sweep`], which both checks are built on — a check does not
+    /// get to shield the code it shares with its sibling.
+    ///
+    /// That second assertion named `src-tauri/src/liveness_contract.rs` until
+    /// 2d-4a-C's review round, when the comparison the two checks had been
+    /// carrying a copy of each was extracted into `crate::prose_sweep` — which
+    /// took the one retained-state-shaped wording in the sibling's source with
+    /// it, and left that file with nothing for this sweep to find.
     #[test]
     fn the_sweep_reaches_both_trees() {
         let hits = sweep();
@@ -1183,8 +1189,8 @@ mod tests {
         );
         assert!(
             hits.iter()
-                .any(|hit| hit.file == "src-tauri/src/liveness_contract.rs"),
-            "the other contract check is swept too — neither exempts the other"
+                .any(|hit| hit.file == "src-tauri/src/prose_sweep.rs"),
+            "the machinery both contract checks share is swept too — neither exempts it"
         );
     } // End of function the_sweep_reaches_both_trees()
 
@@ -1218,54 +1224,14 @@ mod tests {
     /// entry that matches nothing is a passage that was reworded or removed
     /// without being judged again. What this **cannot** do is decide whether a
     /// recorded passage's claim is true — see this module's own documentation.
+    ///
+    /// The comparison itself is [`crate::prose_sweep::complaints_against`],
+    /// shared with [`crate::liveness_contract`] rather than copied out of it.
+    /// What stays here is the sentence a non-empty answer is wrapped in, which
+    /// names this contract and this file's `INVENTORY`.
     #[test]
     fn every_retained_state_claim_is_judged() {
-        let hits = sweep();
-        let found = tally(&hits);
-        let mut recorded: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
-        for entry in INVENTORY {
-            assert!(
-                RETAINED_STATE_SHAPES.contains(&entry.phrase),
-                "the inventory names a phrase the family does not hold: {}",
-                entry.phrase
-            );
-            assert!(
-                !entry.reason.is_empty(),
-                "every inventory entry carries its reason: {} / {}",
-                entry.file,
-                entry.phrase
-            );
-            let slot = recorded
-                .entry((entry.file.to_string(), entry.phrase))
-                .or_insert(0);
-            assert_eq!(*slot, 0, "one entry per file and phrase: {}", entry.file);
-            *slot = entry.count;
-        } // End of the loop over the recorded inventory
-
-        let mut complaints: Vec<String> = Vec::new();
-        for (key, count) in &found {
-            let expected = recorded.get(key).copied().unwrap_or(0);
-            if expected != *count {
-                let where_ = hits
-                    .iter()
-                    .filter(|hit| hit.file == key.0 && hit.phrase == key.1)
-                    .map(|hit| format!("            line {}: …{}…", hit.line, hit.context))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-                complaints.push(format!(
-                    "    {} / {:?}: found {}, inventory says {}\n{}",
-                    key.0, key.1, count, expected, where_
-                ));
-            }
-        } // End of the loop over what the sweep found
-        for (key, count) in &recorded {
-            if !found.contains_key(key) && *count > 0 {
-                complaints.push(format!(
-                    "    {} / {:?}: inventory says {}, found none — reworded or removed, so judge it again",
-                    key.0, key.1, count
-                ));
-            }
-        } // End of the loop over what the inventory records
+        let complaints = complaints_against(&sweep(), INVENTORY, RETAINED_STATE_SHAPES);
 
         assert!(
             complaints.is_empty(),
