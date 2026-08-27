@@ -150,9 +150,24 @@
 //!    asserted one lifetime for all three, and it is Phase 2d-4a-C's round-1
 //!    High: this family is defined as retained **values** above, which is what
 //!    makes the difference a defect and not a quibble. **What a consumer
-//!    depends on is unchanged**: none of the record's four ends touches the
-//!    anchor, so a reading older than this session's latest commit to a path is
-//!    refused even where the record it would have been matched against is gone.
+//!    depends on is unchanged, and it rests on three distinct facts rather
+//!    than on one universal.** *Within* the retained epoch, a reading or a
+//!    reload that clears a record does not touch the anchor:
+//!    `clear_the_record_at` removes the record and its path index and
+//!    expressly leaves `latest_commit_at` alone. **Supersession preserves the
+//!    per-path slot**, replacing its value with the *newer* anchor, so the
+//!    committed write that ends a record by superseding it leaves the path
+//!    anchored. **A workspace replacement does clear the anchor**, and it
+//!    costs nothing: a predecessor epoch's observation is refused by the epoch
+//!    fence *before* chronology is consulted, and clause 3 is why its numbers
+//!    have nothing to be compared along. So a stamped reading older than this
+//!    epoch's latest commit to a path is refused even where the record it
+//!    would have been matched against is gone. **Saying instead that *none of
+//!    the record's four ends touches the anchor* is false of two of them** —
+//!    supersession replaces the value, and the workspace replacement clears
+//!    the slot — and that sentence is Phase 2d-4a-C's **round-2 High**,
+//!    written by the round-1 fix round into the same clause where it had just
+//!    separated the three.
 //!    The two were one value until Phase 2d-3's round 9, and pairing them is
 //!    what let a clearing of the first destroy the second.
 //!
@@ -173,8 +188,10 @@
 //! 2. **That the ledger's per-epoch maps are bounded within their epoch.** The
 //!    announced-state map holds one entry per distinct path announced under the
 //!    epoch and the commit-anchor map one per distinct path this session has
-//!    committed to under it. Entries leave them one at a time only where a
-//!    particular path's fact stops being true; nothing prunes either as a whole
+//!    committed to under it. **A path's slot** leaves them one at a time only
+//!    where that path's fact stops being true — clause 9's distinction read
+//!    here too, since an anchor's *value* is dropped by every later commit to
+//!    that path while its slot stays; nothing prunes either map as a whole
 //!    before the epoch ends (`docs/decisions/2d-3-notes.md` §5 item 27). The
 //!    queue's capacity bounds the queue and nothing else.
 //! 3. **That the queue's bound is a bound on memory.** It counts entries, and

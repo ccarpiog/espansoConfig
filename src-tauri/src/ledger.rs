@@ -492,7 +492,16 @@
 //! through step 3, which clears"*); this list did not.
 //!
 //! The anchor is written by [`WriteLedger::record_app_write`] under the same
-//! state guard as the record, so no decision can see one without the other.
+//! state guard as the record, so **no decision can interleave with that
+//! insertion and observe a half-written pair** — the guard proves that, and
+//! nothing wider. It does **not** say the two are always seen together: the
+//! decision reads them through a helper each, and every path below the two
+//! retaining checks clears the record while leaving the anchor standing, so
+//! **a decision seeing an anchor with no record is what this whole section is
+//! for**. This paragraph asserted the wider co-existence until Phase
+//! 2d-4a-C's round 2 — one sentence above the *keyed by path* paragraph that
+//! refutes it, which is the third round running that this file has held its
+//! own refutation.
 //!
 //! Keyed by path rather than by [`DocumentId`] because [`decide`]'s step 3
 //! removes the `documents_by_path` entry a path-to-record lookup goes through: an
@@ -802,9 +811,10 @@ pub struct AppWrite {
 /// to this path*, stays true exactly because it does: that replacement is what
 /// *latest* means, and it never leaves the slot empty.
 ///
-/// So what the epoch keeps is the slot and that fact. Written by
-/// [`WriteLedger::record_app_write`], read by [`decide`]'s step 1, and
-/// **removed** by [`WriteLedger::begin_epoch`] alone — no clearing of the
+/// So what the epoch keeps is the slot and that fact. **The slot** is created
+/// by [`WriteLedger::record_app_write`], its value is read by [`decide`]'s
+/// step 1, and the slot is **removed** by [`WriteLedger::begin_epoch`] alone —
+/// no clearing of the
 /// app-write record removes it, neither a door's nor the reload invalidation's,
 /// since none of them says anything about *when* this session last wrote to that
 /// path, and the one event that also ends a record by supersession is a later
@@ -1195,9 +1205,10 @@ impl WriteLedger {
         ledger.writes.clear();
         ledger.documents_by_path.clear();
         ledger.announced.clear();
-        // **The one place a commit anchor is removed**, and the only place a
-        // path stops having one: the fact it carries is about *this* epoch's
-        // chronology, so it is discarded with the epoch and by nothing shorter.
+        // **The one place a commit anchor's slot is removed**, and the only
+        // place a path stops having one: the fact it carries is about *this*
+        // epoch's chronology, so the slot is discarded with the epoch and by
+        // nothing shorter.
         // The *value* is shorter-lived than the slot —
         // `record_app_write` replaces it on every later commit to the same path
         // — and `espansoconfig_core::watch::retained_state`'s clause 9 is where
@@ -1231,10 +1242,16 @@ impl WriteLedger {
     ///
     /// **The record and the anchor are written together and cleared apart**,
     /// which is round 9's second High: they are inserted under this one state
-    /// guard, so no decision can see one without the other, and from then on the
-    /// record's life is *how long suppression is licensed* while the path keeps
-    /// an anchor until the epoch is replaced. Anything that clears the record
-    /// leaves the anchor standing. **A second call here ends both, and it ends
+    /// guard, so no decision can interleave with *this insertion* and observe
+    /// a half-written pair — which is all the guard proves, and **not** that
+    /// the two are always seen together. From then on the record's life is
+    /// *how long suppression is licensed* while the path keeps an anchor until
+    /// the epoch is replaced. Anything that clears the record leaves the anchor
+    /// standing, so the next decision can and routinely does see an anchor with
+    /// no record; the wider co-existence claim stood in this doc comment, three
+    /// lines above that sentence, until Phase 2d-4a-C's round 2.
+    ///
+    /// **A second call here ends both, and it ends
     /// neither by clearing**: a later commit to the same path supersedes the
     /// record and replaces the anchor's value in the same two
     /// statements, which is why the slot survives what the value does not — see
@@ -1259,8 +1276,14 @@ impl WriteLedger {
     /// publishing the committed revision is the deliberate direction: nothing
     /// was published for this write, no sequence was spent, and no consumer was
     /// told, so the map must not claim one was. It happens in **this** function,
-    /// under the same state guard as the record, so the two cannot be observed
-    /// apart.
+    /// under the same state guard as the record, so no decision can interleave
+    /// with this insertion and meet the new record while the stale announcement
+    /// still stands. That is an atomicity claim about this one function and not
+    /// a claim that the two are always observed together: below the retaining
+    /// checks a decision clears the record and may then announce a state, so a
+    /// path holding an announcement and no record is ordinary. This sentence
+    /// asserted the wider co-existence until Phase 2d-4a-C's round 2, where the
+    /// sweep for that claim family found it beside the two the review named.
     ///
     /// **The round-7 fix round changed neither the call nor that argument**, and
     /// it widened what the call reaches: since that round the entry it removes

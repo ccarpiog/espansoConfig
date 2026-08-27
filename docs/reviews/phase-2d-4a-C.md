@@ -71,3 +71,60 @@ After fixing the High, the most likely future findings remain:
 Step 2 should not be built on the current text. Correct the subject of G9 and its `CommitAnchor` source passage first; otherwise the new checker will make a false lifetime claim harder to remove.
 
 **NOT READY**
+
+## Round 2 — step 1, against the round-1 fix
+
+### Verdict
+
+**NOT READY.** The round-1 fix corrected the principal subject distinction: in
+production, `record_app_write` never leaves an existing path's slot empty, its
+replacement value is the latest commit anchor, `begin_epoch` is the only
+operation that empties the slot, and `decide` only reads it. G4, G8, N2 and N5
+also remain true at their stated boundary. But the fix's own new consumer
+summary immediately collapses the distinction again in a different direction:
+two of the record's four ends do touch anchor state. The ledger also retains two
+older co-existence claims which the widened lifetime sweep did not catch and
+which contradict the very consumer case G9 is meant to guarantee.
+
+These are not merely restatements of round 1's wording. Round 1 distinguished a
+concrete anchor value from its epoch-lived slot. Round 2 finds (1) a new
+universal over the operations that end a record, including the two operations
+that replace or clear anchor state, and (2) an independent claim that record
+and anchor cannot be observed separately even though their separability is the
+round-9 mechanism. Both have new substantive content.
+
+### Findings
+
+1. **High — `crates/espansoconfig-core/src/watch/retained_state.rs:152`: G9's new consumer summary says none of the record's four ends touches the anchor, but supersession replaces the concrete anchor and workspace replacement clears its slot.** The clause's own four ends include “supersession by a later committed write” and “a workspace replacement.” `WriteLedger::record_app_write` ends the old record at `src-tauri/src/ledger.rs:1284` and replaces the old `CommitAnchor` at lines 1303–1309; `WriteLedger::begin_epoch` clears both the record map and `latest_commit_at` at lines 1195 and 1206. Thus “none” is false under both the value and slot senses the fix has just separated. The usable guarantee is narrower but still strong: within the retained epoch, a reading/reload that clears a record does not touch the anchor; supersession preserves the per-path slot by replacing its value with the newer anchor; and epoch replacement makes predecessor observations stale before chronology is consulted. Consequently a stamped reading older than this epoch's latest commit is still refused without a record, but the stated premise for that consequence is false. This sentence is new in the round-1 fix and sits in the canonical guaranteed clause, so step 2 must not protect it as written.
+
+2. **Medium — `src-tauri/src/ledger.rs:494` and `src-tauri/src/ledger.rs:1232`: the ledger says the shared insertion guard means no decision can see the record without the anchor or the anchor without the record, although seeing an anchor after its record is gone is the intended design.** `decide` reads the two independently at lines 2071–2072, and every path below its two retaining returns calls `clear_the_record_at` at line 2137, which removes `documents_by_path` and `writes` but expressly does not touch `latest_commit_at` (lines 1922–1927). The next decision therefore can and deliberately does see an anchor with no record; G9 relies on precisely that state. The mutex proves only that a decision cannot interleave with `record_app_write` and see a partially inserted pair. The module-level sentence is unqualified, while the `record_app_write` doc repeats it and then immediately says clearing the record leaves the anchor standing. This is what the widened pattern missed: a co-existence assertion about the same two values that says nothing in the vocabulary of lifetime, removal or survival.
+
+### Priority audit
+
+- **G9's three-way distinction:** The headline and its detailed slot/value explanation now match production code. `record_app_write` holds the state mutex while inserting the record, path index and fresh anchor. A later commit to the same path replaces the prior concrete value and leaves the map keyed at that path. No production method removes or mutates an individual `latest_commit_at` entry; `begin_epoch` clears the map whole. `decide` obtains the newest stored instant through `commit_anchor_at` and never mutates the anchor. The test-only `stamp_the_anchor_at` seam can manufacture a non-production instant and is explicitly test-only; it does not refute the application guarantee. The defect is the new “none of the four ends touches” summary, not the slot/value account before it.
+- **Whether the fix weakened the guarantee:** It did not hedge away the important behavior. `clear_the_record_at`, both serialized doors, ordinary stamped supersession below the retaining checks, and reload invalidation leave `latest_commit_at` alone. A later commit updates rather than empties the slot. This is enough for `decide` to refuse a stamped reading at or before the latest anchor even after the suppression record is gone. Workspace replacement is different: it clears the anchor, but the old observation is rejected by the epoch fence and chronology has no cross-epoch meaning. The High is that G9 presents these distinct reasons as “none touches,” not that the consumer protection is absent.
+- **Ten corrected positions and the broader residue:** The corrected module headline, `Admission::PrecedesACommit`, `LedgerTally::preceded_a_commit`, `LedgerState::writes`, `begin_epoch`, `record_app_write`, `decide`, `CommitAnchor`, and the two test comments no longer give each concrete anchor an epoch lifetime. The likeliest remaining narrow residues are `begin_epoch`'s “one place a commit anchor is removed” (`ledger.rs:1198`) and `CommitAnchor`'s “removed by begin_epoch alone” (`ledger.rs:805`): each is defensible only because its following words switch the subject to the slot/fact, while an old concrete value is also dropped on replacement. They should be kept in round 3's attack list, but the immediate qualifications make them ambiguity rather than separate findings here. The two false “no decision can see one without the other” passages are a genuine miss by the widened sweep because they assert co-existence, not duration.
+- **G4's exactly three:** `QueueState::pending` has the four stated production mutation sites: insert at `reconciliation.rs:1097`, overflow removal at 1102, drain retention at 1187–1189, and whole-state replacement at 1029–1030. Insert could replace an equal key, but the only production values come from the ledger allocator, which spends each sequence once under its mutex; `enqueue` and `AdmittedObservation` do not encode that invariant, and the contract honestly says so. On the current production pipeline, a stored entry leaves by acknowledgement, eviction or epoch replacement exactly.
+- **G8's one retained value:** `LedgerState` contains the epoch-scoped epoch/maps/allocator and `tally`; `begin_epoch` resets all but `tally`. `QueueState` is replaced whole, so none of its fields survives an epoch. The queue's wake emitter and the ledger's gate are session-lived infrastructure, but they are outside the contract's expressly drawn family: neither is observation state against which a later observation, drain or save decision is taken. Within that boundary, `LedgerTally` remains the one session-lived retained value. The claim is true but structurally unguarded against a future field addition, exactly as the contract admits.
+- **N2:** `announced` removes individual path entries when a commit or reload makes their fact false, and is cleared whole only at `begin_epoch`. `latest_commit_at` has no individual removal at all; insertion at an existing key replaces its value while preserving the per-path slot/latest-commit fact. Read as a restriction on map slots leaving, the “only where” statement is therefore true of `announced` and vacuously true of `latest_commit_at`. G9's new explicit value/slot distinction makes this wording a likely future ambiguity, but it does not make the present capacity denial false.
+- **N5:** This is an existence counterexample to the denied guarantee that every stored entry reaches a consumer. Overflow can evict a never-drained entry, and `begin_epoch` can discard a pending never-drained entry. Previously returned entries remain stored and may later be evicted or replaced, so the sentence would be false as a universal; in its negative-clause context it supplies the necessary counterexamples and remains true.
+
+### Likeliest sites for round 3
+
+- G9's corrected conclusion at `retained_state.rs:152`, after the High is fixed:
+  it must keep record clearing, anchor replacement and epoch clearing distinct
+  without weakening the chronology refusal.
+- `CommitAnchor`'s `removed` wording at `ledger.rs:805` and `begin_epoch`'s at
+  `ledger.rs:1198`, where “anchor” can still slide from slot/fact back to value.
+- N2 at `retained_state.rs:176`, because “entries leave” needs the same slot/value
+  discipline G9 now makes explicit.
+- G4 and G8 remain the highest-risk true enumerations because neither the set of
+  pending mutations nor the absence of another session-lived field is encoded.
+- N5 remains vulnerable to a pointer turning its existential counterexample into
+  a universal statement.
+
+Step 2 should not be built on the current text. Correct G9's false universal and
+the ledger's two false co-existence assertions first, while preserving the
+epoch-scoped chronology guarantee that the implementation does provide.
+
+**NOT READY**

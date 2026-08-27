@@ -659,3 +659,235 @@ each:
   and therefore new text.
 
 **Do not commit** — the orchestrator commits at the phase boundary.
+
+## 10. Review round 2, and the fix round that answers it
+
+`docs/reviews/phase-2d-4a-C.md` § *Round 2 — step 1, against the round-1 fix* is the review. Verdict
+**NOT READY**, two findings — one **High** and one **Medium**, **both prose-only** — and the same
+closing instruction as round 1: step 2 must not be built on text a reviewer has not read.
+
+**Round 2 reviewed round 1's fix, and both of its findings are about that fix's own shape.** The
+first is a sentence the fix round wrote; the second is an older claim of a **different shape** that
+the fix round's sweep **could not see by construction**. §9.7 item 1 predicted the first — *every fix
+round of this phase has written the next round's findings* — and did not predict the second.
+
+### 10.1 The High — G9's new consumer summary was false of two of the record's four ends
+
+The round-1 fix ended clause 9 with *"**What a consumer depends on is unchanged**: none of the
+record's four ends touches the anchor"* (`retained_state.rs:152`). **That is false under both of the
+senses the same fix had just separated**, and it collapses the distinction three sentences after
+drawing it:
+
+| End of the record | What it does to anchor state |
+|---|---|
+| supersession by a later committed write | `record_app_write` ends the old record (`ledger.rs:1284`) **and replaces the old `CommitAnchor`** (`ledger.rs:1303–1309`) — the **value** |
+| a reading that survives both retaining checks | nothing — `clear_the_record_at` (`ledger.rs:1922–1927`) |
+| a reload onto other bytes | nothing — same function |
+| a workspace replacement | `begin_epoch` clears the record map **and** `latest_commit_at` (`ledger.rs:1195` and `:1206`) — the **slot** |
+
+**How the conclusion was restated: three distinct cases, and not one universal.** The consequence the
+false premise was reaching for is still true, and it now rests on the true premises:
+
+1. **within the retained epoch**, a reading or a reload that clears a record does not touch the
+   anchor — `clear_the_record_at` removes the record and its path index and expressly leaves
+   `latest_commit_at` alone;
+2. **supersession preserves the per-path slot**, replacing its value with the *newer* anchor, so the
+   committed write that ends a record by superseding it leaves the path anchored;
+3. **epoch replacement does clear the anchor**, and it costs nothing: a predecessor epoch's
+   observation is refused by the epoch fence **before** chronology is consulted, and clause 3 is why
+   its numbers have nothing to be compared along.
+
+So *a stamped reading older than **this epoch's** latest commit to a path is refused even where the
+record it would have been matched against is gone* — kept, and now derived. The clause also names the
+false sentence, says which two ends refute it, and records it as this phase's **round-2 High**, so a
+later reader can see the text was corrected rather than quietly rewritten.
+
+### 10.2 The Medium — a co-existence claim the round-1 sweep could not see
+
+**`ledger.rs:494` (the module's *the anchor outlives the record* section) and `ledger.rs:1232`
+(`record_app_write`'s doc)** both said, unqualified, that because the anchor is written under the
+same state guard as the record, **no decision can see one without the other**. That is false, and
+**seeing an anchor after its record is gone is the intended design** — it is Phase 2d-3 round 9's
+mechanism, and **clause 9's consumer guarantee relies on exactly that state**:
+
+- `decide` reads the two **independently** (`ledger.rs:2071–2072`), through a helper each;
+- every path below its two retaining returns calls `clear_the_record_at` (`ledger.rs:2137`), which
+  removes the record and its path index and **expressly does not touch `latest_commit_at`**.
+
+**What the mutex actually proves is only that a decision cannot interleave with `record_app_write`
+and observe a partially inserted pair.** Both sentences now say that and nothing wider, each states
+expressly that it is **not** a claim that the two are always seen together, and each names the
+decision that routinely sees an anchor with no record.
+
+**The file held its own refutation for the third round running.** `record_app_write`'s doc made the
+claim and then, two sentences later, said *"Anything that clears the record leaves the anchor
+standing"*; §9.1 records the same pattern for the anchor's lifetime, and §4 records it one subsystem
+over. **A checker that enforces *pointing* cannot compare a general claim against the local fact
+three lines below it**, and that is now demonstrated three times in three rounds.
+
+### 10.3 The two sweeps, and what each found
+
+**This is a co-existence claim, not a duration claim, and that is the most valuable thing this round
+produced.** Round 1's sweep was written from what its own corrected sentence said — *how long does a
+`CommitAnchor`, a latest-commit fact, an announced state or an app-write record survive* — and it was
+**widened** during that round when its first pattern missed two positions. **It still could not see
+round 2's Medium by construction**: those sentences assert that two values are always **observed
+together** and use none of the vocabulary of lifetime, removal or survival. The reviewer calls it *"a
+genuine miss by the widened sweep"*, and it is not a failure of diligence but of the family: **a
+phrase family is not a claim family**, and step 2's phrase list inherits that limit whole (§5 item 5,
+§9.7 item 3).
+
+Both sweeps ran over `src-tauri/src` **and** `crates/espansoconfig-core/src`, **recursively, never a
+file list**, test names, test comments and assertion messages included, **joining runs of comment
+lines into prose units before matching** — this workspace wraps doc comments at ~76 columns, so a
+claim straddles a line break as a matter of course and a line-based grep cannot see it.
+
+**Family 1 — co-existence** (*observed, inserted, cleared or removed together with*; atomicity,
+pairing, *both*, *never one without the other*, *as a pair*, *in step with*, *under the same guard*):
+
+- the bare pattern matched **339** positions in the two trees, most of them the words in unrelated
+  senses — `pair` as a tuple, `atomic` as a rename, `apart` as *told apart*;
+- conjoined with a subject of the retained-state family (record, anchor, announced state, queue
+  entry, watermark, tally, identity, slot, sequence, map) it came to **66** positions, and each was
+  judged against the code;
+- **3 are the claim shape, and all 3 were false**: the review's two, **plus one more the review did
+  not name** — `record_app_write`'s *"It happens in **this** function, under the same state guard as
+  the record, so the two cannot be observed apart"* (`ledger.rs:1261–1263`), about the **announced
+  state** and the record. Below the retaining checks a decision clears the record and may then
+  announce a state, so a path holding an announcement and no record is ordinary. Narrowed to the
+  interleaving claim, exactly as the other two.
+
+**Positions in family 1 judged true and deliberately left**, so a later round can see they were read:
+`clear_the_record_at`'s *"the record and its index are erased together"* (a statement about that one
+function, and true of it); `enter_gate`'s *"the announcement and the acquisition are one function on
+purpose"*; `watch.rs`'s two *"the two halves are one function on purpose"*; `reconciliation.rs:625`'s
+*"where two `Option`s would let one be present without the other"* (a type-shape claim the enum
+enforces); and the three backup-listing *"never one without the other"* passages, which are about a
+struct's two fields and are outside this contract's boundary in any case.
+
+**Family 2 — duration, re-checked** (subject + *lives*, *life*, *lifetime*, *outlives*, *survives*,
+*nothing removes*, *never removed*, *removed by*, *prunes*, *until the epoch*, *as long as*,
+*nothing shorter*, *epoch-lived*, *session-lived*, *process-wide*): **199** sentences over the two
+trees — 54 in `ledger.rs`, 22 in `commands.rs`, 18 in `reconciliation.rs`, 14 in
+`retained_state.rs`, the remainder spread over 28 further files. **No new false position.** The only
+duration positions changed this round are the two the review flagged as ambiguity (§10.4).
+
+**Positions found beyond the reviewer's three: family 1 → one; family 2 → none.**
+
+### 10.4 The three positions the review left to judgement — what was done with each
+
+- **`ledger.rs:1198`, `begin_epoch`'s *"the one place a commit anchor is removed"* — tightened.** It
+  now says *"the one place a commit anchor's **slot** is removed"* and *"the **slot** is discarded
+  with the epoch and by nothing shorter"*. Nothing else moved: the next sentence already said the
+  *value* is shorter-lived than the slot. A subject correction, not a change of claim, and it removes
+  the slide the reviewer predicted.
+- **`ledger.rs:805`, `CommitAnchor`'s *"removed by `begin_epoch` alone"* — tightened.** The triple
+  *"Written by …, read by …, and **removed** by … alone"* had no explicit subject, which is the
+  whole of the ambiguity. It now reads *"**The slot** is created by `record_app_write`, its value is
+  read by `decide`'s step 1, and the slot is **removed** by `begin_epoch` alone"*. The clause after
+  it — supersession **replaces** the value rather than removing it — is untouched.
+- **N2 at `retained_state.rs:176` — tightened, and the review did not ask for it.** The reviewer
+  confirms N2 is **true**, read as a restriction on **map slots** leaving, and notes only that G9's
+  now-explicit slot/value distinction makes *"entries leave"* a likely future ambiguity. *"Entries
+  leave them one at a time only where a particular path's fact stops being true"* is now *"**A
+  path's slot** leaves them one at a time only where that path's fact stops being true — clause 9's
+  distinction read here too, since an anchor's *value* is dropped by every later commit to that path
+  while its slot stays"*. **This is not a weakening**: under the *value* reading the old sentence
+  would be **false** of the anchor map — a value leaves on every supersession, precisely where the
+  path's fact keeps being true — so naming the slot selects the reading the reviewer certified as
+  true. The denial itself is untouched: neither map has a capacity policy, and nothing prunes either
+  as a whole before the epoch ends.
+
+**What round 2 expressly cleared was left alone**: G4's *exactly three* (the four production mutation
+sites at `reconciliation.rs:1097`, `:1102`, `:1187–1189`, `:1029–1030`), G8's *one retained value*,
+N5, and the slot/value account of G9 **before** the false summary. Only the summary was rewritten.
+
+### 10.5 What changed, file by file
+
+- **`crates/espansoconfig-core/src/watch/retained_state.rs`** — clause 9's conclusion restated as
+  three distinct cases (§10.1), and N2's subject named (§10.4). **Module documentation only; the file
+  still contains no non-comment line.**
+- **`src-tauri/src/ledger.rs`** — the two false co-existence sentences narrowed and the third one the
+  sweep found (§10.2, §10.3), and the two flagged ambiguities tightened (§10.4). **Comments and doc
+  comments only.** No function body, signature, field, type or test was touched.
+- **`docs/decisions/2d-4a-C-notes.md`** — this section.
+- **no other source file, no `src/` path, no command, no wire type, no event, no queue, no i18n key
+  and no user-visible string.**
+
+**Prose only, and verified rather than claimed.**
+
+```sh
+git diff -U0 -- crates/espansoconfig-core/src src-tauri/src \
+  | rg '^[+-]' | rg -v '^(\+\+\+|---)' | sed 's/^[+-]//' | rg -v '^\s*(//|$)' | wc -l
+# 0
+```
+
+### 10.6 The gates after this round
+
+Each run as a separate command, with `pkill -f 'target/debug/deps/espansoconfig-'` before the
+workspace suite and nothing else running on the host.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1309 passed, 0 failed**, exit 0, summed over **26** `test result` lines — the baseline, unmoved |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean**, exit 0 |
+| `cargo fmt --check` | **clean**, exit 0 |
+| `cargo doc --workspace --no-deps` | **exit 0**, **73** `links to private item` warnings — unchanged — and **zero** unresolved or ambiguous links. Re-run after `touch`ing both edited files, so the figure is not an incremental cache's |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `git diff --stat` | two source files and this record; **no path under `src/`** |
+
+**No gate is recorded here that was not run**, and one deviation is recorded rather than smoothed
+over: **the workspace suite ran twice**, because the first invocation's tail did not show the summary
+lines and the second was piped through the `test result` fold. Both were green with identical counts.
+Host discipline says *once*; this round ran it twice. The frontend gates were not re-run and no
+figure for them is claimed — §8's carry is unchanged.
+
+### 10.7 What this round did not do, and where it is thin
+
+1. **The review is not closed by this round.** It closed two findings and wrote sentences, and §5
+   item 11 applies to *these* sentences exactly as it applied to round 1's. **Round 3 is owed, and
+   step 2 must not start before it.** Both rounds so far found the previous round's fix defective;
+   assuming this one is the exception is the assumption each round has falsified.
+2. **Nothing here is enforced.** No test fails if clause 9's conclusion drifts again, and none fails
+   if a co-existence claim is written back into `ledger.rs`. The false universal survived 1309
+   passing tests, `cargo doc`, `clippy` and a written audit trail — for the second round running.
+3. **Round 2's Medium is a claim family the round-1 sweep could not see, and this is the fact step 2
+   must absorb.** Its phrase family is being derived from *lifetime* vocabulary; a co-existence
+   assertion about the same two values uses none of it and is invisible to that list. **Step 2 owes
+   at least two phrase families, not one** — *how long does it survive* and *are these two always
+   seen together* — and it owes the admission that a third family is discoverable the same way: by a
+   reviewer, after the checker is green.
+4. **The sweep is a human reading with a throwaway script.** §5 item 5 and §9.7 item 3, inherited
+   verbatim, with one new piece of evidence: the bare co-existence pattern matched **339** positions
+   and **3** of them were the claim, and the signal was recovered only by conjoining a subject list
+   that is itself a human enumeration.
+5. **N2 was tightened although the reviewer did not ask for it** (§10.4). That is new text no
+   reviewer has read, in a clause round 2 expressly certified as true — the exact shape §9.7 item 1
+   warns about. It is recorded here so round 3 attacks it first.
+6. **No behaviour was changed, and no code defect was found.** Three passages were false and two were
+   ambiguous; in every case the code was right and the comment was wrong. Had it been the other way
+   round this section would say so and change nothing.
+
+### 10.8 Likeliest sites for round 3, so step 2 and round 3 start from them
+
+The reviewer's own list, carried here with this round's outcome against each:
+
+- **G9's corrected conclusion at `retained_state.rs:152`** — rewritten this round into three cases,
+  and therefore the text most worth re-reading: it must keep record clearing, anchor replacement and
+  epoch clearing distinct **without weakening the chronology refusal**;
+- **`CommitAnchor`'s *removed* wording (`ledger.rs:805`) and `begin_epoch`'s (`ledger.rs:1198`)** —
+  tightened this round to name the slot (§10.4), and therefore also new text;
+- **N2 at `retained_state.rs:176`** — tightened this round, against a clause round 2 certified true
+  (§10.7 item 5);
+- **the three narrowed co-existence sentences** (`ledger.rs:494`, `:1232`, `:1261`) — all new text,
+  all asserting what a mutex proves, which is a claim about interleaving that no test in this
+  repository makes;
+- **G4's *exactly three*** and **G8's *one retained value*** — round 2 confirmed both true at their
+  stated boundary and both structurally unguarded: neither the set of `pending` mutations nor the
+  absence of another session-lived field is encoded. Untouched this round;
+- **N5's *take entries no drain ever returned*** — true as an existence counterexample, false if a
+  future pointer restates it universally. Untouched this round;
+- **the `persist::write` lock-registry boundary** (§5 item 8), which step 2 must **inventory as
+  judged-out** rather than pattern-narrow away.
+
+**Do not commit** — the orchestrator commits at the phase boundary.
