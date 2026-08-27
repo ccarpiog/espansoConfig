@@ -473,9 +473,13 @@
 //! and the two lifetimes are one clause of
 //! [`espansoconfig_core::watch::retained_state`] — its ninth — rather than a
 //! rule this module states twice. What belongs here is which value carries
-//! which: the **record** is [`LedgerState::writes`], whose life is its
-//! suppression licence, and the **anchor** is
-//! [`LedgerState::latest_commit_at`], whose life is the epoch.
+//! which: the **record** is [`LedgerState::writes`], whose entry lives as long
+//! as its suppression licence, and the **anchor** is
+//! [`LedgerState::latest_commit_at`], whose **per-path slot** the epoch keeps
+//! while a later commit to that path **replaces the value in it**. This
+//! paragraph said *whose life is the epoch* until Phase 2d-4a-C's round 1,
+//! which is one lifetime asserted for a value, a slot and a fact that do not
+//! share one; the contract's clause 9 is where the three are separated.
 //!
 //! **The record's second end is *a reading that survives both retaining
 //! checks*, and this paragraph said *a serialized reading* until Phase
@@ -626,8 +630,10 @@ pub enum Admission {
     /// section for what is and is not claimed.
     ///
     /// **It does not need a record to exist**, since the round-9 fix round: the
-    /// value it is refused by is the path's [`CommitAnchor`], whose life is the
-    /// epoch, so a commit whose record has since been cleared still refuses a
+    /// value it is refused by is the path's [`CommitAnchor`], and the path holds
+    /// one until the epoch is replaced — no clearing of the record touches it,
+    /// and a later commit to that path replaces its value rather than emptying
+    /// the slot. So a commit whose record has since been cleared still refuses a
     /// reading older than it. Before that round the anchor was a field of the
     /// record, and clearing one cleared the other — round 9's second High.
     ///
@@ -789,12 +795,27 @@ pub struct AppWrite {
 /// with it, and an arbitrarily delayed pre-commit settlement then found nothing
 /// to be refused by and published bytes the commit had since replaced.
 ///
-/// **Its life is the epoch and nothing shorter** —
-/// [`espansoconfig_core::watch::retained_state`]'s clause 9, of which this type
-/// is the source. Written by [`WriteLedger::record_app_write`], read by
-/// [`decide`]'s step 1, and removed by [`WriteLedger::begin_epoch`] alone — not
-/// by supersession, not by any door, and not by the reload invalidation, none of
-/// which say anything about *when* this session last wrote to that path.
+/// **The path's slot is maintained until the epoch is replaced; this value is
+/// not.** [`WriteLedger::record_app_write`] inserts a fresh anchor on every
+/// committed write, so a later commit to the same path drops the one before it —
+/// and the chronology fact the slot answers, *when did this session last commit
+/// to this path*, stays true exactly because it does: that replacement is what
+/// *latest* means, and it never leaves the slot empty.
+///
+/// So what the epoch keeps is the slot and that fact. Written by
+/// [`WriteLedger::record_app_write`], read by [`decide`]'s step 1, and
+/// **removed** by [`WriteLedger::begin_epoch`] alone — no clearing of the
+/// app-write record removes it, neither a door's nor the reload invalidation's,
+/// since none of them says anything about *when* this session last wrote to that
+/// path, and the one event that also ends a record by supersession is a later
+/// committed write, which **replaces** this value rather than removing it.
+///
+/// This is [`espansoconfig_core::watch::retained_state`]'s clause 9, of which
+/// this type is the source. **The paragraph above said *its life is the epoch
+/// and nothing shorter* until Phase 2d-4a-C's round 1** — one lifetime asserted
+/// for the value, the slot and the fact at once, and false of the first;
+/// [`WriteLedger::record_app_write`]'s own insertion comment has said the value
+/// is replaced since round 9, and nothing compared the two.
 ///
 /// **Keyed by path rather than by document**, which is not an economy: step 3
 /// removes the `documents_by_path` entry a path-to-record lookup goes through,
@@ -886,7 +907,8 @@ pub struct LedgerTally {
     /// `a_committed_save_is_suppressed_while_a_later_external_write_is_not`
     /// carries the same concession beside the wait that does the detecting.
     ///
-    /// **But since the round-9 fix round the anchor's life is the epoch**, so a
+    /// **But since the round-9 fix round a path keeps an anchor until the epoch
+    /// is replaced, whatever becomes of its record**, so a
     /// perfectly healthy observation can move this counter too: a watcher
     /// completes a stable reading, its worker is descheduled, this application
     /// commits and records, a serialized decision clears that record, and the
@@ -1054,7 +1076,8 @@ struct LedgerState {
     /// **What an entry licenses is suppression, and nothing about chronology.**
     /// Until the round-9 fix round each entry carried the instant it was taken,
     /// which meant the two lifetimes were one; the instant now lives in
-    /// [`LedgerState::latest_commit_at`], whose life is the epoch. See
+    /// [`LedgerState::latest_commit_at`], whose per-path slot the epoch keeps
+    /// and whose value a later commit to that path replaces. See
     /// [`CommitAnchor`].
     writes: BTreeMap<DocumentId, AppWrite>,
     /// The path each recorded write is at, because an observation names a path
@@ -1172,11 +1195,14 @@ impl WriteLedger {
         ledger.writes.clear();
         ledger.documents_by_path.clear();
         ledger.announced.clear();
-        // **The one place a commit anchor is removed**, and that is the whole of
-        // its lifetime rule: the anchor is a fact about *this* epoch's
+        // **The one place a commit anchor is removed**, and the only place a
+        // path stops having one: the fact it carries is about *this* epoch's
         // chronology, so it is discarded with the epoch and by nothing shorter.
-        // See [`CommitAnchor`] and this module's *the anchor outlives the
-        // record* section.
+        // The *value* is shorter-lived than the slot —
+        // `record_app_write` replaces it on every later commit to the same path
+        // — and `espansoconfig_core::watch::retained_state`'s clause 9 is where
+        // the two are kept apart. See [`CommitAnchor`] and this module's *the
+        // anchor outlives the record* section.
         ledger.latest_commit_at.clear();
         ledger.next_sequence = Some(FIRST_OBSERVATION_SEQUENCE);
     } // End of function begin_epoch()
@@ -1206,8 +1232,15 @@ impl WriteLedger {
     /// **The record and the anchor are written together and cleared apart**,
     /// which is round 9's second High: they are inserted under this one state
     /// guard, so no decision can see one without the other, and from then on the
-    /// record's life is *how long suppression is licensed* while the anchor's is
-    /// the epoch. Anything that clears the record leaves the anchor standing.
+    /// record's life is *how long suppression is licensed* while the path keeps
+    /// an anchor until the epoch is replaced. Anything that clears the record
+    /// leaves the anchor standing. **A second call here ends both, and it ends
+    /// neither by clearing**: a later commit to the same path supersedes the
+    /// record and replaces the anchor's value in the same two
+    /// statements, which is why the slot survives what the value does not — see
+    /// the insertion comment below, and
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 9 for the three
+    /// lifetimes this passage stated as one until Phase 2d-4a-C's round 1.
     ///
     /// Replaces any earlier record for the same document, which is the consult's
     /// *replace it on the next committed app save*. It replaces the path index
@@ -1913,8 +1946,9 @@ fn clear_the_record_at(ledger: &mut LedgerState, path: &Path) {
 ///    round-9 fix round — **may** describe bytes
 ///    this application has since replaced, so it may neither publish nor
 ///    supersede. The check proves only that the session cannot rule that out.
-///    The round-2 High, and its round-9 second one: the anchor's life is the
-///    epoch, so a commit whose record has since been cleared still refuses a
+///    The round-2 High, and its round-9 second one: the path keeps an anchor
+///    until the epoch is replaced, so a commit whose record has since been
+///    cleared still refuses a
 ///    reading older than it. See this module's *stamp* and *the anchor outlives
 ///    the record* sections for the implication
 ///    and for the direction it over-refuses in. A serialized caller
@@ -3854,7 +3888,8 @@ mod tests {
         // delay: only the settlement's *production* is pre-commit, and its
         // delivery waits on thread scheduling and gate contention.
         //
-        // The anchor now lives as long as the epoch, so the refusal still
+        // The path now keeps its anchor until the epoch is replaced, so the
+        // refusal still
         // happens — and, being a refusal, it is **answered**: the engine's
         // settlement is taken back and the path is observed again.
         use espansoconfig_core::watch::engine::{
@@ -3967,7 +4002,8 @@ mod tests {
     fn a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading() {
         // **Round 10's Low, driven.** [`LedgerTally::preceded_a_commit`] used to
         // say that on a healthy production path it stays zero. Since the round-9
-        // fix round the anchor's life is the epoch, so it does not: nothing in
+        // fix round a path keeps its anchor until the epoch is replaced, so it
+        // does not: nothing in
         // the interleaving below malfunctioned — a stable reading completes, the
         // worker that carries it is descheduled, this application commits and
         // records, a serialized decision clears that record, and only then is the

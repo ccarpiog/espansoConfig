@@ -5,13 +5,18 @@
 //! [`crate::watch::liveness`] does. It exists because one family of claims —
 //! **how long does a piece of retained pipeline state survive, and under what
 //! scope** — was paraphrased at some fifty positions across this crate and the
-//! application shell, and three consecutive review rounds of Phase 2d-4a each
-//! found one of those paraphrases claiming something the code refuses. Round 5
-//! found the retention boundary counting two ways an entry leaves a queue that
-//! has three; round 6 found the same shape one level up, on the watermark a
-//! consumer stores; and this step found a third instance in the ledger, one
-//! subsystem over. **Every paraphrase is a surface on which the claim can be
-//! false**, and this module reduces that count to one.
+//! application shell, and **three consecutive audits of Phase 2d-4a each found
+//! one of those paraphrases claiming something the code refuses**. Round 5 of
+//! its review found the retention boundary counting two ways an entry leaves a
+//! queue that has three; round 6 found the same shape one level up, on the
+//! watermark a consumer stores; and the implementation step that wrote this
+//! module found a third instance in the ledger, one subsystem over. Two of the
+//! three were review rounds and the third was not, which is why *audits* rather
+//! than *review rounds* — this sentence said the latter until Phase 2d-4a-C's
+//! round 1, counting an implementation step as a round that had not run.
+//! **Every paraphrase is a surface on which the claim can be false**, and this
+//! module reduces that count to one. Round 1 of this phase's own review then
+//! found a fourth instance, in clause 9 below.
 //!
 //! # What the family is, and where its boundary is drawn
 //!
@@ -128,14 +133,28 @@
 //!    session.** Cumulative and never reset, unlike every map beside it,
 //!    because four of the decisions it counts are otherwise indistinguishable
 //!    from a watcher that noticed nothing (`PROGRESS.md` R24).
-//! 9. **An app-write record lives as long as its suppression licence; a commit
-//!    anchor lives as long as the epoch.** Four things end the record —
-//!    supersession by a later committed write to the same document, **a reading
-//!    that survives both of the ledger's retaining checks**, a reload onto other
-//!    bytes, and a workspace replacement. Exactly one thing removes an anchor:
-//!    the workspace replacement. The two were one value until Phase 2d-3's
-//!    round 9, and pairing them is what let a clearing of the first destroy the
-//!    second.
+//! 9. **An app-write record lives as long as its suppression licence; a path's
+//!    latest-commit anchor is maintained until the epoch is replaced, and a
+//!    later commit to that path supersedes its value.** Four things end the
+//!    record — supersession by a later committed write to the same document,
+//!    **a reading that survives both of the ledger's retaining checks**, a
+//!    reload onto other bytes, and a workspace replacement. The anchor half is
+//!    a claim about the **per-path slot and the chronology fact it answers** —
+//!    *when did this session last commit to this path* — and **exactly one
+//!    thing removes that: the workspace replacement.** It is **not** a claim
+//!    about the concrete `CommitAnchor` value: `record_app_write` inserts a
+//!    fresh one on every committed write, so a later commit to the same path
+//!    drops the one before it, the slot is never left empty, and the fact stays
+//!    true precisely *because* the value was replaced — the replacement is what
+//!    *latest* means. Saying *a commit anchor lives as long as the epoch*
+//!    asserted one lifetime for all three, and it is Phase 2d-4a-C's round-1
+//!    High: this family is defined as retained **values** above, which is what
+//!    makes the difference a defect and not a quibble. **What a consumer
+//!    depends on is unchanged**: none of the record's four ends touches the
+//!    anchor, so a reading older than this session's latest commit to a path is
+//!    refused even where the record it would have been matched against is gone.
+//!    The two were one value until Phase 2d-3's round 9, and pairing them is
+//!    what let a clearing of the first destroy the second.
 //!
 //! # What is expressly NOT guaranteed
 //!

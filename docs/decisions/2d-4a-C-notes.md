@@ -332,6 +332,9 @@ this project's declared worst defect class.
     next round's findings. This one wrote **nine guaranteed clauses and eight negative ones** in a
     single new module, and the likeliest sites are the two that rest on a reading (G4, G8), the one
     that spans a subsystem this phase had never swept (G9, §4), and the boundary in §5 item 8.
+    **That round has now run — §9 — and this prediction half held**: the High landed on G9, one of
+    the three named. The Low landed on the introductory sentence at line 8, which this list did not
+    name at all.
 
 ---
 
@@ -429,5 +432,230 @@ the application shell.** The probe was reverted with the **inverse edit**, never
 `crates/espansoconfig-core/src/watch/retained_state.rs / "observed again": found 1, inventory says 0`,
 and passed after the inventory entry of §3.5 was added. Two contracts, one sweep, and the second one
 was caught by the first.
+
+**Do not commit** — the orchestrator commits at the phase boundary.
+
+---
+
+## 9. Review round 1, and the fix round that answers it
+
+`docs/reviews/phase-2d-4a-C.md` is the review. Verdict **NOT READY**, two findings — one High and
+one Low, **both prose-only** — and a closing instruction that is the reason this round exists:
+*step 2 should not be built on the current text, because a checker over a false lifetime claim makes
+it harder to remove.* **Nothing about step 1's boundary, placement or pointer inventory was
+rejected**; the clause audit derived all 17 clauses from the code and found one wrong.
+
+### 9.1 The High — G9 gave an individual commit anchor an epoch lifetime
+
+**`crates/espansoconfig-core/src/watch/retained_state.rs:131`, clause 9**, said *"a commit anchor
+lives as long as the epoch"* and *"Exactly one thing removes an anchor: the workspace replacement."*
+That is one lifetime asserted for **three different things**:
+
+1. the **app-write record** — four ends, and that half was correct (§4 is where it was fixed);
+2. the **per-path slot and the latest-commit chronology fact** it answers — *epoch-lived*, and
+   removed by `WriteLedger::begin_epoch` alone;
+3. the concrete **`CommitAnchor` value** — **not** epoch-lived: `WriteLedger::record_app_write`
+   (`src-tauri/src/ledger.rs:1270`) does `latest_commit_at.insert(path, CommitAnchor { … })`, so
+   every later commit to the same path drops the value before it.
+
+The distinction is a defect and not a quibble because **the module defines its own family as
+retained *values*** (its lines 18–20). The same overstatement stood in the cited source,
+`CommitAnchor`'s own doc (*"Its life is the epoch and nothing shorter"*, *"removed by …
+`begin_epoch` alone — not by supersession"*), so the pointer and its source doubled down on the same
+wrong subject — which is exactly what step 2 would have mechanically protected.
+
+**The tree already held its own refutation, for the second time in two rounds.** The insertion
+comment at `src-tauri/src/ledger.rs:1258` has correctly said *"It replaces any earlier anchor for
+this path, because* latest *is what it claims"* since round 9. §4 records the same pattern one
+subsystem over — a true local statement beside a false general one in one file, with nothing
+comparing them. **That pattern is the finding, not a coincidence**, and it is the sharpest thing
+step 2 inherits: a checker that enforces *pointing* cannot compare a general claim against the local
+fact three lines below it.
+
+**How the guarantee was restated.** The clause is not deleted and not hedged; its **subject** is
+corrected and it stays usable. G9 now reads, in substance: *an app-write record lives as long as its
+suppression licence; a path's latest-commit anchor is maintained until the epoch is replaced, and a
+later commit to that path supersedes its value.* The anchor half is stated as a claim about the
+**per-path slot and the chronology fact it answers** — *when did this session last commit to this
+path* — of which **exactly one thing removes it, the workspace replacement**; and it says expressly
+that it is **not** a claim about the concrete value, which is replaced on every commit, leaving the
+slot never empty and the fact true *because* the value changed. The consumer-facing guarantee is
+called out as unchanged: **none of the record's four ends touches the anchor**, so a reading older
+than this session's latest commit to a path is refused even where the record it would have been
+matched against is gone.
+
+### 9.2 The Low — three "consecutive review rounds" were not three review rounds
+
+**`retained_state.rs:8`** called the three discoveries *"three consecutive review rounds of Phase
+2d-4a"*, while its own enumeration was round 5, round 6, and **the implementation step that wrote
+the module** — not a review round, and no round 7 had run when the sentence was written. Line 12
+already said it accurately. The sentence now says **three consecutive audits**, names the third as
+the implementation step, and states in the same breath why the word changed. It also records that
+**round 1 of this phase's own review then found a fourth instance, in clause 9** — so the paragraph
+no longer implies the module's text is unreviewed.
+
+### 9.3 The sweep, and what it found beyond the reviewer's two positions
+
+The recorded failure mode — `CLAUDE.md`, and `2d-4a-notes.md` §7.6.2 — is that **four consecutive
+rounds each closed a finding and left a narrower instance standing, every time because the search
+was written from the previous wording**. So the sweep was written from **what the sentence now
+says**: *every position that says anything about how long a `CommitAnchor`, a latest-commit fact, an
+announced state or an app-write record survives.*
+
+It ran over `src-tauri/src` and `crates/espansoconfig-core/src` **recursively, never a file list**,
+test names, test comments and assertion messages included, **joining runs of comment lines into
+prose units** before matching — this workspace wraps doc comments at ~76 columns, so a claim
+straddles a line break as a matter of course and a line-based grep cannot see it — and then splitting
+each unit into sentences and keeping every sentence that names one of the family's subjects **and**
+says something about how long it survives. **152 such sentences**, of which 132 are in the ten files
+that hold the pipeline; each was judged against the code.
+
+**The first pattern was too narrow and is reported as such**: it matched `commit anchor`,
+`CommitAnchor`, `latest_commit_at` and `latest commit`, and **missed two false test comments that say
+only "the anchor"** — the recorded failure mode reproduced inside the sweep meant to prevent it,
+caught by widening to `\banchor` before any edit was made.
+
+**Ten positions were false and are fixed. Eight of them are beyond the reviewer's two.**
+
+| # | Position | What it said | Why it is false |
+|---|---|---|---|
+| 1 | `retained_state.rs`, clause 9 | *a commit anchor lives as long as the epoch* | the reviewer's High |
+| 2 | `ledger.rs`, `CommitAnchor`'s doc | *Its life is the epoch and nothing shorter*; *not by supersession* | the reviewer's cited source |
+| 3 | `ledger.rs`, module doc, *the anchor outlives the record* | *the **anchor** is `LedgerState::latest_commit_at`, whose life is the epoch* | value, slot and fact under one lifetime, in parallel with the record's per-entry one |
+| 4 | `ledger.rs`, `Admission::PrecedesACommit` | *the path's `CommitAnchor`, whose life is the epoch* | same |
+| 5 | `ledger.rs`, `LedgerTally::preceded_a_commit` | *since the round-9 fix round the anchor's life is the epoch* | same |
+| 6 | `ledger.rs`, `LedgerState::writes` | *the instant now lives in `latest_commit_at`, whose life is the epoch* | grammatically the map, but one clause after *the two lifetimes were one*, which is the conflation one step removed |
+| 7 | `ledger.rs`, `begin_epoch`'s inline anchor comment | *that is the whole of its lifetime rule … by nothing shorter* | *the one place an anchor is removed* is true; *the whole of its lifetime rule* is not |
+| 8 | `ledger.rs`, `record_app_write`'s doc | *the anchor's is the epoch* | stated in the doc comment of the function whose own body replaces the value eight lines below |
+| 9 | `ledger.rs`, `decide`'s check-order list, step 1 | *the anchor's life is the epoch* | same |
+| 10 | `ledger.rs`, two test comments (`a_commit_anchor_outlives_the_record_it_was_taken_with`, `a_settlement_produced_before_a_commit_is_counted_once_and_admitted_on_its_next_reading`) | *the anchor now lives as long as the epoch*; *the anchor's life is the epoch* | the two the narrow pattern missed |
+
+Every one of them now says what the code does: **the path keeps an anchor until the epoch is
+replaced, and a later commit to that path replaces its value**. The three positions that state the
+*consequence* — *a commit whose record has since been cleared still refuses a reading older than it*
+— keep it verbatim, because that consequence was never in doubt and is what a consumer depends on.
+
+**Positions judged true and deliberately left**, so that a later round can see they were read rather
+than missed:
+
+- `ledger.rs`, `LedgerState::latest_commit_at` — *"Nothing prunes this map within an epoch"*: true,
+  there is no `remove` on that map anywhere;
+- `ledger.rs`, `LedgerState::announced` — *"entries leave one at a time, where a particular path's
+  announcement stops being true"*: true, `announced.remove(path)` fires in `record_app_write` and in
+  the reload invalidation;
+- `ledger.rs`, `begin_epoch`'s doc, and `record_app_write`'s insertion comment (**kept verbatim, as
+  the review asks**) — both already correct;
+- the seven *"outlives the record"* positions in `commands.rs`, `main.rs` and `ledger.rs`: a
+  **relative** claim, and true — no clearing of a record touches the anchor;
+- `ledger.rs:3067`, *"into a map whose life is the epoch"*: the subject is unambiguously the map, and
+  the map's life **is** the epoch;
+- `reconciliation.rs:1393`, *"scoped by clause 1 and by nothing shorter"*: that is G1, the
+  process-wide identity register, and it is true.
+
+**Two test-only seams exist that no clause mentions and none needs to**: `WriteLedger::commit_anchor`
+reads an anchor back and `WriteLedger::stamp_the_anchor_at` mutates a live one's instant in place.
+Both are `#[cfg(test)]`, both already document that, and the contract is about production retention.
+
+### 9.4 The two already-known-thin positions the review flags — both true, both left
+
+- **N2's plural treatment of the announced and anchor maps.** **True as written, and left.** It
+  denies a *capacity policy*, and neither map has one: `announced` grows by one entry per distinct
+  path announced under the epoch, `latest_commit_at` by one per distinct path committed to under it,
+  and only `begin_epoch` empties either. Its *"entries leave them one at a time only where a
+  particular path's fact stops being true"* is a **restriction**, so it is true of `announced`
+  (which really does remove) and vacuously true of `latest_commit_at` (which never removes an entry
+  individually at all). The reviewer's caution stands and is not a falsehood: **the clause must not
+  be read as claiming a second streaming source for anchors**, and their sources of growth are not
+  identical.
+- **N5's *"take entries no drain ever returned."*** **True as written, and left.** It is an
+  existence counterexample inside a negative clause — an overflow can evict an entry no drain
+  returned, and a replacement discards entries no drain returned — and it is exactly as narrow as
+  `enqueue`'s eviction arm and `begin_epoch`'s whole-state assignment. It becomes false only if a
+  future pointer restates it **universally**, because drained entries remain stored and can be
+  evicted or replacement-discarded afterwards too.
+
+### 9.5 What changed, file by file
+
+- **`crates/espansoconfig-core/src/watch/retained_state.rs`** — clause 9 restated (§9.1) and the
+  introductory sentence narrowed (§9.2). **Module documentation only; the file still contains no
+  non-comment line.**
+- **`src-tauri/src/ledger.rs`** — the eight remaining false positions of §9.3's table.
+  **Comments and doc comments only.** `decide`, `clear_the_record_at`, `record_app_write`,
+  `begin_epoch` and `adopt_reloaded_revision_under_the_session_lock` are untouched, and
+  `record_app_write`'s insertion comment is kept exactly as it stood.
+- **`docs/decisions/2d-4a-C-notes.md`** — §5 item 11's prediction verdict, and this section.
+- **no other source file, no `src/` path, no command, no wire type, no event, no queue, no i18n key
+  and no user-visible string.**
+
+**Prose only, and verified rather than claimed.**
+`git diff -U0 -- crates/espansoconfig-core/src src-tauri/src` filtered to non-comment, non-blank
+changed lines is **zero lines**, in both directions:
+
+```sh
+git diff -U0 -- crates/espansoconfig-core/src src-tauri/src \
+  | rg '^[+-]' | rg -v '^(\+\+\+|---)' | sed 's/^[+-]//' | rg -v '^\s*(//|$)' | wc -l
+# 0
+```
+
+### 9.6 The gates after this round
+
+Each run as a separate command, with `pkill -f 'target/debug/deps/espansoconfig-'` before the
+workspace suite and nothing else running on the host.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1309 passed, 0 failed**, exit 0, summed over **26** `test result` lines — the baseline, unmoved, as prose-only work requires |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **clean**, exit 0 |
+| `cargo fmt --check` | **clean**, exit 0 |
+| `cargo doc --workspace --no-deps` | **exit 0**, **73** `private_intra_doc_links` warnings — unchanged — and **zero** unresolved or ambiguous links |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** |
+| `git diff --stat` | two source files and this record; **no path under `src/`.** The frontend gates were therefore not re-run and no figure for them is claimed here — §8's carry unchanged |
+
+**No gate is recorded here that was not run.** In particular the doc build was **not** re-driven to
+red this round — §8's probe stands as step 1's evidence and is not re-claimed — and
+`liveness_contract::` was not re-run separately, because the workspace suite that contains it passed
+whole.
+
+### 9.7 What this round did not do, and where it is thin
+
+1. **The review is not closed by this round.** It closed two findings and wrote sentences, and
+   §5 item 11 applies to *these* sentences exactly as it applied to step 1's: every fix round of this
+   phase has written the next round's findings. Round 2 is owed, and **step 2 must not start before
+   it** — the reviewer's closing instruction was about building a checker over false text, and text
+   this round changed is text no reviewer has read.
+2. **Nothing here is enforced.** No test fails if clause 9 drifts from `record_app_write` again;
+   §5 items 1 and 3 are untouched, and this round is a second demonstration of why — the false
+   clause survived 1309 passing tests, `cargo doc`, `clippy` and a written audit trail.
+3. **The sweep is a human reading with a throwaway script**, §5 item 5's limit inherited verbatim,
+   with one new piece of evidence for it: **the first pattern of this round's own sweep missed two
+   positions** and only a widened one found them. A phrase family is not the family.
+4. **The judged-true positions of §9.3 are judgements, not proofs.** `LedgerState::writes`'s
+   sentence (row 6) was changed although it is grammatically about the map, and `ledger.rs:3067`'s
+   was **not**, although it is the same shape. The difference is the clause beside it — *the two
+   lifetimes were one* — and a later round may reasonably rule the other way on either.
+5. **No behaviour was changed**, and had the code been wrong rather than the comment this section
+   would say so and change nothing. Ten passages were false; **no code defect was found.**
+
+### 9.8 Likeliest sites for a later round, so step 2 and round 2 start from them
+
+The reviewer's own list, carried here verbatim in substance and with this round's outcome against
+each:
+
+- **G4's *"exactly three"*** — it depends on production provenance and a human enumeration of
+  mutation sites, while `enqueue` and `AdmittedObservation` do not encode uniqueness. Untouched this
+  round;
+- **G8's *"one retained value"*** — an addition to either holder can silently create another
+  non-epoch field. Untouched this round;
+- **G9's distinction among record, per-path slot/latest chronology fact, and concrete `CommitAnchor`
+  value** — the defect this round closed, and therefore the text most worth re-reading, because a
+  fix is a change;
+- **N2's plural treatment of the announced and anchor maps**, whose sources of growth are not
+  identical (§9.4 — judged true and left);
+- **N5's *"take entries no drain ever returned"***, correct as an existence counterexample and false
+  only if a future pointer restates it universally (§9.4 — judged true and left);
+- **the `persist::write` lock-registry boundary** (§5 item 8), which step 2 must **inventory as
+  judged-out** rather than pattern-narrow away;
+- **the introductory review-history sentence** at `retained_state.rs:8` — this round's Low, rewritten
+  and therefore new text.
 
 **Do not commit** — the orchestrator commits at the phase boundary.
