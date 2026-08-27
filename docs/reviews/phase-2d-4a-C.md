@@ -442,3 +442,69 @@ Suggested remedy: Scope the gate evidence to files each guard actually sweeps, a
 ### Verdict rationale
 
 The read-path code fix is sound, the untestable filename argument holds, and the principal assertion arithmetic is correct. The round remains NOT READY because §19 introduces four Low record defects. Finding 2 reintroduces the same selection-versus-actual-traversal substance round 3 had already corrected; Findings 1, 3, and 4 are new defects in this fix round’s account of the alternative remedy, its position count, and what green guards prove.
+
+## Step 2 — round 5 (against the round-4 fix: §20 in full, §20.3's six-position table and its judgement, §20.6's hand replication and its numbers, §20.7's sweep tallies, and the five new correction blocks)
+
+VERDICT: NOT READY
+Counts: 0 High, 0 Medium, 3 Low
+
+### Finding 1 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2442-2448, 2674-2680`
+
+> “*no existing hit was reworded away* — every inventoried hit lives in a file its own guard sweeps, so those two are inside what the gates cover.”
+
+What is wrong: Sweeping the file does not prove that an existing `Hit` survived. `complaints_against` compares only the count for each `(file, phrase)` key. One occurrence can be reworded away while another occurrence of the same phrase is added elsewhere in that file, leaving the count and both guards green. The module documentation expressly identifies this same-key substitution limit. Direct revision comparison shows that no hit actually moved in this commit, but the gates do not establish it.
+
+Why it matters: The correction answers one overclaim about green guards by introducing another, now about the comparison’s positional strength.
+
+Suggested remedy: Keep “86 / 140 unchanged,” but narrow the gate claim to “no inventoried `(file, phrase)` count changed.” Attribute exact hit/window preservation to a direct diff or matcher comparison, not to the guards.
+
+### Finding 2 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2743-2788, 2824-2833`
+
+> “over the record returns **36** lines”
+>
+> “returns **13** lines … returns **60**”
+>
+> “over the record returns **23** lines”
+
+What is wrong: Those counts are correct for `2695cbb~1`, before §20 and its correction blocks were appended, but the shipped record does not say so. Re-running the printed searches over the shipped file returns 66, 32 plus 77, and 49 lines respectively—not 36, 13 plus 60, and 23. §20’s own prose necessarily adds matches.
+
+Why it matters: The measurements are historically sound but not reproducible from the revision the record presents, precisely the ambiguity earlier correction blocks take care to avoid.
+
+Suggested remedy: Bind all three tallies explicitly to `2695cbb~1`, or say they were taken before §20 was appended. Do not update them as if they were evergreen counts.
+
+### Finding 3 — Low — sentence
+
+`docs/decisions/2d-4a-C-notes.md:2816-2819`
+
+> “the three gate tables of §16, §17.7, §18.7 and §19.9”
+
+What is wrong: Four gate tables are listed, not three. The surrounding total of thirteen tables works only when all four are included: the corrected §19.6 table plus twelve others.
+
+Why it matters: This is another false arithmetic sentence inside the subsection specifically auditing accounting errors.
+
+Suggested remedy: Change “three gate tables” to “four gate tables.” Also clarify that §16 was included in addition to every table in §17–§19.
+
+### What I checked and cleared
+
+- §20.3’s six-position table is correct row by row: all six removed identity; five explicitly say “second traversal”; only the two guard test docs state that nothing couples the traversals; the module overview states neither.
+- Narrowing the record instead of enlarging `prose_sweep.rs`’s module documentation remains the right judgment. The existing link avoids duplicating a detailed limitation within one module.
+- An independent in-memory replication matched all 140 retained-state and 86 liveness inventory keys over 70 selected files per guard, with zero count disagreements.
+- The reported own-family totals and splits reproduce exactly: 308 = 95/192/21 and 196 = 72/106/18.
+- The retained-state remainder divides exactly into 6 matches in the first module-doc run, 11 in the later header run, and 4 in the wrapped-claim test.
+- Across `2bd7bd5~1..2bd7bd5`, both own-family totals, per-phrase counts, and matched-window multisets are unchanged. The same 308/196 result holds across `e75ec2b~1..e75ec2b`.
+- Round 3 added 13 lines to each guard, including exactly 20 added `///` lines.
+- §20.6’s sharpest conclusion is factually true for the round-3 commit. Extending the comparison across both families and all three edited source files found zero gained or lost matched windows; Finding 1 concerns only the claim that the guards proved this.
+- The §20.7 tallies 36, 13 plus 60, and 23 reproduce exactly against `2695cbb~1`; Finding 2 is their missing revision scope.
+- The 224 retained-state hits over 29 files, the reverse-inventory 29/20 file counts, and §20.8’s +517 decision-record line delta hold.
+- All five new correction blocks accurately identify the previous text and its substantive correction.
+- Keeping adjacent historical corrections remains defensible, though reorganizing §18–§19 before adding more annotations would now improve readability.
+- The supplied host gate results are not contradicted by the source or diffs. No source file changed in this fix round.
+- Sandbox limit: temporary here-document creation was denied. The same read-only analyses were run in memory, so no requested check remained blocked.
+
+### Verdict rationale
+
+The code and the substantive own-family measurement hold, but the round-4 record introduces three new Low sentence defects: an overclaim about what count-based guards prove, unscoped historical `rg` counts, and another false table-count sentence. These are new defects in this fix round, not restatements of wording already corrected.

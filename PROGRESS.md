@@ -3664,6 +3664,121 @@ the instruction was not merely principled — it was cheaper.
 
 ---
 
+## Verification — Phase 2d-4a-C step 2, review round 5 (NOT READY — 0 High, 0 Medium, 3 Low; **the fix is in the tree, every gate green, and round 6 is OWED**)
+
+Appended verbatim to `docs/reviews/phase-2d-4a-C.md` under `## Step 2 — round 5`. Codex ran
+**read-only** and wrote no file. Job `task-mtbtk4tg-ombcs4`, high effort, **~11 min**. Record
+`docs/decisions/2d-4a-C-notes.md` §21.
+
+The only edit to the reviewer's text was dropping the Codex session-ID trailer — **no heading
+demotion**, for the third round running. The append is **66 insertions, 0 deletions**.
+
+**The watchdog was killed mid-wait and the job was not.** `codex-wait.sh`'s known false-stall is why
+this project polls the **log file's mtime**; this time the poll process itself died while
+`node "$CC" status` showed `running` with a live `progressPreview` at 7m40s and `updatedAt` frozen
+13 s after `startedAt` — the same frozen-`updatedAt` signature. The watchdog was relaunched against
+the same job and it completed normally. **Do not re-dispatch on a dead watchdog; check the job.**
+
+### The round, in one sentence
+
+**Round 5 is the fifth consecutive round whose entire finding list is a previous fix round's own
+work** — and it is the first round of this phase to **independently re-derive the fix round's own
+measurements** rather than reason about them, reproducing every number in §20.6 from its own
+in-memory replication of the sweep.
+
+### The three findings, and what answers each
+
+| # | Sev | Kind | The finding | The fix |
+|---|---|---|---|---|
+| 1 | Low | sentence | *"no existing hit was reworded away — every inventoried hit lives in a file its own guard sweeps, so those two are inside what the gates cover"* attributes to the **guards** something their comparison cannot establish. `complaints_against` compares only the **count** for each `(file, phrase)` key, so one occurrence can be reworded away while another of the same phrase appears elsewhere in that file and both guards stay green. **Round 4's finding 4 was the first half of this exact shape; round 4's own fix wrote the second half** | §20.5 and §21.2. Green guards now claim only *no inventoried count changed* and *no un-inventoried key appeared*. *No hit was reworded away* is re-attributed to the thing that actually established it — a **three-step diff argument the fix round ran**: all hits live in inventoried files (29 / 20); rounds 2 and 3 touched three source files, of which the inventories name exactly one; and neither diff contains that phrase, not even as context |
+| 2 | Low | sentence | §20.7 prints `rg` searches beside their tallies — **36**, **13 plus 60**, **23** lines — which are correct for `2695cbb~1` but **carry no revision**. Re-run over the shipped record they return 66, 32 plus 77, and 49, because §20's own prose necessarily adds matches. The measurement is historically sound and not reproducible from the file that presents it | §21.3. All three tallies are **bound inline to `2695cbb~1`** and the historical figures kept — **not updated**, which would have destroyed the measurement. The fix round's sweep then found the same shape twice more, including §17.4's `git show HEAD:<path>` table, bound to `2ce4e47` |
+| 3 | Low | sentence | *"the three gate tables of §16, §17.7, §18.7 and §19.9"* lists **four**, and the surrounding total of thirteen only works when all four are counted — a false arithmetic sentence inside the subsection that audits accounting errors | §21.4. **Four**, with the derivation written out: §16 (1) + §17 (4) + §18 (4) + §19 (4) = 13 |
+
+### The reviewer was wrong about one thing, and the fix round checked rather than complied
+
+Finding 1 said *"The module documentation expressly identifies this same-key substitution limit"*,
+meaning `prose_sweep.rs`. **It does not.** The limit is stated in each **check**, not in the shared
+machinery — `retained_state_contract.rs:60-63` and `liveness_contract.rs:25-26` — because
+`prose_sweep.rs` explicitly defers inherited limits to the checks that use it. The orchestrator
+verified this independently: `rg` for the limit's wording over `prose_sweep.rs` returns **nothing**,
+and the retained-state guard's module header carries it verbatim (*"the key is `(file, phrase)`, so
+swapping one recorded sentence for a different sentence using the same phrase moves no count"*). The
+citation went where the sentence actually lives. **A reviewer's incidental attribution is a claim like
+any other**, and this phase's whole subject is prose outrunning its code.
+
+### The sweeps — for the shape, not the words
+
+Three shapes, each **bound to a revision**, which is finding 2's own lesson applied to the fix (§21.5):
+
+- **Shape A** — a claim attributing to the guards, or any green gate, a property their count-based
+  comparison cannot establish. 21 lines; 2 cited, **one found beyond** — §18.6's round-4 block, on the
+  *appearance* direction — 17 left in seven kinds. All five gate tables read directly: nothing.
+- **Shape B** — a measurement printed with a re-runnable command but no revision bound. 43 lines, 23
+  of them in §17–§20; **two found beyond** (§17.4's table and its `git show HEAD:`, and §17.6's two
+  sentences), 12 left, two of those re-run to confirm.
+- **Shape C** — an enumeration whose stated count disagrees with the items it lists. 30 + 78 pattern
+  lines and **21 tables re-derived row by row**; **three found beyond**, one of which had been shipped
+  at **`65a0138`** and missed by all five rounds: §13.3's *three rows are mixed* over **two**.
+
+### What round 5 confirmed independently, and what it did not
+
+Round 5 ran **its own in-memory replication** of the sweep and reproduced every figure §20.6 asserted
+from a scratch script: 140 of 140 retained-state and 86 of 86 liveness inventory keys over the 70
+files each guard selects with zero count disagreements; **308 = 95 / 192 / 21** and
+**196 = 72 / 106 / 18**; the **6 / 11 / 4** reading of the 21; unchanged per-phrase counts and
+matched-window multisets across `2bd7bd5~1..2bd7bd5` **and** `e75ec2b~1..e75ec2b`; 13 lines added to
+each guard including exactly **20** added `///` lines; 224 hits over 29 files; the reverse-inventory
+29 / 20; and §20.8's **+517** line delta. It also cleared §20.3's six-position table **row by row**,
+and cleared the judgement not to grow `prose_sweep.rs`'s module doc.
+
+**Two agreeing implementations of a measurement are still not a guard.** §21.6 records the
+strengthening and stops there: nothing in the workspace re-runs either implementation, and §21.9
+item 5 keeps the self-skip hole open with no owner.
+
+### The gates — measured on this tree by the orchestrator, not inherited from the worker
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1313** passed, **0** failed, 26 result lines — **unmoved**, and necessarily: **no source file changed** |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **20/20**, 268 filtered out, 79.92 s, run alone after `pkill` |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo doc --workspace --no-deps` | exit 0, **73** `links to private item`, **zero** unresolved |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **empty** — the architecture rule holds |
+| Inventories and shapes | **86** / **140** entries and **61** / **88** shapes, **unmoved by construction** — `git status` names no file under `src-tauri/` |
+| Source line counts | `prose_sweep.rs` **405**, `retained_state_contract.rs` **1305**, `liveness_contract.rs` **874** — all three **unchanged**, verified by `wc -l` |
+
+`git diff --stat` is **two files, both under `docs/`**: `2d-4a-C-notes.md` 2954 → **3593** lines and
+the review file's 66-line append. The three frontend figures — **431** / **2125** / **184** — are
+carried forward **unverified**, for the fifth consecutive round.
+
+**The host scar bit the fix round and was recovered from, and the account of it is an inference.** Its
+first `cargo test --workspace` failed, exit 101, `279 passed; 9 failed`, all nine `watch_check::`
+baseline-scan timeouts, with an orphaned test binary left by a run it had killed mid-compile. After
+`pkill` the re-run passed and the bin target went 333 s → 110 s. **Nobody re-ran the failure with the
+orphan removed and the build cold to separate the two causes**, and §21.8 and §21.9 item 7 say exactly
+that rather than presenting the diagnosis as measured. The orchestrator's own verification pass
+overlapped the worker's at one point; both of the orchestrator's runs came back clean (1313/0 and
+20/20), so nothing was contaminated.
+
+### What this round leaves open, said plainly
+
+- **§21.2's diff argument is a three-step chain and nothing in the workspace re-derives any step.**
+  It is reproducible from `2bd7bd5~1..2bd7bd5`, `e75ec2b~1..e75ec2b` and `231907e` by anyone who runs
+  the four commands §21.2 names — that is the whole of its evidence. Step 2 in particular stops being
+  true the moment any phrase of either family is written into a swept guard source.
+- **Seven more correction blocks, and §19 and §20 now each hold sentences carrying two stacked
+  blocks.** A reader who stops at the first reads a narrowing that has itself been narrowed. The fix
+  round **kept annotating and said so, with its reason, in §21.7** — but round 5 itself said
+  reorganizing §18–§19 would now improve readability, and §21.9 item 1 records that the argument for
+  doing it is stronger after this round than before.
+- **Two step-1 tallies in §3 and §12.2 read source, carry no revision, and were not re-run.** They
+  were left because step 1 closed READY at its round 4; §21.9 item 6 records plainly that **this is
+  not the same as their having been checked**.
+- **§21.5's account of §19.6's finding-4 search survives only because §21 deliberately avoided the
+  pattern's phrases** — a promise no later section is bound by, left unbound to avoid an eighth
+  correction block on a sentence that is still true.
+
 ## Verification — Phase 2d-4a-C step 2, review round 4 (NOT READY — 0 High, 0 Medium, 4 Low; **the fix is in the tree, every gate green, and round 5 is OWED**)
 
 Appended verbatim to `docs/reviews/phase-2d-4a-C.md` under `## Step 2 — round 4`. Codex ran
@@ -10968,98 +11083,105 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN; ITS REVIEW ROUNDS 1, 2, 3 AND 4 ARE DONE (all four NOT READY) AND ALL FOUR FIXES ARE IN THE TREE. THE NEXT ACTION IS **ROUND 5**, AGAINST THE ROUND-4 FIX.**
+### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN; ITS REVIEW ROUNDS 1–5 ARE DONE (all five NOT READY) AND ALL FIVE FIXES ARE IN THE TREE. THE NEXT ACTION IS **ROUND 6**, AGAINST THE ROUND-5 FIX.**
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
 and answered: **build the mechanism first.** Round 7 is **deferred, not cancelled**; when it runs it
 reviews the mechanism as well as the round-6 fix. Its brief is preserved verbatim below and is still
-the spec for it.
+the spec for it. **Note the collision of names**: that deferred "round 7" belongs to phase **2d-4a**,
+and the rounds counted here are **2d-4a-C step 2's**. They are different sequences.
 
 - **2d-4a-C-1 — the contract stated once, and the pointers. ✅ COMPLETE AND CLOSED.** Four review
-  rounds; rounds 1–3 NOT READY and each fixed, round 4 **READY with 0 findings**, which cleared all
-  six attack-list items and stated that no round 5 is warranted. Record §12.
-- **2d-4a-C-2 — the check. ✅ IMPLEMENTED, every gate green, ⬜ NOT CLOSED — rounds 1, 2, 3 and 4
-  done, round 5 owed.** `prose_sweep.rs` (the shared machinery, plus `complaints_against` from round
-  1's fix, `selected_files` from round 2's and `SelectedFile` from round 3's) and
-  `retained_state_contract.rs` (the check). Round 1: **NOT READY, 1 Low, the phase's first *code*
-  defect** (zero as an "unseen" sentinel in both guards). Round 2, against that fix: **NOT READY,
-  2 Low**, one a sentence and one a *behaviour* defect — and the orchestrator's own sweep found **two
-  further instances of the first one's shape** the reviewer did not name. Round 3, against that fix:
-  **NOT READY, 4 Low** — one code and three sentences, every one a defect the round-2 fix introduced.
-  Round 4, against that fix: **NOT READY, 4 Low — all four sentences, and the first round of the four
-  to find NO code defect at all.** All four fixes are in the tree and green. Record §13–§20. See the
-  verification sections "Phase 2d-4a-C step 2, review round 4", "… round 3", "… round 2" and
-  "Phase 2d-4a-C step 2".
+  rounds; rounds 1–3 NOT READY and each fixed, round 4 **READY with 0 findings**. Record §12.
+- **2d-4a-C-2 — the check. ✅ IMPLEMENTED, every gate green, ⬜ NOT CLOSED — rounds 1–5 done, round 6
+  owed.** `prose_sweep.rs` (the shared machinery, plus `complaints_against` from round 1's fix,
+  `selected_files` from round 2's and `SelectedFile` from round 3's) and `retained_state_contract.rs`
+  (the check). Round 1: **NOT READY, 1 Low, the phase's first *code* defect.** Round 2: **NOT READY,
+  2 Low**, and the orchestrator's own sweep found **two further instances** the reviewer did not name.
+  Round 3: **NOT READY, 4 Low** — one code, three sentences, every one a defect the round-2 fix
+  introduced. Round 4: **NOT READY, 4 Low — all sentences, and the first round to find NO code defect
+  at all.** Round 5: **NOT READY, 3 Low — all sentences again, and the first round to *independently
+  re-derive* the fix round's own measurements** rather than reason about them. All five fixes are in
+  the tree and green. Record §13–§21. See the verification sections "Phase 2d-4a-C step 2, review
+  round 5", "… round 4", "… round 3", "… round 2" and "Phase 2d-4a-C step 2".
 
-#### The next action: **step 2 review round 5**, against the round-4 fix
+#### The next action: **step 2 review round 6**, against the round-5 fix
 
 **A fix is a change, and the round that reviews it is not optional** — in this phase that is a
-measured record, not a precaution. **Four consecutive rounds have now found their entire finding list
-in the previous fix round's own words.** Step 1's rounds 1–3 each found the previous fix's own new
-sentence defective, twice at the very clause the round before had just corrected. Step 2's round 2
-found round 1's fix had corrected **one of three** positions carrying one false sentence; round 3
-found four defects in round 2's fix and nothing else; round 4 found four more in round 3's fix — and
-was the first of the four to clear the **code** outright, so all four of its findings are sentences.
+measured record, not a precaution. **Five consecutive rounds have now found their entire finding list
+in the previous fix round's own words.** Round 4 was the first to clear the code outright; round 5
+was the first to re-run the fix round's measurements itself, and it still found three sentences
+wrong. Round 5's finding 1 is the sharpest precedent for what round 6 should look for: **round 4's
+fix answered an overclaim about what green guards prove by writing a second overclaim, this one about
+what the count-based comparison proves.** The same shape, one level in.
 
-**Round 5's target, and §20.10 is the work list the fix round itself wrote:**
+**Round 6's target, and §21.9 is the work list the fix round itself wrote:**
 
-1. **§20.3's table of six positions — a hand reading with nothing behind it.** It claims which of the
-   six corrected homes state the second traversal (five) and which state the no-coupling limitation
-   (two), and that `prose_sweep.rs`'s module doc states neither. **Read all six and check the table
-   row by row.** A later edit to any of them makes a row false with no test failing, and this is the
-   same class of claim the four previous rounds kept getting wrong, now written in a denser form.
-2. **The judgement §20.3 records, which a round could weigh the other way.** Finding 2 could have
-   been answered by **growing `prose_sweep.rs`'s module doc** until *every corrected position* became
-   true; the fix narrowed the record instead, on three grounds (the doc surface has grown three
-   consecutive rounds and shrunk in none; a second copy of one claim in one module is this project's
-   named failure mode; the record must fit the code). **Was that the right call?** The narrowed text
-   now leans on a reader following a link to `selected_files`, and nothing enforces that the link or
-   that paragraph survives.
-3. **§20.6's inspection is a hand replication, and its validation is an agreement, not a proof.** It
-   reproduces both inventories exactly over the 70 selected files (140/140, 86/86), which is strong
-   evidence that it matches the Rust — but it is a **second implementation** of `prose_units` and the
-   substring search, which is precisely what §18.8 item 4 refused to build inside a test, and **it
-   lives in a scratch directory, not the repository.** Nothing in the workspace re-runs it. §20.10
-   item 3 names the two honest options: a test that sweeps each guard's own source with its own
-   family and pins the **count**, or an accepted permanent hole. **Is the measurement worth what §20.6
-   claims for it?**
-4. **The counts a reader must take from that scratch script** — 308 and 196; the 95/192/21 and
-   72/106/18 splits; the 6/11/4 reading of the 21; 140/140 and 86/86; the 20 added `///` lines.
-   §19.4's assertion arithmetic was last round's equivalent exposure and round 4 checked it against
-   the diff; **this is a larger surface of the same kind.** They are reproducible from
-   `2bd7bd5~1..2bd7bd5` and the shipped tree by anyone who rebuilds the replication — that is the
-   whole of their evidence.
-5. **§20.6's sharpest sentence**, which is a claim about **two revisions of two files and nothing
-   else**: *the claim §19.7 made is true for this commit — it was simply not the guards that
-   established it*. Does it claim exactly that and no more?
-6. **§20.7's four sweep counts** — 36 / 73 / 0-further-tables / 23 `rg` lines, with one found beyond
-   the citation in each of findings 2, 3 and 4 and zero in finding 1. They are **hand tallies of `rg`
-   output**, which is exactly the kind of arithmetic finding 3 was about.
-7. **§20 itself, all ten subsections** — the record written by the round under review — plus the
-   **five new correction blocks** in §18.6, §19.2, §19.3, §19.6 and §19.7. §20.10 item 5 says §19 has
-   now become what §18 was, a section that cannot be read straight. **Is that honest, or is it the
-   point at which reorganizing beats annotating?** Round 4 cleared the annotate-rather-than-delete
-   policy as defensible; round 5 may weigh the accumulated cost differently and should say so.
+1. **§21.2's *the guards contributed the premise of step 1 and nothing else*.** This is a claim about
+   what two green guards prove, which is the exact sentence class that has now failed **five rounds
+   running**, written by the round that was fixing the previous instance of it. Read it against
+   `complaints_against` and against both guards' module headers — the limit lives at
+   `retained_state_contract.rs:60-63` and `liveness_contract.rs:25-26`, **not** in `prose_sweep.rs`,
+   which defers inherited limits to each check.
+2. **§21.2's three-step diff argument, and whether each step claims exactly what it establishes.**
+   Step 1 depends on both guards being green at the revisions in question; step 2 on the inventories
+   naming exactly one of the three edited files, **which stops being true the moment any phrase of
+   either family is written into a swept guard source**; step 3 on the `"one entry per"` occurrence
+   sitting on a non-comment line, which is a property of `prose_units`' definition of a unit rather
+   than of the sentence. **Nothing in the workspace re-derives any of the three.** They are
+   reproducible from `2bd7bd5~1..2bd7bd5`, `e75ec2b~1..e75ec2b` and `231907e` by anyone who runs the
+   four commands §21.2 names.
+3. **§21.5's hand tallies, which are the shape round 5's finding 3 was about.** Sweep A's 21 lines
+   and their split into **seven kinds**; sweep B's 43 and 23 and its twelve; sweep C's 30, 78 and 21.
+   Each is bound to `2695cbb` or `231907e` — check the bindings as well as the counts. **The
+   seven-kind split of the 17 is the likeliest to be wrong, because it partitions rather than
+   counts.**
+4. **§21.4's table of 1 + 4 + 4 + 4 = 13** — an enumeration written inside the fix for a false
+   enumeration.
+5. **§21.6's *the strongest evidence this record holds for that property***, a comparative claim over
+   evidence this record has nowhere enumerated, hedged by a following clause rather than by a count.
+   Does it claim more than it can support?
+6. **§21.8's deviation paragraph.** Its two named causes for the first workspace run's nine
+   `watch_check::` failures — an orphaned test binary competing for the watch machinery, and a
+   just-completed build — are an **inference** from a 333 s → 110 s change and from what was running,
+   **not a controlled measurement**. Nobody re-ran the failure with the orphan removed and the build
+   cold to separate them. Is the paragraph honest about that?
+7. **The two step-1 tallies §21.9 item 6 leaves open**: §3's *45 passages now point, verified by
+   `rg -n 'retained_state'` over both trees*, and §12.2's *`rg -n 'decide\(' src-tauri/src/ crates/
+   --type rust` returns **exactly three** call sites*. Both read **source**, so this record's growth
+   cannot move them — but **the source has changed since each was written and neither was re-run**.
+   They were left because step 1 closed READY; that is not the same as their having been checked.
+   **Re-run both.**
+8. **§21 itself, all nine subsections**, plus the **seven new correction blocks and one note**.
+   §19 and §20 now each hold sentences carrying **two stacked blocks**, so a reader who stops at the
+   first reads a narrowing that has itself been narrowed. Round 5 said reorganizing §18–§19 would now
+   improve readability; §21.7 refused and gave its reason, and §21.9 item 1 records that the argument
+   for reorganizing is stronger after this round than before it. **If you think the record has passed
+   the point where annotating beats rewriting, say so plainly — that is a decision the owner should
+   see made, not drift into.**
 
 **Carry the standing instruction**: *if everything you find is a restatement of wording already
 fixed, with no new substance, say so plainly in the verdict* — and **a clean READY is a valuable
-answer the reviewer should be told to give if the text holds.** Rounds 2, 3 and 4 were each given
-that instruction and none took the easy exit. Round 4 cleared the read path as genuinely lossless,
-cleared `SelectedFile`'s untestable non-UTF-8 argument as sound and no stronger than its support,
-cleared §19.4's assertion arithmetic **against the diff** (retained-state 4→7, liveness 3→7), cleared
-the reverse inventory comparison's 29 and 20 files, cleared the refusal to widen `sweep` as
-defensible, cleared the correction-block policy, and cleared the `dispatch_check.rs` position as
-deliberately left — then found the four things that were wrong.
+answer the reviewer should be told to give if the text holds.** Rounds 2–5 were each given that
+instruction and none took the easy exit. Round 5 cleared §20.3's six-position table **row by row**,
+cleared the judgement not to grow `prose_sweep.rs`'s module doc, and **reproduced from its own
+in-memory replication** every figure §20.6 had asserted from a scratch script — 140/140 and 86/86
+inventory keys, 308 = 95/192/21, 196 = 72/106/18, the 6/11/4 split, unchanged per-phrase counts and
+window multisets across two commit ranges, the 20 added `///` lines, 224 hits over 29 files, the
+29/20 reverse-inventory counts and the +517 line delta — and then found the three things that were
+wrong.
 
-**Append round 5's reply under `## Step 2 — round 5`** in `docs/reviews/phase-2d-4a-C.md`, which now
-holds step 1's four rounds and step 2's rounds 1, 2, 3 and 4.
+**Append round 6's reply under `## Step 2 — round 6`** in `docs/reviews/phase-2d-4a-C.md`, which now
+holds step 1's four rounds and step 2's rounds 1–5.
 
-#### The dispatch that works, measured across eight rounds
+#### The dispatch that works, measured across nine rounds
 
 Codex runs **read-only** and writes no file, so the brief must say the workspace may be read-only,
 that **its final message IS the deliverable**, that the caller captures it, and that a sandbox limit
-**must not affect the verdict**. Dispatch with the companion CLI directly rather than through the
+**must not affect the verdict**. Round 5 hit one — here-document creation was denied — ran the same
+analyses in memory, and said so inside the reply as a stated limit without hedging the verdict, which
+is exactly what the brief asks for. Dispatch with the companion CLI directly rather than through the
 subagent, so the verbatim reply is capturable:
 
 ```sh
@@ -11070,35 +11192,53 @@ node "$CC" result <job-id>                                              # after 
 
 `~/.claude/scripts/codex-wait.sh` **false-stalls on healthy jobs** — its `updatedAt` never advances —
 so poll the **log file's mtime** instead, with a hard deadline as well, and search `running`,
-`recent` **and** `latestFinished`, matching `id || jobId`. Durations so far: step 1 round 3 **301 s**,
-round 4 **141 s**, step 2 round 1 **604 s**, round 2 **262 s**, round 3 **302 s**, round 4 **402 s**,
-all at high effort.
+`recent` **and** `latestFinished`, matching `id || jobId`.
+
+**A dead watchdog is not a dead job, and round 5 proved it.** The poll process was killed mid-wait
+while the job ran on normally: `node "$CC" status <job-id> --json` showed `running` with a live
+`progressPreview` at 7m40s and `updatedAt` frozen 13 s after `startedAt`. **Check the job before
+concluding anything, and relaunch the watchdog rather than re-dispatching the review.** Note that
+`status` echoes the entire prompt back, so filter its output rather than reading it whole.
+
+Durations so far: step 1 round 3 **301 s**, round 4 **141 s**, step 2 round 1 **604 s**, round 2
+**262 s**, round 3 **302 s**, round 4 **402 s**, round 5 **~11 min**, all at high effort.
 
 **Only two edits to the reply are permitted**: demoting its internal `##` headings to `###` so the
 review file stays one `##` per round, and dropping the Codex session-ID trailer. Nothing else.
-**Rounds 3 and 4 each needed only the second of the two** — both briefs asked for `###` headings and
-nothing came back at `##`, so each reply went in with a single trailer line removed and not another
-character touched. Ask for the heading depth in the brief; it is one fewer edit to be trusted about.
+**Rounds 3, 4 and 5 each needed only the second of the two** — every brief asked for `###` headings
+and nothing came back at `##`. Ask for the heading depth in the brief; it is one fewer edit to be
+trusted about.
 
-#### The gate baseline — measured on this tree after round 4's fix, not inherited
+#### A reviewer's incidental attribution is a claim like any other
+
+Round 5's finding 1 said the same-key substitution limit is stated in *the module documentation*,
+meaning `prose_sweep.rs`. **It is not** — `prose_sweep.rs` defers inherited limits to each check, and
+the limit lives in the two guards' own headers. The fix round checked rather than complied and put
+the citation where the sentence actually lives; the orchestrator verified it independently. **Do not
+copy a reviewer's file/line attribution into the record without opening the file.**
+
+#### The gate baseline — measured on this tree after round 5's fix, not inherited
 
 - **`1313 / 431 / 2125 / 184`** (`cargo test --workspace` / `npm run check` files / `npm test` /
-  `npm run build` modules). **Unmoved by round 4's fix, and necessarily so: no source file changed.**
+  `npm run build` modules). **Unmoved by round 5's fix, and necessarily so: no source file changed.**
   `git diff --stat` for the round is two files, both under `docs/`. The three frontend figures are
   still carried forward **unverified** from 2d-4a round 6 and **must be re-measured by any step that
-  touches `src/`**; this is now the fourth consecutive round of the same carry.
+  touches `src/`**; this is the fifth consecutive round of the same carry.
 - `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
   `cargo doc --workspace --no-deps` exit 0 with **73** `private_intra_doc_links`, the pre-existing
   count, and **zero** unresolved links; `cargo tree -p espansoconfig-core | rg tauri` **empty**.
-- Source line counts, **all three unchanged** by round 4's fix: `prose_sweep.rs` **405**,
+- Source line counts, **all three unchanged** by rounds 4 and 5: `prose_sweep.rs` **405**,
   `retained_state_contract.rs` **1305**, `liveness_contract.rs` **874**. Inventory entries **86**
   liveness / **140** retained-state and shapes **61** / **88**, unmoved since `65a0138` and unmoved
-  **by construction** this round, since no file under `src-tauri/` was touched.
-- `docs/decisions/2d-4a-C-notes.md` is **2954** lines (was 2437 before round 4's fix).
-- **The host scar still binds.** Kill orphans (`pkill -f 'target/debug/deps/espansoconfig-'`), run the
-  workspace suite **once**, and stay off the machine. The single-threaded gate is
+  **by construction** for two rounds now, since no file under `src-tauri/` was touched.
+- `docs/decisions/2d-4a-C-notes.md` is **3593** lines (2954 after round 4's fix, 2437 before it);
+  `docs/reviews/phase-2d-4a-C.md` is **510**.
+- **The host scar still binds, and it bit round 5's fix round.** Kill orphans
+  (`pkill -f 'target/debug/deps/espansoconfig-'`), run the workspace suite **once**, and stay off the
+  machine — an orphaned bin target left by a killed run produces exactly the nine `watch_check::`
+  baseline-scan timeouts that look like a real failure. The single-threaded gate is
   `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` (**20/20**,
-  268 filtered out).
+  268 filtered out). **Do not run the workspace suite while another agent is running it.**
 
 #### What step 2 had to build — **the original spec, now DISCHARGED**. Kept as the record of what was asked; do not re-execute it. Check the delivered check against it if you want to audit the step.
 
@@ -11166,9 +11306,9 @@ the honesty as well as the shape.
 
 ```sh
 cd /Users/ccarpio/Developer/espansoConfig
-git status --short --untracked-files=all     # expect EMPTY after the round-4 commit `2695cbb`
-# docs/reviews/phase-2d-4a-C.md              # step 1 rounds 1-4, step 2 rounds 1-4 — read before anything else
-# docs/decisions/2d-4a-C-notes.md            # §20 is round 4 and its fix; §20.10 is round 5's work list
+git status --short --untracked-files=all     # expect EMPTY after the round-5 commit (see Git state)
+# docs/reviews/phase-2d-4a-C.md              # step 1 rounds 1-4, step 2 rounds 1-5 — read before anything else
+# docs/decisions/2d-4a-C-notes.md            # §21 is round 5 and its fix; §21.9 is round 6's work list
 # src-tauri/src/prose_sweep.rs               # complaints_against (r1), selected_files (r2), SelectedFile (r3)
 #                                            # — UNCHANGED by round 4's fix; its module doc is §20.3's judgement
 # src-tauri/src/retained_state_contract.rs   # the check; its SKIPPED doc (line 288) and the_sweep_reaches_both_trees
