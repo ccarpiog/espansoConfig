@@ -67,8 +67,9 @@
 //! that produced it,
 //! which is what places a reading that was already in hand when that window
 //! opened — the gate cannot reach a read that already happened; a **commit
-//! anchor** per path, which is what that stamp is compared against and which
-//! **outlives the app-write record** it was taken with, since nothing bounds how
+//! anchor** per path, which is what that stamp is compared against and whose
+//! life is [`espansoconfig_core::watch::retained_state`]'s clause 9 rather than
+//! the record's, since nothing bounds how
 //! long a completed settlement may wait to be delivered (this step's round-9
 //! second High); a **taken
 //! back settlement**, because the engine installs a stabilized state as tracked

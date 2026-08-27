@@ -649,13 +649,12 @@ impl WorkspaceSession {
     ///
     /// **The app-write ledger and the reconciliation queue are emptied here, in
     /// the same block.** Phase
-    /// 2d-3, the consult's Q2: a replacement discards every recorded app
-    /// write, every announced state — publications and markers alike — and the
-    /// epoch's sequence allocator
-    /// ([`WriteLedger::begin_epoch`]). Not tidiness — a document identity
-    /// survives a replacement, because the process-wide identity table is keyed
-    /// by path, so an entry kept across one could suppress an observation of a
-    /// **different** directory's file that happens to hash the same. The
+    /// 2d-3, the consult's Q2: this is the call site of
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 2, and
+    /// [`WriteLedger::begin_epoch`] is the half of it this paragraph is about.
+    /// Not tidiness — that contract's clause 1 is why an entry kept across a
+    /// replacement could suppress an observation of a **different** directory's
+    /// file that happens to hash the same. The
     /// adoption happens before the successor watcher is started, so the
     /// successor's first observation can never meet an epoch the ledger has not
     /// yet adopted. [`WriteLedger::begin_epoch`] takes the ledger's commit gate
@@ -701,12 +700,10 @@ impl WorkspaceSession {
             // states and sequences are discarded (the consult's Q2).
             self.ledger.begin_epoch(allocated.unwrap_or(NO_EPOCH));
             // The reconciliation queue adopts the same epoch in the same block
-            // and for the same reason (Phase 2d-4a): a sequence means nothing
-            // across epochs, and an entry kept across a replacement could
-            // describe a different directory's file, because the identity table
-            // is keyed by path for the life of the process. This call is the
-            // third way a stored entry leaves that queue — the one that does
-            // not depend on the entry, and the one no `discarded` counts.
+            // and for the same reason (Phase 2d-4a). What the two calls together
+            // scope, and why this one is the third way a stored entry leaves
+            // that queue, is `espansoconfig_core::watch::retained_state`,
+            // clauses 2 and 4.
             self.reconciliation
                 .begin_epoch(allocated.unwrap_or(NO_EPOCH));
             let watcher = match allocated {
@@ -1327,30 +1324,19 @@ impl WorkspaceSession {
     /// twice with the same value answers the same batch twice **when nothing
     /// was enqueued between the two calls and no replacement epoch was adopted
     /// between them**, and an answer lost on the way to the window costs no
-    /// more than the drain that repeats it. **A stored entry leaves this queue
-    /// in exactly three ways — a later drain acknowledges it, an overflow
-    /// evicts it, or the queue adopts a replacement epoch and discards
-    /// everything the previous one held**: past
-    /// [`crate::reconciliation::QUEUE_CAPACITY`] an undrained entry goes
-    /// unacknowledged and is counted in the batch's `discarded`, whose
-    /// answer is a whole-workspace reload rather than a repeated drain, while a
-    /// replacement — [`WorkspaceSession::open`], in the same block that empties
-    /// the ledger — is counted nowhere, because the open that caused it has
-    /// already replaced the workspace a reload would fetch and the batch's own
-    /// epoch is what makes the discarded history stale. Zero
-    /// asks for everything the current epoch still holds. **Within one epoch**
-    /// the batch's `newest_sequence` is never below the highest watermark this
-    /// session has been drained with under that epoch, so a drain arriving out
-    /// of order — which the consult's Q7 item 5 requires 2d-5 to handle —
-    /// cannot walk a caller's watermark backwards. **Across a replacement it
-    /// falls, and that is not a walk-back**: the same `begin_epoch` that
-    /// discards the pending set discards the watermark, and the successor's
-    /// sequences start again, so the first batch of a new epoch may name a
-    /// smaller number than the last batch of the old one. A caller separates
-    /// them by the batch's own `epoch` and installs nothing from a batch whose
-    /// epoch it is not showing —
-    /// [`crate::reconciliation::ReconciliationBatch::newest_sequence`] is the
-    /// whole claim.
+    /// more than the drain that repeats it. Zero asks for everything the current
+    /// epoch still holds.
+    ///
+    /// **What a stored entry's retention, this queue's bound and the batch's
+    /// `newest_sequence` are scoped to is
+    /// [`espansoconfig_core::watch::retained_state`]** — clauses 4 to 7 — and
+    /// this doc points at it rather than restating it. Two consequences are
+    /// this command's own and stay here: the out-of-order drain the consult's Q7
+    /// item 5 requires 2d-5 to handle is exactly why clause 6 is worth stating,
+    /// and a replacement is [`WorkspaceSession::open`], in the same block that
+    /// empties the ledger, so a caller separates two epochs' numbers by the
+    /// batch's own `epoch` and installs nothing from a batch whose epoch it is
+    /// not showing.
     ///
     /// It reads the workspace and writes nothing to disk. What it does mutate is
     /// this session's own queue, which is why it is not on the read-only
@@ -3490,21 +3476,12 @@ pub fn read_backup_text(
 ///   adopted between them, so a lost answer costs no more
 ///   than the drain that repeats it — **short of an overflow**, which evicts
 ///   an undrained entry unacknowledged and reports it in the
-///   batch's `discarded`, whose answer is a whole-workspace reload. Those are
-///   the whole of how a stored entry leaves the queue: **a later drain
-///   acknowledges it, an overflow evicts it, or the queue adopts a replacement
-///   epoch and discards everything the previous one held.** The third is
-///   counted in no `discarded`, because the open that causes it has already
-///   replaced the workspace a reload would fetch, and the batch's own epoch is
-///   what tells a caller its history belongs to another workspace. **Within one
-///   epoch** the answer's `newest_sequence` never falls below a watermark this
-///   session has already been drained with under that epoch, so a caller showing
-///   that epoch stores it unconditionally, out-of-order drains included. **A
-///   replacement epoch resets it with everything else**, so the successor's
-///   first answer may be smaller than the predecessor's last; that is visible as
-///   a different `epoch` and not as a walk-back, since a sequence means nothing
-///   across two epochs. See
-///   [`crate::reconciliation::ReconciliationBatch::newest_sequence`].
+///   batch's `discarded`, whose answer is a whole-workspace reload. How long a
+///   stored entry survives, what the batch's two numbers are scoped to, and
+///   which of the losses is counted where are
+///   [`espansoconfig_core::watch::retained_state`]'s clauses 4 to 7; see
+///   [`crate::reconciliation::ReconciliationBatch::newest_sequence`] for the
+///   field a caller stores.
 ///
 /// # Errors
 ///

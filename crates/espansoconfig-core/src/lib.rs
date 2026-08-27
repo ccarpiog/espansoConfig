@@ -200,7 +200,9 @@ pub use wire::WirePath;
 /// of them bounded by something the process already holds in RAM.
 pub const MAX_EXACT_WIRE_INTEGER: u64 = 9_007_199_254_740_991;
 
-/// Session-local identity of a **file**, for the life of the process.
+/// Session-local identity of a **file**, for the life of the process —
+/// [`watch::retained_state`]'s clause 1, and the scope every consumer of one of
+/// these numbers inherits.
 ///
 /// Deliberately opaque and *not* a path, and deliberately **not a position**:
 /// `crate::workspace` mints it from a monotonic counter keyed by path, so

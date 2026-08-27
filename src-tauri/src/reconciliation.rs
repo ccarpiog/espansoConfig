@@ -32,7 +32,9 @@
 //!    `crate::ledger`'s, minted under its own mutex, and this module never
 //!    invents one. [`ReconciliationQueue::begin_epoch`] empties the queue when
 //!    the session adopts a new epoch, so a sequence never has to be compared
-//!    across two of them.
+//!    across two of them — which is
+//!    [`espansoconfig_core::watch::retained_state`]'s clause 3, and the scope
+//!    every number in this module inherits from it.
 //! 2. **A drained batch is sequence-ordered**, by construction rather than by
 //!    arrival: the pending set is a `BTreeMap` keyed by the sequence, so the
 //!    order a batch comes out in is the order of the keys and not the order two
@@ -52,9 +54,10 @@
 //!    file genuinely held `B` in between and neither `A` is adjacent to the
 //!    other. And the fold happens at **drain**, over the complete set, rather
 //!    than at enqueue over the history so far; the price is that a folded entry
-//!    keeps its slot against [`QUEUE_CAPACITY`] until a drain acknowledges it,
-//!    **an eviction removes it, or a replacement epoch discards it**, since it
-//!    is folded out of the batch and not out of the queue.
+//!    is folded out of the *batch* and not out of the *queue*, so it holds its
+//!    slot against [`QUEUE_CAPACITY`] and leaves on
+//!    [`espansoconfig_core::watch::retained_state`]'s terms like any other
+//!    stored entry.
 //!
 //!    **The capacity bound is arrival-order independent too, and it has to be
 //!    or this guarantee would be conditional on it.** An overflow evicts
@@ -75,34 +78,26 @@
 //!    keeps everything above it, and returns the coalesced form of what it
 //!    kept.
 //!
-//!    **The retention boundary, in the one wording every position in this
-//!    module and in `crate::commands` states.** An admitted observation is
-//!    **stored** unless it is one of the two arrivals no later drain could
-//!    return — a replaced epoch, or a sequence at or below the acknowledged
-//!    watermark ([`ReconciliationQueue::enqueue`] refuses both before storing
-//!    anything, and counts the second in [`ReconciliationBatch::discarded`]).
-//!    A **stored** entry then leaves this queue in exactly three ways: **a
-//!    later drain acknowledges it, an overflow evicts it, or the queue adopts
-//!    a replacement epoch and discards everything the previous one held**
-//!    ([`ReconciliationQueue::begin_epoch`]). The first is the consumer saying
-//!    it holds the observation; the second is a loss counted in
-//!    [`ReconciliationBatch::discarded`], and what it costs is the
-//!    whole-workspace reload a non-zero `discarded` obliges, never a repeated
-//!    drain. **The third is not counted in [`ReconciliationBatch::discarded`]
-//!    at all**, and that is deliberate rather than an omission: the successful
-//!    open that causes it replaces the authoritative workspace outright, so the
-//!    discarded entries describe a directory nothing is showing any more, and
-//!    every batch of the epoch they belonged to is already stale by
-//!    [`ReconciliationBatch::epoch`] whatever it holds. Counting them would
-//!    oblige a reload of a workspace the open has just performed.
+//!    **The retention boundary is
+//!    [`espansoconfig_core::watch::retained_state`]'s**, whose clause 4 states
+//!    it once for both crates: this module is where it is *implemented*, and
+//!    what belongs here is what this queue does at the two ends of it. An
+//!    admitted observation is **stored** unless it is one of the two arrivals no
+//!    later drain could return — a replaced epoch, or a sequence at or below the
+//!    acknowledged watermark ([`ReconciliationQueue::enqueue`] refuses both
+//!    before storing anything, and counts the second in
+//!    [`ReconciliationBatch::discarded`]). Of the three ways a **stored** entry
+//!    then leaves, the one this module decides is the overflow
+//!    ([`QUEUE_CAPACITY`] and [`evictable_sequence`]); the other two are the
+//!    caller's watermark ([`ReconciliationQueue::drain`]) and the session's
+//!    replacement ([`ReconciliationQueue::begin_epoch`]).
 //!
-//!    **Three, and the case that would be a fourth cannot arise**: two
-//!    observations at one sequence would make the later arrival replace the
-//!    earlier in the pending map, counted by nothing, and `crate::ledger`'s
-//!    allocator mints each sequence once within an epoch, so there is no such
-//!    pair. Nothing in the types forces that, which is why
-//!    [`ReconciliationQueue::enqueue`] says it where the insertion is rather
-//!    than leaving it to be inferred here.
+//!    **The case that would be a fourth cannot arise**: two observations at one
+//!    sequence would make the later arrival replace the earlier in the pending
+//!    map, counted by nothing, and `crate::ledger`'s allocator mints each
+//!    sequence once within an epoch, so there is no such pair. Nothing in the
+//!    types forces that, which is why [`ReconciliationQueue::enqueue`] says it
+//!    where the insertion is rather than leaving it to be inferred here.
 //!
 //!    So an answer lost on the way to the window costs no more than the drain
 //!    that repeats it **when nothing is enqueued between the two drains and no
@@ -133,7 +128,12 @@
 //!
 //! What the whole observation pipeline does and does not promise about a path
 //! ever being looked at again is [`espansoconfig_core::watch::liveness`], which
-//! this module points at rather than restating.
+//! this module points at rather than restating. **How long anything it retains
+//! survives, and under what scope, is
+//! [`espansoconfig_core::watch::retained_state`]**, pointed at the same way and
+//! for the same reason — the queue's pending set, its watermark and its loss
+//! count are three of that contract's subjects, and the identity register above
+//! is a fourth.
 //!
 //! # Where the identities come from
 //!
@@ -151,8 +151,9 @@
 //!   `espansoconfig_core::workspace::identity_already_issued` reads the
 //!   process-wide, path-keyed table every identity in this application comes out
 //!   of — a `Workspace`'s at discovery, the observation engine's at projection,
-//!   this module's at a non-UTF-8 addition. It is **not scoped to a workspace or
-//!   an epoch**: a path keeps one number for the life of the process.
+//!   this module's at a non-UTF-8 addition. What its answer is scoped to is
+//!   [`espansoconfig_core::watch::retained_state`]'s clause 1, and it is not
+//!   this queue's epoch.
 //! - *Does the **open** workspace resolve that path today?* Only
 //!   `Workspace::document_id` answers that, and the two answers genuinely
 //!   differ — a file created after the workspace was opened has an identity and
@@ -245,6 +246,12 @@ use crate::watch::NO_EPOCH;
 /// [`ReconciliationBatch::discarded`] and the whole-workspace reload it obliges
 /// are the whole of the safety here. Nothing in Phase 2d-4a enforces that
 /// obligation — `docs/decisions/2d-4a-notes.md` R4 assigns it to the consumer.
+///
+/// This constant and [`evictable_sequence`] are what
+/// [`espansoconfig_core::watch::retained_state`]'s clause 5 and its third,
+/// fourth and fifth *expressly not guaranteed* clauses are derived from; that
+/// contract is where they are stated beside the pipeline's other scopes, and
+/// this doc is where they are stated about the policy itself.
 pub const QUEUE_CAPACITY: usize = 256;
 
 /// The payload of [`crate::events::RECONCILIATION_READY`] — a hint, and the
@@ -266,7 +273,10 @@ pub struct ReconciliationWake {
     ///
     /// **Not a count and not a promise of a batch size.** A later drain may
     /// return more than this (another observation arrived) or fewer (the caller
-    /// had already acknowledged some of them).
+    /// had already acknowledged some of them). It describes one moment and
+    /// promises nothing over time —
+    /// [`espansoconfig_core::watch::retained_state`]'s sixth *expressly not
+    /// guaranteed* clause, which this field is the source of.
     pub newest_sequence: u64,
 }
 
@@ -278,7 +288,8 @@ pub struct ReconciliationWake {
 /// something a consumer needs. **Every arm carries the display path**, so no
 /// consumer is ever handed a number as its only handle on a file.
 ///
-/// *A process-lifetime identity is not an address in the current workspace*, and
+/// *A process-lifetime identity is not an address in the current workspace*
+/// ([`espansoconfig_core::watch::retained_state`], clause 1), and
 /// an earlier shape of this type said `Known { document }` — with no path — for
 /// both of the first two arms below. Round 4 of this phase's review is the
 /// interleaving that made that false: epoch 1 mints an identity for a file,
@@ -326,8 +337,8 @@ pub enum ObservedDocument {
     ///   That is the case round 1 of this phase's review found stranded, and the
     ///   identity is exactly what un-strands it;
     /// - a path a **replaced** workspace discovered. Path identity outlives a
-    ///   workspace epoch deliberately — the core keeps one number per path for
-    ///   the life of the process, a recreation at that path included — so this
+    ///   workspace epoch deliberately
+    ///   ([`espansoconfig_core::watch::retained_state`], clause 1), so this
     ///   arm can name a path the current session never enumerated, and the
     ///   consumer may hold nothing at all under it. What makes a *batch* stale
     ///   across a replacement is [`ReconciliationBatch::epoch`]; what makes this
@@ -706,14 +717,11 @@ pub struct ReconciliationBatch {
     /// back, because giving back its own lower argument would walk its
     /// watermark backwards — which is what an earlier draft of this field did.
     ///
-    /// **Across a replacement epoch it does fall, and that is not a walk-back.**
-    /// [`ReconciliationQueue::begin_epoch`] discards the acknowledged watermark
-    /// with everything else the previous epoch held, and `crate::ledger`'s
-    /// allocator starts the successor's sequences again: drain epoch 1 with
-    /// watermark 9, adopt epoch 2, drain the empty successor, and this field is
-    /// 0. **A sequence means nothing across two epochs** — the module doc's
-    /// guarantee 1 — so there is no order between those two numbers for
-    /// anything to walk backwards along, and what separates them is
+    /// **Across a replacement epoch it does fall, and that is not a walk-back**
+    /// — [`espansoconfig_core::watch::retained_state`]'s clauses 2 and 3 are
+    /// why, and this field is where its clause 6 is derived from. Concretely:
+    /// drain epoch 1 with watermark 9, adopt epoch 2, drain the empty successor,
+    /// and this field is 0. What separates the two numbers is
     /// [`ReconciliationBatch::epoch`]: a batch whose epoch a caller is not
     /// showing installs nothing at all, whatever it holds (the consult's Q3).
     /// Round 6 of this phase's review is where *ever* and *this session* were
@@ -736,21 +744,20 @@ pub struct ReconciliationBatch {
     /// false about the second.
     ///
     /// **What it deliberately does not count is the third way a stored entry
-    /// leaves the queue**: [`ReconciliationQueue::begin_epoch`] discards this
-    /// whole state — the pending set, the watermark and this counter with it —
-    /// when the session adopts a replacement workspace. Those entries describe a
-    /// directory nothing is showing any more, and every batch of the epoch they
-    /// belonged to is already stale by [`ReconciliationBatch::epoch`], so
-    /// counting them would oblige a reload of a workspace the open has just
-    /// performed. This counter is therefore **per epoch**, and reads zero on the
-    /// first drain after a replacement whatever the previous epoch lost.
+    /// leaves the queue** — the replacement epoch of
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 4. Those entries
+    /// describe a directory nothing is showing any more, and every batch of the
+    /// epoch they belonged to is already stale by
+    /// [`ReconciliationBatch::epoch`], so counting them would oblige a reload of
+    /// a workspace the open has just performed.
     ///
-    /// **Cumulative within the epoch and monotonic**, so a non-zero value does
-    /// not say the loss happened since the previous drain. What it does say is
-    /// that this epoch's observation history has a hole in it, so a consumer
-    /// must reload the workspace rather than reconcile from these values. Zero
-    /// on every ordinary run — and nothing in Phase 2d-4a makes a consumer read
-    /// it (`docs/decisions/2d-4a-notes.md` R4).
+    /// **Cumulative within the epoch and monotonic** — that contract's clause 7,
+    /// derived from this field — so a non-zero value does not say the loss
+    /// happened since the previous drain. What it does say is that this epoch's
+    /// observation history has a hole in it, so a consumer must reload the
+    /// workspace rather than reconcile from these values. Zero on every ordinary
+    /// run — and nothing in Phase 2d-4a makes a consumer read it
+    /// (`docs/decisions/2d-4a-notes.md` R4).
     pub discarded: u64,
 }
 
@@ -781,9 +788,9 @@ struct QueueState {
     /// for arriving at or below the acknowledged watermark — the two causes
     /// [`ReconciliationBatch::discarded`] states.
     ///
-    /// Reset with the rest of this state when the queue adopts a replacement
-    /// epoch, which is why the count is per epoch and why the third way a
-    /// stored entry leaves the queue is not in it.
+    /// Reset with the rest of this state by [`ReconciliationQueue::begin_epoch`]
+    /// — see [`espansoconfig_core::watch::retained_state`] for what that scopes
+    /// and why the third way a stored entry leaves is not counted here.
     discarded: u64,
 }
 
@@ -999,12 +1006,11 @@ impl ReconciliationQueue {
     /// three clears, which is what keeps a field added later from being the one
     /// nobody remembered to reset.
     ///
-    /// **This is the third way a stored entry leaves this queue**, beside a
-    /// later drain acknowledging it and an overflow evicting it — the module
-    /// doc's guarantee 4 states all three, and this one is the only one that
-    /// does not depend on what the entry is. An observation stored under the
-    /// previous epoch, acknowledged by nobody and evicted by nothing, is
-    /// discarded here. **It is not counted in
+    /// **This is the third way a stored entry leaves this queue** —
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 4 states all
+    /// three, and this is the one it names as not depending on the entry. An
+    /// observation stored under the previous epoch, acknowledged by nobody and
+    /// evicted by nothing, is discarded here. **It is not counted in
     /// [`ReconciliationBatch::discarded`]**, which this call resets along with
     /// the rest: what obliges a whole-workspace reload is a hole in *an epoch's*
     /// history, and a replacement is not a hole in one — it is the successful
@@ -1012,8 +1018,9 @@ impl ReconciliationQueue {
     /// replaced the workspace the window would reload.
     ///
     /// **What it does not reset is a path's identity**, and it never did in the
-    /// place that matters: identity lives in the core's process-wide table, and
-    /// a path keeps its number for the life of the process. This queue briefly
+    /// place that matters: that is
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 1, and it is
+    /// exactly the scope this call does *not* have. This queue briefly
     /// kept an epoch-scoped copy of the identities it had issued, on the ground
     /// that *one path in two epochs is two files* — which the core's own model
     /// contradicts, since it hands a recreation at one path the same number.
@@ -1140,12 +1147,12 @@ impl ReconciliationQueue {
     /// of the batch, never out of the queue, and never counted in
     /// [`ReconciliationBatch::discarded`], because what it asserts crosses under
     /// a higher sequence. **Holding a slot is not the same as being safe**: a
-    /// later overflow may evict that entry like any other, and then it is a
-    /// counted loss obliging a whole-workspace reload rather than a fold —
-    /// which is why the entries it holds a slot *against* are chosen by
-    /// [`evictable_sequence`] rather than by sequence alone. A replacement epoch
-    /// discards it like every other stored entry
-    /// ([`ReconciliationQueue::begin_epoch`]), and that one is counted nowhere.
+    /// folded entry leaves on
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 4 terms like any
+    /// other stored entry, and an overflow that takes it is a counted loss
+    /// obliging a whole-workspace reload rather than a fold — which is why the
+    /// entries it holds a slot *against* are chosen by [`evictable_sequence`]
+    /// rather than by sequence alone.
     ///
     /// A caller that drains twice with the same watermark therefore receives
     /// the same batch twice **when nothing was enqueued between the two calls
@@ -1162,15 +1169,11 @@ impl ReconciliationQueue {
     /// [`ReconciliationBatch::epoch`] rather than as a `discarded` count: the
     /// second batch is the successor workspace's, and the first one is stale.
     ///
-    /// [`ReconciliationBatch::newest_sequence`] is never below the highest
-    /// watermark this queue has been drained with **under the epoch it names**,
-    /// so a drain that arrives out of order cannot walk a caller's watermark
-    /// backwards. The qualification is not decoration:
-    /// [`ReconciliationQueue::begin_epoch`] discards the watermark with
-    /// everything else, so the successor epoch's first batch may name a smaller
-    /// number than the predecessor's last — which is not a walk-back, because a
-    /// sequence means nothing across two epochs. The field's own doc is the
-    /// whole claim.
+    /// The `max` this function takes is what makes
+    /// [`ReconciliationBatch::newest_sequence`]'s claim a property of the
+    /// function that fills the field rather than of an invariant elsewhere; the
+    /// claim itself, and the epoch it is scoped to, are that field's doc and
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 6.
     ///
     /// `workspace` is here for two things, and [`address_of`] is where both are
     /// asked: it renders a display path against the configuration root, and it
@@ -1193,12 +1196,11 @@ impl ReconciliationQueue {
             .collect();
         // The batch's own highest — which is also the highest *pending*
         // sequence, since `coalesced_sequences` always carries that entry — and
-        // never below the highest watermark this queue has been acknowledged
-        // with **since the epoch in `guard` was adopted**, which is the only
-        // watermark this state holds: `begin_epoch` replaced the whole
-        // `QueueState`, so `guard.acknowledged` says nothing about any earlier
-        // epoch. The `max` is what makes `newest_sequence`'s claim a property of
-        // this function rather than of an invariant elsewhere: every pending
+        // never below `guard.acknowledged`, which `begin_epoch` replaced along
+        // with the whole `QueueState` and which therefore says nothing about any
+        // earlier epoch (`espansoconfig_core::watch::retained_state`, clauses 2
+        // and 6). The `max` is what makes `newest_sequence`'s claim a property
+        // of this function rather than of an invariant elsewhere: every pending
         // entry is above `acknowledged` today, because `enqueue` refuses at or
         // below it and a drain only removes — but nothing in the types forces
         // that, and an empty batch has no entry to be above anything at all.
@@ -1265,15 +1267,9 @@ pub fn queueing_sink(queue: Arc<ReconciliationQueue>) -> AdmittedSink {
 ///
 /// The whole projection into wire form, in one place, so no consumer builds a
 /// second one. It clones out of the queued value rather than consuming it,
-/// because a drain consumes nothing: an entry survives its own drain, and leaves
-/// the queue in exactly three ways — a later drain **acknowledges** it, an
-/// overflow **evicts** it ([`QUEUE_CAPACITY`]), or a replacement epoch
-/// **discards** it with everything else the previous epoch held
-/// ([`ReconciliationQueue::begin_epoch`]). The three are not interchangeable:
-/// the first is the consumer saying it holds the observation; the second is a
-/// loss counted in [`ReconciliationBatch::discarded`] and obliging a
-/// whole-workspace reload; and the third is counted nowhere, because the open
-/// that caused it has already replaced the workspace a reload would fetch.
+/// because a drain consumes nothing: **an entry survives its own drain**, and
+/// what does remove one is
+/// [`espansoconfig_core::watch::retained_state`]'s clause 4.
 ///
 /// **Three ways to an address, and each arm takes the strongest one available
 /// to it.** An arm holding a projection has the identity already and asks
@@ -1393,9 +1389,10 @@ fn external_observation(
 ///
 /// Neither answer alone is enough, and round 3 of this phase's review deleted
 /// the first while closing a duplicate-storage finding: the register's `Some` is
-/// **not scoped to a workspace, an epoch or a moment**, so an identity minted
-/// under a replaced workspace came back as *known* with no path, and the current
-/// workspace answered `UnknownDocument` for it. Round 4 is that interleaving.
+/// scoped by [`espansoconfig_core::watch::retained_state`]'s clause 1 and by
+/// nothing shorter, so an identity minted under a replaced workspace came back
+/// as *known* with no path, and the current workspace answered `UnknownDocument`
+/// for it. Round 4 is that interleaving.
 ///
 /// [`ObservedDocument::Unnamed`] is exactly *nothing in this process has ever
 /// named this path*, which is what makes it strand no projection: no identity
@@ -1442,9 +1439,9 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// # A second source, which must answer the same number where it answers at all
 ///
 /// The two sources have **different membership** and that is ordinary rather
-/// than a fault: the process-wide register holds every path anything in this
-/// process has ever named, and the open workspace holds only what it discovered,
-/// so a file created after the open is in the register and not in the workspace.
+/// than a fault: their two scopes are
+/// [`espansoconfig_core::watch::retained_state`]'s clauses 1 and 2, so a file
+/// created after the open is in the register and not in the workspace.
 /// That difference is the whole subject of [`ObservedDocument`]'s three arms.
 /// What may **not** differ is the number, where both hold the path at all. One
 /// register makes that true today — a `Workspace` mints through `identity_of`
@@ -1681,8 +1678,9 @@ mod tests {
         queue.enqueue(changed(1, 1, "match/a.yml", ONE));
         queue.enqueue(changed(2, 1, "match/a.yml", ONE));
         // Both are stored: the fold is a property of the batch and not of the
-        // queue, so a repeat holds its slot until a drain acknowledges it, an
-        // eviction removes it or a replacement epoch discards it.
+        // queue, so a repeat holds its slot and leaves it on the terms
+        // `espansoconfig_core::watch::retained_state` states for every stored
+        // entry.
         assert_eq!(queue.pending(), 2);
         let batch = queue.drain(0, &workspace);
         assert_eq!(
@@ -2089,8 +2087,9 @@ mod tests {
         };
         let issued = document_summary.id;
         // A replacement empties the pending set, the watermark and the loss
-        // count — and **not** a path's identity, which is the core's register
-        // and keeps one number per path for the life of the process. An earlier
+        // count — and **not** a path's identity, which is the core's register:
+        // `espansoconfig_core::watch::retained_state`'s clauses 2 and 1, and
+        // the whole of what this test is about. An earlier
         // draft of this queue kept an epoch-scoped copy and answered `Unknown`
         // here, on the ground that one path in two epochs is two files: the
         // core's own model says the opposite, a recreation at that path

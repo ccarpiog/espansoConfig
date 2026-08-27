@@ -207,6 +207,12 @@ impl From<IdentityError> for WorkspaceError {
 /// failure mode by construction — a path keeps its identity for the life of the
 /// process, a new file gets a fresh one, and an identity whose file is gone
 /// matches nothing and comes back as [`WorkspaceError::UnknownDocument`].
+///
+/// This table is the first clause of [`crate::watch::retained_state`], which is
+/// where the whole family of *how long does this survive, and under what scope*
+/// claims is collected for the observation pipeline, and where the fact that
+/// **nothing bounds this table** is stated once rather than at each of its
+/// readers.
 struct SessionIdentities {
     /// The next identity to hand out. Never reused, so a removed file's
     /// identity cannot be inherited by another file.
@@ -257,6 +263,11 @@ struct SessionIdentities {
 /// consumer still holds it — knowledge the frontend coordinator (**2d-5**) has
 /// and this module does not. Until one of those exists this is an unbounded
 /// structure with a workload assumption behind it, said plainly.
+///
+/// This section is the source of [`crate::watch::retained_state`]'s first
+/// *expressly not guaranteed* clause, where it is stated beside the bounds the
+/// rest of the pipeline does keep — so a reader comparing this table against the
+/// queue downstream of it reads one passage rather than two.
 fn session_identities() -> &'static Mutex<SessionIdentities> {
     static IDENTITIES: OnceLock<Mutex<SessionIdentities>> = OnceLock::new();
     IDENTITIES.get_or_init(|| {
@@ -337,7 +348,9 @@ pub fn identity_of(path: &Path) -> DocumentId {
 /// generation was open when it was minted. Path identity is deliberately
 /// process-lifetime-stable — the session identity table this module keeps — so
 /// the same path answers the same number for as long as the process runs, a
-/// recreation at that path included.
+/// recreation at that path included. That is the first clause of
+/// [`crate::watch::retained_state`], stated here because this is the function
+/// that answers it and collected there beside every other scope in the pipeline.
 ///
 /// Poisoning is absorbed for [`identity_of`]'s reason: a poisoned table is still
 /// a correct table, and this function only reads it.

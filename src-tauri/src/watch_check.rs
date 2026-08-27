@@ -1249,8 +1249,9 @@ fn a_committed_save_is_suppressed_while_a_later_external_write_is_not() {
     // **Removing the assertion is a trade and not a free lunch — round 12's
     // second High.** The wait carries the *permanent* case, so the removal keeps
     // that detection; what it loses, in the same breath, is the *intermittent*
-    // one: `LedgerTally` is cumulative for the session, so a stamp taken too
-    // early on one pass only left `preceded_a_commit` non-zero forever and the
+    // one: `LedgerTally`'s scope is
+    // `espansoconfig_core::watch::retained_state`'s clause 8, so a stamp taken
+    // too early on one pass only left `preceded_a_commit` non-zero forever and the
     // exact-zero line failed, whereas the rollback's correctly stamped re-pass
     // satisfies this wait and the test now passes. The trade was still right —
     // the removed line could not tell that defect from the harmless save-thread

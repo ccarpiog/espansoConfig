@@ -468,6 +468,12 @@ const INVENTORY: &[Judged] = &[
         reason: "the contract itself",
     },
     Judged {
+        file: "crates/espansoconfig-core/src/watch/retained_state.rs",
+        phrase: "observed again",
+        count: 1,
+        reason: "a pointer: the scoped-lifetime contract (Phase 2d-4a-C) disclaiming the liveness family and naming espansoconfig_core::watch::liveness as where it is stated",
+    },
+    Judged {
         file: "src-tauri/src/backup.rs",
         phrase: "re-observed",
         count: 1,

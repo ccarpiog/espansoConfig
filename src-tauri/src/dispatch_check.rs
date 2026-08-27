@@ -1953,10 +1953,11 @@ fn a_remote_origin_is_refused() {
 /// batch answers the watermark it was asked with rather than zero — which is
 /// what lets a caller showing that epoch store `newest_sequence`
 /// unconditionally. **Both drains here are the same epoch's**, which is the
-/// scope of that claim: a replacement epoch discards the watermark with
-/// everything else, so the successor's first batch may name a smaller number
-/// than the predecessor's last
-/// ([`crate::reconciliation::ReconciliationBatch::newest_sequence`]).
+/// scope that claim carries
+/// ([`espansoconfig_core::watch::retained_state`], clause 6, and
+/// [`crate::reconciliation::ReconciliationBatch::newest_sequence`]) — so what
+/// this test covers is the claim inside its scope and never across a
+/// replacement.
 ///
 /// **What it does not show is an external change.** Nothing here writes to the
 /// tree behind the application's back, and a real filesystem observation is

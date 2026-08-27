@@ -470,15 +470,25 @@
 //! one debounce plus one probe wide, and that was false.
 //!
 //! So the instant lives in [`LedgerState::latest_commit_at`], keyed by **path**,
-//! and the two lifetimes are stated where each value is defined:
+//! and the two lifetimes are one clause of
+//! [`espansoconfig_core::watch::retained_state`] — its ninth — rather than a
+//! rule this module states twice. What belongs here is which value carries
+//! which: the **record** is [`LedgerState::writes`], whose life is its
+//! suppression licence, and the **anchor** is
+//! [`LedgerState::latest_commit_at`], whose life is the epoch.
 //!
-//! - the **record** lives as long as its suppression licence is honest, and four
-//!   things end that: supersession, a serialized reading, a reload onto other
-//!   bytes, and a workspace replacement;
-//! - the **anchor** lives as long as the **epoch**. It is written by
-//!   [`WriteLedger::record_app_write`] under the same state guard as the record,
-//!   so no decision can see one without the other, and removed by
-//!   [`WriteLedger::begin_epoch`] alone.
+//! **The record's second end is *a reading that survives both retaining
+//! checks*, and this paragraph said *a serialized reading* until Phase
+//! 2d-4a-C.** That was narrower than [`decide`], which reaches its clearing step
+//! for every reading that neither fails the chronology check nor is suppressed
+//! as a self-write — every serialized reading, and also **every stamped reading
+//! whose state the record does not name**, which is the ordinary external change
+//! to a file this application had written. [`decide`]'s own documentation has
+//! said so since the round-8 fix round (*"narrowing step 2 sends more readings
+//! through step 3, which clears"*); this list did not.
+//!
+//! The anchor is written by [`WriteLedger::record_app_write`] under the same
+//! state guard as the record, so no decision can see one without the other.
 //!
 //! Keyed by path rather than by [`DocumentId`] because [`decide`]'s step 3
 //! removes the `documents_by_path` entry a path-to-record lookup goes through: an
@@ -695,7 +705,9 @@ pub enum Admission {
     /// module's *the marker and the publication* section.
     Admitted {
         /// This observation's sequence: unique and strictly increasing within
-        /// its workspace epoch, and meaningless across epochs.
+        /// its workspace epoch, and meaningless across epochs —
+        /// [`espansoconfig_core::watch::retained_state`]'s clause 3, of which
+        /// this field is the source.
         sequence: u64,
     },
     /// Recorded as this path's coalescing marker and **not published**: no
@@ -749,10 +761,10 @@ pub enum Admission {
 /// the record was taken is a fact about this session's **chronology** rather
 /// than about the write, and since the round-9 fix round it lives in a map of
 /// its own ([`LedgerState::latest_commit_at`]) rather than beside this value.
-/// That separation is the fix: this record's life is *how long suppression is
-/// licensed*, and the chronology fact's life is *the epoch*, so pairing them in
+/// That separation is the fix: the two lifetimes are
+/// [`espansoconfig_core::watch::retained_state`]'s clause 9, and pairing them in
 /// one struct made clearing the first clear the second — see the module's
-/// *the anchor outlives the record* section.
+/// *the anchor outlives the record* section for what that cost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppWrite {
     /// The workspace epoch this save committed under.
@@ -777,11 +789,12 @@ pub struct AppWrite {
 /// with it, and an arbitrarily delayed pre-commit settlement then found nothing
 /// to be refused by and published bytes the commit had since replaced.
 ///
-/// **Its life is the epoch and nothing shorter.** Written by
-/// [`WriteLedger::record_app_write`], read by [`decide`]'s step 1, and removed
-/// by [`WriteLedger::begin_epoch`] alone — not by supersession, not by a
-/// serialized door, and not by the reload invalidation, none of which say
-/// anything about *when* this session last wrote to that path.
+/// **Its life is the epoch and nothing shorter** —
+/// [`espansoconfig_core::watch::retained_state`]'s clause 9, of which this type
+/// is the source. Written by [`WriteLedger::record_app_write`], read by
+/// [`decide`]'s step 1, and removed by [`WriteLedger::begin_epoch`] alone — not
+/// by supersession, not by any door, and not by the reload invalidation, none of
+/// which say anything about *when* this session last wrote to that path.
 ///
 /// **Keyed by path rather than by document**, which is not an economy: step 3
 /// removes the `documents_by_path` entry a path-to-record lookup goes through,
@@ -812,7 +825,9 @@ struct CommitAnchor {
 /// Every decision this ledger has taken, counted for the life of the session.
 ///
 /// **Cumulative and never reset**, unlike the maps and the sequence allocator,
-/// which a workspace replacement discards. It exists because four of these
+/// which a workspace replacement discards — this is the one exception
+/// [`espansoconfig_core::watch::retained_state`]'s clause 8 names, and the type
+/// it is derived from. It exists because four of these
 /// decisions are otherwise indistinguishable from silence: a suppressed
 /// observation, a coalesced one, one discarded for a replaced epoch and one
 /// discarded as older than a commit all look exactly like a watcher that noticed
@@ -974,10 +989,12 @@ pub struct LedgerTally {
 /// per-epoch sequence allocator, behind two leaf mutexes.
 ///
 /// **Beside the open session, never in core global state and never in the
-/// frontend** (consult Q2). It outlives any one workspace — the sink that reads
-/// it is the session's, shared across replacements — which is why the discard
-/// on replacement is an explicit call ([`WriteLedger::begin_epoch`]) rather
-/// than a value going out of scope.
+/// frontend** (consult Q2). **The object outlives any one workspace and its
+/// contents do not** — the sink that reads it is the session's, shared across
+/// replacements — which is why the discard on replacement is an explicit call
+/// ([`WriteLedger::begin_epoch`]) rather than a value going out of scope. What
+/// that call scopes is [`espansoconfig_core::watch::retained_state`]'s clause 2,
+/// and what it deliberately leaves standing is that contract's clause 8.
 ///
 /// The two mutexes are deliberately separate and are always taken **gate
 /// first**; see this module's *commit gate* section for the whole order and its
@@ -1045,7 +1062,8 @@ struct LedgerState {
     ///
     /// Not a second source of truth: it is written and erased in the same two
     /// statements as `writes`, and the identity table a `DocumentId` comes from
-    /// is itself keyed by path for the life of the process
+    /// answers one number per path on
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 1 terms
     /// (`docs/decisions/2d-1-notes.md` D7), so the two directions cannot
     /// disagree about which document a path is. What is **not** forced is that
     /// the workspace's spelling of a path and the watcher's are the same
@@ -1070,13 +1088,21 @@ struct LedgerState {
     /// shown that state, so an entry for it would coalesce the engine's later
     /// stabilized reading of the same state into silence — round 3's
     /// swallowed-change defect reached from the other side.
+    ///
+    /// **Nothing prunes this map as a whole before the epoch ends** — entries
+    /// leave one at a time, where a particular path's announcement stops being
+    /// true — which is
+    /// [`espansoconfig_core::watch::retained_state`]'s second *expressly not
+    /// guaranteed* clause.
     announced: BTreeMap<PathBuf, ObservedState>,
-    /// When this session last **committed** a write to each path, for the life
-    /// of the epoch — the chronology anchor [`decide`]'s step 1 refuses against.
+    /// When this session last **committed** a write to each path — the
+    /// chronology anchor [`decide`]'s step 1 refuses against.
     ///
     /// Separate from `writes` on purpose, and the separation is round 9's second
-    /// High: see [`CommitAnchor`] for what each of the two lifetimes is and why
-    /// one value could not carry both.
+    /// High: see [`CommitAnchor`] for why one value could not carry both, and
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 9 for the two
+    /// lifetimes themselves. **Nothing prunes this map within an epoch**, which
+    /// that contract's second *expressly not guaranteed* clause is about.
     latest_commit_at: BTreeMap<PathBuf, CommitAnchor>,
     /// The next sequence to hand out; `None` once this epoch's space is spent.
     next_sequence: Option<u64>,
@@ -1122,11 +1148,13 @@ impl WriteLedger {
     /// (publications and markers alike), the per-path commit anchors and the
     /// sequence allocator.
     ///
-    /// Consult Q2's *discard the whole map on workspace replacement*, and the
-    /// reason is not tidiness: a document identity survives a replacement (the
-    /// process-wide table is keyed by path), so an entry kept across one could
-    /// suppress an observation of a different directory's file that happens to
-    /// hash the same. Called from `WorkspaceSession::open` **before** the
+    /// Consult Q2's *discard the whole map on workspace replacement*, and this
+    /// is the ledger's half of
+    /// [`espansoconfig_core::watch::retained_state`]'s clause 2. The reason is
+    /// not tidiness: that contract's clause 1 is why an entry kept across a
+    /// replacement could suppress an observation of a different directory's file
+    /// that happens to hash the same. Called from `WorkspaceSession::open`
+    /// **before** the
     /// successor watcher starts, so the first observation of a new epoch can
     /// never be discarded as stale by an epoch the ledger had not yet adopted.
     ///
@@ -1231,9 +1259,10 @@ impl WriteLedger {
         // the record. It replaces any earlier anchor for this path, because
         // *latest* is what it claims. **A path this document has moved away
         // from keeps its own anchor**, which nothing removes before the epoch
-        // ends: the identity table is keyed by path for the life of the process
-        // (`docs/decisions/2d-1-notes.md` D7), so this cannot happen today, and
-        // if it ever does the residue is one path over-refusing readings older
+        // ends (`espansoconfig_core::watch::retained_state`, clause 9). One
+        // number per path makes this unreachable today
+        // (`docs/decisions/2d-1-notes.md` D7), and
+        // if it ever does happen the residue is one path over-refusing readings older
         // than a commit this session really made — a refusal that takes the
         // settlement back, never a lost change, on the terms
         // `espansoconfig_core::watch::liveness` states and this comment does not
@@ -1995,9 +2024,10 @@ fn decide(
 ) -> Admission {
     // **The two retaining checks read two different values, and that is round
     // 9's second High.** Step 1 asks *when did this session last commit to this
-    // path*, which is [`CommitAnchor`] and lives as long as the epoch; step 2
-    // asks *what does the app-write record license*, which lives exactly as long
-    // as the licence. Until round 9 both came out of one struct, so clearing the
+    // path*, which is [`CommitAnchor`]; step 2 asks *what does the app-write
+    // record license*. Their two lifetimes are
+    // `espansoconfig_core::watch::retained_state`'s clause 9. Until round 9 both
+    // came out of one struct, so clearing the
     // record cleared the anchor and an arbitrarily delayed pre-commit settlement
     // published bytes the commit had replaced.
     //
