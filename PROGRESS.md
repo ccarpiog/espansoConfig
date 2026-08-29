@@ -11420,7 +11420,70 @@ contains `c3a9` (precomposed é), `65cc81` (**decomposed** é) and `f09f9880` (�
 
 ## Next action
 
-### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN; ITS REVIEW ROUNDS 1–8 ARE DONE (all eight NOT READY) AND ALL EIGHT FIXES ARE IN THE TREE. THE NEXT ACTION IS **ROUND 9**, AGAINST THE ROUND-8 FIX. ONE OWNER DECISION IS OPEN AND IS FLAGGED BELOW.**
+### **PHASE 2d-4a-C: STEP 1 IS ✅ CLOSED (round 4 READY, 0 findings). STEP 2 IS ✅ IMPLEMENTED AND GREEN; ITS REVIEW ROUNDS 1–8 ARE DONE (all eight NOT READY) AND ALL EIGHT FIXES ARE IN THE TREE. THE NEXT ACTION IS **ROUND 9**, AGAINST THE ROUND-8 FIX — **IT WAS DISPATCHED ON 2026-08-29 AND DIED ON A CODEX USAGE LIMIT WITH NO REPLY; RE-DISPATCH IT WHOLE, SEE THE BLOCK DIRECTLY BELOW.** ONE OWNER DECISION IS OPEN AND IS FLAGGED BELOW.**
+
+#### ⛔ ROUND 9 WAS DISPATCHED AND DIED ON A CODEX USAGE LIMIT — NO REPLY EXISTS, 2026-08-29
+
+**Nothing was appended to `docs/reviews/phase-2d-4a-C.md`, and nothing should be.** The round-9 job
+(`task-mtea9i0s-lxay7b`, high effort, dispatched 2026-08-29 ~12:13 WEST) ran roughly **ten minutes of
+real analysis** — the log shows it reading §22.7, §23.5, §24, `PROGRESS.md` and several `git show`
+revisions — and then ended at **11:23:50Z** with `Codex error: You've hit your usage limit … try again
+at 2:03 PM.` followed by `Turn failed.` **There is no round-9 verdict, no finding list and no finding
+count.** The review file still holds step 1's four rounds and step 2's rounds 1–8, and is unchanged.
+
+**The brief is `/tmp/round9-brief.txt`** (177 lines), built from the twelve targets below. `/tmp` is
+not durable — if it is gone, rebuild it from the twelve targets and the dispatch section below; that
+list *is* its specification, which is why the list is written here rather than in the brief alone.
+
+**Re-dispatch round 9 as a fresh, complete review.** Do not treat what follows as a partial round 9 and
+do not ask a reviewer to "continue" it: a review collected in two halves under two usage windows has no
+single verdict, which is the one thing every prior round produced. One job, one reply, one verdict.
+
+##### The single lead the aborted job produced — **re-derived by the orchestrator, and sharper than the job stated it**
+
+The job's final output, before the limit, named one inconsistency: the CommonMark rule in §24.1 is
+correct, but *"the record's adjacent statement that it 'does not use multi-backtick delimiters' is
+contradicted by several live double-backtick code spans in the same file."* Per this phase's standing
+rule — **a reviewer's incidental attribution is a claim like any other** — the orchestrator did not
+copy that. It re-derived it on `b2ef96e`, and the measurement is stronger than the sentence:
+
+- The sweep, run on `b2ef96e`:
+
+  ```sh
+  rg -c '``[^`]' docs/decisions/2d-4a-C-notes.md   # 12
+  ```
+
+  Twelve lines match. **Six are fence openers**
+  (```` ```sh ```` at 676, 901, 1152, 3524, 3563, 4129) and are not code spans at all. The other
+  **six are genuine double-backtick code spans**: **4136, 4198, 4233, 4543, 5049, 5060**. Line
+  **4136 alone holds six of them** — `` `rg ``, `` `git ``, `` `wc ``, `` `shasum ``, `` `awk ``,
+  `` `sed `` — and **every one carries a backtick**, which is exactly the construct §24.1 says the
+  record does not use.
+- The false sentence is at **line 5065**: *"the true reason the pattern is fenced is that it contains
+  backticks of its own and this record does not use multi-backtick delimiters."* The nearest
+  counter-example, **5060**, is **five lines above it, inside §24.1 itself**, in the sibling of the
+  same bullet — and **5049**, in the same subsection's opening paragraph, is a second.
+- **§24.8 contradicts §24.1 directly, and both were written by round 8's fix round.** Line **5509**
+  says *"nothing here renders the record to check that its own multi-backtick spans behave as
+  claimed"* — a sentence that presupposes the record **has** multi-backtick spans, which 5065 denies.
+
+##### The gates were NOT re-run for this record edit, and that is stated rather than implied
+
+**No source file changed on this iteration** — `git status --short` is exactly one line, `M PROGRESS.md`,
+and `docs/decisions/2d-4a-C-notes.md` is byte-identical to `b2ef96e`, which is what keeps the line
+numbers 5049 / 5060 / 5065 / 5509 and the count of 12 above valid. The round-8 baseline
+**`1313 / 431 / 2125 / 184`** therefore stands **inherited, not re-measured**, and this iteration makes
+no claim to have re-measured it. **Round 9's fix round still owes all nine on its own tree** — the
+phase's standing rule is *all nine measured, none inherited*, and an aborted review does not spend it.
+The host scar and the piped-gate warning below both still apply to that run.
+
+**This is target 4's subject and it is now pre-derived, not pre-judged.** Round 9 should still reach
+it independently; recording it here means the next dispatch can be checked against it rather than
+trusted. **It is not a round-9 finding** — round 9 has produced none — and it must not be written into
+the review file as one, nor into §25 as though a reviewer had ruled on it. What the fix round may
+legitimately do, if round 9 confirms it, is note that the orchestrator derived it first, as
+§24.1 itself notes for round 8's re-derivations.
+
 
 **The owner decision that produced this phase, 2026-08-27.** The standing question recorded in the
 (now deferred) round-7 handoff below — *round 7 first, or the mechanism first* — was put to the owner
