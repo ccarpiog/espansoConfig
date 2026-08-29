@@ -49,6 +49,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-5 … 2d-8** | The remaining four steps of the consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
+| **M — checkpoint split** | This file cut from 21,803 lines to the live head; the rest archived verbatim under `docs/progress-archive/` | ✅ complete (2026-08-29) — preflight maintenance, unreviewed by rule |
+| **M2 — tail termination** | The review loop given a stopping rule the files can evaluate: `CLAUDE.md` §7 | ✅ complete (2026-08-29) — two review rounds, both `not-ready`, all findings fixed |
 
 ---
 
@@ -92,9 +94,28 @@ These bind every future phase. The reasoning behind each is in
 - A decision record that claims a guarantee the code does not give is this project's worst defect
   class. Where the type system cannot force something, say so in the same sentence that says what it
   does force.
-- A fix is a change and the round that reviews it is not optional — but a review tail has no
-  termination condition of its own, so it ends by an **owner ruling**, never by a session's judgement
-  (2d-3-C, 2d-4a-C).
+- **A review tail ends by rule, not by an owner ruling** (`CLAUDE.md` §7 is the full statement).
+  **One thing commissions a round — a fix round that changed at least one source file — and a step
+  closes as soon as no round is commissioned.** There is no second, separately counted clause: a
+  0-High/0-Medium verdict is the common case of that one rule, a **Low** whose fix changes source is
+  owed a round, a High whose fix is prose only is not, and no item in *"where it is thin"* commissions
+  anything — but an **actionable** item naming a correctness defect in source is a **blocker**: it is
+  fixed, or the step does not close and is marked `BLOCKED`, never left for a later phase to maybe
+  adopt (**recorded only** is the mark for a residual risk or a coverage bound; unmarked counts as
+  recorded only). **"The record" is the closed list — `PROGRESS.md`, `CLAUDE.md`,
+  `IMPLEMENTATION_PLAN.md`, any `README*`, everything under `docs/` — and every other file is source,
+  even when it looks like documentation**, so a manifest, a lockfile, `vite.config.ts` or a `scripts/`
+  file is source and its fix is reviewed. **The unbounded predecessor of this rule** — *a fix is a
+  change*, with no source bound — ran **14 rounds on 2d-3-C** and **9 on 2d-4a-C step 2**, both
+  stopped by a human; rounds 4-9 of the second changed no source file, so this bound would have ended
+  it after round 4. Those two tails are the evidence **for** the bound, never a precedent for closing
+  by owner ruling (`docs/decisions/review-tail-termination.md`). What the bound does **not** do is end
+  a tail whose every fix keeps introducing a real source defect — that tail is finding real defects,
+  and it is `BLOCKED` work rather than a rule to weaken.
+  **Under `/goahead-opus` or `/goahead-fable` the
+  workflow's cap of two review invocations and 45 minutes per phase is tighter and binds first, and a
+  source fix that cap leaves unreviewed becomes a new corrective phase carrying that review, with the
+  original phase recorded as superseded by it, never as complete.**
 - Sweep for the shape a finding names, never for the words it used; every narrower instance this
   project has shipped was missed by searching the previous wording.
 
@@ -273,6 +294,34 @@ reports `tail`'s status, and it hid ten failures once.
 
 `npm install` (or `npm ci`) is required before any frontend command will run.
 
+### Phase M2 — the review-tail termination rule (2026-08-29)
+
+**Reviews: 2/2, both Codex at high effort, both `not-ready`, every finding fixed.** The full text of
+both rounds is [`docs/reviews/phase-M2-review-tail-termination.md`](docs/reviews/phase-M2-review-tail-termination.md).
+
+- **Round 1** — 2 High, 2 Medium, 1 Low. Its Highs were real: the first draft counted rounds with two
+  independent rules, one commissioning and one closing, and they disagreed on three verdict shapes —
+  in one of which a step closed while a source-changing fix went unreviewed. Its second High showed
+  the definition of "source" excluded `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+  `vite.config.ts`, `package.json`, `scripts/` and the lockfiles, all of which change behaviour. The
+  fix replaced the mechanism with a single generator and **inverted** the definition so the closed
+  list is the record and everything else is source, which fails safe.
+- **Round 2** — 1 High, 1 Medium, 3 Low, and one clearance: it confirmed round 1's second High closed,
+  finding no remaining ambiguity in the closed list. Its High was an overclaim — the section said
+  flatly that the rule terminates, which is false where every fix keeps introducing a real source
+  defect — and an unaccounted residue: a source fix the workflow's two-invocation cap leaves
+  unreviewed. Both fixed, the second by saying the debt becomes a corrective phase. Its Medium closed
+  the last hole: an actionable item naming a source defect is now a blocker, never something a later
+  phase may decline to adopt.
+- **No third round ran, and none was owed.** The governing workflow caps a phase at two review
+  invocations. Independently, under the rule this phase installed, the fix round changed only record
+  files, so §7.1 commissions nothing — the rule's first application agreed with the cap.
+
+**This phase changed no source file**, which `git diff --stat HEAD` shows directly: `CLAUDE.md` and
+`PROGRESS.md` only, plus two new files under `docs/`. The baseline above therefore stands unchanged by
+construction rather than by assertion. `npm test` was run anyway as a check on that reasoning and
+returned **2125 passed (56 files)**, matching the recorded figure exactly.
+
 ---
 
 ## Key paths
@@ -330,6 +379,7 @@ and in `git log`._
 | 2d-4a-C step 2 (round 8 + its fix; round 9 OWED) | `2efce7a` | ✅ pushed to `origin/main` |
 | 2d-4a-C step 2 (round 9 DISPATCHED AND ABORTED — no reply) | `2a39b3c` | ✅ pushed to `origin/main` |
 | 2d-4a-C step 2 (round 9 ran; the phase CLOSES here) | `dced09a` | see below |
-| Checkpoint split — this file cut from 21,803 lines to under 400 | _this commit_ | see below |
+| Checkpoint split — this file cut from 21,803 lines to under 400 | `3db0ff3` | ✅ pushed to `origin/main` |
+| M2 — the review-tail termination rule, after two review rounds | _this commit_ | see below |
 
 No source file has been modified since `2efce7a`. The two commits above are record only.

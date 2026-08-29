@@ -350,10 +350,21 @@ still passed. It now takes the identity the **live projection** gives that snipp
 enforces that the caller reads it from there rather than handing back `session.match`, which the
 module's own header says in the same sentence as what it does force.
 
-**A fix is a change, and the round that reviews it is not optional.** Three of 2c-3a-1's ten
-findings were regressions or false records introduced by a *previous round's fix*, and the third
-review pass was commissioned for that reason alone, scoped to one change. Each round's fix produced
-the next round's finding.
+**A fix that changes source is a change, and the round that reviews it is not optional.** Three of
+2c-3a-1's ten findings were regressions or false records introduced by a *previous round's fix*, and
+the third review pass was commissioned for that reason alone, scoped to one change. Each round's fix
+produced the next round's finding. **That is the only thing that commissions a round, and a step
+closes as soon as it commissions none** — so a fix round changing no source file ends the tail, whatever
+the severity of what it answered, and a fix round changing one is owed a round even when the finding
+was a Low. **"Source" is everything the repository holds except a closed list of five record entries**
+(`PROGRESS.md`, `CLAUDE.md`, `IMPLEMENTATION_PLAN.md`, any `README*`, and `docs/`), so a config file or
+a manifest is source. **The source bound is what is new here.** The sentence this replaces had none —
+any fix was a change, the record's own sentences included — and unbounded it ran a fourteen-round tail
+on 2d-3 and a nine-round tail on 2d-4a-C step 2, each round finding its whole list in the previous
+round's own words, with a human as the only thing that stopped either. Rounds 4-9 of that second tail
+changed no source file at all, so the bound would have ended it after round 4: those tails are the
+evidence **for** it. **§7 below is the whole rule**, including the condition under which a tail ends;
+read it before commissioning a round.
 
 **The projection and the draft are two values, and confusing them is 2c-2's named failure mode.**
 `MatchBaseline` is what the file held — including *whether it held the key at all* — and
@@ -557,3 +568,230 @@ Three things the gate deliberately does **not** license, each with a reason reco
   1.1-ambiguous is permitted — that is a claim about risk, not about meaning;
 - **moving a match between files or between sequences** — D2r; `ItemMove` is same-sequence only;
 - **combining a move with any other edit in one batch** — R25.
+
+---
+
+## 7. Review rounds and when a tail ends
+
+**A review tail ends by a rule these files can evaluate, never by an owner ruling — and where a tail
+will not end that way, these files say that too, and say it as `BLOCKED` rather than as another
+round.** Two tails ended the other way: **2d-3 ran 14 rounds** — round 14 changed zero non-comment lines under
+`src-tauri/src/` — and **2d-4a-C step 2 ran 9**, of which rounds 4–9 changed no source file at all.
+Both were stopped by a human, because nothing in these conventions could say *stop*. The diagnosis,
+with its measurements, is `docs/decisions/review-tail-termination.md`.
+
+**§7 has exactly one mechanism that commissions a round, and closure is that mechanism's
+consequence rather than a rule of its own:**
+
+> **A round is commissioned by exactly one thing: a fix round that changed at least one source file.**
+> **A step closes as soon as no round is commissioned.**
+
+Everything else in §7 is definition, illustration or precedence. The first version of this section
+counted two things independently — one rule commissioned rounds, a different rule closed steps — and
+two counters can disagree. `docs/reviews/phase-M2-review-tail-termination.md` found three verdict
+shapes where they did, and in one of them the unsafe arm won: a step closed while a source-changing
+fix went unreviewed. There is one counter now, so there is nothing left to disagree with.
+
+**"The record" is a closed list.** It is exactly these:
+
+- `PROGRESS.md`
+- `CLAUDE.md`
+- `IMPLEMENTATION_PLAN.md`
+- any `README*` (a README file anywhere in the tree; this repository has two, both prose)
+- everything under `docs/`
+
+**Every other file in the repository is source, even when it looks like documentation.** The list is
+closed and it is read as closed: a file that is not on it is source because it is not on it, and no
+argument about what kind of file it is changes that. The definition runs this way round on purpose.
+The first version named *source* as the closed list — `src/`, `src-tauri/src/`, `crates/` — and so
+excluded, by omission rather than by decision, `src-tauri/tauri.conf.json`,
+`src-tauri/capabilities/default.json`, `src-tauri/build.rs`, `src-tauri/Cargo.toml`, the root
+`Cargo.toml`, `vite.config.ts`, `svelte.config.js`, `tsconfig.json`, `package.json`, both lockfiles
+and everything under `scripts/`. The sequence that exposed it: a round finds the `custom-protocol`
+feature wrong in `src-tauri/Cargo.toml`, the fix introduces a second mistake, and no round follows —
+and that feature is what decides whether the production build loads the bundled assets or a dead
+development URL, whose earlier absence shipped a blank application.
+
+Inverted, an omission fails **safe**: a file nobody thought about is source, so its fix gets a round.
+Three consequences worth naming, because each is a file this project has already been bitten by or
+would otherwise argue about:
+
+- **`vite.config.ts` is source.** §4 above is the reason: setting `resolve.conditions`
+  unconditionally silently pulled Svelte's server build into production with nothing failing.
+- **`src/lib/i18n/{en,es}.json` is source.** It is what the user reads on screen, not prose about
+  the project. (It sits under `src/` and the corpus fixtures sit under `crates/`, so both were
+  covered before too; the inversion keeps them covered without depending on where they happen to
+  live.)
+- **`intro.md` and `SIGN_AND_NOTARIZE.md` are source**, because they are not on the list. That is
+  the fail-safe direction working as intended: over-including costs one review round, and
+  under-including ships an unreviewed change.
+
+**The unit is the file, not the line.** Any change to a source file counts, a comment-only change
+included. Whether a particular comment was load-bearing is exactly the judgement this rule exists to
+remove, and a comment is where this project keeps several of its contracts.
+
+### 7.1 A round is commissioned by a fix that changed source — and by nothing else
+
+A fix round that changes **at least one source file** is owed a review round, scoped to that change.
+The rule is real and it stays: three of 2c-3a-1's ten findings were regressions or false records a
+previous round's fix had introduced.
+
+A fix round that changes **no** source file commissions nothing. **A prose-only fix is recorded, not
+reviewed** — correcting an overclaim in a notes file, rewording a record, tightening an attribution —
+and that holds whoever asked for the fix. The input to this rule is the fix's diff. It is never the
+severity of the finding, never who raised it, and never what a section of the notes was called:
+
+- **A Low whose fix changes source commissions a round**, scoped to that fix. The first version of
+  §7 said flatly that fixing a Low does not open a round, and that was backwards for precisely the
+  shape that matters: a round returns 0 High and 0 Medium with one Low, the fix for that Low edits a
+  source file and introduces a correctness defect, and the step closes with the defect unreviewed.
+  What is true is the narrower sentence — fixing a Low **without touching source** opens no round.
+- **A High or a Medium whose fix is prose only commissions nothing.** A round whose entire finding
+  list is about the record is answered by fixing the record, and then the step closes.
+- **Answering an open question in the record commissions nothing**, unless the answer changes source.
+
+### 7.2 A step closes as soon as no round is commissioned
+
+Closure is not counted separately and is not a decision anyone has to make. Run §7.1 against the fix
+round that just happened: if it commissions a round, the round runs; if it does not, the step is
+closed. *Given this round's verdict, does another round run?* is answerable from the verdict and the
+fix round's diff alone, by any reader, without asking the owner.
+
+**0 High and 0 Medium is the common case of that one rule, not a second rule.** A round that finds
+nothing to fix produces a fix round that changes nothing, which changes no source file, which
+commissions no round — so the step closes. It is an illustration of §7.1, and reading it as an
+independent closure clause is what let a source-changing Low fix ship unreviewed.
+
+**The "two consecutive rounds whose findings change no source file" clause is gone**, and nothing
+replaces it. It was the independent counter, and it left the first record-only High round with no
+coherent successor: the prose-only fix commissioned no round, while the clause wanted a second round
+it had no way to obtain, so the step was neither closed nor able to close. What that clause was
+reaching for is now derived rather than stated — a tail that stops touching source stops at the round
+in front of it.
+
+**A tail ends the first time a fix stops touching source, and that is the whole of what the shape
+guarantees.** Each round exists only because the previous round's fix changed source, and nothing
+else can generate one, so the first fix round that changes no source file is the last round of the
+tail. That is how every tail this project has actually run has ended — it is the ending a human used
+to have to supply. The measured case: **2d-4a-C step 2 ends after round 4 instead of running to 9.**
+Round 3's fix was the last of that tail to touch a source file, so it commissioned round 4; round 4's
+fix changed no source file at all (`docs/decisions/2d-4a-C-notes.md` §20.8 — *"One file. No source
+file changed"*), so **round 5 was never commissioned**. Four rounds, not nine. 2d-3 is not a second
+measurement of the same kind: what is recorded of its round 14 is that it changed zero *non-comment*
+lines under `src-tauri/src/`, and a comment-only change to a source file is a source change here, so
+these files do not say where 2d-3 would have stopped.
+
+**What this does not do is bound a tail in which every fix keeps introducing a real source defect,
+and it is not meant to.** If each round exposes a genuine defect and each fix changes source to
+answer it, rounds go on being commissioned for as long as that lasts. The mechanism is deliberately
+not changed to stop it: commissioning a round for every source change is the safe behaviour, and a
+tail that keeps finding real defects in source is a tail doing its job. So **a tail that will not end
+this way is a signal about the work, not about the rule.** It says the change is not converging, and
+it is handled where that belongs — the step is held open and marked `BLOCKED` by the clause that ends
+this section, naming the defect that keeps coming back. It is never answered by spelling it "one more
+round", and never by weakening the generator.
+
+The five verdict shapes, walked through the rule:
+
+| The round's verdict | What its fix round changed | Does another round run? |
+|---|---|---|
+| 0 High, 0 Medium, nothing to fix | nothing | **no** — the step closes |
+| 0 High, 0 Medium, a Low fixed in the record only | no source file | **no** — the step closes |
+| 0 High, 0 Medium, a Low fixed in source | a source file | **yes**, scoped to that fix |
+| High or Medium findings, all fixed in the record | no source file | **no** — the step closes |
+| High or Medium findings fixed in source | a source file | **yes**, scoped to that fix |
+
+Remaining **Low** findings are fixed and recorded in the step's notes like any other finding; the
+table above, not their severity, says whether their fix is owed a round.
+
+Two shapes the table does not name, decided by the same reading of the same diff. **A fix round that
+changes source *and* the record commissions a round** — the record half is neither a discount nor a
+second question, and the round is scoped to the source half. **A fix round that reverts an earlier
+source change commissions one too**, because the input to §7.1 is that fix round's own diff and never
+the tail's net effect: a revert that leaves the tree byte-identical to two rounds ago still changed a
+source file today, and the round that reviews it is the one that catches a revert taking something
+with it.
+
+A step can still be held open for something that is not a review round — a failing gate, an unmet
+acceptance criterion, a genuine correctness blocker, an owner decision the work truly depends on, or
+an **actionable** item under §7.3 that names a correctness defect in source. Those are named and
+marked `BLOCKED`. They are never spelled "one more round".
+
+### 7.3 "Where it is thin" is a record, not a work list
+
+Every round's notes end with a section nominating its own likeliest failure sites. **That section
+stays** — it is among the most useful things a round produces, and the next round should read it.
+What it may no longer be is a pre-written work list that the next round simply executes.
+
+**No item in that section commissions a round.** Neither mark does, and no reader of the section
+decides anything about rounds: §7.1 is the only mechanism, and it reads a diff. An item is either
+fixed now — and then §7.1 alone says whether that fix is owed a round, by whether it touched source —
+or, when it is not a correctness defect in source (the next paragraph), it is carried into the step's
+record as an open item that a later phase may adopt deliberately, which is a phase decision and not a
+tail. The first version said that "only an actionable item can commission a round", which left a
+0-High/0-Medium verdict carrying an actionable item undecided, and left the decider unnamed on top of
+that.
+
+**Carrying an item is not available for a correctness defect in source**, and that is what stops a
+known defect closing with the step. An **actionable** item naming one is a **blocker** in the sense
+§7.2 ends with: it is fixed now — and then §7.1 alone decides whether that fix is owed a round, by
+whether it touched source — or **the step does not close and is marked `BLOCKED`, with the item
+named**. It is never left as *"a later phase may adopt it"*. Without this, a round could record a
+source correctness defect as actionable, fix nothing, change no source file, close under §7.2, and
+leave nobody obliged to take it. Holding a step open is not a round and is never spelled as one: it
+commissions nothing and spends no review invocation.
+
+**From rounds written on or after 2026-08-29, every item in that section carries one of two marks**,
+and because the marks now decide whether the step may close, the boundary between them is drawn
+explicitly rather than left to the writer's sense of how much work an item looks like:
+
+- **actionable** — a named defect, or a check that can be run, in a file that exists. If what it
+  names is a **correctness defect in a source file**, it is a blocker by the paragraph above: fixed
+  now, or the step is `BLOCKED`. If it names anything else — a defect in the record, a check worth
+  running, a cleanup — a later phase may adopt it and the step closes without it.
+- **recorded only** — a residual risk, a coverage bound, a shape to watch for later, and nothing
+  that names a defect in a source file. It is written down and it is not work; no later phase owes
+  it anything.
+
+The mark follows **what the item names**, never how large the work looks. An item that cannot be
+written as *"this file is wrong in this way"* is recorded only; one that can, whose file is source
+and whose wrongness is a correctness defect, is a blocker. An unmarked item counts as **recorded
+only**, and **the existing notes files are deliberately not retro-marked** — this is a convention for
+future rounds, and a round reading an older, unmarked section treats every item in it as recorded
+only.
+
+### 7.4 Under a `goahead` run, the workflow's cap binds first and is tighter
+
+Everything in §7 is the **inner** bound. `~/.claude/scripts/goahead-base.md` — the shared workflow
+behind `/goahead-opus` and `/goahead-fable` — caps a phase at **two review invocations and 45 minutes
+in total**, and states in as many words that this cap outranks every project convention, naming "a fix
+is a change and is owed a review" as one of the conventions it outranks. So under such a run:
+
+- **the workflow's cap wins.** §7 may close a step earlier than the cap would; it may never hold one
+  open past it.
+- **nothing in §7 authorises a third review invocation in a phase.** If §7.1 still commissions a
+  round when the cap is reached, the phase closes under the workflow's own after-the-second-review
+  rule, and what was cut short is recorded — becoming a new corrective phase when the remaining work
+  is substantial, and `BLOCKED` or `FAILED` when a real blocker survives. The paragraph below is the
+  case where what was cut short is a source fix §7.1 owed a round.
+- the conflict is one-way, so it needs no case-by-case ruling and no owner: these rules only ever
+  **subtract** rounds from what the workflow already permits.
+
+**A source fix the cap leaves unreviewed is a debt that is carried, not written off.** The sequence
+is real and §7 has to answer it: review 1 → a fix that changes source → review 2 → a fix that changes
+source → the cap is reached, and §7.1 owes that second fix a round with no invocation left to run it.
+What follows is not that the fix ships unreviewed and the phase is called done. The workflow's own
+after-the-second-review rule applies: **the remaining work becomes a new corrective phase, with its
+own acceptance criteria, its own commit and its own mandatory review, and the original phase is
+recorded in `PROGRESS.md` as superseded by it — never as complete.** §7.1 is exactly what that
+corrective phase's review discharges — it is scoped to the unreviewed source fix, so the round §7.1
+commissioned does run, one phase later and under that phase's own cap. Splitting a phase merely to
+reset the review counter is prohibited by that same workflow rule, and this is not that: what
+justifies the corrective phase is not a wish for another round but an unreviewed source change that
+is still deliverable work, named in that phase's own acceptance criteria. A genuine correctness
+blocker surviving all of this is still `BLOCKED` or `FAILED`. The cap bounds review invocations, not
+honesty.
+
+Outside a `goahead` run — a hand-driven session — §7.1 and §7.2 are the whole stopping rule: nothing
+else decides whether a round runs, and a tail they do not end is `BLOCKED` work under §7.2, never a
+round nobody authorised.
