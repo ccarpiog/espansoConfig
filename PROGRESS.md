@@ -9,7 +9,9 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**.
+triggers the move**. It is **over the soft line bound and under the soft byte bound** as of 2d-4a-E,
+having archived two blocks that iteration; the next place to look for length is *Open risks and
+deviations*, not the phase table or the next action.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
@@ -44,9 +46,10 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-1** | The core observation engine with no caller — debounce, stability, read, hash, project, validate, over an injected clock | ✅ complete, after five review rounds |
 | **2d-2** | The watcher lifecycle behind the workspace session, and the real-filesystem adapter | ✅ complete — READY at round 5 |
 | **2d-3** | The write ledger and the admission gate | ✅ complete — **CLOSED at 2d-3-C (2026-08-26)**, after a fourteen-round tail the owner ended |
-| **2d-4a** | The Rust half of the reconciliation wire — the queue, `ReconciliationWake`, `drain_external_changes`, the wire types, the EN/ES JSON | 🔶 **implemented, every gate green, and NOT closed** — **nine** rounds run; **superseded by 2d-4a-D**, and 2d-4a-D in turn by 2d-4a-E |
-| **2d-4a-D** | The first corrective phase: round 9's review of the round-8 fix, which `/goahead-opus`'s two-invocation cap left unreviewed | 🔶 **ran in full, every gate green, and NOT closed** — round 9 returned **`do-not-ship`** (2 High, 3 Medium), all five fixed; **superseded by 2d-4a-E**, which carries the round-10 review §7.1 owes |
-| **2d-4a-E** | The second corrective phase: round 10's review of the round-9 fix, which `/autoclaude-opus`'s one-invocation cap left unreviewed | ⬜️ not started — **this is the next action** |
+| **2d-4a** | The Rust half of the reconciliation wire — the queue, `ReconciliationWake`, `drain_external_changes`, the wire types, the EN/ES JSON | 🔶 **implemented, every gate green, and NOT closed** — **ten** rounds run; superseded by 2d-4a-D, that by 2d-4a-E, and that by 2d-4a-F |
+| **2d-4a-D** | First corrective phase: round 9's review of the round-8 fix | 🔶 **ran in full, every gate green, NOT closed** — **`do-not-ship`**, 2 High + 3 Medium, all fixed; **superseded by 2d-4a-E** |
+| **2d-4a-E** | Second corrective phase: round 10's review of the round-9 fix | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 2 Low, three fixed and one declined with a recorded reason; **it cleared round 9's two Highs by its own derivation**; **superseded by 2d-4a-F** |
+| **2d-4a-F** | Third corrective phase: round 11's review of the round-10 fix — two comment edits in one file | ⬜️ not started — **this is the next action**; §7.2 predicts the tail ends here if its fix touches no source |
 | **2d-4a-C-1** | The scoped-lifetime contract, stated once, and its pointers | ✅ complete and **CLOSED** — four rounds, round 4 READY with 0 findings |
 | **2d-4a-C-2** | The check that keeps it — `src-tauri/src/prose_sweep.rs` and `src-tauri/src/retained_state_contract.rs` | ✅ implemented, every gate green, **CLOSED by owner decision 2026-08-29** after nine rounds |
 | **2d-4b** | The TypeScript half of the wire — spec `docs/decisions/2d-4-split-notes.md` §2 | ⬜️ not started |
@@ -182,73 +185,82 @@ decision that closed them — those decisions are in
 
 ## Next action
 
-### Round 9 RAN and returned `do-not-ship`. The next action is **Phase 2d-4a-E** — round 10's review of the round-9 fix — then **Phase 2d-4b**.
+### Rounds 9 and 10 both RAN today. The next action is **Phase 2d-4a-F** — round 11's review of the round-10 fix — then **Phase 2d-4b**.
 
 **🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
-needs a new owner ruling, not a fresh session's judgement. **2d-4a's own tail is a different tail**,
-it is not closed, and the round 10 named here belongs to *it*. The two are one digit apart and mean
-opposite things — check which tail a "round 10" is about before acting on it.
+needs a new owner ruling. **2d-4a's own tail is a different tail** and is the one that is live — it
+has now run *eleven* numbered positions, so a bare "round 10" is ambiguous between the two. Check
+which tail before acting.
 
 #### What happened on 2026-08-29, under `/autoclaude-opus` in driven mode
 
-**Phase 2d-4a-D ran to completion: round 9 was dispatched, returned `do-not-ship` with 2 High and
-3 Medium, and every one of its five findings is fixed.** The round-8 fix's two source hunks were
-its whole scope. Report: [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md).
-Record: [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18**. Brief:
-[`docs/decisions/2d-4a-D-round-9-brief.md`](docs/decisions/2d-4a-D-round-9-brief.md).
+**Two corrective phases ran to completion: 2d-4a-D (round 9) and 2d-4a-E (round 10).** Each was
+commissioned by `CLAUDE.md` §7.1 because the fix before it changed a source file, and each spent the
+workflow's single per-phase review invocation.
 
-**The reviewer was the `/autoclaude-opus` workflow's own `autoclaude-reviewer` agent on
-`model: "opus"`, not Codex.** The previous checkpoint had planned round 9 as a Codex round because
-Codex's window reopened at 19:07; that plan belonged to `/goahead-opus`, and the workflow that
-actually ran names exactly one review mechanism. **So rounds 7, 8 and 9 are three consecutive rounds
-with no second provider's eyes** — a coverage bound, recorded in §18 and in the brief, not a defect.
+| Round | Phase | Verdict | Findings | Report |
+|---|---|---|---|---|
+| 9 | 2d-4a-D | **do-not-ship** | **2 High**, 3 Medium | [`…round-9.md`](docs/reviews/phase-2d-4a-round-9.md) |
+| 10 | 2d-4a-E | ship-with-fixes | **0 High**, 2 Medium, 2 Low | [`…round-10.md`](docs/reviews/phase-2d-4a-round-10.md) |
 
-#### 🔴 Round 9's first High is the sharpest finding of this whole tail
+The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** (round 9) and
+**§19** (round 10); the briefs are `docs/decisions/2d-4a-{D-round-9,E-round-10}-brief.md`.
 
-Round 8's Medium was that the M1 paragraph claimed an *enforcement* the code does not perform; its
-fix replaced that claim with **a closed enumeration wrong by one** — *"**Two** things end that
-loop"*, omitting **overflow eviction** — and **the correct enumeration is written out one file
-away**, in `retained_state.rs` clause 4. **Round 5 of this tail found the same shape in the same
-file.** Its second High: the `INVENTORY` entry cited **clause 6** for a sentence that is about clause
-4's third way, while the precedent it appealed to cites clause 4 in its own words. Both were
-confirmed against the code by the orchestrator before the fix was commissioned, and round 9 also
-**confirmed** rather than found — both named escapes trace, and the entry's cell and count are right.
-§18 of the record is the full account.
+**Both reviewers were the `/autoclaude-opus` workflow's own `autoclaude-reviewer` agent on
+`model: "opus"`, not Codex** — the workflow names exactly one review mechanism. **Rounds 7–10 are
+four consecutive rounds with no second provider's eyes**, and round 10 was *told* that in its brief
+and asked to look where an Opus reviewer would nod. That is a coverage bound, recorded in §18.4 and
+§19.4, not a defect. **2d-4a-F is the next opportunity to break the run.**
 
-#### Step 1 — Phase 2d-4a-E, the next corrective phase (THE NEXT ACTION)
+#### 🔴 What round 9 found, and what round 10 then cleared
 
-**Why it exists.** The round-9 fix changed **two source files** —
-`src-tauri/src/reconciliation.rs` (the M1 comment hunk, comment-only, verified with `git diff -U0`)
-and `src-tauri/src/retained_state_contract.rs` (the `INVENTORY` `reason` string) — so `CLAUDE.md`
-§7.1 commissions **round 10**. `/autoclaude-opus` allows **one** review invocation per phase and
-2d-4a-D spent it on round 9, so under §7.4 the debt is carried as the next corrective phase rather
-than written off. **2d-4a-D is therefore recorded as superseded by 2d-4a-E, never as complete** —
-exactly as 2d-4a itself was recorded against 2d-4a-D.
+Round 8's Medium was that the M1 paragraph on `address_of_minted` claimed an *enforcement* the code
+does not perform; **its fix replaced that with a closed enumeration wrong by one** — *"**Two** things
+end that loop"*, omitting **overflow eviction** — and **the correct enumeration was written out one
+file away**, in `retained_state.rs` clause 4. Round 5 of this tail found the same shape in the same
+file. Round 9's second High: the `INVENTORY` entry cited **clause 6** for a sentence stating clause
+4's third way.
 
-**This is the rule working, not a treadmill.** `CLAUDE.md` §7.2 says a tail that keeps finding real
-defects in source is a tail doing its job, and every round of this one has. The tail ends the first
-time a fix stops touching source — **so if round 10 finds only record defects, it ends there.**
+**Round 10 closed both by its own derivation rather than by trusting the fix** — every mutation of
+`pending` enumerated (**no fourth way**), *"every lock in this module"* checked against eight sites,
+and *"no `INVENTORY` count moved"* re-derived over all 88 retained-state and 61 liveness phrases.
+**Round 9's two Highs are closed by an independent round, not merely by their own fix.** Round 10's
+own two Mediums were **citation discipline in that same comment**, not behaviour: a paraphrase of
+clause 5's victim rule missing its tie-break, and a restatement of clause 4's caveat beside the
+pointer meant to replace it — which `retained_state.rs:59-61` says outright *"has bought nothing"*.
+The fix answers both the way that rule prescribes: **point, do not restate.**
 
-**Scope of round 10 — narrow, and this is all of it.** The round-9 fix's diff: the M1 comment hunk
-in `reconciliation.rs` (now naming three escapes, handing the closed count to clause 4 rather than
-re-deriving it), the one-line `INVENTORY` `reason` in `retained_state_contract.rs`, and §18 of the
-record with the four `> **Correction, round 9 …**` blocks it added to §17. **Not** rounds 1–8, not
-the phase's design.
+#### Step 1 — Phase 2d-4a-F, the third corrective phase (THE NEXT ACTION)
 
-**Two things the round-10 brief should carry**, both from 2d-4a-D. **No `INVENTORY` count moved**,
-and the fix round proved that rather than assuming it — a Python replica of
-`prose_sweep::prose_units`/`sweep` run over both guards' phrase families before and after; note that
-`retained_state_contract.rs` is skipped by its own sweep but **is** swept by the liveness guard. And
-**one figure in round 9's report is not re-derivable** — its "net +30 lines" for the round-8 hunk,
-because rounds 7 and 8 share commit `125dfa8`; §18 records `--numstat` for both rounds together
-instead, and a round that cites the figure should derive it or drop it.
+**Why it exists.** The round-10 fix changed **one source file** —
+`src-tauri/src/reconciliation.rs`, comment-only, two hunks — so §7.1 commissions **round 11**.
+`/autoclaude-opus` allows one review invocation per phase and 2d-4a-E spent it on round 10, so §7.4
+carries the debt into the next corrective phase. **2d-4a-E is superseded by 2d-4a-F, never complete.**
 
-Dispatch it the same way: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the
-code, briefed from `docs/decisions/2d-4a-D-round-9-brief.md`'s shape, writing its report to
-`docs/reviews/phase-2d-4a-round-10.md`. The Codex route is
-[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) if a
-second provider is wanted to break the three-round Opus run — it is a `/goahead` procedure, not an
-`/autoclaude` one.
+**Round 11's scope is two comment edits in one file**, plus §19 and the round-10 correction block in
+§18.3 — narrower than round 10's scope, which was narrower than round 9's. **§7.2 predicts the
+ending**: a tail stops at the first fix round that stops touching source, so if round 11 finds only
+record defects — or nothing — its fix touches no source file and **the tail ends there**. That is a
+prediction, not a permission: if round 11 finds a real defect in source, its fix commissions round 12
+and the tail is doing its job.
+
+**Three things the round-11 brief should carry**, all from 2d-4a-E. **The two edits under review** at
+`reconciliation.rs` ~1497–1520 — the eviction sentence now **points at clause 5** instead of
+paraphrasing it, and clause 4's caveat is **deleted**, leaving the pointer alone; ask whether pointing
+lost something the paraphrase carried. **A pointer's target is checked for existence, not content**
+(§19.4): both crates deny `rustdoc::broken_intra_doc_links`, so deleting `retained_state` breaks the
+build, but *clause 4* and *clause 5* are ordinals in a hand-numbered list and **inserting a clause
+renumbers every citation in the workspace with nothing failing** — this round leans on that harder
+than the last. And **L2 was considered and declined, which is not the same as closed**: the precedent
+claim in `retained_state_contract.rs:1089`'s `reason`, with §19.1's argument recorded in full so a
+later round can disagree with it rather than rediscover it.
+
+Dispatch it as before: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the code,
+briefed from [`docs/decisions/2d-4a-E-round-10-brief.md`](docs/decisions/2d-4a-E-round-10-brief.md)'s
+shape, writing to `docs/reviews/phase-2d-4a-round-11.md`. To break the four-round Opus run instead,
+[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) is the
+Codex route — a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth
+reading before choosing it inside a driven single-shot session.
 
 #### Step 2 — Phase 2d-4b
 
@@ -302,47 +314,55 @@ reports `tail`'s status, and it hid ten failures once.
 
 `npm install` (or `npm ci`) is required before any frontend command will run.
 
+### Phase 2d-4a-E — round 10 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
+Medium, 2 Low.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
+[`docs/decisions/2d-4a-E-round-10-brief.md`](docs/decisions/2d-4a-E-round-10-brief.md), writing its
+own report to [`docs/reviews/phase-2d-4a-round-10.md`](docs/reviews/phase-2d-4a-round-10.md). Not
+reproduced into the queue, for the reason §18 gives.
+
+- **M1** — the eviction sentence paraphrased clause 5's victim rule and **dropped its tie-break**
+  (`min_by_key((Reverse(count), lowest))`, so among paths tied for most pending the lower lowest
+  sequence wins). Fixed by **pointing at clause 5** and keeping only the fact this passage needs.
+- **M2** — the paragraph handed the closed count to clause 4 and then **restated clause 4's caveat
+  beside the pointer**, which `retained_state.rs:59-61` says *"has bought nothing"*. The restatement
+  is deleted; the pointer stays.
+- **L1** — the record said H1's paragraph added *three* intra-doc links; it added **four**, the
+  fourth being the cross-crate one. Corrected by a round-10 correction block in §18.3. **Record only.**
+- **L2 — considered and declined**, with the reasoning recorded in §19.1 so a later round can
+  disagree with it rather than rediscover it. §19.4 marks it *actionable, not a blocker*.
+- **What round 10 cleared is the substantive result**: the three-escape enumeration re-derived from
+  every mutation of `pending` with no fourth way, "every lock in this module" checked against eight
+  sites, and "no `INVENTORY` count moved" re-derived over both phrase families. **Round 9's two Highs
+  are closed by an independent round, not merely by their own fix.** What it does not cover, in its
+  own words: substring counting is not `prose_sweep::prose_units`, so unit segmentation,
+  doc-attribute prose and non-comment string sweeping are outside it.
+- **The fix round declined one framing this orchestrator offered** — that round 10 was the first
+  round since a given point to find no High — because rounds 7 and 8 also returned 0 High. **A brief
+  is not evidence, and the fix round was right to check it.**
+- **Round 11 is owed and cannot run here.** The round-10 fix changed one source file, so §7.1
+  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
+  **2d-4a-E is superseded by 2d-4a-F, never complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, each command
+issued separately, after `pkill -f 'target/debug/deps/espansoconfig-'`: `cargo test --workspace`
+**1313** passed / 0 failed over **26** result lines all `ok`, exit 0 (redirected to a file, never
+piped, so the status is Cargo's); `clippy -D warnings` clean; `cargo fmt --check` clean; `cargo doc
+--workspace --no-deps` **73** warnings and **0 unresolved**, run after `touch`ing `reconciliation.rs`
+so M1's new cross-crate link was re-resolved rather than cached; `cargo tree -p espansoconfig-core |
+rg tauri` empty; `npm run check` **431** files / 0 errors; `npm test` **2125** in 56 files; `npm run
+build` **184** modules, server oracle absent, client oracle present with 2 matches. **The three
+frontend figures were re-measured rather than reasoned about**, although no `src/` file changed in
+either phase this iteration.
+
 ### Phase 2d-4a-D — round 9 (2026-08-29, `/autoclaude-opus`, driven mode)
 
-**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `do-not-ship`: 2 High, 3 Medium,
-every finding fixed.** The reviewer was a fresh `autoclaude-reviewer` on `model: "opus"`, briefed
-from [`docs/decisions/2d-4a-D-round-9-brief.md`](docs/decisions/2d-4a-D-round-9-brief.md) and writing
-its own report to [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md). **It
-is not reproduced into the queue file** — the queue exists to preserve replies that lived only in a
-transcript, and this one did not; the queue says so in its own words.
-
-- **H1** — `reconciliation.rs`'s M1 paragraph closed its enumeration at **two** and the code has
-  **three**: overflow eviction was missing. Fixed by naming all three with their conditions, saying
-  all three stay reachable after the panic (every lock in the module goes through
-  `PoisonError::into_inner` — four sites, all checked), and **handing the closed count to clause 4**
-  rather than re-deriving it beside the assertion.
-- **H2** — the new `INVENTORY` `reason` cited **clause 6** for a claim that is clause 4's third way,
-  and its own cited precedent says clause 4. Fixed; `count: 1` and the **local fact** cell were
-  checked by the round and both stand.
-- **M1–M3** — three sentences in §17: "the round's only source change" against a two-file list, an
-  understatement of the unreviewed change's size and direction, and "the fix made the paragraph *say
-  less*". All three answered with `> **Correction, round 9 …**` blocks in the file's existing idiom —
-  **the false sentences are left standing and corrected, not deleted**.
-- **Round 9 confirmed as well as found** (both escapes trace; the entry's cell and count are right),
-  and **no `INVENTORY` count moved** — proved by replicating `prose_sweep::prose_units`/`sweep` over
-  both guards' phrase families before and after, not assumed.
-- **Round 10 is owed and cannot run here.** The round-9 fix changed two source files, so §7.1
-  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
-  **2d-4a-D is recorded as superseded by 2d-4a-E, never as complete.**
-
-**Gates on the tree this iteration produced**, measured by the orchestrator alone, no worker running
-Cargo, after `pkill -f 'target/debug/deps/espansoconfig-'`: `cargo test --workspace` **1313** passed
-/ 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check`
-clean; `cargo doc --workspace --no-deps` **73** `private_intra_doc_links` and **0 unresolved**,
-re-run after `touch`ing `reconciliation.rs` so the new intra-doc link to
-`espansoconfig_core::watch::retained_state` was actually re-resolved; `cargo tree -p
-espansoconfig-core | rg tauri` empty; `npm run check` **431** files / 0 errors; `npm test` **2125**
-in 56 files; `npm run build` **184** modules, server oracle absent, client oracle present with 2
-matches. **The three frontend figures were re-measured although no `src/` file changed** — the rule
-demands it only when `src/` is touched, and they were re-run anyway rather than copied forward,
-because this project has already shipped a stale copied-forward count once.
-
-**Rounds 7 and 8's narrative, and the next-action block that commissioned 2d-4a-D, are archived
+**Archived** at [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md), verbatim,
+now that 2d-4a-E has replaced it as the live narrative. In one line: verdict **`do-not-ship`**, 2
+High and 3 Medium, every finding fixed, and round 10 then cleared both Highs by its own derivation.
+Round 9's own record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §18; the
+report is [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md).
 verbatim** at [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md).
 ### Phase M2 — the review-tail termination rule (2026-08-29)
 
@@ -362,13 +382,14 @@ beside it. These are the ones the next phase needs.
 
 | Path | Why it matters next |
 |---|---|
-| [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md) | **What 2d-4a-E reviews the fix to.** Round 9's report — `do-not-ship`, 2 High, 3 Medium — and the diff its fix produced is round 10's whole scope |
-| [`docs/decisions/2d-4a-D-round-9-brief.md`](docs/decisions/2d-4a-D-round-9-brief.md) | **The shape round 10's brief should copy.** A brief for the `autoclaude-reviewer` rather than for Codex, with the scope, the checks and the claims to re-derive kept separate |
+| [`docs/reviews/phase-2d-4a-round-10.md`](docs/reviews/phase-2d-4a-round-10.md) | **What 2d-4a-F reviews the fix to.** Round 10's report — `ship-with-fixes`, 0 High — and the diff its fix produced is round 11's whole scope |
+| [`docs/decisions/2d-4a-E-round-10-brief.md`](docs/decisions/2d-4a-E-round-10-brief.md) | **The shape round 11's brief should copy.** For the `autoclaude-reviewer`, not for Codex; note how it names the consecutive-Opus bound to the reviewer rather than hiding it |
+| [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md) | Round 9's report — the two Highs round 10 then cleared |
 | [`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) | Read **only if** round 10 goes to Codex to break the three-round Opus run. A `/goahead` procedure, not an `/autoclaude` one: the dispatch, the collection, and what to do when Codex returns a limit rather than a review |
 | [`docs/decisions/2d-4a-round-7-brief.md`](docs/decisions/2d-4a-round-7-brief.md) | Round 7's brief, now spent — but **2d-4b's four inherited constraints are still live at its end** |
 | [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) | §2 is 2d-4b's whole spec; §3 says why the EN/ES JSON is in 4a and the accessors in 4b; §4 says what neither step does |
 | [`docs/reviews/phase-2d-4a-queue.md`](docs/reviews/phase-2d-4a-queue.md) | 2d-4a's work list — rounds 1–8 verbatim, newest last. **Round 9 is deliberately not in it**, and the file says why: the queue preserves replies that lived only in a transcript, and round 9's reviewer wrote its own file |
-| [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) | 2d-4a's record; **§18 is round 9** and ends with what round 10 inherits, §17 carries four `> **Correction, round 9 …**` blocks, §15 is the round-6 fix, §9 the residues, §11.4 the move a check cannot catch |
+| [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) | 2d-4a's record; **§19 is round 10** and ends with what round 11 inherits, §18 is round 9, §17 carries four round-9 correction blocks and §18.3 a round-10 one, §15 is the round-6 fix, §9 the residues |
 | [`docs/decisions/2d-4a-C-notes.md`](docs/decisions/2d-4a-C-notes.md) | The mechanism's record; §25 is round 9, §26 and Appendix A the reorganization, §24.7 the gate table |
 | [`docs/reviews/phase-2d-4a-C.md`](docs/reviews/phase-2d-4a-C.md) | Step 1 rounds 1–4 and step 2 rounds 1–9, each verbatim |
 | [`docs/decisions/2d-3-C-notes.md`](docs/decisions/2d-3-C-notes.md) | The precedent for ending a tail, and §4.4 is the proof-it-fails evidence standard |

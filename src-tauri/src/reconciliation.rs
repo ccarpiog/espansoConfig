@@ -1497,9 +1497,11 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// entry at the retain *before* the projection runs;
 /// [`ReconciliationQueue::enqueue`] evicts, so an arrival taking the pending map
 /// past [`QUEUE_CAPACITY`] costs the offending entry its place **when
-/// [`evictable_sequence`] picks it** — the victim is the lowest pending sequence
-/// of the path holding the most, so it is that path's oldest pending entry that
-/// goes and not whichever one this assertion trips over; and
+/// [`evictable_sequence`] picks it** — and what it picks is fixed by a rule
+/// about paths and their pending counts, stated whole as
+/// [`espansoconfig_core::watch::retained_state`]'s clause 5, so the victim is
+/// whatever that rule names and never whichever entry this assertion trips
+/// over; and
 /// [`ReconciliationQueue::begin_epoch`] assigns an empty state over the whole of
 /// it, so reopening the workspace discards the entry too. All three are escapes
 /// rather than repairs — none touches the disagreement, and nothing here
@@ -1510,12 +1512,10 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// as every lock in this module does. **That the list is closed at three is
 /// clause 4's claim rather than this paragraph's**:
 /// [`espansoconfig_core::watch::retained_state`]'s clause 4 is where a stored
-/// entry's exits are enumerated and where a fourth would have to be added, and
-/// it says in its own words that *exactly three* rests on a reading of every
-/// mutation of the pending map rather than on anything that fails when a fifth
-/// mutation site appears. **None of this paragraph is asserted by anything**:
-/// no test poisons either lock, and what happens to the process around the
-/// panic is asserted by nothing in this repository either.
+/// entry's exits are enumerated, where what that count rests on is stated, and
+/// where a fourth would have to be added. **None of this paragraph is asserted
+/// by anything**: no test poisons either lock, and what happens to the process
+/// around the panic is asserted by nothing in this repository either.
 /// `docs/decisions/2d-4a-notes.md` §15 and §16 are the record, including why no
 /// test can fail on this and why the fixture that once reached it was the
 /// review's own evidence.

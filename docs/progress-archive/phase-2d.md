@@ -2907,3 +2907,53 @@ baselines. Its four inherited constraints are listed at the end of the round-7 b
 rule since 2b-2c, a design consult comes before any line of it is written.
 
 ---
+
+---
+
+## Phase 2d-4a-D — round 9, as `PROGRESS.md` recorded it
+
+_Archived on 2026-08-29 when 2d-4a-E closed and replaced it as the live head's verification
+narrative. 2d-4a-D is superseded by 2d-4a-E, never complete; round 9's own record is
+`docs/decisions/2d-4a-notes.md` §18._
+
+### Phase 2d-4a-D — round 9 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `do-not-ship`: 2 High, 3 Medium,
+every finding fixed.** The reviewer was a fresh `autoclaude-reviewer` on `model: "opus"`, briefed
+from [`docs/decisions/2d-4a-D-round-9-brief.md`](docs/decisions/2d-4a-D-round-9-brief.md) and writing
+its own report to [`docs/reviews/phase-2d-4a-round-9.md`](docs/reviews/phase-2d-4a-round-9.md). **It
+is not reproduced into the queue file** — the queue exists to preserve replies that lived only in a
+transcript, and this one did not; the queue says so in its own words.
+
+- **H1** — `reconciliation.rs`'s M1 paragraph closed its enumeration at **two** and the code has
+  **three**: overflow eviction was missing. Fixed by naming all three with their conditions, saying
+  all three stay reachable after the panic (every lock in the module goes through
+  `PoisonError::into_inner` — four sites, all checked), and **handing the closed count to clause 4**
+  rather than re-deriving it beside the assertion.
+- **H2** — the new `INVENTORY` `reason` cited **clause 6** for a claim that is clause 4's third way,
+  and its own cited precedent says clause 4. Fixed; `count: 1` and the **local fact** cell were
+  checked by the round and both stand.
+- **M1–M3** — three sentences in §17: "the round's only source change" against a two-file list, an
+  understatement of the unreviewed change's size and direction, and "the fix made the paragraph *say
+  less*". All three answered with `> **Correction, round 9 …**` blocks in the file's existing idiom —
+  **the false sentences are left standing and corrected, not deleted**.
+- **Round 9 confirmed as well as found** (both escapes trace; the entry's cell and count are right),
+  and **no `INVENTORY` count moved** — proved by replicating `prose_sweep::prose_units`/`sweep` over
+  both guards' phrase families before and after, not assumed.
+- **Round 10 is owed and cannot run here.** The round-9 fix changed two source files, so §7.1
+  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
+  **2d-4a-D is recorded as superseded by 2d-4a-E, never as complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, no worker running
+Cargo, after `pkill -f 'target/debug/deps/espansoconfig-'`: `cargo test --workspace` **1313** passed
+/ 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check`
+clean; `cargo doc --workspace --no-deps` **73** `private_intra_doc_links` and **0 unresolved**,
+re-run after `touch`ing `reconciliation.rs` so the new intra-doc link to
+`espansoconfig_core::watch::retained_state` was actually re-resolved; `cargo tree -p
+espansoconfig-core | rg tauri` empty; `npm run check` **431** files / 0 errors; `npm test` **2125**
+in 56 files; `npm run build` **184** modules, server oracle absent, client oracle present with 2
+matches. **The three frontend figures were re-measured although no `src/` file changed** — the rule
+demands it only when `src/` is touched, and they were re-run anyway rather than copied forward,
+because this project has already shipped a stale copied-forward count once.
+
+**Rounds 7 and 8's narrative, and the next-action block that commissioned 2d-4a-D, are archived
