@@ -484,7 +484,7 @@ and in `git log`._
 | 2d-4a-E — the SHA and push record | `f7bbf6d` | ✅ pushed to `origin/main` |
 | **2d-4a-F — round 11 and its fix; round 12 OWED** | `b854de5` | ✅ pushed to `origin/main` |
 | 2d-4a-F — the SHA and push record | `4d90177` | ✅ pushed to `origin/main` |
-| **2d-4a-G — round 12 and its fix; round 13 OWED** | G_SHA | G_PUSH |
+| **2d-4a-G — round 12 and its fix; round 13 OWED** | `e334d5b` | ✅ pushed to `origin/main` |
 
 **Each of those source commits is what makes the next round owed.** `125dfa8` changed five files
 under `src-tauri/src/` and made round 9 owed; `6572a29` changed two — the M1 doc paragraph in
@@ -495,3 +495,5 @@ round **12** owed; and this phase's commit changes **one**, the punctuation of t
 one deleted clause (+3 / −4), and makes round **13** owed. **Every one of them is comment or
 inventory prose with no executable line changed**, and under §7.1 the unit is the file, so each still
 commissions a round.
+
+**The tree is clean at `e334d5b`.**
