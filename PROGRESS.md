@@ -470,7 +470,7 @@ and in `git log`._
 | 2d-4a-D — the SHA and push record | `d264012` | ✅ pushed to `origin/main` |
 | **2d-4a-E — round 10 and its fix; round 11 OWED** | `22d1afb` | ✅ pushed to `origin/main` |
 | 2d-4a-E — the SHA and push record | `f7bbf6d` | ✅ pushed to `origin/main` |
-| **2d-4a-F — round 11 and its fix; round 12 OWED** | GIT_SHA_SLOT | GIT_PUSH_SLOT |
+| **2d-4a-F — round 11 and its fix; round 12 OWED** | `b854de5` | ✅ pushed to `origin/main` |
 
 **Each of those source commits is what makes the next round owed.** `125dfa8` changed five files
 under `src-tauri/src/` and made round 9 owed; `6572a29` changed two — the M1 doc paragraph in
@@ -478,4 +478,4 @@ under `src-tauri/src/` and made round 9 owed; `6572a29` changed two — the M1 d
 round 10 owed; `22d1afb` changed **one**, two comment hunks in `reconciliation.rs`, and made round
 11 owed; this phase's commit changes **one**, a single sentence of the same doc comment (+4 / −3),
 and makes round **12** owed. **Every one of them is comment or inventory prose with no executable
-line changed**, and under §7.1 the unit is the file, so each still commissions a round.
+line changed**, and under §7.1 the unit is the file, so each still commissions a round. The tree is clean at `b854de5`.
