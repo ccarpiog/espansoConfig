@@ -2957,3 +2957,54 @@ demands it only when `src/` is touched, and they were re-run anyway rather than 
 because this project has already shipped a stale copied-forward count once.
 
 **Rounds 7 and 8's narrative, and the next-action block that commissioned 2d-4a-D, are archived
+
+
+---
+
+## Phase 2d-4a-E — round 10 (2026-08-29), verification block, verbatim
+
+Moved out of `PROGRESS.md` when 2d-4a-F replaced it as the live narrative. 2d-4a-E is
+**superseded, never complete**: its fix changed a source file, round 11 was owed, and round 11
+then returned `do-not-ship` with a High in the very sentence M1 had rewritten around.
+
+### Phase 2d-4a-E — round 10 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
+Medium, 2 Low.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
+[`docs/decisions/2d-4a-E-round-10-brief.md`](docs/decisions/2d-4a-E-round-10-brief.md), writing its
+own report to [`docs/reviews/phase-2d-4a-round-10.md`](docs/reviews/phase-2d-4a-round-10.md). Not
+reproduced into the queue, for the reason §18 gives.
+
+- **M1** — the eviction sentence paraphrased clause 5's victim rule and **dropped its tie-break**
+  (`min_by_key((Reverse(count), lowest))`, so among paths tied for most pending the lower lowest
+  sequence wins). Fixed by **pointing at clause 5** and keeping only the fact this passage needs.
+- **M2** — the paragraph handed the closed count to clause 4 and then **restated clause 4's caveat
+  beside the pointer**, which `retained_state.rs:59-61` says *"has bought nothing"*. The restatement
+  is deleted; the pointer stays.
+- **L1** — the record said H1's paragraph added *three* intra-doc links; it added **four**, the
+  fourth being the cross-crate one. Corrected by a round-10 correction block in §18.3. **Record only.**
+- **L2 — considered and declined**, with the reasoning recorded in §19.1 so a later round can
+  disagree with it rather than rediscover it. §19.4 marks it *actionable, not a blocker*.
+- **What round 10 cleared is the substantive result**: the three-escape enumeration re-derived from
+  every mutation of `pending` with no fourth way, "every lock in this module" checked against eight
+  sites, and "no `INVENTORY` count moved" re-derived over both phrase families. **Round 9's two Highs
+  are closed by an independent round, not merely by their own fix.** What it does not cover, in its
+  own words: substring counting is not `prose_sweep::prose_units`, so unit segmentation,
+  doc-attribute prose and non-comment string sweeping are outside it.
+- **The fix round declined one framing this orchestrator offered** — that round 10 was the first
+  round since a given point to find no High — because rounds 7 and 8 also returned 0 High. **A brief
+  is not evidence, and the fix round was right to check it.**
+- **Round 11 is owed and cannot run here.** The round-10 fix changed one source file, so §7.1
+  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
+  **2d-4a-E is superseded by 2d-4a-F, never complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, each command
+issued separately, after `pkill -f 'target/debug/deps/espansoconfig-'`: `cargo test --workspace`
+**1313** passed / 0 failed over **26** result lines all `ok`, exit 0 (redirected to a file, never
+piped, so the status is Cargo's); `clippy -D warnings` clean; `cargo fmt --check` clean; `cargo doc
+--workspace --no-deps` **73** warnings and **0 unresolved**, run after `touch`ing `reconciliation.rs`
+so M1's new cross-crate link was re-resolved rather than cached; `cargo tree -p espansoconfig-core |
+rg tauri` empty; `npm run check` **431** files / 0 errors; `npm test` **2125** in 56 files; `npm run
+build` **184** modules, server oracle absent, client oracle present with 2 matches. **The three
+frontend figures were re-measured rather than reasoned about**, although no `src/` file changed in
+either phase this iteration.

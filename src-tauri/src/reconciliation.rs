@@ -1499,9 +1499,10 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// past [`QUEUE_CAPACITY`] costs the offending entry its place **when
 /// [`evictable_sequence`] picks it** — and what it picks is fixed by a rule
 /// about paths and their pending counts, stated whole as
-/// [`espansoconfig_core::watch::retained_state`]'s clause 5, so the victim is
-/// whatever that rule names and never whichever entry this assertion trips
-/// over; and
+/// [`espansoconfig_core::watch::retained_state`]'s clause 5. **That rule does
+/// not know this assertion exists**: the offending entry goes when the rule
+/// happens to name it, never because it is the entry that trips here, so this
+/// escape waits on a state it cannot bring about; and
 /// [`ReconciliationQueue::begin_epoch`] assigns an empty state over the whole of
 /// it, so reopening the workspace discards the entry too. All three are escapes
 /// rather than repairs — none touches the disagreement, and nothing here

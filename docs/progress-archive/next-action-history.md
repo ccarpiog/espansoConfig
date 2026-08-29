@@ -9153,3 +9153,100 @@ move-versus-edit conflict), **R26** (`shares_a_line` is a unit test rather than 
 
 ---
 
+
+
+---
+
+## Superseded next action — written at 2d-4a-E (round 10), spent by 2d-4a-F
+
+**History, never an instruction.** It named Phase 2d-4a-F as the next action and predicted the
+tail would end at round 11. 2d-4a-F ran; round 11 returned `do-not-ship` with a High in source,
+so the prediction was wrong and round 12 is owed. Kept verbatim below.
+
+## Next action
+
+### Rounds 9 and 10 both RAN today. The next action is **Phase 2d-4a-F** — round 11's review of the round-10 fix — then **Phase 2d-4b**.
+
+**🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
+needs a new owner ruling. **2d-4a's own tail is a different tail** and is the one that is live — it
+has now run *eleven* numbered positions, so a bare "round 10" is ambiguous between the two. Check
+which tail before acting.
+
+#### What happened on 2026-08-29, under `/autoclaude-opus` in driven mode
+
+**Two corrective phases ran to completion: 2d-4a-D (round 9) and 2d-4a-E (round 10).** Each was
+commissioned by `CLAUDE.md` §7.1 because the fix before it changed a source file, and each spent the
+workflow's single per-phase review invocation.
+
+| Round | Phase | Verdict | Findings | Report |
+|---|---|---|---|---|
+| 9 | 2d-4a-D | **do-not-ship** | **2 High**, 3 Medium | [`…round-9.md`](docs/reviews/phase-2d-4a-round-9.md) |
+| 10 | 2d-4a-E | ship-with-fixes | **0 High**, 2 Medium, 2 Low | [`…round-10.md`](docs/reviews/phase-2d-4a-round-10.md) |
+
+The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** (round 9) and
+**§19** (round 10); the briefs are `docs/decisions/2d-4a-{D-round-9,E-round-10}-brief.md`.
+
+**Both reviewers were the `/autoclaude-opus` workflow's own `autoclaude-reviewer` agent on
+`model: "opus"`, not Codex** — the workflow names exactly one review mechanism. **Rounds 7–10 are
+four consecutive rounds with no second provider's eyes**, and round 10 was *told* that in its brief
+and asked to look where an Opus reviewer would nod. That is a coverage bound, recorded in §18.4 and
+§19.4, not a defect. **2d-4a-F is the next opportunity to break the run.**
+
+#### 🔴 What round 9 found, and what round 10 then cleared
+
+Round 8's Medium was that the M1 paragraph on `address_of_minted` claimed an *enforcement* the code
+does not perform; **its fix replaced that with a closed enumeration wrong by one** — *"**Two** things
+end that loop"*, omitting **overflow eviction** — and **the correct enumeration was written out one
+file away**, in `retained_state.rs` clause 4. Round 5 of this tail found the same shape in the same
+file. Round 9's second High: the `INVENTORY` entry cited **clause 6** for a sentence stating clause
+4's third way.
+
+**Round 10 closed both by its own derivation rather than by trusting the fix** — every mutation of
+`pending` enumerated (**no fourth way**), *"every lock in this module"* checked against eight sites,
+and *"no `INVENTORY` count moved"* re-derived over all 88 retained-state and 61 liveness phrases.
+**Round 9's two Highs are closed by an independent round, not merely by their own fix.** Round 10's
+own two Mediums were **citation discipline in that same comment**, not behaviour: a paraphrase of
+clause 5's victim rule missing its tie-break, and a restatement of clause 4's caveat beside the
+pointer meant to replace it — which `retained_state.rs:59-61` says outright *"has bought nothing"*.
+The fix answers both the way that rule prescribes: **point, do not restate.**
+
+#### Step 1 — Phase 2d-4a-F, the third corrective phase (THE NEXT ACTION)
+
+**Why it exists.** The round-10 fix changed **one source file** —
+`src-tauri/src/reconciliation.rs`, comment-only, two hunks — so §7.1 commissions **round 11**.
+`/autoclaude-opus` allows one review invocation per phase and 2d-4a-E spent it on round 10, so §7.4
+carries the debt into the next corrective phase. **2d-4a-E is superseded by 2d-4a-F, never complete.**
+
+**Round 11's scope is two comment edits in one file**, plus §19 and the round-10 correction block in
+§18.3 — narrower than round 10's scope, which was narrower than round 9's. **§7.2 predicts the
+ending**: a tail stops at the first fix round that stops touching source, so if round 11 finds only
+record defects — or nothing — its fix touches no source file and **the tail ends there**. That is a
+prediction, not a permission: if round 11 finds a real defect in source, its fix commissions round 12
+and the tail is doing its job.
+
+**Three things the round-11 brief should carry**, all from 2d-4a-E. **The two edits under review** at
+`reconciliation.rs` ~1497–1520 — the eviction sentence now **points at clause 5** instead of
+paraphrasing it, and clause 4's caveat is **deleted**, leaving the pointer alone; ask whether pointing
+lost something the paraphrase carried. **A pointer's target is checked for existence, not content**
+(§19.4): both crates deny `rustdoc::broken_intra_doc_links`, so deleting `retained_state` breaks the
+build, but *clause 4* and *clause 5* are ordinals in a hand-numbered list and **inserting a clause
+renumbers every citation in the workspace with nothing failing** — this round leans on that harder
+than the last. And **L2 was considered and declined, which is not the same as closed**: the precedent
+claim in `retained_state_contract.rs:1089`'s `reason`, with §19.1's argument recorded in full so a
+later round can disagree with it rather than rediscover it.
+
+Dispatch it as before: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the code,
+briefed from [`docs/decisions/2d-4a-E-round-10-brief.md`](docs/decisions/2d-4a-E-round-10-brief.md)'s
+shape, writing to `docs/reviews/phase-2d-4a-round-11.md`. To break the four-round Opus run instead,
+[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) is the
+Codex route — a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth
+reading before choosing it inside a driven single-shot session.
+
+#### Step 2 — Phase 2d-4b
+
+Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
+TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
+wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
+`index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
+baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
+rule since 2b-2c, a design consult comes before any line of it is written.
