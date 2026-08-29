@@ -590,3 +590,92 @@ The record has passed the point where further stacking is better than consolidat
 ### Could not check
 
 The read-only workspace prevents responsibly rerunning Cargo gates because builds write artifacts; I did not attempt them. The two external in-memory replications also are not stored in the repository and therefore cannot be inspected or rerun. These limits do not affect the verdict: the findings above are established from the committed record, source, and Git history.
+
+## Step 2 — round 7 (against the round-6 fix: §22 in full, §22.3's four-passage table, §22.7's sweeps D and E and its thirteen re-run constructions, §22.6's consolidation claim, §22.4 and §22.1, §3's 45-pointer inventory and the sentences built on it, §13.2's five figures and §19.2's 71)
+
+NOT READY — 0 High, 0 Medium, 4 Low. The four findings are substantive defects in still-live wording, not restatements of wording already fixed. The code remains cleared; this verdict concerns the record alone.
+
+### Finding 1 — Low — the regex explanation reverses what “unanchored” means
+
+`docs/decisions/2d-4a-C-notes.md`, §21.7 round-6 correction, lines 3633–3637; §22.3, lines 3857–3861.
+
+> “the leading `^\s*` matters, because the unanchored form misses every block indented under a bullet”
+
+An unanchored pattern beginning `> **...` does not miss indentation: it matches the substring after the spaces and returns all 24 blocks. The form that misses the indented blocks is the one anchored directly at `>`—`^> **...`—which returns 17. The recorded `^\s*>` command correctly returns 24, and the four-passage table derived from it is correct; only the explanation of why is false.
+
+Narrowest fix: in both places, replace “the unanchored form” with “the form anchored directly at `>`” or explicitly name `^>`.
+
+### Finding 2 — Low — Sweep D’s negative is wider than its candidate pattern
+
+`docs/decisions/2d-4a-C-notes.md`, §22.7, lines 4003–4008, 4013–4025 and 4047–4051.
+
+> “Sweeps D and E found nothing beyond their findings”
+
+> “Sweep D — a printed, re-runnable command credited with an exact count.”
+
+> “Cargo and npm gate rows were excluded deliberately … and none of them is a search.”
+
+> “No further instance of the shape was found.”
+
+Sweep D’s pattern only selects inline code spans beginning with six command names. It does not cover all printed, re-runnable commands credited with exact results:
+
+- At `5593a90`, fenced shell commands at lines 594, 819 and 1070 are each credited with a zero-line result but cannot match the backtick pattern.
+- The fenced Sweep-B command at line 3363 is also mechanically missed, although §22 later re-runs that construction through another reference.
+- The excluded gate rows include repeated `cargo tree … | rg tauri` commands credited with an empty result. Those are searches, contrary to “none of them is a search.”
+
+The thirteen constructions §22 chose did all reproduce; the defect is the claim that this deliberately narrow candidate search exhausted the stated shape.
+
+Narrowest fix: scope the negative to “the inline code-span constructions returned by this pattern.” Alternatively, widen the candidate collection to fenced commands and search-bearing gate rows and audit those before retaining the shape-wide negative. Sweep E’s negative survived a broader reading for causal terms; I found no additional unsupported diagnosis there.
+
+### Finding 3 — Low — three live claims still treat the historical 45-pointer inventory as the current complete set
+
+`docs/decisions/2d-4a-C-notes.md`, §5 item 2, lines 303–310; §5 item 6, lines 326–330; §14 item 9, lines 1603–1606.
+
+> “Eight of the 45 pointers are not compile-checked, and 37 are.”
+
+> “five further pointers — `reconciliation.rs`’s two test comments and its inline comment inside `drain`, `commands.rs`’s inline comment inside `open`, and `ledger.rs`’s two inline comments”
+
+> “§3 lists the 45 pointers”
+
+> “Eight of step 1’s 45 pointers are still not compile-checked”
+
+The current eight-file subject contains 47 pointer passages: §3’s historical 45 plus two passages added during step 1’s review fixes:
+
+- `WriteLedger::begin_epoch`’s new inline `//` pointer, which is not compile-checked.
+- `record_app_write`’s new `///` pointer, which is compile-checked.
+
+The current split is therefore 9 unchecked and 38 compile-checked. The older explanation also says “five further pointers” while its own list names six even before the later inline pointer is added: three in `reconciliation.rs`, one in `commands.rs`, and two in `ledger.rs`.
+
+§22.4 correctly defines 45 as the hand-judged inventory at `34cd5af` and openly records the 45-versus-47 gap. That correction does not scope these present-tense completeness and rename-impact claims, so a reader still receives the wrong current guarantee.
+
+Narrowest fix: bind the 8/37 split explicitly to `34cd5af`, correct “five” to “six” for that historical split, and state the current 9/38 split; change §5 item 6 to say §3 lists the initial 45 and omits the two later ledger passages. Update §14 item 9 similarly or mark it historical.
+
+The two other nominated 45-based sentences—§5 line 321 and §14 line 1525—do reproduce as statements about the original sweep: the four named passages are the four unmatched passages within that historical 45. I do not find them false merely because two later, matched pointers were added.
+
+### Finding 4 — Low — Sweep G counts construction slots while calling them positions
+
+`docs/decisions/2d-4a-C-notes.md`, §22.7, lines 4101–4109.
+
+> “Counting positions rather than lines across both sets, **thirteen positions were re-derived** … and they are the thirteen semicolon-separated items here”
+
+There are thirteen semicolon-separated construction slots, but the last slot explicitly combines two distinct record locations: §20.8 and §21.7. The sentence therefore has not counted positions as it says; it has counted grouped constructions. Other items likewise group several figures into a slot, so changing 13 to another number without first defining the unit would repeat the same problem.
+
+Narrowest fix: say “thirteen construction slots” and note that the last slot covers two passages, or recount using a consistently defined position unit.
+
+### Checked and cleared
+
+- §22.3’s underlying inventory reproduces: the anchored whitespace-tolerant search returns 24 annotation blocks at `5593a90`. Reading all 24 gives exactly four stacked passages: §14 item 5 with three blocks, and §17.2, §18.6 and §19.7 with two each. No fifth stack was found.
+- All thirteen constructions §22.7 says it re-ran reproduce, including the four array sizes; 21 `to_string_lossy|to_str()` positions; the 12-line dropped-file search; all eight §20.7 historical/current sweep figures; the 36-separator attribution; the 29/20 files, 140/86 entries and single guard-source inventory line; and Sweep A’s 21 plus Sweep B’s 43/23.
+- §22.6’s consolidation claim holds on direct comparison. Both prior correction texts and both superseded tails survive; the substantive text was not lost. The changes are consolidation headers, explanatory parentheticals and the stated navigational substitutions. The broader reorganization remains an owner decision and is not a blocker here.
+- §22.4’s “Every figure the review also stated agrees” is adequately bounded by “also stated.” The four overlapping measurements—99 over 13 files, 48, 47, and the two net citations—agree. It does not claim that the two readers found every possible measurement.
+- §22.1’s argument about 78 holds. The missing regex prevents reproducing the 78/57 size claim, but the number is not used to derive Sweep C’s three findings or its 21-table result; those rest on the readings and the separately reproducible separator walk.
+- A read-only, faithful implementation of `prose_units` and the guard’s lowercase non-overlapping substring matcher reproduced §13.2 exactly: 88 phrases, 224 hits over 140 keys, 20 phrases with no hit, and excluded-phrase totals of 36 / 19 / 12 / 18 / 5. The approximations in §22.7 are therefore honest disclosure, not the only support for figures that fail to reproduce.
+- The two configured trees contain 71 `.rs` files, all with ASCII paths; skipping either guard’s own source selects 70. §19.2’s 71 is supported under `SWEPT_TREES`, although an explicit revision binding would improve reproducibility.
+- The seven new correction blocks and discharge note accurately identify the prior wording and correction, apart from Finding 1’s repeated regex terminology. §12.2’s call-specific search returns three calls and the wide search accounts for all eight matches. The deviation correction properly replaces diagnosis with correlation.
+- §22.8’s 3593→4227, +634, seven correction blocks plus one discharge, and unchanged 405 / 1305 / 874 source-line figures reproduce.
+
+### Could not check
+
+The read-only workspace prevents running Cargo tests because they write build artifacts. I did not attempt them. This did not leave the nominated guard measurements unchecked: I reproduced the relevant matcher in memory directly from `prose_sweep.rs` and matched the guard’s 224-hit/140-key inventory before checking the five excluded phrases and the 20 zero-hit phrases.
+
+The original 78/57 Sweep-C tally cannot be reproduced because its regex was never recorded. That limitation is correctly disclosed and does not affect the verdict above.
