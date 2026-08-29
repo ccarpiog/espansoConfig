@@ -679,3 +679,61 @@ Narrowest fix: say “thirteen construction slots” and note that the last slot
 The read-only workspace prevents running Cargo tests because they write build artifacts. I did not attempt them. This did not leave the nominated guard measurements unchecked: I reproduced the relevant matcher in memory directly from `prose_sweep.rs` and matched the guard’s 224-hit/140-key inventory before checking the five excluded phrases and the 20 zero-hit phrases.
 
 The original 78/57 Sweep-C tally cannot be reproduced because its regex was never recorded. That limitation is correctly disclosed and does not affect the verdict above.
+
+## Step 2 — round 8 (against the round-7 fix: §23 in full, §23.2's four-way split of the review's four line numbers, §23.5's sweeps H, I, J and K and the patterns they chose, §23.3's nine-passage classification, §23.1's four-passage table, the eight new correction blocks, and the figures no fix round had re-derived)
+
+NOT READY — 0 High, 0 Medium, 4 Low. These are substantive defects in still-live record wording, not restatements of already-fixed language. The code remains cleared; no source changes or code defects were found.
+
+### Finding 1 — Low — Sweep D still misidentifies its carrier, and Sweep H misses the false explanation
+
+`docs/decisions/2d-4a-C-notes.md`, lines 4123–4125, 4191–4195, 4505–4509, 4604–4609, 4618–4639 and 4784–4789.
+
+> “it is printed in a fenced block rather than a code span, because a code span cannot contain the backtick the pattern is looking for. **The candidate set is therefore inline code spans and nothing else**”
+
+> “**3363 is not missed either.** Its own body line **3364** prints sweep B’s alternation”
+
+The regex matches line 3364 only because that fenced command contains the literal text `` `git `` inside its own regex. It is therefore not an inline code span, disproving “inline code spans and nothing else.” A Markdown code span can also contain backticks when enclosed by a longer backtick delimiter, so the preceding explanation is false.
+
+The concrete command was surfaced and re-run, so treating 3363 as audited is defensible; 594 is likewise covered by its exact inline duplicate at 591. The defect is the carrier account and the claim that all future fenced commands are necessarily missed.
+
+Sweep H does not cover its stated shape: its 16-line pattern cannot reach this `code span` explanation or §3’s restricted-versus-unrestricted command explanation at lines 141–147. The former is the live falsehood Sweep H should have found.
+
+Narrowest fix: call Sweep D’s carrier “source lines returned by the token pattern,” describe 3364 as an incidental fenced match that was nevertheless audited, replace the impossible-code-span rationale, qualify the future-fence claim, and scope Sweep H to its named vocabulary rather than the shape.
+
+### Finding 2 — Low — Sweep J’s first count is 12, not 13
+
+`docs/decisions/2d-4a-C-notes.md`, lines 4615 and 4675–4685.
+
+> “J … **13**, plus **24** from a second pattern”
+
+Running the first printed pattern exactly against `e9cfa10` returns **12** lines, at that revision’s lines 303, 321, 329, 337, 1395, 1523, 1525, 1530, 4114, 4186, 4187 and 4196. The second pattern does return 24.
+
+Narrowest fix: change both instances of 13 to 12.
+
+### Finding 3 — Low — §23.8 says four caveats and immediately enumerates five
+
+`docs/decisions/2d-4a-C-notes.md`, lines 4795–4800.
+
+> “now says so in **four places** instead of one”
+
+The next sentence names five: §1, §3, §5 item 2, §5 item 6 and §14 item 9.
+
+Narrowest fix: replace “four” with “five.”
+
+### Finding 4 — Low — the final record is 4853 lines, not 4831
+
+`docs/decisions/2d-4a-C-notes.md`, lines 4705–4706 and 4773–4775.
+
+> “**4227** lines at `e9cfa10` to **4831** in the working tree … **+604**”
+
+> “The record’s own `wc -l` is **4831**”
+
+The fix-round handoff was 4831 lines, but the subsequent gate-result insertion added 22 lines. Both commit `1c5a9bb` and the current file contain **4853** lines; 4853 − 4227 = **626**. The commit diff confirms the same net change: 650 insertions minus 24 deletions.
+
+Narrowest fix: bind 4831/+604 explicitly to the pre-gate handoff, then state the committed total as 4853/+626; change the later unqualified current count to 4853.
+
+### Checks and constraints
+
+I did not run Cargo or npm, as required. I reimplemented `prose_units` and the non-overlapping lowercase matcher from source; it reproduced 88 / 224 / 140 / 20, 36 / 19 / 12 / 18 / 5, 71 files, and 308 / 196. The 9 / 38 classification and all four historical annotation stacks also hold. The two nominated fenced zero-result commands reproduce from their historical diffs, and the widened `rather than` reading found no mischaracterized rejected alternative.
+
+I could not run `cargo tree`; instead I parsed the unchanged manifest and lockfile dependency closure, which contains no `tauri` package. The read-only sandbox also rejected a shell here-document, so I reran the same source-only analysis through an inline interpreter command.
