@@ -605,3 +605,12 @@ real guards, and says the replica "can agree with a wrong implementation of itse
   exist and their text matches, but I did not run `git log -S` on each to confirm which commit
   introduced which. §16.4 already nominates this as thin.
 - The replica's 88/140/224/0 and 61/86/129/0 counts, which need execution.
+
+## Round 9 — filed, and deliberately not reproduced here
+
+Round 9's report is `docs/reviews/phase-2d-4a-round-9.md`, written by the reviewer itself and complete
+there: `do-not-ship`, 2 High and 3 Medium, against the round-8 fix alone. **It is not copied into this
+file, and its absence is not a skipped step.** This queue exists to preserve replies that lived only
+in a transcript — which is what rounds 1 to 6 were — and round 9's reply was a file from the moment it
+was written, so a copy here would be a second text to keep in step with no reply to rescue.
+`docs/decisions/2d-4a-notes.md` §18 is the record of the round.

@@ -2905,6 +2905,23 @@ out *why*, which is where the usage-limit notice was.
   sentence that this is not an enforcement. **This is the round's only source change**, and it errs
   pessimistic in the direction that matters: the sentence it replaces promised *more* safety than the
   code gives, which is this project's named worst defect class, and nothing unsafe followed from it.
+  > **Correction, round 9 (H1 and M1).** Two sentences above are wrong, and the second is this
+  > project's worst defect class arriving in the sentence that closed an instance of it.
+  >
+  > *"**This is the round's only source change**"* is false — the fix also added an `INVENTORY` entry
+  > to `src-tauri/src/retained_state_contract.rs`, which §17.2's by-file list and §17.3's
+  > *"That entry is a second source change"* both record. **The round-8 fix changed two source
+  > files**, and that is the sentence that stands.
+  >
+  > *"names both escapes"* is a closed enumeration wrong by one. There is a **third**:
+  > `ReconciliationQueue::enqueue` evicts while `guard.pending.len() > QUEUE_CAPACITY`
+  > (`reconciliation.rs:1098-1104`, the constant at `:255`), taking the victim `evictable_sequence`
+  > (`:921-935`) selects — the lowest pending sequence of the path holding the most pending entries.
+  > `enqueue` takes the lock through `PoisonError::into_inner` (`:1089`), so eviction stays live
+  > after the panic the paragraph is about. The enumeration was written out correctly one file away
+  > the whole time: `crates/espansoconfig-core/src/watch/retained_state.rs` clause 4 (`:100`) says a
+  > stored entry leaves in **exactly three** ways and names the overflow as the second — and so does
+  > this file's own preamble, in round 5's correction block. §18.1's H1 is the fix.
 - **L1 (Low) — one span description was backwards.** §15.2's round-7 correction block and §16.1's L2
   bullet said the two derived spans are *"each a line wider at one end than the review's"*. Measured
   on `93fb76b` that is true of one and inverted for the other: `:1771-1774` is a line **narrower** at
@@ -2959,6 +2976,19 @@ restating the scope, which is the same judgement this file's `discards everythin
 carries. **That entry is a second source change**, made after round 8 reviewed the fix, and it falls
 under the same unreviewed-source debt §17.4 records rather than adding a new one.
 
+> **Correction, round 9 (H1 and H2).** The judgement recorded above is right in its cell and wrong in
+> both of its details. *"the two escapes"* inherits the miscount corrected in §17.1 — there are
+> **three**, the third being the overflow eviction inside `ReconciliationQueue::enqueue`. And
+> *"clause 6's consequence on one path"* names the wrong clause: clause 6
+> (`crates/espansoconfig-core/src/watch/retained_state.rs:119`) is *"Within the epoch a batch names,
+> its `newest_sequence` never falls"*, and nothing in the M1 paragraph is about `newest_sequence`.
+> What the `begin_epoch` half states is **clause 4's third way** (`:100`) — which the precedent the
+> entry appeals to says in as many words, since `retained_state_contract.rs`'s own
+> `discards everything` entry **for `reconciliation.rs`** reads *"the third way a stored entry
+> leaves"* and its twin for `retained_state.rs` reads *"the contract itself: clause 4's third way"*. So the recorded coupling pointed at a clause the comment does not depend on, and a
+> change to the clause it does depend on traced to nothing. **`count: 1` and the `local fact` cell
+> are both right** and are unchanged; §18.1's H2 is the rewritten `reason`.
+
 ### 17.4 What this round did not do, and where it is thin
 
 Per `CLAUDE.md` §7.3 every item carries a mark. An **actionable** item naming a correctness defect in
@@ -2983,6 +3013,19 @@ a source file is a blocker that stops this step closing; none below is one.
   so the corrective phase's reviewer starts from the right size of thing. It is **not** an argument
   that the round is unnecessary — every prior round of this tail found a real defect in what the round
   before built, and three of them found the defect *in a fix*. *(recorded only.)*
+  > **Correction, round 9 (M2).** This bullet understates its own subject twice. The unreviewed change
+  > is a comment hunk **and** a `const` array item — the `INVENTORY` entry the bullet above it
+  > describes — so it is **two source files**, not one hunk. And the hunk **adds** claims rather than
+  > removing one: where it took out a single enforcement claim it put in two factual ones, that an
+  > unvalidated `after_sequence` prunes the entry at the retain and that `begin_epoch` discards it,
+  > plus the closed count that carried both. Round 9's report measures that hunk at net **+30 lines**;
+  > this fix round cannot re-derive that figure from `git`, because rounds 7 and 8 share commit
+  > `125dfa8` and round 8's share of it cannot be isolated — what `git show --numstat` gives for the
+  > two rounds together is **+51 / −12** in `src-tauri/src/reconciliation.rs` and **+26 / −2** in
+  > `src-tauri/src/retained_state_contract.rs`. Either way the direction is the opposite of the
+  > bullet's. Sizing the corrective phase from *"the cheapest shape"* was therefore sizing it from the
+  > smallest reading available, and round 9 found two Highs inside exactly that change. The bullet's
+  > last sentence stands, and is now measured a fourth time.
 - **Both reviews were Opus fallbacks, so no round of this phase has had a second provider's eyes.**
   Rounds 1–6 were Codex; rounds 7 and 8 were not. The two reviewers are cold agents with no stake, and
   round 8 re-derived rather than accepted, but a systematic blind spot shared by both would be
@@ -2993,6 +3036,15 @@ a source file is a blocker that stops this step closing; none below is one.
   the process around a Tauri command is still measured by nothing in this repository — unchanged from
   §15.4 and §16.4. The fix made the paragraph *say less*, which is why it is safe without a test; it
   did not make it checkable. *(recorded only.)*
+  > **Correction, round 9 (M3).** *"The fix made the paragraph say less"* is false of the diff it
+  > describes, and the inference drawn from it does not hold. The fix traded **one** enforcement claim
+  > for **two** assertions nothing checks — that an unvalidated `after_sequence` prunes the entry at
+  > the retain, and that `begin_epoch` discards it — inside a closed count that was itself wrong by
+  > one. That is more claims, not fewer. What is true, and is the sentence that stands, is the
+  > narrower one: **the fix stopped promising safety the code does not give**, which is the direction
+  > that matters and is not the same as saying less. The unasserted half is unchanged — no test
+  > poisons either lock, and after round 9 the paragraph names three unasserted escapes instead of
+  > two.
 - **The two count corrections are arithmetic over a hand-derived inventory.** Twelve-stating and
   three-pointing were derived by reading, exactly as fourteen and fifteen were, and nothing
   mechanically enforces any of them — the prose guards check that a claim of *their* families is
@@ -3001,3 +3053,199 @@ a source file is a blocker that stops this step closing; none below is one.
   *(recorded only.)*
 - **R9 remains open, unmeasured and unbounded**, for the fourth round running. *(recorded only —
   no step of the 2d split owns building a bound for it, which is itself the residue.)*
+
+## 18. Round 9 of the review, and the fix round that answered it
+
+Round 9 ran on 2026-08-29 under **`/autoclaude-opus`**, as the corrective phase **2d-4a-D** that
+§17.4's first item said the round-8 debt would become. Its reviewer was **the workflow's own
+`autoclaude-reviewer` agent on `model: "opus"`, and not Codex** —
+`docs/decisions/2d-4a-D-round-9-brief.md` records why in its own opening. `PROGRESS.md` had planned a
+Codex round on the ground that Codex's usage window reopened at 19:07, but that plan belonged to
+`/goahead-opus`; the workflow that actually ran this round is `/autoclaude-opus`, whose review step
+names exactly one mechanism — one fresh `autoclaude-reviewer` on `model: "opus"` that did not write
+the code — and using it was preferred over waiting fourteen minutes for another provider's window.
+**Rounds 7, 8 and 9 are therefore three consecutive rounds with no second provider**, and that is a
+coverage bound worth stating rather than a defect: no round of 2d-4a since round 6 has had a second
+model's eyes on it, so a blind spot the adversarial-Opus reviewer shares with itself is invisible
+across all three.
+
+**Its verdict: `do-not-ship` — 2 High and 3 Medium**, every finding against the round-8 fix and
+nothing else. The report is `docs/reviews/phase-2d-4a-round-9.md`, written by the reviewer itself.
+**It is not reproduced into `docs/reviews/phase-2d-4a-queue.md`**, and that absence is a decision
+rather than a skipped step: the queue exists to preserve replies that lived only in a transcript,
+which is what rounds 1 to 6 were, and round 9's reply was a file from the moment it was written. A
+short section at the end of the queue file says exactly that, so a later reader does not read the gap
+as a round nobody filed.
+
+**The sharpest fact about this round, said plainly.** Round 9's first High is that **the fix for
+round 8's Medium replaced a false enforcement claim with a closed enumeration wrong by one** — and
+the enumeration it got wrong is written out correctly **one file away**, in
+`crates/espansoconfig-core/src/watch/retained_state.rs` clause 4 (`:100`), which says a stored queue
+entry leaves in *exactly three* ways and names the overflow eviction as the second of them. It is
+also written out correctly **in this record**, in round 5's correction block in this file's preamble,
+which enumerates the same three clauses. The fix round wrote *two*. **Round 5 of this tail found the
+same shape in this same file** — an enumeration
+of the ways a stored entry leaves the queue that counted two where the code has three — and it is the
+first instance `src-tauri/src/retained_state_contract.rs`'s own module header names when it says why
+that module exists. So the tail's ninth round found its fifth round's defect, in the file that defect was
+found in, written by the fix that answered its eighth.
+
+**What round 9 confirmed rather than found is evidence too, and it is the larger part of the report.**
+Its *Verified, not findings* section traces both of the escapes the round-8 fix had named and reports
+both as holding: `after_sequence` is an unvalidated `u64` from the wire (`commands.rs:3491` →
+`:1355` → `reconciliation.rs:1184`) and the retain at `:1187-1189` precedes the projection at
+`:1191-1197`, so a caller's watermark really can prune the offending entry before this function is
+reached; and `begin_epoch` at `:1029-1031` really does assign a whole fresh state. It also confirmed
+the two cells of the `INVENTORY` entry the round-8 fix was most likely to have got wrong —
+`count: 1` is right (`"things end"` occurs once in that file) and **local fact** is the right cell —
+so the entry's defect was its `reason` alone. And it took *"no executable line changed"* apart
+correctly rather than refusing it: true of the `reconciliation.rs` hunk, **false** of the `INVENTORY`
+entry, and not a defect either way because §17 scopes the claim to round 7's fix. **Two Highs and
+three Mediums are what survived a round that agreed with everything else it checked.**
+
+### 18.1 Finding by finding
+
+**The labels below are this record's, not the report's.** Round 9's report carries its three Mediums
+as three bullets under one *"§17's record of its own scope"* heading rather than numbering them; they
+are M1, M2 and M3 here so the correction blocks in §17 can name which finding each answers.
+
+- **H1 (High) — the closed enumeration is wrong by one.** `reconciliation.rs:1491` read *"**Two
+  things end that loop and neither is an enforcement this code performs**"* and then named the
+  unvalidated watermark and `begin_epoch`. There is a third: `ReconciliationQueue::enqueue` evicts
+  while `guard.pending.len() > QUEUE_CAPACITY` (`:1098-1104`, the constant at `:255`), taking the
+  victim `evictable_sequence` (`:921-935`) selects — the lowest pending sequence of the path holding
+  the most pending entries. `enqueue` takes this queue's lock through `PoisonError::into_inner`
+  (`:1089`), exactly as `drain` (`:1185`) and `begin_epoch` (`:1030`) do, so eviction stays live after
+  the panic the paragraph is about. **Agreed and fixed at four positions** — the doc paragraph; the
+  `INVENTORY` `reason` that had inherited the count, which H2 rewrites for its own reason as well;
+  and in this file §17.1's M1 bullet and §17.3's account of the guard firing. **What replaced it does
+  not re-derive the count.** The paragraph names three escapes,
+  states each one's condition — a caller's watermark, an overflow that selects *this* entry, a reopen
+  — and then hands the closure of the list to clause 4, which is where *exactly three* is argued,
+  where a fourth would have to be added, and which says in its own words that the figure rests on a
+  reading of every mutation of the pending map rather than on anything that fails when a fifth
+  mutation site appears. **The test that fails without it: none, and none is possible.** No test
+  poisons either lock; the guard cannot see a miscount inside a sentence (see §18.4).
+- **H2 (High) — the `INVENTORY` reason cited the wrong clause, and its own precedent said so.** The
+  `("src-tauri/src/reconciliation.rs", "things end")` entry in
+  `src-tauri/src/retained_state_contract.rs` recorded *"the **two** escapes"* — H1's miscount — and
+  said the `begin_epoch` half *"cites **clause 6**'s consequence on one path"*. Clause 6
+  (`retained_state.rs:119`) is *"Within the epoch a batch names, its `newest_sequence` never falls"*,
+  and nothing in the M1 paragraph is about `newest_sequence`. What that half states is **clause 4's
+  third way** — which the precedent the entry appeals to says outright, since that same `INVENTORY`'s
+  `discards everything` entry **for `reconciliation.rs`** reads *"the third way a stored entry
+  leaves"* and its twin for `retained_state.rs` reads *"the contract itself: clause 4's third way"*.
+  The consequence is the
+  one that matters for a check whose whole purpose is coupling: **a change to the clause the comment
+  actually depends on traced to nothing.** Fixed by rewriting the `reason` — three escapes, each
+  attributed to the code in `reconciliation.rs` that performs it, clause 4 named as the clause the
+  `begin_epoch` half restates on one entry, and the closed count recorded as handed to clause 4 rather
+  than derived beside the assertion. **`count: 1` and the `local fact` cell are unchanged**, both
+  having been checked by round 9 and found right.
+- **M1 (Medium) — §17.1 claimed the round-8 fix had one source change.** *"This is the round's only
+  source change"* is contradicted by §17.2's two-file list and by §17.3's *"That entry is a second
+  source change"*. The round-8 fix changed **two** source files, and that is the sentence that
+  stands. Fixed by a round-9 correction block under §17.1's M1 bullet, which also carries H1.
+- **M2 (Medium) — §17.4 understated the unreviewed change twice.** *"The unreviewed change is one
+  comment hunk that removes a claim rather than adding one"* was written to size the corrective
+  phase. It is two source files, not one hunk — the comment hunk **and** the `const` array item the
+  bullet above it describes — and the hunk **adds** claims where it removed one, putting two factual
+  assertions and a closed count in place of a single enforcement claim. Fixed by a correction block
+  on that bullet. The block cites round 9's *net +30 lines* as the reviewer's figure and **does not
+  adopt it as this file's own**, because rounds 7 and 8 share commit `125dfa8` and round 8's share of
+  it cannot be isolated by `git`; what this fix round could derive — `git show --numstat` for the two
+  rounds together, **+51 / −12** in `reconciliation.rs` and **+26 / −2** in
+  `retained_state_contract.rs` — is recorded beside it.
+- **M3 (Medium) — *"the fix made the paragraph say less"* is false of the diff it describes.** §17.4
+  used it to conclude the fix was *"safe without a test"*. It traded one enforcement claim for two
+  assertions nothing checks, inside a closed count that was itself wrong. Fixed by a correction block
+  that keeps the narrower true sentence — **the fix stopped promising safety the code does not give**
+  — and drops the inference from *less* to *safe*.
+
+### 18.2 What this round changed, by file
+
+Listed in full, this record and the review files included, for the reason §15.2 exists:
+
+- `src-tauri/src/reconciliation.rs` — one comment hunk inside `address_of_minted`'s doc comment, H1.
+- `src-tauri/src/retained_state_contract.rs` — one `INVENTORY` `reason` string, H2. The entry's
+  `file`, `phrase` and `count` are untouched.
+- `docs/decisions/2d-4a-notes.md` — this section, plus **four** round-9 correction blocks: one under
+  §17.1's M1 bullet (H1 and M1), one under §17.3 (H1 and H2), and two in §17.4 (M2 and M3).
+- `docs/reviews/phase-2d-4a-round-9.md` — new, written by the reviewer itself, **unmodified here**.
+- `docs/reviews/phase-2d-4a-queue.md` — one short closing section recording that round 9 is filed and
+  deliberately not reproduced.
+- `docs/decisions/2d-4a-D-round-9-brief.md` — new at the dispatch, unmodified here.
+
+**No frontend file changed**, so no `npm` gate was re-run by this fix round.
+
+### 18.3 The gates after this round
+
+Measured by this fix round on the tree it produced, each Cargo command run alone — a second Cargo
+process on this machine makes the `watch_check::` gate false-fail on timeouts, which is why the
+suite was run once, at the end, with nothing beside it.
+
+- `cargo test --workspace` — **1313** passed / 0 failed over **26** result lines, exit 0. Unchanged
+  from §17.3, as it must be: this fix round added no test and removed none, and the two source
+  changes are a doc comment and one `&'static str` inside an existing `INVENTORY` entry.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo fmt --check` — clean.
+- `cargo doc --workspace --no-deps` — exit 0, **73** `private_intra_doc_links` warnings and 0
+  unresolved, unchanged. Run because H1's paragraph added three intra-doc links
+  (`ReconciliationQueue::enqueue`, `QUEUE_CAPACITY`, `evictable_sequence`); none is unresolved and
+  none moved the count, `address_of_minted` being private and therefore undocumented by this
+  invocation.
+
+**No inventoried count moved.** Both prose guards were re-derived by hand before the suite ran, with
+a Python replica of `prose_sweep::prose_units` and `prose_sweep::sweep` over both swept trees: 88
+retained-state phrases against 141 inventory entries and 61 liveness phrases against 86, every
+`(file, phrase)` count in agreement. That replica is evidence about the tree and **not** a
+substitute for the guard — `cargo test --workspace` is what proves it, and the replica exists so that
+a fix round writing into a swept file finds out what it moved before the suite tells it. It matters
+here because `retained_state_contract.rs` is skipped by its own sweep but **is** swept by the liveness
+guard, so H2's rewritten `reason` is prose a check reads.
+
+### 18.4 What this round did not do, and where it is thin
+
+Per `CLAUDE.md` §7.3 every item carries a mark. An **actionable** item naming a correctness defect in
+a source file is a blocker that stops this step closing; none below is one.
+
+- **Round 10 is commissioned by §7.1 and cannot run here, so 2d-4a-D is superseded by 2d-4a-E and is
+  never complete.** This fix round changed two source files — `reconciliation.rs` and
+  `retained_state_contract.rs` — so §7.1 owes it a round, scoped to that fix.
+  `~/.claude/scripts/autoclaude-base.md` allows **exactly one adversarial review per phase** and
+  states there is *no re-review in the same phase*; 2d-4a-D spent its one invocation on round 9. Under
+  `CLAUDE.md` §7.4 that debt is **carried, not written off**: it becomes the corrective phase
+  **2d-4a-E**, with its own acceptance criteria, its own commit and its own mandatory review, exactly
+  as 2d-4a-D itself was recorded — and the workflow's own words are that the original phase is marked
+  *superseded, never as complete*. *(actionable — it names work in files that exist and no defect in
+  source; it is a workflow outcome, and `PROGRESS.md` carries it as the next action.)*
+- **Neither High could have been caught by the guard that demanded the entry, and that is a property
+  of the guard rather than a gap in it.** Its key is `(file, phrase)`: the round-8 comment held
+  `"things end"` once, this fix round's rewrite holds it once, and a count that is wrong *inside* the
+  sentence moves nothing. The module header already says as much — it catches an unmarked or a new
+  claim and *cannot judge whether a passage's claim is true*. What the guard did was force a
+  **judgement**, and the judgement then inherited the comment's error, which is the failure mode a
+  human round exists for. *(recorded only.)*
+- **Three consecutive rounds with no second provider.** Rounds 1–6 were Codex; 7, 8 and 9 were
+  adversarial Opus agents. Each was cold and each re-derived rather than accepted — round 9 traced
+  `enqueue`, `evictable_sequence` and both clauses itself — but a systematic blind spot shared by all
+  three is invisible from inside them. 2d-4a-E is the first opportunity to break the run.
+  *(recorded only — the substitution is the workflow's prescribed behaviour, not a shortcut taken
+  here.)*
+- **The rewritten paragraph is still asserted by nothing, and now names three unasserted escapes
+  instead of two.** No test poisons either lock; no test drives a watermark at or above an offending
+  entry's sequence; and no test connects an overflow eviction to this assertion, although the
+  capacity bound itself is exercised. The paragraph says so about itself, as it did before.
+  *(recorded only.)*
+- **A round's fix cannot be measured after the fact when it shares a commit.** Rounds 7 and 8 both
+  landed in `125dfa8`, which is why round 9 could not isolate round 8's hunk with `git diff`, why it
+  had to take the pre-fix wording from this record, and why §17.4's M2 correction records the two
+  rounds' combined `--numstat` instead of adopting a figure it cannot re-derive. Nothing is wrong in
+  the tree; what is thin is the record's ability to answer *how large was that round's fix*.
+  *(recorded only.)*
+- **R9 remains open, unmeasured and unbounded**, and nothing in this round touched it. **The
+  consecutive-round ordinal is deliberately not carried forward**: §16.4 calls round 7 *"a fourth
+  consecutive round"* and §17.4 calls round 8 *"the fourth round running"*, so the two disagree by one
+  and this round declines to add a third figure to a sequence it would have to guess at. The
+  substance is unchanged — no count, no cap, no eviction rule. *(recorded only — no step of the 2d
+  split owns building a bound for it, which is itself the residue.)*

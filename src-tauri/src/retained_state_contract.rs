@@ -1086,7 +1086,7 @@ const INVENTORY: &[Judged] = &[
         file: "src-tauri/src/reconciliation.rs",
         phrase: "things end",
         count: 1,
-        reason: "local fact: the two escapes from `address_of_minted`'s repeating assertion — an unvalidated watermark pruning the entry, and `begin_epoch` discarding it. The second cites clause 6's consequence on one path rather than restating the scope, exactly as this file's `discards everything` entry does",
+        reason: "local fact: the three escapes from `address_of_minted`'s repeating assertion, all three performed by this file's own code — an unvalidated watermark pruning the entry at the drain's retain, an overflow evicting it inside the enqueue, and `begin_epoch` discarding it. Each names clause 4's corresponding way as it lands on one entry rather than restating the clause, exactly as this file's `discards everything` entry does for the third; the closed count is handed to clause 4 rather than derived beside the assertion",
     },
     Judged {
         file: "src-tauri/src/reconciliation.rs",

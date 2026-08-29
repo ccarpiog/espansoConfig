@@ -2776,3 +2776,134 @@ engine-plus-gate stabilization are each driven separately.
 
 ---
 
+---
+
+## Phase 2d-4a — rounds 7 and 8, and the corrective phase they left behind
+
+_Archived from `PROGRESS.md` on 2026-08-29 when Phase 2d-4a-D closed. Both blocks below are
+verbatim as the live head carried them: first the verification narrative of rounds 7 and 8, then
+the "next action" block that commissioned 2d-4a-D. 2d-4a-D's own record is
+`docs/decisions/2d-4a-notes.md` §18._
+
+### The verification narrative, as it stood
+
+### Phase 2d-4a — rounds 7 and 8 (2026-08-29, `/goahead-opus`, driven mode)
+
+**Reviews: 2/2 — the workflow's whole allowance — tail started 17:42, closed 18:27, both rounds the
+adversarial Opus fallback, both `ship-with-fixes`, every finding fixed.** Neither was Codex: the
+round-7 Codex job failed 221 s in on a usage limit ("try again at 7:07 PM"), which is one bounded
+attempt spent and **not** a `QUOTA` outcome. Round 8 was commissioned by `CLAUDE.md` §7.1 because the
+round-7 fix changed five source files — a comment-only change to a source file is a source change,
+and this project keeps contracts in comments.
+
+- **Round 7** — 0 High, 1 Medium, 4 Low, all false or incomplete sentences in source comments. Its
+  Medium: the panic policy cited `crate::commands`' module header as why two poisoned mutexes are
+  safe, when none of that header's three grounds is true of `QueueState`. The fix **refused the
+  reviewer's own proposed replacement reasoning** and derived a stronger one from `drain`. It changed
+  **no executable line**.
+- **Round 8** — 0 High, 1 Medium, 2 Low, scoped to the round-7 fix. Its Medium: the rewritten panic
+  paragraph claimed an *enforcement* the code does not perform — `after_sequence` is an unvalidated
+  `u64` off the wire, and `begin_epoch` replaces the whole state. Its two Lows were a span description
+  that was backwards for one of two spans, and a "fifteenth"/"fifteen-position" count that counted
+  three pointers as statements. All three fixed, at eight positions.
+- **Round 8 also cleared three claims by its own derivation** rather than accepting them: no
+  executable line changed (verified with `git diff -U0`, whitespace-stripped); the round-7
+  reproduction is verbatim (97 lines against 97, zero hunks after demotion); and M1's substituted
+  claim traces true through `drain`.
+- **Round 9 is owed and cannot run here.** The round-8 fix changed two source files, so §7.1
+  commissions it; the cap of two invocations and 45 minutes is spent; §7.4 makes the debt a corrective
+  phase. **2d-4a is recorded as superseded by 2d-4a-D, never as complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, no worker running
+Cargo: `cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0;
+`clippy -D warnings` clean; `cargo fmt --check` clean; `cargo doc` **73** `private_intra_doc_links`,
+0 unresolved; `cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::` **20/20**, 268
+filtered, 77.63 s; `npm test` **2125** in 56 files; `npm run check` **431** files / 0 errors; `npm run
+build` **184** modules, server oracle absent, client oracle present with 2 matches.
+
+**The first of those runs failed, and it is the iteration's most useful result.** Exit 101, 287 passed
+/ 1 failed: `every_retained_state_claim_is_judged` rejected the M1 comment at
+`src-tauri/src/reconciliation.rs:1425` on phrase `"things end"` — *found 1, inventory says 0*. 2d-4a-C's
+guard caught a new claim written by a fix round, within an hour of its own nine-round tail closing,
+having never fired on new prose before. Judged in `INVENTORY` as a local fact, with the reason recorded.
+
+### The next-action block that commissioned 2d-4a-D
+
+### Rounds 7 and 8 of 2d-4a both RAN today. The next action is **Phase 2d-4a-D** — round 9's review of the round-8 fix — then **Phase 2d-4b**.
+
+**🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
+needs a new owner ruling, not a fresh session's judgement. 2d-4a's own tail is a different tail and
+is *not* closed — see below.
+
+#### What happened on 2026-08-29, under `/goahead-opus` in driven mode
+
+**Round 7 ran, its fix ran, round 8 ran, and its fix ran. Both reviews were the adversarial Opus
+fallback, not Codex.** The Codex job dispatched for round 7 (`task-mtem01j9-fnltn3`, high effort)
+failed 221 s in on *"You've hit your usage limit ... try again at 7:07 PM"*. Under
+`~/.claude/scripts/goahead-base.md` that is one bounded attempt spent — Codex is never relaunched
+inside a phase — and **a Codex limit is explicitly not a `QUOTA` outcome**, because it is another
+provider's window closing and stops no Claude work. So both rounds ran as fresh cold Opus agents,
+each writing its own report file, each reproduced verbatim into the queue.
+
+| Round | Verdict | Findings | Report |
+|---|---|---|---|
+| 7 | ship-with-fixes | 0 High, 1 Medium, 4 Low — all false or incomplete sentences in source comments | [`docs/reviews/phase-2d-4a-round-7.md`](docs/reviews/phase-2d-4a-round-7.md) |
+| 8 | ship-with-fixes | 0 High, 1 Medium, 2 Low | [`docs/reviews/phase-2d-4a-round-8.md`](docs/reviews/phase-2d-4a-round-8.md) |
+
+Both are reproduced verbatim in [`docs/reviews/phase-2d-4a-queue.md`](docs/reviews/phase-2d-4a-queue.md)
+(§ `## Round 7 — verbatim`, `## Round 8 — verbatim`); the round-8 reproduction was checked with `diff`
+and is byte-identical apart from the permitted `###`→`##` demotion. The record is
+[`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§16** (round 7) and **§17** (round 8).
+
+**Round 8 cleared, by its own derivation, the three things the brief told it to disbelieve**: no
+executable line changed in the round-7 fix; the round-7 reproduction is verbatim; and M1's
+*substituted* claim — the round-7 fix having refused the round-7 reviewer's own reasoning and put a
+different one in its place — traces true through `drain`.
+
+#### 🔔 2d-4a-C's guard fired on new prose, for the first time, in anger
+
+The first `cargo test --workspace` after the round-8 fix **failed**, exit 101, 287 passed / 1 failed:
+`retained_state_contract::tests::every_retained_state_claim_is_judged` rejected the M1 comment,
+naming `src-tauri/src/reconciliation.rs:1425`, phrase `"things end"`, *found 1, inventory says 0*.
+The mechanism 2d-4a-C spent nine rounds building — which had cleared the code outright from round 4
+onward and had never once caught a new claim — **caught one written by a fix round within an hour of
+that tail closing.** It is judged in `INVENTORY` as a *local fact* with its reason; the suite is
+green. `docs/decisions/2d-4a-notes.md` §17.3 is the account.
+
+#### Step 1 — Phase 2d-4a-D, the corrective phase (THE NEXT ACTION)
+
+**Why it exists, and why 2d-4a is recorded as superseded rather than complete.** The round-8 fix
+changed **two source files** — `src-tauri/src/reconciliation.rs` (one comment hunk) and
+`src-tauri/src/retained_state_contract.rs` (one `INVENTORY` entry) — so `CLAUDE.md` §7.1 commissions
+round 9. The `/goahead-opus` workflow caps a phase at **two review invocations and 45 minutes**, both
+exhausted (the tail ran 17:42–18:27), and `CLAUDE.md` §7.4 says that cap binds first and that **a
+source fix it leaves unreviewed is a debt carried, not written off**: it becomes a corrective phase
+with its own acceptance criteria, its own commit and its own mandatory review.
+
+**Scope — narrow, and this is all of it.** Round 9 reviews the round-8 fix's diff: the M1 comment
+hunk at `reconciliation.rs:1489-1493` and the `INVENTORY` entry in `retained_state_contract.rs`, plus
+§17 of the record. **The `INVENTORY` entry is the sharper half** — it was written *after* round 8 read
+the diff, because the guard that demanded it had not yet run, so nothing has reviewed the judgement
+itself. §17.4 marks that *actionable*.
+
+Reuse the dispatch procedure below. Codex's window reopened at **19:07 on 2026-08-29**, so round 9
+can be a real Codex round; if it is not, the fallback is a fresh cold `general-purpose` agent on
+`model: "opus"` with the brief template in `~/.claude/scripts/goahead-base.md`.
+
+#### The dispatch that works, measured across thirteen rounds
+
+**It is [`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md)** —
+the read-only brief's shape, the `.job.status` trap, why `codex-wait.sh` false-stalls and what to poll
+instead, the never-re-dispatch rule, the two permitted edits to a reply, and what to do when Codex
+returns a usage limit rather than a review. **Read it before dispatching round 9.**
+
+#### Step 2 — Phase 2d-4b
+
+Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
+TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
+wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
+`index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
+baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
+rule since 2b-2c, a design consult comes before any line of it is written.
+
+---
