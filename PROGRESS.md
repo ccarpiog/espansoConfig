@@ -11431,6 +11431,15 @@ revisions — and then ended at **11:23:50Z** with `Codex error: You've hit your
 at 2:03 PM.` followed by `Turn failed.` **There is no round-9 verdict, no finding list and no finding
 count.** The review file still holds step 1's four rounds and step 2's rounds 1–8, and is unchanged.
 
+**⏰ CHECK THE CLOCK BEFORE RE-DISPATCHING. The Codex window reopens at 2:03 PM WEST on
+2026-08-29.** A run that starts before then will spend a full session restart, dispatch, and get the
+same `You've hit your usage limit` within seconds — the loop runner waits a fixed 30 minutes per
+quota retry and does not know the reset time, so **three or four iterations can burn on this wall**,
+each paying the restart tax of re-reading `CLAUDE.md` and this checkpoint for nothing. If it is
+before 2:03 PM WEST and nothing else in the phase is actionable, **write `STATUS=QUOTA` immediately
+and stop** rather than dispatching. If it is after, dispatch normally; if the limit fires again, the
+reset time in the new error message replaces the one above.
+
 **The brief is `/tmp/round9-brief.txt`** (177 lines), built from the twelve targets below. `/tmp` is
 not durable — if it is gone, rebuild it from the twelve targets and the dispatch section below; that
 list *is* its specification, which is why the list is written here rather than in the brief alone.
