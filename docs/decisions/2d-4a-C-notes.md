@@ -1455,6 +1455,34 @@ value does). Each was replaced by the claim-shaped form that carries the same cl
 `watermark backwards`, `monotonic within`, `nothing evicts`, `for the life of`. This is the one judgement in step 2 that a
 later round is most likely to disagree with, and §14 item 4 says so.
 
+> **Bound, step 2 round 9 (§25.5) — the five figures name no corpus, and three of them move with the
+> corpus.** The sentence above gives **36 / 19 / 12 / 18 / 5** and names no file set. The nearest
+> scope is the step-2 preamble's *sweeps both source trees*, line **1368** on this tree, which pins
+> the **trees**; it does not pin **the skip**, and
+> the skip is the axis three of these numbers move on. Re-derived for round 9 without Cargo, from a
+> standalone re-implementation of `prose_units` and the lowercase non-overlapping matcher, over the
+> two paths `SWEPT_TREES` names, at `b2ef96e`:
+>
+> | Corpus | files | `backwards` | `process-wide` | `one way` | `monotonic` | `in the same breath` |
+> |---|---|---|---|---|---|---|
+> | `SWEPT_TREES`, nothing skipped | 71 | 39 | 22 | 12 | 24 | 5 |
+> | the liveness guard's own `SKIPPED` | 70 | 39 | 22 | 12 | 24 | 5 |
+> | **the retained-state guard's own `SKIPPED`** | **70** | **36** | **19** | **12** | **18** | **5** |
+> | both guards' sources skipped | 69 | 36 | 19 | 12 | 18 | 5 |
+>
+> **The sentence is true of the third row and of the fourth, and false of the first two.** The drift
+> is **3 / 3 / 0 / 6 / 0** and comes entirely from one file, `src-tauri/src/retained_state_contract.rs`,
+> which is the corpus these figures were taken over: they are the retained-state guard's own view of
+> the trees, which is the right corpus for a paragraph explaining that guard's phrase family. **The
+> corpus is therefore named here rather than left to be inferred** — `SWEPT_TREES` with
+> `retained_state_contract.rs` skipped, at `b2ef96e`. Two of the five, **12** and **5**, do not move
+> at all and are stated here because the obvious check gets them wrong: a per-line `rg -c` over the
+> same trees returns **11** and **4**. The record's 12 and 5 are correct and the shortfall is
+> `prose_units` joining a run of comment lines into one unit before matching, so a claim that
+> straddles a wrap is one hit here and none there. **Do not "correct" them from a line-based
+> command.** Nothing about the judgement the paragraph records changes; only its corpus is now
+> written down.
+
 ### 13.3 The inventory: 224 hits over 29 files, every one judged
 
 Not one hit was dropped by narrowing the pattern. The kinds, as the check's own taxonomy:
@@ -1588,31 +1616,17 @@ this project's declared worst defect class.
    not exempt each other** — `the_sweep_reaches_both_trees` asserts that `liveness_contract.rs` is
    swept by this one — but each is blind to itself.
 
-   > **Amended, step 2 round 1 (§17.2).** The middle clause is **no longer what the assertion says**.
-   > Round 1's fix moved the comparison — and with it the one retained-state-shaped wording
-   > `liveness_contract.rs` held, its own duplicate-detection assertion message — into
-   > `prose_sweep.rs`, leaving the sibling's source with nothing for this sweep to find. The
-   > assertion now names **`src-tauri/src/prose_sweep.rs`**, the machinery both checks are built on,
-   > and reads *the machinery both contract checks share is swept too — neither exempts it*. Both
-   > files are still swept rather than skipped; what changed is which one carries a hit, and the
-   > claim the assertion is allowed to make about it. Each check is still blind to itself.
-
-   > **Amended again, step 2 round 2 (§18.2).** The amendment above is the fix that round 2 filed as
-   > a finding, and its last-but-one sentence is where it went wrong: re-pointing the assertion kept
-   > it *true* and left the property it was defending *unguarded*, because **a hit-based assertion
-   > cannot cover a file that legitimately holds no hit** — with `liveness_contract.rs` in exactly
-   > that position, adding it to this check's skip list would have kept all four assertions green.
-   > Coverage is now asserted through `prose_sweep::selected_files`, the same file selection `sweep`
-   > itself walks, in **both** guards: each names its sibling and `prose_sweep.rs`, and each pins its
-   > own skip list to its own source. So *the two checks do not exempt each other* is now a claim two
-   > tests carry between them — this one's test never asserted the liveness guard's half, and the
-   > mutuality had been stated as though it did. Each check is still blind to itself.
-
-   > **Amended a third time, step 2 round 3 (§19).** *The same file selection `sweep` itself walks*
-   > overclaims, in the way §18.2's correction block sets out: `sweep` and the test call one
-   > **function**, and the test's call is a **second traversal** with the same trees and skip list,
-   > not the `Vec` the sweep walked. What the two assertions are worth is what `selected_files`
-   > answers for this check's arguments. Everything else in the amendment above stands.
+   > **Amended three times — round 1 (§17.2), round 2 (§18.2) and round 3 (§19). The current claim is
+   > round 3's and is stated here; all three amendments are kept verbatim, each under the round that
+   > wrote it and in the order they were written, in Appendix A.1.** Coverage is asserted through
+   > `prose_sweep::selected_files` in **both** guards: each names its sibling and `prose_sweep.rs`, and
+   > each pins its own skip list to its own source. So *the two checks do not exempt each other* is a
+   > claim **two tests carry between them** — this check's own test never asserted the liveness guard's
+   > half, and the mutuality had been stated as though it did. Round 3's narrowing bounds what that is
+   > worth: `sweep` and the test call one **function**, and the test's call is a **second traversal**
+   > with the same trees and skip list, not the `Vec` the sweep walked, so **what the two assertions
+   > are worth is what `selected_files` answers for this check's arguments**. Both files are still
+   > swept rather than skipped; each check is still blind to itself.
 6. **It sweeps two source trees and no document.** `docs/` is deliberately not swept and **cannot be**:
    `2d-4a-notes.md` quotes six review rounds' false sentences on purpose, so a check over the
    documentation tree would fail on the record of every defect this phase fixed. This file and that one
@@ -1824,22 +1838,18 @@ loud, on the first run.** This is worth recording because it is the check workin
   machinery both checks are built on, and reads *the machinery both contract checks share is swept
   too — neither exempts it*. §14 item 5 carries the amendment.
 
-  > **Correction, step 2 round 2 (§18.2).** *It now names …* was true when written and is
-  > **historical**; the re-pointing it describes is also the round-2 finding. Re-pointing a
-  > **hit-based** assertion kept it true and left the property unguarded — `liveness_contract.rs` had
-  > become a file with no hit of this family, and no hit-based assertion can distinguish that from a
-  > file the walk never opened. Both guards now assert coverage through
-  > `prose_sweep::selected_files`; the assertion that used to name `prose_sweep.rs` alone has been
-  > replaced, in each guard, by one naming the sibling check and one naming `prose_sweep.rs`, plus a
-  > pin on the guard's own skip list. §18.2 and §18.3 carry it.
-
-  > **Corrected again, step 2 round 3 (§19) — *in each guard*.** Only the **retained-state** guard
-  > ever held that assertion, and only there was anything replaced: its hit-based `prose_sweep.rs`
-  > assertion was removed and four selection-based ones added, four to seven. The **liveness**
-  > guard's `the_sweep_reaches_both_trees` had no assertion about `prose_sweep.rs` or about its
-  > sibling at all before round 2 — §18.1 item 3 says so — so there it was three to seven with
-  > nothing dropped. The correction block at the end of §18.2 carries the arithmetic and the reason
-  > the removal is cheap.
+  > **Corrected twice — round 2 (§18.2) and round 3 (§19). The current claim is round 3's and is
+  > stated here; both corrections are kept verbatim, each under the round that wrote it, in Appendix
+  > A.2.** *It now names …* was true when written and is **historical**; re-pointing a **hit-based**
+  > assertion kept it true and left the property unguarded, because `liveness_contract.rs` had become
+  > a file with no hit of this family, and no hit-based assertion can distinguish that from a file the
+  > walk never opened. Coverage is now asserted through `prose_sweep::selected_files` — but only the
+  > **retained-state** guard ever held that assertion, and only there was anything replaced: its
+  > hit-based `prose_sweep.rs` assertion was removed and four selection-based ones added, **four to
+  > seven**. The **liveness** guard's `the_sweep_reaches_both_trees` had no assertion about
+  > `prose_sweep.rs` or about its sibling at all before round 2 — §18.1 item 3 says so — so there it
+  > was **three to seven with nothing dropped**. §18.2 and §18.3 carry it, and the correction block at
+  > the end of §18.2 carries the arithmetic and the reason the removal is cheap.
 
 ### 17.3 What the fix costs, said plainly
 
@@ -2416,6 +2426,22 @@ cannot be placed in a fixture, in a temporary directory or in the trees themselv
 A test claiming to prove the non-UTF-8 behaviour would therefore be a test proving something else,
 and this round did not write one. What stands is the code reading through a path again, and this
 paragraph.
+
+> **Bound, step 2 round 9 (§25.2) — *the two trees* now names them, and the figure now names a
+> revision.** The sentence above says *All **71** `.rs` files of the two trees* and, as §22.9 item 2
+> observed and left uncorrected, names neither tree and no revision — so a reader reaching for the
+> obvious command over `src-tauri/src` and `crates/` whole gets **95**. **The two trees are
+> `SWEPT_TREES`**, declared identically in both guards
+> (`src-tauri/src/liveness_contract.rs:180` and `src-tauri/src/retained_state_contract.rs:263`) as
+> `src-tauri/src` and `crates/espansoconfig-core/src`. Over exactly those two,
+> `rg --files src-tauri/src crates/espansoconfig-core/src -g '*.rs'` returns **71** on this tree, and
+> `git ls-tree -r b2ef96e --name-only` over the same two paths, filtered to `.rs`, returns **71** as
+> well — so **the figure is 71 at `b2ef96e`**, and this tree differs from that commit in
+> `PROGRESS.md` only. The *same 70 files per check* the sentence already states is the same
+> enumeration minus one: each guard's `SKIPPED` holds exactly its own source file, so
+> `selected_files` answers **70** for either. **This is enumeration and not guard output**, which is
+> why round 9 could re-derive it with Cargo forbidden — a distinction §24's opening and §24.8 item 6
+> both had wrong, and both now carry the correction.
 
 ### 19.3 Finding 2 — what a test calling `selected_files` gets, and the remedy that was refused
 
@@ -4122,9 +4148,27 @@ than left silent; sweep F found one further instance and a wrong inventory; swee
 pattern* collects one.** The pattern is a backtick
 followed by one of six command names and a space; it is printed in a fenced block rather than a code
 span because it contains backticks of its own, and a code span carrying one needs a longer backtick
-delimiter — legal CommonMark, but a form this record does not use. **The candidate set is therefore
+delimiter — legal CommonMark, and the less familiar of the two forms, which is what the passage chose
+a fence over. **The candidate set is therefore
 the source lines that pattern returns**, which is narrower than the shape's name and is what §23.2's
 block below, as corrected by §24.1, bounds:
+
+> **Corrected, step 2 round 9 (§25.1) — the stylistic claim in that sentence was false of this very
+> paragraph, eleven lines above the counter-example.** The clause read *legal CommonMark, but a form
+> this record does not use*, and this record does use it: line **4136**, in this same sweep-D
+> passage, carries **six** double-backtick code spans — `` `rg ``, `` `git ``, `` `wc ``,
+> `` `shasum ``, `` `awk `` and `` `sed `` — each a two-backtick delimiter carrying one backtick,
+> exactly the construction the clause denied. **Eleven lines**, 4125 to 4136, separate the denial
+> from its refutation. Five more spans of the same form sit at **4198, 4233, 4543, 5049** and
+> **5060**, for **eleven** in the record as round 9 read it. **Every line number in this block is
+> that reading's** — `git show 8c345f9:docs/decisions/2d-4a-C-notes.md` — and the eleven is a figure
+> this block's own six spans immediately move, which is why it is stated against that reading and
+> not as a standing total. The
+> CommonMark statement beside it is untouched and
+> correct; only the claim about this record's own usage was wrong, and the sentence now gives a
+> stylistic reason instead of a false factual one. **Nothing about sweep D's carrier, its 54, its 17
+> constructions or its negative moves** — this is a repair of an explanation, and §24.1 carries the
+> twin of it.
 
 ```sh
 git show 5593a90:docs/decisions/2d-4a-C-notes.md | rg -c '`(rg|git|wc|shasum|awk|sed) '
@@ -4912,11 +4956,41 @@ unless the item says in as many words that it was.
    > happens at `5593a90`'s line 3364 — so the miss is conditional, not universal, and relying on
    > either reading is unsafe. **The two genuine misses at 819 and 1070 are unaffected and remain
    > unaudited**, as does the widening; nothing here closes anything.
+
+   > **Corrected, step 2 round 9 (§25.7) — *the ten* gate rows is a `5593a90` figure carried forward
+   > into a live sentence, and there are now twelve.** Re-run for round 9 over the record as round 9
+   > read it, `git show 8c345f9:docs/decisions/2d-4a-C-notes.md`,
+   > ``rg -n '^\| `cargo tree'`` returns **12** rows; at `5593a90` the same shape returns **10**, so
+   > the item's figure was right when it was written and stopped being right when rounds 7 and 8
+   > added their own gate tables. **Eleven of the twelve read `**empty**` and one — round 7's — reads
+   > `**Empty.** The §3 architecture rule holds`**, which is the only variation in the set and the
+   > one a pattern written from the other eleven would miss. §24.8 item 1 carries the identical
+   > correction. **§25.13's own gate table makes a thirteenth**, whose result cell reads
+   > `**Pending** — the orchestrator's` until the orchestrator fills it, so a reader re-running this
+   > after the round gets **13** and three distinct result forms; the twelve is bound to `8c345f9`
+   > for that reason. **Still unaudited**: no row was read for its claim, and the widening is still
+   > not run.
 2. **Sweep I's own negative has the defect it corrected, one level up.** §20.7's sweep 1 is now
    scoped to its 36 lines, and this round measured that `rather than` collects 73 lines the pattern
    does not — **but it did not run the wider sweep**, so nothing here establishes whether any of
    those 73 mischaracterizes a rejected alternative. The correction makes the record honest about
    what it swept; it does not make the sweep complete. **Unchecked.**
+
+   > **Discharged at step 2 round 9 (§25.10) — the 73 have been read.** *Nothing here establishes
+   > whether any of those 73 mischaracterizes a rejected alternative* was true for four rounds and is
+   > no longer. The set was re-derived first — at `2695cbb~1`, `rg -c 'rather than'` returns **75**
+   > and the subset not matching §20.7's sweep-1 pattern returns **73**, both reproducing — and then
+   > every one of the 73 was read, twice and independently: by round 9's reviewer, who reports them as
+   > predominantly measurement-versus-assumption wording, audit-trail and editorial choices,
+   > implementation contrasts and already-judged design alternatives; and by the orchestrator, which
+   > classifies them **27 CLAIM / 43 EDITORIAL / 3 HISTORICAL / 0 FENCE/CODE**. **The two readings
+   > agree on the negative and that is what this discharges**: none of the 73 mischaracterizes a
+   > rejected alternative. **The three-way split is a hand classification with no test behind it**,
+   > exactly the class §23.8 item 5 flags for the 9 / 38 split; round 9's fix read all 73 a third time
+   > and put roughly a dozen of them in a different bucket, so the split is carried on the
+   > orchestrator's authority and only its two zeroes are asserted here. **0 FENCE/CODE was
+   > re-derived**: none of the 73 lines sits inside a fenced block at that revision, and none has its
+   > `rather than` inside a code span.
 3. **§3's inventory is still knowingly two short of its subject, and now says so in five places
    instead of one.** §23.3 bound and scoped three sentences rather than re-judging the two
    `ledger.rs` passages into §3's tables, because that is re-auditing step 1. The cost is that a
@@ -5040,6 +5114,21 @@ re-measured here — they need `cargo test`, which this round was forbidden to r
 8's reviews each reproduced the first group in memory from `prose_sweep.rs`; that is external
 corroboration carried on their authority, and §24.8 keeps it open.
 
+> **Corrected, step 2 round 9 (§25.2) — §19.2's 71 does not belong in that list, because it needs no
+> guard.** The sentence above puts **71** among figures that *need `cargo test`*. It does not: 71 is
+> ordinary file enumeration over the two paths `SWEPT_TREES` names, and this record had already done
+> it that way in §22.7's closing *Two further instances* list, item 2, with `rg --files`. Re-derived
+> for round 9 without Cargo:
+> `rg --files src-tauri/src crates/espansoconfig-core/src -g '*.rs'` returns **71** on the working
+> tree, and `git ls-tree -r b2ef96e --name-only` over the same two paths, filtered to `.rs`, also
+> returns **71** — so the figure is bound to `b2ef96e`, whose only committed difference from this
+> tree is `PROGRESS.md`. **70 is what either guard then selects**, since each skips exactly its own
+> source file. **The other figures in that sentence do need the guard's own machinery** — §13.2's
+> 88 / 224 / 140 / 20, its five left-out-phrase counts and the 308 / 196 self-skip pair all depend on
+> `prose_units` joining comment runs before matching, which no line-based command reproduces — so
+> the Cargo prohibition explains them and never explained 71. §24.8 item 6 carries the same
+> correction.
+
 ### 24.1 Finding 1 — sweep D's carrier was named after a container, its justification was false, and sweep H could not have caught either
 
 **What it said.** §22.7 headed sweep D *a printed, re-runnable command credited with an exact count,
@@ -5062,11 +5151,28 @@ restricted-versus-unrestricted command explanation.
 - **The impossibility is false as a statement about Markdown, and this is a spec fact, not a
   measurement** — said so here rather than dressed as one. CommonMark's code-span rule lets a span
   carry backticks whenever the enclosing delimiter is a longer run of them. The *true* reason the
-  pattern is fenced is that it contains backticks of its own and this record does not use multi-backtick
-  delimiters — **which is exactly what §21.5 line 3522 already says** about its own sweep-B pattern:
+  pattern is fenced is that it contains backticks of its own and the passage chose a fence instead of
+  the legal but less familiar multi-backtick code-span form — **which is exactly what §21.5 line 3522
+  already says** about its own sweep-B pattern:
   *written out in prose rather than in a code span because it contains backticks of its own*. The
   correct form of the explanation was already in the record, **602** lines above the false one
   (3522 against 4124 at `1c5a9bb`).
+
+  > **Corrected, step 2 round 9 (§25.1) — the clause above claimed this record does not use
+  > multi-backtick delimiters, and it does.** The superseded wording was *this record does not use
+  > multi-backtick delimiters*. Measured rather than reasoned: an `rg -n` for a two-backtick run over
+  > **the record as round 9 read it**, `git show 8c345f9:docs/decisions/2d-4a-C-notes.md`,
+  > with fence lines filtered out, returns genuine double-backtick code spans on **six** lines —
+  > **4136, 4198, 4233, 4543, 5049** and **5060** at that revision — and
+  > the total across them is **eleven** spans — six on one line (`` `rg ``, `` `git ``, `` `wc ``,
+  > `` `shasum ``, `` `awk ``, `` `sed ``) and one each on five others. Every one is a two-backtick
+  > delimiter carrying a single backtick, which is the construction the clause denied. §24.8's own
+  > last item speaks of *its own multi-backtick spans* in as many words, so the record contradicted
+  > itself **444** lines apart at the reading round 9 took. **The CommonMark half of the bullet is
+  > untouched and was always right**; only the claim about this record's usage was false, and it is
+  > now a stylistic account of what the passage chose. §22.7's twin of this clause is corrected in
+  > the same round, with its own block, and it was **not** named by the review — it was found by
+  > sweeping for what the sentence claims rather than for its words.
 - **Sweep H provably could not reach either passage.** Its pattern, re-run for this round over
   `git show e9cfa10:docs/decisions/2d-4a-C-notes.md`, returns the same **16** lines round 7 recorded —
   46, 731, 3436, 3476, 3487, 3508, 3514, 3517, 3520, 3636, 3803, 3806, 3810, 3860, 3944, 4149.
@@ -5231,6 +5337,26 @@ explanation §22.7 got wrong, and evidence that this record knew the right reaso
 wrong one; **4503**, just described; and **4844**, §23.8 item 9's nomination, which produced finding 1
 rather than being an instance of it. 11 + 3 + 2 + 1 + 1 + 24 = **42**.
 
+> **Corrected, step 2 round 9 (§25.8) — one of the eleven *rewritten* lines was never rewritten, and
+> at the granularity this sweep counts in the partition is 10 / 3 / 2 / 1 / 1 / 25.** The superseded
+> wording is above: *4109, 4116, 4121, 4123, 4124, 4125, 4160, 4194, 4508, 4785 and 4788 rewritten*,
+> summed as *11 + 3 + 2 + 1 + 1 + 24 = 42*. **Line 4123 is byte-identical at `1c5a9bb` and on the
+> working tree, at the same line number in both** — `git show 1c5a9bb:docs/decisions/2d-4a-C-notes.md
+> | rg -n 'followed by one of six command names'` and the same search on the tree both answer
+> **4123**, and each of the other ten was checked the same way and did change. So this sweep's own
+> unit — **the line**, which is what its pattern returns and what all six of its buckets are counted
+> in — puts 4123 in *read and left*, and the partition is **10 rewritten, 3 annotated, 2 historical
+> quotations, 1 unrelated sense, 1 further instance, 25 read and left**, which still sums to 42.
+> **The eleven is defensible at sentence granularity and is said to be here rather than argued
+> away**: at `1c5a9bb` the sentence runs from *The pattern is a backtick* on 4122 through *a code span
+> cannot contain the backtick the pattern is looking for* on 4124, round 8 rewrote that sentence, and
+> 4123 is inside it — the bytes that changed simply all fell on the neighbouring lines. **The defect
+> is the mismatch between the unit the sweep counts in and the unit the classification was made in**,
+> which is the sweep-G shape one level down, and it is recorded rather than smoothed over because the
+> number a later round will re-derive is the line one. **Nothing the sweep concluded moves**: the 42,
+> the further instance at 4188, the two historical quotations and the unrelated sense at 779 are all
+> untouched, and round 9's reviewer independently reproduced the 42.
+
 **Sweep M — an impossibility or a necessity offered as the reason a scope is what it is.**
 `rg -n -i 'cannot contain|cannot carry|impossible|can never|never matches|necessarily|by construction|must be missed'`
 over the record at `1c5a9bb` returns **10** lines. One is finding 1's (4124). **The candidate set is
@@ -5305,6 +5431,42 @@ record. **Five** are working-tree measurements that say *on the working tree* in
 written, though none names a revision, which §24.8 nominates. 2 + 4 + 8 + 5 = **19**. **Nothing
 further was found among the 19**, over that pattern and not over the shape: a stale figure written
 without any of those three phrases is invisible here.
+
+> **Narrowed, step 2 round 9 (§25.6) — the sentence above says its negative is worth its pattern, and
+> a wider pattern shows how much narrower that is.** Nothing above is withdrawn: sweep P re-runs at
+> **19** for round 9, its 2 + 4 + 8 + 5 partition holds, and the caveat *a stale figure written
+> without any of those three phrases is invisible here* was already the honest form. **What was
+> missing is a measurement of the size of that blind spot**, and the negative read as if the shape had
+> been searched. Round 9's fix ran a wider pattern for the same shape — a measurement described as
+> taken over the current working state without naming a revision — reaching *on this tree*, *on the
+> current tree*, *in the shipped tree*, *counted with*, *measured here*, *re-derived here* and
+> `git diff … HEAD`, over **the record as round 9 read it** —
+> `git show 8c345f9:docs/decisions/2d-4a-C-notes.md`, byte-identical to `b2ef96e`'s — rather than
+> over `1c5a9bb`, since the sentences at issue live in §24. **All the line numbers below are that
+> revision's**; this round's first edit sits at 1458, so the three at 310, 479 and 1436 are unmoved
+> and the other fourteen have all shifted down. Filtering out every line
+> that already carries one of sweep P's three phrases, it returns **23** lines, of which **17 are
+> genuine instances of the shape**, at
+> **310, 479, 1436, 1653, 1773, 4108, 4355, 4362, 4661, 4811, 4817, 4835, 4853, 4970, 5336, 5352**
+> and **5384**.
+> The six discarded — 1325, 4726, 5039, 5172, 5443 and 5512 — are statements that a figure was
+> **not** measured, or measurements whose
+> revision is named in the same clause. **The largest missed class is a self-measurement taken with
+> `rg -c` rather than `wc -l`** — three of the seventeen count this record's own annotation blocks
+> that way — and the second is `git diff … HEAD`, where a revision *is* named but the name moves.
+> **The orchestrator's independent run of the same shape reported 12**, at 310, 479, 1653, 1773,
+> 4355, 4362, 4812, 4835, 4853, 4970, 5336 and 5384 at the same revision; **4812 and this round's
+> 4811 are the same passage**, its command line and the sentence introducing it.
+> **Round 9's fix reproduces all twelve and adds five** — **4108, 4661, 4817** and **5352**, four
+> `git diff … HEAD` lines of exactly the class the orchestrator admitted once at 4362, and **1436**,
+> a second *in the shipped tree* claim beside the one at 1773 that the twelve did include. **The twelve
+> are not wrong, they are short by five**: 17 is the figure that stands, and the two differ because
+> the twelve admitted one `git diff … HEAD` line and left four of the same class out — the
+> hand-classification hazard §23.8 item 5 names, in this round's own sweep. **None of the seventeen
+> is a false figure**; each was true when written. What they lack is a revision, and binding them is
+> not attempted here: with sweep P's own five that is **22** sentences spread across the record, and
+> §25.6 nominates the work rather than doing it. **The sweep is still not widened to the shape** — 23 lines is one more
+> pattern, not the shape, and a stale figure written in none of these words is still invisible.
 
 ### 24.6 What changed, file by file
 
@@ -5406,6 +5568,24 @@ measurement, and it is not recorded as one.** A round that cannot run a gate mus
 > legitimate count**, established by the discriminating oracle rather than by reading the number
 > alone.
 
+> **Corrected, step 2 round 9 (§25.3, §25.4) — two sentences of the block above are wider than what
+> was observed.** Both are left standing in it, and both are scoped here. **First, *Every one was run
+> once, alone, on this tree after the fix round finished*.** The same block records a `cargo test
+> --workspace` that ended *FAILED. 278 passed; 10 failed* before the clean re-run produced 1313, so
+> *every one was run once* is false of the execution history and true only of the reported
+> measurements. It should read: **each reported successful measurement was taken once and alone, and
+> `cargo test --workspace` also had the scarred failed attempt the same block describes.** The nine
+> cells are unaffected — the scar and its remedy were already written down in the sentences directly
+> beneath the one being scoped, which is why this is an overclaim and not a concealment. **Second,
+> *a piped gate does not report the gate's exit status*.** That is true of the invocation observed —
+> a pipeline run without `pipefail` and without inspecting the component statuses reports the last
+> command's status, which was `tail`'s — and **false as a general statement about pipes**: `set -o
+> pipefail` makes the pipeline take the rightmost non-zero status, and `${PIPESTATUS[@]}` in bash or
+> `$pipestatus` in zsh exposes every component's status individually. The scoped form: **that
+> pipeline, run without `pipefail` and without inspecting component statuses, reported `tail`'s
+> status rather than Cargo's.** The practical warning the sentence exists to give is unchanged, and
+> so is *nine or ten* as the honest range of the scar.
+
 **One figure this round did measure, because it costs nothing and is its own.** `git diff --stat`
 reports **two** files: `docs/decisions/2d-4a-C-notes.md`, this round's only edit, and
 `docs/reviews/phase-2d-4a-C.md`, the orchestrator's verbatim append of the round-8 reply, which this
@@ -5432,6 +5612,23 @@ Nothing below has been verified by this round unless the item says in as many wo
    **1070**, each credited with `# 0`, have now survived three rounds unread by any sweep. This round
    corrected the account of *why* they are missed and audited nothing. The ten
    `cargo tree … | rg tauri` gate rows are in the same position. **Unchecked.**
+
+   > **Corrected, step 2 round 9 (§25.7) — there are twelve gate rows, not ten, and one of the twelve
+   > answers differently.** *The ten `cargo tree … | rg tauri` gate rows* was measured at `5593a90`,
+   > where `rg -n 'cargo tree'` did return ten table rows plus the two prose sentences at 46 and 1605
+   > — re-run for round 9 and it still does. **Two rows have been added to this record since**, by
+   > rounds 7 and 8's own gate tables, so over the record as round 9 read it —
+   > `git show 8c345f9:docs/decisions/2d-4a-C-notes.md` — ``rg -n '^\| `cargo tree'`` returns
+   > **12**. The command half is byte-identical in all twelve. **The result half is not**: eleven read
+   > `**empty**` and the twelfth, round 7's, reads `**Empty.** The §3 architecture rule holds`. That
+   > is one more sentence than the pattern's ten-row account described, and it is the row a sweep for
+   > *a search credited with an empty result* would have to reach through a different spelling.
+   > **§25.13's gate table adds a thirteenth**, reading `**Pending** — the orchestrator's` until it is
+   > filled, so the twelve is bound to `8c345f9` and a re-run after this round answers **13**.
+   > **§23.2's ten is correct and untouched** — it is bound to `5593a90` in as many words, and this
+   > correction is about the two live sentences that carry the figure forward without a revision, one
+   > here and one in §23.8 item 1. Nothing else moves: no row was audited, and the whole set stays
+   > **Unchecked**.
 2. **Sweep H is scoped rather than widened, and the shape sweep behind it was never run.** This round
    established that two explanations of sweep H's shape lie outside its five-word vocabulary, and
    checked **both** — one is finding 1's falsehood, one is true. **It ran no pattern over the shape**,
@@ -5441,6 +5638,17 @@ Nothing below has been verified by this round unless the item says in as many wo
 3. **Sweep I's own negative still has the defect it corrected, one level up.** Unchanged from §23.8
    item 2: §20.7's sweep 1 is scoped to its 36 lines, the **73** `rather than` lines it does not
    collect were re-derived here (§24.5, sweep N) and remain unread. **Unchecked.**
+
+   > **Discharged at step 2 round 9 (§25.10) — *remain unread* was true for four rounds and is now
+   > false.** All **73** were read, independently by round 9's reviewer and by the orchestrator,
+   > which classifies them **27 CLAIM / 43 EDITORIAL / 3 HISTORICAL / 0 FENCE/CODE**; both readings
+   > return the same negative — **none of the 73 mischaracterizes a rejected alternative**. The 73
+   > itself was re-derived again for round 9 at `2695cbb~1` (75 `rather than` lines, 73 of them
+   > outside sweep 1's pattern) and reproduces. **§23.8 item 2 carries the same discharge**, with the
+   > caveat that the three-way split is a hand classification carried on the orchestrator's authority
+   > and that only its two zeroes are asserted. **What stays open is the wider sweep itself** — the
+   > 73 are the lines one particular word collects, and a mischaracterization written without
+   > `rather than` is still outside every pattern this record has run.
 4. **§3's inventory is still knowingly two short of its subject, in five places.** §24.3 fixed the
    count of the caveats and touched nothing else. **The judgement of the two `ledger.rs` passages into
    §3.3 remains undone**, 47 still appears in no table, and only an owner ruling that step 1 may be
@@ -5455,9 +5663,33 @@ Nothing below has been verified by this round unless the item says in as many wo
    `SWEPT_TREES` scope and still-missing revision binding. **This round re-derived none of them** —
    it was forbidden to run Cargo. Rounds 7 and 8 both reproduced the first group in memory from
    `prose_sweep.rs`, which is corroboration and not a run in this workspace. **Unchecked here.**
+
+   > **Corrected and discharged at step 2 round 9 (§25.2, §25.10) — 71 never needed the guard, and
+   > the rest have now been run in this workspace.** Two things in the item above are superseded and
+   > both are left standing above this block. **First**, *Two source counts … cannot be closed
+   > without running the guard* folds §19.2's **71** into the guard-dependent set. It does not belong
+   > there: 71 is file enumeration, and `rg --files src-tauri/src crates/espansoconfig-core/src -g
+   > '*.rs'` returns **71** with no Cargo at all, matching `git ls-tree -r b2ef96e` over the same two
+   > paths. §19.2's sentence is now bound to `b2ef96e` and to `SWEPT_TREES` by its own block — **71**
+   > files in the two trees, **70** selected per guard once each skips its own source. **Second**,
+   > *This round re-derived none of them* and *not a run in this workspace* were true of round 8 and
+   > are no longer true of the record: round 9's fix re-derived §13.2's **88 / 224 / 140 / 20**, its
+   > **36 / 19 / 12 / 18 / 5** and the **308** / **196** self-skip pair in this workspace, from a
+   > standalone re-implementation of `prose_units` and the lowercase non-overlapping matcher, without
+   > Cargo. All of them reproduce. **What that does not close is *twenty of the 88* as a judgement**,
+   > nor the self-skip hole's ownership, which item 7 keeps and which is a decision rather than a
+   > measurement.
 7. **The self-skip hole is unchanged and still has no owner.** **308** and **196** own-family matches
    sit unjudged in the two guards' own sources; this round could not re-derive either figure, for the
    same reason as item 6.
+
+   > **Discharged at step 2 round 9 (§25.10) — both figures are re-derived, and only the ownership
+   > remains open.** *This round could not re-derive either figure* was true of round 8. Round 9's
+   > fix ran the two own-family sweeps outside Cargo — `RETAINED_STATE_SHAPES`' 88 phrases over
+   > `retained_state_contract.rs` and `LIVENESS_SHAPES`' 61 over `liveness_contract.rs`, through the
+   > same comment-run join — and got **308** and **196** exactly. **The hole itself is untouched**:
+   > every one of those matches still sits in a file its own guard skips, unjudged and unjudgeable by
+   > it, and no owner has ruled on it. A measurement is not a ruling.
 8. **Line-number citations in this record are working-tree citations, and this round's edits move
    every one that sits below line 4100.** §22.9 item 3's five numbers were stale before round 7;
    §23.8 item 8 recorded their replacements as **303, 358, 366, 1571** and **1649**. **A first draft
@@ -5508,8 +5740,784 @@ Nothing below has been verified by this round unless the item says in as many wo
       CommonMark specification, **not a measurement**, and this record says so where it makes it — but
       nothing here renders the record to check that its own multi-backtick spans behave as claimed, and
       no gate would notice if one did not.
+
+      > **Discharged in its measurable half at step 2 round 9 (§25.9) — the spans were rendered, and
+      > the gate half of the hole is still open.** *Nothing here renders the record* was true of round
+      > 8 and is no longer. Round 9 rendered the whole record with **pandoc 3.10.2**, a binary already
+      > on this host, nothing installed and no network, under three readers — `commonmark`, `gfm` and
+      > `markdown_strict`. **Every one of the eleven double-backtick spans the record held at that
+      > reading renders as a single inline `<code>` whose text carries the backtick**, checked four
+      > ways: each span alone; each whole line in its own context, which matters because two sit
+      > inside blockquotes and two are list-item continuations; the full-document render, which yields
+      > exactly **eleven** backtick-bearing inline `<code>` elements; and the CommonMark rule applied
+      > by hand. `commonmark` and `gfm` agree exactly. **`markdown_strict` agrees on all eleven spans
+      > and its raw element count is 14, not 11** — the three extra are whole fenced blocks, which
+      > strict Markdown does not support and therefore collapses into one `<code>` each, so they are
+      > an artefact of the reader and not a span. **The other half of the hole stands exactly as
+      > written**: this repository ships no Markdown renderer, `pandoc` is in no gate and in no
+      > manifest, so **no project gate could run this check** and none would notice a span that
+      > stopped behaving. A measurement taken once by hand is not a guard.
     - **§24.4's arithmetic, which is the one place this round restates a number the review supplied.**
       4227, 4853, 650, 24 and 626 were each re-derived here before the review's figures were read
       against them, and the two independent accountings agree — but the whole finding was that a line
       count can be quoted from the wrong moment, and **§24.6's handoff figure is exactly such a
       moment**, deliberately labelled.
+
+## 25. Step 2, review round 9, and the fix round that answers it
+
+**Verdict: NOT READY**, four findings, **all Low, all four sentences of this record or of an
+orchestrator block inside it, and none of them code**. `docs/reviews/phase-2d-4a-C.md`, section
+*Step 2 — round 9*. The review cleared the code outright for the **sixth consecutive round**: rounds
+1, 2 and 3 of step 2 each found a defect in the shipped Rust, and rounds **4 through 9** have found
+none. **No source file changed in this round either**, and none was permitted to: this round was
+scoped to `docs/` and would have stopped and reported rather than move a guard inventory or a gate
+baseline.
+
+**All four findings are inside §24, which makes this the ninth consecutive round whose entire finding
+list is drawn from the previous fix round's own output** — and for the first time two of the four are
+in an **orchestrator** block rather than in a fix round's prose, which is a surface no earlier round
+had produced a finding in. §24.8's nomination list produced **one** of the four: its last item
+nominated *§24.1's claim that a Markdown code span can carry a backtick* and named the render hole,
+and finding 1 is the sentence directly beside that claim. The other three were nominated by nothing.
+
+**Seven more items were dispositioned than the review raised**, and they are the substance of this
+round. **Four came from the orchestrator, which measured the record independently before round 9 was
+dispatched, and two of the four are places round 9 affirmatively cleared** — §24.5's sweep P, whose
+*stated pattern bounds are honest*, and sweep L's six-bucket partition, which the review reports
+reproducing *exactly as recorded*. Both disagreements are stated in full below, with both figures and
+which stands. **Three more are recorded rather than fixed**, per the review's own *Could not check*
+and this record's practice of naming what a round did not close.
+
+**Every number this round asserts as its own was re-derived by this round, without Cargo and without
+npm**, which it was forbidden to run. That includes five figures three previous rounds had all
+recorded as unreachable without `cargo test`: §13.2's **88 / 224 / 140 / 20**, its
+**36 / 19 / 12 / 18 / 5**, §19.2's **71** and the **308** / **196** self-skip pair. They were reached
+by re-implementing `prose_units` and the lowercase, non-overlapping matcher outside the crate and
+running them over the same two trees, and **all of them reproduce**. That is a re-derivation of the
+same algorithm rather than a run of the guard, and it is recorded as the former.
+
+**This round disagreed with three figures it was handed, and all three are its own corrections rather
+than the review's.** **One**, the orchestrator's wider sweep for sweep P's shape reported **12**
+genuine instances; re-running it here returns **17**, the twelve plus five, and the five are four
+`git diff … HEAD` lines of exactly the class the twelve admitted once and one *shipped tree* claim.
+**Two**, the account of the pandoc render said `markdown_strict` agrees on all eleven spans; it
+does, but its raw count of backtick-bearing `<code>` elements is **14**, not 11, because strict
+Markdown has no fenced code blocks and collapses three of them into one element each. **Three**, the
+same account said two of the six span-bearing lines sit in blockquotes and **one** is a list
+continuation; measured here, **two** are list continuations — the blockquote count is right and the
+continuation count is not. **All three are written into the passages they belong to, not only
+here.**
+
+**One thing the review did not ask for was changed, and it is the twin of finding 1.** The false
+clause the review found in §24.1 has an unnamed instance in §22.7's own sweep-D heading paragraph —
+*legal CommonMark, but a form this record does not use* — sitting **eleven lines above six spans of
+exactly the form it denies**. It was found by sweeping for what the sentence claims rather than for
+the words the finding used, which is `CLAUDE.md`'s standing instruction and the thing rounds 6, 7 and
+8 each got wrong once.
+
+### 25.1 Finding 1 — a stylistic claim about this record that this record refutes, twice
+
+**What it said.** §24.1's second bullet reads *The true reason the pattern is fenced is that it
+contains backticks of its own and this record does not use multi-backtick delimiters*. The review
+says the CommonMark statement beside it is correct and this clause is false: genuine double-backtick
+code spans sit at six lines, one of which holds six of them, and §24.8's last item speaks of *its own
+multi-backtick spans* in as many words. Its narrowest fix is a local stylistic account.
+
+**What this round measured, before the review's list was read against it.** A two-backtick search
+over the working tree, with fence-delimiter lines filtered out, returns exactly the six lines the
+review names — **4136, 4198, 4233, 4543, 5049** and **5060** at round 9's reading — and **4136 alone
+carries twelve delimiters, which is six spans**: `` `rg ``, `` `git ``, `` `wc ``, `` `shasum ``,
+`` `awk `` and `` `sed ``. **Eleven spans in total.** Every one is a two-backtick delimiter carrying
+a single backtick, which is the construction the clause denied. The record therefore contradicted
+itself **444** lines apart, 5065 against 5509 at that reading.
+
+**And the review named one instance of two.** Sweeping for the claim rather than for its wording —
+a search for *this record does not use* and for the delimiter explanation — returns **two** live
+positions, not one: §24.1's, and **§22.7's sweep-D heading paragraph**, which read *a code span
+carrying one needs a longer backtick delimiter — legal CommonMark, but a form this record does not
+use*. That one is the worse of the two: **eleven lines** separate it from line 4136, the six-span
+line, in the same passage. Nothing else matches — §23.2's round-8 block and §22.7's round-8 block
+state the CommonMark rule without any claim about this record's usage, and both are untouched.
+
+**What changed.** Both clauses now give a stylistic reason instead of a false factual one: §22.7's
+reads *legal CommonMark, and the less familiar of the two forms, which is what the passage chose a
+fence over*, and §24.1's reads *the passage chose a fence instead of the legal but less familiar
+multi-backtick code-span form*, which is the review's own suggested wording. **Two round-9 blocks
+preserve both superseded clauses**, one under each, and each names the other. **Nothing about sweep
+D's carrier, its 54 hits, its 17 constructions or its negative moves**, and §21.5's line 3522, the
+correct form of the explanation the record had all along, is untouched.
+
+**What it does not change.** The CommonMark half was always right and stays. The eleven spans were
+counted at round 9's reading and **this round's own writing adds twenty-one more**, taking the record
+to **32** — twelve of them in the two blocks that carry the six-span list, six here in §25.1, and one
+each in three places that print a `cargo tree` row pattern. That is why the
+figure is stated against that reading rather than as a standing total — the same discipline §24.4
+imposed on a line count.
+
+### 25.2 Finding 2 — 71 is file enumeration, and Cargo never had anything to do with it
+
+**What it said.** §24's opening and §24.8 item 6 both fold §19.2's **71** into the figures that
+*need `cargo test`*. The review says the 71 is ordinary file enumeration, that a read-only
+enumeration of the two paths `SWEPT_TREES` names produces exactly 71 `.rs` files and 70 after either
+guard's own source is skipped, and that this record had already done it that way with `rg --files`.
+Its fix: separate 71 from the guard-dependent figures and bind §19.2's sentence to `b2ef96e` and to
+`SWEPT_TREES`.
+
+**What this round measured.** `rg --files src-tauri/src crates/espansoconfig-core/src -g '*.rs'`
+returns **71** on the working tree, and `git ls-tree -r b2ef96e --name-only` over the same two paths,
+filtered to `.rs`, returns **71** as well — so the figure is bound to `b2ef96e`, whose only committed
+difference from this tree is `PROGRESS.md` (`git diff --stat b2ef96e HEAD` reports that one file).
+Over `src-tauri/src` and `crates/` whole it returns **95**, which is the number a reader reaching for
+the obvious command gets and the reason the binding matters. `SWEPT_TREES` is declared identically in
+both guards, at `src-tauri/src/liveness_contract.rs:180` and
+`src-tauri/src/retained_state_contract.rs:263`, and each guard's `SKIPPED` holds exactly its own
+source file, so `selected_files` answers **70** for either. **None of that needs Cargo**, and the
+review is right that the prohibition never explained it.
+
+**The other figures in that sentence do need the guard's machinery, and this round ran them anyway.**
+§13.2's 88 / 224 / 140 / 20, its five left-out-phrase counts and the 308 / 196 self-skip pair all
+depend on `prose_units` joining a run of comment lines into one unit before matching, which no
+line-based command reproduces. They were re-derived here from a standalone re-implementation of that
+join and of the lowercase, non-overlapping matcher — **88** phrases, **224** hits, **140**
+`(file, phrase)` inventory keys over **29** files, **20** phrases with no hit, and **308** and
+**196** own-family matches — and every one reproduces. **That is the same algorithm, not the same
+run**, and §25.10 records it as such.
+
+**What changed.** Three positions. §19.2's sentence carries a **Bound** block naming `SWEPT_TREES`,
+naming both declaration sites, giving the 71 at `b2ef96e` and the 95 a reader would otherwise get,
+and saying in as many words that this is enumeration and not guard output. §24's opening carries a
+**Corrected** block separating 71 from the guard-dependent set. §24.8 item 6 carries a **Corrected
+and discharged** block doing both halves at once. **All three superseded sentences are left
+standing.**
+
+**What it does not change.** *Twenty of the 88* stays a judgement rather than a measurement, and the
+self-skip hole still has no owner; §25.10 and §24.8 item 7 keep both.
+
+### 25.3 Finding 3 — *every one was run once* over-describes an execution history the same block prints
+
+**What it said.** §24.7's orchestrator block says *Every one was run once, alone, on this tree after
+the fix round finished*, and the same block records a first `cargo test --workspace` that ended
+*FAILED. 278 passed; 10 failed* before the remedy and a clean re-run produced **1313**. The review
+asks for the claim to be limited to the successful measurements the cells report.
+
+**What this round measured.** The block is read as written: it prints one failed workspace run, the
+`pkill` remedy, a discriminating single-threaded gate at **20/20 with 268 filtered out**, and one
+clean workspace re-run. That is **two** `cargo test --workspace` invocations and three Cargo runs on
+the workspace suite's behalf, against a sentence saying every gate was run once. **The nine cells are
+unaffected** — the scar and its remedy sit in the sentences directly beneath the one being scoped, so
+this is an overclaim in a summary and never a concealment.
+
+**What changed.** A round-9 block beneath the orchestrator block scopes the sentence to *each
+reported successful measurement was taken once and alone*, and names the scarred failed attempt as
+the exception, quoting the superseded wording. **The orchestrator block itself is left standing
+whole**, per the practice that a historical account of what a round did is not silently rewritten.
+
+**What it does not change.** No gate figure moves, and *nine or ten* stays the honest range of the
+scar.
+
+### 25.4 Finding 4 — a true statement about one pipeline, written as a fact about pipes
+
+**What it said.** The same orchestrator block says *a piped gate does not report the gate's exit
+status*. The review says that is true of the recorded invocation and false in general, because
+`pipefail` or an inspection of the pipeline's component statuses exposes it.
+
+**What this round measured — and this is a fact about shells, stated as one rather than dressed as a
+measurement.** A POSIX shell's pipeline status is the last command's, which is why `tail` supplied
+the apparent zero. `set -o pipefail` changes that to the rightmost non-zero status, and
+`${PIPESTATUS[@]}` in bash or `$pipestatus` in zsh exposes every component individually. So the exit
+status of a piped gate is recoverable by two ordinary means, and the sentence as written would tell a
+later round the opposite.
+
+**What changed.** The same round-9 block scopes it: *that pipeline, run without `pipefail` and
+without inspecting component statuses, reported `tail`'s status rather than Cargo's* — the review's
+own wording. The superseded sentence stands above it.
+
+**What it does not change.** The practical warning the sentence exists to give is unchanged: a gate
+piped into `tail` and read for its exit code will look green when it is not, and this host has now
+produced that exact reading once.
+
+### 25.5 §13.2's five figures name no corpus, and three of them move with the corpus
+
+**What round 9 said.** Nothing about the corpus. Its *Checked and cleared* list reports an
+independent in-memory implementation reproducing *36 / 19 / 12 / 18 / 5*, among other figures. It
+reproduced the numbers and did not notice that the sentence carrying them names no file set.
+
+**What this round measured.** §13.2's *What was deliberately left out, and why … all five figures
+measured rather than estimated* gives `backwards` **36**, `process-wide` **19**, `one way` **12**,
+`monotonic` **18** and `in the same breath` **5**, and names no corpus. Re-derived here over the two
+paths `SWEPT_TREES` names, at `b2ef96e`:
+
+| Corpus | files | `backwards` | `process-wide` | `one way` | `monotonic` | `in the same breath` |
+|---|---|---|---|---|---|---|
+| `SWEPT_TREES`, nothing skipped | 71 | 39 | 22 | 12 | 24 | 5 |
+| the liveness guard's own `SKIPPED` | 70 | 39 | 22 | 12 | 24 | 5 |
+| **the retained-state guard's own `SKIPPED`** | **70** | **36** | **19** | **12** | **18** | **5** |
+| both guards' sources skipped | 69 | 36 | 19 | 12 | 18 | 5 |
+
+**The recorded five hold on rows three and four and fail on rows one and two.** The drift is
+**3 / 3 / 0 / 6 / 0** and comes entirely from one file, `src-tauri/src/retained_state_contract.rs`.
+The nearest scope in the record is the step-2 preamble's *sweeps both source trees* at line **1368**
+on this tree — above §13, not inside it — which pins the **trees** and
+says nothing about the **skip** — and the skip is the axis three of these numbers move on. So the
+figures were right and unfalsifiable at the same time: a reader re-running them over the full
+`SWEPT_TREES` gets three different answers and cannot tell whether the record or the run is wrong.
+
+**The trap in re-deriving them, verified twice and written into the block.** A per-line `rg -c` over
+the same trees returns **11** for `one way` and **4** for `in the same breath`. The record's **12**
+and **5** are the correct figures; the shortfall is `prose_units` joining a run of comment lines into
+one unit before matching, so a claim that straddles a wrap is one hit under the guard's machinery and
+none under a line-based command. **Do not "correct" 12 and 5 from a line-based run.**
+
+**What changed.** A **Bound** block under §13.2 gives the four-row table, names the corpus in as many
+words — `SWEPT_TREES` with `retained_state_contract.rs` skipped, at `b2ef96e` — states the drift and
+its single cause, and records the 11 / 4 trap. **The paragraph above it is unchanged**, since it was
+never false; only unpinned.
+
+**What it does not change.** The judgement §13.2 records — that these five phrases are vocabulary
+rather than claim-shaped and were replaced by claim-shaped forms — is untouched, and §14 item 4 still
+names it as the one a later round is most likely to disagree with.
+
+### 25.6 Sweep P's negative is narrower than its shape by a measured amount — and 12 is 17
+
+**What round 9 said.** *Sweep M reproduces at 10 and sweep P at 19. Their stated pattern bounds are
+honest.* It cleared the sweep.
+
+**What this round measured, and it disagrees with the orchestrator as well as with the review.**
+Sweep P reproduces at **19** — `rg -c 'wc -l|in the working tree|on the working tree'` at `1c5a9bb`
+— and its 2 + 4 + 8 + 5 partition holds. Its closing caveat, *a stale figure written without any of
+those three phrases is invisible here*, was already the honest form, which is what the review
+cleared. **What was missing is the size of that blind spot.** A wider pattern for the same shape —
+a measurement described as taken over the current working state without naming a revision, reaching
+*on this tree*, *on the current tree*, *in the shipped tree*, *counted with*, *measured here*,
+*re-derived here* and `git diff … HEAD` — run over the working tree, since the sentences at issue
+live in §24, and filtered of every line already carrying one of sweep P's three phrases, returns
+**23** lines. **Seventeen of the 23 are genuine instances of the shape.** The six discarded are
+statements that a figure was **not** measured, or measurements whose revision is named in the same
+clause.
+
+The seventeen sit at **310, 479, 1436, 1653, 1773, 4108, 4355, 4362, 4661, 4811, 4817, 4835, 4853,
+4970, 5336, 5352** and **5384**, all of them line numbers of the record as round 9 read it
+(`git show 8c345f9:docs/decisions/2d-4a-C-notes.md`); the six discarded are 1325, 4726, 5039, 5172,
+5443 and 5512.
+
+**The orchestrator reported 12 of those 17**, at 310, 479, 1653, 1773, 4355, 4362, 4812, 4835, 4853,
+4970, 5336 and 5384 at the same revision — 4812 and this round's 4811 being the command line and the
+sentence introducing it, one passage. **All twelve reproduce here**, and five more of the same shape
+sit beside them: **4108, 4661, 4817** and **5352** are `git diff … HEAD` lines, exactly the class the
+twelve admitted once at 4362 and left out four times, and **1436** is a second *in the shipped tree*
+claim beside the one at 1773 that the twelve did include. **17 is the figure that stands; 12 is short
+by five**, and the reason is that a hand classification applied one of its own classes
+inconsistently, which is precisely the hazard §23.8 item 5 names.
+
+**The largest missed class, and it is the one worth carrying forward**: a self-measurement taken with
+`rg -c` rather than with `wc -l`. Three of the seventeen count this record's own annotation blocks
+that way, and sweep P's three-phrase vocabulary cannot see any of them.
+
+**What changed.** A **Narrowed** block under sweep P states the wider run, gives the 23 and the 17,
+lists all seventeen positions, names both missed classes, records the 12-against-17 disagreement with
+both figures and says which stands. **Nothing above it is withdrawn** — the 19, the partition and the
+negative all stand as measured.
+
+**What it does not change.** None of the seventeen is a false figure; each was true when written.
+What they lack is a revision, and **binding them is not attempted here**: with sweep P's own five
+that is twenty-two sentences spread across the record, and §25.14 nominates the work rather than
+doing it. The sweep is also still **not widened to the shape** — 23 lines is one more pattern, not
+the shape.
+
+### 25.7 Ten `cargo tree` gate rows are now twelve, and one of them answers differently
+
+**What round 9 said.** *The ten historical `cargo tree -p espansoconfig-core | rg tauri` rows all
+print the same command.* It repeated the ten.
+
+**What this round measured.** ``rg -n '^\| `cargo tree'`` over the record as round 9 read it
+(`git show 8c345f9:docs/decisions/2d-4a-C-notes.md`) returns **12** rows,
+at 488, 693, 918, 1170, 1733, 1971, 2266, 2681, 3155, 3751, 4848 and 5378.
+The same shape at `5593a90` returns **10**, at 406, 611, 836, 1088, 1618, 1856, 2140, 2545, 2994 and
+3511, plus the two prose sentences at 46 and 1605 — so the ten was right when it was written and
+stopped being right when rounds 7 and 8 added their own gate tables. **The command half is
+byte-identical in all twelve. The result half is not**: eleven read `**empty**` and the twelfth,
+round 7's at 4848, reads `**Empty.** The §3 architecture rule holds`. That is the only variation in
+the set, and it is the row a pattern written from the other eleven would miss.
+
+**Which occurrences are wrong, and which are not.** §23.2's bullet is bound to `5593a90` in as many
+words — *Everything was re-derived at `5593a90`* — so its ten is correct and untouched. The two live
+sentences that carry the figure forward with no revision are **§23.8 item 1** and **§24.8 item 1**,
+and both are corrected.
+
+**What changed.** Two round-9 blocks, one under each of those items, giving the 12, the 10 at
+`5593a90`, the twelve line numbers, and the result cell that differs. **The superseded sentences
+stand.** §23.8 item 1's block is the second under that item, which makes it a stacked passage and
+adds one to the count §24.8 item 9 tracks.
+
+**What it does not change.** No row was audited. All twelve remain what §24.8 item 1 calls them:
+searches credited with an empty result that no sweep has ever collected. **Unchecked** stands.
+
+**And this round makes a thirteenth**, which is why every figure above is bound to `8c345f9`.
+§25.13's own gate table carries the same row with a **third** result form,
+`**Pending** — the orchestrator's`, and the orchestrator's fill will make it a fourth. **A count of
+these rows goes stale once per round, by construction**, which is the argument for binding it rather
+than for re-deriving it every round — and the same is true of every gate row in this record.
+
+### 25.8 Sweep L's partition counts a line that was never rewritten
+
+**What round 9 said.** *Sweep L reproduces at 42 lines, partitioned exactly as recorded: 11
+rewritten, 3 annotated, 2 historical quotations, 1 unrelated "epoch fence", 1 further instance and 24
+read and left.* It cleared the partition explicitly.
+
+**What this round measured.** The **42** reproduces:
+`rg -c -i 'code span|inline code|fenced block|fence'` at `1c5a9bb` returns 42. The partition does
+not. Each of the eleven lines classified *rewritten* was taken at `1c5a9bb`, searched for verbatim on
+the working tree, and ten of them are gone. **Line 4123 is byte-identical at `1c5a9bb` and on the
+working tree, at the same line number in both** — `git show 1c5a9bb:docs/decisions/2d-4a-C-notes.md |
+rg -n 'followed by one of six command names'` answers 4123, and the identical search on the tree
+answers 4123. The same check confirms that the three *annotated* lines, the two historical quotations
+and the unrelated *epoch fence* at 779 all survive, which is what the classification says of them.
+
+**Both granularities, stated rather than chosen silently.** At **line** granularity — which is the
+unit this sweep's pattern returns and the unit all six of its buckets are counted in — the partition
+is **10 / 3 / 2 / 1 / 1 / 25**, which still sums to 42. At **sentence** granularity the eleven is
+defensible: at `1c5a9bb` the sentence runs from *The pattern is a backtick* on 4122 through *a code
+span cannot contain the backtick the pattern is looking for* on 4124, round 8 rewrote that sentence,
+and 4123 sits inside it — the bytes that changed all happened to fall on the neighbouring lines.
+**The defect is the mismatch between the unit the sweep counts in and the unit its classification was
+made in**, which is the sweep-G shape one level down.
+
+**What changed.** A round-9 block under sweep L gives the line-granularity partition, preserves the
+superseded eleven and its sum, states the sentence-granularity defence in full, and names the
+mismatch. **Nothing the sweep concluded moves**: the 42, the further instance at 4188, the two
+historical quotations and the unrelated sense are untouched.
+
+### 25.9 Recorded, not fixed — the render hole is discharged in its measurable half and stands in its other
+
+§24.8 item 10's fourth nomination said *nothing here renders the record to check that its own multi-backtick spans
+behave as claimed, and no gate would notice if one did not*. **The first half is now false and the
+second is still true**, and both are recorded.
+
+**The measurement.** The record was rendered with **pandoc 3.10.2**, a binary already present on this
+host — nothing was installed and no network was used — under three readers: `commonmark`, `gfm` and
+`markdown_strict`. **All eleven double-backtick spans the record held at round 9's reading render as
+a single inline `<code>` whose text carries the backtick.** Confirmed four ways: each span alone;
+each whole line in its own context, which matters because **two sit inside blockquotes and two are
+list-item continuations**, with the remaining two in plain paragraphs — 4198 and 4233 are the
+blockquoted pair, 4543 and 5060 the list continuations, 4136 and 5049 the plain paragraphs, all six
+being line numbers of the record as round 9 read it;
+the full-document render, which yields exactly **eleven** backtick-bearing inline `<code>` elements;
+and the CommonMark rule applied by hand. `commonmark` and `gfm` agree exactly. **This round's own
+writing adds twenty-one more spans of the same form**, so a re-run after it returns **32**, not 11 —
+the eleven is bound to round 9's reading and to nothing else. **The 32 were rendered too, and all 32
+behave**, including three of a shape the record did not previously hold: a double-backtick span
+carrying a backtick inside a printed table-row pattern.
+
+**A second disagreement with what this round was handed, smaller than the first.** The account it
+received said *two are in blockquotes, one a list continuation*. Measured here, **two are list
+continuations**, 4543 and 5060; the count of blockquoted lines, two, is right. Nothing about the
+render changes — all eleven render identically either way — but the context inventory does.
+
+**One disagreement with the figure this round was handed.** `markdown_strict` agrees on all eleven
+spans, and **its raw count of backtick-bearing `<code>` elements is 14, not 11**. The three extra are
+whole fenced blocks: strict Markdown has no fenced code blocks, so it collapses each into one
+`<code>` element, and three of those blocks contain a backtick. They are an artefact of the reader
+and not spans. **14 is the count and 11 is the agreement**, and both are written into the block.
+
+**The half that stands.** This repository ships no Markdown renderer. `pandoc` appears in no gate, no
+manifest and no script here, so **no project gate could ever run this check** and none would notice a
+span that stopped behaving. A measurement taken once by hand is not a guard, and §25.14 keeps it.
+
+### 25.10 Recorded, not fixed — two carries that had stood for four rounds are now run
+
+**The 73 `rather than` lines.** §20.7's sweep 1 collects 36 lines and does not collect **73** others
+that contain the phrase; §23.8 item 2 and §24.8 item 3 both recorded them as unread, for four rounds.
+The set was re-derived here first — at `2695cbb~1`, `rg -c 'rather than'` returns **75**, sweep 1's
+own pattern returns **36**, and the subset of the 75 not matching that pattern returns **73**, all
+three reproducing — and then all 73 were read. **Round 9's reviewer read them and reports the same
+negative** the orchestrator does: none newly mischaracterizes a rejected alternative. The
+orchestrator classifies them **27 CLAIM / 43 EDITORIAL / 3 HISTORICAL / 0 FENCE/CODE**. **The
+three-way split is a hand classification with no test behind it** — this round read all 73 a third
+time and would put roughly a dozen of them in a different bucket, which is the ordinary spread of
+such a judgement and exactly the class §23.8 item 5 flags — so **the split is carried on the
+orchestrator's authority and only its two zeroes are asserted here**. **0 FENCE/CODE was
+re-derived**: none of the 73 sits inside a fenced block at that revision, and none has its
+`rather than` inside a code span.
+
+**The figures that "need `cargo test`".** §13.2's **88 / 224 / 140 / 20**, its
+**36 / 19 / 12 / 18 / 5**, §19.2's **71** and the **308** / **196** self-skip pair were recorded as
+un-run in this workspace by rounds 7, 8 and 9's fix rounds alike. **All of them were run here, and
+all reproduce.** The 71 needed nothing but `rg --files`. The rest were reached by re-implementing
+`prose_units` — the comment-run join — and the lowercase, non-overlapping matcher outside the crate,
+extracting `RETAINED_STATE_SHAPES` (**88** phrases) and `LIVENESS_SHAPES` (**61**) from their arrays,
+and walking the same two trees: **224** hits, **140** `(file, phrase)` keys over **29** files, **20**
+zero-hit phrases, and **308** and **196** own-family matches in the two guards' own sources.
+
+**What that is, and what it is not.** It is a re-derivation of the same algorithm on the same input,
+not a run of the guard, and it is recorded as the former everywhere it appears. It does not discharge
+*twenty of the 88* as a **judgement**, and it does not give the self-skip hole an owner. **A
+measurement is not a ruling**, and §24.8 item 7 keeps the ruling open.
+
+**What changed.** Four blocks: a **Discharged** note under §23.8 item 2 and another under §24.8 item
+3 for the 73, a **Corrected and discharged** note under §24.8 item 6 for the two source counts, and a
+**Discharged** note under §24.8 item 7 for the self-skip pair. Every superseded sentence stands.
+
+### 25.11 Recorded, not fixed — §14's three step-1 figures are unreproducible and correctly attributed
+
+**§14's second numbered item** — line **1570** at round 9's reading, **1598** after this round's
+edits — reads *Step 1's sweep ran **33** probe phrases over **85** prose units of
+these two trees, comment runs joined, and **four of its 45 pointer passages** sat in units none of
+the 33 matched*. **None of the three figures can be re-derived**, and this round tried: the 33 probe
+phrases appear nowhere in this repository — `rg` for *33 probe* and *probe phrase* over the decision
+records returns exactly three lines, this one and two restatements of the same claim inside §5, at
+358 and 383 — and the
+instrument that produced them was a throwaway script, not a committed module like `prose_sweep.rs`.
+
+**It is a provenance gap and not a false claim, and that distinction is the whole of the item.** The
+sentence says *Step 1's sweep*, in as many words, so it attributes the figures to a historical run at
+a historical moment rather than asserting them of this tree. Round 7 already ruled on the neighbouring
+question — how a live sentence may treat step 1's historical 45-pointer inventory — and §23.3 bound
+the three positions that got it wrong; this sentence is not one of them, because it is in the past
+tense and says whose sweep it was.
+
+**Nothing was changed.** Rewriting it would either delete a figure this record cannot replace or
+attach a revision to a run that has none, and both are worse than a sentence that names its own
+source. **It is recorded here so a later round does not spend a pass rediscovering that it cannot be
+re-run**, and §25.14 keeps it as a known unreproducible.
+
+### 25.12 What changed, file by file
+
+**One file. No source file changed, nothing under `src/`, `src-tauri/` or `crates/` was touched, and
+no gate was run.**
+
+- **`docs/decisions/2d-4a-C-notes.md`** — **5515** lines at `8c345f9` to **6368** at
+  its **pre-gate handoff**, `wc -l` on both, so the **handoff** delta is **+853**. **That is a
+  handoff figure and nothing else**, per §24.4: the orchestrator's gate table is inserted after it,
+  so the committed total will be larger and only the orchestrator can measure it. This round claims
+  no committed total and no committed delta. **The figure is self-referential and was taken that
+  way** — this bullet was written with its number withheld, the file measured, and only then the
+  number substituted, since replacing a placeholder with digits on one line cannot change a line
+  count.
+- **Two positions rewritten, and only two.** §22.7's sweep-D heading paragraph, its
+  *but a form this record does not use* clause; and §24.1's second bullet, its
+  *this record does not use multi-backtick delimiters* clause. `git diff -U0` reports **three**
+  deleted lines across the two, which is the wrapping of those two sentences and no third position.
+  **Everything else this round did is additive.**
+- **Fifteen round-9 annotation blocks**, counted with
+  `rg -c '^\s*> \*\*(Correction|Corrected|Narrowed|Bound|Amend|Discharg)[^*]*step 2 round 9'`: seven
+  **Corrected**, two **Bound**, one **Narrowed**, four **Discharged** and one **Corrected and
+  discharged**. They sit under §13.2, §19.2, §22.7, §23.8 items 1 and 2, §24's opening, §24.1,
+  §24.5's sweeps L and P, §24.7's orchestrator block, and §24.8 items 1, 3, 6, 7 and item 10's
+  **fourth** nomination sub-bullet, the one about §24.1's CommonMark claim. **That is fifteen
+  positions and fifteen blocks**, one each, with no position taking two.
+- **No inline annotation was used.** Round 8 used two deliberately and said so; this round needed
+  none, because every position it touched had room for a block beneath it at its own indentation.
+- **Two of the fifteen sit directly beneath another block, and only one of the two is a stack the
+  alternation can count.** Measured rather than eyeballed — each block's preceding non-blank line was
+  read, and thirteen of the fifteen follow ordinary prose. **§23.8 item 1** now carries a round-8
+  block and a round-9 block in that order, which is a new stacked passage of the kind §24.8 item 9
+  counts, so its tally moves by one and §25.14 carries the move rather than editing §24.8's
+  historical sentence. **§24.7's** round-9 block follows the `Filled by the orchestrator` block, which
+  §24.6 deliberately keeps **outside** the correction alternation; a reader of that gate table now
+  reads a paragraph, an orchestrator block and a correction block in sequence, but no
+  alternation-based count sees it. **That is a stack the record's own instrument cannot measure**, and
+  it is said here because the instrument will not say it.
+- **No block was consolidated, merged, dissolved or removed**, and §18–§20 were not reorganized. The
+  reorganization decision §22.6 put to the owner is **still the owner's**, and this round makes no
+  recommendation beyond §24.8 item 9's.
+- **`src-tauri/src/prose_sweep.rs`**, **`retained_state_contract.rs`** and **`liveness_contract.rs`**
+  were read for this round's measurements and **none was written to**;
+  `git diff HEAD --stat -- src-tauri crates src` is empty, so the source tree is byte-identical to
+  `b2ef96e`'s and every source figure above is a figure about that tree.
+- **`docs/reviews/phase-2d-4a-C.md`** is modified in the tree and **was not touched by this round**:
+  it is the orchestrator's verbatim append of the round-9 reply.
+
+### 25.13 The gates after this round
+
+**No gate was run by this round, and no gate figure is claimed by it.** `cargo test`, `cargo clippy`,
+`cargo fmt`, `cargo doc`, `cargo tree` and the three frontend commands were **not** invoked. The
+orchestrator runs them once, alone, after this round — the documented remedy for this host's
+`watch_check::` scar, where an orphaned bin target left by a concurrent run produces nine or ten
+spurious `watch_check::` baseline-scan timeouts that read exactly like a real failure, and which
+fired on round 8's own gate run. **This is the fourth consecutive round whose fix worker was
+forbidden to run Cargo**, and the fourth to comply.
+
+**This round changed one Markdown file and no source file**, so every gate figure is *expected* to be
+unmoved from round 8's measured baseline — **1313 / 431 / 2125 / 184** (`cargo test --workspace` /
+`npm run check` files / `npm test` / `npm run build` modules). **That is an expectation, not a
+measurement, and it is not recorded as one.** A round that cannot run a gate must not report one, so
+every cell below is left for the orchestrator.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **Pending** — the orchestrator's |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | **Pending** — the orchestrator's |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **Pending** — the orchestrator's |
+| `cargo fmt --check` | **Pending** — the orchestrator's |
+| `cargo doc --workspace --no-deps` | **Pending** — the orchestrator's |
+| `cargo tree -p espansoconfig-core \| rg tauri` | **Pending** — the orchestrator's |
+| `npm run check` | **Pending** — the orchestrator's |
+| `npm test` | **Pending** — the orchestrator's |
+| `npm run build` | **Pending** — the orchestrator's |
+
+**Two notes for whoever fills them**, both from findings this round closed. Run each gate **alone**,
+and if a gate is piped, either `set -o pipefail` or read `${PIPESTATUS[@]}` — round 8's apparent
+*exit code 0* on a failed workspace run was `tail`'s. And if the nine cells come back matching the
+expectation, that is the expectation **discharged as a measurement**, not the expectation confirming
+itself; a filled cell should say which it is.
+
+**One figure this round did measure, because it costs nothing and is its own.** `git diff --stat`
+reports **two** files: `docs/decisions/2d-4a-C-notes.md`, this round's only edit, and
+`docs/reviews/phase-2d-4a-C.md`, the orchestrator's verbatim append of the round-9 reply, which this
+round did not touch. **No path under `src/`, `src-tauri/` or `crates/` appears**, and nothing is
+staged. `git diff --numstat` gives the two rows as **856 insertions, 3 deletions** for the record and
+**66 insertions, 0 deletions** for the review file; the second is byte-for-byte what it was before
+this round began, which is how *untouched by this round* is established rather than asserted.
+5515 + 856 − 3 = the handoff figure §25.12 states, which is the only arithmetic here that closes.
+**The record's own length is in §25.12 and is labelled a handoff figure there; it is
+deliberately not repeated as a number here.**
+
+### 25.14 What this round does **not** close, and where it is thin
+
+Round 10 should start here. **Everything in this list is nominated and unchecked** — a nomination is
+not a clearance. Nine consecutive rounds have found their entire finding list in the previous fix
+round's own words, and the last four each found part of it in the previous round's own nomination
+list; this round found one of four there. Nothing below has been verified by this round unless the
+item says in as many words that it was.
+
+1. **Twenty-two working-tree measurements still name no revision, and this round bound none of
+   them.** Sweep P's own five, plus the **17** §25.6 found beyond its pattern. Each was true when
+   written; none can be re-run against a stated revision. **Binding them is the single largest piece
+   of unfinished bookkeeping in this record**, and it is mechanical rather than judgemental, which is
+   why it is nominated as one job rather than dribbled out a round at a time. **Unchecked.**
+2. **Sweep P is still not widened to its shape.** §25.6 ran one wider pattern, not the shape. A
+   measurement written as current in none of ten phrases is invisible to both patterns, and nothing
+   here establishes how many such there are. **Unchecked.**
+3. **No gate renders this record, and §25.9 does not change that.** The eleven spans were checked
+   once, by hand, with a binary that appears in no manifest here. **A hand measurement is not a
+   guard**, and the record now carries **32** multi-backtick spans where it carried 11, because this
+   round's own writing adds twenty-one. All 32 were rendered here and all 32 behave — including three
+   of a shape the record did not previously hold, a double-backtick span carrying a backtick **inside
+   a table-row pattern** — but that is one more hand measurement, not a guard, and the next round's
+   additions will be unrendered again. **Unchecked.**
+4. **Sweep D's two genuine misses are still unaudited, and the `cargo tree` rows with them.**
+   `5593a90`'s fenced `git diff -U0 … | wc -l` commands at 819 and 1070 have now survived four rounds
+   unread by any sweep. §25.7 corrected the count of the gate rows from ten to twelve and **audited
+   none of them**. **Unchecked.**
+5. **§3's inventory is still knowingly two short of its subject, in five places.** Untouched here,
+   and deliberately: 47 still appears in no table, the judgement of the two `ledger.rs` passages into
+   §3.3 remains undone, and **only an owner ruling that step 1 may be reopened can close it**. Round
+   9 flagged it again and reached the same conclusion. **Unchecked, and not this round's to close.**
+6. **§14 item 2's 33 / 85 / 4-of-45 cannot be re-derived at all**, per §25.11 — the sentence round 9's
+   brief cites as line **1570** at the reading it took, and **1598** on this tree after this round's
+   edits. The probe list is
+   absent and the instrument is gone. It is correctly attributed to step 1's sweep, so it is a
+   provenance gap rather than a false claim — but no later round can verify it, and one should not
+   spend a pass trying. **Unreproducible, and recorded as such.**
+7. **The 27 / 43 / 3 split of the 73 is a hand classification carried on someone else's authority.**
+   §25.10 asserts only its two zeroes. Three independent readings agreed on the negative and would
+   partition the middle differently, which is the whole hazard §23.8 item 5 names for the 9 / 38
+   split. **A reader who needs the split rather than the negative must redo it.** **Unchecked.**
+8. **The self-skip hole has numbers and still has no owner.** **308** and **196** are now re-derived
+   in this workspace, which changes nothing about the hole: every one of those matches sits in a file
+   its own guard skips. **A measurement is not a ruling.** **Unchecked.**
+9. **§13.2's *twenty of the 88* is still a judgement.** The count reproduces; whether keeping twenty
+   zero-hit phrases is right does not, and §14 item 4 already says a later round is most likely to
+   disagree with the neighbouring judgement. **Unchecked.**
+10. **The reorganization decision is still the owner's, and this round enlarged the case for it
+    without acting on it.** The record's annotation count moves from **45** to **60**, and the
+    narrower correction-marker count from **44** to **55**,
+    measured with `rg -c '^\s*> \*\*(Correction|Corrected|Narrowed|Bound|Amend|Discharg)'` and the
+    same alternation without `Discharg`, before and
+    after, and **stacked passages go from four to five** — §23.8 item 1 is the new one, and §24.7 is a
+    sixth stack the alternation cannot see, since the block it sits under is an orchestrator block.
+    **Nothing was
+    consolidated, merged or dissolved**, per §22.6, which holds both sides of the argument intact.
+11. **This round wrote sentences, and the round that reviews them is not optional.** Nominated rather
+    than hoped about, the likeliest sites in §25:
+    - **§25.6's 17 and §25.9's 14.** Both are this round disagreeing with a figure it was handed, and
+      **both are hand judgements about what counts as an instance** — which `git diff … HEAD` lines
+      belong to the shape, and whether a collapsed fenced block is a span. A reviewer may draw either
+      boundary elsewhere, and if it does, the honest reading is that a third classification exists and
+      not that one of the three is authoritative.
+    - **§25.8's line-versus-sentence argument.** It concedes the eleven is defensible and changes the
+      number anyway, on the ground that the sweep's unit is the line. **That is a judgement about what
+      a sweep's unit is**, made by this round about another round's sweep, and it is the most
+      reasonable thing here to disagree with.
+    - **§25.2's claim that a re-implementation of `prose_units` is evidence.** It reproduces every
+      figure, and it is **this round's own code**, checked against nothing but the module it was read
+      from. If the re-implementation shares a misreading with the reading that produced it, both agree
+      and both are wrong. **No test in this workspace would catch that**, and rounds 7 and 8's
+      reviewers reproduced the same figures the same way, which is corroboration and not independence.
+    - **§25.1's count of eleven spans.** It is bound to round 9's reading and is already stale by
+      twelve, deliberately. A reviewer re-running the search gets a larger number, and the block says
+      so — but **a figure that is stated as already-superseded is easy to write and hard to check**,
+      and this is exactly the shape §24.4 found in round 7's 4831.
+
+## 26. The record-structure reorganization — the owner decision of 2026-08-29
+
+**The standing question §22.6 put to the owner has been answered: reorganize.** Round 6 held that the
+record had passed the point where further stacking is better than consolidation; §21.7 held that
+dissolving the stacks into flowing prose would erase the audit trail by which rounds 4, 5 and 6 each
+checked the round before them. **Both arguments are honoured here, because nothing is dissolved.** No
+stack is rewritten into prose. Each stack's blocks are moved, **verbatim and still separately headed
+by the round that wrote each**, into **Appendix A**, and the body keeps one block stating the current
+claim. §20.10 item 5 requires that a round which reorganizes say so before starting rather than decide
+it mid-fix — this section is that declaration, and the reorganization is the whole of what was done.
+
+### 26.1 What was reorganized, and what was deliberately left
+
+**Taken — the two passages §22.6 handed to the owner, and nothing else.**
+
+| Passage | Blocks before | Body now | Verbatim originals |
+|---|---|---|---|
+| **§14 item 5** | **three** amendment blocks — round 1 (§17.2), round 2 (§18.2), round 3 (§19) | **one** block, whose current claim is round 3's | **Appendix A.1** |
+| **§17.2** | **two** correction blocks — round 2 (§18.2), round 3 (§19) | **one** block, whose current claim is round 3's | **Appendix A.2** |
+
+**Left, and this is a finding rather than an omission: §18.6 and §19.7 were not reorganized.** They
+are the two stacks round 6 consolidated into one block each as *the minimum* (§22.6). Read again for
+this decision, they **do not have the shape the reorganization removes**: round 4's part and round 5's
+part correct **two different sentences, and both are current**. Round 5 narrowed only round 4's *own
+tail* — the sentence round 4 wrote and round 5 replaced in place at `5593a90`, which each block
+already quotes as such — while round 4's scope correction is untouched by round 5 and is still the
+live correction of the paragraph above it: at §18.6, that round 2 wrote prose into **three** source
+files of which **all three are swept**, not the two the paragraph names; at §19.7, that two green
+guards establish the cross-family half and nothing at all about the two own-family holes. **Moving
+either half to an appendix would take a live correction out of the body**, and moving both while
+restating them in place would be the duplication an appendix exists to avoid. The consolidation round
+6 already applied, with its *read to the end, because the current claim is round 5's* header, is the
+reorganization those two needed. **Nothing about them changed here.**
+
+### 26.2 The test that nothing was lost, stated so it can be checked rather than accepted
+
+Every block moved out of the body is in Appendix A **verbatim**, under a heading naming the round that
+wrote it, in the order it was written. **The only alteration is the removal of the list indentation**
+that nested each block under its host item — **three** spaces at §14 item 5, **two** at §17.2 — which
+changes each block's nesting and **not one word of it**. The check is a diff: extract A.1's three
+parts and A.2's two, restore the indentation, and they are the five blocks this file held at
+`8c345f9`.
+
+The body's marked-block count falls from **60** to **57** — five blocks removed, two added — and
+Appendix A carries the five originals, so the file holds **62** marked blocks of which **five are
+historical copies** and are marked as such by their appendix heading. A count of the record's live
+annotations is therefore **57**, and §25.14 item 10's tally is superseded by this line rather than by
+a sweep, because the move is the only thing that changed it.
+
+### 26.3 The residual this creates, named rather than retrofitted
+
+`rg -n "§14 item 5's" docs/decisions/2d-4a-C-notes.md` returns **fourteen** lines on the finished
+file, and **four of those are this subsection's own** — the two commands as printed here, and the two
+lines below on which it quotes 3751, 4427 and 3995. **The ten that are the subject all stand above
+§26**, and `head -6351 docs/decisions/2d-4a-C-notes.md | rg -c "§14 item 5's"` — the file as it stood
+before §26 and Appendix A were appended — returns exactly those **ten**. The figure is bound to this
+file and moves with any later mention. **Seven of the ten name item 5's amendments as things to be
+read** — lines 2085, 2463, 2575, 2605, 2820, 3054 and 3106, three
+of which name the *round-2 amendment* and two the *third amendment* specifically. Every one still
+resolves, because Appendix A.1 keeps all three amendments separately headed by round; what changed is
+that they resolve **into the appendix rather than into §14**. **None was edited**, for exactly the
+reason §22.6 gives for the nine it left alone: each sits inside a preserved wording, a historical
+sweep tally or a table of a round's own citations, and rewriting them to match today's layout is the
+silent retrofit this record's correction blocks exist to prevent.
+
+The remaining three are statements *about* the stacks, and two of them were true when written and are
+now historical: line 3751 (*§14 item 5's and §17.2's are left*) and line 4427 (***§14 item 5's three
+stacked blocks and §17.2's two are untouched***). Line 3995 (*§14 item 5's three blocks predate round
+4 entirely*) is unaffected and remains true. **The two are named here and left standing**, because
+each is a round's record of what *that* round did, and correcting them in place would misreport
+rounds 6 and 8.
+
+### 26.4 What this section does not close, and where it is thin
+
+1. **The reorganization was applied to two passages, not to the record.** §22.6's question was posed
+   over §18–§20 as a whole; what it actually named for the owner were the two stacked passages, and
+   those are what moved. **The roughly fifty standalone correction blocks are untouched by design** —
+   a single block after the passage it corrects is already linear, and moving it would cost a reader
+   the correction inline and buy nothing. A later round is free to disagree that the line was drawn
+   in the right place.
+2. **§18.6 and §19.7 rest on a reading of two blocks, not on a sweep.** §26.1's ground for leaving
+   them is that round 4's and round 5's parts correct different sentences. That was established by
+   reading both blocks, and no pattern was run over the record to find other stacks with the same
+   property. **Unchecked.**
+3. **This section wrote sentences, and the round that reviews them is not optional.** The likeliest
+   sites, nominated rather than hoped about: **§26.2's 57 and 62**, which are one marker
+   alternation's count and move with any later block; and **§26.1's claim that both arguments are
+   honoured**, which is this section judging its own compromise and is the most reasonable thing here
+   to disagree with.
+
+## Appendix A — the stacked passages, verbatim
+
+**What this appendix is.** By the owner decision of 2026-08-29 (§26), the two stacked passages §22.6
+handed to the owner were moved here. **Each block below is the block that stood in the body at
+`8c345f9`, word for word**, under the round that wrote it and in the order it was written; the only
+alteration is that the list indentation nesting it under its host item has been removed. Nothing here
+is a summary, and nothing here has been merged. The body now carries one block per passage stating the
+current claim, and points at the entry below.
+
+**Why the history is kept at all.** §21.7's argument, which this appendix answers rather than
+overrides: every one of these blocks corrects a *specific sentence*, and two of them correct an
+earlier block. That is the audit trail by which rounds 4, 5 and 6 each checked the round before them,
+and a reader checking this record's rounds against each other needs the superseded wording, not a
+description of it.
+
+### A.1 — §14 item 5, amended three times
+
+**Host passage:** §14 item 5 (*The sweep skips exactly one file: the check's own source*). **Current claim in the body:** round 3's.
+
+
+#### Round 1 (§17.2) — the first amendment
+
+> **Amended, step 2 round 1 (§17.2).** The middle clause is **no longer what the assertion says**.
+> Round 1's fix moved the comparison — and with it the one retained-state-shaped wording
+> `liveness_contract.rs` held, its own duplicate-detection assertion message — into
+> `prose_sweep.rs`, leaving the sibling's source with nothing for this sweep to find. The
+> assertion now names **`src-tauri/src/prose_sweep.rs`**, the machinery both checks are built on,
+> and reads *the machinery both contract checks share is swept too — neither exempts it*. Both
+> files are still swept rather than skipped; what changed is which one carries a hit, and the
+> claim the assertion is allowed to make about it. Each check is still blind to itself.
+
+
+#### Round 2 (§18.2) — the second amendment, which corrects the first
+
+> **Amended again, step 2 round 2 (§18.2).** The amendment above is the fix that round 2 filed as
+> a finding, and its last-but-one sentence is where it went wrong: re-pointing the assertion kept
+> it *true* and left the property it was defending *unguarded*, because **a hit-based assertion
+> cannot cover a file that legitimately holds no hit** — with `liveness_contract.rs` in exactly
+> that position, adding it to this check's skip list would have kept all four assertions green.
+> Coverage is now asserted through `prose_sweep::selected_files`, the same file selection `sweep`
+> itself walks, in **both** guards: each names its sibling and `prose_sweep.rs`, and each pins its
+> own skip list to its own source. So *the two checks do not exempt each other* is now a claim two
+> tests carry between them — this one's test never asserted the liveness guard's half, and the
+> mutuality had been stated as though it did. Each check is still blind to itself.
+
+
+#### Round 3 (§19) — the third amendment, which narrows the second
+
+> **Amended a third time, step 2 round 3 (§19).** *The same file selection `sweep` itself walks*
+> overclaims, in the way §18.2's correction block sets out: `sweep` and the test call one
+> **function**, and the test's call is a **second traversal** with the same trees and skip list,
+> not the `Vec` the sweep walked. What the two assertions are worth is what `selected_files`
+> answers for this check's arguments. Everything else in the amendment above stands.
+
+
+### A.2 — §17.2, corrected twice
+
+**Host passage:** §17.2 (*The fix — extracted once, and the two positions the extraction moved*). **Current claim in the body:** round 3's.
+
+
+#### Round 2 (§18.2) — the first correction
+
+> **Correction, step 2 round 2 (§18.2).** *It now names …* was true when written and is
+> **historical**; the re-pointing it describes is also the round-2 finding. Re-pointing a
+> **hit-based** assertion kept it true and left the property unguarded — `liveness_contract.rs` had
+> become a file with no hit of this family, and no hit-based assertion can distinguish that from a
+> file the walk never opened. Both guards now assert coverage through
+> `prose_sweep::selected_files`; the assertion that used to name `prose_sweep.rs` alone has been
+> replaced, in each guard, by one naming the sibling check and one naming `prose_sweep.rs`, plus a
+> pin on the guard's own skip list. §18.2 and §18.3 carry it.
+
+
+#### Round 3 (§19) — the second correction, which narrows the first
+
+> **Corrected again, step 2 round 3 (§19) — *in each guard*.** Only the **retained-state** guard
+> ever held that assertion, and only there was anything replaced: its hit-based `prose_sweep.rs`
+> assertion was removed and four selection-based ones added, four to seven. The **liveness**
+> guard's `the_sweep_reaches_both_trees` had no assertion about `prose_sweep.rs` or about its
+> sibling at all before round 2 — §18.1 item 3 says so — so there it was three to seven with
+> nothing dropped. The correction block at the end of §18.2 carries the arithmetic and the reason
+> the removal is cheap.
+

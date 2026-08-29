@@ -737,3 +737,69 @@ Narrowest fix: bind 4831/+604 explicitly to the pre-gate handoff, then state the
 I did not run Cargo or npm, as required. I reimplemented `prose_units` and the non-overlapping lowercase matcher from source; it reproduced 88 / 224 / 140 / 20, 36 / 19 / 12 / 18 / 5, 71 files, and 308 / 196. The 9 / 38 classification and all four historical annotation stacks also hold. The two nominated fenced zero-result commands reproduce from their historical diffs, and the widened `rather than` reading found no mischaracterized rejected alternative.
 
 I could not run `cargo tree`; instead I parsed the unchanged manifest and lockfile dependency closure, which contains no `tauri` package. The read-only sandbox also rejected a shell here-document, so I reran the same source-only analysis through an inline interpreter command.
+
+## Step 2 — round 9 (against the round-8 fix: §24 in full and its eight subsections, §24.5's five sweeps and their patterns, §24.5's sweep-L six-bucket hand classification, §24.6's eleven corrected positions and its 7 / 2 / 2 split, §24.1's CommonMark claim, §24.4's arithmetic, the seven new correction blocks and the two orchestrator blocks)
+
+NOT READY — 0 High, 0 Medium, 4 Low. All four findings are substantive overclaims in round 8’s new record or orchestrator wording, not restatements of wording already corrected. The Rust machinery and inventories remain cleared.
+
+### Findings
+
+1. **Low — `docs/decisions/2d-4a-C-notes.md`, §24.1, line 5065.**
+
+   > “the true reason the pattern is fenced is that it contains backticks of its own and this record does not use multi-backtick delimiters”
+
+   The CommonMark claim immediately before this is correct, but the claim about this record is false. The file contains genuine double-backtick code spans at lines 4136, 4198, 4233, 4543, 5049 and 5060; line 4136 alone contains six. Each uses a two-backtick delimiter to carry a single backtick, exactly the construction line 5065 denies. §24.8 line 5509 also refers to “its own multi-backtick spans.”
+
+   **Narrowest fix:** replace the false clause with a local stylistic account, such as: “the passage chose a fence instead of the legal but less familiar multi-backtick code-span form.”
+
+2. **Low — `docs/decisions/2d-4a-C-notes.md`, §24 opening, lines 5037–5041, and §24.8 item 6, lines 5453–5457.**
+
+   > “§13.2’s … §19.2’s **71**, and the **308** / **196** … were not re-measured here — they need `cargo test`”
+
+   > “Two source counts are still open and cannot be closed without running the guard.”
+
+   This wrongly folds §19.2’s 71-file count into the guard-dependent measurements. The 71 is ordinary file enumeration, not guard output. A read-only enumeration of the two paths named by `SWEPT_TREES` produces exactly 71 `.rs` files and 70 after either guard’s own source is skipped. The record itself previously did this with `rg --files` in §22.7. The matcher-dependent figures may reasonably remain “not run here,” but Cargo prohibition does not explain why 71 was not re-derived.
+
+   **Narrowest fix:** separate 71 from the guard-dependent figures, and bind §19.2’s sentence to `b2ef96e` and `SWEPT_TREES`: 71 files total, 70 selected per guard. Amend the §24 opening and §24.8 item 6 accordingly.
+
+3. **Low — `docs/decisions/2d-4a-C-notes.md`, §24.7 orchestrator block, lines 5383–5396.**
+
+   > “Every one was run once, alone, on this tree after the fix round finished”
+
+   The same block records two `cargo test --workspace` invocations: the first ended with 10 failures, then a clean workspace re-run produced 1313 passed. “Every one was run once” therefore overstates the execution history unless “one” is explicitly limited to the successful measurements reported in the cells.
+
+   **Narrowest fix:** say: “Each reported successful measurement was taken once and alone; `cargo test --workspace` also had the scarred failed attempt described below.”
+
+4. **Low — `docs/decisions/2d-4a-C-notes.md`, §24.7 orchestrator block, lines 5398–5400.**
+
+   > “a piped gate does not report the gate’s exit status”
+
+   That is true of the recorded invocation under the shell’s ordinary last-command pipeline status, which explains why `tail` supplied the apparent zero. It is not true generally: `pipefail`, or inspecting the pipeline’s component statuses, can expose the gate’s failure and potentially its exact status.
+
+   **Narrowest fix:** scope it to the observed command: “that pipeline, run without `pipefail` and without inspecting component statuses, reported `tail`’s status rather than Cargo’s.”
+
+### Checked and cleared
+
+- The CommonMark rule itself holds. All six genuine double-backtick lines are syntactically valid spans whose two-backtick delimiters carry a single backtick.
+- Sweep L reproduces at 42 lines, partitioned exactly as recorded: 11 rewritten, 3 annotated, 2 historical quotations, 1 unrelated “epoch fence,” 1 further instance and 24 read and left.
+- Sweep M reproduces at 10 and sweep P at 19. Their stated pattern bounds are honest, although sweep M’s narrow vocabulary missed finding 2’s “cannot be closed without” wording.
+- Sweep I reproduces at 11; sweep J reproduces at 12 and 24. Sweep N’s enumerated candidate-set design remains materially stronger than the pattern-selected sweeps.
+- I ran a wider multiline sweep over sweep H’s shape using `without … restriction`, `rather than`, abbreviation forms, and miss/invisibility forms. It reached the split-line §3 construction, the abbreviated-alternation explanation, the corrected unanchored explanation and the fenced-versus-code-span explanation. Inspection found no further live defect.
+- All 73 `rather than` lines excluded by §20.7 sweep 1 were read. They are predominantly measurement-versus-assumption wording, audit-trail/editorial choices, implementation contrasts and already-judged design alternatives. None newly mischaracterizes a rejected alternative.
+- §24.6’s eleven corrected positions reproduce under its stated grouped-position unit. Its 7 blocks / 2 inline annotations / 2 folded positions split is defensible. Both inline annotations preserve the superseded wording, and nesting another correction block inside the round-7 block would add real audit-trail cost.
+- The seven round-8 correction blocks reproduce at lines 4217, 4565, 4703, 4770, 4878, 4908 and 4927.
+- Keeping the two `Filled by the orchestrator` blocks outside the correction-marker alternation is appropriate: they supply withheld measurements rather than correct prior prose. The pending-cell practice also cleanly separates expectations from later measurements. Findings 3 and 4 concern two sentences inside the host-scar block, not that accounting choice.
+- §24.4’s 4227 / 4853 / 650 / 24 / 626 arithmetic reproduces. The earlier 2437 → 2954, 2954 → 3593 and 3593 → 4227 pairs also reproduce. The 5479 figure is explicitly a pre-gate handoff, while 5515 is the final round-8 record length; the moments are not conflated.
+- The historical fenced diff commands at `5593a90` lines 819 and 1070 reproduce as zero when applied to the corresponding parent-to-fix source diffs. The credits support the “comments only” conclusions, which the committed diffs also confirm.
+- The ten historical `cargo tree -p espansoconfig-core | rg tauri` rows all print the same command. The core and workspace manifests did not change during this phase, and reading the core dependency declarations supports the claimed separation from Tauri.
+- An independent in-memory implementation of `prose_units` and the lowercase, non-overlapping matcher reproduced 88 phrases, 224 hits, 140 inventory entries, 20 zero-hit phrases, 36 / 19 / 12 / 18 / 5, 71 files, and the 308 / 196 self-skip figures.
+- The five unbound working-tree measurements remain true on the subject source tree: the 48 raw citations reduce to 47 pointers, the 9 / 38 classification holds, and `decide(` has 3 call sites. The cited lines 303, 358, 366, 1571 and 1649 still name the advertised sentences.
+- §3 remains knowingly two passages short, with 47 represented in no table. Flagged as instructed; closing it still requires an owner ruling reopening step 1.
+- The record-structure decision remains properly with the owner. I make no further consolidation recommendation for this fix round.
+
+### Could not check
+
+- I did not run Cargo, npm, builds or tests. Consequently I did not independently execute the `cargo tree` command or verify the orchestrator’s runtime gate results; only their repository evidence and internal accounting were audited.
+- The 5479 pre-gate handoff was not committed as a separate snapshot, so its historical `wc -l` cannot be rerun directly. Its arithmetic and explicit moment binding are coherent with the committed 5515-line result.
+- The checkout’s current `HEAD` is `8c345f9`, not `b2ef96e`, but the only committed difference from `b2ef96e` is `PROGRESS.md`; the decision record, review file and source subject audited here are byte-identical. Git’s read-only commands emitted sandbox warnings when macOS attempted to create `/tmp/xcrun_db` cache files, but the commands returned their substantive output and no requested analysis was blocked.
+
