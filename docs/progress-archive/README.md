@@ -28,6 +28,7 @@ above a `---` rule; everything below that rule is the original text.
 | [`phase-2c.md`](phase-2c.md) | 4022 | Phase 2c — the editing UI, all ten sub-phases of the split, 2c-1a through 2c-5-7. |
 | [`phase-2d.md`](phase-2d.md) | 2772 | Phase 2d — external-change reconciliation: the observation engine, the write ledger, the liveness contract, the reconciliation wire. |
 | [`2d-4a-c-closure.md`](2d-4a-c-closure.md) | 304 | The 2d-4a-C closure narrative: why the owner ended the nine-round tail, and the record reorganization that answered §22.6. |
+| [`phase-m2.md`](phase-m2.md) | 32 | Phase M2 — the review-tail termination rule (`CLAUDE.md` §7): its two review rounds, what each found, and why no third was owed. |
 | [`next-action-history.md`](next-action-history.md) | 9147 | Every superseded "Next action" handoff, newest first. Each was the live instruction once. **They are kept for the record they carry, never as an instruction** — read them as history only. |
 
 ## How to find a phase

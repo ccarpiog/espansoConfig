@@ -809,6 +809,14 @@ through the same process-wide table a `Workspace` uses.
 > disagreement is a failure rather than a wire value. §15.1's L1 row is the reasoning and what the
 > trade costs.
 
+> **Correction, round 7 (Low 1). *"There is no arm that is true in that case"* is false**, and the
+> block above is one of three positions in this file that say it. `Addressable` carrying the number
+> the **workspace** answered is true of the number it carries; what is false is the observation built
+> around it, whose projection is addressed by the **snapshot's**. The accurate general form is **no
+> arm makes the object honest**. Nothing about the policy changes — a locally true arm inside a
+> dishonest object is still not a wire value — and the round-7 correction block after §15.1's table
+> is the full derivation and the list of positions.
+
 ### 3.4 The projection happens at drain time, not at enqueue
 
 Because §3.3 needs the open `Workspace`, and the sink runs on the watcher's worker thread with no
@@ -2306,6 +2314,30 @@ victim while another path has two* — is exactly what it was, with the record c
 | L4 | Low | R9 is a real, known-open defect and not a bounded residue. `SessionIdentities::by_path` retains every path for the process lifetime; every first `identity_of` inserts and nothing removes. Create, stabilize and remove distinct watched paths while draining: the queue stays capped at 256 while the register retains all of them | **No code change, and the verdict recorded** — which is what the finding asked for. R9's round-6 block re-derives the retention from the code rather than accepting round 5's verdict, and says why writing it down is not a closure: a bound needs a rule for when an identity may be forgotten, which needs to know no consumer still holds it — 2d-5's knowledge — and a measurement first means something in 2d-7. **R9 is an open Low with one more round of evidence that it is real** | **None, and none is possible.** The register is a process-wide static shared by every test in the binary, so a count read from a test is not a function of that test. That is unchanged from round 5 and is why no round has measured it |
 | L5 | Low | §14.2 is not file-by-file: it lists four files where commit `eced554` touched five, omitting `docs/reviews/phase-2d-4a-queue.md`, where round 5's 65-line verbatim record was added | **Words.** §14.2 carries a round-6 correction naming the omitted file and naming the habit — the same one Phase 2d-3's round 12 found — and saying why it matters: this section is what a later round diffs against, and L5 was found by comparing it to `git show --stat`, which is the check the section exists to make unnecessary. §15.2 below lists **every** file this round touches, the review queue and this record included | **None.** No test reads a decision record's file list. The only check is a reader comparing it against the commit, which is what round 6 did |
 
+> **Correction, round 7 (Low 1). The L1 row's *"because **no arm is true** in that case"* is the
+> wrong half of the pair, and it is the half three positions of this file repeat.** The arm
+> `address_of_minted` would answer without the assertion is `Addressable { document: resolved }`,
+> and `Addressable`'s claim is *the open workspace resolves this path to this identity* — which is
+> true of `resolved`, since `resolved` is what `workspace.document_id(path)` just answered. **What is
+> false is the observation built around it**, whose `ChangedContent::Projected` carries the
+> snapshot's identity in `DocumentView::id` and in every `MatchId` beneath it. So the accurate
+> sentence is the one `address_of_minted`'s own doc has carried since round 6 — *the arm was locally
+> true and the object held two identities for one file* — and the accurate general form is **no arm
+> makes the object honest**, not *no arm is true*.
+>
+> Nothing about the policy changes: the assertion is still forced rather than chosen, because a
+> locally true arm inside a dishonest object is not a wire value anybody can act on. §14.4's third
+> bullet already said the true thing — *"the arm is true of the value it carries; that is all it
+> is"* — so this file held its own refutation while three positions said the opposite.
+>
+> **The three positions, derived by grepping this file and both source trees for the shape rather
+> than for the round-7 review's wording:** the L1 row above; §3.3's round-6 correction block
+> (*"There is no arm that is true in that case"*); and §15.4's second bullet (*"there is no true arm
+> of `ObservedDocument` for the disagreement"*). **The review named one of the three** — it named the
+> source position, `reconciliation.rs`'s new `#[should_panic]` test comment, which the fix round
+> corrected — **and of the record positions it named only the L1 row.** All four are corrected: the
+> source one in place, the three here by this block.
+
 ### 15.2 What this round changed, by file
 
 **Six files, and the last one is the one §14.2 forgot to count.**
@@ -2346,6 +2378,45 @@ has been. **`crates/espansoconfig-core` is untouched**: `cargo tree -p espansoco
 is still empty and no core file changed. **No Svelte component, no TypeScript and no i18n key
 changed** — this step still draws nothing and still decides nothing about whether a write surface is
 open (Q7 item 4). The three frontend gates were measured all the same, and none of them moved.
+
+> **Correction, round 7 (Low 2). *"§15.2 lists nine source positions"* — and the M1 bullet's
+> *"a words fix over nine source positions"* in §15.4 — undercounts the epoch-scoped watermark claim,
+> and §15.4 sends the next round to that list, so the undercount propagates.**
+>
+> **Fourteen positions of the claim stood in `src-tauri/src/` when this section was written**,
+> counted by this section's own convention, in which a doc paragraph, an inline comment block and an
+> assertion message each count as one. The nine listed above, plus **five** in
+> `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` that the paragraph above
+> files under *gained two assertions* instead:
+>
+> - the comment beginning *"The same clause from the other side"* — the watermark going with the
+>   pending set (`eced554`, round 5's fix, not round 6's);
+> - the assertion message *"epoch 2's watermark, which the replacement below is about to discard"*
+>   (`6be7231`, round 6);
+> - the assertion message *"a replacement resets the watermark with everything else"* (`eced554`,
+>   round 5);
+> - the comment beginning *"**`newest_sequence` falls across a replacement**"* (`6be7231`, round 6);
+> - the assertion message *"the successor epoch answers its own sequences, below the epoch before
+>   it"* (`6be7231`, round 6).
+>
+> **Where this correction disagrees with the round-7 review**, which raised the finding: it said *"at
+> least eleven"* and named two of the five, both as prose blocks the round-6 fix *gained*. Derived
+> from `git log -S` on each string: the omissions are **five**, not two; **three** of the five are
+> round 6's and **two are round 5's**, so one of the two the review named was already in the tree
+> when §15.2 was written. Every one of the five is **correct prose** — the defect is the count, in a
+> section a later round is sent to read.
+>
+> **The list is also stale in a second way, which no round could have foreseen and a reader of §15.4
+> must not walk into.** Phase 2d-4a-C step 1 (`34cd5af`) stated the contract once in
+> `crates/espansoconfig-core/src/watch/retained_state.rs` and turned several of these positions into
+> pointers at it. On today's tree: clause 6 there is a new position and the canonical one;
+> `ReconciliationQueue::drain`'s `max` paragraph and **both** `commands.rs` positions now point at it
+> rather than restating it; `ReconciliationBatch::newest_sequence`'s doc and both `dispatch_check.rs`
+> positions still state it. **Calling clause 6 a "fifteenth" — as this block did until round 8 found
+> it — adds one to fourteen while the same sentence says three of the fourteen stopped being
+> statements**, so it is a count of *positions touching the claim* and never of statements of it.
+> Counted as statements of the claim, today's tree holds **twelve**; counted as positions, fifteen. **So "§15.2's list of nine" is not a work list any later round can
+> execute** — re-derive the positions from the tree in front of you.
 
 ### 15.3 The gates after this round
 
@@ -2435,3 +2506,498 @@ as a bare string). L1's release probe put `debug_assert_eq!` back and ran the ne
   therefore exactly the shape every previous round's fix left a narrower instance of; and the new
   test's comment, which asserts what a `debug_assert_eq!` would have measured — a claim about a
   counterfactual build.
+
+> **Correction, round 7. Three sentences of this section are now false or stale, and round 7 found
+> each of them by reading the sentence beside the one it had been sent to — which is what this
+> section's last bullet predicted.**
+>
+> - The M1 bullet's *"a words fix over nine source positions"*, and §15.2's *"nine source
+>   positions"*, undercount. **Fourteen stood in `src-tauri/src/` when §15.2 was written**, and
+>   today's tree adds a canonical one in `crates/espansoconfig-core/src/watch/retained_state.rs`
+>   while three of the original nine have become pointers at it — **fifteen positions touching the
+>   claim, twelve still stating it**, a distinction round 8 found this bullet collapsing into a
+>   "fifteenth". §15.2's round-7 correction block is the
+>   derivation, position by position, with the commit that introduced each. **So this section's
+>   instruction to start from that list is withdrawn**: re-derive the positions from the tree.
+> - The panic-policy bullet is right that the trade is argued rather than measured, and its
+>   *"there is no true arm of `ObservedDocument` for the disagreement"* is the false half of the L1
+>   pair — see §15.1's round-7 correction. The alternatives are still both refused, on the accurate
+>   ground: **no arm makes the object honest.**
+> - The panic-policy bullet also under-states what it named. Round 7's Medium is not that the trade
+>   is unmeasured; it is that `address_of_minted`'s doc **cited `crate::commands`'s module header as
+>   the justification for absorbing two poisoned mutexes, and none of that header's three grounds is
+>   true of `QueueState`**. §16.1 is the finding and the derivation that replaced it.
+
+## 16. Round 7 of the review, and the fix round that answered it
+
+`docs/reviews/phase-2d-4a-queue.md` holds round 7 verbatim, and — unlike rounds 1 to 6 — it also has
+a file of its own, `docs/reviews/phase-2d-4a-round-7.md`, because of how it was produced.
+**Round 7 was written by the adversarial Opus fallback, not by Codex.** Codex hit its usage limit
+mid-job, 221 s in, and the workflow's rule of one bounded attempt per invocation meant it was not
+relaunched. The review's own first line records that, and the queue keeps that line for the same
+reason: nothing in this record may imply Codex reviewed this round. **The round also ran under
+`/goahead-opus`**, whose cap of two review invocations and forty-five minutes per phase binds tighter
+than this project's own §7 (`CLAUDE.md` §7.4) — so §7.1 could commission a round this workflow has no
+invocation left to run, and what that costs is recorded in §16.4 rather than spent.
+
+Its verdict: **NOT READY — 0 High, 1 Medium, 4 Low**, against gates that were green
+(1313 / 26 / clean / clean / 73 / empty / 20-20 / 2125 / 431 / 184). Its scope was **the round-6 fix
+plus the mechanism Phase 2d-4a-C built** — `prose_sweep.rs` and `retained_state_contract.rs`, which
+did not exist when rounds 1 to 6 ran.
+
+**Every one of the five findings is a sentence in a source-file comment, and not one is a behaviour
+defect.** The review said as much about itself: four of its five sit in sites §15.4 or the brief had
+already nominated. The fix round changed no executable line — ten comment hunks across five source
+files, and this record.
+
+**The single most useful thing this round did is the Medium**, and it is this project's declared
+worst defect class rather than a wording nit: `address_of_minted`'s doc cited another module's
+header as the **justification** for absorbing two poisoned mutexes, and **none of that header's
+three grounds is true of the mutex the sentence was about**. The conclusion survives; the argument
+for it did not exist anywhere. §16.1 has what replaced it and how it was derived.
+
+**All five findings came back with a count, an attribution or a piece of reasoning this fix round
+disagrees with, and wherever the disagreement is a number the fix round's is the larger one.** That
+is not a complaint about the reviewer — every one of the five findings is real, and none was refused
+— it is the standing rule doing its work: rounds 5, 6 and 7 each supplied an instance of a
+reviewer's count being wrong, and this round supplies five more. Each disagreement is derived in
+§16.1 beside the finding it belongs to, with the `git log -S` or the grep that produced it.
+
+### 16.1 Finding by finding
+
+| # | Severity | What was wrong | What closes it | The test that fails without it |
+|---|---|---|---|---|
+| M1 | Medium | `address_of_minted`'s doc said *"`crate::commands`'s module header is why the two poisoned mutexes are not a second failure"*. That header grounds absorption in three properties of the **session** mutex — a cache over the disk behind it, one infallible assignment per mutation, and `reload_document` as the recovery — and **not one of the three is true of `QueueState`**: nothing re-reads a lost observation, `drain` mutates the state with two statements (`reconciliation.rs:1186` and `:1187-1189`), and no command recovers a queue. So the conclusion stood on a citation that did not reach it, which is a decision-record-style overclaim living in source | **Words.** The paragraph now separates the **mechanism** from the **justification**: both mutexes absorb poisoning through `PoisonError::into_inner`, that is all the header supplies, and the three grounds are named as false of `QueueState` in the same sentence. What holds instead is derived from `drain` and stated there: **both mutations run before the projection loop that can panic, and an unwind undoes neither**, so the state behind the poisoned lock is the state a *completed* `drain(after_sequence)` would have left — watermark raised, everything at or below it gone, nothing above it touched, the loss count unmoved, the undelivered batch still stored. The paragraph then says what that does **not** buy, and ends by saying that none of it is asserted by anything | **None, and none is possible without poisoning a lock in a test.** No test in this repository panics a command and then drains again; the `#[should_panic]` test proves the function fails and nothing about what a later caller finds. That is stated in the paragraph itself rather than left to be inferred, and §16.4 carries it |
+| L1 | Low | Two positions of one file contradicted each other about the same arm. `address_of_minted`'s doc says *"the arm was locally true and the object held two identities for one file"*; the new `#[should_panic]` test's comment said *"There is no arm of `ObservedDocument` that is true in that case"*. The doc is right: without the assertion the function answers `Addressable { document: resolved }`, and `Addressable`'s claim — *the open workspace resolves this path to this identity* — is true of `resolved`, because `resolved` is what `workspace.document_id(path)` just answered. What is false is the **observation** around it, whose `ChangedContent::Projected` carries the snapshot's identity in `DocumentView::id` and in every `MatchId` beneath | **Words, at four positions.** The accurate general form is **no arm makes the object honest**, which is not *no arm is true*; the policy is unchanged, because a locally true arm inside a dishonest object is still not a wire value anybody can act on. The test comment is corrected in place. The three record positions are corrected by the round-7 blocks after §15.1's table, in §3.3, and at the end of §15.4 | **None.** No test can fail a false comment, and the behaviour is pinned by `a_snapshot_identity_the_open_workspace_contradicts_is_a_failure_and_never_a_wire_value` either way |
+| L2 | Low | §15.2's *"nine source positions"* of the epoch-scoped watermark claim — repeated by §15.4's M1 bullet as *"a words fix over nine source positions"* — undercounts, and §15.4 sends the next round to that list, so the undercount propagates into whatever round reads it | **Words, in the record only.** §15.2 carries a round-7 correction naming **five** further positions with the commit that introduced each, and §15.4 carries one withdrawing its instruction to start from the list. No source position is wrong; every one of the five is correct prose. The correction also records the second way the list is stale: Phase 2d-4a-C step 1 turned three of the nine into **pointers** at `retained_state`'s clause 6, which is itself a position and did not exist when §15.2 was written | **None.** No test reads a decision record's count. The only check is a reader re-deriving the positions from the tree, which is what this round did and what §15.2's correction now tells the next one to do |
+| L3 | Low | `prose_sweep::prose_units` joins wrapped **comment** runs and leaves every other line a unit of its own — framed in its doc as a benefit, with no mention that the same repository hand-wraps long assertion messages with backslash continuations, so a claim split across one of those breaks matches nothing. `retained_state_contract.rs` claims the check *"catches an unmarked claim and a new claim"* and its four stated limits omitted this one | **Words, at three positions rather than the one named.** `prose_units`'s doc now states the cost beside the benefit; `retained_state_contract.rs` has a **fifth** limit and `liveness_contract.rs` a **fourth**, because the hole is in the shared mechanism and both families inherit it. Each says the measurement and its weakness in the same sentence: **zero** positions today are visible only in the joined form, that measurement is a hand-run replica taken once, and **no test re-takes it** | **None, and this is the finding's own point.** A test would have to join continuations and then assert the join found nothing, which is a test of the replica. What exists is the capability statement; the count is evidence for one tree at one moment and is written down as such |
+| L4 | Low | `commands.rs:8838`'s comment — *"the same call answers the same batch until the caller says it has one of them"* — carried neither of the two qualifications the guarantee is stated with elsewhere: *when nothing was enqueued between the two calls* and *no replacement epoch was adopted between them* | **Words, at two positions.** The `commands.rs` comment now carries both, names where the qualified form lives, and says why neither applies in that test. The sweep found a **second** deficient position the review did not name — `reconciliation.rs`'s comment in `a_watermark_removes_what_it_acknowledges_and_keeps_what_it_does_not`, which carried the first qualification and called it *"the qualification the guarantee carries"*, singular — and it now carries both and points at the test that drives the other side | **None.** Both positions are comments beside tests whose behaviour is already asserted: `the_drain_hands_back_what_the_queue_holds_above_the_watermark` and `a_watermark_removes_what_it_acknowledges_and_keeps_what_it_does_not` both re-drain and compare, and `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` drives the replacement half |
+
+**Where this fix round's derivation disagrees with the review's.** Each was derived on the tree the
+round was commissioned on, `93fb76b`, by `git log -S`, by `grep`, or by re-implementing the sweep;
+the review's own numbers are kept above where they were right.
+
+- **M1's reasoning was adopted in half and refused in half.** The review argued the conclusion holds
+  *"because both mutations are pure functions of `after_sequence`, so the surviving state is
+  consistent and a retry with the same watermark reproduces the batch"*. The first half understates
+  what is true: both mutations complete **before** the projection loop that panics, so there is no
+  partially applied state to reason about at all — the surviving state is what a completed drain
+  leaves, which is stronger than *consistent*. The second half is refused. A retry re-projects the
+  same entries against the same workspace and reaches the same assertion, so the batch is
+  reproducible in principle and not obtainable in fact **by a caller that keeps acknowledging what
+  it was handed**. Round 8 found the first draft of this bullet, and of the doc paragraph it
+  records, stating that bound as an enforcement: it is not one. `after_sequence` crosses the wire as
+  an unvalidated `u64`, so a caller passing a watermark at or above the offending entry's sequence
+  prunes it at the retain before the projection runs, and `begin_epoch` assigns an empty state over
+  the whole of it — two escapes, neither prevented here and neither repairing the disagreement. **Writing *a retry reproduces the batch* into
+  the doc would have been a new false sentence in the paragraph that exists to stop one**, which is
+  why the fix says what the state is and then says what it does not buy.
+- **L1 stands at four positions, not two.** The review named the source comment and one record
+  position (§15.1's L1 row). Grepping this file and both source trees for the *shape* — `no arm`,
+  `true arm`, `arm is true` — found two more, both in this file: §3.3's round-6 correction block and
+  §15.4's second bullet. All four are corrected.
+- **L2's omissions are five, not two, and their provenance is not what the review said.** The review
+  named `reconciliation.rs:1770-1774` and `:1794-1801` and filed both as prose blocks round 6's fix
+  *gained*. Derived: the omitted positions in that test are **five** — one comment and one assertion
+  message from `eced554` (round 5's fix), and one comment and two assertion messages from `6be7231`
+  (round 6's) — so one of the two the review named was already in the tree when §15.2 was written.
+  The spans are `:1771-1774` and `:1794-1802`. Each differs from the review's by one line at one
+  end — **in opposite directions**, which round 8 found this sentence flattening into one: against
+  the review's `:1770-1774` the first is a line **narrower** at the start, and against its
+  `:1794-1801` the second is a line **wider** at the end. And
+  the true figure for the tree §15.2 described is **fourteen**, against the review's *"at least
+  eleven"*.
+- **L3's example line is wrong and its measurement is narrower than the hole.** The review cites
+  `reconciliation.rs:1786` as a backslash-wrapped assertion message; on that tree, 1786 is
+  `queue.enqueue(changed(3, 3, "match/a.yml", TWO));`, a plain statement. The nearest wrapped
+  assertion message is `:1768-1769`. The measurement was re-taken here independently — a Python
+  replica of `prose_units`, `sweep` and `complaints_against`, run over both trees — and it reproduces
+  the review's **zero** for the retained-state family's 88 phrases. It also measures what the review
+  did not: the **liveness** family's 61 phrases, also zero, and that is why the fix touches
+  `liveness_contract.rs` as well as the module the review named.
+- **L4's claim is at six positions, not five.** The review named one deficient position and four
+  sound ones. A sixth exists — `reconciliation.rs:1842`'s test comment — and it carried one
+  qualification of two while calling it *the* qualification. It is fixed with the one the review
+  named.
+- **One line cite is off by one, recorded only so the next round does not re-derive it as a
+  disagreement**: the review's `:1480` for the `assert_eq!` is the macro's second line
+  (`resolved, document,`), the call opening at `:1479`. Its `commands.rs:220-228` for the poison
+  policy was checked and is **exact** — `:220` is the heading and `:222-228` the body. Beyond those,
+  the cites that were opened on `93fb76b` and found right are `reconciliation.rs:2677` (L1's test
+  comment), `:1186` and `:1187-1189` (M1's two mutations), `:1207-1211`, `:102`, `:1157`,
+  `commands.rs:1324`, `:3474`, `:8838`, `prose_sweep.rs:125` and
+  `retained_state_contract.rs:58`; `reconciliation.rs:920-935`, `:1459`,
+  `commands.rs:1446-1455`, `prose_sweep.rs:326-403` and both `workspace/mod.rs` spans land on the
+  right item within a line or two. **The three cites that point at the wrong text are all named
+  above**: two of L2's spans, each off by one line at one end — the first a line wide at the start,
+  the second a line short at the end, and round 8 found an earlier draft of this clause calling them
+  both short — and L3's `:1786`.
+
+**The review's second Question — *"the cheapest honest close is to fix none and carry all five as
+recorded items"* — was considered and refused.** It is available under `CLAUDE.md` §7.3: none of the
+five is a *correctness* defect in source, so all five could have been carried and the step would have
+closed. It was refused because **a false sentence in a source comment is this project's declared worst
+defect class**, and the M1 one in particular is a justification that does not reach its conclusion,
+sitting three lines above the assertion it justifies. Carrying it would have left the next reader the
+same citation to follow. The consequence is taken deliberately: §7.1 commissions round 8 against this
+fix round, scoped to five source files of comments. §16.4's last item is what happens if the
+`/goahead-opus` cap has no invocation left for it.
+
+### 16.2 What this round changed, by file
+
+**Seven files, and two of them are the record's own — the habit §14.2 was corrected for.**
+
+- **`src-tauri/src/reconciliation.rs`** — three comment blocks and **no executable line**.
+  `address_of_minted`'s *what the trade costs* paragraph is rewritten (M1): the poison sentence is
+  replaced by the mechanism/justification split, the three grounds are named as false of
+  `QueueState`, the property of `drain` that does hold is derived, and the paragraph ends by saying
+  none of it is asserted. The `#[should_panic]` test's comment says **no arm makes the object
+  honest** instead of *no arm is true* (L1). The comment in
+  `a_watermark_removes_what_it_acknowledges_and_keeps_what_it_does_not` carries both qualifications
+  of the repeat-drain guarantee instead of one (L4). **No test was added or renamed and no
+  executable line inside one changed** — only comments — so the suite's count should not move and
+  nothing it asserts should change.
+- **`src-tauri/src/commands.rs`** — one comment in
+  `the_drain_hands_back_what_the_queue_holds_above_the_watermark`, which is L4's named position.
+  **No behaviour changed here**, and no fixture.
+- **`src-tauri/src/prose_sweep.rs`** — `prose_units`'s doc gains the paragraph stating the
+  backslash-continuation cost beside the comment-joining benefit, the measurement, and that no test
+  re-takes it (L3). **No code changed**: the function still joins comment runs and only comment runs.
+- **`src-tauri/src/retained_state_contract.rs`** — a **fifth** stated limit, for the same hole
+  (L3); and a clause added to the *two source trees and no document* limit saying that `src/` is a
+  third case the bullet used to read past, that no TypeScript stores a `newest_sequence` yet, that
+  whether this family follows 2d-4b into the frontend tree is that phase's decision, and that until
+  it is taken a retained-state claim written in `src/` is invisible to this check. That clause
+  answers the review's first Question; it is **not** a finding and takes no decision.
+- **`src-tauri/src/liveness_contract.rs`** — a **fourth** stated limit, the same hole in the shared
+  mechanism, and the *Three further limits* line becomes *Four* (L3). The phrase table and the
+  inventory are untouched.
+- **`docs/decisions/2d-4a-notes.md`** — four round-7 correction blocks (§3.3, after §15.1's table,
+  after §15.2's list, and at the end of §15.4) and this section.
+- **`docs/reviews/phase-2d-4a-queue.md`** — round 7's verbatim record, reproduced from
+  `docs/reviews/phase-2d-4a-round-7.md` with exactly two edits: its `###` headings demoted to `##`
+  to match this file's convention for round bodies, and its `Reviewer:` first line kept. The
+  reproduction was checked line by line against the source file rather than read over.
+
+An eighth path is new in this round's commit and is **not** a file this fix round wrote:
+`docs/reviews/phase-2d-4a-round-7.md`, the review itself. It is named here because §14.2's defect
+was a by-file list that omitted the review's own artefact.
+
+**`PROGRESS.md` is the orchestrator's** and is written in its own commit, as every round of this
+step has been. **`crates/espansoconfig-core` is untouched** — no core file changed, so
+`cargo tree -p espansoconfig-core | rg tauri` cannot have moved. **No Svelte component, no TypeScript
+and no i18n key changed**: this step still draws nothing and still decides nothing about whether a
+write surface is open (Q7 item 4).
+
+### 16.3 The gates after this round
+
+**This fix round ran no gate, and every cell below says so.** The orchestrator measures them once,
+alone, after this round — a fix worker running `cargo` concurrently with the orchestrator is what
+produced ten phantom `watch_check::` timeouts on a busy host, which is the scar `PROGRESS.md`
+records. **A round that cannot run a gate does not report one**, and writing a plausible number here
+would be indistinguishable from having measured it.
+
+| Gate | Result |
+|---|---|
+| `pkill -f 'target/debug/deps/espansoconfig-'` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo build --workspace` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo test --workspace` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo fmt --check` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo doc --workspace --no-deps` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo tree -p espansoconfig-core \| rg tauri` | pending — the orchestrator measures these once, alone, after this round |
+| `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` | pending — the orchestrator measures these once, alone, after this round |
+| `npm test` | pending — the orchestrator measures these once, alone, after this round |
+| `npm run check` | pending — the orchestrator measures these once, alone, after this round |
+| `npm run build` | pending — the orchestrator measures these once, alone, after this round |
+
+**What was measured instead, and what it is worth.** Both prose-sweep guards were re-run as a
+**Python replica** of `prose_units`, `sweep` and `complaints_against`, parsing `RETAINED_STATE_SHAPES`,
+`LIVENESS_SHAPES` and both `INVENTORY` tables out of the source: 88 phrases / 140 entries / 224 hits
+/ **0 complaints**, and 61 phrases / 86 entries / 129 hits / **0 complaints**, before any edit and
+after every one of them. The replica was controlled in both directions before being trusted — a
+phrase deliberately split across a `\` continuation is invisible to it line-based and visible joined,
+and the live families match 224 and 129 times, so a zero from it is not a zero from a search that
+cannot match. **It is a replica and not the test**: it re-implements the two guards rather than
+calling them, so it can agree with a wrong implementation of itself, and `every_retained_state_claim_is_judged`
+and `every_liveness_claim_is_judged` are what actually decide. What it buys is that ten comment hunks
+in swept files were made without adding or removing a single inventoried phrase occurrence, which is
+the one way a comment-only round can turn a green suite red.
+
+**No probe was run and none was reverted**, because nothing here changes behaviour to probe. No
+`git` command that changes state was run.
+
+### 16.4 What this round did not do, and where it is thin
+
+Every item carries one of `CLAUDE.md` §7.3's two marks. **An *actionable* item naming a correctness
+defect in a source file is a blocker under that rule — the step does not close until it is fixed.
+This round records none**: nothing below names a correctness defect in a source file, so nothing
+below holds the step open.
+
+- **The Medium's replacement paragraph is a derivation and nothing asserts it.** *"Both mutations run
+  before the projection loop and an unwind undoes neither"* was established by reading `drain` —
+  `guard.acknowledged = …` at `:1186`, `retain` at `:1187-1189`, the `.map(…).collect()` at
+  `:1195-1196`, and no mutation after it — and by confirming that neither manifest sets
+  `panic = "abort"`, so unwinding and therefore poisoning are real. **No test poisons either lock**,
+  no test drains after a panic, and nothing fails if a future edit adds a third mutation to `drain`
+  *after* the collect, which would falsify the paragraph silently. That last one is the sharpest
+  shape here and it is the same shape §14.4 recorded about the fifth mutation of
+  `QueueState::pending`. *(recorded only — it names a risk and a shape to watch, not a defect that
+  exists in the file today.)*
+- **The paragraph's *"a later drain reaches this assertion again"* half is reasoned, not run.** It
+  follows from `retain` removing only what is at or below the caller's watermark and from the caller
+  never being handed the offending sequence, but nothing exercises it, and what a panicking Tauri
+  command does to the process or the webview is still asserted by nothing in this repository —
+  unchanged from §15.4 and from round 7's own *Not verified*. *(recorded only.)*
+- **The L3 measurement is a replica of the sweep, taken once, by the round that wrote the sentence
+  claiming it.** Both new limits say so in the same sentence as the number, which is the honest form,
+  but it remains a measurement whose tool was written by the party it exonerates. A round that wants
+  it independently would re-implement the join differently — the replica joins a `\`-terminated run
+  by stripping the backslash and concatenating, which is not exactly what `rustc` does to a string
+  continuation (it also eats leading whitespace on the next line), so a phrase whose split falls on
+  a run of spaces could behave differently under the two. **On today's tree the answer is zero either
+  way, because zero positions matched at all.** *(actionable — a check that can be re-run over files
+  that exist, though the replica itself is **not** in this repository and a later round would have to
+  write its own; it names no defect in source, so a later phase may adopt it and this step closes
+  without it.)*
+- **Nothing mechanically enforces any of the wording this round fixed**, unchanged from §15.4 and
+  now with two more instances: the six-position *same batch twice* family and the epoch-scoped
+  watermark family — **fifteen positions touching it, of which twelve state it and three point at
+  the canonical clause**, a distinction round 8 found an earlier draft of this bullet collapsing
+  into "fifteen-position" — are both kept identical by a reader. The two prose guards check that
+  a claim of *their* families is inventoried, not that any of these is true, and neither family is
+  in either phrase table. *(recorded only — adding them is a phase decision about what those tables
+  are for, not a defect.)*
+- **One position of the watermark family was found and deliberately left alone.**
+  `reconciliation.rs`'s assertion message in
+  `an_out_of_order_drain_answers_the_acknowledgement_and_never_the_lower_argument` —
+  *"an empty batch answers the highest watermark, never the caller's lower argument"* — carries no
+  epoch scope, where its sibling in `an_empty_batch_answers_the_watermark_it_was_asked_with` says
+  *within one epoch*. It is **not false**: it makes no cross-epoch claim, and the comment above it
+  carries the scope. It was left because adding scope to a message that is not wrong is a source
+  change for symmetry alone, and every source change this round makes widens what round 8 must
+  review. *(actionable — a named position in a file that exists; it names no correctness defect, so
+  the step closes without it.)*
+- **The same capability sentence L3 bounds still stands unbounded in six `docs/` positions** that
+  this round did not touch. Derived by grepping `docs/` for the shape rather than for L3's wording:
+  `docs/progress-archive/2d-4a-c-closure.md:258`, `docs/progress-archive/status-table.md:112`,
+  `docs/progress-archive/phase-2d.md:2152`, `docs/progress-archive/next-action-history.md:134`,
+  `docs/decisions/2d-3-C-notes.md:296` and **this file's own §5**, at the line reading *"It catches an
+  unmarked claim and a new claim, and it cannot judge whether a claim is true"*. Each is a summary of
+  a limits list rather than a limits list, so none of them is false in the way the module doc was —
+  what they omit, they omit by summarising. Four sit in `docs/progress-archive/`, one in a closed
+  phase's decision record, and one here. *(actionable — named positions in files that exist; every
+  one of them is in **the record**, not in source, so a later phase may adopt them and this step
+  closes without them.)*
+- **R9 is open, unmeasured and unbounded**, for a fourth consecutive round. No count, no cap, no
+  eviction rule, and no step of the 2d split owns building one. *(recorded only — the reason it
+  cannot be measured from a test in this binary is §15.1's L4 row and has not changed.)*
+- **R10's tie case still has no test**, unchanged from §15.4. *(recorded only.)*
+- **Nothing here observes a real filesystem**, unchanged from rounds 1 through 6. *(recorded only.)*
+- **The TypeScript half is still 2d-4b's.** No `wire_contract` table compares `ObservedDocument`,
+  either content enum or `UnreadableReason` against a frontend declaration. This round added a
+  sentence saying `src/` is outside the retained-state sweep, which makes the gap *stated* and no
+  smaller. *(recorded only.)*
+- **R8, and the shape this round is most likely to have written.** Round 1's fix wrote three of round
+  2's findings, round 2's at least one of round 3's, round 3's four of round 4's five, round 4's
+  three of round 5's four, round 5's four of round 6's six, and round 6's — by round 7's own count —
+  four of round 7's five. There is no reason to think this round wrote none. The likeliest places,
+  named so round 8 can start there rather than rediscover them: **the M1 paragraph**, which is long,
+  new, entirely unasserted, and makes a claim about what an unwind leaves behind; **the two new
+  limits**, which state a measurement and its weakness in the same breath and could easily have got
+  the balance wrong in either direction; and **§16.1's disagreement list**, which asserts five
+  provenance claims derived from `git log -S` on single strings — a search that finds the commit
+  where a string first appeared in a file and not necessarily where the *claim* did. *(recorded only
+  — a nomination, and per §7.3 no item here commissions a round.)*
+- **Under `/goahead-opus` the workflow's cap can outrank §7.1 on this step.** §7.1 commissions round 8
+  against this fix round, because it changed five source files. If the cap has no invocation left for
+  it, `CLAUDE.md` §7.4 is what applies: the unreviewed source change becomes a corrective phase with
+  its own acceptance criteria and its own mandatory review, and this step is recorded as superseded
+  rather than complete. **That is a workflow outcome, not a finding**, and it is written here so the
+  choice is made deliberately rather than by running out of budget quietly. *(recorded only.)*
+
+---
+
+## 17. Round 8 of the review, and the fix round that answered it
+
+Round 8 is **the phase's second and last review invocation**. It was commissioned by `CLAUDE.md`
+§7.1 — the round-7 fix changed five source files, and a fix that changes source is owed a round,
+a comment-only change included, because *the unit is the file, not the line* and this project keeps
+several of its contracts in comments. Its scope was that fix round's diff and nothing else.
+
+**It was the adversarial Opus fallback, not Codex, and so was round 7.** The Codex job dispatched for
+round 7 (`task-mtem01j9-fnltn3`, high effort) ran 221 s and failed on *"You've hit your usage limit
+... try again at 7:07 PM"*. Under `~/.claude/scripts/goahead-base.md` that is one bounded attempt
+spent — Codex is never relaunched inside a phase — and a Codex limit is explicitly **not** a `QUOTA`
+outcome, because it is another provider's window closing and stops no work here. Both rounds
+therefore ran as fresh cold `general-purpose` Opus agents with no share in the code, each writing its
+full report to a file of its own: `docs/reviews/phase-2d-4a-round-7.md` and
+`docs/reviews/phase-2d-4a-round-8.md`, both reproduced verbatim into
+`docs/reviews/phase-2d-4a-queue.md`. **A fallback review is a real review and carries the same
+weight**; what it is not is a Codex review, and the first line of each report says so, so no later
+reader can mistake the provenance.
+
+**Round 8's verdict: ship-with-fixes — 0 High, 1 Medium, 2 Low.** It also cleared, by its own
+derivation rather than by accepting the fix round's report, the three claims the brief named as the
+ones most worth disbelieving:
+
+- **No executable line changed.** Verified with `git diff -U0` over `src-tauri/src` with added and
+  removed lines stripped of leading whitespace, leaving no non-comment residue: no test, fixture,
+  phrase-table or inventory entry moved.
+- **The round-7 reproduction is verbatim** — 97 lines against 97, zero diff hunks after the `###`→`##`
+  demotion, with the `Reviewer:` line kept.
+- **M1's substituted claim is true.** This was the highest-risk sentence in the round-7 fix, because
+  that fix had *refused* the round-7 reviewer's own proposed reasoning and put a different one in its
+  place. Round 8 traced `drain` and confirmed it: both mutations — `acknowledged` at
+  `reconciliation.rs:1186` and the retain at `:1187-1189` — complete before `coalesced_sequences` and
+  before the `.map(external_observation)` inside the `.collect()` at `:1191-1197` that reaches
+  `address_of_minted`, and `drain` touches neither `discarded` nor `epoch`, so the state behind a
+  poisoned lock is exactly a completed drain's.
+
+### 17.0 The bounded wait that collected round 7's Codex job, reproduced
+
+`~/.claude/scripts/codex-wait.sh` false-stalls on healthy jobs, because the `updatedAt` it polls never
+advances. The wait used today polls `.job.status` and takes the **log file's mtime** as the stall
+signal, with a hard deadline as well. It is reproduced here because it is the third round running that
+this project has had to rediscover it, and it worked first time: it returned `TERMINAL=failed after
+221s`, which is how the usage limit was seen at once rather than waited through.
+
+```zsh
+#!/bin/zsh
+# $1 hard deadline (s), $2 stall threshold (s) on the LOG's mtime, $3 job id.
+JOB="$3"
+CC=$(ls "$HOME"/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | head -1)
+LOG="$HOME/.claude/plugins/data/codex-openai-codex/state/<workspace-key>/jobs/$JOB.log"
+deadline=$(( $(date +%s) + $1 ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  st=$(node "$CC" status "$JOB" --json 2>/dev/null | python3 -c 'import sys,json
+try:
+    print(json.load(sys.stdin).get("job",{}).get("status",""))
+except Exception:
+    print("")' 2>/dev/null)
+  case "$st" in
+    completed|failed|cancelled|canceled|error) echo "TERMINAL=$st"; exit 0;;
+  esac
+  now=$(date +%s); mt=$(stat -f %m "$LOG" 2>/dev/null || echo "$now")
+  [ $(( now - mt )) -ge "$2" ] && { echo "STALLED status=$st"; exit 3; }
+  sleep 20
+done
+echo "DEADLINE status=$st"; exit 2
+# End of the bounded wait loop
+```
+
+Two things it does **not** do, said here rather than assumed: it never re-dispatches, and it reports a
+`failed` terminal status as terminal rather than as an absence — the caller reads the job's log to find
+out *why*, which is where the usage-limit notice was.
+
+### 17.1 Finding by finding
+
+- **M1 (Medium) — the panic paragraph claimed an enforcement the code does not perform.**
+  `reconciliation.rs:1489-1493` said the caller *"cannot acknowledge past a sequence it was never
+  handed"*, and that the surviving state does not buy *"a queue this caller can drain"*. Neither is
+  enforced. `after_sequence` reaches `drain` as an unvalidated `u64` off the wire
+  (`commands.rs:3491` → `:1353` → `reconciliation.rs:1184`), so a caller passing a watermark at or
+  above the offending entry's sequence prunes that entry at the `:1187` retain *before* the
+  projection runs; and `begin_epoch` assigns an empty state over the whole of it, so reopening the
+  workspace discards it too. **Agreed and fixed at three positions** — the doc paragraph and, in
+  this file, §16.1's M1 row and its first disagreement bullet. The rewritten sentence names both
+  escapes, says neither is prevented here and neither repairs the disagreement, and says in the same
+  sentence that this is not an enforcement. **This is the round's only source change**, and it errs
+  pessimistic in the direction that matters: the sentence it replaces promised *more* safety than the
+  code gives, which is this project's named worst defect class, and nothing unsafe followed from it.
+- **L1 (Low) — one span description was backwards.** §15.2's round-7 correction block and §16.1's L2
+  bullet said the two derived spans are *"each a line wider at one end than the review's"*. Measured
+  on `93fb76b` that is true of one and inverted for the other: `:1771-1774` is a line **narrower** at
+  the start than the review's `:1770-1774`, and `:1794-1802` a line **wider** at the end than its
+  `:1794-1801`. **The spans themselves were correct**; only the sentence describing them was wrong.
+  Fixed at both positions, plus the third instance in §16.1's own cite audit, which had called both
+  of them short.
+- **L2 (Low) — "fifteenth" counted pointers as statements.** §15.2's correction block called clause 6
+  of `crates/espansoconfig-core/src/watch/retained_state.rs` a *"fifteenth"* position of the
+  epoch-scoped watermark claim, and §16.4 called the family *"fifteen-position"* — while the same
+  block says three of the fourteen *"now point at it rather than restating it"*. 14 + 1 = 15 only
+  holds if a pointer is a statement. Fixed at three positions by separating the two counts wherever
+  the figure appears: **fifteen positions touch the claim; twelve state it and three point at the
+  canonical clause.**
+
+### 17.2 What this round changed, by file
+
+Listed in full, this record and the review files included, because §15.2 exists precisely because an
+earlier round's by-file list was not:
+
+- `src-tauri/src/reconciliation.rs` — one comment hunk, the M1 fix.
+- `src-tauri/src/retained_state_contract.rs` — **one `INVENTORY` entry, and it was not planned.**
+  See below: 2d-4a-C's own guard rejected the M1 fix and forced this judgement.
+- `docs/decisions/2d-4a-notes.md` — this section, plus five corrections inside §15.2, §16.1 and
+  §16.4 (M1 at two positions, L1 at three, L2 at three; two of those overlap).
+- `docs/reviews/phase-2d-4a-round-8.md` — new, written by the reviewer itself.
+- `docs/reviews/phase-2d-4a-queue.md` — the `## Round 8 — verbatim` section.
+- `docs/reviews/phase-2d-4a-round-7.md` — new at round 7, written by that reviewer, unmodified here.
+
+### 17.3 The gates after this round, and the one that failed first
+
+Measured by the orchestrator, alone, on the tree this round produced — no worker ran a gate.
+`cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0;
+`cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo doc
+--workspace --no-deps` **73** `private_intra_doc_links`, 0 unresolved; `cargo tree -p
+espansoconfig-core | rg tauri` empty; `watch_check::` **20/20**, 268 filtered out, 77.63 s; `npm
+test` **2125** in 56 files; `npm run check` **431** files / 0 errors; `npm run build` **184**
+modules, server-build oracle absent, client-build oracle present with 2 matches. No frontend file
+changed this round, and the three frontend figures were re-measured anyway rather than inferred.
+
+**The first run of that suite failed, and it is the most useful thing this round produced.**
+`retained_state_contract::tests::every_retained_state_claim_is_judged` rejected the M1 fix —
+`cargo test --workspace` exited 101 with 287 passed and 1 failed — naming
+`src-tauri/src/reconciliation.rs` line 1425, phrase `"things end"`, *found 1, inventory says 0*, and
+asking the question the check exists to ask: **is it the contract, a pointer, a local fact, or a
+false positive?** So the mechanism 2d-4a-C built, whose nine-round tail cleared the code outright
+from round 4 onward and which had never once fired on new prose in anger, caught a new claim written
+into a source comment by a fix round, within an hour of that tail closing. It is judged in
+`INVENTORY` as a **local fact** — the two escapes from `address_of_minted`'s repeating assertion —
+with the note that its `begin_epoch` half cites clause 6's consequence on one path rather than
+restating the scope, which is the same judgement this file's `discards everything` entry already
+carries. **That entry is a second source change**, made after round 8 reviewed the fix, and it falls
+under the same unreviewed-source debt §17.4 records rather than adding a new one.
+
+### 17.4 What this round did not do, and where it is thin
+
+Per `CLAUDE.md` §7.3 every item carries a mark. An **actionable** item naming a correctness defect in
+a source file is a blocker that stops this step closing; none below is one.
+
+- **Round 9 is commissioned by §7.1 and cannot run here.** This fix round changed
+  `src-tauri/src/reconciliation.rs`, so §7.1 owes it a round — and the workflow's cap of **two review
+  invocations and 45 minutes per phase** is exhausted and outranks §7 by §7.4's own words. The debt is
+  **carried, not written off**: it becomes a corrective phase with its own acceptance criteria, its
+  own commit and its own mandatory review, and this step is recorded as superseded rather than
+  complete. *(actionable — it names work in files that exist, but no defect in source; it is a
+  workflow outcome, and `PROGRESS.md` carries it as the next action.)*
+- **Part of the unreviewed change was written after round 8 read the diff.** The `INVENTORY` entry in
+  `src-tauri/src/retained_state_contract.rs` did not exist when round 8 reviewed, because the guard
+  that demanded it had not yet been run against the M1 fix. Round 8 therefore reviewed the M1 comment
+  and **not** the judgement recorded for it — which is precisely the shape §7.1 commissions a round
+  for, and the corrective phase's reviewer should start there. *(actionable — it names a specific
+  unreviewed source change in a file that exists; it is not a correctness defect, because the guard it
+  answers passes and the judgement is argued in the entry itself, so it does not block this step.)*
+- **The unreviewed change is one comment hunk that removes a claim rather than adding one.** That is
+  the cheapest shape of unreviewed source change this tail could have ended on, and it is said here
+  so the corrective phase's reviewer starts from the right size of thing. It is **not** an argument
+  that the round is unnecessary — every prior round of this tail found a real defect in what the round
+  before built, and three of them found the defect *in a fix*. *(recorded only.)*
+- **Both reviews were Opus fallbacks, so no round of this phase has had a second provider's eyes.**
+  Rounds 1–6 were Codex; rounds 7 and 8 were not. The two reviewers are cold agents with no stake, and
+  round 8 re-derived rather than accepted, but a systematic blind spot shared by both would be
+  invisible here in a way it would not have been under Codex. *(recorded only — the substitution is
+  the workflow's prescribed behaviour when Codex is unavailable, not a shortcut taken here.)*
+- **M1's fix rests on round 8's trace of `drain`, and nothing asserts it.** No test poisons either
+  lock, no test drives a watermark at or above an offending entry's sequence, and what a panic does to
+  the process around a Tauri command is still measured by nothing in this repository — unchanged from
+  §15.4 and §16.4. The fix made the paragraph *say less*, which is why it is safe without a test; it
+  did not make it checkable. *(recorded only.)*
+- **The two count corrections are arithmetic over a hand-derived inventory.** Twelve-stating and
+  three-pointing were derived by reading, exactly as fourteen and fifteen were, and nothing
+  mechanically enforces any of them — the prose guards check that a claim of *their* families is
+  inventoried, not that a count in this file is right. A later round re-deriving from the tree in
+  front of it, as §15.2 now instructs, is the only thing that would catch a drift.
+  *(recorded only.)*
+- **R9 remains open, unmeasured and unbounded**, for the fourth round running. *(recorded only —
+  no step of the 2d split owns building a bound for it, which is itself the residue.)*

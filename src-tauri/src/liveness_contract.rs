@@ -27,7 +27,7 @@
 //! nevertheless worth having is the reduction of surface — one place to be right
 //! instead of twenty — and never the check's judgement.
 //!
-//! Three further limits, stated rather than hoped about:
+//! Four further limits, stated rather than hoped about:
 //!
 //! - **A paraphrase built from none of the phrases is invisible.**
 //!   [`LIVENESS_SHAPES`] is a family of wordings, not a semantic test. It is
@@ -46,6 +46,15 @@
 //!   against span a line break — including the core engine's own module doc.
 //!   A line-based sweep, which is what every round of the 2d-3 review ran by
 //!   hand, cannot see them.
+//! - **A claim wrapped across a backslash string continuation is still
+//!   invisible**, which is the other half of the limit above and was unstated
+//!   here until Phase 2d-4a's round 7. Only comment runs are joined; this
+//!   repository also wraps long assertion messages with `\`, and a phrase
+//!   straddling one of those breaks matches nothing. A hand-run replica over a
+//!   continuation-joined copy of both trees, all 61 phrases of this family,
+//!   found **zero** positions visible only in the joined form — one reading of
+//!   one tree, re-taken by no test, so the capability statement is what stands
+//!   and not the count.
 //!
 //! # Where the machinery lives
 //!

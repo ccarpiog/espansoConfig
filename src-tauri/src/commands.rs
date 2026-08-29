@@ -8836,7 +8836,14 @@ mod tests {
         assert_eq!(all.epoch, crate::watch::FIRST_WORKSPACE_EPOCH);
 
         // The watermark is an acknowledgement, so the same call answers the
-        // same batch until the caller says it has one of them.
+        // same batch until the caller says it has one of them — **when nothing
+        // is enqueued between the two calls and no replacement epoch is adopted
+        // between them**, which is the qualification the guarantee carries at
+        // `crate::reconciliation`'s module doc, at `ReconciliationQueue::drain`
+        // and at both `drain_external_changes` docs. Neither happens here:
+        // this test enqueues before the first drain and never opens a second
+        // workspace. Round 7 of this phase's review found this position
+        // carrying neither half.
         let again = session.drain_external_changes(0).expect("a batch");
         assert_eq!(again, all);
         let rest = session.drain_external_changes(1).expect("a batch");

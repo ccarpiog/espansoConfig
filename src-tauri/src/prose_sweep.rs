@@ -124,6 +124,21 @@ pub(crate) struct ProseUnit {
 /// every hand-run round of the 2d-3 and 2d-4a reviews used — cannot see it.
 /// Everything that is not a comment line stays one unit per line, which is what
 /// keeps an assertion message or a test name reported at its own position.
+///
+/// **That second half is a cost as well as a benefit, and round 7 of Phase
+/// 2d-4a's review is where it was written down rather than framed as a benefit
+/// alone.** This repository also hand-wraps long assertion messages with
+/// backslash string continuations, and those lines are not comment lines, so a
+/// claim split across such a break is exactly as invisible here as a claim split
+/// across a wrapped comment was before the join above existed. Nothing joins
+/// them, and the two callers' phrase families both inherit the hole. **It is a
+/// hole in what the guards can see and not a live miss today**: re-running both
+/// families over a continuation-joined copy of both swept trees — 88
+/// retained-state phrases and 61 liveness phrases — finds **zero** positions
+/// that only the joined form matches. That measurement is a hand-run replica of
+/// this function and its callers, taken at Phase 2d-4a round 7, and **no test in
+/// this repository re-takes it**; it is a reading of one tree at one moment,
+/// not a guard.
 pub(crate) fn prose_units(source: &str) -> Vec<ProseUnit> {
     let lines: Vec<&str> = source.lines().collect();
     let mut units: Vec<ProseUnit> = Vec::new();

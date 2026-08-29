@@ -1466,12 +1466,42 @@ fn address_of(path: &Path, workspace: &Workspace) -> ObservedDocument {
 /// lock, on any profile. It is **not a panic on input**: no file's bytes, no
 /// filesystem state and no action a person can take reaches it — only a second
 /// identity source added to this process's own code, which is the bug the
-/// assertion is for. `crate::commands`'s module header is why the two poisoned
-/// mutexes are not a second failure: every lock here absorbs poisoning through
-/// `PoisonError::into_inner`. What happens to the process around the panic is
-/// asserted by nothing in this repository. `docs/decisions/2d-4a-notes.md` §15
-/// is the record, including why no test can fail on this and why the fixture
-/// that once reached it was the review's own evidence.
+/// assertion is for.
+///
+/// **Both mutexes absorb poisoning through `PoisonError::into_inner`** — the
+/// session's as `crate::commands`'s module header describes, this queue's as
+/// every lock in this module does. That header is the **mechanism** and not the
+/// justification, and an earlier draft of this paragraph cited it as the
+/// justification, which round 7 of this phase's review found: **not one of its
+/// three grounds is true of `QueueState`**. Nothing re-reads a lost observation
+/// the way `reload_document` re-reads a file; [`ReconciliationQueue::drain`]
+/// mutates the state with two statements rather than one infallible assignment;
+/// and no command recovers a queue.
+///
+/// **What holds instead is narrower, and it is a property of `drain` rather
+/// than of a policy.** Both of that function's mutations — raising
+/// `acknowledged` to `after_sequence`, then retaining only what is above it —
+/// run before the projection loop that reaches this function, and an unwind
+/// undoes neither. So the state behind the poisoned lock is the state a
+/// *completed* `drain(after_sequence)` would have left: the watermark raised,
+/// everything at or below it gone, nothing above it touched, the loss count
+/// unmoved, and the batch this caller never received still stored. **What that
+/// does not buy is a queue this caller can drain.** Nothing about the
+/// disagreement changes, so a later drain at any watermark below the offending
+/// entry's sequence reaches this assertion again. **Two things end that loop
+/// and neither is an enforcement this code performs**, which round 8 of this
+/// phase's review found an earlier draft claiming: `after_sequence` crosses the
+/// wire as an unvalidated `u64`, so a caller passing a watermark at or above
+/// the offending entry's sequence prunes that entry at the retain *before* the
+/// projection runs; and [`ReconciliationQueue::begin_epoch`] assigns an empty
+/// state over the whole of it, so reopening the workspace discards the entry
+/// too. Both are escapes rather than repairs — neither touches the
+/// disagreement, and nothing here prevents either. **None of this paragraph is
+/// asserted by anything**: no test poisons either lock, and what happens to the
+/// process around the panic is asserted by nothing in this repository either.
+/// `docs/decisions/2d-4a-notes.md` §15 and §16 are the record, including why no
+/// test can fail on this and why the fixture that once reached it was the
+/// review's own evidence.
 fn address_of_minted(path: &Path, document: DocumentId, workspace: &Workspace) -> ObservedDocument {
     let relative_path = display_path(path, workspace);
     match workspace.document_id(path) {
@@ -1818,9 +1848,13 @@ mod tests {
         assert_eq!(first.observations.len(), 2);
         // The same watermark twice answers the same batch — the answer is not a
         // one-shot cursor, so an answer lost on the way to the window costs no
-        // more than the drain that repeats it. Nothing is enqueued between the
-        // two calls, which is the qualification the guarantee carries: an
-        // enqueue in between belongs in the second batch.
+        // more than the drain that repeats it. The guarantee carries **two**
+        // qualifications and this comment named only the first until round 7 of
+        // this phase's review: nothing is enqueued between the two calls — an
+        // enqueue in between belongs in the second batch — and no replacement
+        // epoch is adopted between them;
+        // `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses`
+        // is where that second side is driven. Neither happens in this test.
         let again = queue.drain(0, &workspace);
         assert_eq!(again, first);
         // Acknowledging the first drops it and keeps the second.
@@ -2674,9 +2708,14 @@ mod tests {
         // number beside a projection addressed by the **snapshot's** — one
         // observation carrying two identities for one file, since a
         // `DocumentView` has its own `id` and every `MatchId` beneath it carries
-        // that. There is no arm of `ObservedDocument` that is true in that case,
-        // so the policy is a failure rather than a value, and `assert_eq!` is
-        // what makes it one on every profile.
+        // that. **No arm of `ObservedDocument` makes that object honest, which
+        // is not the same as no arm being true** — round 7 of this phase's
+        // review corrected this comment, which said the second. `Addressable`
+        // carrying the number the workspace gave is true of the number it
+        // carries; what is false is the observation built around it, whose
+        // projection is addressed by the snapshot's. So the policy is a failure
+        // rather than a value, and `assert_eq!` is what makes it one on every
+        // profile.
         //
         // **Round 5 said no test was possible and it was right about the code it
         // had**: a `debug_assert_eq!` would have made this pass in a debug build

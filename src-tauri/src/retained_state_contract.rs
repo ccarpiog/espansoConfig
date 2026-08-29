@@ -63,8 +63,19 @@
 //! moves no count. **The reason it is worth having is the reduction of surface —
 //! one place to be right instead of fifty — and never the check's judgement.**
 //!
-//! Four further limits, stated rather than hoped about:
+//! Five further limits, stated rather than hoped about:
 //!
+//! - **A claim wrapped across a backslash string continuation is invisible, for
+//!   the same reason a wrapped comment used to be.**
+//!   [`crate::prose_sweep::prose_units`] joins a run of comment lines and leaves
+//!   every other line a unit of its own. This repository wraps its long
+//!   assertion messages with a backslash string continuation, and a phrase
+//!   straddling one of those breaks matches nothing. Round 7
+//!   of Phase 2d-4a's review found this limit unstated here, and it is a hole in
+//!   **capability**: a hand-run replica of the sweep over a continuation-joined
+//!   copy of both trees, all 88 phrases, found **zero** positions visible only
+//!   in the joined form. That is one reading of one tree and no test re-takes
+//!   it, so what stands is the capability statement, not the count.
 //! - **A paraphrase built from none of the phrases is invisible, and here that is
 //!   measured rather than feared.** Step 1's sweep ran 33 probe phrases over 85
 //!   prose units of these two trees, comment runs joined — and **four of its 45
@@ -95,7 +106,14 @@
 //! - **It sweeps two source trees and no document.** `docs/` is deliberately not
 //!   swept and **cannot be**: `docs/decisions/2d-4a-notes.md` quotes six review
 //!   rounds' false sentences on purpose, so a check over the documentation tree
-//!   would fail on the record of every defect this phase fixed.
+//!   would fail on the record of every defect this phase fixed. **`src/` is a
+//!   third case and this bullet used to read as though there were only two**,
+//!   which round 7 of Phase 2d-4a's review asked about: the frontend tree is
+//!   neither swept nor excluded for a reason, it is simply outside
+//!   [`SWEPT_TREES`], and no TypeScript stores a `newest_sequence` yet. Phase
+//!   2d-4b is what writes the first one, and whether this family follows it
+//!   there is that phase's decision and not a round's; **until it is taken, a
+//!   retained-state claim written in `src/` is invisible to this check.**
 //!
 //! # Where the comparison lives
 //!
@@ -1063,6 +1081,12 @@ const INVENTORY: &[Judged] = &[
         phrase: "survives a replacement",
         count: 1,
         reason: "local fact: `begin_epoch`'s reason for discarding — an identity survives where a sequence does not",
+    },
+    Judged {
+        file: "src-tauri/src/reconciliation.rs",
+        phrase: "things end",
+        count: 1,
+        reason: "local fact: the two escapes from `address_of_minted`'s repeating assertion — an unvalidated watermark pruning the entry, and `begin_epoch` discarding it. The second cites clause 6's consequence on one path rather than restating the scope, exactly as this file's `discards everything` entry does",
     },
     Judged {
         file: "src-tauri/src/reconciliation.rs",

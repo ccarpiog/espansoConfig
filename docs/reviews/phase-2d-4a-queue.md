@@ -384,3 +384,224 @@ NOT READY — 0 High, 1 Medium, 5 Low findings.
 
 Codex session ID: 01a03ff1-0d15-7423-82df-300113b0e626
 Resume in Codex: codex resume 01a03ff1-0d15-7423-82df-300113b0e626
+
+## Round 7 — verbatim
+
+Scope: **the round-6 fix, plus the mechanism Phase 2d-4a-C built on top of it** — `src-tauri/src/prose_sweep.rs` and `src-tauri/src/retained_state_contract.rs`, which did not exist when rounds 1 to 6 ran. Commissioned by the same rule as rounds 2 to 6, in the form `CLAUDE.md` §7.1 now states it: round 6's fix changed source, so a round is owed, scoped to that change. The brief carried §15.4's own nominations — the panic policy's prose, which claims a trade over a runtime nothing measures; the epoch-scoped watermark wording, a new claim at what §15.2 called nine positions and therefore exactly the shape every previous round's fix had left a narrower instance of; and the new `#[should_panic]` test's comment, which asserts what a `debug_assert_eq!` would have measured. It was also asked whether the two new contract modules state their own limits truthfully.
+
+**This round was reviewed by the adversarial Opus fallback, not by Codex.** Codex hit its usage limit mid-job, 221 s in, and the workflow's one-bounded-attempt-per-invocation rule meant it was not relaunched. The review's own first line says so and is kept below for that reason. The round also ran under `/goahead-opus`, whose cap of two review invocations and forty-five minutes per phase binds tighter than this project's §7 (`CLAUDE.md` §7.4).
+
+Gates when this round was commissioned, all measured on this clean tree at `93fb76b` by the orchestrator: `cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo doc --workspace --no-deps` exit 0 with **73** `private_intra_doc_links` warnings and 0 unresolved; `cargo tree -p espansoconfig-core | rg tauri` empty; `cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` **20/20** with **268** filtered out in 75.66 s; `npm test` **2125** in 56 files; `npm run check` **431** files / 0 errors / 0 warnings; `npm run build` **184** modules with the server-build oracle absent and the client-build oracle present with 2 matches.
+
+Reviewer: adversarial Opus fallback — Codex unavailable (usage limit, resets 19:07)
+
+## Verdict
+
+NOT READY — 0 High, 1 Medium, 4 Low; every finding is prose in a source file, none is a behaviour
+defect. **(a), narrowly**: each names a specific false sentence or unstated hole, so none is a bare
+restatement — but four of five sit in sites §15.4 or the brief had already nominated, and round 6
+changed code twice where round 7 finds nothing that would.
+
+## High
+
+None.
+
+## Medium
+
+1. **The panic policy borrows a justification that is false of one of the two mutexes it covers.**
+   `src-tauri/src/reconciliation.rs:1469` says *"`crate::commands`'s module header is why the two
+   poisoned mutexes are not a second failure"*. That header (`commands.rs:220-228`) grounds
+   absorption in three properties of the session mutex: behind it sits **a cache over the disk**,
+   **every mutation is a single infallible assignment**, and **the recovery is `reload_document`**.
+   None holds of `QueueState`: nothing can re-read lost observations; `drain` mutates it with
+   **two** statements — `acknowledged` (`:1186`) then `retain` (`:1187-1189`) — before reaching the
+   `assert_eq!` at `:1480`; and no `reload_document` recovers a queue.
+
+   Failure state: the assertion fires mid-`collect`, both locks are poisoned and absorbed, and the
+   queue is left with `acknowledged` raised and the prefix pruned while the caller got no batch.
+   The conclusion happens to hold — both mutations are pure functions of `after_sequence`, so the
+   surviving state is consistent and a retry with the same watermark reproduces the batch — but
+   **that reason is stated nowhere** and the one stated does not apply. §15.4 called this prose thin
+   for a different reason (the unmeasured runtime).
+
+## Low
+
+1. **Two positions in one file contradict each other about the same arm.**
+   `reconciliation.rs:1459` says the `Addressable` arm carrying the workspace's number *"was
+   locally true and the object held two identities for one file"*. The new test's comment,
+   `reconciliation.rs:2677`, says *"There is no arm of `ObservedDocument` that is true in that
+   case"*; §15.1's L1 row repeats the second. The first is right — `Addressable { resolved }` is
+   true of what it carries; what is false is the **observation**, whose projection carries the
+   snapshot's id.
+
+2. **"Nine source positions" is at least eleven, and the two omitted are wording, not assertions.**
+   §15.2 files `adopting_an_epoch_discards_the_previous_ones_entries_and_its_losses` under *gained
+   two assertions*, but it also gained two prose blocks stating the claim,
+   `reconciliation.rs:1770-1774` and `:1794-1801`. Both are correct — but §15.4 sends round 8 to
+   §15.2's list of nine, and these are not on it.
+
+3. **`prose_sweep` joins wrapped comments but not wrapped string literals, and neither guard states
+   it.** `prose_sweep.rs:125` frames per-line handling of non-comment lines as a benefit. But this
+   repository hand-wraps assertion messages with backslash continuations (e.g.
+   `reconciliation.rs:1786`), and a claim split across such a break matches nothing — exactly as a
+   wrapped comment would have. `retained_state_contract.rs:58` claims the check "catches an
+   *unmarked* claim and a *new* claim"; its four stated limits omit this one. Re-running the
+   sweep's algorithm over a continuation-joined copy of both trees for all 88 phrases finds **zero**
+   hidden positions today, so this is a hole in stated capability, not a live miss.
+
+4. **A fifth "same batch twice" position carries neither qualification.** `commands.rs:8838`: *"the
+   same call answers the same batch until the caller says it has one of them."* The four others
+   (`reconciliation.rs:102`, `:1157`, `commands.rs:1324`, `:3474`) all carry *when nothing was
+   enqueued between the two calls and no replacement epoch was adopted between them*.
+
+## Verified without findings
+
+- Within-epoch monotonicity is real, not merely documented: `acknowledged` only rises
+  (`reconciliation.rs:1186`), `newest_sequence` is `max(batch high, acknowledged)` (`:1207-1211`),
+  and an eviction only accompanies a higher-sequence admission. The nine enumerated positions agree
+  and none is over-narrow.
+- `evictable_sequence` (`reconciliation.rs:920-935`) matches its doc and clause 5:
+  `min_by_key((Reverse(count), lowest))`. R10's narrowed closure and its tie sentence are accurate.
+- "Same batch twice" survives drain-time projection: `entries` is written only by `from_tree`
+  (`crates/espansoconfig-core/src/workspace/mod.rs:483-496`) and `open` mints a new `Workspace`
+  with a new epoch, so `address_of` is constant within an epoch.
+- Lock extent is as documented: `with_workspace_read` (`commands.rs:1446-1455`) holds only the
+  session mutex, `drain` the queue mutex under it, and the identity register
+  (`workspace/mod.rs:313-329`) is released before the assertion.
+- `complaints_against` (`prose_sweep.rs:326-403`) is sound both ways; its three inventory
+  pre-checks are unconditional.
+- Every arm of `ObservedDocument`, `AddedContent` and `ChangedContent` is serialized in
+  `every_observation_crosses_as_a_uniform_object_and_carries_no_anchor`, so no second wire enum
+  repeats the coverage-versus-argument gap.
+
+## Questions
+
+- Should `src/` join `SWEPT_TREES`? 2d-4b will write TypeScript storing `newest_sequence`;
+  `retained_state_contract.rs` explains why `docs/` is excluded and says nothing about the frontend
+  tree, so its limits list reads exhaustive and is not.
+- §7.1: all five are fixed by editing comments in source files, so **any fix commissions round 8**.
+  To stop, the cheapest honest close is to fix none and carry all five as recorded items.
+
+## Not verified
+
+- What a panic inside a Tauri command does to the process or the webview — unchanged from §15.4.
+- R9's identity register — unmeasured for a third round, and unmeasurable from a test in this
+  binary because the register is a process-wide static.
+- The R10 tie case: confirmed by reading `min_by_key`, not by execution.
+- Anything needing `cargo` or `npm` — the caller's gates were taken as given.
+
+## Round 8 — verbatim
+
+Scope: **the round-7 fix round**, and nothing else — ten comment hunks across five files in
+`src-tauri/src/`, plus the two record files. Commissioned by `CLAUDE.md` §7.1: the round-7 fix
+changed source files, and a fix that changes source is owed a round. The brief was narrow by
+construction and named the fix round's own claims as the things to verify rather than to accept:
+that no executable line changed, that the appended round-7 text is verbatim, that §16.3's gate cells
+are all `pending` because the fix worker was forbidden to run Cargo, that the Python replica of the
+prose sweep reads as a replica and not as evidence, and — the highest-risk item — that M1's
+*substituted* claim is true, the fix round having **refused** the round-7 reviewer's own proposed
+reasoning and put a different one in its place.
+
+**This round was the adversarial Opus fallback, not Codex**, for the same reason round 7 was: the
+Codex job for round 7 failed 221 s in on *"You've hit your usage limit ... try again at 7:07 PM"*,
+and under `~/.claude/scripts/goahead-base.md` a Codex limit is one bounded attempt spent, never a
+relaunch. It is the phase's **second and last** review invocation: the workflow caps a phase at two,
+and its 45-minute tail clock had already expired when this round was dispatched.
+
+Gates when this round was commissioned — measured on the tree at `93fb76b` by the orchestrator,
+before the round-7 fix, and unchanged by that fix in principle because it altered no executable
+line: `cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0;
+`cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo doc
+--workspace --no-deps` exit 0 with **73** `private_intra_doc_links` warnings and 0 unresolved;
+`cargo tree -p espansoconfig-core | rg tauri` empty; `watch_check::` **20/20** with 268 filtered out
+in 75.66 s; `npm test` **2125** in 56 files; `npm run check` **431** files / 0 errors; `npm run
+build` **184** modules with the server-build oracle absent and the client-build oracle present with
+2 matches.
+
+Reviewer: adversarial Opus fallback — Codex unavailable (usage limit, resets 19:07)
+
+## Verdict
+
+NOT READY — 0 High, 1 Medium, 2 Low; every finding is prose in a source file or the record, none is
+a behaviour defect, and the fix round's central claim (no executable line changed) is verified true.
+
+## High
+
+None. Every added/removed line under `src-tauri/src/` is a `//`, `///` or `//!` line — checked
+mechanically by stripping `+`/`-` and leading whitespace from `git diff -U0` and finding no residue.
+No test, fixture, phrase table or inventory entry moved. §16.3 records every gate as `pending` with
+no measured number anywhere in the table; the only numbers it reports are labelled a Python replica,
+and the paragraph beneath says in as many words *"It is a replica and not the test"*, names the two
+real guards, and says the replica "can agree with a wrong implementation of itself". That is honest.
+
+## Medium
+
+1. **M1's replacement paragraph denies two escapes the code allows.**
+   `src-tauri/src/reconciliation.rs:1489-1493` states *"a later drain at any watermark below the
+   offending entry's sequence reaches this assertion again — and the caller cannot acknowledge past a
+   sequence it was never handed"*, under the heading *"What that does not buy is a queue this caller
+   can drain."* Both sentences claim an enforcement the code does not have.
+   - `after_sequence` is an unvalidated `u64` off the wire (`commands.rs:3491-3495` →
+     `commands.rs:1353-1359` → `reconciliation.rs:1184`). Nothing checks it against anything handed
+     out; a caller passing any value above the offending sequence has the entry pruned by the
+     `retain` at `:1187` before the projection, and drains cleanly.
+   - `ReconciliationQueue::begin_epoch` (`:1029-1031`) assigns `QueueState::empty(epoch)` over the
+     whole state, so reopening the workspace discards the offending entry outright.
+
+   Failure state: a reader follows this paragraph, believes the queue is wedged for the epoch, and
+   reasons about recovery from a premise the code contradicts twice. It errs pessimistic, so nothing
+   unsafe follows from it — but the paragraph exists precisely to stop a sentence that does not reach
+   its conclusion, and this is one, three lines below the assertion it is about. §16.1's M1 row and
+   its first disagreement bullet repeat it (*"the caller cannot acknowledge past the offending entry
+   because it was never handed its sequence"*), so the fix is at three positions.
+
+   The rest of the paragraph is **true and I verified it line by line**: `guard.acknowledged = …`
+   (`:1186`) and `pending.retain` (`:1187-1189`) both complete before `coalesced_sequences` and
+   before the `.map(external_observation)` inside the `.collect()` (`:1191-1197`) that reaches
+   `external_observation:1307` → `address_of_minted:1500`. `discarded` and `epoch` are untouched by
+   `drain`, so the surviving state is exactly what a completed `drain(after_sequence)` leaves.
+
+## Low
+
+1. **Two record sentences mis-describe the direction of the review's span errors.**
+   `docs/decisions/2d-4a-notes.md` §15.2's round-7 correction and §16.1 say the corrected spans are
+   *"each a line wider at one end than the review's"* and that the review's are *"each a line short
+   at one end"*. Measured on `93fb76b`: the first block is `1771-1774` against the review's
+   `1770-1774` — a line **narrower**, not wider; the second is `1794-1802` against `1794-1801` — a
+   line wider. Both spans themselves are correct; the characterisation of one of them is not.
+
+2. **"Fifteen positions" counts three pointers as statements of the claim.** The same correction
+   block says three of the nine *"now point at it rather than restating it"*, then calls
+   `retained_state`'s clause 6 a *"fifteenth"* — 14+1 only if the three pointers still count.
+   §16.4's second bullet then calls it *"the fifteen-position epoch-scoped watermark family"* whose
+   positions are *"kept identical by a reader"*, which is not what a pointer is. The block hedges
+   ("re-derive the positions from the tree"), so the harm is bounded.
+
+## Verified without findings
+
+- **Verbatim reproduction is exact.** `docs/reviews/phase-2d-4a-queue.md`'s appended block, from its
+  `Reviewer:` line onward, is byte-identical to `docs/reviews/phase-2d-4a-round-7.md` after `### `→
+  `## ` demotion — 97 lines against 97, zero diff hunks.
+- **L4's "six positions" is right.** `reconciliation.rs:102-106`, `:1158`, `:1842`, `commands.rs:1324`,
+  `:3474`, `:8839` — all six now carry both qualifications.
+- **L1's four positions**: source at `reconciliation.rs:2704`, record at §3.3 (`:812`), §15.1
+  (`:2317`) and §15.4 (`:2518`). The uncorrected `:2016` is inside a `>` quote of an earlier round and
+  correctly left.
+- **§16.2's by-file list matches `git diff --stat`**: 7 files, 3 comment blocks in `reconciliation.rs`,
+  1 in `commands.rs`, and it names `phase-2d-4a-round-7.md` as the untracked eighth path.
+- **§16.4's marks are honest.** Nothing marked *recorded only* names a source defect; the three
+  *actionable* items name a re-runnable check, a deliberately-left assertion message and six `docs/`
+  positions — none a correctness defect in source, so none is a blocker.
+- `retained_state_contract.rs:106-116`'s `src/` clause takes no decision and states the gap.
+
+## Questions
+
+- Does `SWEPT_TREES` excluding `src/` deserve a 2d-4b acceptance criterion rather than a sentence?
+
+## Not verified
+
+- Any gate: forbidden to run `cargo`/`npm`.
+- The five provenance attributions in §16.1's L2 bullet (`eced554` / `6be7231`) — the five positions
+  exist and their text matches, but I did not run `git log -S` on each to confirm which commit
+  introduced which. §16.4 already nominates this as thin.
+- The replica's 88/140/224/0 and 61/86/129/0 counts, which need execution.
