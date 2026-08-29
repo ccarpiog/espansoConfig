@@ -412,7 +412,7 @@ and in `git log`._
 | 2d-4a-C step 2 (round 9 ran; the phase CLOSES here) | `dced09a` | see below |
 | Checkpoint split — this file cut from 21,803 lines to under 400 | `3db0ff3` | ✅ pushed to `origin/main` |
 | M2 — the review-tail termination rule, after two review rounds | `93fb76b` | ✅ pushed to `origin/main` |
-| 2d-4a rounds 7 and 8, both fix rounds, and the `INVENTORY` judgement the guard forced | _this commit_ | see below |
+| 2d-4a rounds 7 and 8, both fix rounds, and the `INVENTORY` judgement the guard forced | `125dfa8` | ✅ pushed to `origin/main` |
 
 **Source is modified again as of this commit, for the first time since `2efce7a`** — five files
 under `src-tauri/src/`, all comment or inventory changes and no executable line:
